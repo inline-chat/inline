@@ -319,7 +319,25 @@ type InlineEditStreamState = {
   lastPartialText: string
   finalTextAccumulator: string
   failed: boolean
-  opChain: Promise<void>
+  pendingSnapshot: InlineEditStreamSnapshot | null
+  inFlight: Promise<void> | null
+  timer: ReturnType<typeof setTimeout> | null
+  nextAllowedAt: number
+  actionsFingerprint: string | null
+  latestActions: MessageActions | undefined
+}
+
+type InlineEditStreamSnapshot = {
+  text: string
+  actions?: MessageActions
+  actionsFingerprint: string | null
+}
+
+type InlinePartialMediaDeliveryResult = {
+  mediaUrl: string
+  messageId: bigint | null
+  sent: boolean
+  usedUrlFallback: boolean
 }
 
 type InlineProgressPlaceholderState = {
@@ -852,6 +870,8 @@ const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
 const ATTACHMENT_CONTEXT_LIMIT = 6
 const DEFAULT_INLINE_MEDIA_MAX_BYTES = 300 * 1024 * 1024
+const INLINE_EDIT_STREAM_MIN_INTERVAL_MS = 250
+const INLINE_EDIT_STREAM_MAX_INTERVAL_MS = 750
 const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again."
 const GET_MESSAGES_METHOD =
   typeof (Method as Record<string, unknown>).GET_MESSAGES === "number" &&
@@ -881,9 +901,18 @@ function normalizeAllowEntry(raw: string): string {
 }
 
 function resolveInlinePayloadMediaUrls(payload: InlineReplyPayload): string[] {
-  if (payload.mediaUrls?.length) return payload.mediaUrls
-  if (payload.mediaUrl) return [payload.mediaUrl]
-  return []
+  const urls = payload.mediaUrls?.length
+    ? payload.mediaUrls
+    : payload.mediaUrl
+      ? [payload.mediaUrl]
+      : []
+  return Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)))
+}
+
+function fingerprintInlineMessageActions(actions: MessageActions | undefined): string | null {
+  if (actions === undefined) return null
+  return JSON.stringify(actions, (_key, value) =>
+    value instanceof Uint8Array ? Array.from(value) : value)
 }
 
 function isPartialReasoningTagPrefix(text: string): boolean {
@@ -2462,34 +2491,6 @@ function buildInlineReplyThreadLabel(params: {
   if (!anchorText) return "Re: Message"
 
   return `Re: ${anchorText.slice(0, REPLY_THREAD_LABEL_MAX_CHARS)}`
-}
-
-function drainCompleteParagraphs(buffer: string): { paragraphs: string[]; rest: string } {
-  const paragraphs: string[] = []
-  let rest = buffer
-
-  while (rest.length > 0) {
-    const breakIndex = rest.indexOf("\n\n")
-    if (breakIndex < 0) break
-    const paragraph = rest.slice(0, breakIndex).trim()
-    if (paragraph) {
-      paragraphs.push(paragraph)
-    }
-    rest = rest.slice(breakIndex).replace(/^\n+/, "")
-  }
-
-  return { paragraphs, rest }
-}
-
-function appendParagraphText(existing: string, paragraph: string): string {
-  const trimmed = paragraph.trim()
-  if (!trimmed) return existing
-  return existing ? `${existing}\n\n${trimmed}` : trimmed
-}
-
-function extractCompleteParagraphText(text: string): string {
-  const drained = drainCompleteParagraphs(text)
-  return drained.paragraphs.reduce((acc, paragraph) => appendParagraphText(acc, paragraph), "").trim()
 }
 
 function resolveHistorySenderLabel(params: {
@@ -5050,7 +5051,12 @@ export async function monitorInlineProvider(params: {
       lastPartialText: "",
       finalTextAccumulator: "",
       failed: false,
-      opChain: Promise.resolve(),
+      pendingSnapshot: null,
+      inFlight: null,
+      timer: null,
+      nextAllowedAt: 0,
+      actionsFingerprint: null,
+      latestActions: undefined,
     }
     const progressSeed = `${account.accountId}:${String(deliveryChatId)}:${String(msg.id)}`
     const progressState: InlineProgressPlaceholderState = {
@@ -5175,87 +5181,304 @@ export async function monitorInlineProvider(params: {
       }
     }
     let finalDeliveredForCurrentAssistantMessage = false
+    const clearEditStreamTimer = (): void => {
+      if (editStreamState.timer == null) return
+      clearTimeout(editStreamState.timer)
+      editStreamState.timer = null
+    }
+    const nextEditStreamInterval = (requestDurationMs: number): number =>
+      Math.min(
+        INLINE_EDIT_STREAM_MAX_INTERVAL_MS,
+        Math.max(INLINE_EDIT_STREAM_MIN_INTERVAL_MS, Math.ceil(requestDurationMs * 1.25)),
+      )
+    const sendEditStreamSnapshot = async (snapshot: InlineEditStreamSnapshot): Promise<void> => {
+      try {
+        if (editStreamState.messageId == null) {
+          const sent = await client.sendMessage({
+            chatId: deliveryChatId,
+            text: snapshot.text,
+            ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
+            ...(snapshot.actions !== undefined ? { actions: snapshot.actions } : {}),
+            parseMarkdown,
+          })
+          if (sent.messageId == null) {
+            throw new Error("inline edit stream: sendMessage returned no messageId")
+          }
+          editStreamState.messageId = sent.messageId
+          rememberSentBotMessage({
+            chatId: deliveryChatId,
+            messageId: sent.messageId,
+            replyThreadContext: deliveryReplyThreadContext,
+          })
+        } else {
+          const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+            oneofKind: "editMessage",
+            editMessage: {
+              messageId: editStreamState.messageId,
+              peerId: buildChatPeer(deliveryChatId),
+              text: snapshot.text,
+              parseMarkdown,
+              ...(snapshot.actions !== undefined ? { actions: snapshot.actions } : {}),
+            },
+          })
+          if (result.oneofKind !== "editMessage") {
+            throw new Error(
+              `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
+            )
+          }
+        }
+        editStreamState.accumulatedText = snapshot.text
+        if (snapshot.actions !== undefined) {
+          editStreamState.actionsFingerprint = snapshot.actionsFingerprint
+        }
+        publishStatus({ lastOutboundAt: Date.now() })
+      } catch (error) {
+        editStreamState.failed = true
+        editStreamState.pendingSnapshot = null
+        runtime.error?.(`inline edit stream failed: ${String(error)}`)
+      }
+    }
+    const scheduleEditStreamDrain = (): void => {
+      if (
+        editStreamState.failed ||
+        editStreamState.inFlight != null ||
+        editStreamState.timer != null ||
+        editStreamState.pendingSnapshot == null
+      ) {
+        return
+      }
+
+      const waitMs = Math.max(0, editStreamState.nextAllowedAt - Date.now())
+      if (waitMs > 0) {
+        editStreamState.timer = setTimeout(() => {
+          editStreamState.timer = null
+          scheduleEditStreamDrain()
+        }, waitMs)
+        return
+      }
+
+      const snapshot = editStreamState.pendingSnapshot
+      editStreamState.pendingSnapshot = null
+      const actionsUnchanged =
+        snapshot.actions === undefined ||
+        snapshot.actionsFingerprint === editStreamState.actionsFingerprint
+      if (
+        !snapshot.text ||
+        (snapshot.text === editStreamState.accumulatedText && actionsUnchanged)
+      ) return
+
+      const startedAt = Date.now()
+      const operation = sendEditStreamSnapshot(snapshot)
+      editStreamState.inFlight = operation
+      void operation.finally(() => {
+        if (editStreamState.inFlight !== operation) return
+        editStreamState.inFlight = null
+        const completedAt = Date.now()
+        const nextStartAt = startedAt + nextEditStreamInterval(completedAt - startedAt)
+        editStreamState.nextAllowedAt = Math.max(completedAt, nextStartAt)
+        scheduleEditStreamDrain()
+      })
+    }
+    const settleEditStream = async (dropPending: boolean): Promise<void> => {
+      if (dropPending) editStreamState.pendingSnapshot = null
+      clearEditStreamTimer()
+      while (true) {
+        const inFlight = editStreamState.inFlight
+        if (inFlight) {
+          await inFlight
+          if (dropPending) editStreamState.pendingSnapshot = null
+          clearEditStreamTimer()
+          continue
+        }
+        if (!dropPending && editStreamState.pendingSnapshot != null && !editStreamState.failed) {
+          editStreamState.nextAllowedAt = 0
+          scheduleEditStreamDrain()
+          continue
+        }
+        return
+      }
+    }
+    const partialMediaDeliveries = new Map<
+      string,
+      Promise<InlinePartialMediaDeliveryResult>
+    >()
+    const activePartialMediaDeliveries = new Set<Promise<InlinePartialMediaDeliveryResult>>()
+    let partialMediaReplyClaimed = false
+    let partialMediaDelivered = false
+    const startPartialMediaDeliveries = (
+      payload: InlineReplyPayload,
+      actions: MessageActions | undefined,
+      hasVisibleText: boolean,
+      replyToMsgId: bigint | undefined,
+    ): void => {
+      for (const mediaUrl of resolveInlinePayloadMediaUrls(payload)) {
+        if (partialMediaDeliveries.has(mediaUrl)) continue
+        const isFirstMediaForAnswer = !partialMediaReplyClaimed
+        partialMediaReplyClaimed = true
+        const attachActions = isFirstMediaForAnswer && !hasVisibleText && actions !== undefined
+        const delivery = (async (): Promise<InlinePartialMediaDeliveryResult> => {
+          try {
+            const media = await uploadInlineMediaFromUrl({
+              client,
+              cfg,
+              accountId: account.accountId,
+              mediaUrl,
+            })
+            const sent = await client.sendMessage({
+              chatId: deliveryChatId,
+              media,
+              ...(isFirstMediaForAnswer && replyToMsgId != null
+                ? { replyToMsgId }
+                : {}),
+              ...(attachActions ? { actions } : {}),
+            })
+            rememberSentBotMessage({
+              chatId: deliveryChatId,
+              messageId: sent.messageId,
+              replyThreadContext: deliveryReplyThreadContext,
+            })
+            partialMediaDelivered = true
+            publishStatus({ lastOutboundAt: Date.now() })
+            return {
+              mediaUrl,
+              messageId: sent.messageId ?? null,
+              sent: true,
+              usedUrlFallback: false,
+            }
+          } catch (uploadError) {
+            runtime.error?.(
+              `inline partial media upload failed; falling back to url text (${String(uploadError)})`,
+            )
+            try {
+              const sent = await client.sendMessage({
+                chatId: deliveryChatId,
+                text: `Attachment: ${mediaUrl}`,
+                ...(isFirstMediaForAnswer && replyToMsgId != null
+                  ? { replyToMsgId }
+                  : {}),
+                ...(attachActions ? { actions } : {}),
+                parseMarkdown,
+              })
+              rememberSentBotMessage({
+                chatId: deliveryChatId,
+                messageId: sent.messageId,
+                replyThreadContext: deliveryReplyThreadContext,
+              })
+              partialMediaDelivered = true
+              publishStatus({ lastOutboundAt: Date.now() })
+              return {
+                mediaUrl,
+                messageId: sent.messageId ?? null,
+                sent: true,
+                usedUrlFallback: true,
+              }
+            } catch (deliveryError) {
+              runtime.error?.(
+                `inline partial media fallback failed (${String(deliveryError)})`,
+              )
+              return {
+                mediaUrl,
+                messageId: null,
+                sent: false,
+                usedUrlFallback: false,
+              }
+            }
+          }
+        })()
+        partialMediaDeliveries.set(mediaUrl, delivery)
+        activePartialMediaDeliveries.add(delivery)
+        void delivery.then(() => {
+          activePartialMediaDeliveries.delete(delivery)
+        })
+      }
+    }
+    const settlePartialMediaDeliveries = async (): Promise<void> => {
+      await Promise.all(activePartialMediaDeliveries)
+    }
     const resetEditStreamForAssistantMessage = async (): Promise<void> => {
-      await editStreamState.opChain
+      const hadPartialMedia = partialMediaDeliveries.size > 0
+      await settleEditStream(true)
+      await settlePartialMediaDeliveries()
+      partialMediaDeliveries.clear()
+      activePartialMediaDeliveries.clear()
+      partialMediaReplyClaimed = false
       const hasActiveState =
         editStreamState.messageId != null ||
         editStreamState.accumulatedText.length > 0 ||
         editStreamState.lastPartialText.length > 0 ||
-        editStreamState.finalTextAccumulator.length > 0
+        editStreamState.finalTextAccumulator.length > 0 ||
+        hadPartialMedia
       if (!hasActiveState) return
       editStreamState.messageId = null
       editStreamState.accumulatedText = ""
       editStreamState.lastPartialText = ""
       editStreamState.finalTextAccumulator = ""
       editStreamState.failed = false
+      editStreamState.pendingSnapshot = null
+      editStreamState.nextAllowedAt = 0
+      editStreamState.actionsFingerprint = null
+      editStreamState.latestActions = undefined
       finalDeliveredForCurrentAssistantMessage = false
     }
     const resetEditStreamOnBoundary = async (): Promise<void> => {
       if (!streamViaEditMessage) return
       await resetEditStreamForAssistantMessage()
     }
-    const handlePartialStreamPayload = async (payload: InlineReplyPayload): Promise<void> => {
+    const handlePartialStreamPayload = (payload: InlineReplyPayload): void => {
       const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
       if (!visiblePayload) return
-      if (editStreamState.failed) return
-      if (resolveInlinePayloadMediaUrls(visiblePayload).length > 0) return
       const partialText = typeof visiblePayload.text === "string" ? visiblePayload.text : ""
-      if (!partialText || partialText === editStreamState.lastPartialText) return
-      editStreamState.lastPartialText = partialText
-
       const nextText = sanitizeInlineDeliveryText(
         rewriteNumericMentionsToUsernames(
-          extractCompleteParagraphText(partialText),
+          partialText,
           senderProfilesById,
         ),
-      ).trim()
-      if (!nextText || nextText === editStreamState.accumulatedText) return
+      ).trim() || editStreamState.accumulatedText
+      const suppliedActions = resolveInlineReplyActions(visiblePayload as Record<string, unknown>)
+      if (suppliedActions !== undefined) {
+        editStreamState.latestActions = suppliedActions
+      }
+      const actions = suppliedActions ?? editStreamState.latestActions
+      const actionsFingerprint = fingerprintInlineMessageActions(actions)
 
-      editStreamState.opChain = editStreamState.opChain.then(async () => {
-        if (editStreamState.failed) return
-        if (!nextText || nextText === editStreamState.accumulatedText) return
-
-        try {
-          if (editStreamState.messageId == null) {
-            const sent = await client.sendMessage({
-              chatId: deliveryChatId,
-              text: nextText,
-              ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
-              parseMarkdown,
-            })
-            if (sent.messageId == null) {
-              throw new Error("inline edit stream: sendMessage returned no messageId")
-            }
-            editStreamState.messageId = sent.messageId
-            rememberSentBotMessage({
-              chatId: deliveryChatId,
-              messageId: sent.messageId,
-              replyThreadContext: deliveryReplyThreadContext,
-            })
-          } else {
-            const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
-              oneofKind: "editMessage",
-              editMessage: {
-                messageId: editStreamState.messageId,
-                peerId: buildChatPeer(deliveryChatId),
-                text: nextText,
-                parseMarkdown,
-              },
-            })
-            if (result.oneofKind !== "editMessage") {
-              throw new Error(
-                `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
-              )
-            }
-          }
-          editStreamState.accumulatedText = nextText
-          publishStatus({ lastOutboundAt: Date.now() })
-        } catch (error) {
-          editStreamState.failed = true
-          runtime.error?.(`inline edit stream failed: ${String(error)}`)
+      if (!editStreamState.failed) {
+        if (partialText && partialText !== editStreamState.lastPartialText) {
+          editStreamState.lastPartialText = partialText
         }
-      })
-      await editStreamState.opChain
+        const pending = editStreamState.pendingSnapshot
+        const actionsUnchanged =
+          actions === undefined || actionsFingerprint === editStreamState.actionsFingerprint
+        const matchesPending =
+          pending?.text === nextText &&
+          (actions === undefined || pending.actionsFingerprint === actionsFingerprint)
+        if (
+          nextText &&
+          !matchesPending &&
+          (nextText !== editStreamState.accumulatedText || !actionsUnchanged)
+        ) {
+          editStreamState.pendingSnapshot = {
+            text: nextText,
+            ...(actions !== undefined ? { actions } : {}),
+            actionsFingerprint,
+          }
+          scheduleEditStreamDrain()
+        }
+      }
+
+      let partialReplyToMsgId = defaultReplyToMsgId
+      if (visiblePayload.replyToId != null && canReplyToSourceMessage) {
+        try {
+          partialReplyToMsgId = BigInt(visiblePayload.replyToId)
+        } catch {
+          // Ignore malformed producer reply targets and preserve the default route.
+        }
+      }
+      startPartialMediaDeliveries(
+        visiblePayload,
+        actions,
+        Boolean(nextText),
+        partialReplyToMsgId,
+      )
     }
     const buildInlineProgressLineForEntry = (
       input: Parameters<typeof buildChannelProgressDraftLineForEntry>[1],
@@ -5275,8 +5498,8 @@ export async function monitorInlineProvider(params: {
         : {}),
       ...(streamViaEditMessage
         ? {
-            onPartialReply: async (payload: { text?: string; mediaUrls?: string[] }) => {
-              await handlePartialStreamPayload(payload)
+            onPartialReply: async (payload: InlineReplyPayload) => {
+              handlePartialStreamPayload(payload)
             },
           }
         : {}),
@@ -5506,7 +5729,13 @@ export async function monitorInlineProvider(params: {
               const outboundText = sanitizeInlineDeliveryText(
                 rewriteNumericMentionsToUsernames(rawText, senderProfilesById),
               )
-              const outboundActions = resolveInlineReplyActions(visiblePayload as Record<string, unknown>)
+              const suppliedOutboundActions = resolveInlineReplyActions(
+                visiblePayload as Record<string, unknown>,
+              )
+              if (suppliedOutboundActions !== undefined) {
+                editStreamState.latestActions = suppliedOutboundActions
+              }
+              const outboundActions = suppliedOutboundActions ?? editStreamState.latestActions
               const infoKind = typeof info?.kind === "string" ? info.kind : undefined
 
               let replyToMsgId: bigint | undefined
@@ -5549,7 +5778,7 @@ export async function monitorInlineProvider(params: {
               }
 
               const updateStreamedMessage = async (text: string, actions?: MessageActions): Promise<boolean> => {
-                await editStreamState.opChain
+                await settleEditStream(true)
                 if (editStreamState.messageId == null) return false
                 const nextText = sanitizeInlineDeliveryText(text).trim()
                 const textForEdit = nextText || editStreamState.accumulatedText
@@ -5577,8 +5806,16 @@ export async function monitorInlineProvider(params: {
                   editStreamState.accumulatedText = textForEdit
                   editStreamState.lastPartialText = textForEdit
                 }
+                if (actions !== undefined) {
+                  editStreamState.actionsFingerprint = fingerprintInlineMessageActions(actions)
+                  editStreamState.latestActions = actions
+                }
                 editStreamState.failed = false
                 return true
+              }
+
+              if (streamViaEditMessage) {
+                await settleEditStream(true)
               }
 
               if (mediaList.length === 0) {
@@ -5633,6 +5870,59 @@ export async function monitorInlineProvider(params: {
                   isFirst && (!(streamViaEditMessage && editStreamState.messageId != null) || !outboundText.trim())
                 const caption =
                   isFirst && !(streamViaEditMessage && editStreamState.messageId != null) ? outboundText : ""
+                const partialDelivery = partialMediaDeliveries.get(mediaUrl)
+                if (partialDelivery) {
+                  const result = await partialDelivery
+                  if (result.sent) {
+                    delivered = true
+                    const mediaText = result.usedUrlFallback
+                      ? caption
+                        ? `${caption}\n\nAttachment: ${mediaUrl}`
+                        : `Attachment: ${mediaUrl}`
+                      : caption
+                    const shouldUpdateEarlyMedia =
+                      isFirst &&
+                      (Boolean(mediaText.trim()) ||
+                        (shouldAttachActionsToMedia && outboundActions !== undefined))
+                    if (shouldUpdateEarlyMedia && result.messageId != null) {
+                      try {
+                        const update = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                          oneofKind: "editMessage",
+                          editMessage: {
+                            messageId: result.messageId,
+                            peerId: buildChatPeer(deliveryChatId),
+                            text: mediaText,
+                            parseMarkdown,
+                            ...(shouldAttachActionsToMedia && outboundActions !== undefined
+                              ? { actions: outboundActions }
+                              : {}),
+                          },
+                        })
+                        if (update.oneofKind !== "editMessage") {
+                          throw new Error(
+                            `inline early media: expected editMessage result, got ${String(update.oneofKind)}`,
+                          )
+                        }
+                      } catch (error) {
+                        runtime.error?.(
+                          `inline early media finalization failed (${String(error)})`,
+                        )
+                        await sendTextFallback(
+                          caption || `Attachment: ${mediaUrl}`,
+                          false,
+                          shouldAttachActionsToMedia,
+                        )
+                      }
+                    } else if (shouldUpdateEarlyMedia) {
+                      await sendTextFallback(
+                        caption || `Attachment: ${mediaUrl}`,
+                        false,
+                        shouldAttachActionsToMedia,
+                      )
+                    }
+                    continue
+                  }
+                }
                 try {
                   const media = await uploadInlineMediaFromUrl({
                     client,
@@ -5691,6 +5981,11 @@ export async function monitorInlineProvider(params: {
         runtime.error?.(`inline dispatch failed: ${String(error)}`)
       }
 
+      await settleEditStream(false)
+      await settlePartialMediaDeliveries()
+      if (partialMediaDelivered) {
+        delivered = true
+      }
       await cleanupInlineProgressPlaceholder()
       if (!delivered && streamViaEditMessage && editStreamState.messageId != null) {
         delivered = true

@@ -2971,6 +2971,7 @@ asyncio.run(assert_model_picker_flow())
 
 async def assert_transport_helpers():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    assert adapter.prefers_fresh_final_streaming("preview", metadata={"expect_edits": True}) is False
     calls = []
 
     async def fake_send_sidecar(path, body):
@@ -3007,6 +3008,70 @@ async def assert_transport_helpers():
     assert sent_preview.success
     assert calls[-1][0] == "/send"
     assert calls[-1][1]["parseMarkdown"] is True
+
+    calls.clear()
+    markdown_image = "![Live chart](https://example.com/chart.png)"
+    preview_actions = {
+        "rows": [{
+            "actions": [{"id": "open-chart", "text": "Open", "callback": "open:chart"}],
+        }],
+    }
+    markdown_preview = await adapter.send(
+        "chat:10",
+        markdown_image,
+        metadata={**metadata, "expect_edits": True},
+        actions=preview_actions,
+    )
+    assert markdown_preview.success
+    assert calls[-1] == ("/send", {
+        "target": {"chatId": "99"},
+        "text": markdown_image,
+        "parseMarkdown": True,
+        "actions": preview_actions,
+    })
+
+    markdown_update = f"{markdown_image}\n\nUpdated live."
+    edited_markdown = await adapter.edit_message(
+        "chat:10",
+        markdown_preview.message_id,
+        markdown_update,
+        metadata=metadata,
+    )
+    assert edited_markdown.success
+    assert calls[-1] == ("/edit", {
+        "target": {"chatId": "99"},
+        "messageId": "message-1",
+        "text": markdown_update,
+        "parseMarkdown": True,
+    })
+
+    markdown_final = f"{markdown_update}\n\nFinal."
+    finalized_markdown = await adapter.edit_message(
+        "chat:10",
+        markdown_preview.message_id,
+        markdown_final,
+        finalize=True,
+        metadata=metadata,
+    )
+    assert finalized_markdown.success
+    assert calls[-1] == ("/edit", {
+        "target": {"chatId": "99"},
+        "messageId": "message-1",
+        "text": markdown_final,
+        "parseMarkdown": True,
+    })
+
+    image_companion = await adapter.send_image(
+        "chat:10",
+        "https://example.com/companion.png",
+        caption="Image companion",
+        metadata=metadata,
+    )
+    assert image_companion.success
+    assert calls[-1][0] == "/send-attachment"
+    assert calls[-1][1]["target"] == {"chatId": "99"}
+    assert calls[-1][1]["kind"] == "photo"
+    assert calls[-1][1]["caption"] == "Image companion"
 
     preview_overflow = await adapter.edit_message(
         "chat:10",
