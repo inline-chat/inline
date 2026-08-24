@@ -3998,6 +3998,9 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::SpaceSettings(_) => "space_settings",
         Update::ChatPermissions(_) => "chat_permissions",
         Update::DialogCollapsedMaxId(_) => "dialog_collapsed_max_id",
+        Update::DialogFolder(_) => "dialog_folder",
+        Update::UserAddedToChat(_) => "user_added_to_chat",
+        Update::UserRemovedFromChat(_) => "user_removed_from_chat",
     }
 }
 
