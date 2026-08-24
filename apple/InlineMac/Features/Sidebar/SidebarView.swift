@@ -396,9 +396,18 @@ struct SidebarView: View {
     let projectedNodes = tree?.projectedNodes() ?? []
     let pinnedNodes = projectedNodes.filter { $0.lane == .pinned }
     let contentNodes = projectedNodes.filter { $0.lane == .normal }
-    let pinnedExpanded = configuration.sectionHeaders.pinned == false
+    let presentsPinnedSpacer = sectionUsesPinnedSpacer(.pinned)
+    // The simplified Inbox keeps Pinned untitled and expanded. Its stored
+    // disclosure state and titled renderer remain intact for a quick reversal.
+    let pinnedExpanded = presentsPinnedSpacer
+      || configuration.sectionHeaders.pinned == false
       || collapsedAppKitSections.contains(.pinned) == false
-    let contentExpanded = configuration.sectionHeaders.content == false
+    let presentsOpenSeparator = settings.sidebarAsInbox && isArchiveVisible == false
+    // Open is intentionally non-collapsible in the current presentation. Keep
+    // the stored disclosure state intact so the old behavior can be restored
+    // without a migration or a second source of truth.
+    let contentExpanded = presentsOpenSeparator
+      || configuration.sectionHeaders.content == false
       || collapsedAppKitSections.contains(.content) == false
     let isAllChatsMode = settings.sidebarAsInbox == false && isArchiveVisible == false
 
@@ -406,9 +415,11 @@ struct SidebarView: View {
       rows.append(.sectionHeader(
         .pinned,
         isExpanded: pinnedExpanded,
-        height: configuration.sectionHeaders.pinned
-          ? SidebarCollectionRow.spacedSectionHeaderHeight
-          : 0
+        height: presentsPinnedSpacer
+          ? SidebarCollectionRow.pinnedSpacerHeight
+          : (configuration.sectionHeaders.pinned
+            ? SidebarCollectionRow.pinnedSectionHeaderHeight
+            : 0)
       ))
       if pinnedExpanded {
         appendAppKitRows(pinnedNodes, to: &rows)
@@ -427,9 +438,11 @@ struct SidebarView: View {
       rows.append(.sectionHeader(
         .content,
         isExpanded: contentExpanded,
-        height: configuration.sectionHeaders.content
-          ? SidebarCollectionRow.spacedSectionHeaderHeight
-          : 0
+        height: presentsOpenSeparator
+          ? (contentNodes.isEmpty ? 0 : SidebarCollectionRow.openSeparatorHeight)
+          : (configuration.sectionHeaders.content
+            ? SidebarCollectionRow.spacedSectionHeaderHeight
+            : 0)
       ))
     }
     if contentExpanded, isAllChatsMode == false {
@@ -642,17 +655,9 @@ struct SidebarView: View {
         onCloseAll: nil
       ))
     case let .sectionHeader(section, isExpanded):
-      .header(SidebarNativeRowConfiguration.Header(
-        title: section.title(
-          sidebarAsInbox: settings.sidebarAsInbox,
-          archiveVisible: isArchiveVisible
-        ),
-        style: .section,
-        isExpanded: context.disclosureExpandedOverride ?? isExpanded,
-        topSpacing: SidebarCollectionRow.sectionTopSpacing,
-        onToggle: { toggleAppKitSection(section) },
-        onCleanUp: nativeSectionSupportsCleanup(section) ? cleanUpOpenChats : nil,
-        onCloseAll: nativeSectionSupportsCleanup(section) ? closeAllOpenChats : nil
+      .header(nativeSectionHeaderConfiguration(
+        section,
+        isExpanded: context.disclosureExpandedOverride ?? isExpanded
       ))
     case let .timelineHeader(period):
       .header(SidebarNativeRowConfiguration.Header(
@@ -841,6 +846,42 @@ struct SidebarView: View {
     section == .content && settings.sidebarAsInbox && !isArchiveVisible
   }
 
+  private func sectionUsesPinnedSpacer(
+    _ section: SidebarCollectionRow.SectionHeader
+  ) -> Bool {
+    section == .pinned && settings.sidebarAsInbox && !isArchiveVisible
+  }
+
+  private func nativeSectionHeaderConfiguration(
+    _ section: SidebarCollectionRow.SectionHeader,
+    isExpanded: Bool
+  ) -> SidebarNativeRowConfiguration.Header {
+    let presentsOpenSeparator = nativeSectionSupportsCleanup(section)
+    let presentsPinnedSpacer = sectionUsesPinnedSpacer(section)
+    let isInertPresentation = presentsOpenSeparator || presentsPinnedSpacer
+    let style: SidebarNativeRowConfiguration.Header.Style = if presentsOpenSeparator {
+      .openSeparator
+    } else if presentsPinnedSpacer {
+      .pinnedSpacer
+    } else {
+      section == .pinned ? .pinnedSection : .section
+    }
+    return SidebarNativeRowConfiguration.Header(
+      title: isInertPresentation
+        ? ""
+        : section.title(
+          sidebarAsInbox: settings.sidebarAsInbox,
+          archiveVisible: isArchiveVisible
+        ),
+      style: style,
+      isExpanded: isInertPresentation ? nil : isExpanded,
+      topSpacing: isInertPresentation ? 0 : SidebarCollectionRow.sectionTopSpacing,
+      onToggle: isInertPresentation ? nil : { toggleAppKitSection(section) },
+      onCleanUp: presentsOpenSeparator ? cleanUpOpenChats : nil,
+      onCloseAll: presentsOpenSeparator ? closeAllOpenChats : nil
+    )
+  }
+
   private var nativeAllChatsUnreadAccessibilityValue: String {
     let prominent = unreadCounts.scopedUnopenedProminentUnreadCount
     let other = unreadCounts.scopedUnopenedOtherUnreadCount
@@ -949,35 +990,32 @@ struct SidebarView: View {
     return viewModel.folders.first(where: { $0.id == folderID })?.isPinned == true
   }
 
+  @ViewBuilder
   private func appKitSectionHeader(
     _ section: SidebarCollectionRow.SectionHeader,
     isExpanded: Bool,
     hostState: SidebarCollectionRowHostState?
   ) -> some View {
-    SidebarCollectionSectionHeaderView(
-      title: section.title(
-        sidebarAsInbox: settings.sidebarAsInbox,
-        archiveVisible: isArchiveVisible
-      ),
-      initialIsExpanded: isExpanded,
-      hostState: hostState,
-      topSpacing: SidebarCollectionRow.sectionTopSpacing,
-      cleanupMenu: appKitSectionCleanupMenu(section),
-      onToggle: { toggleAppKitSection(section) }
-    )
-  }
-
-  private func appKitSectionCleanupMenu(
-    _ section: SidebarCollectionRow.SectionHeader
-  ) -> SidebarOpenChatsCleanupMenu? {
-    guard section == .content, settings.sidebarAsInbox, isArchiveVisible == false else {
-      return nil
+    if nativeSectionSupportsCleanup(section) {
+      SidebarCollectionOpenSeparatorView(
+        onCleanUp: cleanUpOpenChats,
+        onCloseAll: closeAllOpenChats
+      )
+    } else if sectionUsesPinnedSpacer(section) {
+      SidebarCollectionPinnedSpacerView()
+    } else {
+      SidebarCollectionSectionHeaderView(
+        title: section.title(
+          sidebarAsInbox: settings.sidebarAsInbox,
+          archiveVisible: isArchiveVisible
+        ),
+        isPinned: section == .pinned,
+        initialIsExpanded: isExpanded,
+        hostState: hostState,
+        topSpacing: SidebarCollectionRow.sectionTopSpacing,
+        onToggle: { toggleAppKitSection(section) }
+      )
     }
-
-    return SidebarOpenChatsCleanupMenu(
-      onCleanUp: cleanUpOpenChats,
-      onCloseAll: closeAllOpenChats
-    )
   }
 
   private var allChatsRow: some View {
@@ -2332,7 +2370,7 @@ struct SidebarView: View {
     }
   }
 
-  private func closeChat(_ item: SidebarViewModel.Item, recordsUndo: Bool = true) {
+  private func closeChat(_ item: SidebarViewModel.Item) {
     guard settings.sidebarAsInbox else { return }
 
     if isTemporaryItem(item) {
@@ -2341,14 +2379,27 @@ struct SidebarView: View {
     }
 
     guard let dependencies else { return }
-
     let itemsToClose = appKitAttachedGroupItems(startingAt: item)
+    closeSidebarItems(
+      itemsToClose,
+      dependencies: dependencies,
+      undoIntent: dependencies.appUndo.beginIntent(),
+      showsUndoToast: false
+    )
+  }
+
+  private func closeSidebarItems(
+    _ itemsToClose: [SidebarViewModel.Item],
+    dependencies: AppDependencies,
+    undoIntent: AppUndoHistory.Intent,
+    showsUndoToast: Bool
+  ) {
     let itemIDsToClose = Set(itemsToClose.map(\.id))
+    guard itemIDsToClose.isEmpty == false else { return }
     guard pendingClosedSidebarItemIDs.isDisjoint(with: itemIDsToClose) else {
       sidebarInteractionLog.debug("ignored repeated close while the existing request is pending")
       return
     }
-    let undoIntent = recordsUndo ? dependencies.appUndo.beginIntent() : nil
 
     // The dialog model remains authoritative, but waiting for its realtime
     // observation kept a successfully clicked row fully interactive for
@@ -2384,17 +2435,45 @@ struct SidebarView: View {
           Log.shared.error("Failed to close chat in sidebar", error: error)
         }
       }
-      if let undoIntent {
-        dependencies.appUndo.recordClosedChats(closedChats, intent: undoIntent)
+      let recordedUndo = dependencies.appUndo.recordClosedChats(
+        closedChats,
+        intent: undoIntent
+      )
+      if showsUndoToast, recordedUndo {
+        let closedCount = closedChats.count
+        let failedCount = failedItemIDs.count
+        let message = if failedCount == 0 {
+          "Closed \(closedCount) \(closedCount == 1 ? "chat" : "chats")"
+        } else {
+          "Closed \(closedCount); \(failedCount) couldn’t be closed"
+        }
+        ToastCenter.shared.showUndoCountdown(message) {
+          Task {
+            let result = await dependencies.appUndo.undo(
+              undoIntent,
+              using: dependencies
+            )
+            switch result {
+            case .completed:
+              pendingClosedSidebarItemIDs.subtract(itemIDsToClose)
+            case .unavailable:
+              ToastCenter.shared.showInfo("Undo is no longer available from this toast")
+            case .failed:
+              break
+            }
+          }
+        }
       }
       guard failedItemIDs.isEmpty == false else { return }
       await MainActor.run {
         pendingClosedSidebarItemIDs.subtract(failedItemIDs)
-        ToastCenter.shared.showError(
-          failedItemIDs.count == 1
-            ? "Couldn’t close that chat"
-            : "Some chats couldn’t be closed"
-        )
+        if recordedUndo == false || showsUndoToast == false {
+          ToastCenter.shared.showError(
+            failedItemIDs.count == 1
+              ? "Couldn’t close that chat"
+              : "Some chats couldn’t be closed"
+          )
+        }
       }
     }
   }
@@ -2424,13 +2503,28 @@ struct SidebarView: View {
   }
 
   private func closeAllOpenChats() {
-    let rootItems = appKitSidebarTree.projectedItems()
-      .filter { $0.lane == .normal && $0.depth == 0 }
-      .map(\.item)
-
-    for item in rootItems {
-      closeChat(item, recordsUndo: false)
+    guard settings.sidebarAsInbox, let dependencies else { return }
+    let tree = appKitSidebarTree
+    var seenItemIDs = Set<ChatListItem.Identifier>()
+    let openItems = visibleNormalSourceItems.filter { item in
+      guard seenItemIDs.insert(item.id).inserted else { return false }
+      return tree.snapshot.sectionID(containing: .chat(item.id)).flatMap { $0 } == .normal
     }
+
+    // Preserve the existing temporary-row behavior. These rows are a local
+    // navigation projection rather than dialog-open state, so the semantic
+    // undo batch contains only persisted dialogs.
+    let persistedOpenItems = openItems.filter { isTemporaryItem($0) == false }
+    if persistedOpenItems.count != openItems.count {
+      viewModel.setTemporaryPeer(nil)
+    }
+
+    closeSidebarItems(
+      persistedOpenItems,
+      dependencies: dependencies,
+      undoIntent: dependencies.appUndo.beginIntent(),
+      showsUndoToast: true
+    )
   }
 
   private func appKitAttachedGroupItems(

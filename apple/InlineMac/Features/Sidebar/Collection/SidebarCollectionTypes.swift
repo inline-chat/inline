@@ -65,9 +65,14 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   }
 
   static let sectionHeaderHeight: CGFloat = 28
+  static let timelineHeaderAdditionalTopSpacing: CGFloat = 5
   static let timelineHeaderHeight: CGFloat = 28
+    + timelineHeaderAdditionalTopSpacing
   static let sectionTopSpacing: CGFloat = 8
   static let spacedSectionHeaderHeight = sectionHeaderHeight + sectionTopSpacing
+  static let pinnedSectionHeaderHeight: CGFloat = 24
+  static let pinnedSpacerHeight: CGFloat = 6
+  static let openSeparatorHeight: CGFloat = 14
   static let emptyPinnedTargetHeight: CGFloat = 56
   static let itemVisualGap: CGFloat = 1
   static let itemVisualEdgeInset = itemVisualGap / 2
@@ -186,12 +191,14 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   static func sectionHeader(
     _ section: SectionHeader,
     isExpanded: Bool,
-    height: CGFloat = spacedSectionHeaderHeight
+    height: CGFloat? = nil
   ) -> Self {
     Self(
       id: .sectionHeader(section),
       kind: .sectionHeader(section, isExpanded: isExpanded),
-      height: height
+      height: height ?? (section == .pinned
+        ? pinnedSectionHeaderHeight
+        : spacedSectionHeaderHeight)
     )
   }
 

@@ -27,6 +27,9 @@ enum SidebarSectionHeaderMetrics {
   static let leadingInset = Theme.sidebarItemInnerSpacing + 8
   static let trailingInset: CGFloat = 7
   static let controlSize: CGFloat = 24
+  static let openSeparatorControlSpacing: CGFloat = 4
+  static let openSeparatorOpacity: CGFloat = 0.7
+  static let sectionTitleOpacity: CGFloat = 0.5
 }
 
 /// SwiftUI-hosted content for the collection's app-owned logical sections.
@@ -34,10 +37,10 @@ enum SidebarSectionHeaderMetrics {
 /// native-looking title and disclosure interaction.
 struct SidebarCollectionSectionHeaderView: View {
   let title: String
+  let isPinned: Bool
   let initialIsExpanded: Bool
   let hostState: SidebarCollectionRowHostState?
   let topSpacing: CGFloat
-  let cleanupMenu: SidebarOpenChatsCleanupMenu?
   let onToggle: () -> Void
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -51,8 +54,9 @@ struct SidebarCollectionSectionHeaderView: View {
     HStack(alignment: .center, spacing: 0) {
       Button(action: onToggle) {
         Text(title)
-          .font(.system(size: 11, weight: .medium))
+          .font(.system(size: 11, weight: .regular))
           .foregroundStyle(.secondary)
+          .opacity(Double(SidebarSectionHeaderMetrics.sectionTitleOpacity))
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
           .contentShape(Rectangle())
       }
@@ -60,20 +64,15 @@ struct SidebarCollectionSectionHeaderView: View {
       .accessibilityLabel(isExpanded ? "Collapse \(title)" : "Expand \(title)")
       .accessibilityAddTraits(.isHeader)
 
-      if let cleanupMenu {
-        cleanupMenu
-          .opacity(isHovered ? 1 : 0)
-          .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
-      }
-
       Button(action: onToggle) {
         SidebarSectionChevronIcon(
           isExpanded: isExpanded,
-          animates: !reduceMotion
+          animates: !reduceMotion,
+          height: isPinned ? 16 : SidebarSectionHeaderMetrics.controlSize
         )
-          .opacity(isExpanded && isHovered == false ? 0 : 1)
-          .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isExpanded)
-          .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
+        .opacity(isExpanded && isHovered == false ? 0 : 1)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isExpanded)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
       }
       .buttonStyle(.plain)
       .accessibilityLabel(isExpanded ? "Collapse \(title)" : "Expand \(title)")
@@ -89,6 +88,58 @@ struct SidebarCollectionSectionHeaderView: View {
   }
 }
 
+/// The simplified Inbox keeps the Pinned section's stable collection identity
+/// as spacing only. The titled disclosure view remains available to the other
+/// sidebar presentations and for an easy reversal of this experiment.
+struct SidebarCollectionPinnedSpacerView: View {
+  var body: some View {
+    Color.clear
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
+  }
+}
+
+/// The Open lane keeps one stable collection identity but presents only a
+/// separator and its scoped menu. Its row height collapses to zero when the
+/// lane is empty, so New Thread naturally follows the preceding visible row.
+struct SidebarCollectionOpenSeparatorView: View {
+  let onCleanUp: () -> Void
+  let onCloseAll: () -> Void
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var isHovered = false
+
+  var body: some View {
+    ZStack(alignment: .trailing) {
+      Rectangle()
+        .fill(Color(nsColor: .separatorColor))
+        .opacity(Double(SidebarSectionHeaderMetrics.openSeparatorOpacity))
+        .frame(height: 1)
+        .padding(
+          .trailing,
+          isHovered
+            ? SidebarSectionHeaderMetrics.controlSize
+              + SidebarSectionHeaderMetrics.openSeparatorControlSpacing
+            : 0
+        )
+
+      SidebarOpenChatsCleanupMenu(
+        onCleanUp: onCleanUp,
+        onCloseAll: onCloseAll
+      )
+      .opacity(isHovered ? 1 : 0)
+      .allowsHitTesting(isHovered)
+    }
+    .padding(.leading, SidebarSectionHeaderMetrics.leadingInset)
+    .padding(.trailing, SidebarSectionHeaderMetrics.trailingInset)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .contentShape(Rectangle())
+    .onHover { isHovered = $0 }
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
+  }
+}
+
 /// A plain chronological label. Unlike the app-owned lane headers, timeline
 /// headers have no disclosure state, hover treatment, or interaction.
 struct SidebarCollectionTimelineHeaderView: View {
@@ -96,9 +147,11 @@ struct SidebarCollectionTimelineHeaderView: View {
 
   var body: some View {
     Text(title)
-      .font(.system(size: 11, weight: .medium))
+      .font(.system(size: 11, weight: .regular))
       .foregroundStyle(.secondary)
+      .opacity(Double(SidebarSectionHeaderMetrics.sectionTitleOpacity))
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+      .padding(.top, SidebarCollectionRow.timelineHeaderAdditionalTopSpacing)
       .padding(.leading, SidebarSectionHeaderMetrics.leadingInset)
       .padding(.trailing, SidebarSectionHeaderMetrics.trailingInset)
       .accessibilityAddTraits(.isHeader)
@@ -132,6 +185,7 @@ struct SidebarOpenChatsCleanupMenu: View {
 struct SidebarSectionChevronIcon: View {
   let isExpanded: Bool
   let animates: Bool
+  var height: CGFloat = 24
 
   var body: some View {
     Image(systemName: "chevron.right")
@@ -139,7 +193,7 @@ struct SidebarSectionChevronIcon: View {
       .foregroundStyle(.tertiary)
       .rotationEffect(.degrees(isExpanded ? 90 : 0))
       .animation(animates ? SidebarDisclosureMotion.animation : nil, value: isExpanded)
-      .frame(width: 24, height: 24)
+      .frame(width: 24, height: height)
       .contentShape(Rectangle())
   }
 }
@@ -149,7 +203,10 @@ struct SidebarSectionCleanupIcon: View {
     Image(systemName: "eraser.line.dashed")
       .font(.system(size: 10, weight: .medium))
       .foregroundStyle(.tertiary)
-      .frame(width: 24, height: 24)
+      .frame(
+        width: SidebarSectionHeaderMetrics.controlSize,
+        height: SidebarCollectionRow.openSeparatorHeight
+      )
       .contentShape(Rectangle())
   }
 }

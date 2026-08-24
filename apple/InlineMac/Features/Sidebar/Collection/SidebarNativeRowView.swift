@@ -78,6 +78,9 @@ struct SidebarNativeRowConfiguration {
       case archive
       case timeline
       case section
+      case pinnedSection
+      case pinnedSpacer
+      case openSeparator
     }
 
     let title: String
@@ -973,6 +976,7 @@ private final class SidebarNativeHeaderDisclosureButton: NSButton {
 @MainActor
 private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentView {
   private let titleField = SidebarNativeTextField()
+  private let separatorView = NSBox()
   private let chevronView = SidebarNativeHostedVisualView()
   private let cleanupView = SidebarNativeHostedVisualView()
   private let disclosureButton = SidebarNativeHeaderDisclosureButton()
@@ -982,11 +986,15 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     addSubview(disclosureButton)
+    addSubview(separatorView)
     addSubview(titleField)
     addSubview(cleanupView)
     addSubview(chevronView)
-    titleField.font = .systemFont(ofSize: 11, weight: .medium)
     titleField.textColor = .secondaryLabelColor
+    separatorView.boxType = .separator
+    separatorView.alphaValue = SidebarSectionHeaderMetrics.openSeparatorOpacity
+    separatorView.setAccessibilityElement(false)
+    separatorView.setAccessibilityHidden(true)
     cleanupView.configure { SidebarSectionCleanupIcon() }
     cleanupView.toolTip = "Open Chats Cleanup"
     setAccessibilityRole(.group)
@@ -1001,26 +1009,43 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
     self.configuration = configuration
     displayedIsExpanded = configuration.isExpanded
     titleField.stringValue = configuration.title
+    titleField.font = .systemFont(ofSize: 11, weight: .regular)
+    titleField.textColor = .secondaryLabelColor
+    titleField.alphaValue = switch configuration.style {
+    case .section, .pinnedSection, .timeline:
+      SidebarSectionHeaderMetrics.sectionTitleOpacity
+    case .archive, .pinnedSpacer, .openSeparator:
+      1
+    }
     cleanupView.configure { SidebarSectionCleanupIcon() }
-    let isSection = configuration.style == .section
-    if isSection {
+    let isDisclosureSection = configuration.style == .section
+      || configuration.style == .pinnedSection
+    let isPinnedSpacer = configuration.style == .pinnedSpacer
+    let isOpenSeparator = configuration.style == .openSeparator
+    if isDisclosureSection {
       let toggle: () -> Void = { [weak self] in
         self?.performDisclosureToggle()
       }
       primaryAction = toggle
       disclosureButton.actionHandler = toggle
+    } else if isOpenSeparator {
+      primaryAction = { [weak self] in self?.showCleanupMenu() }
+      disclosureButton.actionHandler = nil
     } else {
       primaryAction = nil
       disclosureButton.actionHandler = nil
     }
-    disclosureButton.isEnabled = isSection
+    disclosureButton.isEnabled = isDisclosureSection
     doubleClickAction = nil
-    chevronView.isHidden = !isSection
-    cleanupView.isHidden = configuration.onCleanUp == nil
+    titleField.isHidden = isOpenSeparator || isPinnedSpacer
+    separatorView.isHidden = !isOpenSeparator
+    chevronView.isHidden = !isDisclosureSection
+    cleanupView.isHidden = !isOpenSeparator
+      || configuration.onCleanUp == nil
       || configuration.onCloseAll == nil
     configureChevron()
     updateControlPresentation(animated: false)
-    if isSection {
+    if isDisclosureSection || isOpenSeparator {
       setAccessibilityRole(.button)
     } else if #available(macOS 26, *) {
       setAccessibilityRole(.headingRole)
@@ -1042,6 +1067,11 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
     recomputePointerLocation()
   }
 
+  override func setLayoutVisibility(_ isVisible: Bool) {
+    super.setLayoutVisibility(isVisible)
+    setAccessibilityHidden(!isVisible || configuration?.style == .pinnedSpacer)
+  }
+
   override func layout() {
     super.layout()
     guard let configuration else { return }
@@ -1055,31 +1085,37 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
         height: 16
       )
     case .timeline:
-      let contentHeight = max(bounds.height - top, 0)
+      let timelineTop = top + SidebarCollectionRow.timelineHeaderAdditionalTopSpacing
+      let contentHeight = max(
+        bounds.height
+          - timelineTop,
+        0
+      )
       let titleHeight = min(16, contentHeight)
       titleField.frame = CGRect(
         x: Theme.sidebarItemInnerSpacing + 8,
-        y: top + (contentHeight - titleHeight) / 2,
+        y: timelineTop + (contentHeight - titleHeight) / 2,
         width: max(bounds.width - Theme.sidebarItemInnerSpacing - 15, 0),
         height: titleHeight
       )
-    case .section:
+    case .section, .pinnedSection:
       let contentHeight = max(bounds.height - top, 0)
       let centerY = top + contentHeight / 2
       let controlSize = SidebarSectionHeaderMetrics.controlSize
-      let controlsY = centerY - controlSize / 2
+      let controlHeight: CGFloat = configuration.style == .pinnedSection ? 16 : controlSize
+      let controlsY = centerY - controlHeight / 2
       let titleHeight = min(16, contentHeight)
       chevronView.frame = CGRect(
         x: bounds.width - SidebarSectionHeaderMetrics.trailingInset - controlSize,
         y: controlsY,
         width: controlSize,
-        height: controlSize
+        height: controlHeight
       )
       cleanupView.frame = CGRect(
         x: chevronView.frame.minX - controlSize,
         y: controlsY,
         width: controlSize,
-        height: controlSize
+        height: controlHeight
       )
       let titleTrailing = cleanupView.isHidden
         ? chevronView.frame.minX
@@ -1091,15 +1127,37 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
         height: titleHeight
       )
       disclosureButton.frame = bounds
+      separatorView.frame = .zero
+    case .pinnedSpacer:
+      titleField.frame = .zero
+      separatorView.frame = .zero
+      chevronView.frame = .zero
+      cleanupView.frame = .zero
+      disclosureButton.frame = .zero
+    case .openSeparator:
+      updateOpenSeparatorLayout(animated: false)
+      titleField.frame = .zero
+      chevronView.frame = .zero
+      disclosureButton.frame = .zero
     }
   }
 
   override func hoverDidChange() {
     updateControlPresentation(animated: true)
+    updateOpenSeparatorLayout(animated: true)
   }
 
   override func keyDown(with event: NSEvent) {
-    guard let configuration, configuration.style == .section else {
+    guard let configuration else {
+      super.keyDown(with: event)
+      return
+    }
+    if configuration.style == .openSeparator,
+       event.keyCode == 36 || event.keyCode == 49 {
+      showCleanupMenu()
+      return
+    }
+    guard configuration.style == .section || configuration.style == .pinnedSection else {
       super.keyDown(with: event)
       return
     }
@@ -1121,6 +1179,7 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
     primaryAction = nil
     disclosureButton.actionHandler = nil
     disclosureButton.isEnabled = false
+    separatorView.frame = .zero
     chevronView.prepareForReuse()
     cleanupView.prepareForReuse()
   }
@@ -1134,7 +1193,15 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard isLayoutVisible, super.hitTest(point) != nil else { return nil }
-    guard let configuration, configuration.style == .section else { return self }
+    guard let configuration else { return self }
+    if configuration.style == .pinnedSpacer { return nil }
+    if configuration.style == .openSeparator {
+      guard cleanupAcceptsInteraction, cleanupView.frame.contains(point) else { return nil }
+      return self
+    }
+    guard configuration.style == .section || configuration.style == .pinnedSection else {
+      return self
+    }
     if cleanupAcceptsInteraction, cleanupView.frame.contains(point) {
       return self
     }
@@ -1155,9 +1222,13 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
   }
 
   private func updateControlPresentation(animated: Bool) {
-    guard let configuration, configuration.style == .section else { return }
-    let isExpanded = displayedIsExpanded == true
-    let chevronOpacity: CGFloat = isExpanded && !isHovered ? 0 : 1
+    guard let configuration else { return }
+    let isDisclosureSection = configuration.style == .section
+      || configuration.style == .pinnedSection
+    guard isDisclosureSection || configuration.style == .openSeparator else { return }
+    let chevronOpacity: CGFloat = isDisclosureSection
+      ? (displayedIsExpanded == true && !isHovered ? 0 : 1)
+      : 0
     let cleanupOpacity: CGFloat = isHovered ? 1 : 0
     guard animated,
           allowsAnimations,
@@ -1174,9 +1245,44 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
     }
   }
 
+  private func updateOpenSeparatorLayout(animated: Bool) {
+    guard let configuration, configuration.style == .openSeparator else { return }
+    let contentHeight = max(bounds.height - configuration.topSpacing, 0)
+    let centerY = configuration.topSpacing + contentHeight / 2
+    let controlSize = SidebarSectionHeaderMetrics.controlSize
+    cleanupView.frame = CGRect(
+      x: bounds.width - SidebarSectionHeaderMetrics.trailingInset - controlSize,
+      y: configuration.topSpacing,
+      width: controlSize,
+      height: contentHeight
+    )
+    let separatorTrailing = if isHovered && cleanupView.isHidden == false {
+      cleanupView.frame.minX - SidebarSectionHeaderMetrics.openSeparatorControlSpacing
+    } else {
+      bounds.width - SidebarSectionHeaderMetrics.trailingInset
+    }
+    let separatorFrame = CGRect(
+      x: SidebarSectionHeaderMetrics.leadingInset,
+      y: centerY,
+      width: max(separatorTrailing - SidebarSectionHeaderMetrics.leadingInset, 0),
+      height: 1
+    )
+    guard animated,
+          allowsAnimations,
+          !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    else {
+      separatorView.frame = separatorFrame
+      return
+    }
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.1
+      separatorView.animator().frame = separatorFrame
+    }
+  }
+
   private func performDisclosureToggle() {
     guard let configuration,
-          configuration.style == .section,
+          configuration.style == .section || configuration.style == .pinnedSection,
           let displayedIsExpanded
     else { return }
     self.displayedIsExpanded = !displayedIsExpanded
@@ -1191,13 +1297,26 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
       SidebarSectionChevronIcon(
         isExpanded: displayedIsExpanded == true,
         animates: allowsAnimations
-          && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+          && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+        height: configuration?.style == .pinnedSection
+          ? 16
+          : SidebarSectionHeaderMetrics.controlSize
       )
     }
   }
 
   private func updateDisclosureAccessibility() {
     guard let configuration else { return }
+    if configuration.style == .pinnedSpacer {
+      setAccessibilityLabel("")
+      setAccessibilityValue(nil)
+      return
+    }
+    if configuration.style == .openSeparator {
+      setAccessibilityLabel("Open Chats Cleanup")
+      setAccessibilityValue(nil)
+      return
+    }
     guard let displayedIsExpanded else {
       setAccessibilityLabel(configuration.title)
       setAccessibilityValue(nil)

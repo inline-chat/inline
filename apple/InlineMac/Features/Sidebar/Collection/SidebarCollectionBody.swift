@@ -2412,9 +2412,17 @@ final class SidebarCollectionBodyController: NSViewController {
       || localSettle?.keepsEmptyPinnedSection == true
     guard isRevealed else { return nil }
     return SidebarCollectionEmptyPinnedLayoutState(
-      headerHeight: Double(SidebarCollectionRow.spacedSectionHeaderHeight),
+      headerHeight: Double(emptyPinnedHeaderHeight),
       targetHeight: Double(SidebarCollectionRow.emptyPinnedTargetHeight)
     )
+  }
+
+  private var emptyPinnedHeaderHeight: CGFloat {
+    let presentsSimplifiedInboxHierarchy = latestRenderState?.sidebarAsInbox == true
+      && latestRenderState?.archiveVisible == false
+    return presentsSimplifiedInboxHierarchy
+      ? SidebarCollectionRow.pinnedSpacerHeight
+      : SidebarCollectionRow.pinnedSectionHeaderHeight
   }
 
   private func configureLayout(
@@ -3252,18 +3260,34 @@ final class SidebarCollectionBodyController: NSViewController {
       .sectionHeader?.isExpanded ?? true
     let contentExpanded = baseRows.first(where: { $0.id == .sectionHeader(.content) })?
       .sectionHeader?.isExpanded ?? true
+    let presentsSimplifiedInboxHierarchy = latestRenderState?.sidebarAsInbox == true
+      && latestRenderState?.archiveVisible == false
+    // Recompute latent lane geometry from optimistic membership so the first
+    // pin or open chat gets its spacing on the same frame as the moved row.
+    let pinnedHeaderHeight = presentsSimplifiedInboxHierarchy
+      ? (pinnedRows.isEmpty ? 0 : SidebarCollectionRow.pinnedSpacerHeight)
+      : (baseRows.first(where: { $0.id == .sectionHeader(.pinned) })?.height
+        ?? SidebarCollectionRow.pinnedSectionHeaderHeight)
+    let contentHeaderHeight = presentsSimplifiedInboxHierarchy
+      ? (contentNodes.isEmpty ? 0 : SidebarCollectionRow.openSeparatorHeight)
+      : (baseRows.first(where: { $0.id == .sectionHeader(.content) })?.height
+        ?? SidebarCollectionRow.spacedSectionHeaderHeight)
     // Optimistic moves rebuild chat membership, but the base projection still
-    // owns whether New Thread leads or trails the content lane.
+    // owns whether New Thread leads or trails the content lane. In All Chats,
+    // the action is navigation chrome before every organizational lane—not
+    // merely a row before the chronological timeline.
     let newThreadIndex = baseRows.firstIndex(where: { $0.id == .newThread })
     let newThreadRow = newThreadIndex.map { baseRows[$0] }
     let newThreadLeadsContent = newThreadLeadsContent(in: baseRows)
     var logicalRows: [SidebarCollectionRow] = []
+    if usesTimelineSections, newThreadLeadsContent, let newThreadRow {
+      logicalRows.append(newThreadRow)
+    }
     if pinnedRows.isEmpty == false {
       logicalRows.append(.sectionHeader(
         .pinned,
         isExpanded: pinnedExpanded,
-        height: baseRows.first(where: { $0.id == .sectionHeader(.pinned) })?.height
-          ?? SidebarCollectionRow.spacedSectionHeaderHeight
+        height: pinnedHeaderHeight
       ))
       if pinnedExpanded {
         logicalRows.append(contentsOf: pinnedRows)
@@ -3275,16 +3299,12 @@ final class SidebarCollectionBodyController: NSViewController {
       logicalRows.append(.pinDropGuide())
     }
     if usesTimelineSections {
-      if newThreadLeadsContent, let newThreadRow {
-        logicalRows.append(newThreadRow)
-      }
       logicalRows.append(contentsOf: contentRows)
     } else {
       logicalRows.append(.sectionHeader(
         .content,
         isExpanded: contentExpanded,
-        height: baseRows.first(where: { $0.id == .sectionHeader(.content) })?.height
-          ?? SidebarCollectionRow.spacedSectionHeaderHeight
+        height: contentHeaderHeight
       ))
       if newThreadLeadsContent, let newThreadRow {
         logicalRows.append(newThreadRow)
@@ -4087,7 +4107,7 @@ final class SidebarCollectionBodyController: NSViewController {
     let plannedRows = plannedLayoutRows(for: session)
     let emptyPinned = revealsEmptyPinnedSection
       ? SidebarCollectionEmptyPinnedLayoutState(
-        headerHeight: Double(SidebarCollectionRow.spacedSectionHeaderHeight),
+        headerHeight: Double(emptyPinnedHeaderHeight),
         targetHeight: Double(SidebarCollectionRow.emptyPinnedTargetHeight)
       )
       : nil
@@ -4183,7 +4203,7 @@ final class SidebarCollectionBodyController: NSViewController {
         rows: plannedLayoutRows(for: session),
         drag: Optional<SidebarCollectionDragLayoutState<SidebarCollectionRow.ID>>.none,
         emptyPinned: SidebarCollectionEmptyPinnedLayoutState(
-          headerHeight: Double(SidebarCollectionRow.spacedSectionHeaderHeight),
+          headerHeight: Double(emptyPinnedHeaderHeight),
           targetHeight: Double(SidebarCollectionRow.emptyPinnedTargetHeight)
         )
       )

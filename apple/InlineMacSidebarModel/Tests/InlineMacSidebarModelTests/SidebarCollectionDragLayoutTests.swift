@@ -2,9 +2,11 @@ import Testing
 @testable import InlineMacSidebarModel
 
 private enum DragRowID: Hashable, Sendable {
+  case navigation
   case pinnedHeader
   case pinGuide
   case contentHeader
+  case newThread
   case parent
   case reply
   case next
@@ -167,6 +169,82 @@ struct SidebarCollectionDragLayoutTests {
     #expect(idleAfterDrag.rowFrames == idle.rowFrames)
     #expect(idleAfterDrag.visibleRowIDs == idle.visibleRowIDs)
     #expect(idleAfterDrag.contentHeight == idle.contentHeight)
+  }
+
+  @Test("latent Open separator adds no empty-section geometry")
+  func latentOpenSeparatorCollapsesWithoutDisturbingPinnedDropRows() {
+    let emptyOpenRows = [
+      DragRow(id: .navigation, height: 44),
+      DragRow(id: .pinnedHeader, height: 0, role: .pinnedHeader),
+      DragRow(id: .pinGuide, height: 0, role: .emptyPinnedGuide),
+      DragRow(id: .contentHeader, height: 0),
+      DragRow(id: .newThread, height: 44),
+    ]
+    let emptyOpen = SidebarCollectionDragLayoutPlanner.plan(
+      rows: emptyOpenRows,
+      drag: nil
+    )
+
+    #expect(frame(emptyOpen, .pinnedHeader)?.height == 0)
+    #expect(frame(emptyOpen, .pinGuide)?.height == 0)
+    #expect(frame(emptyOpen, .contentHeader)?.height == 0)
+    #expect(emptyOpen.visibleRowIDs.contains(.contentHeader) == false)
+    #expect(frame(emptyOpen, .newThread)?.minY == 44)
+    #expect(emptyOpen.contentHeight == 88)
+
+    let populatedOpen = SidebarCollectionDragLayoutPlanner.plan(
+      rows: emptyOpenRows.map { row in
+        row.id == .contentHeader
+          ? DragRow(id: row.id, height: 14, role: row.role)
+          : row
+      },
+      drag: nil
+    )
+    #expect(frame(populatedOpen, .contentHeader)?.height == 14)
+    #expect(frame(populatedOpen, .newThread)?.minY == 58)
+    #expect(populatedOpen.contentHeight == 102)
+  }
+
+  @Test("untitled Pinned spacer adds only the calibrated lane spacing")
+  func pinnedSpacerPrecedesPinnedItemsAndOpenSeparator() {
+    let rows = [
+      DragRow(id: .navigation, height: 44),
+      DragRow(id: .pinnedHeader, height: 6, role: .pinnedHeader),
+      DragRow(id: .parent, height: 44),
+      DragRow(id: .contentHeader, height: 14),
+      DragRow(id: .newThread, height: 44),
+      DragRow(id: .next, height: 44),
+    ]
+    let result = SidebarCollectionDragLayoutPlanner.plan(rows: rows, drag: nil)
+
+    #expect(frame(result, .pinnedHeader) == .init(minY: 44, height: 6))
+    #expect(frame(result, .parent)?.minY == 50)
+    #expect(frame(result, .contentHeader) == .init(minY: 94, height: 14))
+    #expect(frame(result, .newThread)?.minY == 108)
+    #expect(frame(result, .next)?.minY == 152)
+    #expect(result.contentHeight == 196)
+  }
+
+  @Test("empty Pinned drag reveal reuses the compact Inbox lead-in")
+  func emptyPinnedDragRevealUsesPinnedSpacerHeight() {
+    let rows = [
+      DragRow(id: .navigation, height: 44),
+      DragRow(id: .pinnedHeader, height: 0, role: .pinnedHeader),
+      DragRow(id: .pinGuide, height: 0, role: .emptyPinnedGuide),
+      DragRow(id: .contentHeader, height: 14),
+      DragRow(id: .newThread, height: 44),
+    ]
+    let result = SidebarCollectionDragLayoutPlanner.plan(
+      rows: rows,
+      drag: nil,
+      emptyPinned: .init(headerHeight: 6, targetHeight: 56)
+    )
+
+    #expect(frame(result, .pinnedHeader) == .init(minY: 44, height: 6))
+    #expect(frame(result, .pinGuide) == .init(minY: 50, height: 56))
+    #expect(frame(result, .contentHeader) == .init(minY: 106, height: 14))
+    #expect(frame(result, .newThread)?.minY == 120)
+    #expect(result.contentHeight == 164)
   }
 
   @Test("conditional empty Pinned remains real geometry at a normal destination")

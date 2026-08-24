@@ -4,6 +4,12 @@ import Logger
 
 @MainActor
 final class AppUndoHistory {
+  enum TargetedUndoResult {
+    case completed
+    case unavailable
+    case failed
+  }
+
   struct Intent {
     fileprivate let sequence: UInt64
     fileprivate let epoch: Int
@@ -77,9 +83,10 @@ final class AppUndoHistory {
     return Intent(sequence: nextSequence, epoch: epoch)
   }
 
-  func recordClosedChats(_ chats: [ClosedChat], intent: Intent) {
-    guard chats.isEmpty == false else { return }
-    record(.closeChats(chats), intent: intent)
+  @discardableResult
+  func recordClosedChats(_ chats: [ClosedChat], intent: Intent) -> Bool {
+    guard chats.isEmpty == false else { return false }
+    return record(.closeChats(chats), intent: intent)
   }
 
   func recordClosedFolder(_ folder: ClosedFolder, intent: Intent) {
@@ -107,7 +114,26 @@ final class AppUndoHistory {
 
   func undo(using dependencies: AppDependencies) async {
     guard transitionID == nil, let entry = undoEntries.popLast() else { return }
+    _ = await performUndo(entry, using: dependencies)
+  }
 
+  /// Undo a toast-owned action only while it is still the latest semantic
+  /// action. This prevents an old toast from undoing unrelated newer work.
+  func undo(
+    _ intent: Intent,
+    using dependencies: AppDependencies
+  ) async -> TargetedUndoResult {
+    guard transitionID == nil,
+          intent.epoch == epoch,
+          intent.sequence == nextSequence,
+          undoEntries.last?.sequence == intent.sequence,
+          let entry = undoEntries.popLast()
+    else { return .unavailable }
+
+    return await performUndo(entry, using: dependencies) ? .completed : .failed
+  }
+
+  private func performUndo(_ entry: Entry, using dependencies: AppDependencies) async -> Bool {
     let startingGeneration = generation
     let startingEpoch = epoch
     let operationID = UUID()
@@ -124,16 +150,18 @@ final class AppUndoHistory {
         direction: .undo,
         using: dependencies
       )
-      guard epoch == startingEpoch else { return }
+      guard epoch == startingEpoch else { return false }
       if generation == startingGeneration {
         redoEntries.append(Entry(sequence: entry.sequence, action: completedAction))
         trim(&redoEntries)
       }
+      return true
     } catch {
-      guard epoch == startingEpoch else { return }
+      guard epoch == startingEpoch else { return false }
       insertUndo(entry)
       Log.shared.error("Failed to undo \(entry.action.title)", error: error)
       ToastCenter.shared.showError("Couldn’t \(undoFailureVerb(for: entry.action))")
+      return false
     }
   }
 
@@ -169,11 +197,13 @@ final class AppUndoHistory {
     }
   }
 
-  private func record(_ action: Action, intent: Intent) {
-    guard intent.epoch == epoch else { return }
+  @discardableResult
+  private func record(_ action: Action, intent: Intent) -> Bool {
+    guard intent.epoch == epoch else { return false }
     generation &+= 1
     redoEntries.removeAll(keepingCapacity: true)
     insertUndo(Entry(sequence: intent.sequence, action: action))
+    return true
   }
 
   private func insertUndo(_ entry: Entry) {
