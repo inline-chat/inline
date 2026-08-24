@@ -28,6 +28,10 @@ Sendable {
 
   public var handle: String?
   public var isPublic: Bool?
+  /// Last authoritative sequence included in a Space snapshot.
+  public var seq: Int?
+  /// Whether the cached member directory is a complete replacement snapshot.
+  public var memberRosterComplete: Bool = false
 
   public enum Columns {
     public static let id = Column(CodingKeys.id)
@@ -36,6 +40,8 @@ Sendable {
     public static let creator = Column(CodingKeys.creator)
     public static let handle = Column(CodingKeys.handle)
     public static let isPublic = Column(CodingKeys.isPublic)
+    public static let seq = Column(CodingKeys.seq)
+    public static let memberRosterComplete = Column(CodingKeys.memberRosterComplete)
   }
 
   // Based on https://github.com/groue/GRDB.swift/discussions/1492, GRDB models can't be marked as sendable in GRDB < 6
@@ -65,7 +71,9 @@ Sendable {
     date: Date,
     creator: Bool? = nil,
     handle: String? = nil,
-    isPublic: Bool? = nil
+    isPublic: Bool? = nil,
+    seq: Int? = nil,
+    memberRosterComplete: Bool = false
   ) {
     self.id = id
     self.name = name
@@ -73,6 +81,8 @@ Sendable {
     self.creator = creator
     self.handle = handle
     self.isPublic = isPublic
+    self.seq = seq
+    self.memberRosterComplete = memberRosterComplete
   }
 }
 
@@ -89,6 +99,8 @@ public extension Space {
     creator = apiSpace.creator
     handle = nil
     isPublic = nil
+    seq = nil
+    memberRosterComplete = false
     date = Self.fromTimestamp(from: apiSpace.date)
   }
 
@@ -98,6 +110,8 @@ public extension Space {
     creator = from.creator
     handle = from.hasHandle ? from.handle : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
+    seq = from.hasSeq ? Int(from.seq) : nil
+    memberRosterComplete = false
     date = Date(timeIntervalSince1970: Double(from.date))
   }
 

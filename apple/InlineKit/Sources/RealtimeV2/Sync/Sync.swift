@@ -281,7 +281,7 @@ actor Sync {
   private static let getUpdatesStateTimeout: Duration = .seconds(15)
   private static let getUpdatesStateRetryDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(5)]
   private static let chatRepairTimeout: Duration = .seconds(20)
-  private static let chatRepairHistoryLimit: Int32 = 50
+  private static let chatRepairHistoryLimit: Int32 = 100
 
   private var log = Log.scoped("RealtimeV2.Sync")
 
@@ -363,10 +363,19 @@ actor Sync {
           continue
 
         default:
-          if update.hasSeq, update.seq > 0, let key = getBucketKey(for: update) {
+          if update.hasSeq, update.seq > 0 {
+            if case .userAddedToChat = update.update {
+              fetchUserBucket(upToSeq: Int64(update.seq))
+              continue
+            }
+            if let key = getBucketKey(for: update) {
             // Route sequenced updates through BucketActor so we can enforce strict per-bucket ordering
             // and fetch missing history when we detect gaps.
-            bucketedUpdates[key, default: []].append(update)
+              bucketedUpdates[key, default: []].append(update)
+              continue
+            }
+            log.warning("sequenced update has unknown bucket content; running discovery")
+            getStateFromServer()
             continue
           }
 
@@ -518,22 +527,22 @@ actor Sync {
         return nil
       }
 
-      let participantsResult = try await client.callRpc(
+      async let participantsResult = client.callRpc(
         method: .getChatParticipants,
         input: .getChatParticipants(.with { $0.chatID = chat.chat.id }),
         timeout: Self.chatRepairTimeout
       )
-      guard case let .getChatParticipants(participants) = participantsResult else {
-        log.error("failed to parse getChatParticipants result during chat repair")
-        return nil
-      }
-
-      let historyResult = try await client.callRpc(method: .getChatHistory, input: .getChatHistory(.with {
+      async let historyResult = client.callRpc(method: .getChatHistory, input: .getChatHistory(.with {
         $0.peerID = peer.toInputPeer()
         $0.mode = .historyModeLatest
         $0.limit = Self.chatRepairHistoryLimit
       }), timeout: Self.chatRepairTimeout)
-      guard case let .getChatHistory(history) = historyResult else {
+      let (rawParticipants, rawHistory) = try await (participantsResult, historyResult)
+      guard case let .getChatParticipants(participants) = rawParticipants else {
+        log.error("failed to parse getChatParticipants result during chat repair")
+        return nil
+      }
+      guard case let .getChatHistory(history) = rawHistory else {
         log.error("failed to parse getChatHistory result during chat repair")
         return nil
       }
@@ -552,6 +561,109 @@ actor Sync {
       return repaired
     } catch {
       log.error("failed to repair chat bucket", error: error)
+      return nil
+    }
+  }
+
+  func repairSpaceBucket(
+    spaceID: Int64,
+    targetState: BucketState,
+    reason: String
+  ) async -> BucketState? {
+    guard let client else {
+      log.error("client is nil, cannot repair space bucket")
+      return nil
+    }
+    do {
+      async let spaceResult = client.callRpc(
+        method: .getSpace,
+        input: .getSpace(.with { $0.spaceID = spaceID }),
+        timeout: Self.chatRepairTimeout
+      )
+      async let membersResult = client.callRpc(
+        method: .getSpaceMembers,
+        input: .getSpaceMembers(.with { $0.spaceID = spaceID }),
+        timeout: Self.chatRepairTimeout
+      )
+      let (rawSpace, rawMembers) = try await (spaceResult, membersResult)
+      guard case let .getSpace(snapshot) = rawSpace else {
+        log.error("failed to parse getSpace result during space repair")
+        return nil
+      }
+      guard case let .getSpaceMembers(members) = rawMembers else {
+        log.error("failed to parse getSpaceMembers result during space repair")
+        return nil
+      }
+      return await applyUpdates.repairSpace(SpaceRepairSnapshot(
+        spaceID: spaceID,
+        snapshot: snapshot,
+        members: members,
+        targetState: targetState,
+        reason: reason
+      ))
+    } catch {
+      log.error("failed to repair space bucket", error: error)
+      return nil
+    }
+  }
+
+  func repairUserBucket(
+    targetState: BucketState,
+    reason: String
+  ) async -> BucketState? {
+    guard let client else {
+      log.error("client is nil, cannot repair user bucket")
+      return nil
+    }
+    do {
+      let rawCheckpoint = try await client.callRpc(
+        method: .getUpdatesState,
+        input: .getUpdatesState(.init()),
+        timeout: Self.getUpdatesStateTimeout
+      )
+      guard case let .getUpdatesState(checkpoint) = rawCheckpoint,
+            checkpoint.hasSeq,
+            checkpoint.date > 0,
+            Int64(checkpoint.seq) >= targetState.seq
+      else {
+        log.error("failed to capture a valid current user checkpoint during user repair")
+        return nil
+      }
+      let checkpointState = BucketState(date: checkpoint.date, seq: Int64(checkpoint.seq))
+
+      async let chatsResult = client.callRpc(
+        method: .getChats,
+        input: .getChats(.init()),
+        timeout: Self.chatRepairTimeout
+      )
+      async let meResult = client.callRpc(
+        method: .getMe,
+        input: .getMe(.init()),
+        timeout: Self.chatRepairTimeout
+      )
+      async let settingsResult = client.callRpc(
+        method: .getUserSettings,
+        input: .getUserSettings(.init()),
+        timeout: Self.chatRepairTimeout
+      )
+      let (rawChats, rawMe, rawSettings) = try await (chatsResult, meResult, settingsResult)
+      guard case let .getChats(chats) = rawChats,
+            case let .getMe(me) = rawMe,
+            case let .getUserSettings(settings) = rawSettings
+      else {
+        log.error("failed to parse account snapshot during user repair")
+        return nil
+      }
+      return await applyUpdates.repairUser(UserRepairSnapshot(
+        chats: chats,
+        me: me,
+        settings: settings,
+        checkpointState: checkpointState,
+        targetState: targetState,
+        reason: reason
+      ))
+    } catch {
+      log.error("failed to repair user bucket", error: error)
       return nil
     }
   }
@@ -844,10 +956,13 @@ actor Sync {
     }
   }
 
-  private func fetchUserBucket() {
+  private func fetchUserBucket(upToSeq: Int64 = 0) {
     log.trace("fetching user bucket updates")
     launchRootTask { sync, generation in
       guard let bucketActor = await sync.getBucketActor(key: .user, generation: generation) else { return }
+      if upToSeq > 0 {
+        _ = await bucketActor.noteHasNewUpdates(upToSeq: upToSeq)
+      }
       await bucketActor.fetchNewUpdates()
     }
   }
@@ -1406,8 +1521,8 @@ actor Sync {
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .deleteChat(payload):
         .chat(peer: payload.peerID)
-      case let .markAsUnread(payload):
-        .chat(peer: payload.peerID)
+      case .markAsUnread:
+        .user
       case let .spaceMemberAdd(payload):
         .space(id: payload.member.spaceID)
       case let .spaceMemberDelete(payload):
@@ -1416,7 +1531,8 @@ actor Sync {
         .space(id: payload.member.spaceID)
       case .joinSpace:
         .user
-      case .updateUserStatus, .updateUserSettings, .updatedUser, .dialogArchived, .dialogNotificationSettings:
+      case .updateUserStatus, .updateUserSettings, .updatedUser, .dialogArchived,
+           .dialogNotificationSettings, .dialogFolder, .userAddedToChat, .userRemovedFromChat:
         .user
       case let .newChat(payload):
         .chat(peer: payload.chat.peerID)
@@ -1539,8 +1655,8 @@ actor FetchLimiter {
 actor BucketActor {
   private var log = Log.scoped("RealtimeV2.Sync.BucketActor")
 
-  private static let updatesPageLimit: Int32 = 200
-  private static let maxTotalUpdates: Int64 = 1000
+  private static let updatesPageLimit: Int32 = 100
+  private static let maxTotalUpdates: Int64 = 10_000
   private static let maxBufferedRealtimeUpdates = 4_096
   private static let maxBufferedRealtimeBytes = 16 * 1024 * 1024
   private static let getUpdatesTimeout: Duration = .seconds(30)
@@ -1628,6 +1744,8 @@ actor BucketActor {
         true
       case .participantGroupDelete:
         true
+      case .userAddedToChat, .userRemovedFromChat:
+        true
       case .chatVisibility:
         true
       case .chatInfo:
@@ -1665,6 +1783,8 @@ actor BucketActor {
       case .messageActionInvoked, .messageActionAnswered:
         true
       case .dialogFollowMode, .dialogCollapsedMaxID:
+        true
+      case .dialogFolder:
         true
       case .updatedUser:
         true
@@ -2075,33 +2195,20 @@ actor BucketActor {
     if let maxBuffered = bufferedRealtimeUpdates.keys.max() {
       requestedEndSeq = max(requestedEndSeq ?? 0, maxBuffered)
     }
-    var hardEndSeq = requestedEndSeq.map { min($0, currentSeq + Self.maxTotalUpdates) }
-    if let requestedEndSeq, let hardEndSeq, requestedEndSeq > hardEndSeq {
-      fetchSeqEnd = max(fetchSeqEnd ?? 0, requestedEndSeq)
-    }
+    var hardEndSeq = requestedEndSeq
     if let bound = hardEndSeq, bound <= currentSeq {
       // Avoid invalid requests (server requires seqEnd >= startSeq).
       hardEndSeq = nil
     }
-
-    // When the server reports TOO_LONG, it returns a slice boundary seq. We temporarily use `sliceEndSeq`
-    // to fetch up to that boundary, then restore `hardEndSeq` (if any) and continue.
-    var sliceEndSeq: Int64? = nil
-
-    // On a cold start (no sequence), attempt a small catch-up instead of immediately fast-forwarding.
-    // We cap the first request to avoid pulling large history. If a chat bucket reports TOO_LONG,
-    // continue with bounded slices rather than marking stale history as caught up.
-    let isColdStart = seq == 0
-    let coldStartTotalLimit: Int32 = 50
 
     do {
       log.debug("starting fetch for bucket \(key) from seq \(seq)")
 
       // Fetch loop: accumulate all updates until final=true
       while !isFinal {
-        log.debug("getUpdates request bucket \(key) startSeq=\(currentSeq) coldStart=\(isColdStart)")
+        log.debug("getUpdates request bucket \(key) startSeq=\(currentSeq)")
 
-        let requestSeqEnd: Int64? = sliceEndSeq ?? hardEndSeq
+        let requestSeqEnd: Int64? = hardEndSeq
 
         let queueStartedAt = Date()
         let queueSpan = PerformanceTrace.begin(
@@ -2128,11 +2235,7 @@ actor BucketActor {
           result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
           $0.bucket = key.toProtocolBucket()
           $0.startSeq = currentSeq
-          if isColdStart, sliceEndSeq == nil {
-            $0.totalLimit = coldStartTotalLimit
-          } else {
-            $0.totalLimit = Int32(Self.maxTotalUpdates)
-          }
+          $0.totalLimit = Int32(Self.maxTotalUpdates)
           $0.limit = Self.updatesPageLimit
           if let requestSeqEnd {
             $0.seqEnd = requestSeqEnd
@@ -2169,7 +2272,7 @@ actor BucketActor {
             return false
           }
           if requiresSnapshotRepair {
-            guard await repairChatSnapshotIfNeeded(
+            guard await repairAuthoritativeSnapshotIfNeeded(
               targetSeq: payload.seq,
               targetDate: payload.date,
               reason: "server_classified_gap"
@@ -2192,13 +2295,12 @@ actor BucketActor {
               fetchSeqEnd = nil
             }
             hardEndSeq = nil
-            sliceEndSeq = nil
           }
         }
 
         // Defensive guard: if the server reports non-final but does not advance seq,
         // we'd spin this loop forever and keep the sync actor busy.
-        if !payload.final, payload.seq == currentSeq {
+        if payload.resultType != .tooLong, !payload.final, payload.seq == currentSeq {
           log.error(
             "non-progress getUpdates response for bucket \(key) (seq=\(payload.seq), total=\(totalCount), result=\(payload.resultType)); aborting fetch loop"
           )
@@ -2237,39 +2339,22 @@ actor BucketActor {
             ]
           )
           await sync.recordBucketFetchTooLong()
-          if isColdStart, shouldRepairColdChatTooLong {
-            let repairedSeq = Int64(payload.seq)
-            if await repairChatSnapshotIfNeeded(
-              targetSeq: repairedSeq,
-              targetDate: payload.date,
-              reason: "cold_too_long"
-            ) {
-              resultLabel = "repaired_too_long"
-              return true
-            }
-          }
-          // Slice within max total updates and commit each slice before fetching the next one.
-          //
-          // Server behaviors:
-          // - New: returns a slice boundary seq (<= currentSeq + maxTotalUpdates)
-          // - Legacy: returns latestSeq (can be far ahead); we derive our own boundary via `currentSeq + maxTotalUpdates`.
           let serverSeq = Int64(payload.seq)
           if serverSeq <= currentSeq {
             log.error("TOO_LONG seq \(serverSeq) is not ahead of currentSeq \(currentSeq) for bucket \(key)")
             resultLabel = "too_long_invalid_seq"
+            return false
+          }
+          if await repairAuthoritativeSnapshotIfNeeded(
+            targetSeq: serverSeq,
+            targetDate: payload.date,
+            reason: "too_long"
+          ) {
+            resultLabel = "repaired_too_long"
             return true
           }
-          let seqGap = serverSeq - currentSeq
-          if seqGap > Self.maxTotalUpdates {
-            // Legacy server semantics: remember latestSeq, but commit one bounded slice at a time.
-            fetchSeqEnd = max(fetchSeqEnd ?? 0, serverSeq)
-            hardEndSeq = min(serverSeq, currentSeq + Self.maxTotalUpdates)
-            sliceEndSeq = hardEndSeq
-          } else {
-            // New server semantics: `payload.seq` is already the slice boundary.
-            sliceEndSeq = serverSeq
-          }
-          continue
+          resultLabel = "too_long_repair_failed"
+          return false
         }
 
         // Validate seq: if server seq is behind or equal to our local seq (and not TOO_LONG), something is wrong or
@@ -2342,16 +2427,6 @@ actor BucketActor {
         finalDate = payload.date
         isFinal = payload.final
 
-        if isFinal, sliceEndSeq != nil {
-          // We finished a bounded slice; continue fetching (bounded by hardEndSeq if present),
-          // or unbounded to learn if more exists.
-          sliceEndSeq = nil
-          if let hardEndSeq, currentSeq >= hardEndSeq {
-            isFinal = true
-          } else {
-            isFinal = false
-          }
-        }
       }
 
       // Apply all accumulated updates in one batch, ordered by seq. Any live
@@ -2432,7 +2507,7 @@ actor BucketActor {
             skipped: totalSkipped + result.failedCount,
             duplicates: totalDuplicateSkipped
           )
-          if await repairChatSnapshotIfNeeded(
+          if await repairAuthoritativeSnapshotIfNeeded(
             targetSeq: finalSeq,
             targetDate: finalDate,
             reason: "apply_failed"
@@ -2699,15 +2774,6 @@ actor BucketActor {
     }
   }
 
-  private var shouldRepairColdChatTooLong: Bool {
-    switch key {
-      case .chat:
-        true
-      case .space, .user:
-        false
-    }
-  }
-
   private func repairChatSnapshotIfNeeded(
     targetSeq: Int64,
     targetDate: Int64,
@@ -2728,6 +2794,38 @@ actor BucketActor {
     retainBufferedRealtimeUpdates(after: saved.seq)
     if let fetchSeqEnd, saved.seq >= fetchSeqEnd {
       self.fetchSeqEnd = nil
+    }
+    await sync.bucketDidAdvance(key: key, state: saved, authoritative: true)
+    return true
+  }
+
+  private func repairAuthoritativeSnapshotIfNeeded(
+    targetSeq: Int64,
+    targetDate: Int64,
+    reason: String
+  ) async -> Bool {
+    guard targetSeq > seq, let sync else { return false }
+    let targetState = BucketState(date: max(date, targetDate), seq: targetSeq)
+    let saved: BucketState?
+    switch key {
+      case let .chat(peer):
+        saved = await sync.repairChatBucket(peer: peer, targetState: targetState, reason: reason)
+      case let .space(id):
+        saved = await sync.repairSpaceBucket(spaceID: id, targetState: targetState, reason: reason)
+      case .user:
+        saved = await sync.repairUserBucket(targetState: targetState, reason: reason)
+    }
+    guard let saved else { return false }
+    seq = saved.seq
+    date = saved.date
+    clearPendingCatchupBatch()
+    retainBufferedRealtimeUpdates(after: saved.seq)
+    if let fetchSeqEnd, saved.seq >= fetchSeqEnd { self.fetchSeqEnd = nil }
+    if case .user = key {
+      // Account projections were fetched after this checkpoint. Probe once
+      // from the captured cursor so a change racing the snapshot cannot wait
+      // for a later reconnect or realtime hint.
+      needsFetch = true
     }
     await sync.bucketDidAdvance(key: key, state: saved, authoritative: true)
     return true

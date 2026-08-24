@@ -21,6 +21,8 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
     let pinned: Bool?
     let destination: DialogOrderDestination?
     let intentId: String?
+    /// Optional so transactions queued by older app versions still decode.
+    let requiresChatCreated: Bool?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -34,7 +36,8 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
     order: String? = nil,
     pinnedOrder: String? = nil,
     pinned: Bool? = nil,
-    destination: DialogOrderDestination? = nil
+    destination: DialogOrderDestination? = nil,
+    requiresChatCreated: Bool = false
   ) {
     context = Context(
       peerId: peerId,
@@ -42,7 +45,8 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
       pinnedOrder: pinnedOrder,
       pinned: pinned,
       destination: destination,
-      intentId: UUID().uuidString
+      intentId: UUID().uuidString,
+      requiresChatCreated: requiresChatCreated
     )
   }
 
@@ -151,6 +155,16 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
     }
   }
 
+  public var blockers: [TransactionBlocker] {
+    guard context.requiresChatCreated == true,
+          case let .thread(chatId) = context.peerId
+    else {
+      return []
+    }
+
+    return [.chatCreated(chatId: chatId)]
+  }
+
   private func applyLocalOrder(_ dialog: inout Dialog, db: Database) throws {
     if let order = context.order {
       dialog.order = order
@@ -204,14 +218,16 @@ public extension Transaction2 where Self == UpdateDialogOrderTransaction {
     order: String? = nil,
     pinnedOrder: String? = nil,
     pinned: Bool? = nil,
-    destination: DialogOrderDestination? = nil
+    destination: DialogOrderDestination? = nil,
+    requiresChatCreated: Bool = false
   ) -> UpdateDialogOrderTransaction {
     UpdateDialogOrderTransaction(
       peerId: peerId,
       order: order,
       pinnedOrder: pinnedOrder,
       pinned: pinned,
-      destination: destination
+      destination: destination,
+      requiresChatCreated: requiresChatCreated
     )
   }
 }

@@ -51,6 +51,17 @@ public actor InlineRPCClient {
     return result
   }
 
+  public func getSpace(spaceID: Int64) async throws -> InlineProtocol.GetSpaceResult {
+    let response = try await Api.realtime.callRpcDirect(
+      method: .getSpace,
+      input: .getSpace(.with { $0.spaceID = spaceID })
+    )
+    guard case let .getSpace(result)? = response else {
+      throw InlineRPCClientError.unexpectedResponse
+    }
+    return result
+  }
+
   public func createThread(
     title: String,
     spaceID: Int64,

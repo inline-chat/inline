@@ -20,6 +20,29 @@ final class SyncTests {
     #expect(config.maxConcurrentBucketFetches == SyncConfig.default.maxConcurrentBucketFetches)
   }
 
+  @Test("bucket commits dynamically dispatch through the apply-updates owner")
+  func testBucketCommitExistentialDispatch() async {
+    let recorder = BucketCommitApplyRecorder()
+    let owner: any ApplyUpdates = recorder
+    let commit = UpdateBucketCommit(
+      key: .space(id: 42),
+      state: BucketState(date: 100, seq: 7)
+    )
+
+    let result = await owner.apply(
+      updates: [],
+      source: .syncCatchup,
+      sidecars: nil,
+      bucketCommit: commit
+    )
+
+    #expect(result.committedBucketState?.seq == commit.state.seq)
+    #expect(result.committedBucketState?.date == commit.state.date)
+    let received = await recorder.receivedCommit()
+    #expect(received?.seq == commit.state.seq)
+    #expect(received?.date == commit.state.date)
+  }
+
   @Test("direct bucket updates do not advance the discovery checkpoint")
   func testDirectBucketUpdatePreservesDiscoveryCheckpoint() async throws {
     let storage = InMemorySyncStorage()
@@ -486,10 +509,11 @@ final class SyncTests {
     #expect(didLeaveAfterFetch)
   }
 
-  @Test("TOO_LONG slices within max total and updates bucket state")
-  func testTooLongSlicesWhenWarm() async throws {
+  @Test("warm chat TOO_LONG repairs an authoritative snapshot")
+  func testWarmChatTooLongRepairsAndAdvances() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
 
     let tooLong = makeGetUpdatesResult(
       seq: 10,
@@ -498,16 +522,25 @@ final class SyncTests {
       final: false,
       resultType: .tooLong
     )
-    let slice = makeGetUpdatesResult(
-      seq: 10,
-      date: 200,
-      updates: [],
-      final: true,
-      resultType: .empty,
-      skippedSequences: makeIrrelevantSkippedSequences(after: 5, through: 10)
+    let historyMessage = makeProtocolMessage(id: 10, chatId: 1)
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdates: [
+          tooLong,
+          makeGetUpdatesResult(
+            seq: 12,
+            date: 220,
+            updates: [],
+            final: true,
+            resultType: .empty
+          ),
+        ],
+        .getChat: [makeGetChatResult(chatId: 1, seq: 10)],
+        .getChatParticipants: [makeGetChatParticipantsResult()],
+        .getChatHistory: [makeGetChatHistoryResult(messages: [historyMessage])],
+      ]
     )
-
-    let client = FakeProtocolClient(responses: [tooLong, slice])
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
@@ -521,10 +554,7 @@ final class SyncTests {
     update.update = .chatHasNewUpdates(payload)
 
     await sync.process(updates: [update])
-    _ = await waitForCondition {
-      let bucketState = await storage.getBucketState(for: .chat(peer: peer))
-      return bucketState.seq == 10 && bucketState.date == 200
-    }
+    _ = await waitForCondition { await apply.repairedChats.count == 1 }
 
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
     #expect(bucketState.seq == 10)
@@ -533,8 +563,11 @@ final class SyncTests {
     let stats = await sync.getStats()
     #expect(stats.bucketFetchTooLong == 1)
 
+    let repaired = await apply.repairedChats
+    #expect(repaired.first?.reason == "too_long")
+
     let callCount = await client.getCallCount()
-    #expect(callCount == 2)
+    #expect(callCount == 4)
 
     let applied = await apply.appliedUpdates
     #expect(applied.isEmpty)
@@ -559,7 +592,7 @@ final class SyncTests {
       responses: [],
       methodResponses: [
         .getUpdates: [tooLong],
-        .getChat: [makeGetChatResult(chatId: 1)],
+        .getChat: [makeGetChatResult(chatId: 1, seq: 10)],
         .getChatParticipants: [makeGetChatParticipantsResult()],
         .getChatHistory: [makeGetChatHistoryResult(messages: [historyMessage])],
       ]
@@ -577,7 +610,7 @@ final class SyncTests {
     let repaired = await apply.repairedChats
     #expect(repaired.count == 1)
     let snapshot = try #require(repaired.first)
-    #expect(snapshot.reason == "cold_too_long")
+    #expect(snapshot.reason == "too_long")
     #expect(snapshot.history.messages.map(\.id) == [10])
 
     let applied = await apply.appliedUpdates
@@ -594,11 +627,12 @@ final class SyncTests {
     #expect(callCount == 4)
 
     let methods = await client.getCalledMethods()
-    #expect(methods == [.getUpdates, .getChat, .getChatParticipants, .getChatHistory])
+    #expect(Array(methods.prefix(2)) == [.getUpdates, .getChat])
+    #expect(Set(methods.dropFirst(2)) == Set([.getChatParticipants, .getChatHistory]))
   }
 
-  @Test("cold chat TOO_LONG falls back to slicing when repair fails")
-  func testColdChatTooLongFallsBackToSlicingWhenRepairFails() async throws {
+  @Test("chat TOO_LONG retains its cursor when authoritative repair fails")
+  func testChatTooLongRetainsCursorWhenRepairFails() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -609,20 +643,10 @@ final class SyncTests {
       final: false,
       resultType: .tooLong
     )
-    let message = makeNewMessageUpdate(seq: 10, date: 200)
-    let slice = makeGetUpdatesResult(
-      seq: 10,
-      date: 200,
-      updates: [message],
-      final: true,
-      resultType: .slice,
-      skippedSequences: makeIrrelevantSkippedSequences(after: 0, through: 9)
-    )
-
     let client = FakeProtocolClient(
       responses: [],
       methodResponses: [
-        .getUpdates: [tooLong, slice],
+        .getUpdates: [tooLong],
         .getChat: [nil],
       ]
     )
@@ -633,60 +657,193 @@ final class SyncTests {
     let signal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 10)
     await sync.process(updates: [signal])
 
-    _ = await waitForCondition {
-      await apply.appliedUpdates.count == 1
-    }
+    _ = await waitForCondition { await client.getCallCount() == 2 }
 
     let applied = await apply.appliedUpdates
-    #expect(applied.map { Int($0.seq) } == [10])
+    #expect(applied.isEmpty)
 
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
-    #expect(bucketState.seq == 10)
-    #expect(bucketState.date == 200)
+    #expect(bucketState.seq == 0)
+    #expect(bucketState.date == 0)
 
     let stats = await sync.getStats()
     #expect(stats.bucketFetchTooLong == 1)
 
     let callCount = await client.getCallCount()
-    #expect(callCount == 3)
+    #expect(callCount == 2)
   }
 
-  @Test("TOO_LONG (legacy) slices locally instead of fast-forwarding")
-  func testTooLongLegacyServerSlicesLocally() async throws {
+  @Test("space TOO_LONG repairs its authoritative snapshot and advances")
+  func testSpaceTooLongRepairsAndAdvances() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    await storage.setBucketState(
+      for: .space(id: 10),
+      state: BucketState(date: 150, seq: 5)
+    )
+
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 10,
+          date: 200,
+          updates: [],
+          final: false,
+          resultType: .tooLong
+        )],
+        .getSpace: [makeGetSpaceResult(spaceId: 10, seq: 10)],
+        .getSpaceMembers: [makeGetSpaceMembersResult(spaceId: 10)],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.process(updates: [makeSpaceHasNewUpdatesSignal(spaceId: 10, updateSeq: 10)])
+    let repaired = await waitForCondition { await apply.repairedSpaces.count == 1 }
+
+    #expect(repaired)
+    let repairs = await apply.repairedSpaces
+    let repair = try #require(repairs.first)
+    #expect(repair.reason == "too_long")
+    #expect(repair.targetState.date == 200)
+    #expect(repair.targetState.seq == 10)
+    let bucketState = await storage.getBucketState(for: .space(id: 10))
+    #expect(bucketState.seq == 10)
+    #expect(bucketState.date == 200)
+    let methods = await client.getCalledMethods()
+    #expect(methods.first == .getUpdates)
+    #expect(Set(methods.dropFirst()) == Set([.getSpace, .getSpaceMembers]))
+  }
+
+  @Test("space TOO_LONG retains its cursor when authoritative repair fails")
+  func testSpaceTooLongRetainsCursorWhenRepairFails() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    await apply.setRepairResult(false)
+    await storage.setBucketState(
+      for: .space(id: 10),
+      state: BucketState(date: 150, seq: 5)
+    )
+
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 10,
+          date: 200,
+          updates: [],
+          final: false,
+          resultType: .tooLong
+        )],
+        .getSpace: [makeGetSpaceResult(spaceId: 10, seq: 10)],
+        .getSpaceMembers: [makeGetSpaceMembersResult(spaceId: 10)],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    await sync.process(updates: [makeSpaceHasNewUpdatesSignal(spaceId: 10, updateSeq: 10)])
+    let attempted = await waitForCondition { await apply.repairedSpaces.count == 1 }
+
+    #expect(attempted)
+    let bucketState = await storage.getBucketState(for: .space(id: 10))
+    #expect(bucketState.seq == 5)
+    #expect(bucketState.date == 150)
+  }
+
+  @Test("user TOO_LONG captures state before fetching account projections")
+  func testUserTooLongCapturesStateBeforeSnapshot() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+
+    let tooLong = makeGetUpdatesResult(
+      seq: 10,
+      date: 200,
+      updates: [],
+      final: false,
+      resultType: .tooLong
+    )
+    let caughtUp = makeGetUpdatesResult(
+      seq: 12,
+      date: 220,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+    var user = InlineProtocol.User()
+    user.id = 42
+    var me = InlineProtocol.GetMeResult()
+    me.user = user
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdates: [tooLong, caughtUp],
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 220, seq: 12)],
+        .getChats: [.getChats(.init())],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15)
+    )
+
+    let trigger = makeDurableUpdate(seq: 10, date: 200, payload: .updatedUser(.init()))
+    await sync.process(updates: [trigger])
+    let repaired = await waitForCondition {
+      let repairCount = await apply.repairedUsers.count
+      let callCount = await client.getCallCount()
+      return repairCount == 1 && callCount == 6
+    }
+
+    #expect(repaired)
+    let repairs = await apply.repairedUsers
+    let snapshot = try #require(repairs.first)
+    #expect(snapshot.targetState.date == 200)
+    #expect(snapshot.targetState.seq == 10)
+    #expect(snapshot.checkpointState.date == 220)
+    #expect(snapshot.checkpointState.seq == 12)
+    let storedState = await storage.getBucketState(for: .user)
+    #expect(storedState.date == 220)
+    #expect(storedState.seq == 12)
+    let methods = await client.getCalledMethods()
+    #expect(Array(methods.prefix(2)) == [.getUpdates, .getUpdatesState])
+    #expect(Set(methods.dropFirst(2).dropLast()) == Set([.getChats, .getMe, .getUserSettings]))
+    #expect(methods.last == .getUpdates)
+    #expect(await client.getUpdatesStateDates() == [nil])
+    #expect(await client.getUpdatesStartSequences() == [0, 12])
+  }
+
+  @Test("malformed TOO_LONG cannot fast-forward a bucket")
+  func testMalformedTooLongCannotFastForward() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
-    // Simulate legacy server semantics where TOO_LONG.seq is the latest seq (far ahead),
-    // not a slice boundary.
-    let tooLongLatest = makeGetUpdatesResult(
-      seq: 2005,
+    let tooLong = makeGetUpdatesResult(
+      seq: 5,
       date: 500,
       updates: [],
       final: false,
       resultType: .tooLong
     )
-    // First slice: currentSeq=5 -> boundary=1005
-    let slice1005 = makeGetUpdatesResult(
-      seq: 1005,
-      date: 200,
-      updates: [],
-      final: true,
-      resultType: .empty,
-      skippedSequences: makeIrrelevantSkippedSequences(after: 5, through: 1005)
-    )
-    // Second TOO_LONG still reports latest=2005.
-    let tooLongLatestAgain = tooLongLatest
-    // Final slice: boundary reaches latest=2005.
-    let slice2005 = makeGetUpdatesResult(
-      seq: 2005,
-      date: 500,
-      updates: [],
-      final: true,
-      resultType: .empty,
-      skippedSequences: makeIrrelevantSkippedSequences(after: 1005, through: 2005)
-    )
-
-    let client = FakeProtocolClient(responses: [tooLongLatest, slice1005, tooLongLatestAgain, slice2005])
+    let client = FakeProtocolClient(responses: [tooLong])
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
@@ -699,19 +856,16 @@ final class SyncTests {
     update.update = .chatHasNewUpdates(payload)
 
     await sync.process(updates: [update])
-    _ = await waitForCondition {
-      let bucketState = await storage.getBucketState(for: .chat(peer: peer))
-      return bucketState.seq == 2005
-    }
+    _ = await waitForCondition { await client.getCallCount() == 1 }
 
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
-    #expect(bucketState.seq == 2005)
+    #expect(bucketState.seq == 5)
 
     let stats = await sync.getStats()
-    #expect(stats.bucketFetchTooLong == 2)
+    #expect(stats.bucketFetchTooLong == 1)
 
     let callCount = await client.getCallCount()
-    #expect(callCount == 4)
+    #expect(callCount == 1)
   }
 
   @Test("getUpdatesState response with updates does not advance lastSyncDate")
@@ -1645,14 +1799,15 @@ final class SyncTests {
       makeDurableUpdate(seq: 5, date: 104, payload: .updatedUser(.init())),
       makeDurableUpdate(seq: 6, date: 105, payload: .dialogCollapsedMaxID(.init())),
       makeDurableUpdate(seq: 7, date: 106, payload: .updateUserSettings(.init())),
+      makeDurableUpdate(seq: 8, date: 107, payload: .dialogFolder(.init())),
     ]
     let client = FakeProtocolClient(
       responses: [],
       methodResponses: [
-        .getUpdatesState: [makeGetUpdatesStateResult(date: 106, seq: 7)],
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 107, seq: 8)],
         .getUpdates: [makeGetUpdatesResult(
-          seq: 7,
-          date: 106,
+          seq: 8,
+          date: 107,
           updates: updates,
           final: true,
           resultType: .slice
@@ -1672,10 +1827,10 @@ final class SyncTests {
     }
 
     #expect(didApply)
-    #expect(await apply.appliedUpdates.map(\.seq) == [1, 2, 3, 4, 5, 6, 7])
+    #expect(await apply.appliedUpdates.map(\.seq) == [1, 2, 3, 4, 5, 6, 7, 8])
     let bucketState = await storage.getBucketState(for: .user)
-    #expect(bucketState.seq == 7)
-    #expect(bucketState.date == 106)
+    #expect(bucketState.seq == 8)
+    #expect(bucketState.date == 107)
   }
 
   @Test("catch-up advances past a forward-compatible unknown update")
@@ -1780,7 +1935,7 @@ final class SyncTests {
     #expect(finalActivity == [true, false])
   }
 
-  @Test("chat catch-up applies durable reaction updates")
+  @Test("legacy sequenced reaction records remain replayable without making reactions durable")
   func testChatCatchUpAppliesDurableReactionUpdates() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
@@ -1869,7 +2024,7 @@ final class SyncTests {
     let client = FakeProtocolClient(
       responses: [response],
       methodResponses: [
-        .getChat: [makeGetChatResult(chatId: 1)],
+        .getChat: [makeGetChatResult(chatId: 1, seq: 6)],
         .getChatParticipants: [makeGetChatParticipantsResult()],
         .getChatHistory: [makeGetChatHistoryResult()],
       ]
@@ -2197,7 +2352,7 @@ final class SyncTests {
       responses: [],
       methodResponses: [
         .getUpdates: [tooLong],
-        .getChat: [makeGetChatResult(chatId: 1)],
+        .getChat: [makeGetChatResult(chatId: 1, seq: 4_098)],
         .getChatParticipants: [makeGetChatParticipantsResult()],
         .getChatHistory: [makeGetChatHistoryResult(messages: [])],
       ]
@@ -2933,6 +3088,8 @@ actor RecordingApplyUpdates: ApplyUpdates {
   private(set) var appliedSources: [UpdateApplySource] = []
   private(set) var appliedSidecars: [InlineProtocol.UpdateSidecars] = []
   private(set) var repairedChats: [ChatRepairSnapshot] = []
+  private(set) var repairedSpaces: [SpaceRepairSnapshot] = []
+  private(set) var repairedUsers: [UserRepairSnapshot] = []
   var result = UpdateApplyResult.success(count: 0)
   var repairResult = true
   var repairStorage: InMemorySyncStorage?
@@ -2973,6 +3130,56 @@ actor RecordingApplyUpdates: ApplyUpdates {
       state: snapshot.targetState
     )
     return snapshot.targetState
+  }
+
+  func repairSpace(_ snapshot: SpaceRepairSnapshot) async -> BucketState? {
+    repairedSpaces.append(snapshot)
+    guard repairResult else { return nil }
+    await repairStorage?.setBucketState(
+      for: .space(id: snapshot.spaceID),
+      state: snapshot.targetState
+    )
+    return snapshot.targetState
+  }
+
+  func repairUser(_ snapshot: UserRepairSnapshot) async -> BucketState? {
+    repairedUsers.append(snapshot)
+    guard repairResult else { return nil }
+    await repairStorage?.setBucketState(
+      for: .user,
+      state: snapshot.checkpointState
+    )
+    return snapshot.checkpointState
+  }
+}
+
+actor BucketCommitApplyRecorder: ApplyUpdates {
+  private var commit: BucketState?
+
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?
+  ) async -> UpdateApplyResult {
+    .success(count: updates.count)
+  }
+
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?,
+    bucketCommit: UpdateBucketCommit?
+  ) async -> UpdateApplyResult {
+    commit = bucketCommit?.state
+    return UpdateApplyResult(
+      appliedCount: updates.count,
+      failedCount: 0,
+      committedBucketState: bucketCommit?.state
+    )
+  }
+
+  func receivedCommit() -> BucketState? {
+    commit
   }
 }
 
@@ -3151,13 +3358,17 @@ private func makeSpaceHasNewUpdatesSignal(spaceId: Int64, updateSeq: Int32) -> I
   return update
 }
 
-private func makeGetChatResult(chatId: Int64 = 1) -> InlineProtocol.RpcResult.OneOf_Result {
+private func makeGetChatResult(
+  chatId: Int64 = 1,
+  seq: Int32
+) -> InlineProtocol.RpcResult.OneOf_Result {
   let peer = makeChatPeer(chatId: chatId)
 
   var chat = InlineProtocol.Chat()
   chat.id = chatId
   chat.title = "Chat \(chatId)"
   chat.peerID = peer
+  chat.seq = seq
 
   var dialog = InlineProtocol.Dialog()
   dialog.peer = peer
@@ -3167,6 +3378,43 @@ private func makeGetChatResult(chatId: Int64 = 1) -> InlineProtocol.RpcResult.On
   result.chat = chat
   result.dialog = dialog
   return .getChat(result)
+}
+
+private func makeGetSpaceResult(
+  spaceId: Int64,
+  seq: Int32
+) -> InlineProtocol.RpcResult.OneOf_Result {
+  var space = InlineProtocol.Space()
+  space.id = spaceId
+  space.name = "Space \(spaceId)"
+  space.date = 100
+  space.seq = seq
+  var membership = InlineProtocol.Member()
+  membership.id = 1
+  membership.spaceID = spaceId
+  membership.userID = 1
+  membership.date = 100
+  var result = InlineProtocol.GetSpaceResult()
+  result.space = space
+  result.membership = membership
+  return .getSpace(result)
+}
+
+private func makeGetSpaceMembersResult(
+  spaceId: Int64
+) -> InlineProtocol.RpcResult.OneOf_Result {
+  var user = InlineProtocol.User()
+  user.id = 1
+  user.firstName = "Member"
+  var member = InlineProtocol.Member()
+  member.id = 1
+  member.spaceID = spaceId
+  member.userID = 1
+  member.date = 100
+  var result = InlineProtocol.GetSpaceMembersResult()
+  result.users = [user]
+  result.members = [member]
+  return .getSpaceMembers(result)
 }
 
 private func makeGetChatHistoryResult(

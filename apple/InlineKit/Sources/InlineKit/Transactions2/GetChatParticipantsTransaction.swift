@@ -40,48 +40,41 @@ public struct GetChatParticipantsTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        do {
-          try ChatParticipant.filter(Column("chatId") == context.chatID).deleteAll(db)
-          try ChatParticipantGroup.filter(ChatParticipantGroup.Columns.chatId == context.chatID).deleteAll(db)
-        } catch {
-          log.error("Failed to clear chat participants before refresh", error: error)
-        }
-
-        // Save users
-        for user in response.users {
-          do {
-            _ = try User.save(db, user: user)
-          } catch {
-            log.error("Failed to save user", error: error)
-          }
-        }
-
-        // Save participants
-        for participant in response.participants {
-          ChatParticipant.save(db, from: participant, chatId: context.chatID)
-        }
-
-        for group in response.groups {
-          do {
-            try UserGroup.save(db, from: group)
-          } catch {
-            log.error("Failed to save user group for chat participants", error: error)
-          }
-        }
-
-        for participant in response.groupParticipants {
-          do {
-            try ChatParticipantGroup.save(db, from: participant, chatId: context.chatID)
-          } catch {
-            log.error("Failed to save group participant", error: error)
-          }
-        }
+        try Self.apply(response, chatID: context.chatID, in: db)
       }
       log.trace("getChatParticipants saved")
     } catch {
       log.error("Failed to save chat participants", error: error)
       throw TransactionExecutionError.invalid
     }
+  }
+
+  static func apply(
+    _ response: InlineProtocol.GetChatParticipantsResult,
+    chatID: Int64,
+    in db: Database
+  ) throws {
+    try ChatParticipant.filter(Column("chatId") == chatID).deleteAll(db)
+    try ChatParticipantGroup.filter(ChatParticipantGroup.Columns.chatId == chatID).deleteAll(db)
+
+    for user in response.users {
+      _ = try User.save(db, user: user)
+    }
+
+    for participant in response.participants {
+      try ChatParticipant.save(db, from: participant, chatId: chatID)
+    }
+
+    for group in response.groups {
+      try UserGroup.save(db, from: group)
+    }
+
+    for participant in response.groupParticipants {
+      try ChatParticipantGroup.save(db, from: participant, chatId: chatID)
+    }
+    try Chat
+      .filter(Chat.Columns.id == chatID)
+      .updateAll(db, [Chat.Columns.participantRosterComplete.set(to: true)])
   }
 }
 

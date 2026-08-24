@@ -58,14 +58,27 @@ public struct UpdateDialogFolderTransaction: Transaction2 {
     case clear
   }
 
+  public enum EmojiUpdate: Sendable, Codable {
+    case unchanged
+    case set(String)
+    case clear
+  }
+
   public struct Context: Sendable, Codable {
     let folderId: Int64
     let title: TitleUpdate
+    /// Optional so transactions queued by older app versions still decode.
+    let emoji: EmojiUpdate?
     let order: String?
   }
 
-  public init(folderId: Int64, title: TitleUpdate = .unchanged, order: String? = nil) {
-    context = Context(folderId: folderId, title: title, order: order)
+  public init(
+    folderId: Int64,
+    title: TitleUpdate = .unchanged,
+    emoji: EmojiUpdate = .unchanged,
+    order: String? = nil
+  ) {
+    context = Context(folderId: folderId, title: title, emoji: emoji, order: order)
   }
 
   enum CodingKeys: String, CodingKey {
@@ -79,6 +92,11 @@ public struct UpdateDialogFolderTransaction: Transaction2 {
       case .unchanged: break
       case let .set(title): $0.title = title
       case .clear: $0.clearTitle_p = true
+      }
+      switch context.emoji ?? .unchanged {
+      case .unchanged: break
+      case let .set(emoji): $0.emoji = emoji
+      case .clear: $0.clearEmoji_p = true
       }
       if let order = context.order { $0.order = order }
     })
@@ -160,9 +178,10 @@ public extension Transaction2 where Self == UpdateDialogFolderTransaction {
   static func updateDialogFolder(
     folderId: Int64,
     title: UpdateDialogFolderTransaction.TitleUpdate = .unchanged,
+    emoji: UpdateDialogFolderTransaction.EmojiUpdate = .unchanged,
     order: String? = nil
   ) -> UpdateDialogFolderTransaction {
-    UpdateDialogFolderTransaction(folderId: folderId, title: title, order: order)
+    UpdateDialogFolderTransaction(folderId: folderId, title: title, emoji: emoji, order: order)
   }
 }
 

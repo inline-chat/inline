@@ -9,10 +9,15 @@ public actor UpdatesEngine: Sendable {
   public static let shared = UpdatesEngine()
 
   private let database: AppDatabase
+  private let authenticatedUserID: @Sendable () -> Int64?
   private let log = Log.scoped("RealtimeUpdates")
 
-  init(database: AppDatabase = .shared) {
+  init(
+    database: AppDatabase = .shared,
+    authenticatedUserID: @escaping @Sendable () -> Int64? = { Auth.shared.getCurrentUserId() }
+  ) {
     self.database = database
+    self.authenticatedUserID = authenticatedUserID
   }
 
   public nonisolated func apply(
@@ -128,6 +133,12 @@ public actor UpdatesEngine: Sendable {
 
         case let .participantGroupDelete(participantGroupDelete):
           try participantGroupDelete.apply(db)
+
+        case let .userAddedToChat(userAddedToChat):
+          try userAddedToChat.apply(db)
+
+        case let .userRemovedFromChat(userRemovedFromChat):
+          try userRemovedFromChat.apply(db)
 
         case let .chatVisibility(chatVisibility):
           try chatVisibility.apply(db)
@@ -451,12 +462,24 @@ public actor UpdatesEngine: Sendable {
       return nil
     }
     let bucketKey = BucketKey.chat(peer: snapshot.peer)
-    guard BucketKey.chat(peer: snapshot.chat.chat.peerID) == bucketKey else {
+    let peer = snapshot.peer.toPeer()
+    guard snapshot.chat.chat.id > 0,
+          BucketKey.chat(peer: snapshot.chat.chat.peerID) == bucketKey,
+          snapshot.chat.dialog.hasPeer,
+          snapshot.chat.dialog.peer.toPeer() == peer,
+          snapshot.chat.dialog.hasChatID,
+          snapshot.chat.dialog.chatID == snapshot.chat.chat.id
+    else {
       log.error("Chat repair snapshot peer does not match the requested bucket")
       return nil
     }
+    guard snapshot.chat.chat.hasSeq,
+          Int64(snapshot.chat.chat.seq) >= snapshot.targetState.seq
+    else {
+      log.error("Chat repair snapshot sequence is below the frozen recovery target")
+      return nil
+    }
 
-    let peer = snapshot.peer.toPeer()
     let startedAt = Date()
     let span = PerformanceTrace.begin(
       "UpdateApplyChatRepair",
@@ -477,42 +500,23 @@ public actor UpdatesEngine: Sendable {
         }
 
         let chatID = snapshot.chat.chat.id
-        // This is a bucket replacement, not an overlay. Clear every locally
-        // complete chat-owned projection before installing the bounded current
-        // snapshot. Older history is deliberately refetched on demand.
-        try Chat
-          .filter(Chat.Columns.id == chatID)
-          .updateAll(db, [Chat.Columns.lastMsgId.set(to: nil)])
-        try PinnedMessage.filter(PinnedMessage.Columns.chatId == chatID).deleteAll(db)
-        try Reaction.filter(Reaction.Columns.chatId == chatID).deleteAll(db)
-        try Message.filter(Message.Columns.chatId == chatID).deleteAll(db)
-        try ChatParticipant.filter(ChatParticipant.Columns.chatId == chatID).deleteAll(db)
-        try ChatParticipantGroup
-          .filter(ChatParticipantGroup.Columns.chatId == chatID)
-          .deleteAll(db)
 
         if snapshot.chat.hasUser {
           _ = try User.save(db, user: snapshot.chat.user)
         }
-        for user in snapshot.participants.users {
-          _ = try User.save(db, user: user)
-        }
-        for group in snapshot.participants.groups {
-          try UserGroup.save(db, from: group)
-        }
-
         var chat = Chat(from: snapshot.chat.chat)
+        chat.participantRosterComplete = false
         try self.clearMissingOptionalReferences(in: &chat, db: db)
         try chat.saveWithValidLastMsg(db)
+        try GetChatParticipantsTransaction.apply(
+          snapshot.participants,
+          chatID: chatID,
+          in: db
+        )
 
-        _ = try snapshot.chat.dialog.saveFull(db)
-
-        for participant in snapshot.participants.participants {
-          let model = ChatParticipant(from: participant, chatId: chatID)
-          try model.save(db)
-        }
-        for participant in snapshot.participants.groupParticipants {
-          try ChatParticipantGroup.save(db, from: participant, chatId: chatID)
+        let dialogID = Dialog.getDialogId(peerId: peer)
+        if try Dialog.fetchOne(db, id: dialogID) == nil {
+          _ = try snapshot.chat.dialog.saveFull(db)
         }
 
         if snapshot.chat.hasAnchorMessage {
@@ -524,18 +528,20 @@ public actor UpdatesEngine: Sendable {
           )
         }
 
-        var savedMessages: [Message] = []
-        savedMessages.reserveCapacity(snapshot.history.messages.count)
-        for message in snapshot.history.messages {
-          let saved = try Message.save(
-            db,
-            protocolMessage: message,
-            publishChanges: false,
-            materializeMissingReferences: true
-          )
-          savedMessages.append(saved)
-        }
-        try Chat.updateLastMsgIds(db, messages: savedMessages)
+        try MessageHistoryCoverageStore.invalidate(db, chatId: chatID)
+        let historyContext = GetChatHistoryTransaction.Context(
+          peer: peer,
+          offsetID: nil,
+          limit: 100,
+          modeRawValue: InlineProtocol.GetChatHistoryMode.historyModeLatest.rawValue,
+          anchorID: nil,
+          beforeID: nil,
+          afterID: nil,
+          beforeLimit: nil,
+          afterLimit: nil,
+          includeAnchor: nil
+        )
+        try GetChatHistoryTransaction.apply(snapshot.history, context: historyContext, db: db)
 
         let knownPinnedIds = try self.knownPinnedMessageIds(
           db,
@@ -546,7 +552,10 @@ public actor UpdatesEngine: Sendable {
 
         return try GRDBSyncStorage.advanceBucketState(
           for: bucketKey,
-          state: snapshot.targetState,
+          state: BucketState(
+            date: snapshot.targetState.date,
+            seq: Int64(snapshot.chat.chat.seq)
+          ),
           in: db
         )
       }
@@ -593,13 +602,121 @@ public actor UpdatesEngine: Sendable {
     }
   }
 
+  @discardableResult
+  public func applySpaceRepair(_ repair: SpaceRepairSnapshot) async -> BucketState? {
+    let snapshot = repair.snapshot
+    guard snapshot.hasSpace,
+          snapshot.hasMembership,
+          snapshot.space.id == repair.spaceID,
+          snapshot.membership.spaceID == repair.spaceID,
+          snapshot.space.hasSeq,
+          Int64(snapshot.space.seq) >= repair.targetState.seq
+    else {
+      log.error("Space repair snapshot is incomplete or below the frozen recovery target")
+      return nil
+    }
+
+    let bucketKey = BucketKey.space(id: repair.spaceID)
+    do {
+      return try await database.dbWriter.write { db in
+        if let existing = try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == bucketKey.getBucket()
+              && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+          )
+          .fetchOne(db),
+          existing.seq >= Int64(snapshot.space.seq) {
+          return BucketState(date: existing.date, seq: existing.seq)
+        }
+
+        var space = Space(from: snapshot.space)
+        space.memberRosterComplete = false
+        try space.save(db)
+        try GetSpaceMembersTransaction.apply(
+          repair.members,
+          spaceID: repair.spaceID,
+          in: db
+        )
+        if snapshot.hasSettings {
+          try SpaceRecoverySettings(spaceId: repair.spaceID, settings: snapshot.settings).save(db)
+        }
+
+        return try GRDBSyncStorage.advanceBucketState(
+          for: bucketKey,
+          state: BucketState(
+            date: repair.targetState.date,
+            seq: Int64(snapshot.space.seq)
+          ),
+          in: db
+        )
+      }
+    } catch {
+      log.error("Failed to apply space repair", error: error)
+      return nil
+    }
+  }
+
+  @discardableResult
+  public func applyUserRepair(_ repair: UserRepairSnapshot) async -> BucketState? {
+    guard repair.me.hasUser,
+          let expectedUserID = authenticatedUserID(),
+          repair.me.user.id == expectedUserID,
+          repair.settings.hasUserSettings,
+          repair.checkpointState.date > 0,
+          repair.checkpointState.seq >= repair.targetState.seq
+    else {
+      log.error("User repair snapshot identity or checkpoint is invalid")
+      return nil
+    }
+    let bucketKey = BucketKey.user
+    do {
+      let (state, snapshotStates) = try await database.dbWriter.write { db in
+        if let existing = try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == bucketKey.getBucket()
+              && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+          )
+          .fetchOne(db),
+          existing.seq >= repair.checkpointState.seq {
+          return (
+            BucketState(date: existing.date, seq: existing.seq),
+            [BucketKey: BucketState]()
+          )
+        }
+
+        let imported = try GetChatsTransaction.applySnapshot(repair.chats, in: db)
+        guard imported.failures.isEmpty else {
+          throw TransactionExecutionError.invalid
+        }
+        _ = try User.save(db, user: repair.me.user)
+        let state = try GRDBSyncStorage.advanceBucketState(
+          for: bucketKey,
+          state: repair.checkpointState,
+          in: db
+        )
+        return (state, imported.bucketStates)
+      }
+      await Api.realtime.installSnapshotBucketStates(snapshotStates)
+      if repair.settings.hasUserSettings {
+        await MainActor.run {
+          INUserSettings.current.updateFromServer(repair.settings.userSettings)
+        }
+      }
+      return state
+    } catch {
+      log.error("Failed to apply user repair", error: error)
+      return nil
+    }
+  }
+
   private nonisolated func apply(sidecars: InlineProtocol.UpdateSidecars, db: Database) throws {
     for user in sidecars.users {
       _ = try User.save(db, user: user)
     }
 
     for protoSpace in sidecars.spaces {
-      let space = Space(from: protoSpace)
+      var space = Space(from: protoSpace)
+      space.memberRosterComplete = try Space.fetchOne(db, id: space.id)?.memberRosterComplete ?? false
       try space.save(db)
     }
 
@@ -698,6 +815,8 @@ enum RealtimeUpdateDiagnostics {
     case .updatedUser: return "updatedUser"
     case .participantGroupAdd: return "participantGroupAdd"
     case .participantGroupDelete: return "participantGroupDelete"
+    case .userAddedToChat: return "userAddedToChat"
+    case .userRemovedFromChat: return "userRemovedFromChat"
     case .spaceSettings: return "spaceSettings"
     case .chatPermissions: return "chatPermissions"
     case .dialogCollapsedMaxID: return "dialogCollapsedMaxID"
@@ -718,6 +837,7 @@ func preparedSidecarChats(_ protoChats: [InlineProtocol.Chat], db: Database) thr
   let sidecarChatIds = Set(protoChats.map(\.id))
   return try orderedSidecarChats(protoChats.map(Chat.init)).map { chat in
     var chat = chat
+    chat.participantRosterComplete = try Chat.fetchOne(db, id: chat.id)?.participantRosterComplete ?? false
     if let parentChatId = chat.parentChatId,
        !sidecarChatIds.contains(parentChatId),
        try Chat.fetchOne(db, id: parentChatId) == nil {
@@ -1483,7 +1603,7 @@ extension InlineProtocol.UpdateChatParticipantAdd {
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat participant add \(chatID) \(participant.userID)")
 
-    ChatParticipant.save(db, from: participant, chatId: chatID)
+    try ChatParticipant.save(db, from: participant, chatId: chatID)
   }
 }
 
@@ -1518,6 +1638,25 @@ extension InlineProtocol.UpdateChatParticipantGroupDelete {
       .deleteAll(db)
 
     try deleteLocalPrivateThreadIfCurrentUserLostAccess(db, chatId: chatID)
+  }
+}
+
+extension InlineProtocol.UpdateUserAddedToChat {
+  func apply(_ db: Database) throws {
+    guard chatID > 0 else { return }
+    if hasParticipant {
+      try ChatParticipant.save(db, from: participant, chatId: chatID)
+    }
+    if hasGroup {
+      try ChatParticipantGroup.save(db, from: group, chatId: chatID)
+    }
+  }
+}
+
+extension InlineProtocol.UpdateUserRemovedFromChat {
+  func apply(_ db: Database) throws {
+    guard chatID > 0 else { return }
+    try deleteLocalChatData(db, chatId: chatID)
   }
 }
 

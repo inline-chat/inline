@@ -207,7 +207,7 @@ public extension Realtime {
           try handleResult_createChat(result)
 
         case let .getSpaceMembers(result):
-          try await handleResult_getSpaceMembers(result)
+          try await handleResult_getSpaceMembers(input!, result)
 
         case let .inviteToSpace(result):
           try await handleResult_inviteToSpace(result)
@@ -274,29 +274,30 @@ public extension Realtime {
     }
 
     let peerId = getChatHistoryInput.peerID.toPeer()
+    let context = GetChatHistoryTransaction.Context(
+      peer: peerId,
+      offsetID: getChatHistoryInput.hasOffsetID ? getChatHistoryInput.offsetID : nil,
+      limit: getChatHistoryInput.hasLimit ? getChatHistoryInput.limit : nil,
+      modeRawValue: getChatHistoryInput.hasMode ? getChatHistoryInput.mode.rawValue : nil,
+      anchorID: getChatHistoryInput.hasAnchorID ? getChatHistoryInput.anchorID : nil,
+      beforeID: getChatHistoryInput.hasBeforeID ? getChatHistoryInput.beforeID : nil,
+      afterID: getChatHistoryInput.hasAfterID ? getChatHistoryInput.afterID : nil,
+      beforeLimit: getChatHistoryInput.hasBeforeLimit ? getChatHistoryInput.beforeLimit : nil,
+      afterLimit: getChatHistoryInput.hasAfterLimit ? getChatHistoryInput.afterLimit : nil,
+      includeAnchor: getChatHistoryInput.hasIncludeAnchor ? getChatHistoryInput.includeAnchor : nil
+    )
 
     Task.detached(priority: .userInitiated) {
-      _ = try await self.db.dbWriter.write { db in
-        var savedMessages: [Message] = []
-        for message in result.messages {
-          do {
-            let msg = try Message.save(db, protocolMessage: message, publishChanges: false) // we reload below
-            savedMessages.append(msg)
-          } catch {
-            self.log.error("Failed to save message", error: error)
-          }
+      do {
+        _ = try await self.db.dbWriter.write { db in
+          try GetChatHistoryTransaction.apply(result, context: context, db: db)
         }
 
-        do {
-          try Chat.updateLastMsgIds(db, messages: savedMessages)
-        } catch {
-          self.log.error("Failed to update chat last message", error: error)
+        await MainActor.run {
+          MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
         }
-      }
-
-      // Publish and reload messages
-      Task.detached(priority: .userInitiated) { @MainActor in
-        MessagesPublisher.shared.messagesReload(peer: peerId, animated: false)
+      } catch {
+        self.log.error("Failed to save chat history", error: error)
       }
     }
   }
@@ -328,25 +329,28 @@ public extension Realtime {
     log.trace("createChat saved")
   }
 
-  private func handleResult_getSpaceMembers(_ result: GetSpaceMembersResult) async throws {
+  private func handleResult_getSpaceMembers(
+    _ input: RpcCall.OneOf_Input,
+    _ result: GetSpaceMembersResult
+  ) async throws {
     log.trace("getSpaceMembers")
+    guard case let .getSpaceMembers(getSpaceMembersInput) = input else {
+      throw InlineRPCClientError.unexpectedResponse
+    }
     try await db.dbWriter.write { db in
+      try Member
+        .filter(Member.Columns.spaceId == getSpaceMembersInput.spaceID)
+        .deleteAll(db)
       for user in result.users {
-        do {
-          _ = try User.save(db, user: user)
-        } catch {
-          Log.shared.error("Failed to save user", error: error)
-        }
+        _ = try User.save(db, user: user)
       }
 
       for member in result.members {
-        do {
-          let member = Member(from: member)
-          try member.save(db)
-        } catch {
-          Log.shared.error("Failed to save member", error: error)
-        }
+        try Member(from: member).save(db)
       }
+      try Space
+        .filter(Space.Columns.id == getSpaceMembersInput.spaceID)
+        .updateAll(db, [Space.Columns.memberRosterComplete.set(to: true)])
     }
     log.trace("getSpaceMembers saved")
   }
@@ -398,24 +402,26 @@ public extension Realtime {
     }
 
     try await db.dbWriter.write { db in
-      do {
-        try ChatParticipant.filter(Column("chatId") == getChatParticipantsInput.chatID).deleteAll(db)
-      } catch {
-        Log.shared.error("Failed to clear chat participants before refresh", error: error)
-      }
+      try ChatParticipant.filter(Column("chatId") == getChatParticipantsInput.chatID).deleteAll(db)
+      try ChatParticipantGroup.filter(ChatParticipantGroup.Columns.chatId == getChatParticipantsInput.chatID)
+        .deleteAll(db)
 
-      // Save users
       for user in result.users {
-        do {
-          _ = try User.save(db, user: user)
-        } catch {
-          Log.shared.error("Failed to save user", error: error)
-        }
+        _ = try User.save(db, user: user)
       }
 
       for participant in result.participants {
-        ChatParticipant.save(db, from: participant, chatId: getChatParticipantsInput.chatID)
+        try ChatParticipant.save(db, from: participant, chatId: getChatParticipantsInput.chatID)
       }
+      for group in result.groups {
+        try UserGroup.save(db, from: group)
+      }
+      for participant in result.groupParticipants {
+        try ChatParticipantGroup.save(db, from: participant, chatId: getChatParticipantsInput.chatID)
+      }
+      try Chat
+        .filter(Chat.Columns.id == getChatParticipantsInput.chatID)
+        .updateAll(db, [Chat.Columns.participantRosterComplete.set(to: true)])
     }
     log.trace("getChatParticipants saved")
   }
@@ -437,7 +443,7 @@ public extension Realtime {
       }
 
       if result.hasParticipant {
-        ChatParticipant.save(db, from: result.participant, chatId: addInput.chatID)
+        try ChatParticipant.save(db, from: result.participant, chatId: addInput.chatID)
       }
 
       if result.hasGroup {

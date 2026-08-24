@@ -40,30 +40,37 @@ public struct GetSpaceMembersTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        // Save users
-        for user in response.users {
-          do {
-            _ = try User.save(db, user: user)
-          } catch {
-            Log.shared.error("Failed to save user", error: error)
-          }
-        }
-
-        // Save members
-        for member in response.members {
-          do {
-            let member = Member(from: member)
-            try member.save(db)
-          } catch {
-            Log.shared.error("Failed to save member", error: error)
-          }
-        }
+        try Self.apply(response, spaceID: context.spaceId, in: db)
       }
       log.trace("getSpaceMembers saved")
     } catch {
       log.error("Failed to save space members data", error: error)
       throw TransactionExecutionError.invalid
     }
+  }
+
+  static func apply(
+    _ response: InlineProtocol.GetSpaceMembersResult,
+    spaceID: Int64,
+    in db: Database
+  ) throws {
+    guard response.members.allSatisfy({ $0.spaceID == spaceID }) else {
+      throw TransactionExecutionError.invalid
+    }
+
+    try Member
+      .filter(Member.Columns.spaceId == spaceID)
+      .deleteAll(db)
+    for user in response.users {
+      _ = try User.save(db, user: user)
+    }
+
+    for member in response.members {
+      try Member(from: member).save(db)
+    }
+    try Space
+      .filter(Space.Columns.id == spaceID)
+      .updateAll(db, [Space.Columns.memberRosterComplete.set(to: true)])
   }
 }
 

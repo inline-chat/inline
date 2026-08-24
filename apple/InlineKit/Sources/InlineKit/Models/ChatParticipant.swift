@@ -45,25 +45,14 @@ public extension ChatParticipant {
       : Date(timeIntervalSince1970: TimeInterval(from.date))
   }
 
-  static func save(_ db: Database, from: InlineProtocol.ChatParticipant, chatId: Int64) {
-    do {
-      let existingParticipant = try ChatParticipant
-        .filter(Column("chatId") == chatId)
-        .filter(Column("userId") == from.userID)
-        .fetchOne(db)
+  static func save(_ db: Database, from: InlineProtocol.ChatParticipant, chatId: Int64) throws {
+    let existingParticipant = try ChatParticipant
+      .filter(Column("chatId") == chatId)
+      .filter(Column("userId") == from.userID)
+      .fetchOne(db)
 
-      var participant: ChatParticipant
-
-      if let existingId = existingParticipant?.id {
-        participant = ChatParticipant(from: from, chatId: chatId)
-        participant.id = existingId // reuse existing ID
-      } else {
-        participant = ChatParticipant(from: from, chatId: chatId)
-      }
-
-      try participant.save(db, onConflict: .replace) // replace bc previous we used random IDs
-    } catch {
-      Log.shared.error("Error saving chat participant:", error: error)
-    }
+    var participant = ChatParticipant(from: from, chatId: chatId)
+    participant.id = existingParticipant?.id
+    try participant.save(db, onConflict: .replace) // replace bc previous we used random IDs
   }
 }

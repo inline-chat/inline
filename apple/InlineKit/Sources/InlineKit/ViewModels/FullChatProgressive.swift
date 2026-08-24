@@ -890,21 +890,65 @@ public class MessagesProgressiveViewModel {
     peer: Peer,
     bounds: LoadedWindowBounds
   ) throws -> (Bool, Bool) {
-    let olderExists = try baseQuery(for: peer)
+    let olderCandidate = try baseQuery(for: peer)
       .filter(
         (Column("date") < bounds.oldestDate)
           || ((Column("date") == bounds.oldestDate) && (Column("messageId") < bounds.oldestMessageId))
       )
+      .order(Column("date").desc, Column("messageId").desc)
       .limit(1)
-      .fetchCount(db) > 0
-    let newerExists = try baseQuery(for: peer)
+      .fetchOne(db)
+    let newerCandidate = try baseQuery(for: peer)
       .filter(
         (Column("date") > bounds.newestDate)
           || ((Column("date") == bounds.newestDate) && (Column("messageId") > bounds.newestMessageId))
       )
+      .order(Column("date").asc, Column("messageId").asc)
       .limit(1)
-      .fetchCount(db) > 0
-    return (olderExists, newerExists)
+      .fetchOne(db)
+
+    guard let chatID = try historyChatID(for: peer, db: db) else {
+      return (false, false)
+    }
+    let olderAvailable = try candidateIsCertified(
+      olderCandidate?.message.messageId,
+      through: bounds.oldestMessageId,
+      chatID: chatID,
+      db: db
+    )
+    let newerAvailable = try candidateIsCertified(
+      newerCandidate?.message.messageId,
+      through: bounds.newestMessageId,
+      chatID: chatID,
+      db: db
+    )
+    return (olderAvailable, newerAvailable)
+  }
+
+  private nonisolated static func historyChatID(for peer: Peer, db: Database) throws -> Int64? {
+    switch peer {
+      case let .thread(chatID): chatID
+      case let .user(userID):
+        try Chat
+          .filter(Chat.Columns.peerUserId == userID)
+          .fetchOne(db)?
+          .id
+    }
+  }
+
+  private nonisolated static func candidateIsCertified(
+    _ candidateID: Int64?,
+    through referenceID: Int64,
+    chatID: Int64,
+    db: Database
+  ) throws -> Bool {
+    guard let candidateID, candidateID > 0, referenceID > 0 else { return false }
+    return try !MessageHistoryCoverageStore.intersects(
+      db,
+      chatId: chatID,
+      lowerId: min(candidateID, referenceID),
+      upperId: max(candidateID, referenceID)
+    )
   }
 
   private func loadModeLogLabel(_ loadMode: LoadMode) -> String {

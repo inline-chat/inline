@@ -971,6 +971,60 @@ public extension AppDatabase {
       )
     }
 
+    migrator.registerMigration("message history holes and space recovery state") { db in
+      try db.create(table: "messageHistoryHole") { table in
+        table.column("chatId", .integer)
+          .notNull()
+          .references("chat", column: "id", onDelete: .cascade)
+        table.column("lowerId", .integer).notNull()
+        table.column("upperId", .integer).notNull()
+        table.primaryKey(["chatId", "lowerId", "upperId"])
+        table.check(Column("lowerId") > 0)
+        table.check(Column("upperId") >= Column("lowerId"))
+      }
+      try db.create(
+        index: "messageHistoryHole_chatId_lowerId_idx",
+        on: "messageHistoryHole",
+        columns: ["chatId", "lowerId"]
+      )
+      try db.execute(
+        sql: """
+        INSERT INTO messageHistoryHole (chatId, lowerId, upperId)
+        SELECT id, 1, 9223372036854775806 FROM chat
+        """
+      )
+      try db.execute(
+        sql: """
+        CREATE TRIGGER messageHistoryHole_seed_chat
+        AFTER INSERT ON chat
+        BEGIN
+          INSERT OR IGNORE INTO messageHistoryHole (chatId, lowerId, upperId)
+          VALUES (NEW.id, 1, 9223372036854775806);
+        END
+        """
+      )
+
+      try db.alter(table: "space") { table in
+        table.add(column: "seq", .integer)
+        table.add(column: "memberRosterComplete", .boolean).notNull().defaults(to: false)
+      }
+      try db.alter(table: "chat") { table in
+        table.add(column: "participantRosterComplete", .boolean).notNull().defaults(to: false)
+      }
+      try db.create(table: "spaceRecoverySettings") { table in
+        table.column("spaceId", .integer)
+          .primaryKey()
+          .references("space", column: "id", onDelete: .cascade)
+        table.column("payload", .blob).notNull()
+      }
+    }
+
+    migrator.registerMigration("dialog folder emoji") { db in
+      try db.alter(table: "dialogFolder") { table in
+        table.add(column: "emoji", .text)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

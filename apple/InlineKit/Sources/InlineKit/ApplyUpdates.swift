@@ -30,4 +30,12 @@ struct InlineApplyUpdates: ApplyUpdates {
   func repairChat(_ snapshot: ChatRepairSnapshot) async -> BucketState? {
     await UpdatesEngine.shared.applyChatRepair(snapshot)
   }
+
+  func repairSpace(_ snapshot: SpaceRepairSnapshot) async -> BucketState? {
+    await UpdatesEngine.shared.applySpaceRepair(snapshot)
+  }
+
+  func repairUser(_ snapshot: UserRepairSnapshot) async -> BucketState? {
+    await UpdatesEngine.shared.applyUserRepair(snapshot)
+  }
 }

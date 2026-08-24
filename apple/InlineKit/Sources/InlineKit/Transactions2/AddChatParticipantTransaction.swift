@@ -65,7 +65,7 @@ public struct AddChatParticipantTransaction: Transaction2 {
         }
 
         if response.hasParticipant {
-          ChatParticipant.save(db, from: response.participant, chatId: context.chatID)
+          try ChatParticipant.save(db, from: response.participant, chatId: context.chatID)
         }
 
         if response.hasGroup {

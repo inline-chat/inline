@@ -22,6 +22,7 @@ struct DialogFolderPersistenceTests {
       $0.id = 7
       $0.title = "Favorites"
       $0.order = "a"
+      $0.emoji = "🚀"
     }]
     result.dialogs = [makeDialog(chatID: 10, folderID: 7, order: "b")]
 
@@ -30,6 +31,7 @@ struct DialogFolderPersistenceTests {
 
       #expect(imported.failures.isEmpty)
       #expect(try DialogFolder.fetchOne(db, key: 7)?.title == "Favorites")
+      #expect(try DialogFolder.fetchOne(db, key: 7)?.emoji == "🚀")
       #expect(try Dialog.fetchOne(db, key: 10)?.folderId == 7)
     }
   }
@@ -65,6 +67,59 @@ struct DialogFolderPersistenceTests {
     }
   }
 
+  @Test("folder emoji updates use the existing mutation lane")
+  func emojiUpdateInput() {
+    let transaction = UpdateDialogFolderTransaction(folderId: 7, emoji: .set("🚀"))
+
+    guard case let .updateDialogFolder(input)? = transaction.input(from: transaction.context) else {
+      Issue.record("Expected an updateDialogFolder input")
+      return
+    }
+    #expect(input.folderID == 7)
+    #expect(input.emoji == "🚀")
+    #expect(input.titleUpdate == nil)
+  }
+
+  @Test("folder updates queued before emoji support still decode")
+  func legacyUpdateContextDecodes() throws {
+    let legacy = LegacyDialogFolderUpdateContext(
+      folderId: 7,
+      title: .set("Favorites"),
+      order: nil
+    )
+    let decoded = try JSONDecoder().decode(
+      UpdateDialogFolderTransaction.Context.self,
+      from: JSONEncoder().encode(legacy)
+    )
+
+    #expect(decoded.emoji == nil)
+    let transaction = UpdateDialogFolderTransaction(folderId: 7)
+    guard case let .updateDialogFolder(input)? = transaction.input(from: decoded) else {
+      Issue.record("Expected a legacy updateDialogFolder input")
+      return
+    }
+    #expect(input.title == "Favorites")
+    #expect(input.emojiUpdate == nil)
+  }
+
+  @Test("new threads created from an empty folder wait before joining it")
+  func newFolderThreadWaitsForCreation() {
+    let transaction = UpdateDialogOrderTransaction(
+      peerId: .thread(id: 44),
+      pinned: false,
+      destination: .folder(7),
+      requiresChatCreated: true
+    )
+
+    #expect(transaction.blockers == [.chatCreated(chatId: 44)])
+    guard case let .updateDialogOrder(input)? = transaction.input(from: transaction.context) else {
+      Issue.record("Expected an updateDialogOrder input")
+      return
+    }
+    #expect(input.peerID.chat.chatID == 44)
+    #expect(input.destination.folderID == 7)
+  }
+
   private func makeDialog(
     chatID: Int64,
     folderID: Int64?,
@@ -87,4 +142,10 @@ struct DialogFolderPersistenceTests {
     chat.seq = 1
     return chat
   }
+}
+
+private struct LegacyDialogFolderUpdateContext: Codable {
+  let folderId: Int64
+  let title: UpdateDialogFolderTransaction.TitleUpdate
+  let order: String?
 }

@@ -4298,10 +4298,6 @@ private extension MessagesCollectionView {
       return true
     }
 
-    private func remoteOlderLimit() -> Int32 {
-      Int32(messages.count > 200 ? 200 : 100)
-    }
-
     private func requestRemoteOlderBatch(beforeMessageId: Int64) {
       guard shouldRequestRemoteOlder(beforeMessageId: beforeMessageId) else { return }
 
@@ -4315,16 +4311,13 @@ private extension MessagesCollectionView {
 
         do {
           guard !Task.isCancelled else { return }
-          let rpcResult = try await Api.realtime.send(
-            .getChatHistory(peer: peerId, offsetID: beforeMessageId, limit: remoteOlderLimit())
+          let outcome = try await MessageHistoryRepairCoordinator.shared.loadOlder(
+            peer: peerId,
+            beforeID: beforeMessageId
           )
           guard !Task.isCancelled else { return }
 
-          guard let rpcResult, case let .getChatHistory(result) = rpcResult else {
-            return
-          }
-
-          if result.messages.isEmpty {
+          if outcome == .empty || outcome == .notNeeded {
             if let boundary = noRemoteOlderBeforeMessageId {
               noRemoteOlderBeforeMessageId = max(boundary, beforeMessageId)
             } else {

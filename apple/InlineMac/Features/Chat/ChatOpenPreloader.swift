@@ -418,6 +418,22 @@ actor ChatOpenPreloader {
         query.filter(Message.Columns.messageId > referenceMessageId)
     }
 
-    return try query.limit(1).fetchCount(db) > 0
+    query = switch direction {
+      case .older:
+        query.order(Message.Columns.date.desc, Message.Columns.messageId.desc)
+      case .newer:
+        query.order(Message.Columns.date.asc, Message.Columns.messageId.asc)
+    }
+
+    guard let candidate = try query.limit(1).fetchOne(db),
+          let chatId = try resolveChatId(peer: peer, chatItem: nil, db: db)
+    else { return false }
+
+    return try !MessageHistoryCoverageStore.intersects(
+      db,
+      chatId: chatId,
+      lowerId: min(candidate.messageId, referenceMessageId),
+      upperId: max(candidate.messageId, referenceMessageId)
+    )
   }
 }

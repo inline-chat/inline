@@ -404,19 +404,18 @@ public class DataManager: ObservableObject {
       "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
     )
 
-    let result = try await InlineRPCClient.shared.getChatHistory(peerID: peerId_)
+    let messages = try await InlineRPCClient.shared.getChatHistory(peerID: peerId_)
+    var result = InlineProtocol.GetChatHistoryResult()
+    result.messages = messages
+    let historyResult = result
+    let transaction = GetChatHistoryTransaction(
+      peer: peerId_,
+      mode: .historyModeLatest,
+      limit: 100
+    )
 
     try await database.dbWriter.write { db in
-      for protocolMessage in result {
-        do {
-          var message = Message(from: protocolMessage)
-          try message.saveMessage(db)
-        } catch {
-          Task {
-            await self.log.error("failed to save history message", error: error)
-          }
-        }
-      }
+      try GetChatHistoryTransaction.apply(historyResult, context: transaction.context, db: db)
     }
 
     // Publish

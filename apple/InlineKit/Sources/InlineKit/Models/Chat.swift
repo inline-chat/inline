@@ -49,6 +49,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var parentMessageId: Int64? = nil
   public var canUpdateInfo: Bool?
   public var createState: ChatCreateState?
+  public var participantRosterComplete: Bool = false
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -67,6 +68,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let parentMessageId = Column(CodingKeys.parentMessageId)
     static let canUpdateInfo = Column(CodingKeys.canUpdateInfo)
     static let createState = Column(CodingKeys.createState)
+    static let participantRosterComplete = Column(CodingKeys.participantRosterComplete)
   }
 
   public static let space = belongsTo(Space.self)
@@ -109,7 +111,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     parentChatId: Int64? = nil,
     parentMessageId: Int64? = nil,
     canUpdateInfo: Bool? = nil,
-    createState: ChatCreateState? = nil
+    createState: ChatCreateState? = nil,
+    participantRosterComplete: Bool = false
   ) {
     self.id = id
     self.date = date
@@ -127,6 +130,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.parentMessageId = parentMessageId
     self.canUpdateInfo = canUpdateInfo
     self.createState = createState
+    self.participantRosterComplete = participantRosterComplete
   }
 }
 
