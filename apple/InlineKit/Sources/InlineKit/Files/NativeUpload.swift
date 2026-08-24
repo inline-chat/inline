@@ -169,6 +169,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private static let maximumPartSize = 16 * 1_048_576
   private static let maximumConcurrentPartsPerUpload = 2
   private static let maximumPartAttempts = 2
+  private static let maximumFinishReconciliationAttempts = 3
   // These are individual RPC stall bounds, not a deadline for the complete upload.
   // A large file can span any number of successful part requests.
   private static let mutationTimeout: Duration = .seconds(60)
@@ -267,6 +268,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     )
     progress(durableAcceptedBytes, byteCount)
 
+    var finishReconciliationAttempts = 0
     do {
       while true {
         let missingParts = (0 ..< created.partCount).filter { !accepted.contains($0) }
@@ -312,6 +314,7 @@ public actor DurableUploadCoordinator: MediaUploading {
               }
             }
           }
+          finishReconciliationAttempts = 0
         }
 
         var finish = FinishUploadInput()
@@ -328,10 +331,15 @@ public actor DurableUploadCoordinator: MediaUploading {
           else {
             throw NativeMediaUploadError.unexpectedResponse
           }
+          finishReconciliationAttempts = 0
           finished = value
         } catch is CancellationError {
           throw CancellationError()
         } catch {
+          finishReconciliationAttempts += 1
+          guard finishReconciliationAttempts <= Self.maximumFinishReconciliationAttempts else {
+            throw error
+          }
           switch try await reconcileLostFinish(uploadID: created.uploadID) {
           case let .complete(complete):
             if durableAcceptedBytes < byteCount {

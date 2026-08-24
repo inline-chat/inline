@@ -73,8 +73,18 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
 }
 
 private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
+  enum ReconciliationMode {
+    case complete
+    case uploading
+  }
+
+  private let reconciliationMode: ReconciliationMode
   private(set) var methods: [InlineProtocol.Method] = []
   private var finishCommitted = false
+
+  init(reconciliationMode: ReconciliationMode = .complete) {
+    self.reconciliationMode = reconciliationMode
+  }
 
   func callUploadRPC(
     method: InlineProtocol.Method,
@@ -98,6 +108,12 @@ private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
       throw SimulatedUploadFailure.responseLost
     case (.getUploadState, .getUploadState):
       #expect(finishCommitted)
+      if reconciliationMode == .uploading {
+        var state = GetUploadStateResult()
+        state.status = .uploading
+        state.acceptedParts = [0]
+        return .getUploadState(state)
+      }
       var photo = Photo()
       photo.id = 78
       var complete = UploadComplete()
@@ -358,6 +374,37 @@ struct NativeUploadTests {
       .finishUpload,
       .getUploadState,
     ])
+  }
+
+  @Test("bounds ambiguous finish retries without new accepted parts")
+  func boundsAmbiguousFinishRetries() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-finish-bound-test-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    let transport = FinishResponseLostUploadRPCMock(reconciliationMode: .uploading)
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: PassthroughUploadStaging(),
+      ownerScope: { "test-owner" }
+    )
+    await #expect(throws: SimulatedUploadFailure.self) {
+      try await coordinator.upload(
+        NativeMediaUploadRequest(
+          logicalID: "photo:finish-bound",
+          fileURL: source,
+          fileName: "photo.jpg",
+          mimeType: "image/jpeg",
+          kind: .photo
+        ),
+        progress: { _, _ in }
+      )
+    }
+
+    let methods = await transport.calledMethods()
+    #expect(methods.count(where: { $0 == .finishUpload }) == 4)
+    #expect(methods.count(where: { $0 == .getUploadState }) == 3)
   }
 
   @Test("stages an immutable source and cleans it up after completion")
