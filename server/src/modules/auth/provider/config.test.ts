@@ -63,4 +63,27 @@ describe("required provider authentication configuration", () => {
     expect(config.google.clientId).toBe("google-client")
     expect(config.apple.keyId).toBe("apple-key")
   })
+
+  test("treats whitespace-only provider credentials as missing", () => {
+    const names = [
+      "GOOGLE_AUTH_CLIENT_ID",
+      "GOOGLE_AUTH_CLIENT_SECRET",
+      "APPLE_AUTH_CLIENT_ID",
+      "APPLE_AUTH_TEAM_ID",
+      "APPLE_AUTH_KEY_ID",
+      "APPLE_AUTH_PRIVATE_KEY",
+    ] as const
+    const previous = names.map((name) => [name, process.env[name]] as const)
+    try {
+      for (const name of names) delete process.env[name]
+      process.env["GOOGLE_AUTH_CLIENT_ID"] = "  "
+      process.env["GOOGLE_AUTH_CLIENT_SECRET"] = "\t"
+      expect(() => requireProviderAuthConfig()).toThrow("GOOGLE_AUTH_CLIENT_ID")
+    } finally {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    }
+  })
 })

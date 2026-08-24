@@ -16,6 +16,11 @@ export type RequiredProviderAuthConfig = Omit<ProviderAuthConfig, "google" | "ap
 const requiredPair = (first: string | undefined, second: string | undefined) =>
   Boolean(first) === Boolean(second)
 
+const providerCredential = (name: string): string | undefined => {
+  const value = process.env[name]?.trim()
+  return value ? value : undefined
+}
+
 export function decodeApplePrivateKey(value: string): Uint8Array {
   let key
   try {
@@ -50,16 +55,16 @@ function normalizeProviderBaseUrl(value: string): string {
 }
 
 export function providerAuthConfig(): ProviderAuthConfig {
-  const googleClientId = process.env["GOOGLE_AUTH_CLIENT_ID"]
-  const googleClientSecret = process.env["GOOGLE_AUTH_CLIENT_SECRET"]
+  const googleClientId = providerCredential("GOOGLE_AUTH_CLIENT_ID")
+  const googleClientSecret = providerCredential("GOOGLE_AUTH_CLIENT_SECRET")
   if (!requiredPair(googleClientId, googleClientSecret)) {
     throw new Error("GOOGLE_AUTH_CLIENT_ID and GOOGLE_AUTH_CLIENT_SECRET must be configured together")
   }
 
-  const appleClientId = process.env["APPLE_AUTH_CLIENT_ID"]
-  const appleTeamId = process.env["APPLE_AUTH_TEAM_ID"]
-  const appleKeyId = process.env["APPLE_AUTH_KEY_ID"]
-  const applePrivateKey = process.env["APPLE_AUTH_PRIVATE_KEY"]
+  const appleClientId = providerCredential("APPLE_AUTH_CLIENT_ID")
+  const appleTeamId = providerCredential("APPLE_AUTH_TEAM_ID")
+  const appleKeyId = providerCredential("APPLE_AUTH_KEY_ID")
+  const applePrivateKey = providerCredential("APPLE_AUTH_PRIVATE_KEY")
   const appleValues = [appleClientId, appleTeamId, appleKeyId, applePrivateKey]
   if (appleValues.some(Boolean) && !appleValues.every(Boolean)) {
     throw new Error("All APPLE_AUTH_* provider credentials must be configured together")
