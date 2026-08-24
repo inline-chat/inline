@@ -364,6 +364,77 @@ describe("getChatHistory", () => {
     expect(aroundWithoutAnchor.messages.map((message) => message.id)).toEqual([10n, 9n, 8n, 6n, 5n])
   })
 
+  test("treats a missing around anchor as a numeric coordinate", async () => {
+    const userA = (await testUtils.createUser("userA9-missing@example.com"))!
+    const userB = (await testUtils.createUser("userB9-missing@example.com"))!
+
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+    await db
+      .insert(schema.dialogs)
+      .values([
+        { chatId: chat.id, userId: userA.id, peerUserId: userB.id },
+        { chatId: chat.id, userId: userB.id, peerUserId: userA.id },
+      ])
+      .execute()
+
+    for (const messageId of [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) {
+      await testUtils.createTestMessage({
+        messageId,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: `Message ${messageId}`,
+      })
+    }
+
+    await db.update(schema.chats).set({ lastMsgId: 12 }).where(eq(schema.chats.id, chat.id)).execute()
+
+    const peerId = {
+      type: {
+        oneofKind: "user" as const,
+        user: { userId: BigInt(userB.id) },
+      },
+    }
+    const context = makeFunctionContext(userA.id)
+
+    const explicitSides = await getChatHistory(
+      {
+        peerId,
+        mode: "around",
+        anchorId: 7n,
+        beforeLimit: 2,
+        afterLimit: 3,
+        includeAnchor: true,
+      },
+      context,
+    )
+    expect(explicitSides.messages.map((message) => message.id)).toEqual([10n, 9n, 8n, 6n, 5n])
+
+    const fallbackSplit = await getChatHistory(
+      {
+        peerId,
+        mode: "around",
+        anchorId: 7n,
+        limit: 6,
+        includeAnchor: true,
+      },
+      context,
+    )
+    expect(fallbackSplit.messages.map((message) => message.id)).toEqual([10n, 9n, 8n, 6n, 5n, 4n])
+
+    const withoutAnchorLookup = await getChatHistory(
+      {
+        peerId,
+        mode: "around",
+        anchorId: 7n,
+        beforeLimit: 1,
+        afterLimit: 1,
+        includeAnchor: false,
+      },
+      context,
+    )
+    expect(withoutAnchorLookup.messages.map((message) => message.id)).toEqual([8n, 6n])
+  })
+
   test("rejects invalid explicit mode combinations", async () => {
     const userA = (await testUtils.createUser("userA10@example.com"))!
     const userB = (await testUtils.createUser("userB10@example.com"))!
@@ -401,6 +472,18 @@ describe("getChatHistory", () => {
         {
           peerId,
           mode: "around",
+          limit: 10,
+        },
+        context,
+      ),
+    ).rejects.toThrow()
+
+    await expect(
+      getChatHistory(
+        {
+          peerId,
+          mode: "around",
+          anchorId: 0n,
           limit: 10,
         },
         context,

@@ -431,46 +431,45 @@ async function getMessages(
   const anchorIdNumber = Number(input.anchorId)
   const includeAnchor = input.includeAnchor ?? true
   const aroundLimit = input.limit ?? 60
-  const defaultBeforeLimit = Math.floor(aroundLimit / 2)
-  const defaultAfterLimit = Math.max(aroundLimit - defaultBeforeLimit - (includeAnchor ? 1 : 0), 0)
-  const beforeLimit = Math.max(input.beforeLimit ?? defaultBeforeLimit, 0)
-  const afterLimit = Math.max(input.afterLimit ?? defaultAfterLimit, 0)
+  const combinedAround = await db.transaction(
+    async (tx) => {
+      const anchorMessages = includeAnchor
+        ? await tx._query.messages.findMany({
+            where: and(eq(messages.chatId, chatId), eq(messages.messageId, anchorIdNumber)),
+            limit: 1,
+            with: fullMessageRelations,
+          })
+        : []
 
-  const anchorExists = await db._query.messages.findFirst({
-    where: and(eq(messages.chatId, chatId), eq(messages.messageId, anchorIdNumber)),
-    columns: { messageId: true },
-  })
-  if (!anchorExists) {
-    return []
-  }
+      const defaultBeforeLimit = Math.floor(aroundLimit / 2)
+      const defaultAfterLimit = Math.max(aroundLimit - defaultBeforeLimit - anchorMessages.length, 0)
+      const beforeLimit = Math.max(input.beforeLimit ?? defaultBeforeLimit, 0)
+      const afterLimit = Math.max(input.afterLimit ?? defaultAfterLimit, 0)
 
-  const [beforeMessages, anchorMessages, afterMessages] = await Promise.all([
-    beforeLimit > 0
-      ? db._query.messages.findMany({
-          where: and(eq(messages.chatId, chatId), lt(messages.messageId, anchorIdNumber)),
-          orderBy: desc(messages.messageId),
-          limit: beforeLimit,
-          with: fullMessageRelations,
-        })
-      : Promise.resolve([]),
-    includeAnchor
-      ? db._query.messages.findMany({
-          where: and(eq(messages.chatId, chatId), eq(messages.messageId, anchorIdNumber)),
-          limit: 1,
-          with: fullMessageRelations,
-        })
-      : Promise.resolve([]),
-    afterLimit > 0
-      ? db._query.messages.findMany({
-          where: and(eq(messages.chatId, chatId), gt(messages.messageId, anchorIdNumber)),
-          orderBy: asc(messages.messageId),
-          limit: afterLimit,
-          with: fullMessageRelations,
-        })
-      : Promise.resolve([]),
-  ])
+      const beforeMessages =
+        beforeLimit > 0
+          ? await tx._query.messages.findMany({
+              where: and(eq(messages.chatId, chatId), lt(messages.messageId, anchorIdNumber)),
+              orderBy: desc(messages.messageId),
+              limit: beforeLimit,
+              with: fullMessageRelations,
+            })
+          : []
+      const afterMessages =
+        afterLimit > 0
+          ? await tx._query.messages.findMany({
+              where: and(eq(messages.chatId, chatId), gt(messages.messageId, anchorIdNumber)),
+              orderBy: asc(messages.messageId),
+              limit: afterLimit,
+              with: fullMessageRelations,
+            })
+          : []
 
-  const combinedAround = [...beforeMessages, ...anchorMessages, ...afterMessages]
+      return [...beforeMessages, ...anchorMessages, ...afterMessages]
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  )
+
   combinedAround.sort((a, b) => b.messageId - a.messageId)
 
   return processMessages(combinedAround)

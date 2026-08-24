@@ -111,6 +111,13 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
     throw RealtimeRpcError.BadRequest()
   }
 
+  if (
+    input.anchorId !== undefined &&
+    (input.anchorId <= 0n || input.anchorId > BigInt(Number.MAX_SAFE_INTEGER))
+  ) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
   if (input.beforeLimit !== undefined && input.beforeLimit < 0) {
     throw RealtimeRpcError.BadRequest()
   }
