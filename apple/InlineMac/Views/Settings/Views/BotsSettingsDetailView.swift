@@ -18,6 +18,7 @@ struct BotsSettingsDetailView: View {
 
   @State private var botToEdit: BotEditItem?
   @State private var botToEditAvatar: BotAvatarEditItem?
+  @State private var botSettingsItem: BotSettingsItem?
   @State private var rotateConfirmBotId: Int64?
   @State private var deleteConfirmBot: BotDeleteItem?
 
@@ -159,6 +160,9 @@ struct BotsSettingsDetailView: View {
               onEditAvatar: {
                 botToEditAvatar = BotAvatarEditItem(bot: bot)
               },
+              onSettings: {
+                botSettingsItem = BotSettingsItem(bot: bot)
+              },
               onCopy: { token in
                 copyToken(token)
               }
@@ -201,6 +205,27 @@ struct BotsSettingsDetailView: View {
       BotAvatarSettingsSheet(bot: item.bot) { updatedBot in
         viewModel.upsertBot(updatedBot)
       }
+    }
+    .sheet(item: $botSettingsItem) { item in
+      ManagedBotSettingsSheet(
+        bot: item.bot,
+        token: viewModel.revealedTokens[item.id],
+        isBusy: viewModel.isBusy(item.id),
+        onRevealToken: {
+          Task { await viewModel.revealToken(for: item.id, realtimeV2: realtimeV2) }
+        },
+        onHideToken: {
+          viewModel.hideToken(for: item.id)
+        },
+        onCopyToken: copyToken,
+        onRotateToken: {
+          Task { await viewModel.rotateToken(for: item.id, realtimeV2: realtimeV2) }
+        },
+        onBotUpdated: { updatedBot in
+          viewModel.upsertBot(updatedBot)
+          botSettingsItem = BotSettingsItem(bot: updatedBot)
+        }
+      )
     }
     .confirmationDialog(
       "Rotate Token",
@@ -320,6 +345,11 @@ private struct BotEditItem: Identifiable {
 }
 
 private struct BotAvatarEditItem: Identifiable {
+  let bot: InlineProtocol.User
+  var id: Int64 { bot.id }
+}
+
+private struct BotSettingsItem: Identifiable {
   let bot: InlineProtocol.User
   var id: Int64 { bot.id }
 }
@@ -561,6 +591,7 @@ private struct BotRow: View {
   let onDeleteRequested: () -> Void
   let onEditProfile: () -> Void
   let onEditAvatar: () -> Void
+  let onSettings: () -> Void
   let onCopy: (String) -> Void
 
   var body: some View {
@@ -622,6 +653,10 @@ private struct BotRow: View {
 
       Divider()
 
+      Button("Settings...") {
+        onSettings()
+      }
+
       Button(isRotating ? "Rotating..." : "Rotate Token...") {
         onRotateRequested()
       }
@@ -661,6 +696,125 @@ private struct BotRow: View {
   private var usernameText: String? {
     guard bot.hasUsername, !bot.username.isEmpty else { return nil }
     return "@\(bot.username)"
+  }
+}
+
+private struct ManagedBotSettingsSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @State private var botToEdit: BotEditItem?
+  @State private var botToEditAvatar: BotAvatarEditItem?
+  @State private var isConfirmingRotation = false
+
+  let bot: InlineProtocol.User
+  let token: String?
+  let isBusy: Bool
+  let onRevealToken: () -> Void
+  let onHideToken: () -> Void
+  let onCopyToken: (String) -> Void
+  let onRotateToken: () -> Void
+  let onBotUpdated: (InlineProtocol.User) -> Void
+
+  var body: some View {
+    VStack(spacing: 0) {
+      Form {
+        ManagedBotIdentitySection(
+          bot: bot,
+          onEditProfile: { botToEdit = BotEditItem(bot: bot) },
+          onEditAvatar: { botToEditAvatar = BotAvatarEditItem(bot: bot) }
+        )
+        ManagedBotAccessSection(
+          token: token,
+          isBusy: isBusy,
+          onRevealToken: onRevealToken,
+          onHideToken: onHideToken,
+          onCopyToken: onCopyToken,
+          onRotateToken: { isConfirmingRotation = true }
+        )
+      }
+      .formStyle(.grouped)
+
+      Divider()
+
+      HStack {
+        Spacer()
+        Button("Done") { dismiss() }
+          .keyboardShortcut(.defaultAction)
+      }
+      .padding()
+    }
+    .frame(width: 520, height: 390)
+    .sheet(item: $botToEdit) { item in
+      BotProfileEditorSheet(bot: item.bot, onUpdated: onBotUpdated)
+    }
+    .sheet(item: $botToEditAvatar) { item in
+      BotAvatarSettingsSheet(bot: item.bot, onUpdated: onBotUpdated)
+    }
+    .confirmationDialog(
+      "Rotate Token",
+      isPresented: $isConfirmingRotation,
+      titleVisibility: .visible
+    ) {
+      Button("Rotate Token", role: .destructive, action: onRotateToken)
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("This will revoke the existing token. Any integrations using the old token will stop working until updated.")
+    }
+  }
+}
+
+private struct ManagedBotIdentitySection: View {
+  let bot: InlineProtocol.User
+  let onEditProfile: () -> Void
+  let onEditAvatar: () -> Void
+
+  var body: some View {
+    Section("Profile") {
+      LabeledContent("Name", value: User(from: bot).displayName)
+      if bot.hasUsername, !bot.username.isEmpty {
+        LabeledContent("Username", value: "@\(bot.username)")
+      }
+      HStack {
+        Button("Edit Profile...", action: onEditProfile)
+        Button("Change Avatar...", action: onEditAvatar)
+      }
+    }
+  }
+}
+
+private struct ManagedBotAccessSection: View {
+  let token: String?
+  let isBusy: Bool
+  let onRevealToken: () -> Void
+  let onHideToken: () -> Void
+  let onCopyToken: (String) -> Void
+  let onRotateToken: () -> Void
+
+  var body: some View {
+    Section {
+      if let token {
+        Text(token)
+          .font(.caption.monospaced())
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .privacySensitive()
+          .textSelection(.enabled)
+
+        HStack {
+          Button("Copy") { onCopyToken(token) }
+          Button("Hide", action: onHideToken)
+        }
+      } else {
+        Button("Reveal Token", action: onRevealToken)
+          .disabled(isBusy)
+      }
+
+      Button("Rotate Token...", action: onRotateToken)
+        .disabled(isBusy)
+    } header: {
+      Text("Access Token")
+    } footer: {
+      Text("Keep this token private. Rotating it immediately revokes the previous token.")
+    }
   }
 }
 

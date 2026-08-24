@@ -83,6 +83,7 @@ struct BotsSettingsView: View {
               revealToken: { revealToken(for: bot.id) },
               hideToken: { revealedTokens[bot.id] = nil },
               copyToken: copyToken,
+              rotateToken: { rotateToken(for: bot.id) },
               requestDelete: { botToDelete = bot }
             )
           }
@@ -237,6 +238,26 @@ struct BotsSettingsView: View {
     }
   }
 
+  private func rotateToken(for botID: Int64) {
+    guard !busyBotIDs.contains(botID) else { return }
+    busyBotIDs.insert(botID)
+    errorMessage = nil
+
+    Task {
+      do {
+        let result = try await realtimeV2.send(.rotateBotToken(botUserId: botID))
+        guard case let .rotateBotToken(response) = result, !response.token.isEmpty else {
+          throw TransactionExecutionError.invalid
+        }
+        revealedTokens[botID] = response.token
+      } catch {
+        Log.scoped("IOSSettings.Bots").error("Failed to rotate bot token", error: error)
+        errorMessage = "Could not rotate the bot token."
+      }
+      busyBotIDs.remove(botID)
+    }
+  }
+
   private func copyToken(_ token: String) {
     UIPasteboard.general.setItems(
       [[UTType.plainText.identifier: token]],
@@ -272,22 +293,26 @@ private struct IOSBotSettingsRow: View {
   let revealToken: () -> Void
   let hideToken: () -> Void
   let copyToken: (String) -> Void
+  let rotateToken: () -> Void
   let requestDelete: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 10) {
-        UserAvatar(user: User(from: bot), size: 38)
-
-        VStack(alignment: .leading, spacing: 2) {
-          Text(User(from: bot).displayName)
-          if bot.hasUsername, !bot.username.isEmpty {
-            Text("@\(bot.username)")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+        NavigationLink {
+          IOSManagedBotSettingsView(
+            bot: bot,
+            token: token,
+            isBusy: isBusy,
+            revealToken: revealToken,
+            hideToken: hideToken,
+            copyToken: copyToken,
+            rotateToken: rotateToken
+          )
+        } label: {
+          IOSManagedBotSummary(bot: bot)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(.plain)
 
         if isBusy {
           ProgressView()
@@ -300,8 +325,8 @@ private struct IOSBotSettingsRow: View {
               Button("Hide Token", action: hideToken)
             }
 
-            // TODO: Add profile/avatar editing and token rotation after the
-            // second-pass information architecture is verified on device.
+            // TODO: Add profile and avatar editing after the second-pass
+            // information architecture is verified on device.
             Divider()
             Button("Delete Bot", role: .destructive, action: requestDelete)
           } label: {
@@ -329,5 +354,111 @@ private struct IOSBotSettingsRow: View {
       }
     }
     .padding(.vertical, 3)
+  }
+}
+
+private struct IOSManagedBotSummary: View {
+  let bot: InlineProtocol.User
+
+  var body: some View {
+    HStack(spacing: 10) {
+      UserAvatar(user: User(from: bot), size: 38)
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text(User(from: bot).displayName)
+        if bot.hasUsername, !bot.username.isEmpty {
+          Text("@\(bot.username)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+}
+
+private struct IOSManagedBotSettingsView: View {
+  let bot: InlineProtocol.User
+  let token: String?
+  let isBusy: Bool
+  let revealToken: () -> Void
+  let hideToken: () -> Void
+  let copyToken: (String) -> Void
+  let rotateToken: () -> Void
+
+  @State private var isConfirmingRotation = false
+
+  var body: some View {
+    List {
+      IOSManagedBotProfileSection(bot: bot)
+      IOSManagedBotAccessSection(
+        token: token,
+        isBusy: isBusy,
+        revealToken: revealToken,
+        hideToken: hideToken,
+        copyToken: copyToken,
+        requestRotation: { isConfirmingRotation = true }
+      )
+    }
+    .listStyle(.insetGrouped)
+    .navigationTitle(User(from: bot).displayName)
+    .navigationBarTitleDisplayMode(.inline)
+    .confirmationDialog(
+      "Rotate Token?",
+      isPresented: $isConfirmingRotation,
+      titleVisibility: .visible
+    ) {
+      Button("Rotate Token", role: .destructive, action: rotateToken)
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("The current token will stop working immediately. Existing integrations must be updated with the new token.")
+    }
+  }
+}
+
+private struct IOSManagedBotProfileSection: View {
+  let bot: InlineProtocol.User
+
+  var body: some View {
+    Section("Profile") {
+      LabeledContent("Name", value: User(from: bot).displayName)
+      if bot.hasUsername, !bot.username.isEmpty {
+        LabeledContent("Username", value: "@\(bot.username)")
+      }
+    }
+  }
+}
+
+private struct IOSManagedBotAccessSection: View {
+  let token: String?
+  let isBusy: Bool
+  let revealToken: () -> Void
+  let hideToken: () -> Void
+  let copyToken: (String) -> Void
+  let requestRotation: () -> Void
+
+  var body: some View {
+    Section {
+      if let token {
+        Text(token)
+          .font(.caption.monospaced())
+          .lineLimit(2)
+          .truncationMode(.middle)
+          .privacySensitive()
+
+        Button("Copy Token") { copyToken(token) }
+        Button("Hide Token", action: hideToken)
+      } else {
+        Button("Reveal Token", action: revealToken)
+          .disabled(isBusy)
+      }
+
+      Button("Rotate Token…", role: .destructive, action: requestRotation)
+        .disabled(isBusy)
+    } header: {
+      Text("Access Token")
+    } footer: {
+      Text("Keep this token private. Rotating it immediately revokes the previous token.")
+    }
   }
 }
