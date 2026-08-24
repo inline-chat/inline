@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { getUpdates } from "@in/server/functions/updates.getUpdates"
+import { getUpdates, replayRequiresAuthoritativeRepair } from "@in/server/functions/updates.getUpdates"
 import { addChatParticipant } from "@in/server/functions/messages.addChatParticipant"
 import { createUserGroup, updateUserGroup } from "@in/server/modules/userGroups"
 import { testUtils, setupTestLifecycle } from "../setup"
@@ -16,6 +16,7 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { chats, dialogs, members, messages, spaces } from "@in/server/db/schema"
 import { handler as readMessages } from "@in/server/methods/readMessages"
@@ -46,6 +47,14 @@ const insertServerUpdate = async (params: {
 describe("getUpdates", () => {
   setupTestLifecycle()
 
+  test("uses an exclusive 10,000-update authoritative-repair boundary", () => {
+    expect(replayRequiresAuthoritativeRepair(0, 9_999)).toBe(false)
+    expect(replayRequiresAuthoritativeRepair(0, 10_000)).toBe(false)
+    expect(replayRequiresAuthoritativeRepair(0, 10_001)).toBe(true)
+    expect(replayRequiresAuthoritativeRepair(50, 10_050)).toBe(false)
+    expect(replayRequiresAuthoritativeRepair(50, 10_051)).toBe(true)
+  })
+
   test("returns TOO_LONG with correct seq when gap is too large", async () => {
     // 1. Setup User and Chat
     const { users, space } = await testUtils.createSpaceWithMembers("Test Space", ["user@example.com"])
@@ -53,21 +62,15 @@ describe("getUpdates", () => {
     const chat = await testUtils.createChat(space.id, "Test Chat", "thread")
     if (!chat) throw new Error("Chat creation failed")
 
-    // 2. Insert updates (seq 1 to 10)
-    // We just need dummy payload
+    // The payload is intentionally opaque because TOO_LONG is decided before inflation.
     const dummyPayload = Buffer.from([1, 2, 3])
-    
-    for (let i = 1; i <= 10; i++) {
-      await db.insert(updates).values({
-        bucket: UpdateBucket.Chat,
-        entityId: chat.id,
-        seq: i,
-        payload: dummyPayload,
-      })
-    }
+    await db.insert(updates).values({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 10_001,
+      payload: dummyPayload,
+    })
 
-    // 3. Call getUpdates with fast-forward parameters
-    // startSeq=0, totalLimit=1
     const inputPeer: InputPeer = {
       type: {
         oneofKind: "chat",
@@ -90,7 +93,7 @@ describe("getUpdates", () => {
 
     // 4. Verify result
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
-    expect(Number(result.seq)).toBe(10) 
+    expect(Number(result.seq)).toBe(10_001)
   })
 
   test("respects seqEnd for sliced getUpdates", async () => {
@@ -126,12 +129,12 @@ describe("getUpdates", () => {
     expect(result.updates.length).toBe(3)
   })
 
-  test("uses request limit as page size", async () => {
+  test("uses 100 as the default page size", async () => {
     const { users } = await testUtils.createSpaceWithMembers("Page Limit", ["page-limit@example.com"])
     const user = users[0]
     if (!user) throw new Error("User creation failed")
 
-    for (let seq = 1; seq <= 5; seq += 1) {
+    for (let seq = 1; seq <= 105; seq += 1) {
       await insertServerUpdate({
         bucket: UpdateBucket.User,
         entityId: user.id,
@@ -149,14 +152,101 @@ describe("getUpdates", () => {
       bucket: { type: { oneofKind: "user", user: {} } },
       startSeq: 0n,
       seqEnd: 0n,
-      totalLimit: 1000,
-      limit: 2,
+      totalLimit: 1,
+      limit: 0,
     }, { currentUserId: user.id } as any)
 
-    expect(Number(result.seq)).toBe(2)
+    expect(Number(result.seq)).toBe(100)
     expect(result.final).toBe(false)
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
-    expect(result.updates.length).toBe(2)
+    expect(result.updates.length).toBe(100)
+
+    const capped = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 1,
+      limit: 500,
+    }, { currentUserId: user.id } as any)
+
+    expect(capped.seq).toBe(100n)
+    expect(capped.final).toBe(false)
+    expect(capped.updates).toHaveLength(100)
+  })
+
+  test("rejects invalid page limits", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Invalid Page Limit", ["invalid-page-limit@example.com"])
+    const user = users[0]
+    if (!user) throw new Error("User creation failed")
+
+    await expect(getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 0,
+      limit: 1.5,
+    }, { currentUserId: user.id } as any)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects sequences outside the PostgreSQL integer domain", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Sequence Domain", ["sequence-domain@example.com"])
+    const user = users[0]
+    if (!user) throw new Error("User creation failed")
+
+    await expect(getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 2_147_483_648n,
+      seqEnd: 0n,
+      totalLimit: 0,
+      limit: 100,
+    }, { currentUserId: user.id } as any)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+
+    await expect(getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n,
+      seqEnd: 2_147_483_648n,
+      totalLimit: 0,
+      limit: 100,
+    }, { currentUserId: user.id } as any)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("requests authoritative repair for a non-contiguous durable page without delivering a partial slice", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Sparse Page", ["sparse-page@example.com"])
+    const user = users[0]
+    if (!user) throw new Error("User creation failed")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: { chatId: 1n },
+      },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 3,
+      payload: {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: { chatId: 3n },
+      },
+    })
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 0,
+      limit: 100,
+    }, { currentUserId: user.id } as any)
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
+    expect(result.seq).toBe(3n)
+    expect(result.final).toBe(false)
+    expect(result.updates).toEqual([])
+    expect(result.skippedSequences).toEqual([])
   })
 
   test("does not return a cursor behind startSeq", async () => {
@@ -188,6 +278,7 @@ describe("getUpdates", () => {
     expect(result.final).toBe(true)
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.EMPTY)
     expect(result.updates).toHaveLength(0)
+    expect(result.date).toBe(0n)
   })
 
   test("accounts for a filtered record before advancing past later updates", async () => {
@@ -237,6 +328,43 @@ describe("getUpdates", () => {
         reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET,
       },
     ])
+  })
+
+  test("accounts for an unknown durable user update and continues", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Unknown Catalog Entry", ["unknown-catalog@example.com"])
+    const user = users[0]
+    if (!user) throw new Error("User creation failed")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: { oneofKind: undefined },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 2,
+      payload: {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: { chatId: 2n },
+      },
+    })
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 0,
+      limit: 100,
+    }, { currentUserId: user.id } as any)
+
+    expect(result.seq).toBe(2n)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantDelete"])
+    expect(result.skippedSequences).toEqual([{
+      seq: 1n,
+      reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET,
+    }])
   })
 
   test("serves group grants with chat and group sidecars", async () => {
@@ -293,9 +421,14 @@ describe("getUpdates", () => {
     )
 
     expect(result.updates.map((update) => update.update.oneofKind)).toEqual([
-      "participantGroupAdd",
+      "userAddedToChat",
       "chatPermissions",
     ])
+    const accessUpdate = result.updates[0]?.update
+    expect(accessUpdate?.oneofKind).toBe("userAddedToChat")
+    if (accessUpdate?.oneofKind !== "userAddedToChat") throw new Error("Expected userAddedToChat")
+    expect(Number(accessUpdate.userAddedToChat.chatId)).toBe(chat.id)
+    expect(Number(accessUpdate.userAddedToChat.group?.groupId)).toBe(groupId)
     const permissionUpdate = result.updates[1]?.update
     expect(permissionUpdate?.oneofKind).toBe("chatPermissions")
     if (permissionUpdate?.oneofKind !== "chatPermissions") {
@@ -520,28 +653,34 @@ describe("getUpdates", () => {
     expect(result.sidecars?.users.map((sidecar) => Number(sidecar.id))).toContain(newUser.id)
   })
 
-  test("caps totalLimit to MAX_TOTAL_LIMIT", async () => {
-    const { users } = await testUtils.createSpaceWithMembers("TotalLimit Cap", ["cap@example.com"])
+  test("does not let the client totalLimit force TOO_LONG", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Server Replay Limit", ["server-limit@example.com"])
     const user = users[0]
     if (!user) throw new Error("User creation failed")
 
-    const dummyPayload = Buffer.from([1, 2, 3])
-    await db.insert(updates).values({
-      bucket: UpdateBucket.User,
-      entityId: user.id,
-      seq: 1501,
-      payload: dummyPayload,
-    })
+    for (let seq = 1; seq <= 2; seq += 1) {
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: user.id,
+        seq,
+        payload: {
+          oneofKind: "userChatParticipantDelete",
+          userChatParticipantDelete: { chatId: BigInt(seq) },
+        },
+      })
+    }
 
     const result = await getUpdates({
       bucket: { type: { oneofKind: "user", user: {} } },
       startSeq: 0n,
       seqEnd: 0n,
-      totalLimit: 5000,
+      totalLimit: 1,
       limit: 0,
     }, { currentUserId: user.id } as any)
 
-    expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.updates).toHaveLength(2)
+    expect(result.final).toBe(true)
   })
 
   test("advances over missing newMessage targets with chatSkipPts", async () => {

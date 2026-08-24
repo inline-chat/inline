@@ -14,8 +14,13 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
 import { Log } from "@in/server/utils/log"
 
-const MAX_TOTAL_LIMIT = 1000
+const PAGE_LIMIT = 100
+const REPLAY_LIMIT = 10_000
+const MAX_DATABASE_SEQUENCE = 2_147_483_647
 const log = new Log("updates.getUpdates")
+
+export const replayRequiresAuthoritativeRepair = (startSeq: number, latestSeq: number): boolean =>
+  latestSeq - startSeq > REPLAY_LIMIT
 
 type BucketDescriptor =
   | {
@@ -47,7 +52,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
 
   const seqStart = Number(seqStartBigInt)
-  if (!Number.isSafeInteger(seqStart)) {
+  if (!Number.isSafeInteger(seqStart) || seqStart > MAX_DATABASE_SEQUENCE) {
     throw RealtimeRpcError.BadRequest()
   }
 
@@ -59,7 +64,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
       throw RealtimeRpcError.BadRequest()
     }
     const seqEndNumber = Number(seqEndBigInt)
-    if (!Number.isSafeInteger(seqEndNumber)) {
+    if (!Number.isSafeInteger(seqEndNumber) || seqEndNumber > MAX_DATABASE_SEQUENCE) {
       throw RealtimeRpcError.BadRequest()
     }
     if (seqEndNumber < seqStart) {
@@ -68,11 +73,12 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     seqEnd = seqEndNumber
   }
 
-  const requestedLimit =
-    input.totalLimit !== undefined && input.totalLimit > 0 ? Number(input.totalLimit) : MAX_TOTAL_LIMIT
-  const totalLimit = Math.min(requestedLimit, MAX_TOTAL_LIMIT)
-  const requestedPageLimit = input.limit !== undefined && input.limit > 0 ? Number(input.limit) : totalLimit
-  const pageLimit = Math.min(requestedPageLimit, totalLimit)
+  const rawPageLimit = input.limit ?? 0
+  if (!Number.isSafeInteger(rawPageLimit) || rawPageLimit < 0) {
+    throw RealtimeRpcError.BadRequest()
+  }
+  const requestedPageLimit = rawPageLimit > 0 ? rawPageLimit : PAGE_LIMIT
+  const pageLimit = Math.min(requestedPageLimit, PAGE_LIMIT)
 
   const fetchTiming = await timed(async () =>
     Sync.getUpdates({
@@ -89,8 +95,8 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   } = fetchTiming.value
   const fetchMs = fetchTiming.ms
 
-  let pageSeq = latestSeq
-  let pageDate = latestDate
+  let pageSeq = seqStart
+  let pageDate: Date | null = null
   if (dbUpdates.length > 0) {
     const lastRecord = dbUpdates[dbUpdates.length - 1]!
     pageSeq = lastRecord.seq
@@ -98,7 +104,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
 
   const seqDifference = latestSeq - seqStart
-  if (seqDifference > totalLimit) {
+  if (replayRequiresAuthoritativeRepair(seqStart, latestSeq)) {
     logGetUpdatesTiming({
       scope: descriptor.scope,
       result: "too_long",
@@ -110,17 +116,36 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
       dbUpdates: dbUpdates.length,
       updates: 0,
       pageLimit,
-      totalLimit,
+      replayLimit: REPLAY_LIMIT,
       seqDifference,
     })
-    return {
-      updates: [],
-      seq: BigInt(latestSeq),
-      date: encodeOptionalDate(latestDate),
-      final: false,
-      resultType: GetUpdatesResult_ResultType.TOO_LONG,
-      skippedSequences: [],
-    }
+    return authoritativeRepairResult(latestSeq, latestDate)
+  }
+
+  const pageGap = findDatabasePageGap(dbUpdates, seqStart)
+  if (pageGap) {
+    log.warn("Non-contiguous durable sync page; requesting authoritative repair", {
+      scope: descriptor.scope,
+      expectedSeq: pageGap.expectedSeq,
+      actualSeq: pageGap.actualSeq,
+      latestSeq,
+      dbUpdates: dbUpdates.length,
+    })
+    logGetUpdatesTiming({
+      scope: descriptor.scope,
+      result: "too_long",
+      totalMs: elapsedMs(startedAt),
+      resolveMs,
+      fetchMs,
+      inflateMs: 0,
+      sidecarsMs: 0,
+      dbUpdates: dbUpdates.length,
+      updates: 0,
+      pageLimit,
+      replayLimit: REPLAY_LIMIT,
+      seqDifference,
+    })
+    return authoritativeRepairResult(latestSeq, latestDate)
   }
 
   let inflatedUpdates: GetUpdatesResult["updates"] = []
@@ -191,7 +216,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     dbUpdates: dbUpdates.length,
     updates: updates.length,
     pageLimit,
-    totalLimit,
+    replayLimit: REPLAY_LIMIT,
     seqDifference,
   })
 
@@ -205,6 +230,31 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     skippedSequences,
   }
 }
+
+const findDatabasePageGap = (
+  dbUpdates: Awaited<ReturnType<typeof Sync.getUpdates>>["updates"],
+  seqStart: number,
+): { expectedSeq: number; actualSeq: number } | undefined => {
+  for (let index = 0; index < dbUpdates.length; index += 1) {
+    const expectedSeq = seqStart + index + 1
+    const actualSeq = dbUpdates[index]!.seq
+    if (actualSeq !== expectedSeq) {
+      return { expectedSeq, actualSeq }
+    }
+  }
+}
+
+const authoritativeRepairResult = (
+  latestSeq: number,
+  latestDate: Date | null,
+): GetUpdatesResult => ({
+  updates: [],
+  seq: BigInt(latestSeq),
+  date: encodeOptionalDate(latestDate),
+  final: false,
+  resultType: GetUpdatesResult_ResultType.TOO_LONG,
+  skippedSequences: [],
+})
 
 const assertPageSequenceAccounting = (
   dbUpdates: Awaited<ReturnType<typeof Sync.getUpdates>>["updates"],
@@ -259,7 +309,7 @@ type GetUpdatesTiming = {
   dbUpdates: number
   updates: number
   pageLimit: number
-  totalLimit: number
+  replayLimit: number
   seqDifference: number
 }
 

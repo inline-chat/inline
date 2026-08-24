@@ -812,7 +812,7 @@ describe("Sync core flow", () => {
     expect(result.updates).toHaveLength(1)
   })
 
-  it("returns TOO_LONG when total limit is exceeded", async () => {
+  it("returns TOO_LONG when the server replay ceiling is exceeded", async () => {
     const { users } = await testUtils.createSpaceWithMembers("Too Long Sync", ["toolong@sync.com"])
     const user = users[0]
     if (!user) {
@@ -822,7 +822,7 @@ describe("Sync core flow", () => {
     await insertServerUpdate({
       bucket: UpdateBucket.User,
       entityId: user.id,
-      seq: 5,
+      seq: 10_001,
       payload: {
         oneofKind: "userChatParticipantDelete",
         userChatParticipantDelete: {

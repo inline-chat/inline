@@ -24,6 +24,7 @@ import {
   members,
   messageAttachments,
   spaces,
+  updates as updatesTable,
   userGroupMembers,
   userGroups,
   userNotDeleted,
@@ -34,7 +35,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, asc, eq, inArray } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, lte } from "drizzle-orm"
 import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
 
@@ -99,39 +100,42 @@ async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
   const { bucket, seqStart, seqEnd } = input
   const entityId = getEntityId(bucket)
 
-  const seqFilter = seqEnd !== undefined ? { gt: seqStart, lte: seqEnd } : { gt: seqStart }
+  const pageWhere = and(
+    eq(updatesTable.bucket, bucket.type),
+    eq(updatesTable.entityId, entityId),
+    gt(updatesTable.seq, seqStart),
+    seqEnd !== undefined ? lte(updatesTable.seq, seqEnd) : undefined,
+  )
+  const latestWhere = and(
+    eq(updatesTable.bucket, bucket.type),
+    eq(updatesTable.entityId, entityId),
+    seqEnd !== undefined ? lte(updatesTable.seq, seqEnd) : undefined,
+  )
 
-  const list = await db.query.updates.findMany({
-    where: {
-      bucket: bucket.type,
-      entityId,
-      seq: seqFilter,
+  return db.transaction(
+    async (tx) => {
+      const list = await tx
+        .select()
+        .from(updatesTable)
+        .where(pageWhere)
+        .orderBy(asc(updatesTable.seq))
+        .limit(input.limit)
+
+      const [latest] = await tx
+        .select()
+        .from(updatesTable)
+        .where(latestWhere)
+        .orderBy(desc(updatesTable.seq))
+        .limit(1)
+
+      return {
+        updates: list,
+        latestSeq: Math.max(latest?.seq ?? seqStart, seqStart),
+        latestDate: latest !== undefined && latest.seq >= seqStart ? latest.date : null,
+      }
     },
-    orderBy: {
-      seq: "asc",
-    },
-    limit: input.limit,
-  })
-
-  const latestWhere = seqEnd !== undefined
-    ? { bucket: bucket.type, entityId, seq: { lte: seqEnd } }
-    : { bucket: bucket.type, entityId }
-
-  const latest = await db.query.updates.findFirst({
-    where: latestWhere,
-    orderBy: {
-      seq: "desc",
-    },
-  })
-
-  const latestSeq = Math.max(latest?.seq ?? seqStart, seqStart)
-  const latestDate = latest !== undefined && latest.seq >= seqStart ? latest.date : null
-
-  return {
-    updates: list,
-    latestSeq,
-    latestDate,
-  }
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  )
 }
 
 const getEntityId = (bucket: UpdateBoxInput): number => {
@@ -599,6 +603,8 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "updatedUser":
       case "userChatParticipantGroupAdd":
       case "userChatParticipantGroupDelete":
+      case "userAddedToChat":
+      case "userRemovedFromChat":
       case "userChatPermissions":
       case "userSettings":
       case "userDialogFolder":
@@ -607,7 +613,9 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         inflatedUpdates.push(chatSkipPts(update, chatId))
         break
       case undefined:
-        throw new Error(`Chat sync update ${update.seq} has no payload`)
+        log.warn("Skipping unknown durable chat update", { chatId, seq: update.seq })
+        inflatedUpdates.push(chatSkipPts(update, chatId))
+        break
       default:
         assertNever(serverUpdate.update)
     }
@@ -837,6 +845,16 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
 
   for (const update of input.updates) {
     switch (update.update.oneofKind) {
+      case "userAddedToChat":
+        addSafeId(chatIds, update.update.userAddedToChat.chatId)
+        addSafeId(userIds, update.update.userAddedToChat.participant?.userId)
+        addSafeId(groupIds, update.update.userAddedToChat.group?.groupId)
+        break
+
+      case "userRemovedFromChat":
+        addSafeId(chatIds, update.update.userRemovedFromChat.chatId)
+        break
+
       case "participantAdd":
         addSafeId(chatIds, update.update.participantAdd.chatId)
         addSafeId(userIds, update.update.participantAdd.participant?.userId)
@@ -1340,12 +1358,15 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "participantGroupDelete":
     case "userChatParticipantGroupAdd":
     case "userChatParticipantGroupDelete":
+    case "userAddedToChat":
+    case "userRemovedFromChat":
     case "userChatPermissions":
     case "userSettings":
     case "userDialogFolder":
       return null
     case undefined:
-      throw new Error(`Space sync update ${update.seq} has no payload`)
+      log.warn("Skipping unknown durable space update", { spaceId: update.entityId, seq: update.seq })
+      return null
     default:
       return assertNever(payload)
   }
@@ -1445,6 +1466,26 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
             chatId: payload.userChatParticipantGroupAdd.chatId,
             groupParticipant: payload.userChatParticipantGroupAdd.groupParticipant,
           },
+        },
+      }
+
+    case "userAddedToChat":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "userAddedToChat",
+          userAddedToChat: payload.userAddedToChat,
+        },
+      }
+
+    case "userRemovedFromChat":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "userRemovedFromChat",
+          userRemovedFromChat: payload.userRemovedFromChat,
         },
       }
 
@@ -1658,7 +1699,8 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
     case "participantGroupDelete":
       return null
     case undefined:
-      throw new Error(`User sync update ${decrypted.seq} has no payload`)
+      log.warn("Skipping unknown durable user update", { userId, seq: decrypted.seq })
+      return null
     default:
       return assertNever(payload)
   }

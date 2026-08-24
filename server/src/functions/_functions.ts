@@ -13,6 +13,7 @@ import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
 import { createChat } from "./messages.createChat"
 import { getSpaceMembers } from "./space.getSpaceMembers"
+import { getSpace } from "./space.getSpace"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
 import { joinPublicSpace } from "./space.joinPublicSpace"
@@ -124,6 +125,7 @@ export const Functions = {
     //markAsUnread: markAsUnread,
   },
   spaces: {
+    getSpace,
     getSpaceMembers: getSpaceMembers,
     inviteToSpace: inviteToSpace,
     joinPublicSpace,

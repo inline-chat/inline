@@ -20,6 +20,7 @@ import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
 import { createChat } from "@in/server/realtime/handlers/messages.createChat"
 import { getSpaceMembers } from "@in/server/realtime/handlers/space.getSpaceMembers"
+import { getSpace } from "@in/server/realtime/handlers/space.getSpace"
 import { deleteChatHandler } from "@in/server/realtime/handlers/messages.deleteChat"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
 import { joinPublicSpace } from "@in/server/functions/space.joinPublicSpace"
@@ -138,11 +139,11 @@ import {
   updateSessionV3,
 } from "@in/server/realtime/handlers/v3Migration"
 
-const log = new Log("rpc")
+const log = new Log("Realtime.RPC")
 
 export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContext): Promise<RpcResult["result"]> => {
   // user still unauthenticated here.
-  log.debug("rpc call", Method[call.method])
+  log.trace("rpc call", Method[call.method])
 
   switch (call.method) {
     case Method.GET_ME: {
@@ -337,6 +338,11 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       if (call.input.oneofKind !== "answerBotChatSettings") throw RealtimeRpcError.BadRequest()
       const result = await answerBotChatSettingsHandler(call.input.answerBotChatSettings, handlerContext)
       return { oneofKind: "answerBotChatSettings", answerBotChatSettings: result }
+    }
+    case Method.GET_SPACE: {
+      if (call.input.oneofKind !== "getSpace") throw RealtimeRpcError.BadRequest()
+      const result = await getSpace(call.input.getSpace, handlerContext)
+      return { oneofKind: "getSpace", getSpace: result }
     }
     case Method.GET_SPACE_MEMBERS: {
       if (call.input.oneofKind !== "getSpaceMembers") {
