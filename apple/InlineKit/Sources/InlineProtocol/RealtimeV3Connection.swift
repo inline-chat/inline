@@ -255,6 +255,7 @@ public enum InlineProtocolV3ConnectionError: Error, Equatable, Sendable {
   case invalidKey
   case outboundBufferOverflow
   case protocolFailure
+  case rejectedBeforeExecution
   case requestCapacityExceeded
   /// The authenticated temporary authorization reached its rotation boundary. The owning
   /// transport closes the carrier so the normal reconnect owner can replace and persist it.
@@ -340,6 +341,7 @@ public actor InlineProtocolV3Connection {
   private var receiveTask: Task<Void, Never>?
   private var terminated = false
   private var terminationErrorValue: InlineProtocolV3ConnectionError?
+  private var didWarnAboutUnknownServiceMessage = false
 
   private init(
     session: URLSession,
@@ -554,16 +556,7 @@ public actor InlineProtocolV3Connection {
       switch result {
       case let .success(prepared):
         do {
-          if try InlineSecureTransport.decodeTLRPCError(prepared.result)?.code == 504 {
-            await completion(.failure(InlineProtocolV3ConnectionError.commitOutcomeUnknown))
-            return
-          }
-          guard case let .result(payload) = try InlineSecureTransport
-            .decodeInlineApplicationObject(prepared.result)
-          else {
-            throw InlineProtocolV3ConnectionError.unexpectedResponse
-          }
-          await completion(.success(try RealtimeV3Response(serializedBytes: payload)))
+          await completion(.success(try Self.decodeApplicationResponse(prepared.result)))
         } catch {
           await completion(.failure(error))
         }
@@ -571,6 +564,27 @@ public actor InlineProtocolV3Connection {
         await completion(.failure(error))
       }
     }
+  }
+
+  /// Converts the carrier's service-level outcome into the existing protobuf
+  /// application result boundary. Carrier outcomes stay distinct from protobuf
+  /// application errors even when an application happens to use the same status.
+  static func decodeApplicationResponse(_ result: [UInt8]) throws -> RealtimeV3Response {
+    if let carrierError = try InlineSecureTransport.decodeTLRPCError(result) {
+      switch carrierError.code {
+      case 503:
+        throw InlineProtocolV3ConnectionError.rejectedBeforeExecution
+      case 504:
+        throw InlineProtocolV3ConnectionError.commitOutcomeUnknown
+      default:
+        throw InlineProtocolV3ConnectionError.unexpectedResponse
+      }
+    }
+
+    guard case let .result(payload) = try InlineSecureTransport.decodeInlineApplicationObject(result) else {
+      throw InlineProtocolV3ConnectionError.unexpectedResponse
+    }
+    return try RealtimeV3Response(serializedBytes: payload)
   }
 
   public func authBegin(_ request: AuthBeginRequest) async throws -> AuthBeginResult {
@@ -850,7 +864,10 @@ public actor InlineProtocolV3Connection {
       } catch {
         // Authenticated service constructors added by newer peers are non-critical unless this
         // client recognizes them. Ignore them without weakening record authentication.
-        log.warning("Ignoring unknown authenticated Inline Protocol service message")
+        if !didWarnAboutUnknownServiceMessage {
+          didWarnAboutUnknownServiceMessage = true
+          log.warning("Ignoring unknown authenticated Inline Protocol service message")
+        }
         return
       }
       guard case let .update(payload) = application else { return }
@@ -983,7 +1000,6 @@ public actor InlineProtocolV3Connection {
     }
     let pending = pendingRequests.removeValue(forKey: entry.key)!
     pending.timeoutTask?.cancel()
-    log.error("Application request timed out; terminating connection")
     deliver(pending, .failure(InlineProtocolV3ConnectionError.timeout))
     await terminate(with: InlineProtocolV3ConnectionError.timeout, closeCode: .goingAway)
   }
@@ -1098,15 +1114,37 @@ public actor InlineProtocolV3Connection {
     let pendingRPCCount = pendingRequests.count
     let pendingProbeCount = pendingProbes.count
     let queuedWriteCount = await outboundWriter.queuedWriteCount
-    if closeCode == .normalClosure {
-      log.info(
-        "Connection closed pending_rpc=\(pendingRPCCount) pending_probe=\(pendingProbeCount) queued_write=\(queuedWriteCount)"
+    let queuedWriteBytes = await outboundWriter.queuedByteCount
+    if terminationErrorValue == .updateBufferOverflow || terminationErrorValue == .outboundBufferOverflow {
+      PerformanceTrace.breadcrumb(
+        "realtime_transport_buffer_overflow",
+        category: "realtime.transport",
+        level: .warning,
+        data: [
+          "pending_rpc": pendingRPCCount,
+          "pending_probe": pendingProbeCount,
+          "queued_write": queuedWriteCount,
+          "queued_bytes": queuedWriteBytes,
+          "inbound_update_overflow": terminationErrorValue == .updateBufferOverflow ? 1 : 0,
+          "outbound_write_overflow": terminationErrorValue == .outboundBufferOverflow ? 1 : 0,
+        ]
       )
+    }
+    let message = if closeCode == .normalClosure {
+      "Connection closed pending_rpc=\(pendingRPCCount) pending_probe=\(pendingProbeCount) queued_write=\(queuedWriteCount)"
     } else {
+      "Connection failed pending_rpc=\(pendingRPCCount) pending_probe=\(pendingProbeCount) queued_write=\(queuedWriteCount)"
+    }
+    switch closeCode == .normalClosure ? LogLevel.debug : Self.failureLogLevel(for: error) {
+    case .error:
       log.error(
-        "Connection failed pending_rpc=\(pendingRPCCount) pending_probe=\(pendingProbeCount) queued_write=\(queuedWriteCount)",
+        message,
         error: error
       )
+    case .warning:
+      log.warning("\(message) reason=\(String(describing: error))")
+    case .debug, .info, .trace:
+      log.debug("\(message) reason=\(String(describing: error))")
     }
     receiveTask?.cancel()
     receiveTask = nil
@@ -1115,6 +1153,41 @@ public actor InlineProtocolV3Connection {
     updatePipe.finish()
     task.cancel(with: closeCode, reason: nil)
     session.invalidateAndCancel()
+  }
+
+  static func failureLogLevel(for error: any Error) -> LogLevel {
+    if error is CancellationError { return .debug }
+    if let urlError = error as? URLError {
+      switch urlError.code {
+      case .cancelled,
+        .timedOut,
+        .notConnectedToInternet,
+        .secureConnectionFailed,
+        .networkConnectionLost:
+        return .debug
+      default:
+        return .error
+      }
+    }
+    guard let connectionError = error as? InlineProtocolV3ConnectionError else { return .error }
+    switch connectionError {
+    case .outboundBufferOverflow,
+      .timeout,
+      .updateBufferOverflow:
+      return .warning
+    case .invalidKey,
+      .protocolFailure,
+      .unexpectedResponse:
+      return .error
+    case .authorizationInvalidated,
+      .closed,
+      .commitOutcomeUnknown,
+      .rejectedBeforeExecution,
+      .requestCapacityExceeded,
+      .rpc,
+      .temporaryAuthorizationRotationDue:
+      return .debug
+    }
   }
 
   private func receivePacket() async throws -> [UInt8] {

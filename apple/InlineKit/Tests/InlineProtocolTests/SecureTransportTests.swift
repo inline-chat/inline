@@ -30,6 +30,23 @@ struct SecureTransportTests {
     #expect(try InlineSecureTransport.decodeTLRPCError(Array(application.serializedData())) == nil)
   }
 
+  @Test("maps carrier 503 to rejected-before-execution without weakening 504")
+  func carrierApplicationOutcomeMapping() throws {
+    let rejected = withUnsafeBytes(of: InlineSecureTransport.rpcErrorConstructor.littleEndian, Array.init)
+      + withUnsafeBytes(of: Int32(503).littleEndian, Array.init)
+      + [0, 0, 0, 0]
+    #expect(throws: InlineProtocolV3ConnectionError.rejectedBeforeExecution) {
+      try InlineProtocolV3Connection.decodeApplicationResponse(rejected)
+    }
+
+    let uncertain = withUnsafeBytes(of: InlineSecureTransport.rpcErrorConstructor.littleEndian, Array.init)
+      + withUnsafeBytes(of: Int32(504).littleEndian, Array.init)
+      + [0, 0, 0, 0]
+    #expect(throws: InlineProtocolV3ConnectionError.commitOutcomeUnknown) {
+      try InlineProtocolV3Connection.decodeApplicationResponse(uncertain)
+    }
+  }
+
   @Test("handshake worker executes Security work off the main thread")
   @MainActor
   func handshakeWorkerRunsOffMainThread() async throws {

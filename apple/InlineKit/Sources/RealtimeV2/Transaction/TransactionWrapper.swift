@@ -67,4 +67,9 @@ public struct TransactionWrapper: Sendable, Identifiable {
       dispatchPhase: dispatchPhase
     )
   }
+
+  func isEphemeralExpired(at date: Date = Date()) -> Bool {
+    guard let config = transaction.ephemeralConfig else { return false }
+    return date.timeIntervalSince(self.date) >= config.maxQueueAge
+  }
 }

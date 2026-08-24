@@ -25,6 +25,9 @@ actor ProtocolSession: ProtocolSessionType {
 
   private var rpcContinuations: [UInt64: PendingDirectRpcContinuation] = [:]
   private static let maxPendingDirectRPCs = 64
+  private static let capacityDiagnosticInterval: TimeInterval = 60
+  private var directCapacityRejections = 0
+  private var lastDirectCapacityDiagnosticAt = Date.distantPast
 
   // Message sequencing and ID generation
   private var seq: UInt32 = 0
@@ -109,6 +112,12 @@ actor ProtocolSession: ProtocolSessionType {
       case let .rpcCommitOutcomeUnknown(msgId):
         await emitAccountEvent(.rpcCommitOutcomeUnknown(msgId: msgId))
         await failRpcContinuation(for: msgId, error: ProtocolSessionError.commitOutcomeUnknown)
+
+      case let .rpcRejectedBeforeExecution(msgId):
+        await emitAccountEvent(.rpcRejectedBeforeExecution(msgId: msgId))
+        // Direct callers have no durable transaction owner. Surface the existing
+        // known-unsent/busy classification and let their operation owner retry.
+        await failRpcContinuation(for: msgId, error: ProtocolSessionError.capacityExceeded)
       }
     }
   }
@@ -117,10 +126,16 @@ actor ProtocolSession: ProtocolSessionType {
     await events.send(.lifecycle(event))
   }
 
-  private func emitAccountEvent(_ event: ProtocolSessionEvent) async {
+  private func emitAccountEvent(
+    _ event: ProtocolSessionEvent,
+    originatingSessionID: UInt64? = nil
+  ) async {
     nextAccountEventID &+= 1
     let eventID = nextAccountEventID
-    let envelope = ProtocolSessionEventEnvelope.account(event)
+    let envelope = ProtocolSessionEventEnvelope.account(
+      event,
+      originatingSessionID: originatingSessionID
+    )
     pendingAccountEvents[eventID] = envelope
     await events.send(envelope)
     await envelope.waitUntilProcessed()
@@ -174,7 +189,14 @@ actor ProtocolSession: ProtocolSessionType {
 
     case let .connectionError(error):
       log.error("Protocol session: server rejected connection init reason=\(error.reason)")
-      await emitAccountEvent(.connectionError(reason: error.reason))
+      guard let transportSessionID else {
+        log.warning("Ignoring connection error without an active transport session")
+        return
+      }
+      await emitAccountEvent(
+        .connectionError(reason: error.reason),
+        originatingSessionID: transportSessionID
+      )
 
     default:
       log.trace("Protocol session: unhandled message type: \(String(describing: message.body))")
@@ -260,6 +282,8 @@ actor ProtocolSession: ProtocolSessionType {
       switch error {
       case .notConnected:
         throw ProtocolSessionError.notConnected
+      case .capacityExceeded:
+        throw ProtocolSessionError.capacityExceeded
       }
     } catch {
       throw error
@@ -282,7 +306,7 @@ actor ProtocolSession: ProtocolSessionType {
       guard !Task.isCancelled else { return }
       switch error {
       case .notAuthorized:
-          await emitAccountEvent(.authFailed)
+        await emitAccountEvent(.authFailed, originatingSessionID: sessionID)
       default:
         await emitLifecycleEvent(.transportDisconnected(
           sessionID: sessionID,
@@ -377,6 +401,8 @@ extension ProtocolSession {
       switch error {
       case .notConnected:
         throw ProtocolSessionError.notConnected
+      case .capacityExceeded:
+        throw ProtocolSessionError.capacityExceeded
       }
     } catch {
       throw error
@@ -395,6 +421,7 @@ extension ProtocolSession {
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     try Task.checkCancellation()
     guard rpcContinuations.count < Self.maxPendingDirectRPCs else {
+      recordDirectCapacityRejection()
       throw ProtocolSessionError.capacityExceeded
     }
     let message = wrapMessage(body: .rpcCall(.with {
@@ -428,6 +455,9 @@ extension ProtocolSession {
               case .notConnected:
                 await self.failRpcContinuation(for: message.id, error: ProtocolSessionError.notConnected)
                 return
+              case .capacityExceeded:
+                await self.failRpcContinuation(for: message.id, error: ProtocolSessionError.capacityExceeded)
+                return
               }
             }
           } catch {
@@ -445,6 +475,25 @@ extension ProtocolSession {
     } onCancel: {
       Task { await self.cancelRpcContinuation(for: message.id) }
     }
+  }
+
+  private func recordDirectCapacityRejection() {
+    directCapacityRejections += 1
+    let now = Date()
+    guard now.timeIntervalSince(lastDirectCapacityDiagnosticAt) >= Self.capacityDiagnosticInterval else {
+      return
+    }
+    PerformanceTrace.breadcrumb(
+      "realtime_direct_rpc_capacity",
+      category: "realtime.transaction",
+      level: .warning,
+      data: [
+        "direct_capacity_rejections": directCapacityRejections,
+        "outstanding": rpcContinuations.count,
+      ]
+    )
+    directCapacityRejections = 0
+    lastDirectCapacityDiagnosticAt = now
   }
 
   private func timeOutRpcContinuation(after timeout: Duration, msgId: UInt64) async {
@@ -537,7 +586,7 @@ func inlineProtocolRpcMethodIsReadOnly(_ method: InlineProtocol.Method) -> Bool 
        .getThreadSubthreads, .getPeerBots, .getMyBotCapabilities, .getGrid,
        .getGridHome, .getExternalProfilePhoto, .getChatTranscript,
        .searchExternalResources, .listConnectors, .searchUsers,
-       .resolveURLPreview, .getBotAgent, .listBotAgents, .getConnectorConfig,
+       .resolveURLPreview, .getBotAgent, .listBotAgents, .getConnectorConfig, .getSpace,
        .getUploadState:
     true
   default:

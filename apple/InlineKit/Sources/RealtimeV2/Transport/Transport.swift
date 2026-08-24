@@ -18,10 +18,16 @@ public enum TransportEvent: Sendable {
   /// The authenticated carrier returned an MTProto service-level deadline result
   /// for this request. The connection remains usable; only this request is uncertain.
   case rpcCommitOutcomeUnknown(msgId: UInt64)
+
+  /// The authenticated carrier proved this request did not enter application execution.
+  /// Redelivery may use a fresh carrier message ID without application ambiguity.
+  case rpcRejectedBeforeExecution(msgId: UInt64)
 }
 
 public enum TransportError: Error {
   case notConnected
+  /// The transport rejected admission before accepting request bytes.
+  case capacityExceeded
 }
 
 public protocol Transport: Sendable {

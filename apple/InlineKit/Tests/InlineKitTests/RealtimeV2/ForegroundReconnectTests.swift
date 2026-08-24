@@ -1,6 +1,7 @@
 import AsyncAlgorithms
 import Foundation
 import InlineProtocol
+import Network
 import Testing
 
 @testable import RealtimeV2
@@ -167,7 +168,7 @@ final class ConnectionManagerTests {
     }
     #expect(enteredAuthenticating)
 
-    session.emit(.authFailed)
+    await session.emitAccount(.authFailed)
 
     let transitionedToWaiting = await waitForCondition(timeout: .seconds(1)) {
       let snapshot = await manager.currentSnapshot()
@@ -201,7 +202,7 @@ final class ConnectionManagerTests {
     }
     #expect(firstHandshake)
 
-    session.emit(.authFailed)
+    await session.emitAccount(.authFailed)
     let pausedForMissingAuth = await waitForCondition(timeout: .seconds(1)) {
       let snapshot = await manager.currentSnapshot()
       return snapshot.state == .waitingForConstraints && snapshot.constraints.authAvailable == false
@@ -230,6 +231,341 @@ final class ConnectionManagerTests {
     #expect(policy.pingInterval == .seconds(5))
     #expect(policy.pingTimeoutGood == .seconds(6))
     #expect(policy.pingTimeoutConstrained == .seconds(12))
+    #expect(policy.backgroundGrace == .seconds(20))
+  }
+
+  @Test("stale scheduled commands cannot mutate a replacement session")
+  func staleScheduledCommandsCannotMutateReplacementSession() async {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    let firstSessionID = await openConnection(manager, session: session).sessionID
+    await manager.networkPathChanged(
+      isAvailable: true,
+      routeChanged: true,
+      quality: .good
+    )
+    #expect(await waitForCondition { await session.startTransportCount == 2 })
+    let replacement = await manager.currentSnapshot()
+    let stopCount = await session.stopTransportCount
+    #expect(replacement.sessionID != firstSessionID)
+
+    await manager.scheduledEventDidFire(.connectTimeout, sessionID: firstSessionID)
+    await manager.scheduledEventDidFire(.protocolAuthFailed, sessionID: firstSessionID)
+    await manager.scheduledEventDidFire(.backoffFired, sessionID: firstSessionID)
+
+    let afterStaleCommands = await manager.currentSnapshot()
+    #expect(afterStaleCommands.sessionID == replacement.sessionID)
+    #expect(afterStaleCommands.state == .connectingTransport)
+    #expect(await session.stopTransportCount == stopCount)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("ping timeout validates its nonce when consumed")
+  func pingTimeoutValidatesNonceWhenConsumed() async {
+    let session = FakeProtocolSession()
+    let policy = ConnectionPolicy(
+      pingInterval: .milliseconds(20),
+      pingTimeoutGood: .seconds(5),
+      pingTimeoutConstrained: .seconds(5)
+    )
+    let manager = ConnectionManager(
+      session: session,
+      policy: policy,
+      constraints: .initial
+    )
+
+    let openSnapshot = await openConnection(manager, session: session)
+    #expect(await waitForCondition { await session.sentPingNonces.isEmpty == false })
+    let activeNonce = await session.sentPingNonces[0]
+    let stopCount = await session.stopTransportCount
+
+    await manager.scheduledEventDidFire(
+      .pingTimeout,
+      sessionID: openSnapshot.sessionID,
+      pingNonce: activeNonce &+ 1
+    )
+
+    #expect(await manager.currentSnapshot().state == .open)
+    #expect(await session.stopTransportCount == stopCount)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("stale destructive auth events are not forwarded or applied")
+  func staleDestructiveAuthEventsAreIgnored() async {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+    let recorder = SessionEventRecorder()
+    let eventDrain = Task {
+      for await envelope in await manager.sessionEvents() {
+        await recorder.record(envelope.event)
+        await envelope.markProcessed()
+      }
+    }
+
+    let firstSessionID = await openConnection(manager, session: session).sessionID
+    await manager.networkPathChanged(
+      isAvailable: true,
+      routeChanged: true,
+      quality: .good
+    )
+    #expect(await waitForCondition { await session.startTransportCount == 2 })
+    let secondSessionID = await manager.currentSnapshot().sessionID
+
+    await session.emitAccount(
+      .connectionError(reason: .unspecified),
+      sessionID: firstSessionID
+    )
+    await session.emitAccount(.authFailed, sessionID: firstSessionID)
+    #expect(await recorder.count == 0)
+    #expect(await manager.currentSnapshot().constraints.authAvailable)
+
+    await session.emitAccount(
+      .connectionError(reason: .unspecified),
+      sessionID: secondSessionID
+    )
+    #expect(await waitForCondition { await recorder.count == 1 })
+
+    await session.emitAccount(.authFailed, sessionID: secondSessionID)
+    #expect(await waitForCondition {
+      let snapshot = await manager.currentSnapshot()
+      return snapshot.state == .waitingForConstraints && !snapshot.constraints.authAvailable
+    })
+
+    await manager.shutdownForTesting()
+    eventDrain.cancel()
+    await eventDrain.value
+  }
+
+  @Test("replacement open snapshot carries both transaction lifecycle edges")
+  func replacementOpenSnapshotCarriesLossAndOpenEdges() {
+    let snapshot = ConnectionSnapshot(
+      state: .open,
+      reason: .none,
+      attempt: 0,
+      since: Date(),
+      sessionID: 2,
+      constraints: .initial,
+      lastErrorDescription: nil
+    )
+    let replacement = RealtimeConnectionLifecycleEdge(
+      previousState: .open,
+      previousSessionID: 1,
+      snapshot: snapshot
+    )
+    #expect(replacement.connectionLost)
+    #expect(replacement.connectionOpened)
+
+    let unchanged = RealtimeConnectionLifecycleEdge(
+      previousState: .open,
+      previousSessionID: 2,
+      snapshot: snapshot
+    )
+    #expect(!unchanged.connectionLost)
+    #expect(!unchanged.connectionOpened)
+  }
+
+  @Test("manager can deallocate while its collectors are idle")
+  func managerCanDeallocateWhileCollectorsAreIdle() async {
+    weak var weakManager: ConnectionManager?
+    do {
+      let session = FakeProtocolSession()
+      var manager: ConnectionManager? = ConnectionManager(
+        session: session,
+        constraints: .initial
+      )
+      weakManager = manager
+      await manager?.start()
+      manager = nil
+    }
+
+    let clock = ContinuousClock()
+    let deadline = clock.now + .seconds(1)
+    while weakManager != nil, clock.now < deadline {
+      await Task.yield()
+    }
+    #expect(weakManager == nil)
+  }
+
+  @Test("brief iOS backgrounding preserves the open transport")
+  func briefBackgroundingPreservesOpenTransport() async {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    let openSnapshot = await openConnection(manager, session: session)
+    let stopCount = await session.stopTransportCount
+    await manager.applicationBecameInactive(keepConnection: true)
+    await manager.applicationBecameActive(transportWasRetained: true)
+
+    let foregroundSnapshot = await manager.currentSnapshot()
+    #expect(foregroundSnapshot.state == .open)
+    #expect(foregroundSnapshot.sessionID == openSnapshot.sessionID)
+    #expect(await session.startTransportCount == 1)
+    #expect(await session.stopTransportCount == stopCount)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("foreground replaces a transport whose background lease expired while suspended")
+  func foregroundReplacesTransportAfterMissedBackgroundExpiry() async {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    let firstSessionID = await openConnection(manager, session: session).sessionID
+    let stopCount = await session.stopTransportCount
+    await manager.applicationBecameInactive(keepConnection: true)
+    await manager.applicationBecameActive(transportWasRetained: false)
+
+    #expect(await waitForCondition { await session.startTransportCount == 2 })
+    let replacementSnapshot = await manager.currentSnapshot()
+    #expect(replacementSnapshot.state == .connectingTransport)
+    #expect(replacementSnapshot.sessionID != firstSessionID)
+    #expect(await session.stopTransportCount == stopCount + 1)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("background lease expiry suspends retries until foreground")
+  func backgroundLeaseExpirySuspendsUntilForeground() async {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    _ = await openConnection(manager, session: session)
+
+    await manager.applicationBecameInactive(keepConnection: true)
+    await manager.applicationBecameInactive(keepConnection: false)
+    #expect(await manager.currentSnapshot().state == .backgroundSuspended)
+    let suspendedStartCount = await session.startTransportCount
+
+    try? await Task.sleep(for: .milliseconds(30))
+    #expect(await session.startTransportCount == suspendedStartCount)
+
+    await manager.applicationBecameActive(transportWasRetained: false)
+    #expect(await waitForCondition { await session.startTransportCount == suspendedStartCount + 1 })
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("satisfied route change replaces the active transport")
+  func satisfiedRouteChangeReplacesActiveTransport() async {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    let firstSessionID = await openConnection(manager, session: session).sessionID
+    let stopCount = await session.stopTransportCount
+    await manager.networkPathChanged(
+      isAvailable: true,
+      routeChanged: false,
+      quality: .constrained
+    )
+    #expect(await manager.currentSnapshot().state == .open)
+    #expect(await session.stopTransportCount == stopCount)
+
+    await manager.networkPathChanged(
+      isAvailable: true,
+      routeChanged: true,
+      quality: .good
+    )
+    #expect(await waitForCondition { await session.startTransportCount == 2 })
+    let replacementSnapshot = await manager.currentSnapshot()
+    #expect(replacementSnapshot.state == .connectingTransport)
+    #expect(replacementSnapshot.sessionID != firstSessionID)
+    #expect(await session.stopTransportCount == stopCount + 1)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("network return bypasses any pending retry delay")
+  func networkReturnBypassesPendingRetryDelay() async {
+    let session = FakeProtocolSession()
+    let policy = ConnectionPolicy(
+      backoff: BackoffPolicy { _ in .seconds(86_400) }
+    )
+    let manager = ConnectionManager(
+      session: session,
+      policy: policy,
+      constraints: .initial
+    )
+
+    _ = await openConnection(manager, session: session)
+    await session.emitTransportDisconnected(errorDescription: "offline")
+    #expect(await waitForCondition { await manager.currentSnapshot().state == .backoff })
+
+    await manager.networkPathChanged(
+      isAvailable: false,
+      routeChanged: false,
+      quality: .good
+    )
+    await manager.networkPathChanged(
+      isAvailable: true,
+      routeChanged: false,
+      quality: .good
+    )
+
+    #expect(await waitForCondition { await session.startTransportCount == 2 })
+    #expect(await manager.currentSnapshot().state == .connectingTransport)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("path snapshots distinguish route changes from quality changes")
+  func pathSnapshotChangeClassification() {
+    let wifiRoute = ConnectionPathRoute(
+      interfaceTypes: [.wifi],
+      interfaceIndexes: [4]
+    )
+    let first = ConnectionPathSnapshot(
+      isAvailable: true,
+      route: wifiRoute,
+      quality: .good
+    )
+
+    #expect(first.change(since: nil)?.routeChanged == false)
+    #expect(first.change(since: first) == nil)
+
+    let constrained = ConnectionPathSnapshot(
+      isAvailable: true,
+      route: wifiRoute,
+      quality: .constrained
+    )
+    #expect(constrained.change(since: first)?.routeChanged == false)
+
+    let cellular = ConnectionPathSnapshot(
+      isAvailable: true,
+      route: ConnectionPathRoute(
+        interfaceTypes: [.cellular],
+        interfaceIndexes: [7]
+      ),
+      quality: .constrained
+    )
+    #expect(cellular.change(since: constrained)?.routeChanged == true)
+
+    let nextVPN = ConnectionPathSnapshot(
+      isAvailable: true,
+      route: ConnectionPathRoute(
+        interfaceTypes: [.other],
+        interfaceIndexes: [12]
+      ),
+      quality: .good
+    )
+    let previousVPN = ConnectionPathSnapshot(
+      isAvailable: true,
+      route: ConnectionPathRoute(
+        interfaceTypes: [.other],
+        interfaceIndexes: [11]
+      ),
+      quality: .good
+    )
+    #expect(nextVPN.change(since: previousVPN)?.routeChanged == true)
+
+    let unavailable = ConnectionPathSnapshot(
+      isAvailable: false,
+      route: nil,
+      quality: .good
+    )
+    #expect(first.change(since: unavailable)?.routeChanged == false)
   }
 
   @Test("session forwarding teardown releases an unbuffered account event")
@@ -265,7 +601,6 @@ final class ConnectionManagerTests {
       pingInterval: .seconds(1),
       pingTimeoutGood: .seconds(1),
       pingTimeoutConstrained: .seconds(1),
-      backgroundGrace: .seconds(30),
       wakeProbeTimeout: .seconds(1)
     )
     let manager = ConnectionManager(session: session, policy: policy, constraints: .initial)
@@ -298,7 +633,6 @@ final class ConnectionManagerTests {
       pingInterval: .seconds(1),
       pingTimeoutGood: .seconds(1),
       pingTimeoutConstrained: .seconds(1),
-      backgroundGrace: .seconds(30),
       wakeProbeTimeout: .seconds(1)
     )
     let manager = ConnectionManager(session: session, policy: policy, constraints: .initial)
@@ -333,7 +667,6 @@ final class ConnectionManagerTests {
       pingInterval: .seconds(30),
       pingTimeoutGood: .seconds(1),
       pingTimeoutConstrained: .seconds(1),
-      backgroundGrace: .seconds(30),
       wakeProbeTimeout: .seconds(5)
     )
     let manager = ConnectionManager(session: session, policy: policy, constraints: .initial)
@@ -389,7 +722,6 @@ final class ConnectionManagerTests {
       pingInterval: .milliseconds(20),
       pingTimeoutGood: .milliseconds(30),
       pingTimeoutConstrained: .milliseconds(30),
-      backgroundGrace: .seconds(30),
       wakeProbeTimeout: .seconds(1)
     )
     let manager = ConnectionManager(session: session, policy: policy, constraints: .initial)
@@ -427,7 +759,6 @@ final class ConnectionManagerTests {
       pingInterval: .milliseconds(20),
       pingTimeoutGood: .milliseconds(30),
       pingTimeoutConstrained: .milliseconds(30),
-      backgroundGrace: .seconds(30),
       wakeProbeTimeout: .seconds(1)
     )
     let manager = ConnectionManager(session: session, policy: policy, constraints: .initial)
@@ -447,6 +778,20 @@ final class ConnectionManagerTests {
 
     await manager.shutdownForTesting()
   }
+
+  private func openConnection(
+    _ manager: ConnectionManager,
+    session: FakeProtocolSession
+  ) async -> ConnectionSnapshot {
+    await manager.start()
+    await manager.setAuthAvailable(true)
+    #expect(await waitForCondition { await session.startTransportCount == 1 })
+    await session.emitTransportConnected()
+    #expect(await waitForCondition { await session.startHandshakeCount == 1 })
+    await session.emitProtocolOpen()
+    #expect(await waitForCondition { await manager.currentSnapshot().state == .open })
+    return await manager.currentSnapshot()
+  }
 }
 
 private actor ForwardingFinishFlag {
@@ -458,6 +803,14 @@ private actor ForwardingFinishFlag {
 
   func get() -> Bool {
     value
+  }
+}
+
+private actor SessionEventRecorder {
+  private(set) var count = 0
+
+  func record(_: ProtocolSessionEvent) {
+    count += 1
   }
 }
 
@@ -495,6 +848,7 @@ actor FakeProtocolSession: ProtocolSessionType {
   private(set) var startHandshakeCount: Int = 0
   private(set) var handshakeSessionIDs: [UInt64] = []
   private(set) var sentPingCount: Int = 0
+  private(set) var sentPingNonces: [UInt64] = []
 
   init(
     suspendTransportStart: Bool = false,
@@ -537,6 +891,7 @@ actor FakeProtocolSession: ProtocolSessionType {
 
   func sendPing(nonce: UInt64) async {
     sentPingCount += 1
+    sentPingNonces.append(nonce)
     if suspendPing {
       try? await Task.sleep(for: .seconds(30))
     }
@@ -554,10 +909,15 @@ actor FakeProtocolSession: ProtocolSessionType {
     nil
   }
 
-  nonisolated func emit(_ event: ProtocolSessionEvent) {
-    Task {
-      await events.send(.lifecycle(event))
+  func emitAccount(
+    _ event: ProtocolSessionEvent,
+    sessionID: UInt64? = nil
+  ) async {
+    guard let sessionID = sessionID ?? startTransportSessionIDs.last else {
+      Issue.record("Cannot emit an account event before transport startup")
+      return
     }
+    await events.send(.account(event, originatingSessionID: sessionID))
   }
 
   func emitProtocolOpen() async {

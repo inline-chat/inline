@@ -254,6 +254,166 @@ class NewTransactionsTests {
       MockTransaction(type: .query(), reconnectReplayPolicy: .neverReplay)
         .effectiveReconnectReplayPolicy == .neverReplay
     )
+    #expect(
+      MockTransaction(type: .ephemeral()).effectiveReconnectReplayPolicy == .neverReplay
+    )
+  }
+
+  @Test("bounded dequeue holds excess work until outstanding capacity reopens")
+  func testBoundedDequeueAdmission() async throws {
+    let transactions = Transactions()
+    let firstID = await transactions.queue(transaction: MockTransaction())
+    let secondID = await transactions.queue(transaction: MockTransaction())
+    let thirdID = await transactions.queue(transaction: MockTransaction())
+
+    guard case let .ready(first)? = await transactions.dequeue(maximumOutstanding: 2),
+          case let .ready(second)? = await transactions.dequeue(maximumOutstanding: 2)
+    else {
+      Issue.record("Expected the first two transactions to enter the outstanding window")
+      return
+    }
+    #expect(Set([first.id, second.id]) == Set([firstID, secondID]))
+
+    guard case let .capacityLimited(pressure)? = await transactions.dequeue(maximumOutstanding: 2) else {
+      Issue.record("Expected excess work to remain queued at the outstanding limit")
+      return
+    }
+    #expect(pressure.queued == 1)
+    #expect(pressure.outstanding == 2)
+
+    await transactions.cancel(transactionId: first.id)
+    guard case let .ready(third)? = await transactions.dequeue(maximumOutstanding: 2) else {
+      Issue.record("Expected queued work to dispatch after capacity reopened")
+      return
+    }
+    #expect(third.id == thirdID)
+  }
+
+  @Test("cancellation keeps dispatched work owned until it settles")
+  func testCancellationAfterDispatchDoesNotReleaseCapacity() async throws {
+    let transactions = Transactions()
+    let owner = TransactionOwner(accountID: 1, generation: 1)
+    await transactions.activate(owner: owner)
+    let firstID = try #require(await transactions.queue(transaction: MockTransaction(), owner: owner))
+    _ = await transactions.queue(transaction: MockTransaction(), owner: owner)
+
+    guard case let .ready(first)? = await transactions.dequeue(owner: owner, maximumOutstanding: 1) else {
+      Issue.record("Expected the first transaction to enter the outstanding window")
+      return
+    }
+    #expect(first.id == firstID)
+    #expect(await transactions.running(transactionId: first.id, rpcMsgId: 91, owner: owner))
+
+    await transactions.cancel(transactionId: first.id)
+
+    guard case .capacityLimited? = await transactions.dequeue(owner: owner, maximumOutstanding: 1) else {
+      Issue.record("Expected dispatched cancellation to retain the outstanding permit")
+      return
+    }
+    #expect(await transactions.complete(rpcMsgId: 91, owner: owner) != nil)
+    guard case .ready? = await transactions.dequeue(owner: owner, maximumOutstanding: 1) else {
+      Issue.record("Expected queued work to run after the dispatched owner settled")
+      return
+    }
+  }
+
+  @Test("expired ephemeral work is removed before dispatch")
+  func testEphemeralTransactionExpiresBeforeDispatch() async throws {
+    let transactions = Transactions()
+    let id = await transactions.queue(
+      transaction: MockTransaction(type: .ephemeral(.init(maxQueueAge: 0)))
+    )
+
+    guard case let .expired(wrapper)? = await transactions.dequeue() else {
+      Issue.record("Expected stale ephemeral work to expire instead of dispatch")
+      return
+    }
+    #expect(wrapper.id == id)
+    #expect(await transactions.isInQueue(transactionId: id) == false)
+  }
+
+  @Test("ephemeral expiry wakes a saturated queue without waiting for capacity")
+  func testEphemeralExpiryWakesSaturatedQueue() async throws {
+    let transactions = Transactions()
+    let queueStream = await transactions.queueStream
+    let wakeTask = Task { () -> Bool in
+      var iterator = queueStream.makeAsyncIterator()
+      guard await iterator.next() != nil else { return false }
+      return await iterator.next() != nil
+    }
+    let id = await transactions.queue(
+      transaction: MockTransaction(type: .ephemeral(.init(maxQueueAge: 0.05)))
+    )
+
+    guard case .capacityLimited? = await transactions.dequeue(maximumOutstanding: 0) else {
+      Issue.record("Expected the zero-sized window to retain fresh ephemeral work")
+      return
+    }
+
+    let wokeForExpiry = await withTaskGroup(of: Bool.self) { group in
+      group.addTask { await wakeTask.value }
+      group.addTask {
+        try? await Task.sleep(for: .seconds(1))
+        return false
+      }
+      let result = await group.next() ?? false
+      group.cancelAll()
+      return result
+    }
+    #expect(wokeForExpiry)
+
+    guard case let .expired(wrapper)? = await transactions.dequeue(maximumOutstanding: 0) else {
+      Issue.record("Expected expiry to win over the saturated dispatch window")
+      return
+    }
+    #expect(wrapper.id == id)
+  }
+
+  @Test("new queued ephemeral work supersedes the same method and key")
+  func testEphemeralTransactionCoalescing() async throws {
+    let transactions = Transactions()
+    let owner = TransactionOwner(accountID: 1, generation: 1)
+    await transactions.activate(owner: owner)
+    let firstID = TransactionId.generate()
+    let secondID = TransactionId.generate()
+    let first = MockTransaction(type: .ephemeral(), ephemeralCoalescingKey: "grid")
+    let second = MockTransaction(type: .ephemeral(), ephemeralCoalescingKey: "grid")
+
+    guard case let .accepted(firstSuperseded) = await transactions.enqueue(
+      transaction: first,
+      transactionId: firstID,
+      owner: owner
+    ) else {
+      Issue.record("Expected first ephemeral admission")
+      return
+    }
+    #expect(firstSuperseded.isEmpty)
+
+    guard case let .accepted(secondSuperseded) = await transactions.enqueue(
+      transaction: second,
+      transactionId: secondID,
+      owner: owner
+    ) else {
+      Issue.record("Expected replacement ephemeral admission")
+      return
+    }
+    #expect(secondSuperseded.map(\.id) == [firstID])
+    #expect(await transactions.isInQueue(transactionId: firstID) == false)
+    #expect(await transactions.isInQueue(transactionId: secondID))
+  }
+
+  @Test("connection loss drops ephemeral work without replaying ordinary queued work")
+  func testConnectionLossDropsEphemeralWork() async throws {
+    let transactions = Transactions()
+    let ephemeralID = await transactions.queue(transaction: MockTransaction(type: .ephemeral()))
+    let ordinaryID = await transactions.queue(transaction: MockTransaction())
+    _ = await transactions.dequeue()
+
+    let expired = await transactions.connectionLost()
+
+    #expect(expired.map(\.id) == [ephemeralID])
+    #expect(await transactions.isInQueue(transactionId: ephemeralID) == false)
+    #expect(await transactions.isInQueue(transactionId: ordinaryID))
   }
 
   @Test("connection loss keeps durable attempted state after rpc mappings are cleared")
@@ -263,7 +423,7 @@ class NewTransactionsTests {
     _ = await transactions.dequeue()
     await transactions.running(transactionId: id, rpcMsgId: 452)
 
-    await transactions.connectionLost()
+    _ = await transactions.connectionLost()
     let dropped = await transactions.requeueAll()
 
     #expect(dropped.map(\.id) == [id])
@@ -312,7 +472,7 @@ class NewTransactionsTests {
     let mappedBeforeLoss = await transactions.transactionIdFrom(msgId: 55)
     #expect(mappedBeforeLoss == id)
 
-    await transactions.connectionLost()
+    _ = await transactions.connectionLost()
 
     let mappedAfterLoss = await transactions.transactionIdFrom(msgId: 55)
     #expect(mappedAfterLoss == nil)
@@ -430,13 +590,16 @@ private struct MockTransaction: Transaction, Codable {
   var type: TransactionKindType = .query()
   var context: Context = Context()
   var reconnectReplayPolicy: TransactionReconnectPolicy?
+  var ephemeralCoalescingKey: String?
 
   init(
     type: TransactionKindType = .query(),
-    reconnectReplayPolicy: TransactionReconnectPolicy? = nil
+    reconnectReplayPolicy: TransactionReconnectPolicy? = nil,
+    ephemeralCoalescingKey: String? = nil
   ) {
     self.type = type
     self.reconnectReplayPolicy = reconnectReplayPolicy
+    self.ephemeralCoalescingKey = ephemeralCoalescingKey
   }
 
   func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {

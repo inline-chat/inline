@@ -107,7 +107,7 @@ public actor InlineProtocolV3Transport: Transport {
   }
 
   private func performStart(generation: UInt64) async {
-    log.info("Inline Protocol transport start requested")
+    log.debug("Inline Protocol transport start requested")
     await channel.send(.connecting)
     var candidate: InlineProtocolV3Connection?
     do {
@@ -116,7 +116,7 @@ public actor InlineProtocolV3Transport: Transport {
         throw InlineProtocolV3ConnectionError.invalidKey
       }
       if let temporary = credentials.temporary, temporary.expiresAt != nil {
-        log.info("Reconnecting with stored temporary authorization")
+        log.debug("Reconnecting with stored temporary authorization")
         let cached = try await InlineProtocolV3Connection.connect(.reconnect(
           url: url, authorization: temporary
         ))
@@ -126,12 +126,12 @@ public actor InlineProtocolV3Transport: Transport {
           try await cached.verifyAuthorization()
           try requireCurrentStart(generation)
           if await cached.temporaryAuthorizationNeedsRotation() {
-            log.info("Stored temporary authorization reached its rotation boundary")
+            log.debug("Stored temporary authorization reached its rotation boundary")
             await cached.close()
             candidate = nil
             try requireCurrentStart(generation)
           } else {
-            log.info("Stored temporary authorization verified")
+            log.debug("Stored temporary authorization verified")
           }
         } catch {
           let terminalError = await cached.terminationError
@@ -141,7 +141,7 @@ public actor InlineProtocolV3Transport: Transport {
           guard Self.authenticationInvalidationReason(for: error) != nil ||
             terminalError == .authorizationInvalidated
           else {
-            log.warning("Stored temporary authorization verification failed transiently; keeping key")
+            log.debug("Stored temporary authorization verification failed transiently; keeping key")
             throw error
           }
           log.warning("Stored temporary authorization was not accepted; regenerating once")
@@ -155,14 +155,14 @@ public actor InlineProtocolV3Transport: Transport {
             throw error
           }
           try requireCurrentStart(generation)
-          log.info("Replacement temporary authorization verified and stored")
+          log.debug("Replacement temporary authorization verified and stored")
         }
       }
       if candidate == nil, (!rsaPublicKeys.isEmpty || InlineProtocolTrustRoots.supportsLocalDebugDiscovery(
         for: url,
         allowedDevelopmentHost: localDebugTrustHost
       )) {
-        log.info("Creating replacement temporary authorization")
+        log.debug("Creating replacement temporary authorization")
         let replacement = try await makeVerifiedTemporary(permanent: credentials.permanent)
         candidate = replacement
         try requireCurrentStart(generation)
@@ -173,7 +173,7 @@ public actor InlineProtocolV3Transport: Transport {
           throw error
         }
         try requireCurrentStart(generation)
-        log.info("Replacement temporary authorization verified and stored")
+        log.debug("Replacement temporary authorization verified and stored")
       } else if candidate == nil {
         // Application traffic must never fall back to the permanent authorization key. A client
         // without a usable temporary key must have pinned roots available to create and bind one.
@@ -184,7 +184,7 @@ public actor InlineProtocolV3Transport: Transport {
       connection = candidate
       startUpdates(candidate)
       startRotationMonitor(candidate)
-      log.info("Inline Protocol transport connected")
+      log.debug("Inline Protocol transport connected")
       await channel.send(.connected)
       try requireCurrentStart(generation)
       candidateStartDidFinish(generation: generation)
@@ -193,7 +193,7 @@ public actor InlineProtocolV3Transport: Transport {
       guard generation == startGeneration else { return }
       candidateStartDidFinish(generation: generation)
       if error is CancellationError || Task.isCancelled { return }
-      log.error("Inline Protocol connection failed", error: error)
+      logStartFailure(error)
       connection = nil
       if Self.authenticationInvalidationReason(for: error) != nil {
         await emitAuthenticationInvalidated(error)
@@ -204,7 +204,7 @@ public actor InlineProtocolV3Transport: Transport {
   }
 
   public func stop() async {
-    log.info("Inline Protocol transport stop requested")
+    log.debug("Inline Protocol transport stop requested")
     startGeneration = startGeneration &+ 1
     starting = false
     let stoppingStartTask = startTask
@@ -221,7 +221,7 @@ public actor InlineProtocolV3Transport: Transport {
     if let connection { await connection.close() }
     connection = nil
     await channel.send(.disconnected(errorDescription: "stopped"))
-    log.info("Inline Protocol transport stopped")
+    log.debug("Inline Protocol transport stopped")
   }
 
   private func requireCurrentStart(_ generation: UInt64) throws {
@@ -240,7 +240,7 @@ public actor InlineProtocolV3Transport: Transport {
     guard let connection else { throw TransportError.notConnected }
     switch message.body {
     case .connectionInit:
-      log.warning("Ignoring redundant connection init on authenticated V3 transport")
+      log.debug("Ignoring redundant connection init on authenticated V3 transport")
       return
     case let .rpcCall(call):
       let startedAt = ProcessInfo.processInfo.systemUptime
@@ -285,13 +285,18 @@ public actor InlineProtocolV3Transport: Transport {
         // connection manager perform the normal temporary-key replacement/reconnect sequence.
         await connection.close()
         throw TransportError.notConnected
+      } catch let error as InlineProtocolV3ConnectionError
+        where error == .requestCapacityExceeded {
+        // This is a local admission failure: no record was accepted and the
+        // application owner may safely hold the request for later dispatch.
+        throw TransportError.capacityExceeded
       } catch {
         let writeDurationMilliseconds = Int(
           (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
         )
-        log.error(
-          "RPC write failed rpc_id=\(message.id) method=\(call.method) duration_ms=\(writeDurationMilliseconds)",
-          error: error
+        log.debug(
+          "RPC write failed rpc_id=\(message.id) method=\(call.method) " +
+            "duration_ms=\(writeDurationMilliseconds) error=\(String(describing: error))"
         )
         throw error
       }
@@ -355,9 +360,9 @@ public actor InlineProtocolV3Transport: Transport {
       )
     case let .failure(error):
       guard !(error is CancellationError) else { return }
-      log.error(
-        "Authorization probe failed generation=\(generation) duration_ms=\(durationMilliseconds)",
-        error: error
+      log.debug(
+        "Authorization probe failed generation=\(generation) duration_ms=\(durationMilliseconds) " +
+          "error=\(String(describing: error))"
       )
     }
   }
@@ -399,6 +404,13 @@ public actor InlineProtocolV3Transport: Transport {
         "RPC completed rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds)"
       )
     case let .failure(error):
+      if error as? InlineProtocolV3ConnectionError == .rejectedBeforeExecution {
+        await channel.send(.rpcRejectedBeforeExecution(msgId: requestMessageID))
+        log.warning(
+          "RPC rejected before execution rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds)"
+        )
+        return
+      }
       if error as? InlineProtocolV3ConnectionError == .commitOutcomeUnknown {
         await channel.send(.rpcCommitOutcomeUnknown(msgId: requestMessageID))
         log.warning(
@@ -407,10 +419,17 @@ public actor InlineProtocolV3Transport: Transport {
         return
       }
       // Connection termination owns the corresponding disconnected event and transaction replay.
-      log.error(
-        "RPC failed rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds)",
-        error: error
-      )
+      if await source.terminationError == nil {
+        log.error(
+          "RPC response failed rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds)",
+          error: error
+        )
+      } else {
+        log.debug(
+          "RPC failed rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds) " +
+            "error=\(String(describing: error))"
+        )
+      }
       await source.close()
     }
   }
@@ -440,7 +459,7 @@ public actor InlineProtocolV3Transport: Transport {
     )
     let rootsResolvedAt = ProcessInfo.processInfo.systemUptime
     let fingerprints = resolvedRsaPublicKeys.map { String($0.fingerprint) }.joined(separator: ",")
-    log.info(
+    log.debug(
       "Creating temporary authorization scheme=\(url.scheme ?? "unknown") " +
         "host=\(url.host ?? "unknown") key_count=\(resolvedRsaPublicKeys.count) " +
         "fingerprints=\(fingerprints) " +
@@ -454,28 +473,28 @@ public actor InlineProtocolV3Transport: Transport {
         temporary: true
       ))
     } catch {
-      log.error(
+      log.debug(
         "Temporary authorization handshake failed " +
-          "duration_ms=\(Int((ProcessInfo.processInfo.systemUptime - rootsResolvedAt) * 1_000))",
-        error: error
+          "duration_ms=\(Int((ProcessInfo.processInfo.systemUptime - rootsResolvedAt) * 1_000)) " +
+          "error=\(String(describing: error))"
       )
       throw error
     }
     let handshakeCompletedAt = ProcessInfo.processInfo.systemUptime
-    log.info(
+    log.debug(
       "Temporary authorization handshake completed " +
         "duration_ms=\(Int((handshakeCompletedAt - rootsResolvedAt) * 1_000))"
     )
     do {
       try await temporary.bindTemporary(to: permanent)
       let bindingCompletedAt = ProcessInfo.processInfo.systemUptime
-      log.info(
+      log.debug(
         "Temporary authorization binding completed " +
           "duration_ms=\(Int((bindingCompletedAt - handshakeCompletedAt) * 1_000))"
       )
       try await temporary.verifyAuthorization()
       let verificationCompletedAt = ProcessInfo.processInfo.systemUptime
-      log.info(
+      log.debug(
         "Temporary authorization verification completed " +
           "duration_ms=\(Int((verificationCompletedAt - bindingCompletedAt) * 1_000)) " +
           "total_ms=\(Int((verificationCompletedAt - startedAt) * 1_000))"
@@ -521,7 +540,7 @@ public actor InlineProtocolV3Transport: Transport {
 
   private func rotationBoundaryReached(_ source: InlineProtocolV3Connection) async {
     guard connection === source else { return }
-    log.info("Temporary authorization rotation boundary reached; draining admitted RPCs")
+    log.debug("Temporary authorization rotation boundary reached; draining admitted RPCs")
     // Admission is closed by the connection's authoritative beginPrepared check. This bounded
     // drain only covers low-level RPCs; it deliberately does not claim to lease a multipart
     // upload across the reconnect.
@@ -537,7 +556,7 @@ public actor InlineProtocolV3Transport: Transport {
     pingTask?.cancel()
     pingTask = nil
     activePingNonce = nil
-    log.warning("Inline Protocol transport receive loop ended")
+    log.debug("Inline Protocol transport receive loop ended")
     connection = nil
     if let terminationError = await endedConnection.terminationError,
        Self.authenticationInvalidationReason(for: terminationError) != nil {
@@ -558,13 +577,59 @@ public actor InlineProtocolV3Transport: Transport {
 
   private func emitAuthenticationInvalidated(_ error: any Error) async {
     guard let reason = Self.authenticationInvalidationReason(for: error) else { return }
-    log.error("Inline Protocol authorization invalidated reason=\(reason)", error: error)
+    log.warning("Inline Protocol authorization invalidated reason=\(reason)")
     var connectionError = InlineProtocol.ConnectionError()
     connectionError.reason = reason
     var server = ServerProtocolMessage()
     server.body = .connectionError(connectionError)
     await channel.send(.message(server))
     await channel.send(.disconnected(errorDescription: "session_revoked"))
+  }
+
+  private func logStartFailure(_ error: any Error) {
+    switch Self.startFailureLogLevel(for: error) {
+    case .error:
+      log.error("Inline Protocol connection failed", error: error)
+    case .warning:
+      log.warning("Inline Protocol connection failed reason=\(String(describing: error))")
+    case .debug, .info, .trace:
+      log.debug("Inline Protocol connection failed error=\(String(describing: error))")
+    }
+  }
+
+  static func startFailureLogLevel(for error: any Error) -> LogLevel {
+    if error is CancellationError { return .debug }
+    if let urlError = error as? URLError {
+      switch urlError.code {
+      case .cancelled,
+        .timedOut,
+        .notConnectedToInternet,
+        .secureConnectionFailed,
+        .networkConnectionLost:
+        return .debug
+      default:
+        return .error
+      }
+    }
+    guard let connectionError = error as? InlineProtocolV3ConnectionError else { return .error }
+    switch connectionError {
+    case .authorizationInvalidated,
+      .closed,
+      .commitOutcomeUnknown,
+      .rejectedBeforeExecution,
+      .requestCapacityExceeded,
+      .rpc,
+      .temporaryAuthorizationRotationDue:
+      return .debug
+    case .outboundBufferOverflow,
+      .timeout,
+      .updateBufferOverflow:
+      return .warning
+    case .invalidKey,
+      .protocolFailure,
+      .unexpectedResponse:
+      return .error
+    }
   }
 }
 
@@ -610,10 +675,10 @@ public actor NegotiatingRealtimeTransport: Transport {
 
     let transport: any Transport
     if hasInlineProtocolCredentials() {
-      log.info("Selected Inline Protocol transport")
+      log.debug("Selected Inline Protocol transport")
       transport = makeInlineProtocolTransport()
     } else {
-      log.info("Selected legacy Realtime V2 transport")
+      log.debug("Selected legacy Realtime V2 transport")
       transport = makeLegacyTransport()
     }
     active = transport

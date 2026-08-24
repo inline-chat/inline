@@ -1,4 +1,4 @@
-public enum ConnectionNetworkQuality: Sendable {
+public enum ConnectionNetworkQuality: Sendable, Equatable {
   case good
   case constrained
 }

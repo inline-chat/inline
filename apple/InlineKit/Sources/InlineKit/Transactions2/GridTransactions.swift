@@ -37,7 +37,8 @@ public struct ToggleSpaceGridTransaction: Transaction2 {
 public struct GetGridTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .getGrid
   public var context: Context
-  public var type: TransactionKindType = .query()
+  public var type: TransactionKindType = .ephemeral()
+  public var ephemeralCoalescingKey: String? { "space:\(context.spaceID)" }
 
   public struct Context: Sendable, Codable { let spaceID: Int64 }
   enum CodingKeys: String, CodingKey { case context }
@@ -53,7 +54,8 @@ public struct GetGridTransaction: Transaction2 {
 public struct GetGridHomeTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .getGridHome
   public var context = Context()
-  public var type: TransactionKindType = .query()
+  public var type: TransactionKindType = .ephemeral()
+  public var ephemeralCoalescingKey: String? { "home" }
 
   public struct Context: Sendable, Codable {}
   enum CodingKeys: String, CodingKey { case context }
@@ -163,8 +165,8 @@ public struct DeleteGridRoomTransaction: Transaction2 {
 public struct PrepareGridConnectionTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .prepareGridConnection
   public var context: Context
-  public var type: TransactionKindType = .query()
-  public var reconnectReplayPolicy: TransactionReconnectPolicy? { .neverReplay }
+  public var type: TransactionKindType = .ephemeral()
+  public var ephemeralCoalescingKey: String? { "room:\(context.roomID)" }
 
   public struct Context: Sendable, Codable { let roomID: Int64; let generation: Int32 }
   enum CodingKeys: String, CodingKey { case context }

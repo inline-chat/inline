@@ -101,7 +101,7 @@ struct TransactionLifetimeTests {
     case let .ready(wrapper):
       #expect(wrapper.id == accountBTransactionID)
       #expect(wrapper.id != accountATransactionID)
-    case .failed:
+    case .failed, .expired, .capacityLimited:
       Issue.record("The current account's ready transaction was unexpectedly failed")
     }
   }
@@ -148,7 +148,11 @@ struct TransactionLifetimeTests {
     #expect(await persistence.contains(transactionID, for: owner) == false)
 
     await persistence.releaseSave()
-    #expect(await admission.value == .accepted)
+    guard case let .accepted(superseded) = await admission.value else {
+      Issue.record("Expected durable admission to succeed")
+      return
+    }
+    #expect(superseded.isEmpty)
     #expect(await persistence.contains(transactionID, for: owner))
 
     let result = await transactions.dequeue(owner: owner)
@@ -173,7 +177,10 @@ struct TransactionLifetimeTests {
       owner: owner
     )
 
-    #expect(result == .persistenceFailed)
+    guard case .persistenceFailed = result else {
+      Issue.record("Expected persistence failure to reject admission")
+      return
+    }
     #expect(await transactions.isInQueue(transactionId: transactionID) == false)
     #expect(await transactions.isInFlight(transactionId: transactionID) == false)
   }

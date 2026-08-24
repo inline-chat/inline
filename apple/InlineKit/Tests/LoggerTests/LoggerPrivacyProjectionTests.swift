@@ -240,6 +240,85 @@ struct LoggerPrivacyProjectionTests {
     #expect(projection.data["unknown"] == nil)
   }
 
+  @Test("realtime pressure breadcrumbs retain only bounded aggregate metrics")
+  func realtimePressureBreadcrumbProjectionRetainsAggregateMetrics() throws {
+    let projection = PerformanceTrace.privacySafeBreadcrumbProjection(
+      message: "method=getGrid account=secret",
+      category: "realtime.transaction",
+      data: [
+        "queued": 33,
+        "outstanding": 32,
+        "oldest_queue_age_ms": 125,
+        "window_saturations": 1,
+        "ephemeral_superseded": 4,
+        "ephemeral_expired": 2,
+        "capacity_rejections": 0,
+        "method": "getGrid",
+      ]
+    )
+
+    #expect(projection.message == "performance_event")
+    #expect(projection.category == "realtime.transaction")
+    #expect(try #require(projection.data["queued"] as? Double) == 33)
+    #expect(try #require(projection.data["outstanding"] as? Double) == 32)
+    #expect(try #require(projection.data["oldest_queue_age_ms"] as? Double) == 125)
+    #expect(try #require(projection.data["window_saturations"] as? Double) == 1)
+    #expect(try #require(projection.data["ephemeral_superseded"] as? Double) == 4)
+    #expect(try #require(projection.data["ephemeral_expired"] as? Double) == 2)
+    #expect(try #require(projection.data["capacity_rejections"] as? Double) == 0)
+    #expect(projection.data["method"] == nil)
+  }
+
+  @Test("sync overflow breadcrumbs retain recovery metrics without bucket identity")
+  func syncOverflowBreadcrumbProjectionRetainsRecoveryMetrics() throws {
+    let projection = PerformanceTrace.privacySafeBreadcrumbProjection(
+      message: "bucket=chat:123",
+      category: "sync.realtime",
+      data: [
+        "buffered": 4_096,
+        "buffered_bytes": 16 * 1_024 * 1_024,
+        "target_seq": 7_000,
+        "bucket_id": 123,
+      ]
+    )
+
+    #expect(projection.message == "performance_event")
+    #expect(projection.category == "sync.realtime")
+    #expect(try #require(projection.data["buffered"] as? Double) == 4_096)
+    #expect(try #require(projection.data["buffered_bytes"] as? Double) == 16 * 1_024 * 1_024)
+    #expect(try #require(projection.data["target_seq"] as? Double) == 7_000)
+    #expect(projection.data["bucket_id"] == nil)
+  }
+
+  @Test("transport overflow breadcrumbs retain queue pressure without request identity")
+  func transportOverflowBreadcrumbProjectionRetainsQueuePressure() throws {
+    let projection = PerformanceTrace.privacySafeBreadcrumbProjection(
+      message: "request=secret",
+      category: "realtime.transport",
+      data: [
+        "pending_rpc": 12,
+        "pending_probe": 1,
+        "queued_write": 256,
+        "queued_bytes": 16 * 1_024 * 1_024,
+        "inbound_update_overflow": 1,
+        "outbound_write_overflow": 0,
+        "direct_capacity_rejections": 3,
+        "request_id": 99,
+      ]
+    )
+
+    #expect(projection.message == "performance_event")
+    #expect(projection.category == "realtime.transport")
+    #expect(try #require(projection.data["pending_rpc"] as? Double) == 12)
+    #expect(try #require(projection.data["pending_probe"] as? Double) == 1)
+    #expect(try #require(projection.data["queued_write"] as? Double) == 256)
+    #expect(try #require(projection.data["queued_bytes"] as? Double) == 16 * 1_024 * 1_024)
+    #expect(try #require(projection.data["inbound_update_overflow"] as? Double) == 1)
+    #expect(try #require(projection.data["outbound_write_overflow"] as? Double) == 0)
+    #expect(try #require(projection.data["direct_capacity_rejections"] as? Double) == 3)
+    #expect(projection.data["request_id"] == nil)
+  }
+
   @Test("performance breadcrumb metric types cannot cross bridge")
   func performanceBreadcrumbProjectionRejectsCrossTypeValues() {
     let projection = PerformanceTrace.privacySafeBreadcrumbProjection(

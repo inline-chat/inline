@@ -5,6 +5,8 @@ import Logger
 private struct ConnectionCommand: Sendable {
   let event: ConnectionEvent
   let enqueuedAt: TimeInterval
+  let originatingSessionID: UInt64?
+  let pingNonce: UInt64?
   let receipt: ConnectionCommandReceipt?
 }
 
@@ -67,9 +69,8 @@ actor ConnectionManager {
   private var probeTimeoutTask: Task<Void, Never>?
   private var probeContinuation: CheckedContinuation<Bool, Never>?
   private var probeNonce: UInt64?
-  private var backgroundGraceTask: Task<Void, Never>?
   private var pendingPingNonce: UInt64?
-  private var backgroundGraceActive = false
+  private var backgroundConnectionRetained = false
 
   init(
     session: ProtocolSessionType,
@@ -97,7 +98,13 @@ actor ConnectionManager {
     sessionTask?.cancel()
     transportStartTask?.cancel()
     handshakeTask?.cancel()
+    backoffTask?.cancel()
+    authTimeoutTask?.cancel()
+    connectTimeoutTask?.cancel()
+    pingTask?.cancel()
+    pingTimeoutTask?.cancel()
     wakeProbeTask?.cancel()
+    probeTimeoutTask?.cancel()
   }
 
   // MARK: - Public API
@@ -118,16 +125,24 @@ actor ConnectionManager {
     await enqueue(available ? .authAvailable : .authLost)
   }
 
-  func setNetworkAvailable(_ available: Bool) async {
-    await enqueue(available ? .networkAvailable : .networkUnavailable)
+  func networkPathChanged(
+    isAvailable: Bool,
+    routeChanged: Bool,
+    quality: ConnectionNetworkQuality
+  ) async {
+    await enqueue(.networkPathChanged(
+      isAvailable: isAvailable,
+      routeChanged: routeChanged,
+      quality: quality
+    ))
   }
 
-  func setNetworkQuality(_ quality: ConnectionNetworkQuality) async {
-    networkQuality = quality
+  func applicationBecameActive(transportWasRetained: Bool) async {
+    await enqueue(.applicationActive(transportWasRetained: transportWasRetained))
   }
 
-  func setAppActive(_ active: Bool) async {
-    await enqueue(active ? .appForeground : .appBackground)
+  func applicationBecameInactive(keepConnection: Bool) async {
+    await enqueue(.applicationInactive(keepConnection: keepConnection))
   }
 
   func systemDidWake() async {
@@ -144,6 +159,24 @@ actor ConnectionManager {
 
   func sessionEvents() -> AsyncChannel<ProtocolSessionEventEnvelope> {
     sessionEventChannel
+  }
+
+  func backgroundRetentionDuration() -> Duration {
+    policy.backgroundGrace
+  }
+
+  /// Enqueues a timer result with the generation it was created for. The
+  /// command consumer revalidates this provenance after all earlier commands.
+  func scheduledEventDidFire(
+    _ event: ConnectionEvent,
+    sessionID: UInt64,
+    pingNonce: UInt64? = nil
+  ) async {
+    await enqueue(
+      event,
+      originatingSessionID: sessionID,
+      pingNonce: pingNonce
+    )
   }
 
   /// Final process teardown only. Normal stop/logout keeps the collector alive
@@ -174,7 +207,7 @@ actor ConnectionManager {
 
   func shutdownForTesting() async {
     cancelAllTimers()
-    backgroundGraceActive = false
+    backgroundConnectionRetained = false
     pendingPingNonce = nil
     commandTask?.cancel()
     sessionTask?.cancel()
@@ -223,37 +256,77 @@ actor ConnectionManager {
       await handleConstraintLoss(reason: .authLost)
 
     case .networkAvailable:
-      constraints.networkAvailable = true
-      attempt = 0
-      cancelBackoff()
-      await evaluateConstraints(resetBackoff: true)
+      await handle(.networkPathChanged(
+        isAvailable: true,
+        routeChanged: false,
+        quality: networkQuality
+      ))
 
     case .networkUnavailable:
-      constraints.networkAvailable = false
-      await handleConstraintLoss(reason: .networkUnavailable)
+      await handle(.networkPathChanged(
+        isAvailable: false,
+        routeChanged: false,
+        quality: networkQuality
+      ))
+
+    case let .networkPathChanged(isAvailable, routeChanged, quality):
+      let availabilityChanged = constraints.networkAvailable != isAvailable
+      networkQuality = quality
+      if !isAvailable {
+        constraints.networkAvailable = false
+        guard availabilityChanged else { return }
+        await handleConstraintLoss(reason: .networkUnavailable)
+        return
+      }
+
+      constraints.networkAvailable = true
+      guard availabilityChanged || routeChanged else { return }
+      attempt = 0
+      cancelBackoff()
+      if routeChanged, state.isActive, constraintsSatisfied() {
+        log.info("Realtime network route changed; replacing transport session=\(sessionID)")
+        await forceReconnect(reason: .none)
+      } else if constraintsSatisfied() {
+        await evaluateConstraints(resetBackoff: true)
+      }
 
     case .appForeground:
-      constraints.appActive = true
-      attempt = 0
-      cancelBackgroundGrace()
-      backgroundGraceActive = false
-      cancelBackoff()
-      await evaluateConstraints(resetBackoff: true)
+      await handle(.applicationActive(transportWasRetained: true))
 
     case .appBackground:
-      constraints.appActive = false
-      if state == .open || state == .connectingTransport || state == .authenticating {
-        backgroundGraceActive = true
-        scheduleBackgroundGrace()
+      await handle(.applicationInactive(keepConnection: false))
+
+    case let .applicationActive(transportWasRetained):
+      log.debug(
+        "Realtime lifecycle active retained_transport=\(transportWasRetained ? 1 : 0) " +
+          "state=\(state) session=\(sessionID)"
+      )
+      constraints.appActive = true
+      attempt = 0
+      backgroundConnectionRetained = false
+      cancelBackoff()
+      if !transportWasRetained, state.isActive {
+        await forceReconnect(reason: .none)
       } else {
-        backgroundGraceActive = false
+        await evaluateConstraints(resetBackoff: true)
+      }
+
+    case let .applicationInactive(keepConnection):
+      log.debug(
+        "Realtime lifecycle inactive keep_connection=\(keepConnection ? 1 : 0) " +
+          "state=\(state) session=\(sessionID)"
+      )
+      constraints.appActive = false
+      backgroundConnectionRetained = keepConnection
+      if !keepConnection {
+        await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
+        await stopTransportAndReset()
       }
 
     case .systemWake:
       constraints.appActive = true
       attempt = 0
-      cancelBackgroundGrace()
-      backgroundGraceActive = false
+      backgroundConnectionRetained = false
       cancelBackoff()
       resetPendingPing()
       await evaluateConstraints(resetBackoff: true)
@@ -331,28 +404,34 @@ actor ConnectionManager {
       startPingLoop(sessionID: sessionID)
 
     case .protocolAuthFailed:
+      guard state == .authenticating else { return }
       log.error("Realtime authenticated handshake timed out")
       lastErrorDescription = "auth_failed"
       await session.stopTransport()
       await handleTransportDisconnect(reason: .authFailed)
 
     case .connectTimeout:
+      guard state == .connectingTransport else { return }
       lastErrorDescription = "connect_timeout"
       await session.stopTransport()
       await handleTransportDisconnect(reason: .transportDisconnected)
 
     case .pingTimeout:
+      guard state == .open else { return }
       lastErrorDescription = "ping_timeout"
       await session.stopTransport()
       await handleTransportDisconnect(reason: .pingTimeout)
 
     case .backoffFired:
+      guard state == .backoff else { return }
       await evaluateConstraints(resetBackoff: false)
 
     case .backgroundGraceExpired:
-      backgroundGraceActive = false
+      guard !constraints.appActive else { return }
+      backgroundConnectionRetained = false
       await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
       await stopTransportAndReset()
+
     }
   }
 
@@ -363,32 +442,42 @@ actor ConnectionManager {
     let commandStream = self.commandStream
     commandTask = Task { [weak self] in
       for await command in commandStream {
-        guard let self else {
+        guard let manager = self else {
           await command.receipt?.finish()
           return
         }
-        await self.handleCommand(command)
+        await manager.handleCommand(command)
       }
     }
 
+    let sessionEvents = session.events
     sessionTask = Task { [weak self] in
-      guard let self else { return }
-      for await envelope in self.session.events {
+      for await envelope in sessionEvents {
         guard !Task.isCancelled else {
           await envelope.markProcessed()
           return
         }
-        await self.handleSessionEvent(envelope)
+        guard let manager = self else {
+          await envelope.markProcessed()
+          return
+        }
+        await manager.handleSessionEvent(envelope)
       }
     }
   }
 
-  private func enqueue(_ event: ConnectionEvent) async {
+  private func enqueue(
+    _ event: ConnectionEvent,
+    originatingSessionID: UInt64? = nil,
+    pingNonce: UInt64? = nil
+  ) async {
     startLoopsIfNeeded()
     let receipt = ConnectionCommandReceipt()
     commandContinuation.yield(ConnectionCommand(
       event: event,
       enqueuedAt: ProcessInfo.processInfo.systemUptime,
+      originatingSessionID: originatingSessionID,
+      pingNonce: pingNonce,
       receipt: receipt
     ))
     await receipt.wait()
@@ -402,6 +491,8 @@ actor ConnectionManager {
     commandContinuation.yield(ConnectionCommand(
       event: event,
       enqueuedAt: ProcessInfo.processInfo.systemUptime,
+      originatingSessionID: nil,
+      pingNonce: nil,
       receipt: nil
     ))
   }
@@ -413,6 +504,21 @@ actor ConnectionManager {
       log.warning(
         "Connection event delayed event=\(command.event.diagnosticName) queue_ms=\(queueMilliseconds) state=\(state) session=\(sessionID)"
       )
+    }
+
+    if let originatingSessionID = command.originatingSessionID,
+       originatingSessionID != sessionID {
+      log.debug(
+        "Ignoring stale scheduled event event=\(command.event.diagnosticName) " +
+          "event_session=\(originatingSessionID) current_session=\(sessionID)"
+      )
+      await command.receipt?.finish()
+      return
+    }
+    if let pingNonce = command.pingNonce, pingNonce != pendingPingNonce {
+      log.debug("Ignoring stale ping timeout nonce for session=\(sessionID)")
+      await command.receipt?.finish()
+      return
     }
 
     await handle(command.event)
@@ -445,7 +551,26 @@ actor ConnectionManager {
       submit(.protocolOpen(sessionID: openSessionID))
 
     case .authFailed:
+      guard envelope.originatingSessionID == sessionID else {
+        log.warning(
+          "Ignoring stale auth failure event_session=\(String(describing: envelope.originatingSessionID)) " +
+            "current_session=\(sessionID)"
+        )
+        await envelope.markProcessed()
+        return
+      }
       submit(.authLost)
+      await forwardSessionEvent(envelope)
+
+    case .connectionError:
+      guard envelope.originatingSessionID == sessionID else {
+        log.warning(
+          "Ignoring stale connection error event_session=\(String(describing: envelope.originatingSessionID)) " +
+            "current_session=\(sessionID)"
+        )
+        await envelope.markProcessed()
+        return
+      }
       await forwardSessionEvent(envelope)
 
     case let .pong(nonce):
@@ -492,8 +617,6 @@ actor ConnectionManager {
   }
 
   private func handleConstraintLoss(reason: ConnectionReason) async {
-    cancelBackgroundGrace()
-    backgroundGraceActive = false
     await transition(to: .waitingForConstraints, reason: reason)
     await stopTransportAndReset()
   }
@@ -504,7 +627,7 @@ actor ConnectionManager {
     }
     handshakeTask?.cancel()
     handshakeTask = nil
-    cancelAllTimers(exceptBackground: true)
+    cancelAllTimers()
 
     guard constraintsSatisfied() else {
       await transition(to: .waitingForConstraints, reason: .constraintUnavailable)
@@ -566,13 +689,12 @@ actor ConnectionManager {
     handshakeTask?.cancel()
     handshakeTask = nil
     pendingPingNonce = nil
-    backgroundGraceActive = false
     await session.stopTransport()
     await stoppingStartTask?.value
   }
 
   private func constraintsSatisfied() -> Bool {
-    let appActiveEffective = constraints.appActive || backgroundGraceActive
+    let appActiveEffective = constraints.appActive || backgroundConnectionRetained
     return constraints.authAvailable && constraints.networkAvailable && appActiveEffective && constraints.userWantsConnection
   }
 
@@ -581,12 +703,11 @@ actor ConnectionManager {
   private func scheduleBackoff(sessionID: UInt64) {
     cancelBackoff()
     let delay = policy.backoff.delay(attempt)
+    let timeProvider = self.timeProvider
     backoffTask = Task { [weak self] in
-      guard let self else { return }
-      await self.timeProvider.sleep(for: delay)
+      await timeProvider.sleep(for: delay)
       guard !Task.isCancelled else { return }
-      guard await self.sessionID == sessionID else { return }
-      await self.enqueue(.backoffFired)
+      await self?.scheduledEventDidFire(.backoffFired, sessionID: sessionID)
     }
   }
 
@@ -597,13 +718,12 @@ actor ConnectionManager {
 
   private func startAuthTimeout(sessionID: UInt64) {
     cancelAuthTimeout()
+    let duration = policy.authTimeout
+    let timeProvider = self.timeProvider
     authTimeoutTask = Task { [weak self] in
-      guard let self else { return }
-      await self.timeProvider.sleep(for: self.policy.authTimeout)
+      await timeProvider.sleep(for: duration)
       guard !Task.isCancelled else { return }
-      guard await self.sessionID == sessionID else { return }
-      guard await self.state == .authenticating else { return }
-      await self.enqueue(.protocolAuthFailed)
+      await self?.scheduledEventDidFire(.protocolAuthFailed, sessionID: sessionID)
     }
   }
 
@@ -614,13 +734,12 @@ actor ConnectionManager {
 
   private func startConnectTimeout(sessionID: UInt64) {
     cancelConnectTimeout()
+    let duration = policy.connectTimeout
+    let timeProvider = self.timeProvider
     connectTimeoutTask = Task { [weak self] in
-      guard let self else { return }
-      await self.timeProvider.sleep(for: self.policy.connectTimeout)
+      await timeProvider.sleep(for: duration)
       guard !Task.isCancelled else { return }
-      guard await self.sessionID == sessionID else { return }
-      guard await self.state == .connectingTransport else { return }
-      await self.enqueue(.connectTimeout)
+      await self?.scheduledEventDidFire(.connectTimeout, sessionID: sessionID)
     }
   }
 
@@ -629,34 +748,23 @@ actor ConnectionManager {
     connectTimeoutTask = nil
   }
 
-  private func scheduleBackgroundGrace() {
-    guard state == .open || state == .connectingTransport || state == .authenticating else { return }
-    cancelBackgroundGrace()
-    backgroundGraceTask = Task { [weak self] in
-      guard let self else { return }
-      await self.timeProvider.sleep(for: self.policy.backgroundGrace)
-      guard !Task.isCancelled else { return }
-      await self.enqueue(.backgroundGraceExpired)
-    }
-  }
-
-  private func cancelBackgroundGrace() {
-    backgroundGraceTask?.cancel()
-    backgroundGraceTask = nil
-  }
-
   private func startPingLoop(sessionID: UInt64) {
     pingTask?.cancel()
+    let interval = policy.pingInterval
+    let timeProvider = self.timeProvider
     pingTask = Task { [weak self] in
-      guard let self else { return }
       while !Task.isCancelled {
-        await self.timeProvider.sleep(for: self.policy.pingInterval)
+        await timeProvider.sleep(for: interval)
         guard !Task.isCancelled else { return }
-        guard await self.sessionID == sessionID else { return }
-        guard await self.state == .open else { return }
-        await self.sendPingIfNeeded(sessionID: sessionID)
+        guard await self?.pingIntervalDidFire(sessionID: sessionID) == true else { return }
       }
     }
+  }
+
+  private func pingIntervalDidFire(sessionID expectedSessionID: UInt64) async -> Bool {
+    guard sessionID == expectedSessionID, state == .open else { return false }
+    await sendPingIfNeeded(sessionID: expectedSessionID)
+    return true
   }
 
   private func sendPingIfNeeded(sessionID: UInt64) async {
@@ -665,14 +773,16 @@ actor ConnectionManager {
     pendingPingNonce = nonce
 
     pingTimeoutTask?.cancel()
+    let timeout = policy.pingTimeout(for: networkQuality)
+    let timeProvider = self.timeProvider
     pingTimeoutTask = Task { [weak self] in
-      guard let self else { return }
-      let timeout = self.policy.pingTimeout(for: await self.networkQuality)
-      await self.timeProvider.sleep(for: timeout)
+      await timeProvider.sleep(for: timeout)
       guard !Task.isCancelled else { return }
-      guard await self.sessionID == sessionID else { return }
-      guard await self.pendingPingNonce == nonce else { return }
-      await self.enqueue(.pingTimeout)
+      await self?.scheduledEventDidFire(
+        .pingTimeout,
+        sessionID: sessionID,
+        pingNonce: nonce
+      )
     }
 
     await session.sendPing(nonce: nonce)
@@ -756,7 +866,7 @@ actor ConnectionManager {
     cancelProbe()
   }
 
-  private func cancelAllTimers(exceptBackground: Bool = false) {
+  private func cancelAllTimers() {
     cancelBackoff()
     cancelAuthTimeout()
     cancelConnectTimeout()
@@ -765,9 +875,6 @@ actor ConnectionManager {
     pingTask = nil
     pingTimeoutTask?.cancel()
     pingTimeoutTask = nil
-    if !exceptBackground {
-      cancelBackgroundGrace()
-    }
   }
 
   private func resetPendingPing() {

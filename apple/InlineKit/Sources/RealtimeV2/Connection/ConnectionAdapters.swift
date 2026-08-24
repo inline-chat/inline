@@ -274,82 +274,327 @@ private func diagnosticName(for status: AuthStatus) -> String {
   }
 }
 
+#if canImport(UIKit)
+enum IOSLifecycleSignal: Sendable {
+  case willResignActive
+  case didEnterBackground
+  case didBecomeActive
+  case retentionExpired(UInt64)
+}
+
+@MainActor
+protocol IOSBackgroundConnectionRetaining: AnyObject {
+  var epoch: UInt64 { get }
+  var isRetained: Bool { get }
+  func end()
+}
+
+typealias IOSBackgroundConnectionLeaseFactory = @MainActor @Sendable (
+  _ epoch: UInt64,
+  _ duration: Duration,
+  _ signal: AsyncStream<IOSLifecycleSignal>.Continuation
+) -> any IOSBackgroundConnectionRetaining
+
+@MainActor
+final class IOSBackgroundConnectionLease: IOSBackgroundConnectionRetaining {
+  typealias ExpirationHandler = @MainActor @Sendable () -> Void
+  typealias BeginBackgroundTask = @MainActor @Sendable (
+    _ expirationHandler: @escaping ExpirationHandler
+  ) -> UIBackgroundTaskIdentifier
+  typealias EndBackgroundTask = @MainActor @Sendable (UIBackgroundTaskIdentifier) -> Void
+  typealias Now = @MainActor @Sendable () -> ContinuousClock.Instant
+
+  let epoch: UInt64
+
+  private var identifier: UIBackgroundTaskIdentifier = .invalid
+  private var expirationTask: Task<Void, Never>?
+  private var ended = false
+  private let deadline: ContinuousClock.Instant
+  private let signal: AsyncStream<IOSLifecycleSignal>.Continuation
+  private let endBackgroundTask: EndBackgroundTask
+  private let now: Now
+
+  init(
+    epoch: UInt64,
+    duration: Duration,
+    signal: AsyncStream<IOSLifecycleSignal>.Continuation,
+    now: @escaping Now = { ContinuousClock().now },
+    beginBackgroundTask: @escaping BeginBackgroundTask = { expirationHandler in
+      UIApplication.shared.beginBackgroundTask(
+        withName: "Realtime connection retention",
+        expirationHandler: expirationHandler
+      )
+    },
+    endBackgroundTask: @escaping EndBackgroundTask = { identifier in
+      UIApplication.shared.endBackgroundTask(identifier)
+    }
+  ) {
+    self.epoch = epoch
+    self.signal = signal
+    self.now = now
+    self.endBackgroundTask = endBackgroundTask
+    deadline = now() + duration
+
+    identifier = beginBackgroundTask { [weak self] in
+      self?.expire()
+    }
+
+    guard identifier != .invalid else { return }
+    expirationTask = Task { @MainActor [weak self] in
+      do {
+        try await Task.sleep(for: duration)
+      } catch {
+        return
+      }
+      self?.expire()
+    }
+  }
+
+  var isRetained: Bool {
+    !ended && identifier != .invalid && now() < deadline
+  }
+
+  func end() {
+    guard !ended else { return }
+    ended = true
+    expirationTask?.cancel()
+    expirationTask = nil
+    guard identifier != .invalid else { return }
+    let endingIdentifier = identifier
+    identifier = .invalid
+    endBackgroundTask(endingIdentifier)
+  }
+
+  private func expire() {
+    guard !ended else { return }
+    end()
+    signal.yield(.retentionExpired(epoch))
+  }
+}
+
 final class LifecycleConnectionAdapter {
   private let manager: ConnectionManager
+  private let notificationCenter: NotificationCenter
+  private let applicationState: @MainActor @Sendable () -> UIApplication.State
+  private let makeLease: IOSBackgroundConnectionLeaseFactory
+  private let signalStream: AsyncStream<IOSLifecycleSignal>
+  private let signalContinuation: AsyncStream<IOSLifecycleSignal>.Continuation
+  private var observers: [NSObjectProtocol] = []
+  private var task: Task<Void, Never>?
 
-  #if canImport(UIKit)
+  init(
+    manager: ConnectionManager,
+    notificationCenter: NotificationCenter = .default,
+    applicationState: @escaping @MainActor @Sendable () -> UIApplication.State = {
+      UIApplication.shared.applicationState
+    },
+    makeLease: @escaping IOSBackgroundConnectionLeaseFactory = { epoch, duration, signal in
+      IOSBackgroundConnectionLease(epoch: epoch, duration: duration, signal: signal)
+    }
+  ) {
+    self.manager = manager
+    self.notificationCenter = notificationCenter
+    self.applicationState = applicationState
+    self.makeLease = makeLease
+    (signalStream, signalContinuation) = AsyncStream.create(
+      IOSLifecycleSignal.self,
+      bufferingPolicy: .unbounded
+    )
+  }
+
+  func start() {
+    guard task == nil else { return }
+    installObservers()
+    let manager = self.manager
+    let signalStream = self.signalStream
+    let signalContinuation = self.signalContinuation
+    let applicationState = self.applicationState
+    let makeLease = self.makeLease
+    task = Task { @MainActor in
+      await Self.run(
+        manager: manager,
+        signals: signalStream,
+        signalContinuation: signalContinuation,
+        applicationState: applicationState,
+        makeLease: makeLease
+      )
+    }
+  }
+
+  deinit {
+    for observer in observers {
+      notificationCenter.removeObserver(observer)
+    }
+    signalContinuation.finish()
+    task?.cancel()
+  }
+
+  private func installObservers() {
+    let signalContinuation = self.signalContinuation
+    let center = notificationCenter
+    observers = [
+      center.addObserver(
+        forName: UIApplication.willResignActiveNotification,
+        object: nil,
+        queue: .main
+      ) { _ in
+        signalContinuation.yield(.willResignActive)
+      },
+      center.addObserver(
+        forName: UIApplication.didEnterBackgroundNotification,
+        object: nil,
+        queue: .main
+      ) { _ in
+        signalContinuation.yield(.didEnterBackground)
+      },
+      center.addObserver(
+        forName: UIApplication.didBecomeActiveNotification,
+        object: nil,
+        queue: .main
+      ) { _ in
+        signalContinuation.yield(.didBecomeActive)
+      },
+    ]
+  }
+
+  @MainActor
+  private static func run(
+    manager: ConnectionManager,
+    signals: AsyncStream<IOSLifecycleSignal>,
+    signalContinuation: AsyncStream<IOSLifecycleSignal>.Continuation,
+    applicationState: @escaping @MainActor @Sendable () -> UIApplication.State,
+    makeLease: @escaping IOSBackgroundConnectionLeaseFactory
+  ) async {
+    var lease: (any IOSBackgroundConnectionRetaining)?
+    var nextLeaseEpoch: UInt64 = 0
+    let initialApplicationState = applicationState()
+    let backgroundRetentionDuration = await manager.backgroundRetentionDuration()
+    var isInBackground = initialApplicationState == .background
+    var managerIsActive = initialApplicationState == .active
+
+    if managerIsActive {
+      await manager.applicationBecameActive(transportWasRetained: true)
+    } else {
+      await manager.applicationBecameInactive(keepConnection: false)
+    }
+
+    defer {
+      lease?.end()
+    }
+
+    func beginLease() -> any IOSBackgroundConnectionRetaining {
+      nextLeaseEpoch = nextLeaseEpoch &+ 1
+      return makeLease(
+        nextLeaseEpoch,
+        backgroundRetentionDuration,
+        signalContinuation
+      )
+    }
+
+    for await signal in signals {
+      guard !Task.isCancelled else { return }
+
+      switch signal {
+      case .willResignActive:
+        if !isInBackground, lease == nil {
+          lease = beginLease()
+        }
+
+      case .didEnterBackground:
+        guard !isInBackground else { continue }
+        isInBackground = true
+        managerIsActive = false
+        if lease == nil {
+          lease = beginLease()
+        }
+        await manager.applicationBecameInactive(
+          keepConnection: lease?.isRetained == true
+        )
+
+      case .didBecomeActive:
+        let shouldReportForeground = !managerIsActive
+        let transportWasRetained = isInBackground && lease?.isRetained == true
+        isInBackground = false
+        managerIsActive = true
+        lease?.end()
+        lease = nil
+        if shouldReportForeground {
+          await manager.applicationBecameActive(
+            transportWasRetained: transportWasRetained
+          )
+        }
+
+      case let .retentionExpired(epoch):
+        guard lease?.epoch == epoch else { continue }
+        lease?.end()
+        lease = nil
+        if applicationState() == .active {
+          // The foreground notification may be queued behind this expiration.
+          // The manager still owns the transport, so foreground wins without
+          // turning the queued expiration into a needless reconnect.
+          let shouldReportForeground = !managerIsActive
+          isInBackground = false
+          managerIsActive = true
+          if shouldReportForeground {
+            await manager.applicationBecameActive(transportWasRetained: true)
+          }
+        } else if isInBackground {
+          await manager.applicationBecameInactive(keepConnection: false)
+        }
+      }
+    }
+  }
+}
+#elseif canImport(AppKit)
+final class LifecycleConnectionAdapter {
+  private let manager: ConnectionManager
   private var observersInstalled = false
-  #endif
 
   init(manager: ConnectionManager) {
     self.manager = manager
+  }
+
+  func start() {
+    guard !observersInstalled else { return }
+    observersInstalled = true
     installObservers()
   }
 
   deinit {
     NotificationCenter.default.removeObserver(self)
-    #if canImport(AppKit)
     NSWorkspace.shared.notificationCenter.removeObserver(self)
-    #endif
   }
 
   private func installObservers() {
-    #if canImport(UIKit)
-    guard !observersInstalled else { return }
-    observersInstalled = true
-
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleAppDidBecomeActive),
-      name: UIApplication.didBecomeActiveNotification,
-      object: nil
-    )
-
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleAppDidEnterBackground),
-      name: UIApplication.didEnterBackgroundNotification,
-      object: nil
-    )
-    #elseif canImport(AppKit)
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleAppDidBecomeActive),
       name: NSApplication.didBecomeActiveNotification,
       object: nil
     )
-
     NSWorkspace.shared.notificationCenter.addObserver(
       self,
       selector: #selector(handleSystemWillSleep),
       name: NSWorkspace.willSleepNotification,
       object: nil
     )
-
     NSWorkspace.shared.notificationCenter.addObserver(
       self,
       selector: #selector(handleSystemDidWake),
       name: NSWorkspace.didWakeNotification,
       object: nil
     )
-    #endif
   }
 
   @objc private func handleAppDidBecomeActive() {
     Task { [manager] in
-      await manager.setAppActive(true)
-    }
-  }
-
-  @objc private func handleAppDidEnterBackground() {
-    Task { [manager] in
-      await manager.setAppActive(false)
+      await manager.applicationBecameActive(transportWasRetained: true)
     }
   }
 
   @objc private func handleSystemWillSleep() {
     Task { [manager] in
-      await manager.setAppActive(false)
+      await manager.applicationBecameInactive(keepConnection: false)
     }
   }
 
@@ -359,29 +604,144 @@ final class LifecycleConnectionAdapter {
     }
   }
 }
+#else
+final class LifecycleConnectionAdapter {
+  init(manager _: ConnectionManager) {}
+  func start() {}
+}
+#endif
+
+struct ConnectionPathRoute: Sendable, Equatable {
+  let interfaceTypes: Set<NWInterface.InterfaceType>
+  let interfaceIndexes: Set<Int>
+  let gateways: Set<NWEndpoint>
+  let supportsDNS: Bool
+  let supportsIPv4: Bool
+  let supportsIPv6: Bool
+
+  init(path: NWPath) {
+    // Public NWPath data cannot distinguish every same-interface Wi-Fi or VPN
+    // replacement. This signature covers only observable route identity.
+    let activeTypes = Set([
+      NWInterface.InterfaceType.other,
+      .wifi,
+      .cellular,
+      .wiredEthernet,
+      .loopback,
+    ].filter { path.usesInterfaceType($0) })
+    interfaceTypes = activeTypes
+    interfaceIndexes = Set(
+      path.availableInterfaces.lazy
+        .filter { activeTypes.contains($0.type) }
+        .map(\.index)
+    )
+    gateways = Set(path.gateways)
+    supportsDNS = path.supportsDNS
+    supportsIPv4 = path.supportsIPv4
+    supportsIPv6 = path.supportsIPv6
+  }
+
+  init(
+    interfaceTypes: Set<NWInterface.InterfaceType>,
+    interfaceIndexes: Set<Int> = [],
+    gateways: Set<NWEndpoint> = [],
+    supportsDNS: Bool = true,
+    supportsIPv4: Bool = true,
+    supportsIPv6: Bool = true
+  ) {
+    self.interfaceTypes = interfaceTypes
+    self.interfaceIndexes = interfaceIndexes
+    self.gateways = gateways
+    self.supportsDNS = supportsDNS
+    self.supportsIPv4 = supportsIPv4
+    self.supportsIPv6 = supportsIPv6
+  }
+}
+
+struct ConnectionPathSnapshot: Sendable, Equatable {
+  let isAvailable: Bool
+  let route: ConnectionPathRoute?
+  let quality: ConnectionNetworkQuality
+
+  init(path: NWPath) {
+    isAvailable = path.status == .satisfied
+    route = isAvailable ? ConnectionPathRoute(path: path) : nil
+    quality = (path.isConstrained || path.isExpensive) ? .constrained : .good
+  }
+
+  init(
+    isAvailable: Bool,
+    route: ConnectionPathRoute?,
+    quality: ConnectionNetworkQuality
+  ) {
+    self.isAvailable = isAvailable
+    self.route = route
+    self.quality = quality
+  }
+
+  func change(since previous: ConnectionPathSnapshot?) -> ConnectionPathChange? {
+    guard previous != self else { return nil }
+    let routeChanged = previous.map {
+      $0.isAvailable && isAvailable && $0.route != route
+    } ?? false
+    return ConnectionPathChange(
+      isAvailable: isAvailable,
+      routeChanged: routeChanged,
+      quality: quality
+    )
+  }
+}
+
+struct ConnectionPathChange: Sendable, Equatable {
+  let isAvailable: Bool
+  let routeChanged: Bool
+  let quality: ConnectionNetworkQuality
+}
 
 final class NetworkConnectionAdapter {
   private let manager: ConnectionManager
-  private let monitor: NWPathMonitor
+  private let monitor = NWPathMonitor()
+  private let snapshotStream: AsyncStream<ConnectionPathSnapshot>
+  private let snapshotContinuation: AsyncStream<ConnectionPathSnapshot>.Continuation
+  private var task: Task<Void, Never>?
 
   init(manager: ConnectionManager) {
     self.manager = manager
-    self.monitor = NWPathMonitor()
+    (snapshotStream, snapshotContinuation) = AsyncStream.create(
+      ConnectionPathSnapshot.self,
+      bufferingPolicy: .bufferingNewest(1)
+    )
+  }
 
+  func start() {
+    guard task == nil else { return }
     let manager = self.manager
-    monitor.pathUpdateHandler = { path in
-      let isSatisfied = path.status == .satisfied
-      let quality: ConnectionNetworkQuality = (path.isConstrained || path.isExpensive) ? .constrained : .good
-      Task {
-        await manager.setNetworkAvailable(isSatisfied)
-        await manager.setNetworkQuality(quality)
+    let snapshots = self.snapshotStream
+    task = Task {
+      var previous: ConnectionPathSnapshot?
+      for await snapshot in snapshots {
+        guard !Task.isCancelled else { return }
+        guard let change = snapshot.change(since: previous) else { continue }
+        previous = snapshot
+        await manager.networkPathChanged(
+          isAvailable: change.isAvailable,
+          routeChanged: change.routeChanged,
+          quality: change.quality
+        )
       }
     }
 
+    let snapshotContinuation = self.snapshotContinuation
+    monitor.pathUpdateHandler = { path in
+      snapshotContinuation.yield(ConnectionPathSnapshot(path: path))
+    }
     monitor.start(queue: DispatchQueue(label: "RealtimeV2.ConnectionManager.path"))
   }
 
   deinit {
+    monitor.pathUpdateHandler = nil
     monitor.cancel()
+    snapshotContinuation.finish()
+    task?.cancel()
   }
 }

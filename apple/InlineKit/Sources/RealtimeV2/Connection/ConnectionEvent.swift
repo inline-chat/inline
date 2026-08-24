@@ -6,11 +6,18 @@ public enum ConnectionEvent: Sendable {
   case authAvailable
   case authLost
 
+  // Retained for source compatibility with the original public event surface.
+  // ConnectionManager's adapters use the richer path event below.
   case networkAvailable
   case networkUnavailable
+  case networkPathChanged(isAvailable: Bool, routeChanged: Bool, quality: ConnectionNetworkQuality)
 
+  // Retained for source compatibility. Platform lifecycle adapters use the
+  // explicit retention variants below.
   case appForeground
   case appBackground
+  case applicationActive(transportWasRetained: Bool)
+  case applicationInactive(keepConnection: Bool)
   case systemWake
   case wakeProbeCompleted(sessionID: UInt64, isHealthy: Bool)
 
@@ -37,8 +44,11 @@ extension ConnectionEvent {
     case .authLost: "authLost"
     case .networkAvailable: "networkAvailable"
     case .networkUnavailable: "networkUnavailable"
+    case .networkPathChanged: "networkPathChanged"
     case .appForeground: "appForeground"
     case .appBackground: "appBackground"
+    case .applicationActive: "applicationActive"
+    case .applicationInactive: "applicationInactive"
     case .systemWake: "systemWake"
     case .wakeProbeCompleted: "wakeProbeCompleted"
     case .transportConnecting: "transportConnecting"

@@ -311,7 +311,7 @@ public class ComposeActions: ObservableObject {
       log.trace("sending typing status for \(peerId)")
       try await sendComposeAction(for: peerId, action: .typing)
     } catch {
-      log.error("Failed to send typing status: \(error)")
+      log.debug("Best-effort typing status was not sent: \(error)")
     }
   }
 
@@ -327,7 +327,7 @@ public class ComposeActions: ObservableObject {
     do {
       try await sendComposeAction(for: peerId, action: nil)
     } catch {
-      log.error("Failed to send stop typing status: \(error)")
+      log.debug("Best-effort stop-typing status was not sent: \(error)")
     }
   }
 }
@@ -351,28 +351,19 @@ public extension ComposeActions {
     _activeUploads.insert(peerId)
     lastTypingSent[peerId] = Date()
 
-    // Send initial status immediately
-    Task.detached(priority: .userInitiated) {
-      try await self.sendComposeAction(for: peerId, action: action)
-    }
-
-    // Create a repeating task that sends the uploading status every 3 seconds
-    let uploadTask = Task.detached(priority: .userInitiated) {
+    // One owned task sends immediately and then refreshes every three seconds.
+    // Replacing an activity for this peer cancels the previous owner first.
+    let uploadTask = Task(priority: .userInitiated) {
       do {
-        // Keep sending status updates every 3 seconds until cancelled
         while !Task.isCancelled {
+          try await self.sendComposeAction(for: peerId, action: action)
+          self.lastTypingSent[peerId] = Date()
           try await Task.sleep(for: .seconds(3))
-          if !Task.isCancelled {
-            try await self.sendComposeAction(for: peerId, action: action)
-            await MainActor.run {
-              self.lastTypingSent[peerId] = Date()
-            }
-          } else {
-            break
-          }
         }
+      } catch is CancellationError {
+        // Replaced or explicitly stopped.
       } catch {
-        await self.log.error("Failed to send \(action) status: \(error)")
+        self.log.debug("Best-effort \(action) status refresh stopped: \(error)")
       }
     }
 
@@ -381,6 +372,7 @@ public extension ComposeActions {
     if cancelTasks[peerId] == nil {
       cancelTasks[peerId] = [:]
     }
+    cancelTasks[peerId]?[currentUserId]?.cancel()
     cancelTasks[peerId]![currentUserId] = uploadTask
 
     // Return a completion function
@@ -394,11 +386,11 @@ public extension ComposeActions {
         self._activeUploads.remove(peerId)
 
         // Send the "stopped uploading" status
-        Task.detached(priority: .userInitiated) {
+        Task(priority: .userInitiated) {
           do {
             try await self.sendComposeAction(for: peerId, action: nil)
           } catch {
-            await self.log.error("Failed to send stop \(action) status: \(error)")
+            self.log.debug("Best-effort stop-\(action) status was not sent: \(error)")
           }
         }
         self.lastTypingSent[peerId] = nil
@@ -427,26 +419,17 @@ public extension ComposeActions {
   func startVoiceRecording(for peerId: Peer) -> @Sendable () -> Void {
     lastTypingSent[peerId] = Date()
 
-    Task.detached(priority: .userInitiated) {
-      do {
-        try await self.sendComposeAction(for: peerId, action: .recordingVoice)
-      } catch {
-        await self.log.error("Failed to send recording voice status: \(error)")
-      }
-    }
-
-    let task = Task.detached(priority: .userInitiated) {
+    let task = Task(priority: .userInitiated) {
       do {
         while !Task.isCancelled {
-          try await Task.sleep(for: .seconds(3))
-          guard !Task.isCancelled else { break }
           try await self.sendComposeAction(for: peerId, action: .recordingVoice)
-          await MainActor.run {
-            self.lastTypingSent[peerId] = Date()
-          }
+          self.lastTypingSent[peerId] = Date()
+          try await Task.sleep(for: .seconds(3))
         }
+      } catch is CancellationError {
+        // Replaced or explicitly stopped.
       } catch {
-        await self.log.error("Failed to keep recording voice status alive: \(error)")
+        self.log.debug("Best-effort recording voice refresh stopped: \(error)")
       }
     }
 
@@ -454,6 +437,7 @@ public extension ComposeActions {
     if cancelTasks[peerId] == nil {
       cancelTasks[peerId] = [:]
     }
+    cancelTasks[peerId]?[currentUserId]?.cancel()
     cancelTasks[peerId]![currentUserId] = task
 
     return {
@@ -461,11 +445,11 @@ public extension ComposeActions {
         self.cancelTasks[peerId]?[currentUserId]?.cancel()
         self.cancelTasks[peerId]?[currentUserId] = nil
 
-        Task.detached(priority: .userInitiated) {
+        Task(priority: .userInitiated) {
           do {
             try await self.sendComposeAction(for: peerId, action: nil)
           } catch {
-            await self.log.error("Failed to send stop recording voice status: \(error)")
+            self.log.debug("Best-effort stop-recording status was not sent: \(error)")
           }
         }
         self.lastTypingSent[peerId] = nil

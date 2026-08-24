@@ -245,6 +245,16 @@ let package = Package(
     ),
 
     .testTarget(
+      name: "RealtimeV2Tests",
+      dependencies: [
+        "RealtimeV2",
+        "InlineProtocol",
+        .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
+      ],
+      swiftSettings: swiftSettings
+    ),
+
+    .testTarget(
       name: "LoggerTests",
       dependencies: ["Logger"],
       swiftSettings: swiftSettings

@@ -51,6 +51,35 @@ private enum TransactionDispatchPreparationError: Error {
   case persistenceUnavailable
 }
 
+struct RealtimeConnectionLifecycleEdge: Sendable, Equatable {
+  let connectionLost: Bool
+  let connectionOpened: Bool
+
+  init(
+    previousState: ConnectionState,
+    previousSessionID: UInt64,
+    snapshot: ConnectionSnapshot
+  ) {
+    let sessionChanged = snapshot.sessionID != previousSessionID
+    connectionLost = previousState == .open && (snapshot.state != .open || sessionChanged)
+    connectionOpened = snapshot.state == .open && (previousState != .open || sessionChanged)
+  }
+}
+
+private struct RealtimeTransactionDiagnosticCounters {
+  var windowSaturations = 0
+  var ephemeralSuperseded = 0
+  var ephemeralExpired = 0
+  var capacityRejections = 0
+
+  var isEmpty: Bool {
+    windowSaturations == 0
+      && ephemeralSuperseded == 0
+      && ephemeralExpired == 0
+      && capacityRejections == 0
+  }
+}
+
 /// This root actor manages the connection, sync, transactions, queries, etc.
 ///
 /// later we will rename the main module to `Realtime`
@@ -76,6 +105,13 @@ public actor RealtimeV2 {
   private var lifecycleAdapter: LifecycleConnectionAdapter?
   private var networkAdapter: NetworkConnectionAdapter?
   private let maxLimitedRpcErrorRetries = 2
+  /// Keep application transactions below the carrier's 64-request ceiling so
+  /// sync, probes, and direct control RPCs retain admission capacity.
+  private let maximumOutstandingTransactions = 32
+  private let transactionDiagnosticInterval: TimeInterval = 60
+  private var transactionDiagnosticCounters = RealtimeTransactionDiagnosticCounters()
+  private var lastTransactionDiagnosticAt = Date.distantPast
+  private var lastTransactionWarningDiagnosticAt = Date.distantPast
 
   // Connection state channel for cross-task consumption and the latest cached state
   private var connectionStateContinuations: [UUID: AsyncStream<RealtimeConnectionState>.Continuation] = [:]
@@ -84,6 +120,7 @@ public actor RealtimeV2 {
   private var currentConnectionState: RealtimeConnectionState = .connecting
   private var syncActivityInProgress = false
   private var lastSnapshotState: ConnectionState = .stopped
+  private var lastSnapshotSessionID: UInt64 = 0
   private var didNotifyConnectionInitFailure = false
   private var didNotifyAuthInvalidated = false
   private let authRecoveryDiagnostics = RealtimeAuthRecoveryDiagnostics()
@@ -116,11 +153,16 @@ public actor RealtimeV2 {
     acceptsTransactions = auth.userId() != nil
     authDiagnosticSnapshots = auth.snapshots
     session = ProtocolSession(transport: transport, auth: auth)
+    #if canImport(UIKit)
+    let initiallyAppActive = false
+    #else
+    let initiallyAppActive = true
+    #endif
     let initialConstraints = ConnectionConstraints(
       // Realtime handshake requires a token; userId alone is not enough.
       authAvailable: auth.snapshot().isLoggedIn,
       networkAvailable: true,
-      appActive: true,
+      appActive: initiallyAppActive,
       userWantsConnection: true
     )
     connectionManager = ConnectionManager(session: session, constraints: initialConstraints)
@@ -158,9 +200,11 @@ public actor RealtimeV2 {
     tasks.removeAll()
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
-    // Stop core components
-    Task { [self] in
+    // Stop the transport and terminate its infinite event collector. Capture
+    // only the manager so cleanup cannot extend RealtimeV2's lifetime.
+    Task { [connectionManager] in
       await connectionManager.stop()
+      await connectionManager.finishSessionEventForwarding()
     }
   }
 
@@ -177,6 +221,8 @@ public actor RealtimeV2 {
 
     await session.start()
     await connectionManager.start()
+    lifecycleAdapter?.start()
+    networkAdapter?.start()
     authAdapter?.start()
     if auth.snapshot().isLoggedIn {
       await connectionManager.setAuthAvailable(true)
@@ -291,16 +337,23 @@ public actor RealtimeV2 {
         let mapped = self.mapConnectionState(snapshot.state)
         await self.updateTransportConnectionState(mapped)
 
-        if snapshot.state != .open && self.lastSnapshotState == .open {
-          await self.transactions.connectionLost()
+        let lifecycleEdge = RealtimeConnectionLifecycleEdge(
+          previousState: self.lastSnapshotState,
+          previousSessionID: self.lastSnapshotSessionID,
+          snapshot: snapshot
+        )
+        if lifecycleEdge.connectionLost {
+          let expired = await self.transactions.connectionLost()
+          await self.expireEphemeralTransactions(expired)
         }
 
-        if snapshot.state == .open && self.lastSnapshotState != .open {
+        if lifecycleEdge.connectionOpened {
           self.didNotifyConnectionInitFailure = false
           self.didNotifyAuthInvalidated = false
           await self.restartTransactions()
         }
         self.lastSnapshotState = snapshot.state
+        self.lastSnapshotSessionID = snapshot.sessionID
       }
     }.store(in: &tasks)
 
@@ -337,6 +390,13 @@ public actor RealtimeV2 {
             error: TransactionError.commitOutcomeUnknownAfterReconnect
           )
 
+        case let .rpcRejectedBeforeExecution(msgId):
+          self.log.warning("Received carrier pre-execution rejection for message \(msgId)")
+          await self.completeTransaction(
+            msgId: msgId,
+            error: TransactionError.rejectedBeforeExecution
+          )
+
         case let .updates(updates):
           self.log.trace("Received updates \(updates)")
           await self.sync.process(updates: updates.updates)
@@ -371,7 +431,10 @@ public actor RealtimeV2 {
 
         transactionDrain: while await self.canExecuteTransactions(),
                                 await self.isCurrentTransactionOwner(owner),
-                                let dequeueResult = await self.transactions.dequeue(owner: owner) {
+                                let dequeueResult = await self.transactions.dequeue(
+                                  owner: owner,
+                                  maximumOutstanding: self.maximumOutstandingTransactions
+                                ) {
           switch dequeueResult {
             case let .ready(transaction):
               self.log.trace("Dequeued transaction \(transaction.id)")
@@ -381,6 +444,16 @@ public actor RealtimeV2 {
             case let .failed(transaction):
               self.log.trace("Dropping blocked transaction \(transaction.id) after dependency failure")
               await self.failQueuedTransaction(transaction, error: .dependencyFailed)
+            case let .expired(transaction):
+              self.log.trace("Discarding expired ephemeral transaction \(transaction.id)")
+              await self.recordTransactionDiagnostics(ephemeralExpired: 1)
+              await self.failQueuedTransaction(transaction, error: .timeout)
+            case let .capacityLimited(pressure):
+              await self.recordTransactionDiagnostics(
+                windowSaturations: 1,
+                pressure: pressure
+              )
+              break transactionDrain
           }
         }
       }
@@ -532,6 +605,13 @@ public actor RealtimeV2 {
       await transactions.requeueBeforeDispatch(transactionId: transactionWrapper.id, signal: false)
       scheduleTransactionQueueRetry()
       return .deferred
+    } catch ProtocolSessionError.capacityExceeded {
+      // Carrier admission rejected this request before accepting bytes. Hold it
+      // behind the bounded transaction window instead of reporting uncertainty.
+      recordTransactionDiagnostics(capacityRejections: 1)
+      await transactions.requeueBeforeDispatch(transactionId: transactionWrapper.id, signal: false)
+      scheduleTransactionQueueRetry()
+      return .deferred
     } catch {
       if let unresolved = await transactions.recoverAfterUncertainDispatch(
         transactionId: transactionWrapper.id
@@ -600,6 +680,7 @@ public actor RealtimeV2 {
       await transactions.finishExecution(for: transactionWrapper)
       await transactions.satisfy(blockers: transaction.satisfiedBlockersOnSuccess)
       resumeTransactionContinuation(for: transactionId, returning: rpcResult)
+      await transactions.signalQueue()
     } catch {
       guard completingOwner == transactionOwner else {
         await transaction.cancelled()
@@ -619,7 +700,8 @@ public actor RealtimeV2 {
     beginTransactionOperation()
     defer { endTransactionOperation() }
 
-    let shouldRetry = isLimitedRetryRpcError(error)
+    let rejectedBeforeExecution = isRejectedBeforeExecution(error)
+    let shouldRetry = rejectedBeforeExecution || isLimitedRetryRpcError(error)
     guard let transactionWrapper = await transactions.complete(
       rpcMsgId: msgId,
       owner: completingOwner,
@@ -652,7 +734,8 @@ public actor RealtimeV2 {
       let requeued = await transactions.retryAfterRpcError(
         transactionWrapper,
         owner: completingOwner,
-        maxRetries: maxLimitedRpcErrorRetries
+        maxRetries: maxLimitedRpcErrorRetries,
+        signalQueue: !rejectedBeforeExecution
       )
       guard completingOwner == transactionOwner else {
         if !requeued {
@@ -665,6 +748,11 @@ public actor RealtimeV2 {
         log.warning(
           "Retrying transaction \(transactionId) after RPC error \(transactionWrapper.rpcErrorRetryCount + 1)/\(maxLimitedRpcErrorRetries): \(error)"
         )
+        if rejectedBeforeExecution {
+          // The server proved this request did not execute. Back off before
+          // redelivery so overload does not turn into an immediate retry burst.
+          scheduleTransactionQueueRetry()
+        }
         return
       }
     }
@@ -694,6 +782,25 @@ public actor RealtimeV2 {
     await transaction.failed(error: error)
     guard completingOwner == transactionOwner else { return }
     resumeTransactionContinuation(for: transactionId, throwing: error)
+  }
+
+  private func cancelSupersededEphemeralTransactions(_ wrappers: [TransactionWrapper]) async {
+    guard !wrappers.isEmpty else { return }
+    recordTransactionDiagnostics(ephemeralSuperseded: wrappers.count)
+    for wrapper in wrappers {
+      await wrapper.transaction.cancelled()
+      resumeTransactionContinuation(for: wrapper.id, throwing: CancellationError())
+    }
+  }
+
+  private func expireEphemeralTransactions(_ wrappers: [TransactionWrapper]) async {
+    guard !wrappers.isEmpty else { return }
+    recordTransactionDiagnostics(ephemeralExpired: wrappers.count)
+    for wrapper in wrappers {
+      await wrapper.transaction.failed(error: .timeout)
+      resumeTransactionContinuation(for: wrapper.id, throwing: TransactionError.timeout)
+    }
+    await transactions.signalQueue()
   }
 
   private func getAndRemoveContinuation(for transactionId: TransactionId) -> PendingTransactionContinuation? {
@@ -788,8 +895,8 @@ public actor RealtimeV2 {
       owner: owner
     )
     switch admission {
-      case .accepted:
-        break
+      case let .accepted(superseded):
+        await cancelSupersededEphemeralTransactions(superseded)
       case .ownerUnavailable:
         resumeTransactionContinuation(for: transactionId, throwing: CancellationError())
         await transaction.cancelled()
@@ -1001,6 +1108,13 @@ public actor RealtimeV2 {
         throw CancellationError()
       }
 
+      guard await admitEphemeralTransactionWhileConnected(transaction) else {
+        cancellationState.finish()
+        await transaction.failed(error: .timeout)
+        await endTransactionOperation()
+        throw TransactionError.timeout
+      }
+
       guard !Task.isCancelled, !cancellationState.isCancellationRequested() else {
         cancellationState.finish()
         await transaction.cancelled()
@@ -1041,6 +1155,12 @@ public actor RealtimeV2 {
       return transactionId
     }
 
+    guard await admitEphemeralTransactionWhileConnected(transaction) else {
+      await transaction.failed(error: .timeout)
+      await endTransactionOperation()
+      return transactionId
+    }
+
     guard !Task.isCancelled else {
       await transaction.cancelled()
       await endTransactionOperation()
@@ -1060,10 +1180,13 @@ public actor RealtimeV2 {
       transactionId: transactionId,
       owner: owner
     )
-    guard admission == .accepted else {
-      await transaction.cancelled()
-      await endTransactionOperation()
-      return transactionId
+    switch admission {
+      case let .accepted(superseded):
+        await cancelSupersededEphemeralTransactions(superseded)
+      case .ownerUnavailable, .persistenceFailed:
+        await transaction.cancelled()
+        await endTransactionOperation()
+        return transactionId
     }
 
     guard await isCurrentTransactionOwner(owner) else {
@@ -1455,6 +1578,66 @@ public actor RealtimeV2 {
     }
   }
 
+  private func admitEphemeralTransactionWhileConnected(_ transaction: any Transaction) -> Bool {
+    let accepted = transaction.ephemeralConfig == nil || canExecuteTransactions()
+    if !accepted {
+      recordTransactionDiagnostics(ephemeralExpired: 1)
+    }
+    return accepted
+  }
+
+  private func recordTransactionDiagnostics(
+    windowSaturations: Int = 0,
+    ephemeralSuperseded: Int = 0,
+    ephemeralExpired: Int = 0,
+    capacityRejections: Int = 0,
+    pressure: TransactionQueuePressure? = nil
+  ) {
+    transactionDiagnosticCounters.windowSaturations += windowSaturations
+    transactionDiagnosticCounters.ephemeralSuperseded += ephemeralSuperseded
+    transactionDiagnosticCounters.ephemeralExpired += ephemeralExpired
+    transactionDiagnosticCounters.capacityRejections += capacityRejections
+
+    let now = Date()
+    let incomingWarning = windowSaturations > 0 || capacityRejections > 0
+    let lastRelevantDiagnosticAt = incomingWarning
+      ? lastTransactionWarningDiagnosticAt
+      : lastTransactionDiagnosticAt
+    guard now.timeIntervalSince(lastRelevantDiagnosticAt) >= transactionDiagnosticInterval,
+          !transactionDiagnosticCounters.isEmpty
+    else { return }
+
+    let counters = transactionDiagnosticCounters
+    transactionDiagnosticCounters = RealtimeTransactionDiagnosticCounters()
+    lastTransactionDiagnosticAt = now
+
+    var data: [String: Any] = [
+      "window_saturations": counters.windowSaturations,
+      "ephemeral_superseded": counters.ephemeralSuperseded,
+      "ephemeral_expired": counters.ephemeralExpired,
+      "capacity_rejections": counters.capacityRejections,
+    ]
+    if let pressure {
+      data["queued"] = pressure.queued
+      data["outstanding"] = pressure.outstanding
+      data["oldest_queue_age_ms"] = pressure.oldestQueueAgeMilliseconds
+    }
+
+    let isWarning = counters.windowSaturations > 0 || counters.capacityRejections > 0
+    if isWarning { lastTransactionWarningDiagnosticAt = now }
+    PerformanceTrace.breadcrumb(
+      "realtime_transaction_pressure",
+      category: "realtime.transaction",
+      level: isWarning ? .warning : .info,
+      data: data
+    )
+    if isWarning {
+      log.warning(
+        "Realtime transaction pressure queued=\(pressure?.queued ?? 0) outstanding=\(pressure?.outstanding ?? 0) saturations=\(counters.windowSaturations) capacity_rejections=\(counters.capacityRejections)"
+      )
+    }
+  }
+
   private func addConnectionStateContinuation(
     id: UUID,
     continuation: AsyncStream<RealtimeConnectionState>.Continuation
@@ -1556,5 +1739,10 @@ public actor RealtimeV2 {
          .UNRECOGNIZED(_):
       return false
     }
+  }
+
+  private func isRejectedBeforeExecution(_ error: TransactionError) -> Bool {
+    if case .rejectedBeforeExecution = error { return true }
+    return false
   }
 }

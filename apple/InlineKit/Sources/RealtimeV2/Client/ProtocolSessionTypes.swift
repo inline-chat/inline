@@ -14,6 +14,7 @@ enum ProtocolSessionEvent: Sendable {
   case rpcResult(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?)
   case rpcError(msgId: UInt64, rpcError: InlineProtocol.RpcError)
   case rpcCommitOutcomeUnknown(msgId: UInt64)
+  case rpcRejectedBeforeExecution(msgId: UInt64)
   case updates(updates: InlineProtocol.UpdatesPayload)
   case grid(event: InlineProtocol.GridEvent)
   case pong(nonce: UInt64)
@@ -24,14 +25,22 @@ enum ProtocolSessionEvent: Sendable {
 /// it does not mean an update or transaction result was durably applied.
 struct ProtocolSessionEventEnvelope: Sendable {
   let event: ProtocolSessionEvent
+  let originatingSessionID: UInt64?
   private let processingReceipt: ProtocolSessionEventProcessingReceipt?
 
   static func lifecycle(_ event: ProtocolSessionEvent) -> Self {
-    Self(event: event, processingReceipt: nil)
+    Self(event: event, originatingSessionID: nil, processingReceipt: nil)
   }
 
-  static func account(_ event: ProtocolSessionEvent) -> Self {
-    Self(event: event, processingReceipt: ProtocolSessionEventProcessingReceipt())
+  static func account(
+    _ event: ProtocolSessionEvent,
+    originatingSessionID: UInt64? = nil
+  ) -> Self {
+    Self(
+      event: event,
+      originatingSessionID: originatingSessionID,
+      processingReceipt: ProtocolSessionEventProcessingReceipt()
+    )
   }
 
   func waitUntilProcessed() async {

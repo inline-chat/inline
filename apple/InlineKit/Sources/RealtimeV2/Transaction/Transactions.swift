@@ -5,10 +5,18 @@ import Logger
 enum TransactionDequeueResult {
   case ready(TransactionWrapper)
   case failed(TransactionWrapper)
+  case expired(TransactionWrapper)
+  case capacityLimited(TransactionQueuePressure)
 }
 
-enum TransactionAdmissionResult: Equatable {
-  case accepted
+struct TransactionQueuePressure: Sendable {
+  let queued: Int
+  let outstanding: Int
+  let oldestQueueAgeMilliseconds: Int
+}
+
+enum TransactionAdmissionResult {
+  case accepted(superseded: [TransactionWrapper])
   case ownerUnavailable
   case persistenceFailed
 }
@@ -57,6 +65,8 @@ actor Transactions {
   private var acceptsTransactions = false
   private var activationWaiters: [CheckedContinuation<Bool, Never>] = []
   private var persistenceTail: Task<Void, Never>?
+  private var ephemeralExpiryTask: Task<Void, Never>?
+  private var ephemeralExpiryDeadline: Date?
 
   init(
     persistenceHandler: TransactionPersistenceHandler? = nil,
@@ -95,6 +105,7 @@ actor Transactions {
       combined[id] = transaction
     }
     _queue = combined
+    rescheduleEphemeralExpiryTimer()
     acceptsTransactions = true
     resumeActivationWaiters(accepted: true)
 
@@ -118,6 +129,7 @@ actor Transactions {
 
     let wrappers = uniqueTransactions()
     _queue.removeAll()
+    cancelEphemeralExpiryTimer()
     inFlight.removeAll()
     sent.removeAll()
     transactionRpcMap.removeAll()
@@ -144,11 +156,17 @@ actor Transactions {
 
   func queue(transaction: some Transaction, owner expectedOwner: TransactionOwner) async -> TransactionId? {
     let transactionId = TransactionId.generate()
-    guard await enqueue(
+    let result = await enqueue(
       transaction: transaction,
       transactionId: transactionId,
       owner: expectedOwner
-    ) == .accepted else {
+    )
+    switch result {
+    case let .accepted(superseded):
+      for wrapper in superseded {
+        await wrapper.transaction.cancelled()
+      }
+    case .ownerUnavailable, .persistenceFailed:
       return nil
     }
     queueContinuation.yield(())
@@ -184,8 +202,9 @@ actor Transactions {
       return .ownerUnavailable
     }
     guard acceptsTransactions, owner == expectedOwner else { return .ownerUnavailable }
+    let superseded = supersedeQueuedEphemeralTransactions(with: wrapper)
     enqueue(wrapper, saveToDisk: false)
-    return .accepted
+    return .accepted(superseded: superseded)
   }
 
   private func enqueue(_ wrapper: TransactionWrapper, saveToDisk shouldSave: Bool = true) {
@@ -195,6 +214,7 @@ actor Transactions {
 
     // add to queue
     _queue[transactionId] = wrapper
+    rescheduleEphemeralExpiryTimer()
 
     if shouldSave {
       saveToDisk(transaction: wrapper)
@@ -206,7 +226,15 @@ actor Transactions {
   }
 
   /// Dequeue next transaction from the queue and mark it as in-flight.
-  func dequeue() async -> TransactionDequeueResult? {
+  func dequeue(maximumOutstanding: Int = .max) async -> TransactionDequeueResult? {
+    if let expired = removeFirstExpiredEphemeral() {
+      return .expired(expired)
+    }
+
+    if outstandingCount >= max(0, maximumOutstanding), let pressure = queuePressure {
+      return .capacityLimited(pressure)
+    }
+
     for transactionId in Array(_queue.keys) {
       guard let wrapper = _queue[transactionId] else { continue }
 
@@ -214,10 +242,12 @@ actor Transactions {
         case .ready:
           guard acquireExecutionKey(for: wrapper) else { continue }
           _queue.removeValue(forKey: transactionId)
+          rescheduleEphemeralExpiryTimer()
           inFlight[transactionId] = wrapper
           return .ready(wrapper)
         case .failed:
           _queue.removeValue(forKey: transactionId)
+          rescheduleEphemeralExpiryTimer()
           deleteFromDisk(transactionId: transactionId)
           return .failed(wrapper)
         case .blocked:
@@ -228,11 +258,22 @@ actor Transactions {
     return nil
   }
 
-  func dequeue(owner expectedOwner: TransactionOwner) async -> TransactionDequeueResult? {
+  func dequeue(
+    owner expectedOwner: TransactionOwner,
+    maximumOutstanding: Int = .max
+  ) async -> TransactionDequeueResult? {
     guard acceptsTransactions, owner == expectedOwner else { return nil }
+    if let expired = removeFirstExpiredEphemeral() {
+      return .expired(expired)
+    }
+
+    if outstandingCount >= max(0, maximumOutstanding), let pressure = queuePressure {
+      return .capacityLimited(pressure)
+    }
 
     for transactionId in Array(_queue.keys) {
       guard let wrapper = _queue[transactionId] else { continue }
+
       let state = await blockerState(for: wrapper)
       guard acceptsTransactions,
             owner == expectedOwner,
@@ -243,10 +284,12 @@ actor Transactions {
         case .ready:
           guard acquireExecutionKey(for: wrapper) else { continue }
           _queue.removeValue(forKey: transactionId)
+          rescheduleEphemeralExpiryTimer()
           inFlight[transactionId] = wrapper
           return .ready(wrapper)
         case .failed:
           _queue.removeValue(forKey: transactionId)
+          rescheduleEphemeralExpiryTimer()
           deleteFromDisk(transactionId: transactionId)
           return .failed(wrapper)
         case .blocked:
@@ -363,6 +406,7 @@ actor Transactions {
     let transactionFromInFlight = inFlight.removeValue(forKey: transactionId)
     let transactionFromSent = sent.removeValue(forKey: transactionId)
     _ = _queue.removeValue(forKey: transactionId)
+    rescheduleEphemeralExpiryTimer()
 
     // remove from rpc map
     transactionRpcMap.removeValue(forKey: rpcMsgId)
@@ -381,7 +425,8 @@ actor Transactions {
   func retryAfterRpcError(
     _ wrapper: TransactionWrapper,
     owner expectedOwner: TransactionOwner,
-    maxRetries: Int
+    maxRetries: Int,
+    signalQueue: Bool = true
   ) -> Bool {
     guard acceptsTransactions, owner == expectedOwner else { return false }
     guard wrapper.rpcErrorRetryCount < maxRetries else {
@@ -391,9 +436,12 @@ actor Transactions {
 
     let retried = wrapper.incrementingRpcErrorRetryCount()
     _queue[retried.id] = retried
+    rescheduleEphemeralExpiryTimer()
     saveToDisk(transaction: retried)
 
-    queueContinuation.yield(())
+    if signalQueue {
+      queueContinuation.yield(())
+    }
 
     return true
   }
@@ -411,6 +459,7 @@ actor Transactions {
 
     // re-add to queue
     _queue[transactionId] = wrapper
+    rescheduleEphemeralExpiryTimer()
 
     if signal {
       queueContinuation.yield(())
@@ -432,6 +481,7 @@ actor Transactions {
     // Undo the defensive mayHaveExecuted marker before persisting the retry.
     let queued = wrapper.withDispatchPhase(.queued)
     _queue[transactionId] = queued
+    rescheduleEphemeralExpiryTimer()
     saveToDisk(transaction: queued)
 
     if signal {
@@ -468,6 +518,7 @@ actor Transactions {
     sent.removeAll()
 
     removeRpcMappings(for: requeuedIds.union(droppedIds))
+    rescheduleEphemeralExpiryTimer()
 
     guard !requeuedIds.isEmpty else { return dropped }
 
@@ -484,6 +535,7 @@ actor Transactions {
 
     if wrapper.dispatchPhase == .queued || canReplayAfterReconnect(transaction: wrapper) {
       _queue[transactionId] = wrapper.withDispatchPhase(.queued)
+      rescheduleEphemeralExpiryTimer()
       queueContinuation.yield(())
       return nil
     }
@@ -515,9 +567,31 @@ actor Transactions {
 
   /// Called when a transport/session disconnect happens.
   /// RPC message IDs are session-scoped and must not survive reconnect boundaries.
-  func connectionLost() {
+  func connectionLost() -> [TransactionWrapper] {
     transactionRpcMap.removeAll()
     pendingAckMsgIds.removeAll()
+
+    let queuedEphemeral = _queue.filter { $0.value.transaction.ephemeralConfig != nil }
+    let inFlightEphemeral = inFlight.filter { $0.value.transaction.ephemeralConfig != nil }
+    let sentEphemeral = sent.filter { $0.value.transaction.ephemeralConfig != nil }
+    let expired = queuedEphemeral.map(\.value)
+      + inFlightEphemeral.map(\.value)
+      + sentEphemeral.map(\.value)
+
+    for (transactionId, _) in queuedEphemeral {
+      _queue.removeValue(forKey: transactionId)
+    }
+    rescheduleEphemeralExpiryTimer()
+    for (transactionId, _) in inFlightEphemeral {
+      inFlight.removeValue(forKey: transactionId)
+    }
+    for (transactionId, _) in sentEphemeral {
+      sent.removeValue(forKey: transactionId)
+    }
+    for wrapper in expired {
+      finishExecution(for: wrapper)
+    }
+    return expired
   }
 
   func satisfy(blockers: [TransactionBlocker]) async {
@@ -542,10 +616,11 @@ actor Transactions {
   /// Cancel all transactions that match the predicate from the queue.
   func cancel(where predicate: @Sendable (TransactionWrapper) -> Bool) async {
     let matches = uniqueTransactions().filter(predicate)
+    var cancelledAny = false
     for wrapper in matches {
       let transactionId = wrapper.id
-      if ownsExecutionKey(wrapper) {
-        log.trace("Keeping active serialized transaction \(transactionId) after cancellation request")
+      if wrapper.dispatchPhase == .mayHaveExecuted {
+        log.trace("Detaching caller from dispatched transaction \(transactionId) after cancellation request")
         continue
       }
       log.trace("Cancelling transaction \(transactionId) method=\(wrapper.transaction.method)")
@@ -556,7 +631,10 @@ actor Transactions {
       deleteFromDisk(transactionId: transactionId)
       await wrapper.transaction.cancelled()
       finishExecution(for: wrapper)
+      cancelledAny = true
     }
+    rescheduleEphemeralExpiryTimer()
+    if cancelledAny { queueContinuation.yield(()) }
   }
 
   func cancel(
@@ -566,11 +644,12 @@ actor Transactions {
     guard acceptsTransactions, owner == expectedOwner else { return }
     let matches = uniqueTransactions().filter(predicate)
     guard acceptsTransactions, owner == expectedOwner else { return }
+    var cancelledAny = false
     for wrapper in matches {
       guard acceptsTransactions, owner == expectedOwner else { return }
       let transactionId = wrapper.id
-      if ownsExecutionKey(wrapper) {
-        log.trace("Keeping active serialized transaction \(transactionId) after cancellation request")
+      if wrapper.dispatchPhase == .mayHaveExecuted {
+        log.trace("Detaching caller from dispatched transaction \(transactionId) after cancellation request")
         continue
       }
       _queue.removeValue(forKey: transactionId)
@@ -581,13 +660,16 @@ actor Transactions {
       await wrapper.transaction.cancelled()
       guard owner == expectedOwner else { return }
       finishExecution(for: wrapper)
+      cancelledAny = true
     }
+    rescheduleEphemeralExpiryTimer()
+    if cancelledAny { queueContinuation.yield(()) }
   }
 
   func cancel(transactionId: TransactionId) async {
     let candidate = _queue[transactionId] ?? inFlight[transactionId] ?? sent[transactionId]
-    if let candidate, ownsExecutionKey(candidate) {
-      log.trace("Detaching caller from active serialized transaction \(transactionId)")
+    if let candidate, candidate.dispatchPhase == .mayHaveExecuted {
+      log.trace("Detaching caller from dispatched transaction \(transactionId)")
       return
     }
 
@@ -595,11 +677,13 @@ actor Transactions {
       ?? inFlight.removeValue(forKey: transactionId)
       ?? sent.removeValue(forKey: transactionId)
     guard let wrapper else { return }
+    rescheduleEphemeralExpiryTimer()
 
     removeRpcMappings(for: [transactionId])
     deleteFromDisk(transactionId: transactionId)
     await wrapper.transaction.cancelled()
     finishExecution(for: wrapper)
+    queueContinuation.yield(())
   }
 
   func waitForPersistence() async {
@@ -647,6 +731,8 @@ actor Transactions {
         false
       case let .mutation(config):
         config.transient ? false : true
+      case .ephemeral:
+        false
     }
   }
 
@@ -697,6 +783,85 @@ actor Transactions {
   private func ownsExecutionKey(_ wrapper: TransactionWrapper) -> Bool {
     guard let key = wrapper.transaction.executionKey else { return false }
     return executionOwners[key] == wrapper.id
+  }
+
+  private var outstandingCount: Int {
+    inFlight.count + sent.count
+  }
+
+  private var queuePressure: TransactionQueuePressure? {
+    guard let oldest = _queue.values.map(\.date).min() else { return nil }
+    return TransactionQueuePressure(
+      queued: _queue.count,
+      outstanding: outstandingCount,
+      oldestQueueAgeMilliseconds: max(0, Int(Date().timeIntervalSince(oldest) * 1_000))
+    )
+  }
+
+  /// Keep one deadline wakeup for the oldest queued ephemeral transaction.
+  /// This lets stale work expire even while every durable dispatch slot remains
+  /// occupied, without polling or creating one task per queued transaction.
+  private func rescheduleEphemeralExpiryTimer() {
+    let nextDeadline = _queue.values.compactMap { wrapper -> Date? in
+      guard let config = wrapper.transaction.ephemeralConfig else { return nil }
+      return wrapper.date.addingTimeInterval(config.maxQueueAge)
+    }.min()
+
+    guard nextDeadline != ephemeralExpiryDeadline else { return }
+    ephemeralExpiryTask?.cancel()
+    ephemeralExpiryTask = nil
+    ephemeralExpiryDeadline = nextDeadline
+
+    guard let nextDeadline else { return }
+    let delay = max(0, nextDeadline.timeIntervalSinceNow)
+    ephemeralExpiryTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: .seconds(delay))
+      } catch {
+        return
+      }
+      await self?.ephemeralExpiryReached(deadline: nextDeadline)
+    }
+  }
+
+  private func cancelEphemeralExpiryTimer() {
+    ephemeralExpiryTask?.cancel()
+    ephemeralExpiryTask = nil
+    ephemeralExpiryDeadline = nil
+  }
+
+  private func ephemeralExpiryReached(deadline: Date) {
+    guard ephemeralExpiryDeadline == deadline else { return }
+    ephemeralExpiryTask = nil
+    ephemeralExpiryDeadline = nil
+    queueContinuation.yield(())
+  }
+
+  private func removeFirstExpiredEphemeral(at now: Date = Date()) -> TransactionWrapper? {
+    for (transactionId, wrapper) in Array(_queue) where wrapper.isEphemeralExpired(at: now) {
+      _queue.removeValue(forKey: transactionId)
+      rescheduleEphemeralExpiryTimer()
+      return wrapper
+    }
+    return nil
+  }
+
+  private func supersedeQueuedEphemeralTransactions(
+    with replacement: TransactionWrapper
+  ) -> [TransactionWrapper] {
+    guard replacement.transaction.ephemeralConfig != nil,
+          let key = replacement.transaction.ephemeralCoalescingKey
+    else { return [] }
+
+    let superseded = _queue.filter { _, candidate in
+      candidate.transaction.ephemeralConfig != nil
+        && candidate.transaction.method == replacement.transaction.method
+        && candidate.transaction.ephemeralCoalescingKey == key
+    }
+    for (transactionId, _) in superseded {
+      _queue.removeValue(forKey: transactionId)
+    }
+    return superseded.map(\.value)
   }
 
   private func removeRpcMappings(for transactionIds: Set<TransactionId>) {

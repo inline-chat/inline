@@ -56,12 +56,28 @@ public struct MutationConfig: Sendable {
   }
 }
 
+/// Short-lived work whose result is useful only near the time it was requested.
+///
+/// Ephemeral transactions are never persisted or replayed across a disconnect.
+/// They may wait briefly behind the bounded application-request window, but are
+/// discarded instead of being dispatched after `maxQueueAge` has elapsed.
+public struct EphemeralTransactionConfig: Sendable {
+  public var maxQueueAge: TimeInterval
+
+  public init(maxQueueAge: TimeInterval = 5) {
+    self.maxQueueAge = max(0, maxQueueAge)
+  }
+}
+
 public enum TransactionKindType: Sendable {
   /// Query is a transaction that will not be persisted to disk
   case query(QueryConfig = QueryConfig())
 
   /// Mutations will be persisted to disk for the duration of the timeout
   case mutation(MutationConfig = MutationConfig())
+
+  /// Best-effort work that must not accumulate or cross a reconnect boundary.
+  case ephemeral(EphemeralTransactionConfig = EphemeralTransactionConfig())
 }
 
 public protocol Transaction: Sendable, Codable {
@@ -107,6 +123,10 @@ public protocol Transaction: Sendable, Codable {
   /// replay and mutations do not.
   var reconnectReplayPolicy: TransactionReconnectPolicy? { get }
 
+  /// Coalesces queued ephemeral work with the same method and key.
+  /// In-flight work is never cancelled because it may already be executing.
+  var ephemeralCoalescingKey: String? { get }
+
   /// The policy the transaction owner must use when deciding whether work may
   /// cross a reconnect boundary again. Keep the compatibility fallback here so
   /// every owner path applies the same conservative query/mutation default.
@@ -134,6 +154,7 @@ public extension Transaction {
   var satisfiedBlockersOnSuccess: [TransactionBlocker] { [] }
   var executionKey: TransactionExecutionKey? { nil }
   var reconnectReplayPolicy: TransactionReconnectPolicy? { nil }
+  var ephemeralCoalescingKey: String? { nil }
   var effectiveReconnectReplayPolicy: TransactionReconnectPolicy {
     if let reconnectReplayPolicy {
       return reconnectReplayPolicy
@@ -144,7 +165,14 @@ public extension Transaction {
       return .replaySafe
     case .mutation:
       return .neverReplay
+    case .ephemeral:
+      return .neverReplay
     }
+  }
+
+  var ephemeralConfig: EphemeralTransactionConfig? {
+    guard case let .ephemeral(config) = type else { return nil }
+    return config
   }
 
   var input: InlineProtocol.RpcCall.OneOf_Input? {

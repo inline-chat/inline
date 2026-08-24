@@ -63,6 +63,30 @@ struct AuthRecoveryDiagnosticsTests {
     )
   }
 
+  @Test("V3 start logging separates transient failures from actionable failures")
+  func v3StartLoggingSeparatesTransientAndActionableFailures() {
+    #expect(
+      InlineProtocolV3Transport.startFailureLogLevel(
+        for: URLError(.networkConnectionLost)
+      ) == .debug
+    )
+    #expect(
+      InlineProtocolV3Transport.startFailureLogLevel(
+        for: InlineProtocolV3ConnectionError.authorizationInvalidated
+      ) == .debug
+    )
+    #expect(
+      InlineProtocolV3Transport.startFailureLogLevel(
+        for: InlineProtocolV3ConnectionError.timeout
+      ) == .warning
+    )
+    #expect(
+      InlineProtocolV3Transport.startFailureLogLevel(
+        for: InlineProtocolV3ConnectionError.invalidKey
+      ) == .error
+    )
+  }
+
   @Test("captures an authenticated snapshot missed by the auth observer")
   func observerMissedCapture() {
     let sink = RecordingLogSink()
