@@ -2149,9 +2149,9 @@ private extension MessagesCollectionView {
       Task {
         let scopedSpaceId = peerId.isThread ? spaceId.validSpaceId : nil
         do {
-          let integrations = try await ApiClient.shared.getIntegrations(
-            userId: Auth.shared.getCurrentUserId() ?? 0,
-            spaceId: scopedSpaceId
+          let integrations = try await InlineRPCClient.shared.integrations(
+            userID: Auth.shared.getCurrentUserId() ?? 0,
+            spaceID: scopedSpaceId
           )
 
           await NotionTaskManager.shared.checkIntegrationAccess(
@@ -4451,9 +4451,9 @@ private extension MessagesCollectionView {
           }
 
           do {
-            let integrations = try await ApiClient.shared.getIntegrations(
-              userId: Auth.shared.getCurrentUserId() ?? 0,
-              spaceId: nil
+            let integrations = try await InlineRPCClient.shared.integrations(
+              userID: Auth.shared.getCurrentUserId() ?? 0,
+              spaceID: nil
             )
 
             guard integrations.hasLinearConnected else {
@@ -4482,9 +4482,9 @@ private extension MessagesCollectionView {
                 Task { [weak self] in
                   guard let self else { return }
                   do {
-                    let perSpace = try await ApiClient.shared.getIntegrations(
-                      userId: Auth.shared.getCurrentUserId() ?? 0,
-                      spaceId: selectedSpaceId
+                    let perSpace = try await InlineRPCClient.shared.integrations(
+                      userID: Auth.shared.getCurrentUserId() ?? 0,
+                      spaceID: selectedSpaceId
                     )
 
                     guard perSpace.hasLinearConnected else {
@@ -4536,13 +4536,11 @@ private extension MessagesCollectionView {
       )
 
       do {
-        let result = try await ApiClient.shared.createLinearIssue(
-          text: text,
-          messageId: message.messageId,
-          peerId: message.peerId,
-          chatId: message.chatId,
-          fromId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: spaceId
+        guard let spaceId else { throw InlineRPCClientError.unexpectedResponse }
+        let result = try await InlineRPCClient.shared.createLinearIssue(
+          spaceID: spaceId,
+          messageID: message.messageId,
+          peerID: message.peerId
         )
 
         guard let link = result.link, let url = URL(string: link) else {

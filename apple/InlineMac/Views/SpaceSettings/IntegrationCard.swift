@@ -1,6 +1,5 @@
 import AppKit
 import Auth
-import InlineConfig
 import InlineKit
 import Logger
 import SwiftUI
@@ -24,8 +23,6 @@ struct IntegrationCard: View {
   var completion: () -> Void
 
   @State private var lastError: String?
-
-  private let baseURL: String = InlineConfig.integrationsServerURL
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -123,7 +120,10 @@ struct IntegrationCard: View {
   }
 
   private func connect() {
-    guard let token = Auth.shared.getToken() else {
+    guard let provider = ConnectorKind(rawValue: provider),
+          let scopeID = spaceId.map(ScopeID.space)
+            ?? Auth.shared.getCurrentUserId().map(ScopeID.user)
+    else {
       lastError = "You need to be signed in to connect \(title)."
       return
     }
@@ -133,26 +133,19 @@ struct IntegrationCard: View {
       return
     }
 
-    var components = URLComponents(string: "\(baseURL)/integrations/\(provider)/integrate")
-    var queryItems: [URLQueryItem] = [
-      URLQueryItem(name: "token", value: token),
-    ]
-    if let spaceId {
-      queryItems.append(URLQueryItem(name: "spaceId", value: "\(spaceId)"))
-    }
-    components?.queryItems = queryItems
-
-    guard let url = components?.url else {
-      lastError = "Failed to prepare integration URL."
-      return
-    }
-
-    Log.shared.debug("Opening integration URL: \(url.absoluteString)")
     isConnecting = true
     lastError = nil
-    _ = NSWorkspace.shared.open(url)
     Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 400_000_000)
+      let model = ConnectorSettingsModel(initialScopeID: scopeID)
+      await model.load()
+      guard let url = await model.prepareOAuth(for: provider) else {
+        lastError = model.errorMessage ?? "Failed to prepare integration authorization."
+        isConnecting = false
+        return
+      }
+
+      Log.shared.debug("Opening prepared integration authorization URL")
+      _ = NSWorkspace.shared.open(url)
       isConnecting = false
     }
   }

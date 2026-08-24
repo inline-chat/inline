@@ -1,5 +1,4 @@
 import Auth
-import InlineConfig
 import InlineKit
 import InlineUI
 import Logger
@@ -18,8 +17,6 @@ struct IntegrationCard: View {
   var hasOptions: Bool = false
   var navigateToOptions: (() -> Void)? = nil
   var permissionCheck: (() -> Bool)? = nil
-
-  let baseURL: String = ApiClient.serverURL
 
   var body: some View {
     Section {
@@ -43,25 +40,24 @@ struct IntegrationCard: View {
       .padding(.vertical, 4)
 
       Button(action: {
-        guard let token = Auth.shared.getToken() else {
+        guard let provider = ConnectorKind(rawValue: provider),
+              let scopeID = spaceId.map(ScopeID.space)
+                ?? Auth.shared.getCurrentUserId().map(ScopeID.user)
+        else {
           return
         }
         isConnecting = true
-        if let spaceId {
-          if let url =
-            URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)&spaceId=\(spaceId)")
-          {
-            Log.shared.debug("Opening URL: \(url)")
-            InAppBrowser.shared.open(url)
-          }
-        } else {
-          if let url = URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)") {
-            Log.shared.debug("Opening URL: \(url)")
-            InAppBrowser.shared.open(url)
-          }
-        }
         Task { @MainActor in
-          try? await Task.sleep(nanoseconds: 400_000_000)
+          let model = ConnectorSettingsModel(initialScopeID: scopeID)
+          await model.load()
+          guard let url = await model.prepareOAuth(for: provider) else {
+            Log.shared.error("Failed to prepare integration authorization")
+            isConnecting = false
+            return
+          }
+
+          Log.shared.debug("Opening prepared integration authorization URL")
+          InAppBrowser.shared.open(url)
           isConnecting = false
         }
       }) {
