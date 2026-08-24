@@ -126,7 +126,7 @@ struct SidebarCollectionDisclosureDescriptor {
           return item.lane == .normal
         case (.content, let .folder(folder)):
           return folder.lane == .normal
-        case (.content, .folderNewThread):
+        case (.content, .folderEmpty):
           return true
         case (.content, .newThread):
           return true

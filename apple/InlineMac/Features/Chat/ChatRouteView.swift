@@ -338,6 +338,7 @@ struct ChatRouteView: View {
         isFollowing: dialog?.isFollowingThread == true,
         isOpenInSidebar: dialog?.open == true && dialog?.archived != true && dialog?.chatListHidden != true,
         isPinned: dialog?.pinned == true,
+        canPin: dialog?.pinned == true || dialog?.folderId == nil,
         isArchived: dialog?.archived == true,
         canRename: peer.isThread,
         perform: { command in

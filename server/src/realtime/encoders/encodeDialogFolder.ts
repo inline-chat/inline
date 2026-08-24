@@ -7,5 +7,6 @@ export function encodeDialogFolder(folder: DbDialogFolder): DialogFolder {
     title: folder.title ?? undefined,
     emoji: folder.emoji ?? undefined,
     order: folder.order,
+    pinnedOrder: folder.pinnedOrder ?? undefined,
   }
 }

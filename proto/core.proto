@@ -260,6 +260,8 @@ message DialogFolder {
   string order = 3;
   // Optional emoji chosen by the user for the folder icon.
   optional string emoji = 4;
+  // Presence is both pinned state and the coordinate in the shared Pinned lane.
+  optional string pinned_order = 5;
 }
 
 enum DialogFollowMode {
@@ -2482,6 +2484,7 @@ message CreateDialogFolderInput {
   optional string title = 1;
   repeated InputPeer peers = 2;
   optional string order = 3;
+  optional string pinned_order = 4;
 }
 
 message CreateDialogFolderResult {
@@ -2499,6 +2502,10 @@ message UpdateDialogFolderInput {
   oneof emoji_update {
     string emoji = 5;
     bool clear_emoji = 6;
+  }
+  oneof pinned_order_update {
+    string pinned_order = 7;
+    bool clear_pinned_order = 8;
   }
 }
 

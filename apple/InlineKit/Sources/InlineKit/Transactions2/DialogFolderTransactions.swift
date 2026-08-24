@@ -13,10 +13,17 @@ public struct CreateDialogFolderTransaction: Transaction2 {
     let title: String?
     let peers: [Peer]
     let order: String?
+    /// Optional so transactions queued by older app versions still decode.
+    let pinnedOrder: String?
   }
 
-  public init(title: String?, peers: [Peer], order: String? = nil) {
-    context = Context(title: title, peers: peers, order: order)
+  public init(
+    title: String?,
+    peers: [Peer],
+    order: String? = nil,
+    pinnedOrder: String? = nil
+  ) {
+    context = Context(title: title, peers: peers, order: order, pinnedOrder: pinnedOrder)
   }
 
   enum CodingKeys: String, CodingKey {
@@ -28,6 +35,7 @@ public struct CreateDialogFolderTransaction: Transaction2 {
       if let title = context.title { $0.title = title }
       $0.peers = context.peers.map { $0.toInputPeer() }
       if let order = context.order { $0.order = order }
+      if let pinnedOrder = context.pinnedOrder { $0.pinnedOrder = pinnedOrder }
     })
   }
 
@@ -64,11 +72,19 @@ public struct UpdateDialogFolderTransaction: Transaction2 {
     case clear
   }
 
+  public enum PinnedOrderUpdate: Sendable, Codable {
+    case unchanged
+    case set(String)
+    case clear
+  }
+
   public struct Context: Sendable, Codable {
     let folderId: Int64
     let title: TitleUpdate
     /// Optional so transactions queued by older app versions still decode.
     let emoji: EmojiUpdate?
+    /// Optional so transactions queued by older app versions still decode.
+    let pinnedOrder: PinnedOrderUpdate?
     let order: String?
   }
 
@@ -76,9 +92,16 @@ public struct UpdateDialogFolderTransaction: Transaction2 {
     folderId: Int64,
     title: TitleUpdate = .unchanged,
     emoji: EmojiUpdate = .unchanged,
+    pinnedOrder: PinnedOrderUpdate = .unchanged,
     order: String? = nil
   ) {
-    context = Context(folderId: folderId, title: title, emoji: emoji, order: order)
+    context = Context(
+      folderId: folderId,
+      title: title,
+      emoji: emoji,
+      pinnedOrder: pinnedOrder,
+      order: order
+    )
   }
 
   enum CodingKeys: String, CodingKey {
@@ -97,6 +120,11 @@ public struct UpdateDialogFolderTransaction: Transaction2 {
       case .unchanged: break
       case let .set(emoji): $0.emoji = emoji
       case .clear: $0.clearEmoji_p = true
+      }
+      switch context.pinnedOrder ?? .unchanged {
+      case .unchanged: break
+      case let .set(pinnedOrder): $0.pinnedOrder = pinnedOrder
+      case .clear: $0.clearPinnedOrder_p = true
       }
       if let order = context.order { $0.order = order }
     })
@@ -168,9 +196,15 @@ public extension Transaction2 where Self == CreateDialogFolderTransaction {
   static func createDialogFolder(
     title: String?,
     peers: [Peer],
-    order: String? = nil
+    order: String? = nil,
+    pinnedOrder: String? = nil
   ) -> CreateDialogFolderTransaction {
-    CreateDialogFolderTransaction(title: title, peers: peers, order: order)
+    CreateDialogFolderTransaction(
+      title: title,
+      peers: peers,
+      order: order,
+      pinnedOrder: pinnedOrder
+    )
   }
 }
 
@@ -179,9 +213,16 @@ public extension Transaction2 where Self == UpdateDialogFolderTransaction {
     folderId: Int64,
     title: UpdateDialogFolderTransaction.TitleUpdate = .unchanged,
     emoji: UpdateDialogFolderTransaction.EmojiUpdate = .unchanged,
+    pinnedOrder: UpdateDialogFolderTransaction.PinnedOrderUpdate = .unchanged,
     order: String? = nil
   ) -> UpdateDialogFolderTransaction {
-    UpdateDialogFolderTransaction(folderId: folderId, title: title, emoji: emoji, order: order)
+    UpdateDialogFolderTransaction(
+      folderId: folderId,
+      title: title,
+      emoji: emoji,
+      pinnedOrder: pinnedOrder,
+      order: order
+    )
   }
 }
 

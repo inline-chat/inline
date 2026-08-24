@@ -348,10 +348,12 @@ struct SidebarChatItemView: Equatable, View {
           Divider()
         }
 
-        Button {
-          togglePin()
-        } label: {
-          Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash.fill" : "pin.fill")
+        if item.pinned || item.folderID == nil {
+          Button {
+            togglePin()
+          } label: {
+            Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash.fill" : "pin.fill")
+          }
         }
 
         Button {

@@ -911,6 +911,13 @@
       "when": 1787575362652,
       "tag": "0129_dialog-folder-emoji",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1787582446629,
+      "tag": "0130_dialog-folder-pinned-order",
+      "breakpoints": true
     }
   ]
 }

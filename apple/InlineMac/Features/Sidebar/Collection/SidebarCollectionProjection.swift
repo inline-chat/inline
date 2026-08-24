@@ -88,6 +88,7 @@ struct SidebarCollectionNestingPolicy: Equatable {
 
   static let replyThreads = Self(nestsReplyThreads: true, presentsFolders: false)
   static let inbox = Self(nestsReplyThreads: true, presentsFolders: true)
+  static let foldersOnly = Self(nestsReplyThreads: false, presentsFolders: true)
   static let flat = Self(nestsReplyThreads: false, presentsFolders: false)
 }
 
@@ -176,8 +177,8 @@ struct SidebarCollectionTree {
       guard let item = itemByID[id] else { return nil }
       return lane == .pinned ? item.pinnedOrder : item.order
     case let .folder(id):
-      guard lane == .normal else { return nil }
-      return folderByID[id]?.order
+      guard let folder = folderByID[id] else { return nil }
+      return lane == .pinned ? folder.pinnedOrder : folder.order
     }
   }
 
@@ -265,12 +266,13 @@ enum SidebarCollectionProjection {
     let inputs = chatInputs(pinnedItems, lane: .pinned)
       + chatInputs(normalItems, lane: .normal)
       + presentedFolders.map { folder in
-        Input(
+        let lane: SidebarOrderLane = folder.isPinned ? .pinned : .normal
+        return Input(
           id: .folder(folder.id),
           item: nil,
           folder: folder,
-          lane: .normal,
-          order: folder.order,
+          lane: lane,
+          order: lane == .pinned ? folder.pinnedOrder : folder.order,
           activity: .distantPast
         )
       }
@@ -339,8 +341,7 @@ enum SidebarCollectionProjection {
       }
       if nestingPolicy.presentsFolders,
          let folderID = item.folderID,
-         folderIDs.contains(folderID),
-         input.lane == .normal {
+         folderIDs.contains(folderID) {
         semanticParentByID[input.id] = .folder(folderID)
         presentationParentByID[input.id] = .folder(folderID)
         continue

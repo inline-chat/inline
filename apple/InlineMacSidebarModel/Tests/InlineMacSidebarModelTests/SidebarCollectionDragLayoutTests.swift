@@ -22,6 +22,57 @@ private func frame(
 
 @Suite("Sidebar collection frozen drag layout")
 struct SidebarCollectionDragLayoutTests {
+  @Test("vertical hit resolution never assigns the gap between rows")
+  func verticalHitResolutionRequiresContainment() {
+    let guides = [
+      SidebarCollectionVerticalHitGuide(minY: 0, middleY: 15, maxY: 30),
+      SidebarCollectionVerticalHitGuide(minY: 32, middleY: 47, maxY: 62),
+    ]
+
+    #expect(SidebarCollectionVerticalHitResolver.resolve(
+      position: 15,
+      sortedGuides: guides
+    ) == 0)
+    #expect(SidebarCollectionVerticalHitResolver.resolve(
+      position: 31,
+      sortedGuides: guides
+    ) == nil)
+    #expect(SidebarCollectionVerticalHitResolver.resolve(
+      position: 47,
+      sortedGuides: guides
+    ) == 1)
+  }
+
+  @Test("an extended container guide owns its empty placeholder")
+  func verticalHitResolutionSupportsEmptyContainerArea() {
+    let guides = [
+      SidebarCollectionVerticalHitGuide(minY: 0, middleY: 30, maxY: 60),
+      SidebarCollectionVerticalHitGuide(minY: 61, middleY: 76, maxY: 91),
+    ]
+
+    #expect(SidebarCollectionVerticalHitResolver.resolve(
+      position: 52,
+      sortedGuides: guides
+    ) == 0)
+  }
+
+  @Test("touching hit ranges resolve to the nearest row center")
+  func verticalHitResolutionBreaksBoundaryTiesByCenter() {
+    let guides = [
+      SidebarCollectionVerticalHitGuide(minY: 0, middleY: 10, maxY: 20),
+      SidebarCollectionVerticalHitGuide(minY: 20, middleY: 30, maxY: 40),
+    ]
+
+    #expect(SidebarCollectionVerticalHitResolver.resolve(
+      position: 20,
+      sortedGuides: guides
+    ) == 0)
+    #expect(SidebarCollectionVerticalHitResolver.resolve(
+      position: 21,
+      sortedGuides: guides
+    ) == 1)
+  }
+
   @Test("lifting starts with one source-sized hole and unchanged surrounding geometry")
   func originalSlotDoesNotJump() {
     let rows = [

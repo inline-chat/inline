@@ -112,6 +112,7 @@ struct SidebarNativeRowConfiguration {
   struct ChatPresentation: Equatable {
     let peerID: Peer
     let parentChatID: Int64?
+    let folderID: Int64?
     let title: String
     let preview: String
     let unread: Bool
@@ -124,6 +125,7 @@ struct SidebarNativeRowConfiguration {
     init(_ item: SidebarViewModel.Item) {
       peerID = item.peerId
       parentChatID = item.parentChatId
+      folderID = item.folderID
       title = item.title
       preview = item.preview
       unread = item.unread
@@ -137,6 +139,7 @@ struct SidebarNativeRowConfiguration {
     init(
       peerID: Peer,
       parentChatID: Int64? = nil,
+      folderID: Int64? = nil,
       title: String,
       preview: String = "",
       unread: Bool = false,
@@ -148,6 +151,7 @@ struct SidebarNativeRowConfiguration {
     ) {
       self.peerID = peerID
       self.parentChatID = parentChatID
+      self.folderID = folderID
       self.title = title
       self.preview = preview
       self.unread = unread
@@ -180,18 +184,22 @@ struct SidebarNativeRowConfiguration {
     let emoji: String?
     let childCount: Int
     let unreadCount: Int
+    let isPinned: Bool
 
     init(_ folder: SidebarProjectedFolder) {
       title = folder.title
       emoji = folder.folder.emoji
       childCount = folder.childCount
       unreadCount = folder.unreadCount
+      isPinned = folder.folder.isPinned
     }
   }
 
   struct FolderActions {
     let toggleDisclosure: () -> Void
     let setEmoji: (String) -> Void
+    let togglePin: () -> Void
+    let rename: () -> Void
     let close: () -> Void
     let ungroup: () -> Void
   }
@@ -213,12 +221,17 @@ struct SidebarNativeRowConfiguration {
     let action: (() -> Void)?
   }
 
+  struct FolderEmpty {
+    let size: SidebarItemSize
+  }
+
   enum Content {
     case navigation(Navigation)
     case header(Header)
     case pinDropGuide(PinDropGuide)
     case chat(Chat)
     case folder(Folder)
+    case folderEmpty(FolderEmpty)
     case emptyState(EmptyState)
   }
 
@@ -242,7 +255,7 @@ struct SidebarNativeRowConfiguration {
         dragMode: value.isDropTargeted ? .dropTarget
           : (value.forceHoverAppearance ? .lifted : .idle)
       )
-    case .header, .pinDropGuide, .emptyState:
+    case .header, .pinDropGuide, .folderEmpty, .emptyState:
       .idle
     }
   }
@@ -259,8 +272,6 @@ private enum SidebarNativeChatRowMetrics {
 
 private enum SidebarNativeFolderRowMetrics {
   static let accessoryHitSize: CGFloat = 28
-  static let disclosureWidth: CGFloat = 24
-  static let titleDisclosureSpacing: CGFloat = 4
 }
 
 /// A narrow SwiftUI rendering leaf inside an AppKit-owned row. The hosting
@@ -311,6 +322,7 @@ final class SidebarNativeRowView: NSView {
     case pinDropGuide
     case chat
     case folder
+    case folderEmpty
     case emptyState
   }
 
@@ -379,6 +391,15 @@ final class SidebarNativeRowView: NSView {
     case let .folder(value):
       guard let view = contentView(for: .folder) as? SidebarNativeFolderRowView else {
         assertionFailure("Unexpected native folder row view")
+        return
+      }
+      configuredContentView = view
+      view.allowsAnimations = animatesChanges
+      view.setInteractionPresentation(configuration.interactionPresentation)
+      view.configure(value)
+    case let .folderEmpty(value):
+      guard let view = contentView(for: .folderEmpty) as? SidebarNativeFolderEmptyRowView else {
+        assertionFailure("Unexpected native folder-empty row view")
         return
       }
       configuredContentView = view
@@ -462,6 +483,8 @@ final class SidebarNativeRowView: NSView {
       SidebarNativeChatRowView()
     case .folder:
       SidebarNativeFolderRowView()
+    case .folderEmpty:
+      SidebarNativeFolderEmptyRowView()
     case .emptyState:
       SidebarNativeEmptyStateRowView()
     }
@@ -1322,17 +1345,6 @@ private final class SidebarNativeTextButton: NSButton {
 
 @MainActor
 private final class SidebarNativeTextField: NSTextField {
-  var unconstrainedTextWidth: CGFloat {
-    if let cell {
-      // NSTextFieldCell reserves horizontal drawing space beyond the glyph
-      // bounds. Measuring only NSString makes a fitting title truncate by a
-      // few points (for example, `New Folder` became `New Fol…`).
-      return ceil(cell.cellSize.width)
-    }
-    let font = font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
-    return ceil((stringValue as NSString).size(withAttributes: [.font: font]).width + 4)
-  }
-
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     isEditable = false
@@ -1477,7 +1489,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   func configure(_ configuration: SidebarNativeRowConfiguration.Folder) {
     self.configuration = configuration
     displayedExpanded = configuration.disclosureExpanded
-    primaryAction = configuration.actions.toggleDisclosure
+    primaryAction = { [weak self] in self?.performDisclosureToggle() }
     titleField.stringValue = configuration.presentation.title
     titleField.textColor = configuration.titleDimmed ? .secondaryLabelColor : .labelColor
     detailField.stringValue = folderDetail(configuration.presentation)
@@ -1496,6 +1508,8 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     backgroundLayer.frame = painted
     backgroundLayer.cornerRadius = Theme.sidebarItemRadius
 
+    disclosureView.frame = disclosureHitRect(in: painted)
+
     var leading = painted.minX + Theme.sidebarItemInnerSpacing
     let iconSize = configuration.size.iconSize
     folderIconView.frame = CGRect(
@@ -1506,13 +1520,8 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     )
     leading = folderIconView.frame.maxX + 8
 
-    let trailing = painted.maxX - Theme.sidebarItemInnerSpacing
-    let disclosureSpace = SidebarNativeFolderRowMetrics.titleDisclosureSpacing
-      + SidebarNativeFolderRowMetrics.disclosureWidth
-    let titleWidth = min(
-      titleField.unconstrainedTextWidth,
-      max(trailing - leading - disclosureSpace, 0)
-    )
+    let trailing = painted.maxX - Theme.sidebarItemOuterSpacing
+    let titleWidth = max(trailing - leading, 0)
     if configuration.size == .compact {
       titleField.frame = CGRect(
         x: leading,
@@ -1523,26 +1532,22 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       detailField.frame = .zero
       detailField.isHidden = true
     } else {
+      let lineHeight: CGFloat = 13
+      let top = painted.midY - (lineHeight * 2 + 2) / 2
       titleField.frame = CGRect(
         x: leading,
-        y: painted.midY - 15,
+        y: top,
         width: titleWidth,
-        height: 16
+        height: lineHeight + 2
       )
       detailField.frame = CGRect(
         x: leading,
-        y: painted.midY + 1,
+        y: top + lineHeight + 2,
         width: max(trailing - leading, 0),
-        height: 14
+        height: lineHeight
       )
       detailField.isHidden = false
     }
-    disclosureView.frame = CGRect(
-      x: titleField.frame.maxX + SidebarNativeFolderRowMetrics.titleDisclosureSpacing,
-      y: painted.minY,
-      width: SidebarNativeFolderRowMetrics.disclosureWidth,
-      height: painted.height
-    )
   }
 
   override func hoverDidChange() {
@@ -1572,6 +1577,25 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   override func menu(for _: NSEvent) -> NSMenu? {
     guard let configuration else { return nil }
     let menu = NSMenu()
+    menu.addItem(SidebarNativeMenuItem(
+      title: configuration.presentation.isPinned ? "Unpin" : "Pin",
+      systemImage: configuration.presentation.isPinned ? "pin.slash.fill" : "pin.fill",
+      action: configuration.actions.togglePin
+    ))
+    menu.addItem(SidebarNativeMenuItem(
+      title: "Rename Folder…",
+      systemImage: "pencil",
+      action: configuration.actions.rename
+    ))
+    menu.addItem(SidebarNativeMenuItem(
+      title: "Change Emoji…",
+      systemImage: "face.smiling"
+    ) { [weak self] in
+      DispatchQueue.main.async {
+        self?.showEmojiPicker()
+      }
+    })
+    menu.addItem(.separator())
     if configuration.presentation.childCount == 0 {
       menu.addItem(SidebarNativeMenuItem(
         title: "Delete Folder",
@@ -1617,7 +1641,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
 
   override func performAccessoryAction(_ target: InteractionTarget) {
     switch target {
-    case .accessory(0): showEmojiPicker()
+    case .accessory(0): performDisclosureToggle()
     case .accessory(1): performDisclosureToggle()
     default: break
     }
@@ -1638,7 +1662,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
 
   private func configureFolderIcon() {
     guard let configuration else { return }
-    folderIconView.toolTip = "Choose folder emoji"
+    folderIconView.toolTip = displayedExpanded ? "Collapse folder" : "Expand folder"
     folderIconView.configure {
       SidebarFolderIcon(
         emoji: configuration.presentation.emoji,
@@ -1692,6 +1716,16 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
         return self != nil
       },
     ]
+    actions.append(NSAccessibilityCustomAction(
+      name: configuration.presentation.isPinned ? "Unpin" : "Pin"
+    ) {
+      configuration.actions.togglePin()
+      return true
+    })
+    actions.append(NSAccessibilityCustomAction(name: "Rename folder") {
+      configuration.actions.rename()
+      return true
+    })
     if configuration.presentation.childCount == 0 {
       actions.append(NSAccessibilityCustomAction(name: "Delete folder") {
         configuration.actions.ungroup()
@@ -1728,6 +1762,15 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     )
   }
 
+  private func disclosureHitRect(in painted: CGRect) -> CGRect {
+    CGRect(
+      x: painted.minX + (Theme.sidebarItemInnerSpacing - 24) / 2,
+      y: painted.minY,
+      width: 24,
+      height: painted.height
+    )
+  }
+
   private func showEmojiPicker() {
     guard configuration != nil else { return }
     if emojiPopover?.isShown == true { return }
@@ -1740,6 +1783,54 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       relativeTo: folderIconView.bounds,
       of: folderIconView,
       preferredEdge: .maxX
+    )
+  }
+}
+
+@MainActor
+private final class SidebarNativeFolderEmptyRowView: SidebarNativeContentView {
+  private let titleField = SidebarNativeTextField()
+  private var configuration: SidebarNativeRowConfiguration.FolderEmpty?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    addSubview(titleField)
+    titleField.font = .systemFont(ofSize: 11)
+    titleField.textColor = .tertiaryLabelColor
+    titleField.stringValue = String(
+      localized: "No chats",
+      comment: "Passive placeholder inside an expanded empty sidebar folder."
+    )
+    setAccessibilityLabel(titleField.stringValue)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func configure(_ configuration: SidebarNativeRowConfiguration.FolderEmpty) {
+    self.configuration = configuration
+    needsLayout = true
+  }
+
+  override func layout() {
+    super.layout()
+    guard let configuration else { return }
+    let leading = Theme.sidebarItemOuterSpacing
+      + Theme.sidebarItemInnerSpacing
+      + SidebarChatRowLayout.contentIndentation(
+        level: 1,
+        size: configuration.size,
+        showsIcon: true
+      )
+      + configuration.size.iconSize
+      + 8
+    titleField.frame = CGRect(
+      x: leading,
+      y: bounds.midY - 8,
+      width: max(bounds.maxX - Theme.sidebarItemOuterSpacing - leading, 0),
+      height: 16
     )
   }
 }
@@ -2185,11 +2276,13 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         action: actions.persist
       ))
     } else {
-      menu.addItem(SidebarNativeMenuItem(
-        title: presentation.pinned ? "Unpin" : "Pin",
-        systemImage: presentation.pinned ? "pin.slash.fill" : "pin.fill",
-        action: actions.togglePin
-      ))
+      if presentation.pinned || presentation.folderID == nil {
+        menu.addItem(SidebarNativeMenuItem(
+          title: presentation.pinned ? "Unpin" : "Pin",
+          systemImage: presentation.pinned ? "pin.slash.fill" : "pin.fill",
+          action: actions.togglePin
+        ))
+      }
       menu.addItem(SidebarNativeMenuItem(
         title: presentation.unread ? "Mark Read" : "Mark Unread",
         systemImage: presentation.unread ? "checkmark.message.fill" : "envelope.badge.fill",
@@ -2420,10 +2513,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         return true
       })
     } else {
-      actions.append(NSAccessibilityCustomAction(name: presentation.pinned ? "Unpin" : "Pin") {
-        configuration.actions.togglePin()
-        return true
-      })
+      if presentation.pinned || presentation.folderID == nil {
+        actions.append(NSAccessibilityCustomAction(name: presentation.pinned ? "Unpin" : "Pin") {
+          configuration.actions.togglePin()
+          return true
+        })
+      }
       actions.append(NSAccessibilityCustomAction(name: presentation.unread ? "Mark Read" : "Mark Unread") {
         configuration.actions.toggleReadUnread()
         return true

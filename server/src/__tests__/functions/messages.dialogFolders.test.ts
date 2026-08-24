@@ -73,6 +73,37 @@ describe("dialog folders", () => {
     ).toHaveLength(1)
   })
 
+  test("creates a pinned folder atomically without pinning its child", async () => {
+    const owner = await testUtils.createUser("dialog-folder-create-pinned-owner@example.com")
+    const peer = await testUtils.createUser("dialog-folder-create-pinned-peer@example.com")
+    await testUtils.createPrivateChatWithOptionalDialog({
+      userA: owner,
+      userB: peer,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+
+    const result = await createDialogFolder(
+      { peers: [peerUser(peer.id)], pinnedOrder: "p" },
+      testUtils.functionContext({ userId: owner.id, sessionId: 28 }),
+    )
+
+    expect(result.folder?.pinnedOrder).toBe("p")
+    expect(result.dialogs[0]?.pinned).toBe(false)
+    const [storedFolder] = await db
+      .select()
+      .from(dialogFolders)
+      .where(and(eq(dialogFolders.id, Number(result.folder?.id)), eq(dialogFolders.userId, owner.id)))
+    expect(storedFolder?.pinnedOrder).toBe("p")
+
+    await expect(
+      createDialogFolder(
+        { peers: [], pinnedOrder: "invalid order" },
+        testUtils.functionContext({ userId: owner.id, sessionId: 28 }),
+      ),
+    ).rejects.toThrow()
+  })
+
   test("creates a folder containing an accessible thread", async () => {
     const owner = await testUtils.createUser("dialog-folder-thread-owner@example.com")
     const chat = await testUtils.createChat(null, "Folder thread", "thread", false, owner.id)
@@ -125,6 +156,70 @@ describe("dialog folders", () => {
           emojiUpdate: { oneofKind: "emoji", emoji: "not emoji" },
         },
         testUtils.functionContext({ userId: owner.id, sessionId: 26 }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  test("uses nullable pinned order as the synced folder pin state", async () => {
+    const owner = await testUtils.createUser("dialog-folder-pin-owner@example.com")
+    const peer = await testUtils.createUser("dialog-folder-pin-peer@example.com")
+    await testUtils.createPrivateChatWithOptionalDialog({
+      userA: owner,
+      userB: peer,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+    const created = await createDialogFolder(
+      { peers: [peerUser(peer.id)] },
+      testUtils.functionContext({ userId: owner.id, sessionId: 27 }),
+    )
+    const folderId = Number(created.folder?.id)
+    const childOrder = created.dialogs[0]?.order
+
+    const pinned = await updateDialogFolder(
+      {
+        folderId,
+        titleUpdate: { oneofKind: undefined },
+        emojiUpdate: { oneofKind: undefined },
+        pinnedOrderUpdate: { oneofKind: "pinnedOrder", pinnedOrder: "p" },
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 27 }),
+    )
+    expect(pinned.folder?.pinnedOrder).toBe("p")
+    expect(pinned.dialogs).toEqual([])
+
+    const [storedPinned] = await db
+      .select()
+      .from(dialogFolders)
+      .where(and(eq(dialogFolders.id, folderId), eq(dialogFolders.userId, owner.id)))
+    expect(storedPinned?.pinnedOrder).toBe("p")
+    const [storedChild] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.userId, owner.id), eq(dialogs.folderId, folderId)))
+    expect(storedChild?.pinned).toBe(false)
+    expect(storedChild?.order).toBe(childOrder)
+
+    const unpinned = await updateDialogFolder(
+      {
+        folderId,
+        titleUpdate: { oneofKind: undefined },
+        emojiUpdate: { oneofKind: undefined },
+        pinnedOrderUpdate: { oneofKind: "clearPinnedOrder", clearPinnedOrder: true },
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 27 }),
+    )
+    expect(unpinned.folder?.pinnedOrder).toBeUndefined()
+
+    await expect(
+      updateDialogFolder(
+        {
+          folderId,
+          titleUpdate: { oneofKind: undefined },
+          emojiUpdate: { oneofKind: undefined },
+          pinnedOrderUpdate: { oneofKind: "clearPinnedOrder", clearPinnedOrder: false },
+        },
+        testUtils.functionContext({ userId: owner.id, sessionId: 27 }),
       ),
     ).rejects.toThrow()
   })

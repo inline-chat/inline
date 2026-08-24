@@ -13,7 +13,7 @@ struct SidebarCollectionReorderPolicyTests {
     ))
   }
 
-  @Test("pinning mode permits only root lane transfers")
+  @Test("pinning mode permits root lane transfers and pinned-container entry")
   func pinningOnlyPolicy() {
     let policy = SidebarCollectionReorderPolicy.pinningOnly
     #expect(policy.allowsMove(
@@ -30,6 +30,12 @@ struct SidebarCollectionReorderPolicyTests {
       sourceIsRoot: false,
       changesSection: true,
       changesParent: true
+    ))
+    #expect(policy.allowsMove(
+      sourceIsRoot: false,
+      changesSection: false,
+      changesParent: true,
+      entersPinnedContainer: true
     ))
   }
 }

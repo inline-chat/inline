@@ -437,25 +437,14 @@ final class DeveloperSidebarPlaygroundModel {
         actions: .init(
           toggleDisclosure: { [weak self] in self?.record("Toggled a folder fixture.") },
           setEmoji: { [weak self] emoji in self?.record("Selected folder emoji \(emoji).") },
+          togglePin: { [weak self] in self?.record("Pinned or unpinned a folder fixture.") },
+          rename: { [weak self] in self?.record("Renamed a folder fixture.") },
           close: { [weak self] in self?.record("Closed a folder fixture.") },
           ungroup: { [weak self] in self?.record("Ungrouped a folder fixture.") }
         )
       ))
-    case .folderNewThread:
-      .navigation(.init(
-        title: "New thread",
-        systemImage: "plus",
-        iconStyle: .newThread,
-        selected: false,
-        titleDimmed: true,
-        size: itemSize,
-        indentationLevel: 1,
-        prominentUnreadCount: 0,
-        otherUnreadCount: 0,
-        avatars: [],
-        accessibilityValue: "",
-        action: { [weak self] in self?.record("Created a thread in an empty folder fixture.") }
-      ))
+    case .folderEmpty:
+      .folderEmpty(.init(size: itemSize))
     case .newThread:
       .navigation(.init(
         title: "New thread",

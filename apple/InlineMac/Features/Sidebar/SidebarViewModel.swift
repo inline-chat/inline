@@ -80,12 +80,16 @@ final class SidebarViewModel {
     let title: String?
     let emoji: String?
     let order: String
+    let pinnedOrder: String?
+
+    var isPinned: Bool { pinnedOrder != nil }
 
     init(_ folder: DialogFolder) {
       id = folder.id
       title = folder.title
       emoji = folder.emoji
       order = folder.order
+      pinnedOrder = folder.pinnedOrder
     }
   }
 

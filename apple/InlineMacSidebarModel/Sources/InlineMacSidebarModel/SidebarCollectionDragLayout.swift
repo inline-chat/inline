@@ -77,6 +77,54 @@ public enum SidebarConditionalSectionResolver {
   }
 }
 
+/// Frozen vertical geometry for a row that can establish collection
+/// containment during a drag. `middleY` selects between touching hit ranges;
+/// `minY...maxY` prevents a nearby row from claiming empty space.
+public struct SidebarCollectionVerticalHitGuide: Hashable, Sendable {
+  public let minY: Double
+  public let middleY: Double
+  public let maxY: Double
+
+  public init(minY: Double, middleY: Double, maxY: Double) {
+    self.minY = min(minY, maxY)
+    self.middleY = middleY
+    self.maxY = max(minY, maxY)
+  }
+}
+
+/// Resolves only guides whose row actually contains the pointer. Guides must
+/// be sorted by `middleY`, matching collection display order.
+public enum SidebarCollectionVerticalHitResolver {
+  public static func resolve(
+    position: Double,
+    sortedGuides: [SidebarCollectionVerticalHitGuide]
+  ) -> Int? {
+    guard sortedGuides.isEmpty == false else { return nil }
+
+    var lower = 0
+    var upper = sortedGuides.count
+    while lower < upper {
+      let middle = lower + (upper - lower) / 2
+      if sortedGuides[middle].middleY < position {
+        lower = middle + 1
+      } else {
+        upper = middle
+      }
+    }
+
+    return [lower - 1, lower]
+      .filter { sortedGuides.indices.contains($0) }
+      .filter {
+        let guide = sortedGuides[$0]
+        return position >= guide.minY && position <= guide.maxY
+      }
+      .min {
+        abs(sortedGuides[$0].middleY - position)
+          < abs(sortedGuides[$1].middleY - position)
+      }
+  }
+}
+
 public struct SidebarCollectionVerticalFrame: Hashable, Sendable {
   public let minY: Double
   public let height: Double

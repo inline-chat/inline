@@ -7,13 +7,14 @@ public enum SidebarCollectionReorderPolicy: Equatable, Sendable {
   public func allowsMove(
     sourceIsRoot: Bool,
     changesSection: Bool,
-    changesParent: Bool
+    changesParent: Bool,
+    entersPinnedContainer: Bool = false
   ) -> Bool {
     switch self {
     case .manual:
       true
     case .pinningOnly:
-      sourceIsRoot && changesSection && changesParent == false
+      entersPinnedContainer || (sourceIsRoot && changesSection && changesParent == false)
     }
   }
 }

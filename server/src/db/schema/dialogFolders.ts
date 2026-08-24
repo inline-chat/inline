@@ -12,11 +12,13 @@ export const dialogFolders = pgTable(
     title: text("title"),
     emoji: text("emoji"),
     order: text("order").notNull(),
+    pinnedOrder: text("pinned_order"),
     date: creationDate,
   },
   (table) => ({
     idUserIdUnique: unique("dialog_folders_id_user_id_unique").on(table.id, table.userId),
     userIdOrderIndex: index("dialog_folders_user_id_order_idx").on(table.userId, table.order),
+    userIdPinnedOrderIndex: index("dialog_folders_user_id_pinned_order_idx").on(table.userId, table.pinnedOrder),
   }),
 )
 

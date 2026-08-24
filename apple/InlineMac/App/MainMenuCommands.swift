@@ -27,6 +27,7 @@ struct ChatMenuContext {
   let isFollowing: Bool
   let isOpenInSidebar: Bool
   let isPinned: Bool
+  let canPin: Bool
   let isArchived: Bool
   let canRename: Bool
   let perform: @MainActor (ChatMenuCommand) -> Void
@@ -69,6 +70,8 @@ struct ChatMenuContext {
       peer.isThread
     case .openInSidebar:
       !isOpenInSidebar
+    case .togglePin:
+      canPin
     default:
       true
     }

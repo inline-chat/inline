@@ -532,6 +532,7 @@ public extension Dialog {
           AND "folderId" IS NULL
         UNION ALL
         SELECT "order" FROM "dialogFolder"
+        WHERE "pinnedOrder" IS NULL
       )
       ORDER BY "order" \(direction)
       LIMIT 1
@@ -545,41 +546,21 @@ public extension Dialog {
   }
 
   static func nextPinnedOrder(_ db: Database) throws -> String {
-    try edgeOrder(
-      db,
-      column: "pinnedOrder",
-      filter: """
-      AND "pinned" = 1
-      """,
-      placement: .bottom
-    )
-  }
-
-  private static func edgeOrder(
-    _ db: Database,
-    column: String,
-    filter: String,
-    placement: DialogOpenPlacement
-  ) throws -> String {
-    let direction = placement == .top ? "ASC" : "DESC"
-    let request = SQLRequest<String>(
-      sql: """
-      SELECT "\(column)"
-      FROM "dialog"
-      WHERE "\(column)" IS NOT NULL
-      \(filter)
-      ORDER BY "\(column)" \(direction)
+    let edge = try SQLRequest<String>(sql: """
+      SELECT "pinnedOrder" FROM (
+        SELECT "pinnedOrder"
+        FROM "dialog"
+        WHERE "pinnedOrder" IS NOT NULL
+          AND "pinned" = 1
+        UNION ALL
+        SELECT "pinnedOrder"
+        FROM "dialogFolder"
+        WHERE "pinnedOrder" IS NOT NULL
+      )
+      ORDER BY "pinnedOrder" DESC
       LIMIT 1
-      """
-    )
-
-    let edge = try request.fetchOne(db)
-    switch placement {
-    case .top:
-      return FractionalIndex.before(edge)
-    case .bottom:
-      return FractionalIndex.after(edge)
-    }
+      """).fetchOne(db)
+    return FractionalIndex.after(edge)
   }
 
   static func applyingChatListVisibilityFilter<T: DerivableRequest>(_ request: T) -> T {

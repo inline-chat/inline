@@ -16,10 +16,12 @@ final class AppUndoHistory {
     let restoresNestedPin: Bool
   }
 
-  private struct ClosedFolder {
+  struct ClosedFolder {
     var folderID: Int64
     let title: String?
+    let emoji: String?
     let order: String
+    let pinnedOrder: String?
     let chats: [ClosedChat]
   }
 
@@ -80,19 +82,8 @@ final class AppUndoHistory {
     record(.closeChats(chats), intent: intent)
   }
 
-  func recordClosedFolder(
-    folderID: Int64,
-    title: String?,
-    order: String,
-    chats: [ClosedChat],
-    intent: Intent
-  ) {
-    record(.closeFolder(ClosedFolder(
-      folderID: folderID,
-      title: title,
-      order: order,
-      chats: chats
-    )), intent: intent)
+  func recordClosedFolder(_ folder: ClosedFolder, intent: Intent) {
+    record(.closeFolder(folder), intent: intent)
   }
 
   func archiveChat(peer: Peer, spaceID: Int64?) async throws {
@@ -236,6 +227,14 @@ final class AppUndoHistory {
         ))
         guard case let .createDialogFolder(response) = result, response.hasFolder else {
           throw ExecutionError.invalidFolderResult
+        }
+        if folder.emoji != nil || folder.pinnedOrder != nil {
+          _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
+            folderId: folder.folderID,
+            emoji: folder.emoji.map(UpdateDialogFolderTransaction.EmojiUpdate.set) ?? .unchanged,
+            pinnedOrder: folder.pinnedOrder
+              .map(UpdateDialogFolderTransaction.PinnedOrderUpdate.set) ?? .unchanged
+          ))
         }
         folder.folderID = response.folder.id
         return .closeFolder(folder)

@@ -202,7 +202,9 @@ final class SidebarCollectionBodyController: NSViewController {
     let nodeID: SidebarCollectionNodeID
     let parentID: SidebarCollectionNodeID?
     let isContainer: Bool
+    let minY: CGFloat
     let middleY: CGFloat
+    let maxY: CGFloat
   }
 
   private struct ProjectedRootGuide {
@@ -319,6 +321,7 @@ final class SidebarCollectionBodyController: NSViewController {
     var rawRootProposals: [Proposal] = []
     var rawChildProposals: [Proposal] = []
     let projectedHitGuides: [ProjectedHitGuide]
+    let projectedVerticalHitGuides: [SidebarCollectionVerticalHitGuide]
     var pinBoundaryY: CGFloat?
     let emptyPinnedRevealThresholdY: CGFloat?
     let canRevealEmptyPinnedSection: Bool
@@ -1934,7 +1937,7 @@ final class SidebarCollectionBodyController: NSViewController {
         headerCount += 1
       case .pinDropGuide:
         guideCount += 1
-      case .allChats, .grid, .folderNewThread, .newThread, .emptyState:
+      case .allChats, .grid, .folderEmpty, .newThread, .emptyState:
         chromeCount += 1
       }
     }
@@ -2582,7 +2585,9 @@ final class SidebarCollectionBodyController: NSViewController {
           // its own persisted order lane. Until those order domains are
           // decoupled, do not offer a drag whose apparent move would also
           // mutate pin state or immediately snap back into the parent.
-          source.parentID == nil || source.orderLane == source.lane,
+          source.parentID?.folderID != nil
+            || source.parentID == nil
+            || source.orderLane == source.lane,
           let dragGroup = try? tree.snapshot.dragGroup(for: source.nodeID),
           let allLegalSlots = try? tree.snapshot.legalSlots(for: source.nodeID),
           let window = collectionView.window
@@ -2597,12 +2602,20 @@ final class SidebarCollectionBodyController: NSViewController {
       // Dialog folders are one-level root containers. The generic `.any`
       // child policy accepts chats, but must never imply nested folders.
       legalSlots = allLegalSlots.filter {
-        $0.sectionID == .normal && $0.parentID == nil
+        $0.parentID == nil
       }
     case let .chat(item):
-      legalSlots = item.parentID != nil && item.lane == .pinned
-        ? allLegalSlots.filter { $0.parentID == item.parentID }
-        : allLegalSlots
+      if item.parentID?.folderID != nil {
+        // Folder members may move between folders or return to the normal
+        // root, but never become a pinned root as a side effect of dragging.
+        legalSlots = allLegalSlots.filter {
+          !($0.sectionID == .pinned && $0.parentID == nil)
+        }
+      } else {
+        legalSlots = item.parentID != nil && item.lane == .pinned
+          ? allLegalSlots.filter { $0.parentID == item.parentID }
+          : allLegalSlots
+      }
     }
 
     collectionView.layoutSubtreeIfNeeded()
@@ -2618,13 +2631,26 @@ final class SidebarCollectionBodyController: NSViewController {
     )
     let projectedHitGuides = displayRows.compactMap { row -> ProjectedHitGuide? in
       guard let nodeID = row.projectedNodeID,
-            let frame = stableFrames[row.id]
+            var frame = stableFrames[row.id]
       else { return nil }
+      if case let .folder(folder) = row.kind,
+         let emptyFrame = stableFrames[.folderEmpty(folder.id)] {
+        frame = frame.union(emptyFrame)
+      }
       return ProjectedHitGuide(
         nodeID: nodeID,
         parentID: row.presentationParentID,
         isContainer: tree.snapshot.nodes[nodeID]?.childPolicy != SidebarCollectionChildPolicy.none,
-        middleY: frame.midY
+        minY: frame.minY,
+        middleY: frame.midY,
+        maxY: frame.maxY
+      )
+    }
+    let projectedVerticalHitGuides = projectedHitGuides.map {
+      SidebarCollectionVerticalHitGuide(
+        minY: Double($0.minY),
+        middleY: Double($0.middleY),
+        maxY: Double($0.maxY)
       )
     }
     guard let groupFrame = frameUnion(for: blockIDs, frames: stableFrames),
@@ -2672,6 +2698,7 @@ final class SidebarCollectionBodyController: NSViewController {
       pointerScreenPoint: currentScreenPoint,
       pointerInCollection: location,
       projectedHitGuides: projectedHitGuides,
+      projectedVerticalHitGuides: projectedVerticalHitGuides,
       pinBoundaryY: layout.laneBoundaryFrame?.minY,
       emptyPinnedRevealThresholdY: firstNormalRootFrame?.midY,
       canRevealEmptyPinnedSection: pinnedRootIDs.isEmpty
@@ -2683,11 +2710,17 @@ final class SidebarCollectionBodyController: NSViewController {
     session.rawRootProposals = rootProposals(session: session).filter {
       session.legalSlots.contains($0.slot)
     }
-    if reorderPolicy == .manual {
-      let containerIDs = Set(allLegalSlots.compactMap(\.parentID))
-      session.rawChildProposals = containerIDs.flatMap { parentID in
-        childProposals(parentID: parentID, session: session)
-      }.filter { session.legalSlots.contains($0.slot) }
+    let containerIDs = Set(allLegalSlots.compactMap(\.parentID))
+    let legalChildProposals = containerIDs.flatMap { parentID in
+      childProposals(parentID: parentID, session: session)
+    }.filter { session.legalSlots.contains($0.slot) }
+    session.rawChildProposals = switch reorderPolicy {
+    case .manual:
+      legalChildProposals
+    case .pinningOnly:
+      legalChildProposals.filter {
+        $0.targetLane == .pinned && $0.slot.parentID?.folderID != nil
+      }
     }
     refreshProposalGroups(session: &session)
     let allProposals: [Proposal] = session.rootProposals.proposals
@@ -3194,9 +3227,9 @@ final class SidebarCollectionBodyController: NSViewController {
           )]
           if folder.childCount == 0, folder.isExpanded {
             rows.append(SidebarCollectionRow(
-              id: .folderNewThread(folder.id),
-              kind: .folderNewThread(folder.id),
-              height: baseRows.first(where: { $0.id == .folderNewThread(folder.id) })?.height
+              id: .folderEmpty(folder.id),
+              kind: .folderEmpty(folder.id, lane: folder.lane),
+              height: baseRows.first(where: { $0.id == .folderEmpty(folder.id) })?.height
                 ?? rowHeight
             ))
           }
@@ -3625,18 +3658,18 @@ final class SidebarCollectionBodyController: NSViewController {
     at point: CGPoint,
     session: ReorderSession
   ) -> ProposalGroup? {
-    guard point.x >= childDropIndentThreshold,
-          let target = closestProjectedGuide(toY: point.y, session: session)
-    else { return nil }
+    guard let target = closestProjectedGuide(toY: point.y, session: session) else { return nil }
 
     let availableParentIDs = Set(session.childProposals.proposals.compactMap { $0.slot.parentID })
     let parentID: SidebarCollectionNodeID?
     if target.isContainer, availableParentIDs.contains(target.nodeID) {
       parentID = target.nodeID
-    } else if let targetParentID = target.parentID,
+    } else if point.x >= childDropIndentThreshold,
+              let targetParentID = target.parentID,
               availableParentIDs.contains(targetParentID) {
       parentID = targetParentID
-    } else if target.nodeID == session.source.nodeID,
+    } else if point.x >= childDropIndentThreshold,
+              target.nodeID == session.source.nodeID,
               let sourceParentID = session.source.parentID,
               availableParentIDs.contains(sourceParentID) {
       parentID = sourceParentID
@@ -3659,23 +3692,11 @@ final class SidebarCollectionBodyController: NSViewController {
     session: ReorderSession
   ) -> ProjectedHitGuide? {
     let guides = session.projectedHitGuides
-    guard guides.isEmpty == false else { return nil }
-
-    var lower = 0
-    var upper = guides.count
-    while lower < upper {
-      let middle = lower + (upper - lower) / 2
-      if guides[middle].middleY < y {
-        lower = middle + 1
-      } else {
-        upper = middle
-      }
-    }
-
-    return [lower - 1, lower]
-      .filter { guides.indices.contains($0) }
-      .min { abs(guides[$0].middleY - y) < abs(guides[$1].middleY - y) }
-      .map { guides[$0] }
+    let index = SidebarCollectionVerticalHitResolver.resolve(
+      position: Double(y),
+      sortedGuides: session.projectedVerticalHitGuides
+    )
+    return index.map { guides[$0] }
   }
 
   private func rootProposals(session: ReorderSession) -> [Proposal] {
@@ -3981,6 +4002,7 @@ final class SidebarCollectionBodyController: NSViewController {
     var proposals: [Proposal] = []
     guard let parentRowID = rowID(for: parentID) else { return [] }
     let sectionID = session.tree.snapshot.sectionID(containing: parentID) ?? nil
+    let presentationLane = sectionID
 
     for sibling in siblings {
       guard let index = reducedIndexByID[sibling.rowID],
@@ -3994,7 +4016,7 @@ final class SidebarCollectionBodyController: NSViewController {
         ),
         insertionIndex: index,
         guideY: frame.minY,
-        targetLane: sibling.lane,
+        targetLane: presentationLane ?? sibling.lane,
         reducedIDs: reducedIDs
       ))
     }
@@ -4014,12 +4036,13 @@ final class SidebarCollectionBodyController: NSViewController {
           rowByID: session.rowByID
         ),
         guideY: frame.maxY,
-        targetLane: last.lane,
+        targetLane: presentationLane ?? last.lane,
         reducedIDs: reducedIDs
       ))
     } else if let parentIndex = reducedIndexByID[parentRowID],
               let parentFrame = session.stableFrames[parentRowID],
-              let targetLane = session.rowByID[parentRowID]?.presentationLane
+              let targetLane = presentationLane
+                ?? session.rowByID[parentRowID]?.presentationLane
                 ?? session.source.orderLane {
       proposals.append(makeProposal(
         slot: ModelSlot(
@@ -4322,10 +4345,15 @@ final class SidebarCollectionBodyController: NSViewController {
           )
     else { return nil }
 
+    let sourcePresentationLane = tree.snapshot.sectionID(containing: sourceNodeID).flatMap { $0 }
     if tree.snapshot.isNode(sourceNodeID, at: proposal.slot),
-       sourceLane == proposal.targetLane {
+       sourcePresentationLane == proposal.targetLane {
       return nil
     }
+
+    let targetOrderLane: SidebarOrderLane = proposal.slot.parentID?.folderID == nil
+      ? proposal.targetLane
+      : .normal
 
     let siblingIDs: [SidebarCollectionNodeID]
     if let parentID = proposal.slot.parentID {
@@ -4348,16 +4376,15 @@ final class SidebarCollectionBodyController: NSViewController {
     let nextNodeID = nextIndex < siblingIDs.endIndex ? siblingIDs[nextIndex] : nil
     let hasPreviousOrder = previousNodeID != nil
     let previousOrder = previousNodeID.flatMap {
-      tree.trailingPersistedOrder(for: $0, lane: proposal.targetLane)
+      tree.trailingPersistedOrder(for: $0, lane: targetOrderLane)
     }
     let hasNextOrder = nextNodeID != nil
     let nextOrder = nextNodeID.flatMap {
-      tree.persistedOrder(for: $0, lane: proposal.targetLane)
+      tree.persistedOrder(for: $0, lane: targetOrderLane)
     }
 
     if case let .folder(folder) = session.source {
-      guard proposal.targetLane == .normal,
-            proposal.slot.parentID == nil,
+      guard proposal.slot.parentID == nil,
             session.reorderPolicy == .manual
       else { return nil }
       return .folder(SidebarCollectionFolderMove(
@@ -4366,7 +4393,9 @@ final class SidebarCollectionBodyController: NSViewController {
         hasPreviousOrder: hasPreviousOrder,
         previousOrder: previousOrder,
         hasNextOrder: hasNextOrder,
-        nextOrder: nextOrder
+        nextOrder: nextOrder,
+        sourceLane: sourceLane,
+        targetLane: proposal.targetLane
       ))
     }
 
@@ -4395,10 +4424,15 @@ final class SidebarCollectionBodyController: NSViewController {
       nil
     }
 
+    let entersPinnedContainer = session.reorderPolicy == .pinningOnly
+      && proposal.targetLane == .pinned
+      && proposal.slot.parentID?.folderID != nil
+      && dialogDestination != nil
     guard session.reorderPolicy.allowsMove(
       sourceIsRoot: currentParentID == nil,
-      changesSection: sourceLane != proposal.targetLane,
-      changesParent: hierarchyChange != nil || dialogDestination != nil
+      changesSection: sourceLane != targetOrderLane,
+      changesParent: hierarchyChange != nil || dialogDestination != nil,
+      entersPinnedContainer: entersPinnedContainer
     ) else { return nil }
 
     return .chat(SidebarCollectionMove(
@@ -4411,7 +4445,7 @@ final class SidebarCollectionBodyController: NSViewController {
       hasNextOrder: hasNextOrder,
       nextOrder: nextOrder,
       sourceLane: sourceLane,
-      targetLane: proposal.targetLane,
+      targetLane: targetOrderLane,
       hierarchyChange: hierarchyChange,
       dialogDestination: dialogDestination
     ))
@@ -4421,7 +4455,11 @@ final class SidebarCollectionBodyController: NSViewController {
     for session: ReorderSession,
     proposal: Proposal
   ) -> SidebarCollectionMoveScope {
-    session.source.orderLane == proposal.targetLane ? .attachedSubtree : .sourceOnly
+    if case .folder = session.source { return .attachedSubtree }
+    let targetOrderLane: SidebarOrderLane = proposal.slot.parentID?.folderID == nil
+      ? proposal.targetLane
+      : .normal
+    return session.source.orderLane == targetOrderLane ? .attachedSubtree : .sourceOnly
   }
 
   // MARK: - Cancellation and autoscroll

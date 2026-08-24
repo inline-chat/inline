@@ -1045,6 +1045,17 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("dialog folder pinned order") { db in
+      try db.alter(table: "dialogFolder") { table in
+        table.add(column: "pinnedOrder", .text)
+      }
+      try db.create(
+        index: "dialogFolder_pinnedOrder_idx",
+        on: "dialogFolder",
+        columns: ["pinnedOrder"]
+      )
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

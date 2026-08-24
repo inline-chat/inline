@@ -83,15 +83,17 @@ struct ChatToolbarMenuButton: View {
 
       Divider()
 
-      Button(
-        model.state.isPinned ? "Unpin" : "Pin",
-        systemImage: model.state.isPinned ? "pin.slash.fill" : "pin.fill"
-      ) {
-        ChatMenuActions.togglePin(
-          peer: peer,
-          isPinned: model.state.isPinned,
-          spaceID: dependencies.activeSpaceId
-        )
+      if model.state.canPin {
+        Button(
+          model.state.isPinned ? "Unpin" : "Pin",
+          systemImage: model.state.isPinned ? "pin.slash.fill" : "pin.fill"
+        ) {
+          ChatMenuActions.togglePin(
+            peer: peer,
+            isPinned: model.state.isPinned,
+            spaceID: dependencies.activeSpaceId
+          )
+        }
       }
 
       Button(
@@ -484,6 +486,7 @@ private final class ChatToolbarMenuModel: ObservableObject {
 
 private struct ChatToolbarMenuState: Equatable {
   var isPinned = false
+  var canPin = true
   var isArchived = false
   var isChatListHidden = false
   var isOpen = false
@@ -504,6 +507,7 @@ private struct ChatToolbarMenuState: Equatable {
     db: Database
   ) throws {
     isPinned = dialog?.pinned ?? false
+    canPin = isPinned || dialog?.folderId == nil
     isArchived = dialog?.archived ?? false
     isChatListHidden = dialog?.chatListHidden == true
     isOpen = dialog?.open == true

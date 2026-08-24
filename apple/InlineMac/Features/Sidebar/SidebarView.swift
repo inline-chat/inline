@@ -15,6 +15,12 @@ private struct SidebarDropTarget {
   let parentPeer: Peer?
 }
 
+private struct SidebarFolderRenameRequest: Identifiable {
+  let id: Int64
+  let title: String
+  let emoji: String?
+}
+
 @MainActor
 private final class SidebarDropImportJob {
   let userID: Int64?
@@ -52,6 +58,7 @@ struct SidebarView: View {
   @State private var hideConnectedTask: Task<Void, Never>?
   @State private var pendingSpaceAction: SidebarSpacePendingAction?
   @State private var sidebarRenameItem: SidebarViewModel.Item?
+  @State private var sidebarRenameFolder: SidebarFolderRenameRequest?
   @State private var fetchingDialogSpaceIds = Set<Int64>()
   @State private var sidebarDrag = SidebarDragViewModel()
   @State private var cleanupOwnerID = UUID()
@@ -107,6 +114,14 @@ struct SidebarView: View {
       }
       .sheet(item: $sidebarRenameItem) { item in
         RenameChatSheet(peer: item.peerId, initialTitle: item.title)
+      }
+      .sheet(item: $sidebarRenameFolder) { folder in
+        RenameSidebarFolderSheet(
+          initialTitle: folder.title,
+          initialEmoji: folder.emoji
+        ) { title, emoji in
+          renameFolder(folder.id, title: title, emoji: emoji)
+        }
       }
   }
 
@@ -510,8 +525,8 @@ struct SidebarView: View {
         ))
         if folder.childCount == 0, folder.isExpanded {
           rows.append(SidebarCollectionRow(
-            id: .folderNewThread(folder.id),
-            kind: .folderNewThread(folder.id),
+            id: .folderEmpty(folder.id),
+            kind: .folderEmpty(folder.id, lane: folder.lane),
             height: settings.sidebarItemSize.rowHeight
           ))
         }
@@ -566,15 +581,8 @@ struct SidebarView: View {
         isDropTargeted: context.isDropTargeted,
         disclosureExpandedOverride: context.disclosureExpandedOverride
       ))
-    case let .folderNewThread(folderID):
-      AnyView(SidebarNewThreadRow(
-        size: settings.sidebarItemSize,
-        titleDimmed: sidebarTitlesDimmed,
-        usesFullWidthCollectionLayout: true,
-        indentationLevel: 1,
-        systemImage: "plus",
-        action: { createNewThread(inFolder: folderID) }
-      ))
+    case .folderEmpty:
+      AnyView(SidebarFolderEmptyRow(size: settings.sidebarItemSize))
     case .newThread:
       AnyView(newThreadRow(usesFullWidthCollectionLayout: true))
     case .emptyState:
@@ -680,24 +688,21 @@ struct SidebarView: View {
         actions: .init(
           toggleDisclosure: { toggleAppKitFolder(folder.id) },
           setEmoji: { updateFolderEmoji(folder.id, emoji: $0) },
+          togglePin: { toggleFolderPin(folder) },
+          rename: {
+            sidebarRenameFolder = SidebarFolderRenameRequest(
+              id: folder.id,
+              title: folder.title,
+              emoji: folder.folder.emoji
+            )
+          },
           close: { removeFolder(folder, disposition: .closeDialogs) },
           ungroup: { removeFolder(folder, disposition: .keepDialogs) }
         )
       ))
-    case let .folderNewThread(folderID):
-      .navigation(SidebarNativeRowConfiguration.Navigation(
-        title: "New thread",
-        systemImage: "plus",
-        iconStyle: .newThread,
-        selected: false,
-        titleDimmed: sidebarTitlesDimmed,
-        size: settings.sidebarItemSize,
-        indentationLevel: 1,
-        prominentUnreadCount: 0,
-        otherUnreadCount: 0,
-        avatars: [],
-        accessibilityValue: "",
-        action: { createNewThread(inFolder: folderID) }
+    case .folderEmpty:
+      .folderEmpty(SidebarNativeRowConfiguration.FolderEmpty(
+        size: settings.sidebarItemSize
       ))
     case .newThread:
       .navigation(SidebarNativeRowConfiguration.Navigation(
@@ -785,12 +790,21 @@ struct SidebarView: View {
       emoji: folder.folder.emoji,
       childCount: folder.childCount,
       unreadCount: folder.unreadCount,
+      isPinned: folder.folder.isPinned,
       isExpanded: disclosureExpandedOverride ?? folder.isExpanded,
       isDropTargeted: isDropTargeted,
       titleDimmed: sidebarTitlesDimmed,
       size: settings.sidebarItemSize,
       onToggle: { toggleAppKitFolder(folder.id) },
       onSetEmoji: { updateFolderEmoji(folder.id, emoji: $0) },
+      onTogglePin: { toggleFolderPin(folder) },
+      onRename: {
+        sidebarRenameFolder = SidebarFolderRenameRequest(
+          id: folder.id,
+          title: folder.title,
+          emoji: folder.folder.emoji
+        )
+      },
       onClose: { removeFolder(folder, disposition: .closeDialogs) },
       onUngroup: { removeFolder(folder, disposition: .keepDialogs) }
     )
@@ -926,7 +940,13 @@ struct SidebarView: View {
 
   private func appKitShowsCloseButton(for item: SidebarViewModel.Item) -> Bool {
     guard settings.sidebarAsInbox else { return false }
+    guard isInPinnedFolder(item) == false else { return false }
     return item.pinned == false || item.parentChatId != nil
+  }
+
+  private func isInPinnedFolder(_ item: SidebarViewModel.Item) -> Bool {
+    guard let folderID = item.folderID else { return false }
+    return viewModel.folders.first(where: { $0.id == folderID })?.isPinned == true
   }
 
   private func appKitSectionHeader(
@@ -1109,7 +1129,9 @@ struct SidebarView: View {
             titleDimmed: sidebarTitlesDimmed,
             size: settings.sidebarItemSize,
             unreadBadgeStyle: settings.unreadBadgeStyle,
-            showsCloseButton: settings.sidebarAsInbox && item.pinned == false,
+            showsCloseButton: settings.sidebarAsInbox
+              && item.pinned == false
+              && isInPinnedFolder(item) == false,
             opensOnMouseDown: true,
             isTemporary: isTemporary,
             isDropTargeted: isDropTargeted,
@@ -1517,13 +1539,20 @@ struct SidebarView: View {
     SidebarCollectionProjection.sidebarTree(
       pinnedItems: visiblePinnedItems,
       normalItems: visibleNormalSourceItems,
-      folders: viewModel.folders.filter { pendingRemovedFolderIDs.contains($0.id) == false },
+      folders: foldersPresentedInCurrentSidebar,
       collapsedParentIDs: collapsedAppKitThreadParentIDs,
       collapsedFolderIDs: collapsedAppKitFolderIDs,
       detachedReplyIDs: detachedAppKitReplyIDs,
       nestingPolicy: sidebarPresentationConfiguration.nesting,
       sortMode: effectiveSidebarSort
     )
+  }
+
+  private var foldersPresentedInCurrentSidebar: [SidebarViewModel.Folder] {
+    let folders = viewModel.folders.filter {
+      pendingRemovedFolderIDs.contains($0.id) == false
+    }
+    return settings.sidebarMode == .allChats ? folders.filter(\.isPinned) : folders
   }
 
   private var appKitProjectedVisibleItems: [SidebarProjectedItem] {
@@ -1587,16 +1616,14 @@ struct SidebarView: View {
   private func sidebarFolderMenu(
     for item: SidebarViewModel.Item
   ) -> SidebarChatFolderMenu? {
-    guard settings.sidebarAsInbox,
-          isArchiveVisible == false,
+    guard isArchiveVisible == false,
           nav.selectedSpaceId == nil,
           isTemporaryItem(item) == false
     else { return nil }
 
-    let destinations = viewModel.folders
+    let destinations = foldersPresentedInCurrentSidebar
       .filter { folder in
-        pendingRemovedFolderIDs.contains(folder.id) == false
-          && folder.id != item.folderID
+        folder.id != item.folderID
       }
       .map { folder in
         let title = folder.title?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1623,11 +1650,13 @@ struct SidebarView: View {
 
   private func createFolder(peers: [Peer]) {
     guard let dependencies else { return }
+    let pinnedOrder = settings.sidebarMode == .allChats ? nextSidebarPinnedOrder() : nil
     Task(priority: .userInitiated) {
       do {
         _ = try await dependencies.realtimeV2.send(.createDialogFolder(
           title: nil,
-          peers: peers
+          peers: peers,
+          pinnedOrder: pinnedOrder
         ))
       } catch {
         sidebarInteractionLog.error("folder creation failed", error: error)
@@ -1637,7 +1666,7 @@ struct SidebarView: View {
   }
 
   private var canCreateFolder: Bool {
-    settings.sidebarAsInbox && isArchiveVisible == false && nav.selectedSpaceId == nil
+    isArchiveVisible == false && nav.selectedSpaceId == nil
   }
 
   private func moveChat(_ item: SidebarViewModel.Item, toFolder folderID: Int64) {
@@ -1680,6 +1709,57 @@ struct SidebarView: View {
         ToastCenter.shared.showError("Couldn’t update the folder emoji. Please try again.")
       }
     }
+  }
+
+  private func renameFolder(_ folderID: Int64, title: String, emoji: String?) {
+    guard let dependencies else { return }
+    let emojiUpdate: UpdateDialogFolderTransaction.EmojiUpdate = emoji.map {
+      .set($0)
+    } ?? .clear
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
+          folderId: folderID,
+          title: .set(title),
+          emoji: emojiUpdate
+        ))
+      } catch {
+        sidebarInteractionLog.error("folder rename failed", error: error)
+        ToastCenter.shared.showError("Couldn’t rename the folder. Please try again.")
+      }
+    }
+  }
+
+  private func toggleFolderPin(_ folder: SidebarProjectedFolder) {
+    guard let dependencies else { return }
+    let pinnedOrder: UpdateDialogFolderTransaction.PinnedOrderUpdate
+    if folder.folder.isPinned {
+      pinnedOrder = .clear
+    } else {
+      pinnedOrder = .set(nextSidebarPinnedOrder())
+    }
+
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
+          folderId: folder.id,
+          pinnedOrder: pinnedOrder
+        ))
+      } catch {
+        sidebarInteractionLog.error("folder pin update failed", error: error)
+        ToastCenter.shared.showError("Couldn’t update the folder pin. Please try again.")
+      }
+    }
+  }
+
+  private func nextSidebarPinnedOrder() -> String {
+    let lastPinnedOrder = (
+      visiblePinnedItems.compactMap(\.pinnedOrder)
+        + viewModel.folders.compactMap(\.pinnedOrder)
+    )
+    .filter(FractionalIndex.isValid)
+    .max()
+    return FractionalIndex.after(lastPinnedOrder)
   }
 
   private func removeFolder(
@@ -1725,10 +1805,14 @@ struct SidebarView: View {
         ))
         if let undoIntent {
           dependencies.appUndo.recordClosedFolder(
-            folderID: folder.id,
-            title: folder.folder.title,
-            order: folder.folder.order,
-            chats: closedChats,
+            AppUndoHistory.ClosedFolder(
+              folderID: folder.id,
+              title: folder.folder.title,
+              emoji: folder.folder.emoji,
+              order: folder.folder.order,
+              pinnedOrder: folder.folder.pinnedOrder,
+              chats: closedChats
+            ),
             intent: undoIntent
           )
         }
@@ -2478,10 +2562,19 @@ struct SidebarView: View {
     }
     Task(priority: .userInitiated) {
       do {
-        _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
-          folderId: move.folder.id,
-          order: order
-        ))
+        switch move.targetLane {
+        case .pinned:
+          _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
+            folderId: move.folder.id,
+            pinnedOrder: .set(order)
+          ))
+        case .normal:
+          _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
+            folderId: move.folder.id,
+            pinnedOrder: move.sourceLane == .pinned ? .clear : .unchanged,
+            order: order
+          ))
+        }
         completion(true)
       } catch {
         sidebarInteractionLog.error("folder reorder persistence failed", error: error)
@@ -2495,18 +2588,22 @@ struct SidebarView: View {
     completion: @escaping @MainActor @Sendable (Bool) -> Void
   ) {
     if effectiveSidebarSort == .recentActivity {
+      let entersPinnedContainer = isMoveIntoPinnedFolder(move)
       guard SidebarCollectionReorderPolicy.pinningOnly.allowsMove(
         sourceIsRoot: move.sourceIsRoot,
         changesSection: move.sourceLane != move.targetLane,
-        changesParent: move.hierarchyChange != nil || move.dialogDestination != nil
+        changesParent: move.hierarchyChange != nil || move.dialogDestination != nil,
+        entersPinnedContainer: entersPinnedContainer
       )
       else {
         sidebarInteractionLog.error("rejected manual reorder in recent-activity mode")
         completion(false)
         return
       }
-      applyRecentActivityPinMove(move, completion: completion)
-      return
+      if entersPinnedContainer == false {
+        applyRecentActivityPinMove(move, completion: completion)
+        return
+      }
     }
 
     let detachedReplyIDsBeforeMove = detachedAppKitReplyIDs
@@ -2560,6 +2657,11 @@ struct SidebarView: View {
       },
       completion: completion
     )
+  }
+
+  private func isMoveIntoPinnedFolder(_ move: SidebarCollectionMove) -> Bool {
+    guard case let .folder(folderID)? = move.dialogDestination else { return false }
+    return viewModel.folders.first(where: { $0.id == folderID })?.isPinned == true
   }
 
   private func applyRecentActivityPinMove(

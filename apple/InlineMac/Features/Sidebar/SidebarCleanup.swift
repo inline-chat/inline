@@ -434,6 +434,12 @@ final class SidebarCleanup {
     \(Dialog.chatListVisibilitySQL)
     AND "dialog"."open" = 1
     AND ("dialog"."pinned" IS NULL OR "dialog"."pinned" = 0)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM "dialogFolder"
+      WHERE "dialogFolder"."id" = "dialog"."folderId"
+        AND "dialogFolder"."pinnedOrder" IS NOT NULL
+    )
     """
   }
 

@@ -23,6 +23,7 @@ struct DialogFolderPersistenceTests {
       $0.title = "Favorites"
       $0.order = "a"
       $0.emoji = "🚀"
+      $0.pinnedOrder = "p"
     }]
     result.dialogs = [makeDialog(chatID: 10, folderID: 7, order: "b")]
 
@@ -32,6 +33,8 @@ struct DialogFolderPersistenceTests {
       #expect(imported.failures.isEmpty)
       #expect(try DialogFolder.fetchOne(db, key: 7)?.title == "Favorites")
       #expect(try DialogFolder.fetchOne(db, key: 7)?.emoji == "🚀")
+      #expect(try DialogFolder.fetchOne(db, key: 7)?.pinnedOrder == "p")
+      #expect(try DialogFolder.fetchOne(db, key: 7)?.isPinned == true)
       #expect(try Dialog.fetchOne(db, key: 10)?.folderId == 7)
     }
   }
@@ -67,6 +70,16 @@ struct DialogFolderPersistenceTests {
     }
   }
 
+  @Test("pinned order allocation includes folder positions")
+  func pinnedOrderUsesSharedCoordinate() throws {
+    let queue = try makeDatabase()
+    try queue.write { db in
+      try DialogFolder(id: 7, title: nil, order: "a", pinnedOrder: "z").insert(db)
+      let order = try Dialog.nextPinnedOrder(db)
+      #expect(order > "z")
+    }
+  }
+
   @Test("folder emoji updates use the existing mutation lane")
   func emojiUpdateInput() {
     let transaction = UpdateDialogFolderTransaction(folderId: 7, emoji: .set("🚀"))
@@ -78,6 +91,39 @@ struct DialogFolderPersistenceTests {
     #expect(input.folderID == 7)
     #expect(input.emoji == "🚀")
     #expect(input.titleUpdate == nil)
+  }
+
+  @Test("folder creation carries pinned order atomically")
+  func pinnedCreateInput() {
+    let transaction = CreateDialogFolderTransaction(
+      title: nil,
+      peers: [.thread(id: 44)],
+      pinnedOrder: "p"
+    )
+
+    guard case let .createDialogFolder(input)? = transaction.input(from: transaction.context) else {
+      Issue.record("Expected a createDialogFolder input")
+      return
+    }
+    #expect(input.pinnedOrder == "p")
+    #expect(input.peers.first?.chat.chatID == 44)
+  }
+
+  @Test("folder pinned order updates use presence as pin state")
+  func pinnedOrderUpdateInput() {
+    let pin = UpdateDialogFolderTransaction(folderId: 7, pinnedOrder: .set("p"))
+    guard case let .updateDialogFolder(pinInput)? = pin.input(from: pin.context) else {
+      Issue.record("Expected a pin updateDialogFolder input")
+      return
+    }
+    #expect(pinInput.pinnedOrder == "p")
+
+    let unpin = UpdateDialogFolderTransaction(folderId: 7, pinnedOrder: .clear)
+    guard case let .updateDialogFolder(unpinInput)? = unpin.input(from: unpin.context) else {
+      Issue.record("Expected an unpin updateDialogFolder input")
+      return
+    }
+    #expect(unpinInput.clearPinnedOrder_p)
   }
 
   @Test("folder updates queued before emoji support still decode")
@@ -93,6 +139,7 @@ struct DialogFolderPersistenceTests {
     )
 
     #expect(decoded.emoji == nil)
+    #expect(decoded.pinnedOrder == nil)
     let transaction = UpdateDialogFolderTransaction(folderId: 7)
     guard case let .updateDialogFolder(input)? = transaction.input(from: decoded) else {
       Issue.record("Expected a legacy updateDialogFolder input")
@@ -100,6 +147,17 @@ struct DialogFolderPersistenceTests {
     }
     #expect(input.title == "Favorites")
     #expect(input.emojiUpdate == nil)
+  }
+
+  @Test("folder creates queued before pinning support still decode")
+  func legacyCreateContextDecodes() throws {
+    let legacy = LegacyDialogFolderCreateContext(title: nil, peers: [], order: nil)
+    let decoded = try JSONDecoder().decode(
+      CreateDialogFolderTransaction.Context.self,
+      from: JSONEncoder().encode(legacy)
+    )
+
+    #expect(decoded.pinnedOrder == nil)
   }
 
   @Test("new threads created from an empty folder wait before joining it")
@@ -147,5 +205,11 @@ struct DialogFolderPersistenceTests {
 private struct LegacyDialogFolderUpdateContext: Codable {
   let folderId: Int64
   let title: UpdateDialogFolderTransaction.TitleUpdate
+  let order: String?
+}
+
+private struct LegacyDialogFolderCreateContext: Codable {
+  let title: String?
+  let peers: [InlineKit.Peer]
   let order: String?
 }

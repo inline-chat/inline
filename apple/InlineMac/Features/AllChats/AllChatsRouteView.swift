@@ -681,6 +681,7 @@ struct AllChatsItem: Identifiable, Equatable {
   let isOpen: Bool
   let pinned: Bool
   let pinnedOrder: String?
+  let folderID: Int64?
   let archived: Bool
   let chatListHidden: Bool
   let identity: ChatListIdentityDescriptor?
@@ -708,6 +709,7 @@ struct AllChatsItem: Identifiable, Equatable {
     isOpen = snapshot.isOpen
     pinned = snapshot.isPinned
     pinnedOrder = snapshot.pinnedOrder
+    folderID = snapshot.folderID
     archived = snapshot.isArchived
     chatListHidden = snapshot.isChatListHidden
     identity = snapshot.identity
@@ -939,10 +941,12 @@ private struct ChatListRow: View {
 
       Divider()
 
-      Button {
-        togglePin()
-      } label: {
-        Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash.fill" : "pin.fill")
+      if item.pinned || item.folderID == nil {
+        Button {
+          togglePin()
+        } label: {
+          Label(item.pinned ? "Unpin" : "Pin", systemImage: item.pinned ? "pin.slash.fill" : "pin.fill")
+        }
       }
 
       Button {

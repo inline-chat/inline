@@ -36,7 +36,7 @@ struct SidebarPresentationConfiguration: Equatable {
   static let allChats = Self(
     sectionHeaders: .visible,
     newThreadPlacement: .beforeContent,
-    nesting: .flat
+    nesting: .foldersOnly
   )
 
   static let archived = Self(
@@ -85,7 +85,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case pinDropGuide
     case chat(ChatListItem.Identifier)
     case folder(Int64)
-    case folderNewThread(Int64)
+    case folderEmpty(Int64)
     case newThread
     case emptyState
 
@@ -104,7 +104,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case pinDropGuide
     case chat(SidebarProjectedItem)
     case folder(SidebarProjectedFolder)
-    case folderNewThread(Int64)
+    case folderEmpty(Int64, lane: SidebarOrderLane)
     case newThread
     case emptyState
   }
@@ -133,7 +133,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
 
   var presentationParentID: SidebarCollectionNodeID? {
     switch kind {
-    case let .folderNewThread(folderID): .folder(folderID)
+    case let .folderEmpty(folderID, _): .folder(folderID)
     default: projectedItem?.parentID
     }
   }
@@ -142,7 +142,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     switch kind {
     case let .chat(item): item.depth
     case let .folder(folder): folder.depth
-    case .folderNewThread: 1
+    case .folderEmpty: 1
     default: nil
     }
   }
@@ -151,7 +151,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     switch kind {
     case let .chat(item): item.lane
     case let .folder(folder): folder.lane
-    case .folderNewThread: .normal
+    case let .folderEmpty(_, lane): lane
     default: nil
     }
   }
@@ -171,7 +171,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   var usesFullWidthCollectionLayout: Bool {
     switch id {
     case .allChats, .grid, .sectionHeader, .timelineHeader, .pinDropGuide, .chat, .folder,
-         .folderNewThread, .newThread:
+         .folderEmpty, .newThread:
       true
     case .archiveHeader, .emptyState:
       false
@@ -328,6 +328,8 @@ struct SidebarCollectionFolderMove {
   let previousOrder: String?
   let hasNextOrder: Bool
   let nextOrder: String?
+  let sourceLane: SidebarOrderLane
+  let targetLane: SidebarOrderLane
 }
 
 enum SidebarCollectionMoveIntent {

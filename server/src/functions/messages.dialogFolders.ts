@@ -39,13 +39,22 @@ type EmojiUpdate =
   | { oneofKind: "clearEmoji"; clearEmoji: boolean }
   | { oneofKind: undefined }
 
+type PinnedOrderUpdate =
+  | { oneofKind: "pinnedOrder"; pinnedOrder: string }
+  | { oneofKind: "clearPinnedOrder"; clearPinnedOrder: boolean }
+  | { oneofKind: undefined }
+
 type ResolvedChat = Awaited<ReturnType<typeof ChatModel.getChatFromInputPeer>>
 
 export async function createDialogFolder(
-  input: { title?: string; peers: InputPeer[]; order?: string },
+  input: { title?: string; peers: InputPeer[]; order?: string; pinnedOrder?: string },
   context: FunctionContext,
 ): Promise<CreateDialogFolderResult> {
-  if (input.peers.length > MAX_FOLDER_DIALOGS || (input.order != null && !FractionalIndex.isValid(input.order))) {
+  if (
+    input.peers.length > MAX_FOLDER_DIALOGS ||
+    (input.order != null && !FractionalIndex.isValid(input.order)) ||
+    (input.pinnedOrder != null && !FractionalIndex.isValid(input.pinnedOrder))
+  ) {
     throw RealtimeRpcError.BadRequest()
   }
   const title = normalizeOptionalTitle(input.title)
@@ -74,7 +83,12 @@ export async function createDialogFolder(
 
     const [folder] = await tx
       .insert(dialogFolders)
-      .values({ userId: context.currentUserId, title, order: folderOrder })
+      .values({
+        userId: context.currentUserId,
+        title,
+        order: folderOrder,
+        pinnedOrder: input.pinnedOrder ?? null,
+      })
       .returning()
     if (!folder) throw RealtimeRpcError.InternalError()
 
@@ -123,19 +137,32 @@ export async function createDialogFolder(
 }
 
 export async function updateDialogFolder(
-  input: { folderId: number; titleUpdate: TitleUpdate; emojiUpdate: EmojiUpdate; order?: string },
+  input: {
+    folderId: number
+    titleUpdate: TitleUpdate
+    emojiUpdate: EmojiUpdate
+    pinnedOrderUpdate?: PinnedOrderUpdate
+    order?: string
+  },
   context: FunctionContext,
 ): Promise<UpdateDialogFolderResult> {
+  const pinnedOrderUpdate = input.pinnedOrderUpdate ?? { oneofKind: undefined }
   if (
     input.folderId <= 0 ||
     (input.order != null && !FractionalIndex.isValid(input.order)) ||
-    (input.order == null && input.titleUpdate.oneofKind === undefined && input.emojiUpdate.oneofKind === undefined)
+    (pinnedOrderUpdate.oneofKind === "pinnedOrder"
+      && !FractionalIndex.isValid(pinnedOrderUpdate.pinnedOrder)) ||
+    (input.order == null
+      && input.titleUpdate.oneofKind === undefined
+      && input.emojiUpdate.oneofKind === undefined
+      && pinnedOrderUpdate.oneofKind === undefined)
   ) {
     throw RealtimeRpcError.BadRequest()
   }
 
   const title = titleValue(input.titleUpdate)
   const emoji = emojiValue(input.emojiUpdate)
+  const pinnedOrder = pinnedOrderValue(pinnedOrderUpdate)
   const result = await db.transaction(async (tx) => {
     await lockUser(tx, context.currentUserId)
     const folder = await ownedDialogFolder(tx, context.currentUserId, input.folderId)
@@ -166,6 +193,7 @@ export async function updateDialogFolder(
     if (input.order != null) updateSet.order = input.order
     if (title !== undefined) updateSet.title = title
     if (emoji !== undefined) updateSet.emoji = emoji
+    if (pinnedOrder !== undefined) updateSet.pinnedOrder = pinnedOrder
     const [updatedFolder] = await tx
       .update(dialogFolders)
       .set(updateSet)
@@ -261,6 +289,18 @@ function emojiValue(update: EmojiUpdate): string | null | undefined {
       return normalizeEmoji(update.emoji)
     case "clearEmoji":
       if (!update.clearEmoji) throw RealtimeRpcError.BadRequest()
+      return null
+    case undefined:
+      return undefined
+  }
+}
+
+function pinnedOrderValue(update: PinnedOrderUpdate): string | null | undefined {
+  switch (update.oneofKind) {
+    case "pinnedOrder":
+      return update.pinnedOrder
+    case "clearPinnedOrder":
+      if (!update.clearPinnedOrder) throw RealtimeRpcError.BadRequest()
       return null
     case undefined:
       return undefined

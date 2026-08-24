@@ -2571,12 +2571,23 @@ public nonisolated struct DialogFolder: Sendable {
   /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
   public mutating func clearEmoji() {self._emoji = nil}
 
+  /// Presence is both pinned state and the coordinate in the shared Pinned lane.
+  public var pinnedOrder: String {
+    get {_pinnedOrder ?? String()}
+    set {_pinnedOrder = newValue}
+  }
+  /// Returns true if `pinnedOrder` has been explicitly set.
+  public var hasPinnedOrder: Bool {self._pinnedOrder != nil}
+  /// Clears the value of `pinnedOrder`. Subsequent reads from it will return its default value.
+  public mutating func clearPinnedOrder() {self._pinnedOrder = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _title: String? = nil
   fileprivate var _emoji: String? = nil
+  fileprivate var _pinnedOrder: String? = nil
 }
 
 /// Effective actions the current user may take on a chat.
@@ -11824,12 +11835,22 @@ public nonisolated struct CreateDialogFolderInput: Sendable {
   /// Clears the value of `order`. Subsequent reads from it will return its default value.
   public mutating func clearOrder() {self._order = nil}
 
+  public var pinnedOrder: String {
+    get {_pinnedOrder ?? String()}
+    set {_pinnedOrder = newValue}
+  }
+  /// Returns true if `pinnedOrder` has been explicitly set.
+  public var hasPinnedOrder: Bool {self._pinnedOrder != nil}
+  /// Clears the value of `pinnedOrder`. Subsequent reads from it will return its default value.
+  public mutating func clearPinnedOrder() {self._pinnedOrder = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _title: String? = nil
   fileprivate var _order: String? = nil
+  fileprivate var _pinnedOrder: String? = nil
 }
 
 public nonisolated struct CreateDialogFolderResult: Sendable {
@@ -11907,6 +11928,24 @@ public nonisolated struct UpdateDialogFolderInput: Sendable {
     set {emojiUpdate = .clearEmoji_p(newValue)}
   }
 
+  public var pinnedOrderUpdate: UpdateDialogFolderInput.OneOf_PinnedOrderUpdate? = nil
+
+  public var pinnedOrder: String {
+    get {
+      if case .pinnedOrder(let v)? = pinnedOrderUpdate {return v}
+      return String()
+    }
+    set {pinnedOrderUpdate = .pinnedOrder(newValue)}
+  }
+
+  public var clearPinnedOrder_p: Bool {
+    get {
+      if case .clearPinnedOrder_p(let v)? = pinnedOrderUpdate {return v}
+      return false
+    }
+    set {pinnedOrderUpdate = .clearPinnedOrder_p(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_TitleUpdate: Equatable, Sendable {
@@ -11918,6 +11957,12 @@ public nonisolated struct UpdateDialogFolderInput: Sendable {
   public nonisolated enum OneOf_EmojiUpdate: Equatable, Sendable {
     case emoji(String)
     case clearEmoji_p(Bool)
+
+  }
+
+  public nonisolated enum OneOf_PinnedOrderUpdate: Equatable, Sendable {
+    case pinnedOrder(String)
+    case clearPinnedOrder_p(Bool)
 
   }
 
@@ -20681,7 +20726,7 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
 nonisolated extension DialogFolder: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "DialogFolder"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}title\0\u{1}order\0\u{1}emoji\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}title\0\u{1}order\0\u{1}emoji\0\u{3}pinned_order\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -20693,6 +20738,7 @@ nonisolated extension DialogFolder: SwiftProtobuf.Message, SwiftProtobuf._Messag
       case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.order) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._pinnedOrder) }()
       default: break
       }
     }
@@ -20715,6 +20761,9 @@ nonisolated extension DialogFolder: SwiftProtobuf.Message, SwiftProtobuf._Messag
     try { if let v = self._emoji {
       try visitor.visitSingularStringField(value: v, fieldNumber: 4)
     } }()
+    try { if let v = self._pinnedOrder {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -20723,6 +20772,7 @@ nonisolated extension DialogFolder: SwiftProtobuf.Message, SwiftProtobuf._Messag
     if lhs._title != rhs._title {return false}
     if lhs.order != rhs.order {return false}
     if lhs._emoji != rhs._emoji {return false}
+    if lhs._pinnedOrder != rhs._pinnedOrder {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -35257,7 +35307,7 @@ nonisolated extension UpdateDialogArchivedResult: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension CreateDialogFolderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateDialogFolderInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}peers\0\u{1}order\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}peers\0\u{1}order\0\u{3}pinned_order\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -35268,6 +35318,7 @@ nonisolated extension CreateDialogFolderInput: SwiftProtobuf.Message, SwiftProto
       case 1: try { try decoder.decodeSingularStringField(value: &self._title) }()
       case 2: try { try decoder.decodeRepeatedMessageField(value: &self.peers) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._order) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._pinnedOrder) }()
       default: break
       }
     }
@@ -35287,6 +35338,9 @@ nonisolated extension CreateDialogFolderInput: SwiftProtobuf.Message, SwiftProto
     try { if let v = self._order {
       try visitor.visitSingularStringField(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._pinnedOrder {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -35294,6 +35348,7 @@ nonisolated extension CreateDialogFolderInput: SwiftProtobuf.Message, SwiftProto
     if lhs._title != rhs._title {return false}
     if lhs.peers != rhs.peers {return false}
     if lhs._order != rhs._order {return false}
+    if lhs._pinnedOrder != rhs._pinnedOrder {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -35340,7 +35395,7 @@ nonisolated extension CreateDialogFolderResult: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension UpdateDialogFolderInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogFolderInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}folder_id\0\u{1}title\0\u{3}clear_title\0\u{1}order\0\u{1}emoji\0\u{3}clear_emoji\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}folder_id\0\u{1}title\0\u{3}clear_title\0\u{1}order\0\u{1}emoji\0\u{3}clear_emoji\0\u{3}pinned_order\0\u{3}clear_pinned_order\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -35382,6 +35437,22 @@ nonisolated extension UpdateDialogFolderInput: SwiftProtobuf.Message, SwiftProto
           self.emojiUpdate = .clearEmoji_p(v)
         }
       }()
+      case 7: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.pinnedOrderUpdate != nil {try decoder.handleConflictingOneOf()}
+          self.pinnedOrderUpdate = .pinnedOrder(v)
+        }
+      }()
+      case 8: try {
+        var v: Bool?
+        try decoder.decodeSingularBoolField(value: &v)
+        if let v = v {
+          if self.pinnedOrderUpdate != nil {try decoder.handleConflictingOneOf()}
+          self.pinnedOrderUpdate = .clearPinnedOrder_p(v)
+        }
+      }()
       default: break
       }
     }
@@ -35420,6 +35491,17 @@ nonisolated extension UpdateDialogFolderInput: SwiftProtobuf.Message, SwiftProto
     }()
     case nil: break
     }
+    switch self.pinnedOrderUpdate {
+    case .pinnedOrder?: try {
+      guard case .pinnedOrder(let v)? = self.pinnedOrderUpdate else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 7)
+    }()
+    case .clearPinnedOrder_p?: try {
+      guard case .clearPinnedOrder_p(let v)? = self.pinnedOrderUpdate else { preconditionFailure() }
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 8)
+    }()
+    case nil: break
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -35428,6 +35510,7 @@ nonisolated extension UpdateDialogFolderInput: SwiftProtobuf.Message, SwiftProto
     if lhs.titleUpdate != rhs.titleUpdate {return false}
     if lhs._order != rhs._order {return false}
     if lhs.emojiUpdate != rhs.emojiUpdate {return false}
+    if lhs.pinnedOrderUpdate != rhs.pinnedOrderUpdate {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

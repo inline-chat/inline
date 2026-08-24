@@ -96,7 +96,10 @@ export async function rootDialogFolderPositions(
     dialogConditions.push(notInArray(dialogs.chatId, input.excludingChatIds))
   }
 
-  const folderConditions = [eq(dialogFolders.userId, input.userId)]
+  const folderConditions = [
+    eq(dialogFolders.userId, input.userId),
+    isNull(dialogFolders.pinnedOrder),
+  ]
   if (input.excludingFolderId !== undefined) {
     folderConditions.push(ne(dialogFolders.id, input.excludingFolderId))
   }

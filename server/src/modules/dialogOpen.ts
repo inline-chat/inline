@@ -104,19 +104,21 @@ export async function dialogOrderForPlacement(
     .limit(1)
 
   let edgeOrder = edgeDialog?.order
-  if (lane === "sidebar") {
-    const [edgeFolder] = await tx
-      .select({ order: dialogFolders.order })
-      .from(dialogFolders)
-      .where(eq(dialogFolders.userId, userId))
-      .orderBy(placement === "top" ? asc(dialogFolders.order) : desc(dialogFolders.order))
-      .limit(1)
-    if (
-      edgeFolder?.order != null &&
-      (edgeOrder == null || (placement === "top" ? edgeFolder.order < edgeOrder : edgeFolder.order > edgeOrder))
-    ) {
-      edgeOrder = edgeFolder.order
-    }
+  const folderColumn = lane === "pinned" ? dialogFolders.pinnedOrder : dialogFolders.order
+  const folderLaneFilter = lane === "pinned"
+    ? isNotNull(dialogFolders.pinnedOrder)
+    : isNull(dialogFolders.pinnedOrder)
+  const [edgeFolder] = await tx
+    .select({ order: folderColumn })
+    .from(dialogFolders)
+    .where(and(eq(dialogFolders.userId, userId), folderLaneFilter))
+    .orderBy(placement === "top" ? asc(folderColumn) : desc(folderColumn))
+    .limit(1)
+  if (
+    edgeFolder?.order != null &&
+    (edgeOrder == null || (placement === "top" ? edgeFolder.order < edgeOrder : edgeFolder.order > edgeOrder))
+  ) {
+    edgeOrder = edgeFolder.order
   }
 
   return dialogOrderAtPlacement(edgeOrder, placement, preferredOrder)
