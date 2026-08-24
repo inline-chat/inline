@@ -153,8 +153,8 @@ struct HomeChatListPresentationTests {
     #expect(recorder.errorDescription == nil)
   }
 
-  @Test("Narrow snapshot projection ignores malformed unused relationships")
-  func narrowProjectionAvoidsUnrelatedDecodeFailures() throws {
+  @Test("Native rich projection accepts nullable legacy file sizes")
+  func richProjectionAcceptsNullableLegacyFileSizes() throws {
     let database = AppDatabase.empty()
     let userID: Int64 = 801
     let chatID: Int64 = 802
@@ -177,9 +177,8 @@ struct HomeChatListPresentationTests {
       dialog.open = true
       try dialog.insert(db)
 
-      // `fileSize` predates its non-optional model representation and remains
-      // nullable in SQLite. A malformed historical avatar must not blank a
-      // chat list that only needs the user's narrow avatar descriptor.
+      // `fileSize` has always been nullable in SQLite. Missing size metadata is
+      // valid cache state and must match the Swift record model.
       try db.execute(
         sql: """
         INSERT INTO "file" (
@@ -190,11 +189,16 @@ struct HomeChatListPresentationTests {
       )
     }
 
-    #expect(throws: RowDecodingError.self) {
-      try database.reader.read { db in
-        try HomeChatItem.all().fetchAll(db)
-      }
+    let richItems = try database.reader.read { db in
+      try HomeChatItem.all().fetchAll(db)
     }
+    #expect(richItems.map(\.peerId) == [.user(id: userID)])
+    #expect(richItems.first?.user?.profilePhoto?.first?.fileSize == nil)
+
+    let destinations = try database.reader.read { db in
+      try ChatDestinationCatalogSnapshotQuery.fetchAll(db)
+    }
+    #expect(destinations.map(\.peerId) == [.user(id: userID)])
 
     let snapshots = try database.reader.read { db in
       try ChatListDatabaseQuery.fetchSnapshots(
@@ -207,6 +211,70 @@ struct HomeChatListPresentationTests {
 
     #expect(snapshots.map(\.peer) == [.user(id: userID)])
     #expect(snapshots.first?.title == "Mo")
+  }
+
+  @Test("Destination catalog ignores invalid cached presence and user decoders reject milliseconds")
+  func destinationCatalogIgnoresInvalidCachedPresence() async throws {
+    let database = AppDatabase.empty()
+    let userID: Int64 = 803
+    let chatID: Int64 = 804
+
+    try await database.dbWriter.write { db in
+      try User(id: userID, email: nil, firstName: "Mo").insert(db)
+      try Chat(
+        id: chatID,
+        date: date(day: 1),
+        type: .privateChat,
+        title: nil,
+        spaceId: nil,
+        peerUserId: userID
+      ).insert(db)
+
+      var dialog = Dialog.previewDm
+      dialog.id = Dialog.getDialogId(peerUserId: userID)
+      dialog.peerUserId = userID
+      dialog.chatId = chatID
+      dialog.open = true
+      try dialog.insert(db)
+
+      // Reproduce the old contract: milliseconds were stored as Unix seconds.
+      try User.filter(id: userID).updateAll(
+        db,
+        [Column("lastOnline").set(to: Int64(1_723_000_000_000))]
+      )
+      let user = try #require(try User.fetchOne(db, id: userID))
+      try user.save(db) // Re-encodes the far-future Date as an unsupported five-digit-year string.
+    }
+
+    let destinations = try await database.reader.read { db in
+      try ChatDestinationCatalogSnapshotQuery.fetchAll(db)
+    }
+    #expect(destinations.map(\.peerId) == [.user(id: userID)])
+    #expect(destinations.first?.item.user?.user.lastOnline == nil)
+
+    let commandBarSnapshot = try await database.fetchCommandBarCatalogSnapshot()
+    #expect(commandBarSnapshot.knownUsers.map(\.id) == [userID])
+    #expect(commandBarSnapshot.knownUsers.first?.lastOnline == nil)
+
+    let apiUser = ApiUser(
+      id: userID,
+      email: nil,
+      firstName: "Mo",
+      lastName: nil,
+      lastOnline: 1_723_000_000_000,
+      date: 1_723_000_000,
+      username: nil
+    )
+    #expect(User(from: apiUser).lastOnline == nil)
+
+    var lastOnline = LastOnline()
+    lastOnline.date = 1_723_000_000_000
+    var status = UserStatus()
+    status.lastOnline = lastOnline
+    var protocolUser = InlineProtocol.User()
+    protocolUser.id = userID
+    protocolUser.status = status
+    #expect(User(from: protocolUser).lastOnline == nil)
   }
 
   @Test("Snapshot projection carries All Chats rendering and action metadata")

@@ -233,7 +233,7 @@ public extension User {
     username = apiUser.username
     date = Self.fromTimestamp(from: apiUser.date)
     online = apiUser.online
-    lastOnline = apiUser.lastOnline.map(Self.fromTimestamp(from:))
+    lastOnline = apiUser.lastOnline.flatMap { Self.lastOnlineDate(from: Int64($0)) }
     pendingSetup = apiUser.pendingSetup ?? false
     phoneNumber = apiUser.phoneNumber ?? nil
     timeZone = apiUser.timeZone ?? nil
@@ -369,9 +369,8 @@ public extension User {
 
       if user.hasStatus {
         online = user.status.online == .online
-        lastOnline = user.status.hasLastOnline ? Date(
-          timeIntervalSince1970: Double(user.status.lastOnline.date)
-        )
+        lastOnline = user.status.hasLastOnline
+          ? Self.lastOnlineDate(from: user.status.lastOnline.date)
           : nil
       }
     }

@@ -160,11 +160,8 @@ public enum ReplyThreadTitleFallback {
     })
     guard userIds.isEmpty == false else { return [:] }
 
-    let users = try User
-      .userInfoQuery()
-      .filter(userIds.contains(Column("id")))
-      .fetchAll(db)
-    return Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0) })
+    let users = try ChatDestinationUserQuery.fetch(ids: userIds, db: db)
+    return Dictionary(uniqueKeysWithValues: users.map { ($0.id, UserInfo(user: $0)) })
   }
 
   private static func parentUserId(for chat: Chat, dialogsByChatId: [Int64: Dialog]) -> Int64? {

@@ -18,8 +18,8 @@ public extension AppDatabase {
   func fetchCommandBarCatalogSnapshot() async throws -> CommandBarCatalogSnapshot {
     try await reader.read { db in
       CommandBarCatalogSnapshot(
-        chats: try CommandBarChatCatalogSnapshotQuery.fetchAll(db),
-        knownUsers: try User.fetchAll(db),
+        chats: try ChatDestinationCatalogSnapshotQuery.fetchAll(db),
+        knownUsers: try ChatDestinationUserQuery.fetchAll(db),
         spaces: try Space.fetchAll(db)
       )
     }
@@ -29,12 +29,12 @@ public extension AppDatabase {
   /// translations, documents, sender profiles, or other rich chat-list presentation state.
   func fetchCommandBarChatCatalogSnapshots() async throws -> [HomeChatListItemSnapshot] {
     try await reader.read { db in
-      try CommandBarChatCatalogSnapshotQuery.fetchAll(db)
+      try ChatDestinationCatalogSnapshotQuery.fetchAll(db)
     }
   }
 }
 
-private enum CommandBarChatCatalogSnapshotQuery {
+enum ChatDestinationCatalogSnapshotQuery {
   static func fetchAll(_ db: Database) throws -> [HomeChatListItemSnapshot] {
     let dialogs = try Dialog
       .applyingChatListVisibilityFilter(Dialog.all())
@@ -46,7 +46,7 @@ private enum CommandBarChatCatalogSnapshotQuery {
     let chatsByID = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, $0) })
 
     let userIDs = Set(dialogs.compactMap(\.peerUserId))
-    let users = try fetch(User.self, ids: userIDs, db: db)
+    let users = try ChatDestinationUserQuery.fetch(ids: userIDs, db: db)
     let usersByID = Dictionary(uniqueKeysWithValues: users.map { ($0.id, UserInfo(user: $0)) })
 
     let spaceIDs = Set(dialogs.compactMap { dialog in
@@ -141,5 +141,41 @@ private enum CommandBarChatCatalogSnapshotQuery {
     if lhs.pinned, rhs.pinned, lhs.id != rhs.id { return lhs.id > rhs.id }
     if lhs.sortDate != rhs.sortDate { return lhs.sortDate > rhs.sortDate }
     return lhs.id > rhs.id
+  }
+}
+
+enum ChatDestinationUserQuery {
+  static func fetchAll(_ db: Database) throws -> [User] {
+    try request().fetchAll(db)
+  }
+
+  static func fetch(ids: Set<Int64>, db: Database) throws -> [User] {
+    guard ids.isEmpty == false else { return [] }
+    return try request()
+      .filter(ids.contains(User.Columns.id))
+      .fetchAll(db)
+  }
+
+  private static func request() -> QueryInterfaceRequest<User> {
+    // Presence is not presentation state for destination catalogs. Excluding it also keeps
+    // historical invalid cache values from poisoning Forward and Command-K projections.
+    User
+      .select(
+        User.Columns.id,
+        User.Columns.email,
+        User.Columns.firstName,
+        User.Columns.lastName,
+        User.Columns.bio,
+        User.Columns.date,
+        User.Columns.username,
+        User.Columns.phoneNumber,
+        User.Columns.pendingSetup,
+        User.Columns.timeZone,
+        User.Columns.profileFileId,
+        User.Columns.profileCdnUrl,
+        User.Columns.profileLocalPath,
+        User.Columns.profileFileUniqueId,
+        User.Columns.bot
+      )
   }
 }

@@ -115,13 +115,13 @@ public extension AppDatabase {
 
     return ValueObservation
       .tracking { db in
-        let items = try HomeChatItem.all().fetchAll(db)
-        return try HomeChatListItemSnapshot.snapshots(from: items, db: db)
+        try ChatDestinationCatalogSnapshotQuery.fetchAll(db)
       }
       .publisher(in: reader, scheduling: .immediate)
-      .catch { error in
-        log.error("Failed to observe forward destinations", error: error)
-        return Just<[HomeChatListItemSnapshot]>([])
+      .retry(2)
+      .catch { error -> Empty<[HomeChatListItemSnapshot], Never> in
+        log.error("Failed to observe Forward destinations", error: error)
+        return Empty()
       }
       .removeDuplicates()
       .eraseToAnyPublisher()

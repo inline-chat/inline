@@ -41,7 +41,7 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var uploading: Bool
 
   // File size
-  public var fileSize: Int64
+  public var fileSize: Int64?
 
   // URL
   public var temporaryUrl: String?
@@ -73,7 +73,7 @@ public struct File: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     fileType: MessageFileType,
     fileName: String,
     uploading: Bool,
-    fileSize: Int64,
+    fileSize: Int64?,
     temporaryUrl: String?,
     temporaryUrlExpiresAt: Date?,
     width: Int?,
