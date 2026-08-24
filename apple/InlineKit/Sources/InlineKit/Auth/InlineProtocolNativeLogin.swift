@@ -342,7 +342,7 @@ public actor InlineProtocolNativeLogin {
       RealtimeDirectRpcError.notConnected
     case .commitOutcomeUnknown:
       RealtimeDirectRpcError.commitOutcomeUnknown
-    case .requestCapacityExceeded:
+    case .rejectedBeforeExecution, .requestCapacityExceeded:
       RealtimeDirectRpcError.capacityExceeded
     case .timeout:
       RealtimeDirectRpcError.timeout

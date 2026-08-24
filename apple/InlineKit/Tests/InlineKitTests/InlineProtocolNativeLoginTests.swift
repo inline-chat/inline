@@ -154,6 +154,18 @@ struct InlineProtocolNativeLoginTests {
     #expect(presented.localizedDescription == "Email is invalid")
   }
 
+  @Test("native login presents pre-execution rejection as retryable capacity pressure")
+  func nativeLoginPresentsPreExecutionRejection() {
+    let presented = InlineProtocolNativeLogin.presentationError(
+      InlineProtocolV3ConnectionError.rejectedBeforeExecution
+    )
+
+    guard case RealtimeDirectRpcError.capacityExceeded = presented else {
+      Issue.record("Expected capacity pressure for a request proven not to have executed")
+      return
+    }
+  }
+
   @Test("prepares durable database authority before bearer credentials are replaced")
   func preparesDatabaseBeforeCredentialCommit() async throws {
     let auth = Auth.mocked(authenticated: false)
@@ -208,8 +220,13 @@ struct InlineProtocolNativeLoginTests {
     )
 
     _ = try await login.beginEmail("test@example.com")
-    await #expect(throws: CredentialStoragePreparationTestError.unavailable) {
-      try await login.complete(code: "123456")
+    do {
+      _ = try await login.complete(code: "123456")
+      Issue.record("Expected credential storage preparation to fail")
+    } catch let RealtimeDirectRpcError.unknown(underlying) {
+      #expect(underlying is CredentialStoragePreparationTestError)
+    } catch {
+      Issue.record("Expected the preparation failure to cross the presentation boundary")
     }
 
     #expect(auth.handle.token() == "42:legacy")
