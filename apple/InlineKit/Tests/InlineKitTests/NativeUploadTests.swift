@@ -8,8 +8,19 @@ private enum SimulatedUploadFailure: Error {
 }
 
 private actor UploadRPCMock: NativeUploadRPCTransport {
+  enum PartFailureMode {
+    case afterAcceptance
+    case beforeAcceptanceOnce
+  }
+
+  private let partFailureMode: PartFailureMode
   private var accepted = false
+  private var saveAttempts = 0
   private(set) var methods: [InlineProtocol.Method] = []
+
+  init(partFailureMode: PartFailureMode = .afterAcceptance) {
+    self.partFailureMode = partFailureMode
+  }
 
   func callUploadRPC(
     method: InlineProtocol.Method,
@@ -29,8 +40,15 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
     case let (.saveUploadPart, .saveUploadPart(save)):
       #expect(save.partIndex == 0)
       #expect(save.data == Data([1, 2, 3]))
+      saveAttempts += 1
+      if partFailureMode == .beforeAcceptanceOnce, saveAttempts == 1 {
+        throw SimulatedUploadFailure.responseLost
+      }
       accepted = true
-      throw SimulatedUploadFailure.responseLost
+      if partFailureMode == .afterAcceptance {
+        throw SimulatedUploadFailure.responseLost
+      }
+      return .saveUploadPart(SaveUploadPartResult())
     case (.getUploadState, .getUploadState):
       var state = GetUploadStateResult()
       state.status = .uploading
@@ -270,6 +288,40 @@ struct NativeUploadTests {
       .createUpload,
       .saveUploadPart,
       .getUploadState,
+      .finishUpload,
+    ])
+  }
+
+  @Test("replays a part once when authoritative state says it is missing")
+  func replaysMissingPartOnce() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-replay-test-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    let transport = UploadRPCMock(partFailureMode: .beforeAcceptanceOnce)
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: PassthroughUploadStaging(),
+      ownerScope: { "test-owner" }
+    )
+    let complete = try await coordinator.upload(
+      NativeMediaUploadRequest(
+        logicalID: "photo:replay",
+        fileURL: source,
+        fileName: "photo.jpg",
+        mimeType: "image/jpeg",
+        kind: .photo
+      ),
+      progress: { _, _ in }
+    )
+
+    #expect(complete.fileUniqueID == "INP_native")
+    #expect(await transport.calledMethods() == [
+      .createUpload,
+      .saveUploadPart,
+      .getUploadState,
+      .saveUploadPart,
       .finishUpload,
     ])
   }

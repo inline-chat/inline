@@ -168,6 +168,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private static let hashReadSize = 1_048_576
   private static let maximumPartSize = 16 * 1_048_576
   private static let maximumConcurrentPartsPerUpload = 2
+  private static let maximumPartAttempts = 2
   // These are individual RPC stall bounds, not a deadline for the complete upload.
   // A large file can span any number of successful part requests.
   private static let mutationTimeout: Duration = .seconds(60)
@@ -287,6 +288,7 @@ public actor DurableUploadCoordinator: MediaUploading {
             }
 
             while let partIndex = try await group.next() {
+              try Task.checkCancellation()
               accepted.insert(partIndex)
               durableAcceptedBytes = Self.acceptedBytes(
                 accepted,
@@ -487,21 +489,44 @@ public actor DurableUploadCoordinator: MediaUploading {
     log.debug(
       "Part dispatch started part=\(partIndex) bytes=\(length) active=\(activePartTransfers) read_ms=\(readMilliseconds) slot_wait_ms=\(slotWaitMilliseconds)"
     )
-    do {
-      let result = try await transport.callUploadRPC(
-        method: .saveUploadPart,
-        input: .saveUploadPart(save),
-        timeout: Self.mutationTimeout
-      )
-      guard case .saveUploadPart? = result else {
-        throw NativeMediaUploadError.unexpectedResponse
+    var accepted = false
+    for attempt in 0 ..< Self.maximumPartAttempts {
+      try Task.checkCancellation()
+      do {
+        let result = try await transport.callUploadRPC(
+          method: .saveUploadPart,
+          input: .saveUploadPart(save),
+          timeout: Self.mutationTimeout
+        )
+        guard case .saveUploadPart? = result else {
+          throw NativeMediaUploadError.unexpectedResponse
+        }
+        accepted = true
+        break
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        let saveError = error
+        try Task.checkCancellation()
+        let state: GetUploadStateResult
+        do {
+          state = try await uploadState(uploadID: uploadID)
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          throw saveError
+        }
+        try Task.checkCancellation()
+        if state.acceptedParts.contains(partIndex) {
+          accepted = true
+          break
+        }
+        guard state.status == .uploading,
+              attempt + 1 < Self.maximumPartAttempts
+        else { throw saveError }
       }
-    } catch is CancellationError {
-      throw CancellationError()
-    } catch {
-      let state = try? await uploadState(uploadID: uploadID)
-      guard state?.acceptedParts.contains(partIndex) == true else { throw error }
     }
+    guard accepted else { throw NativeMediaUploadError.unexpectedResponse }
     try Task.checkCancellation()
     let rpcMilliseconds = Int(
       (ProcessInfo.processInfo.systemUptime - rpcStartedAt) * 1_000
