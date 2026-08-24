@@ -99,6 +99,18 @@ struct InventoryDiscoveryTests {
   }
 
   @Test
+  func buildMarkerPreservesExistingRunningEntries() {
+    let existing = "Long-lived development server\n"
+
+    #expect(
+      InlineAppBuildRunner.runningFileContents(
+        existing,
+        appending: "Inline Dev Companion: macOS build"
+      ) == "Long-lived development server\nInline Dev Companion: macOS build\n"
+    )
+  }
+
+  @Test
   func parsesInstalledIOSVersionMetadata() {
     let data = Data(
       #"{"result":{"apps":[{"bundleIdentifier":"chat.inline.InlineIOS.debug","bundleVersion":"841","name":"Inline Debug","version":"0.1"}]}}"#.utf8

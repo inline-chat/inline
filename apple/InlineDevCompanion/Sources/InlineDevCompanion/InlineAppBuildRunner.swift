@@ -108,16 +108,10 @@ enum InlineAppBuildRunner {
     let marker = "Inline Dev Companion [\(getpid())]: \(command.displayCommand)"
     let runningURL = repositoryRoot.appending(path: ".running", directoryHint: .notDirectory)
 
-    switch reserveBuild(marker: marker, at: runningURL) {
-    case .busy:
-      return InlineAppBuildResult(
-        succeeded: false,
-        message: "Another repository build is already listed in .running.",
-        logURL: nil
-      )
+    switch recordBuild(marker: marker, at: runningURL) {
     case let .failed(message):
       return InlineAppBuildResult(succeeded: false, message: message, logURL: nil)
-    case .reserved:
+    case .recorded:
       break
     }
     defer { releaseBuild(marker: marker, at: runningURL) }
@@ -171,23 +165,25 @@ enum InlineAppBuildRunner {
     return InlineAppBuildResult(succeeded: true, message: nil, logURL: logURL)
   }
 
-  private enum ReservationResult {
-    case reserved
-    case busy
+  private enum BuildMarkerResult {
+    case recorded
     case failed(String)
   }
 
-  private static func reserveBuild(marker: String, at runningURL: URL) -> ReservationResult {
+  private static func recordBuild(marker: String, at runningURL: URL) -> BuildMarkerResult {
     do {
       let current = try String(contentsOf: runningURL, encoding: .utf8)
-      guard current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return .busy
-      }
-      try "\(marker)\n".write(to: runningURL, atomically: true, encoding: .utf8)
-      return .reserved
+      try runningFileContents(current, appending: marker)
+        .write(to: runningURL, atomically: true, encoding: .utf8)
+      return .recorded
     } catch {
-      return .failed("Could not reserve the repository build slot: \(error.localizedDescription)")
+      return .failed("Could not record the repository build: \(error.localizedDescription)")
     }
+  }
+
+  static func runningFileContents(_ current: String, appending marker: String) -> String {
+    let separator = current.isEmpty || current.hasSuffix("\n") ? "" : "\n"
+    return "\(current)\(separator)\(marker)\n"
   }
 
   private static func releaseBuild(marker: String, at runningURL: URL) {
