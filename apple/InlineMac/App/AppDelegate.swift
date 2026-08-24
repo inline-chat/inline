@@ -295,6 +295,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     for url in urls {
       if Self.isCLIAuthURL(url) {
         log.debug("Received local CLI auth request via application:open")
+      } else if ProviderSignInCoordinator.shared.canHandle(url) {
+        log.debug("Received provider auth callback via application:open")
       } else {
         log.debug("Received URL via application:open: \(url)")
       }

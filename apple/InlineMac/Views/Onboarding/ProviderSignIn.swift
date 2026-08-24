@@ -5,7 +5,6 @@ import SwiftUI
 struct OnboardingProviderSignIn: View {
   let provider: ProviderSignInProvider
 
-  @EnvironmentObject private var onboardingViewModel: OnboardingViewModel
   @ObservedObject private var coordinator = ProviderSignInCoordinator.shared
   @State private var attemptID = UUID()
   @State private var openingBrowser = false
@@ -62,11 +61,6 @@ struct OnboardingProviderSignIn: View {
     .task(id: attemptID) {
       await start()
     }
-    .onChange(of: coordinator.completion?.id) { _, _ in
-      guard let completion = coordinator.completion else { return }
-      AppSettings.shared.resolveSidebarModeForAccount(createdAt: completion.userCreatedAt)
-      onboardingViewModel.navigateAfterLogin(pendingSetup: completion.pendingSetup)
-    }
     .onDisappear {
       coordinator.cancelPendingAttempt()
     }
@@ -99,9 +93,12 @@ struct OnboardingProviderSignIn: View {
     do {
       let url = try await coordinator.startURL(for: provider)
       signInURL = url
-      guard NSWorkspace.shared.open(url) else { throw APIError.invalidURL }
+      guard NSWorkspace.shared.open(url) else {
+        coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: url)
+        return
+      }
     } catch {
-      coordinator.recordStartFailure(error)
+      // startURL records failures only when this is still the active attempt.
     }
   }
 
@@ -110,7 +107,7 @@ struct OnboardingProviderSignIn: View {
     openingBrowser = true
     defer { openingBrowser = false }
     guard NSWorkspace.shared.open(signInURL) else {
-      coordinator.recordStartFailure(APIError.invalidURL)
+      coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: signInURL)
       return
     }
   }

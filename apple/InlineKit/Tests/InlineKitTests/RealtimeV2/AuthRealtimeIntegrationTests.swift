@@ -27,7 +27,7 @@ final class AuthRealtimeIntegrationTests {
 
     let token = "1:integrationToken"
     let userId: Int64 = 42
-    await auth.saveCredentials(token: token, userId: userId)
+    try await auth.saveCredentials(token: token, userId: userId)
 
     let didSend = await waitForCondition {
       let messages = await transport.sentMessages
@@ -56,7 +56,7 @@ final class AuthRealtimeIntegrationTests {
     #expect(initialHandshake)
 
     await auth.logOut()
-    await auth.saveCredentials(token: "2:reloginToken", userId: 2)
+    try await auth.saveCredentials(token: "2:reloginToken", userId: 2)
 
     let reloginHandshake = await waitForCondition {
       let messages = await transport.sentMessages
@@ -84,7 +84,7 @@ final class AuthRealtimeIntegrationTests {
     }
     #expect(initialHandshake)
 
-    await auth.saveCredentials(token: "2:replacementToken", userId: 2)
+    try await auth.saveCredentials(token: "2:replacementToken", userId: 2)
 
     let replacementHandshake = await waitForCondition {
       let messages = await transport.sentMessages

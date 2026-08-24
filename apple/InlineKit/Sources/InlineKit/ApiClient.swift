@@ -226,7 +226,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   private func request<T: Decodable & Sendable>(
     _ path: Path,
     queryItems: [URLQueryItem] = [],
-    includeToken: Bool = false
+    includeToken: Bool = false,
+    authorizationToken: String? = nil
   ) async throws -> T {
     guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
@@ -241,7 +242,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
 
-    if let token = Auth.shared.getToken(), includeToken {
+    if let token = authorizationToken ?? (includeToken ? Auth.shared.getToken() : nil) {
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
@@ -542,7 +543,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func redeemProviderAuth(ticket: String, codeVerifier: String) async throws -> VerifyCode {
+  public func redeemProviderAuth(ticket: String, codeVerifier: String) async throws -> ProviderAuthRedeemResult {
     try await postRequest(
       .providerAuthRedeem,
       body: ["ticket": ticket, "code_verifier": codeVerifier],
@@ -818,6 +819,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   public func logout() async throws -> EmptyPayload {
     try await request(.logout, includeToken: true)
+  }
+
+  public func logout(bearerToken: String) async throws -> EmptyPayload {
+    try await request(.logout, authorizationToken: bearerToken)
   }
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws
@@ -1720,6 +1725,12 @@ public struct VerifyCode: Codable, Sendable {
     self.token = token
     self.user = user
   }
+}
+
+public struct ProviderAuthRedeemResult: Codable, Sendable {
+  public let userId: Int64
+  public let token: String
+  public let user: ApiUser
 }
 
 public struct SendCode: Codable, Sendable {

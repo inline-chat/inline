@@ -3,6 +3,8 @@ import SwiftUI
 
 struct OnboardingView: View {
   @EnvironmentObject private var navigation: OnboardingNavigation
+  @EnvironmentObject private var mainViewRouter: MainViewRouter
+  @ObservedObject private var providerSignIn = ProviderSignInCoordinator.shared
 
   var body: some View {
     NavigationStack(path: $navigation.path) {
@@ -36,6 +38,17 @@ struct OnboardingView: View {
         }
     }
     .animation(.snappy, value: navigation.path)
+    .onChange(of: providerSignIn.completion?.id, initial: true) { _, completionID in
+      guard let completionID,
+        let completion = providerSignIn.consumeCompletion(id: completionID)
+      else { return }
+      if completion.pendingSetup {
+        navigation.push(.profile(userId: completion.userId))
+      } else {
+        navigation.reset()
+        mainViewRouter.setRoute(route: .main)
+      }
+    }
     .onDisappear {
       Task { await InlineProtocolNativeLogin.shared.cancel() }
     }

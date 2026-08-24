@@ -19,6 +19,7 @@ struct Profile: View {
   @State private var errorMsg = ""
   @State private var isInputValid = false
   @State private var usernameStatus: UsernameStatus = .checking
+  @State private var hasHydratedProfile = false
 
   // MARK: - Focus Management
 
@@ -45,48 +46,77 @@ struct Profile: View {
   // MARK: - Body
 
   var body: some View {
-    VStack(spacing: 20) {
-      Spacer()
+    Group {
+      if hasHydratedProfile {
+        VStack(spacing: 20) {
+          Spacer()
 
-      // Icon and title section
-      VStack(spacing: 12) {
-        Image(systemName: "person.circle.fill")
-          .resizable()
-          .scaledToFit()
-          .frame(width: 34, height: 34)
-          .foregroundColor(.primary)
+          // Icon and title section
+          VStack(spacing: 12) {
+            Image(systemName: "person.circle.fill")
+              .resizable()
+              .scaledToFit()
+              .frame(width: 34, height: 34)
+              .foregroundColor(.primary)
 
-        Text(NSLocalizedString("Setup your profile", comment: "Profile setup title"))
-          .font(.onboardingIOSTitle.weight(.medium))
-          .foregroundStyle(.primary)
-      }
+            Text(NSLocalizedString("Setup your profile", comment: "Profile setup title"))
+              .font(.onboardingIOSTitle.weight(.medium))
+              .foregroundStyle(.primary)
+          }
 
-      // Input fields
-      VStack(spacing: 8) {
-        nameSection
-        usernameSection
+          // Input fields
+          VStack(spacing: 8) {
+            nameSection
+            usernameSection
 
-        if !errorMsg.isEmpty {
-          Text(errorMsg)
-            .font(.callout)
-            .foregroundColor(.red)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if !errorMsg.isEmpty {
+              Text(errorMsg)
+                .font(.callout)
+                .foregroundColor(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+          }
+          .padding(.horizontal, OnboardingUtils.shared.hPadding)
+
+          Spacer()
         }
+        .safeAreaInset(edge: .bottom) { bottomButton }
+      } else {
+        ProgressView()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-
-      Spacer()
     }
-    .safeAreaInset(edge: .bottom) { bottomButton }
     .onChange(of: fullName) { validateInput() }
     .onChange(of: username) { validateInput() }
-    .onAppear { focusedField = .fullName }
+    .task { await hydratePersistedProfile() }
   }
 }
 
 // MARK: - Helper Methods
 
 extension Profile {
+  @MainActor
+  private func hydratePersistedProfile() async {
+    defer {
+      hasHydratedProfile = true
+      focusedField = .fullName
+      validateInput()
+    }
+    guard let userID = auth.getCurrentUserId() else { return }
+    do {
+      let user = try await User.fetch(id: userID, from: database)
+      guard let user else { return }
+      if fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        fullName = user.fullName
+      }
+      if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        username = user.username ?? ""
+      }
+    } catch {
+      Log.shared.error("Failed to load persisted onboarding profile", error: error)
+    }
+  }
+
   private func handleUsernameChange(_ newValue: String) {
     errorMsg = ""
     let trimmedUsername = newValue.trimmingCharacters(in: .whitespacesAndNewlines)

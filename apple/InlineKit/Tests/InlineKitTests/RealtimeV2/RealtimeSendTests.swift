@@ -87,7 +87,7 @@ final class RealtimeSendTests {
   func testSendRejectsAccountSwitchDuringOptimisticWork() async throws {
     let auth = Auth.mocked(authenticated: true)
     await AccountSwitchSendRecorder.shared.reset {
-      await auth.saveCredentials(token: "2:replacementToken", userId: 2)
+      try? await auth.saveCredentials(token: "2:replacementToken", userId: 2)
     }
     let transport = AccountSwitchSendTransport()
     let persistence = AccountSwitchSendPersistence()
@@ -135,7 +135,7 @@ final class RealtimeSendTests {
   func testSendQueuedRejectsAccountSwitchDuringOptimisticWork() async throws {
     let auth = Auth.mocked(authenticated: true)
     await AccountSwitchSendRecorder.shared.reset {
-      await auth.saveCredentials(token: "2:replacementToken", userId: 2)
+      try? await auth.saveCredentials(token: "2:replacementToken", userId: 2)
     }
     let transport = AccountSwitchSendTransport()
     let persistence = AccountSwitchSendPersistence()

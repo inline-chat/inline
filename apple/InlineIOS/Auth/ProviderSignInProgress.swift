@@ -5,8 +5,6 @@ import UIKit
 struct ProviderSignInProgress: View {
   let provider: ProviderSignInProvider
 
-  @EnvironmentObject private var navigation: OnboardingNavigation
-  @EnvironmentObject private var mainViewRouter: MainViewRouter
   @ObservedObject private var coordinator = ProviderSignInCoordinator.shared
   @State private var attemptID = UUID()
   @State private var openingBrowser = false
@@ -63,15 +61,6 @@ struct ProviderSignInProgress: View {
     .task(id: attemptID) {
       await start()
     }
-    .onChange(of: coordinator.completion?.id) { _, _ in
-      guard let completion = coordinator.completion else { return }
-      if completion.pendingSetup {
-        navigation.push(.profile(userId: completion.userId))
-      } else {
-        navigation.reset()
-        mainViewRouter.setRoute(route: .main)
-      }
-    }
     .onDisappear {
       coordinator.cancelPendingAttempt()
     }
@@ -104,9 +93,12 @@ struct ProviderSignInProgress: View {
     do {
       let url = try await coordinator.startURL(for: provider)
       signInURL = url
-      guard await UIApplication.shared.open(url) else { throw APIError.invalidURL }
+      guard await UIApplication.shared.open(url) else {
+        coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: url)
+        return
+      }
     } catch {
-      coordinator.recordStartFailure(error)
+      // startURL records failures only when this is still the active attempt.
     }
   }
 
@@ -115,7 +107,7 @@ struct ProviderSignInProgress: View {
     openingBrowser = true
     defer { openingBrowser = false }
     guard await UIApplication.shared.open(signInURL) else {
-      coordinator.recordStartFailure(APIError.invalidURL)
+      coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: signInURL)
       return
     }
   }

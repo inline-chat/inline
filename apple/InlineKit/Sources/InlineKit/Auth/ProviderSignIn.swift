@@ -16,6 +16,61 @@ public struct ProviderSignInCompletion: Equatable, Sendable {
   public let userCreatedAt: Date
 }
 
+struct ProviderSignInPendingAttempt: Equatable, Sendable {
+  let provider: ProviderSignInProvider
+  let codeVerifier: String
+  let codeChallenge: String
+  let generation: UUID
+}
+
+struct ProviderSignInAttemptState: Sendable {
+  private(set) var pending: ProviderSignInPendingAttempt?
+
+  mutating func begin(
+    provider: ProviderSignInProvider,
+    codeVerifier: String,
+    codeChallenge: String,
+    generation: UUID = UUID()
+  ) -> ProviderSignInPendingAttempt {
+    let attempt = ProviderSignInPendingAttempt(
+      provider: provider,
+      codeVerifier: codeVerifier,
+      codeChallenge: codeChallenge,
+      generation: generation
+    )
+    pending = attempt
+    return attempt
+  }
+
+  func current(generation: UUID) -> Bool {
+    pending?.generation == generation
+  }
+
+  func matching(codeChallenge: String) -> ProviderSignInPendingAttempt? {
+    pending?.codeChallenge == codeChallenge ? pending : nil
+  }
+
+  @discardableResult
+  mutating func take(codeChallenge: String) -> ProviderSignInPendingAttempt? {
+    guard let attempt = matching(codeChallenge: codeChallenge) else { return nil }
+    pending = nil
+    return attempt
+  }
+
+  mutating func cancel(generation: UUID) {
+    guard current(generation: generation) else { return }
+    pending = nil
+  }
+
+  mutating func cancel(codeChallenge: String) {
+    _ = take(codeChallenge: codeChallenge)
+  }
+
+  mutating func cancel() {
+    pending = nil
+  }
+}
+
 @MainActor
 public final class ProviderSignInCoordinator: ObservableObject {
   public static let shared = ProviderSignInCoordinator()
@@ -25,7 +80,8 @@ public final class ProviderSignInCoordinator: ObservableObject {
   @Published public private(set) var isRedeeming = false
 
   private let log = Log.scoped("ProviderSignIn")
-  private var pendingCodeVerifier: String?
+  private var attemptState = ProviderSignInAttemptState()
+  private var redeemingGeneration: UUID?
 
   private init() {}
 
@@ -33,24 +89,40 @@ public final class ProviderSignInCoordinator: ObservableObject {
     completion = nil
     errorMessage = nil
     let codeVerifier = Self.randomCodeVerifier()
-    pendingCodeVerifier = codeVerifier
-    let sessionInfo = SessionInfo.get()
-    let deviceID = try await DeviceIdentifier.shared.getIdentifier()
-    var components = URLComponents(string: "\(ApiClient.baseURL)/auth/provider/start")
-    components?.queryItems = [
-      URLQueryItem(name: "provider", value: provider.rawValue),
-      URLQueryItem(name: "purpose", value: "app"),
-      URLQueryItem(name: "callback_scheme", value: InlineDeepLink.configuredScheme),
-      URLQueryItem(name: "code_challenge", value: Self.codeChallenge(for: codeVerifier)),
-      URLQueryItem(name: "client_type", value: sessionInfo?.clientType ?? platformClientType),
-      URLQueryItem(name: "device_id", value: deviceID),
-      URLQueryItem(name: "client_version", value: sessionInfo?.clientVersion),
-      URLQueryItem(name: "os_version", value: sessionInfo?.osVersion),
-      URLQueryItem(name: "device_name", value: sessionInfo?.deviceName),
-      URLQueryItem(name: "timezone", value: sessionInfo?.timezone),
-    ].filter { $0.value?.isEmpty == false }
-    guard let url = components?.url else { throw APIError.invalidURL }
-    return url
+    let attempt = attemptState.begin(
+      provider: provider,
+      codeVerifier: codeVerifier,
+      codeChallenge: Self.codeChallenge(for: codeVerifier)
+    )
+
+    do {
+      let sessionInfo = SessionInfo.get()
+      let deviceID = try await DeviceIdentifier.shared.getIdentifier()
+      guard attemptState.current(generation: attempt.generation) else { throw CancellationError() }
+      var components = URLComponents(string: "\(ApiClient.baseURL)/auth/provider/start")
+      components?.queryItems = [
+        URLQueryItem(name: "provider", value: provider.rawValue),
+        URLQueryItem(name: "purpose", value: "app"),
+        URLQueryItem(name: "callback_scheme", value: InlineDeepLink.configuredScheme),
+        URLQueryItem(name: "code_challenge", value: attempt.codeChallenge),
+        URLQueryItem(name: "client_type", value: sessionInfo?.clientType ?? platformClientType),
+        URLQueryItem(name: "device_id", value: deviceID),
+        URLQueryItem(name: "client_version", value: sessionInfo?.clientVersion),
+        URLQueryItem(name: "os_version", value: sessionInfo?.osVersion),
+        URLQueryItem(name: "device_name", value: sessionInfo?.deviceName),
+        URLQueryItem(name: "timezone", value: sessionInfo?.timezone),
+      ].filter { $0.value?.isEmpty == false }
+      guard let url = components?.url else { throw APIError.invalidURL }
+      return url
+    } catch {
+      guard attemptState.current(generation: attempt.generation) else { throw error }
+      attemptState.cancel(generation: attempt.generation)
+      if !(error is CancellationError) {
+        log.error("Failed to start provider sign-in", error: error)
+        errorMessage = Self.userFacingMessage(for: error)
+      }
+      throw error
+    }
   }
 
   public func canHandle(_ url: URL) -> Bool {
@@ -61,10 +133,19 @@ public final class ProviderSignInCoordinator: ObservableObject {
   }
 
   public func handleCallback(_ url: URL) async {
-    guard canHandle(url), !isRedeeming else { return }
+    guard canHandle(url) else { return }
     let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+    guard let callbackChallenge = queryItems?.first(where: { $0.name == "code_challenge" })?.value,
+      !callbackChallenge.isEmpty,
+      let attempt = attemptState.matching(codeChallenge: callbackChallenge),
+      !isRedeeming
+    else {
+      log.warning("Ignored provider callback that did not match the active attempt")
+      return
+    }
+
     if let callbackError = queryItems?.first(where: { $0.name == "error" })?.value {
-      pendingCodeVerifier = nil
+      attemptState.cancel(codeChallenge: callbackChallenge)
       errorMessage = callbackError == "cancelled"
         ? String(localized: "Sign-in was cancelled. No changes were made.")
         : String(localized: "Inline could not finish signing you in. Please try again.")
@@ -73,30 +154,34 @@ public final class ProviderSignInCoordinator: ObservableObject {
     guard let ticket = queryItems?.first(where: { $0.name == "ticket" })?.value,
       !ticket.isEmpty
     else {
+      attemptState.cancel(codeChallenge: callbackChallenge)
       errorMessage = String(localized: "Sign-in could not finish. Return to Inline and try again.")
       return
     }
-    guard let codeVerifier = pendingCodeVerifier else {
-      errorMessage = String(localized: "This sign-in is no longer active. Please try again.")
-      return
-    }
-    pendingCodeVerifier = nil
+    guard attemptState.take(codeChallenge: callbackChallenge) != nil else { return }
 
     isRedeeming = true
+    redeemingGeneration = attempt.generation
     errorMessage = nil
-    defer { isRedeeming = false }
+    var redeemedToken: String?
+    defer {
+      if redeemingGeneration == attempt.generation {
+        redeemingGeneration = nil
+        isRedeeming = false
+      }
+    }
     do {
+      try await AppDatabase.authenticated()
       let result = try await ApiClient.shared.redeemProviderAuth(
         ticket: ticket,
-        codeVerifier: codeVerifier
+        codeVerifier: attempt.codeVerifier
       )
-      if let token = result.token {
-        await Auth.shared.saveCredentials(token: token, userId: result.userId)
-      }
-      try await AppDatabase.authenticated()
+      redeemedToken = result.token
       _ = try await AppDatabase.shared.dbWriter.write { db in
         try result.user.saveFull(db)
       }
+      try await Auth.shared.saveCredentials(token: result.token, userId: result.userId)
+      guard redeemingGeneration == attempt.generation else { return }
       Analytics.identify(
         userId: result.userId,
         email: result.user.email,
@@ -110,15 +195,28 @@ public final class ProviderSignInCoordinator: ObservableObject {
         userCreatedAt: Date(timeIntervalSince1970: TimeInterval(result.user.date))
       )
     } catch {
+      guard redeemingGeneration == attempt.generation else { return }
+      if let redeemedToken {
+        _ = try? await ApiClient.shared.logout(bearerToken: redeemedToken)
+      }
       log.error("Failed to redeem provider sign-in", error: error)
       errorMessage = Self.userFacingMessage(for: error)
     }
   }
 
-  public func recordStartFailure(_ error: Error) {
-    log.error("Failed to start provider sign-in", error: error)
-    pendingCodeVerifier = nil
+  public func recordBrowserOpenFailure(_ error: Error, for url: URL) {
+    let challenge = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+      .first(where: { $0.name == "code_challenge" })?.value
+    guard let challenge, attemptState.matching(codeChallenge: challenge) != nil else { return }
+    log.error("Failed to open provider sign-in", error: error)
+    attemptState.cancel(codeChallenge: challenge)
     errorMessage = Self.userFacingMessage(for: error)
+  }
+
+  public func consumeCompletion(id: UUID) -> ProviderSignInCompletion? {
+    guard completion?.id == id else { return nil }
+    defer { completion = nil }
+    return completion
   }
 
   public func clearError() {
@@ -126,7 +224,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
   }
 
   public func cancelPendingAttempt() {
-    pendingCodeVerifier = nil
+    attemptState.cancel()
   }
 
   private static func userFacingMessage(for error: Error) -> String {

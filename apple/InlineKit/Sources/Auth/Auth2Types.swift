@@ -26,6 +26,7 @@ public struct InlineProtocolSessionCredentials: Sendable, Codable, Equatable {
 public enum AuthStorageError: Error, Sendable {
   case encodingFailed
   case keychainWriteFailed
+  case logoutInProgress
 }
 
 public struct AuthCredentials: Sendable, Codable, Equatable {

@@ -211,13 +211,24 @@ actor AuthStore {
     eventBroadcaster.stream()
   }
 
-  func saveCredentials(token: String, userId: Int64) async {
+  func saveCredentials(token: String, userId: Int64) async throws {
+    guard !hasPendingLogout() else {
+      log.warning("AUTH2_SAVE rejected while logout cleanup is pending")
+      throw AuthStorageError.logoutInProgress
+    }
+
+    let record = AuthCredentials(userId: userId, token: token)
+    let encodedRecord: Data
+    do {
+      encodedRecord = try JSONEncoder().encode(record)
+    } catch {
+      log.error("AUTH2 encode credentials failed", error: error)
+      throw AuthStorageError.encodingFailed
+    }
+
     if mocked {
       AuthKeychainConfig.mockSet(token, forKey: Self.legacyTokenKey, namespace: namespace)
-      let record = AuthCredentials(userId: userId, token: token)
-      if let data = try? JSONEncoder().encode(record) {
-        AuthKeychainConfig.mockSet(data, forKey: Self.credentialsV2Key, namespace: namespace)
-      }
+      AuthKeychainConfig.mockSet(encodedRecord, forKey: Self.credentialsV2Key, namespace: namespace)
       AuthKeychainConfig.mockDelete(Self.inlineProtocolCredentialsKey, namespace: namespace)
       UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
       UserDefaults.standard.removeObject(forKey: logoutPendingKey)
@@ -239,26 +250,14 @@ actor AuthStore {
     let legacyPrimaryStatus = primaryKeychain.lastResultCode
 
     // Persist v2 record (token + userId together).
-    let record = AuthCredentials(userId: userId, token: token)
-    let encodedRecord: Data? = {
-      do {
-        return try JSONEncoder().encode(record)
-      } catch {
-        log.error("AUTH2 encode credentials failed", error: error)
-        return nil
-      }
-    }()
-
     var v2SavedPrimary = false
     var v2PrimaryStatus = errSecSuccess
-    if let encodedRecord {
-      v2SavedPrimary = primaryKeychain.set(
-        encodedRecord,
-        forKey: Self.credentialsV2Key,
-        withAccess: .accessibleAfterFirstUnlock
-      )
-      v2PrimaryStatus = primaryKeychain.lastResultCode
-    }
+    v2SavedPrimary = primaryKeychain.set(
+      encodedRecord,
+      forKey: Self.credentialsV2Key,
+      withAccess: .accessibleAfterFirstUnlock
+    )
+    v2PrimaryStatus = primaryKeychain.lastResultCode
 
     // Best-effort macOS fallback write if the primary access-group isn't working.
     var legacySavedFallback = false
@@ -274,7 +273,7 @@ actor AuthStore {
         )
         legacyFallbackStatus = fallbackKeychain.lastResultCode
       }
-      if v2SavedPrimary == false, let encodedRecord {
+      if v2SavedPrimary == false {
         v2SavedFallback = fallbackKeychain.set(
           encodedRecord,
           forKey: Self.credentialsV2Key,
@@ -289,7 +288,7 @@ actor AuthStore {
 
     guard legacySaved || v2Saved else {
       log.error("AUTH2_SAVE failed to persist bearer credentials; retaining current session authority")
-      return
+      throw AuthStorageError.keychainWriteFailed
     }
 
     _ = primaryKeychain.delete(Self.inlineProtocolCredentialsKey)

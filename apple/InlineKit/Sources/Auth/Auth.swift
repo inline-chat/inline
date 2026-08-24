@@ -120,9 +120,9 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
   // MARK: - Mutations
 
-  public func saveCredentials(token: String, userId: Int64) async {
+  public func saveCredentials(token: String, userId: Int64) async throws {
     log.info("AUTH2 saveCredentials called userId=\(userId)")
-    await store.saveCredentials(token: token, userId: userId)
+    try await store.saveCredentials(token: token, userId: userId)
   }
 
   public func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {

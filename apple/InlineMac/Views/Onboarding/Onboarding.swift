@@ -5,6 +5,7 @@ struct Onboarding: View {
   @EnvironmentObject private var windowViewModel: MainWindowViewModel
   @StateObject private var viewModel: OnboardingViewModel
   @State private var profileSetup = OnboardingProfileSetupModel()
+  @ObservedObject private var providerSignIn = ProviderSignInCoordinator.shared
 
   let allowsBackgroundWindowDrag: Bool
 
@@ -86,6 +87,13 @@ struct Onboarding: View {
     .environment(profileSetup)
     .task {
       viewModel.setMainWindowViewModel(windowViewModel)
+    }
+    .onChange(of: providerSignIn.completion?.id, initial: true) { _, completionID in
+      guard let completionID,
+        let completion = providerSignIn.consumeCompletion(id: completionID)
+      else { return }
+      AppSettings.shared.resolveSidebarModeForAccount(createdAt: completion.userCreatedAt)
+      viewModel.navigateAfterLogin(pendingSetup: completion.pendingSetup)
     }
     .onDisappear {
       Task { await InlineProtocolNativeLogin.shared.cancel() }

@@ -94,7 +94,7 @@ extension Code {
         )
 
         if let token = result.token {
-          await auth.saveCredentials(token: token, userId: result.userId)
+          try await auth.saveCredentials(token: token, userId: result.userId)
         }
 
         do {

@@ -158,7 +158,7 @@ final class Auth2StoreTests {
     defer { h.resetStorage() }
 
     let (cache, store) = h.makeStore()
-    await store.saveCredentials(token: "42:legacy", userId: 42)
+    try await store.saveCredentials(token: "42:legacy", userId: 42)
     try await store.saveInlineProtocolCredentials(v3Credentials())
 
     #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
@@ -175,7 +175,7 @@ final class Auth2StoreTests {
 
     let (cache, store) = h.makeStore()
     try await store.saveInlineProtocolCredentials(v3Credentials())
-    await store.saveCredentials(token: "42:legacy", userId: 42)
+    try await store.saveCredentials(token: "42:legacy", userId: 42)
 
     #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
     guard case let .authenticated(credentials) = cache.snapshot().status else {
@@ -291,7 +291,7 @@ final class Auth2StoreTests {
   }
 
   @Test("emits login then logout events")
-  func emitsLoginAndLogoutEvents() async {
+  func emitsLoginAndLogoutEvents() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
@@ -299,7 +299,7 @@ final class Auth2StoreTests {
     let (_, store) = h.makeStore()
     var it = store.events().makeAsyncIterator()
 
-    await store.saveCredentials(token: "1:eventTok", userId: 1)
+    try await store.saveCredentials(token: "1:eventTok", userId: 1)
     let e1 = await it.next()
     #expect(e1 == .login(userId: 1, token: "1:eventTok"))
 
@@ -333,8 +333,30 @@ final class Auth2StoreTests {
     #expect(await recovered.hasPendingLogout() == false)
   }
 
+  @Test("pending logout rejects stale bearer credential writers")
+  func pendingLogoutRejectsBearerCredentialWriter() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    await store.beginLogout()
+    do {
+      try await store.saveCredentials(token: "42:stale", userId: 42)
+      Issue.record("Expected pending logout to reject bearer credential persistence")
+    } catch AuthStorageError.logoutInProgress {
+      // The logout marker owns authority destruction until app cleanup finishes.
+    } catch {
+      Issue.record("Unexpected bearer credential persistence error: \(error)")
+    }
+
+    #expect(await store.hasPendingLogout())
+    #expect(cache.snapshot().status == .unauthenticated)
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
+  }
+
   @Test("broadcasts login and logout events to every subscriber")
-  func broadcastsAuthEventsToEverySubscriber() async {
+  func broadcastsAuthEventsToEverySubscriber() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
@@ -343,7 +365,7 @@ final class Auth2StoreTests {
     var first = store.events().makeAsyncIterator()
     var second = store.events().makeAsyncIterator()
 
-    await store.saveCredentials(token: "1:eventTok", userId: 1)
+    try await store.saveCredentials(token: "1:eventTok", userId: 1)
     #expect(await first.next() == .login(userId: 1, token: "1:eventTok"))
     #expect(await second.next() == .login(userId: 1, token: "1:eventTok"))
 
@@ -353,13 +375,13 @@ final class Auth2StoreTests {
   }
 
   @Test("snapshot subscribers start with current state and receive future changes")
-  func snapshotSubscribersStartCurrentAndReceiveChanges() async {
+  func snapshotSubscribersStartCurrentAndReceiveChanges() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
 
     let (cache, store) = h.makeStore()
-    await store.saveCredentials(token: "1:eventTok", userId: 1)
+    try await store.saveCredentials(token: "1:eventTok", userId: 1)
 
     var first = store.snapshots().makeAsyncIterator()
     var second = store.snapshots().makeAsyncIterator()
@@ -373,18 +395,18 @@ final class Auth2StoreTests {
   }
 
   @Test("snapshot subscribers do not coalesce rapid auth transitions")
-  func snapshotSubscribersPreserveRapidAuthTransitions() async {
+  func snapshotSubscribersPreserveRapidAuthTransitions() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
 
     let (cache, store) = h.makeStore()
-    await store.saveCredentials(token: "1:firstToken", userId: 1)
+    try await store.saveCredentials(token: "1:firstToken", userId: 1)
     var snapshots = store.snapshots().makeAsyncIterator()
     #expect(await snapshots.next() == cache.snapshot())
 
     await store.logOut()
-    await store.saveCredentials(token: "2:secondToken", userId: 2)
+    try await store.saveCredentials(token: "2:secondToken", userId: 2)
 
     #expect(await snapshots.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
     let reloggedSnapshot = await snapshots.next()
@@ -394,18 +416,18 @@ final class Auth2StoreTests {
   }
 
   @Test("snapshot stream buffers transitions before iteration begins")
-  func snapshotStreamBuffersTransitionsBeforeIteration() async {
+  func snapshotStreamBuffersTransitionsBeforeIteration() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
 
     let (_, store) = h.makeStore()
-    await store.saveCredentials(token: "1:firstToken", userId: 1)
+    try await store.saveCredentials(token: "1:firstToken", userId: 1)
 
     // Creating the stream is the subscription boundary used by task-based observers.
     let snapshots = store.snapshots()
     await store.logOut()
-    await store.saveCredentials(token: "2:secondToken", userId: 2)
+    try await store.saveCredentials(token: "2:secondToken", userId: 2)
 
     var iterator = snapshots.makeAsyncIterator()
     #expect((await iterator.next())?.token == "1:firstToken")
@@ -414,13 +436,13 @@ final class Auth2StoreTests {
   }
 
   @Test("event subscribers receive transitions buffered while no subscriber was active")
-  func eventSubscribersReceiveIdleTransitions() async {
+  func eventSubscribersReceiveIdleTransitions() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
 
     let (_, store) = h.makeStore()
-    await store.saveCredentials(token: "1:eventTok", userId: 1)
+    try await store.saveCredentials(token: "1:eventTok", userId: 1)
     var events = store.events().makeAsyncIterator()
 
     #expect(await events.next() == .login(userId: 1, token: "1:eventTok"))

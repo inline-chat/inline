@@ -218,6 +218,12 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 }
 
 public extension User {
+  static func fetch(id: Int64, from database: AppDatabase) async throws -> User? {
+    try await database.dbWriter.read { db in
+      try User.fetchOne(db, key: id)
+    }
+  }
+
   init(from apiUser: ApiUser) {
     id = apiUser.id
     email = apiUser.email

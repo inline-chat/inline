@@ -87,7 +87,7 @@ extension PhoneNumberCode {
         let result = try await api.verifySmsCode(code: code, phoneNumber: phoneNumber, inviteCode: inviteCode)
 
         if let token = result.token {
-          await auth.saveCredentials(token: token, userId: result.userId)
+          try await auth.saveCredentials(token: token, userId: result.userId)
         }
 
         do {
