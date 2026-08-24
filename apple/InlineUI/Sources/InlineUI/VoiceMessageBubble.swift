@@ -16,6 +16,7 @@ public struct VoiceMessageBubble: View {
   public let outgoing: Bool
   public let maxWidth: CGFloat?
   public let mode: Mode
+  public let accentColor: Color
 
   @ObservedObject private var player = SharedAudioPlayer.shared
   @State private var downloadProgress: DownloadProgress?
@@ -23,11 +24,18 @@ public struct VoiceMessageBubble: View {
   @State private var progressCancellable: AnyCancellable?
   @State private var autoDownloadRequestedVoiceID: Int64?
 
-  public init(message: InlineKit.Message, outgoing: Bool, maxWidth: CGFloat? = nil, mode: Mode = .bubble) {
+  public init(
+    message: InlineKit.Message,
+    outgoing: Bool,
+    maxWidth: CGFloat? = nil,
+    mode: Mode = .bubble,
+    accentColor: Color = .accentColor
+  ) {
     self.message = message
     self.outgoing = outgoing
     self.maxWidth = maxWidth
     self.mode = mode
+    self.accentColor = accentColor
   }
 
   private var voice: Client_MessageVoiceContent? {
@@ -67,7 +75,7 @@ public struct VoiceMessageBubble: View {
   }
 
   private var primaryTint: Color {
-    outgoing ? .white : .accentColor
+    outgoing ? .white : accentColor
   }
 
   private var secondaryTint: Color {
@@ -244,7 +252,7 @@ public struct VoiceMessageBubble: View {
   private var primaryButton: some View {
     ZStack {
       Circle()
-        .fill(outgoing ? .white.opacity(0.14) : .accentColor.opacity(0.12))
+        .fill(outgoing ? .white.opacity(0.14) : accentColor.opacity(0.12))
         .frame(width: buttonSize, height: buttonSize)
 
       if let downloadProgress = visibleDownloadProgress {

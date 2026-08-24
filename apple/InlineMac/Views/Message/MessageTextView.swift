@@ -55,6 +55,9 @@ enum MessageTextEntityHit: CustomStringConvertible {
 
 // Custom NSTextView subclass to handle hit testing
 class MessageTextView: NSTextView {
+  // Match iOS message rendering: inline code is text-only.
+  private static let drawsInlineCodeBackground = false
+
   var codeBlockStyle = CodeBlockStyle.block
   var inlineCodeStyle = CodeBlockStyle.inline
 
@@ -554,6 +557,8 @@ class MessageTextView: NSTextView {
   }
 
   private func drawInlineCode(in rect: NSRect) {
+    guard Self.drawsInlineCodeBackground else { return }
+
     guard let textStorage, textStorage.length > 0 else { return }
     let fullRange = NSRange(location: 0, length: textStorage.length)
     textStorage.enumerateAttribute(.inlineCode, in: fullRange, options: []) { value, range, _ in

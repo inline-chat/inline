@@ -381,6 +381,47 @@ final class PinnedMessageHeaderView: NSView {
     onHeightChange?(0)
   }
 
+  override func menu(for _: NSEvent) -> NSMenu? {
+    guard currentMessageId != nil else { return nil }
+
+    let menu = NSMenu()
+    menu.addItem(contextMenuItem(
+      title: "Go to Message",
+      systemSymbolName: "text.bubble",
+      action: #selector(goToMessage)
+    ))
+    menu.addItem(contextMenuItem(
+      title: "Unpin",
+      systemSymbolName: "pin.slash",
+      action: #selector(unpinTapped)
+    ))
+    return menu
+  }
+
+  private func contextMenuItem(title: String, systemSymbolName: String, action: Selector) -> NSMenuItem {
+    let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+    item.target = self
+    item.image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: title)
+#if compiler(>=6.4)
+    if #available(macOS 27.0, *) {
+      item.preferredImageVisibility = .visible
+    }
+#else
+    // Xcode 26 doesn't expose macOS 27's typed image-visibility API.
+    if item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) {
+      item.setValue(1, forKey: "preferredImageVisibility")
+    }
+#endif
+    return item
+  }
+
+  @objc private func goToMessage() {
+    guard let messageId = currentMessageId else { return }
+    ChatsManager.shared
+      .get(for: peerId, chatId: chatId)
+      .scrollTo(msgId: messageId, reason: .pinned)
+  }
+
   @objc private func unpinTapped() {
     guard let messageId = currentMessageId else { return }
     Task { @MainActor in

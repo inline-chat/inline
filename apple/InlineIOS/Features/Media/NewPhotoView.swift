@@ -18,7 +18,7 @@ final class NewPhotoView: UIView {
   private let maxWidth: CGFloat = 280
   private let maxHeight: CGFloat = 400
   private let minWidth: CGFloat = 180
-  private let cornerRadius: CGFloat = 16.0
+  private let cornerRadius = MessageBubbleGeometry.cornerRadius
   private let maskLayer = CAShapeLayer()
 
   var isSticker: Bool {

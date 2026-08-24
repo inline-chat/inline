@@ -16,7 +16,7 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
 
   private var fullMessage: FullMessage
   private let maskLayer = CAShapeLayer()
-  private let cornerRadius: CGFloat = 16.0
+  private let cornerRadius = MessageBubbleGeometry.cornerRadius
 
   private var hasText: Bool {
     fullMessage.message.text?.isEmpty == false

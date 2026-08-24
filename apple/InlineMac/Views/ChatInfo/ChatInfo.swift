@@ -529,7 +529,10 @@ struct ChatInfo: View {
   @ViewBuilder
   private var voiceTab: some View {
     if let voiceMemosViewModel = voiceMemosState.voiceMemosViewModel {
-      ChatInfoVoiceMemosList(voiceMemosViewModel: voiceMemosViewModel)
+      ChatInfoVoiceMemosList(
+        voiceMemosViewModel: voiceMemosViewModel,
+        accentColor: themeAccentColor
+      )
     } else {
       HStack {
         Spacer()
@@ -539,6 +542,11 @@ struct ChatInfo: View {
       }
       .padding(.vertical, 32)
     }
+  }
+
+  private var themeAccentColor: Color {
+    _ = appSettings.themeRevision
+    return Color(nsColor: Theme.accentColor)
   }
 
   @ViewBuilder
@@ -1172,6 +1180,7 @@ private struct ChatInfoLinksList: View {
 
 private struct ChatInfoVoiceMemosList: View {
   @ObservedObject var voiceMemosViewModel: ChatVoiceMemosViewModel
+  let accentColor: Color
 
   var body: some View {
     Group {
@@ -1189,7 +1198,10 @@ private struct ChatInfoVoiceMemosList: View {
                 .foregroundStyle(.secondary)
 
               ForEach(group.messages) { voiceMemo in
-                ChatInfoVoiceMemoRow(voiceMemo: voiceMemo)
+                ChatInfoVoiceMemoRow(
+                  voiceMemo: voiceMemo,
+                  accentColor: accentColor
+                )
                   .onAppear {
                     Task {
                       await voiceMemosViewModel.loadMoreIfNeeded(currentMessageId: voiceMemo.message.messageId)
@@ -1210,6 +1222,7 @@ private struct ChatInfoVoiceMemosList: View {
 
 private struct ChatInfoVoiceMemoRow: View {
   let voiceMemo: VoiceMemoMessage
+  let accentColor: Color
 
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
@@ -1238,7 +1251,8 @@ private struct ChatInfoVoiceMemoRow: View {
           message: voiceMemo.message,
           outgoing: false,
           maxWidth: 300,
-          mode: .minimal
+          mode: .minimal,
+          accentColor: accentColor
         )
       }
     }
