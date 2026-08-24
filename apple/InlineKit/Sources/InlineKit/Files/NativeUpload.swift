@@ -213,11 +213,14 @@ public actor DurableUploadCoordinator: MediaUploading {
   ) async throws -> UploadComplete {
     guard let owner = ownerScope() else { throw NativeMediaUploadError.unauthenticated }
     let ownerScopedLogicalID = "\(owner):\(request.logicalID)"
+    try Task.checkCancellation()
     let stagedURL = try await staging.stage(
       logicalID: ownerScopedLogicalID,
       sourceURL: request.fileURL
     )
+    try Task.checkCancellation()
     let (byteCount, digest) = try Self.hashFile(at: stagedURL)
+    try Task.checkCancellation()
     guard byteCount > 0 else {
       await staging.discard(logicalID: ownerScopedLogicalID)
       throw NativeMediaUploadError.emptySource
@@ -255,6 +258,16 @@ public actor DurableUploadCoordinator: MediaUploading {
           Int64(created.partCount) == expectedPartCount
     else {
       throw NativeMediaUploadError.invalidGeometry
+    }
+
+    do {
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      await cancelAndDiscard(
+        uploadID: created.uploadID,
+        logicalID: ownerScopedLogicalID
+      )
+      throw CancellationError()
     }
 
     var accepted = Set(created.acceptedParts)
@@ -401,24 +414,30 @@ public actor DurableUploadCoordinator: MediaUploading {
       }
     } catch {
       if Task.isCancelled {
-        var cancel = CancelUploadInput()
-        cancel.uploadID = created.uploadID
-        let transport = transport
-        // The upload task is already cancelled, but cancellation has one terminal owner. Give
-        // that owner a short, awaited, non-cancelled window to release server staging before the
-        // caller tears down its transport. Failure remains best effort and server TTL is the
-        // safety net.
-        await Task.detached {
-          _ = try? await transport.callUploadRPC(
-            method: .cancelUpload,
-            input: .cancelUpload(cancel),
-            timeout: Self.cancellationCleanupTimeout
-          )
-        }.value
-        await staging.discard(logicalID: ownerScopedLogicalID)
+        await cancelAndDiscard(
+          uploadID: created.uploadID,
+          logicalID: ownerScopedLogicalID
+        )
       }
       throw error
     }
+  }
+
+  private func cancelAndDiscard(uploadID: Data, logicalID: String) async {
+    var cancel = CancelUploadInput()
+    cancel.uploadID = uploadID
+    let transport = transport
+    // The upload task is already cancelled, but cancellation has one terminal owner. Give that
+    // owner a short, awaited, non-cancelled window to release server staging before its transport
+    // is torn down. Failure remains best effort and server TTL is the safety net.
+    await Task.detached {
+      _ = try? await transport.callUploadRPC(
+        method: .cancelUpload,
+        input: .cancelUpload(cancel),
+        timeout: Self.cancellationCleanupTimeout
+      )
+    }.value
+    await staging.discard(logicalID: logicalID)
   }
 
   private func uploadState(uploadID: Data) async throws -> GetUploadStateResult {
@@ -600,6 +619,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     var hash = SHA256()
     var byteCount: Int64 = 0
     while true {
+      try Task.checkCancellation()
       let data = try handle.read(upToCount: hashReadSize) ?? Data()
       guard !data.isEmpty else { break }
       byteCount += Int64(data.count)

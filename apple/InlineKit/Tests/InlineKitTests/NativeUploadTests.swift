@@ -138,6 +138,18 @@ private actor PassthroughUploadStaging: NativeUploadStaging {
   func discard(logicalID _: String) {}
 }
 
+private actor CancelingUploadStaging: NativeUploadStaging {
+  private var discarded = false
+
+  func stage(logicalID _: String, sourceURL: URL) -> URL {
+    withUnsafeCurrentTask { $0?.cancel() }
+    return sourceURL
+  }
+
+  func discard(logicalID _: String) { discarded = true }
+  func wasDiscarded() -> Bool { discarded }
+}
+
 private actor BlockingPartUploadRPCMock: NativeUploadRPCTransport {
   private var createdUploads = 0
   private var startedParts: [UInt8] = []
@@ -438,6 +450,43 @@ struct NativeUploadTests {
       progress: { _, _ in }
     )
     #expect(FileManager.default.fileExists(atPath: staged.path) == false)
+  }
+
+  @Test("stops preflight without deleting retry staging when canceled after staging")
+  func cancelsAfterStaging() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-preflight-cancel-test-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    let transport = UploadRPCMock()
+    let staging = CancelingUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: staging,
+      ownerScope: { "test-owner" }
+    )
+    let upload = Task {
+      try await coordinator.upload(
+        NativeMediaUploadRequest(
+          logicalID: "photo:preflight-cancel",
+          fileURL: source,
+          fileName: "photo.jpg",
+          mimeType: "image/jpeg",
+          kind: .photo
+        ),
+        progress: { _, _ in }
+      )
+    }
+
+    let result = await upload.result
+    guard case let .failure(error) = result else {
+      Issue.record("Expected preflight cancellation")
+      return
+    }
+    #expect(error is CancellationError)
+    #expect(await staging.wasDiscarded() == false)
+    #expect(await transport.calledMethods().isEmpty)
   }
 
   @Test("cancels a transfer waiting for the global part limit without leaking a slot")
