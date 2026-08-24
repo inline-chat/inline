@@ -8,6 +8,7 @@ struct DeveloperPlaygroundView: View {
   @State private var appearance = DeveloperPlaygroundAppearance.system
   @State private var inviteLayout = DeveloperInviteLayout.focused
   @State private var messageConfiguration = DeveloperMessagePlaygroundConfiguration()
+  @State private var sidebarModel = DeveloperSidebarPlaygroundModel()
 
   var body: some View {
     NavigationSplitView {
@@ -25,6 +26,11 @@ struct DeveloperPlaygroundView: View {
             systemImage: DeveloperPlaygroundScope.messageViews.iconName
           )
           .tag(DeveloperPlaygroundScope.messageViews)
+          Label(
+            DeveloperPlaygroundScope.sidebarRows.title,
+            systemImage: DeveloperPlaygroundScope.sidebarRows.iconName
+          )
+          .tag(DeveloperPlaygroundScope.sidebarRows)
         }
 
         Section("Experiments") {
@@ -47,6 +53,8 @@ struct DeveloperPlaygroundView: View {
         DeveloperPlaygroundNotificationView()
       case .messageViews:
         DeveloperPlaygroundMessageView(configuration: $messageConfiguration)
+      case .sidebarRows:
+        DeveloperPlaygroundSidebarView(model: sidebarModel)
       case nil:
         ContentUnavailableView(
           "Select a playground",
@@ -61,7 +69,8 @@ struct DeveloperPlaygroundView: View {
         appearance: $appearance,
         selectedScope: selectedScope,
         inviteLayout: $inviteLayout,
-        messageConfiguration: $messageConfiguration
+        messageConfiguration: $messageConfiguration,
+        sidebarModel: sidebarModel
       )
         .inspectorColumnWidth(min: 200, ideal: 220, max: 280)
     }
@@ -73,6 +82,7 @@ private enum DeveloperPlaygroundScope: String, CaseIterable, Identifiable {
   case avatars
   case notifications
   case messageViews
+  case sidebarRows
   case invitePageExperiment
 
   var id: Self { self }
@@ -85,6 +95,8 @@ private enum DeveloperPlaygroundScope: String, CaseIterable, Identifiable {
       "Notifications"
     case .messageViews:
       "Message Views"
+    case .sidebarRows:
+      "Sidebar Rows"
     case .invitePageExperiment:
       "August 13th · Invite page"
     }
@@ -98,6 +110,8 @@ private enum DeveloperPlaygroundScope: String, CaseIterable, Identifiable {
       "bell.badge"
     case .messageViews:
       "bubble.left.and.bubble.right"
+    case .sidebarRows:
+      "sidebar.left"
     case .invitePageExperiment:
       "flask"
     }
@@ -139,6 +153,7 @@ private struct DeveloperPlaygroundInspector: View {
   let selectedScope: DeveloperPlaygroundScope?
   @Binding var inviteLayout: DeveloperInviteLayout
   @Binding var messageConfiguration: DeveloperMessagePlaygroundConfiguration
+  let sidebarModel: DeveloperSidebarPlaygroundModel
 
   var body: some View {
     Form {
@@ -169,6 +184,10 @@ private struct DeveloperPlaygroundInspector: View {
 
       if selectedScope == .messageViews {
         DeveloperMessagePlaygroundInspector(configuration: $messageConfiguration)
+      }
+
+      if selectedScope == .sidebarRows {
+        DeveloperSidebarPlaygroundInspector(model: sidebarModel)
       }
     }
     .formStyle(.grouped)
