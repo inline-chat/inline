@@ -224,6 +224,8 @@ type MonitorSetup = {
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   mediaLoadErrors?: Record<string, Error>
   mediaLoadDelayMs?: number
+  mediaLoadDelayMsByUrl?: Record<string, number>
+  mediaLoadCompletionLog?: string[]
   mentionRegexes?: RegExp[]
   matchesMentionPatterns?: (text: string, regexes: RegExp[]) => boolean
   sendTyping?: (params: { chatId: bigint; typing: boolean }) => Promise<void>
@@ -303,6 +305,7 @@ type MonitorSetup = {
   }) => void
   getDiagnostics?: () => unknown
   sendMessageDelayMs?: number
+  sendMessageErrors?: Error[]
   editMessageDelayMs?: number
   editMessageErrors?: Error[]
   partialReplyDelayMs?: number
@@ -480,6 +483,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     if (setup.sendMessageDelayMs != null && setup.sendMessageDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, setup.sendMessageDelayMs))
     }
+    const sendError = setup.sendMessageErrors?.shift()
+    if (sendError) throw sendError
     const messageId = nextSentMessageId
     nextSentMessageId += 1n
     return { messageId }
@@ -1115,9 +1120,11 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     },
     media: {
       loadWebMedia: vi.fn(async (mediaUrl: string) => {
-        if (setup.mediaLoadDelayMs != null && setup.mediaLoadDelayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, setup.mediaLoadDelayMs))
+        const loadDelayMs = setup.mediaLoadDelayMsByUrl?.[mediaUrl] ?? setup.mediaLoadDelayMs
+        if (loadDelayMs != null && loadDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, loadDelayMs))
         }
+        setup.mediaLoadCompletionLog?.push(mediaUrl)
         const error = setup.mediaLoadErrors?.[mediaUrl]
         if (error) throw error
         const media = setup.mediaByUrl?.[mediaUrl]
@@ -8276,6 +8283,47 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("commits streamed media in payload order", async () => {
+    const firstUrl = "https://example.com/first-slow.png"
+    const secondUrl = "https://example.com/second-fast.png"
+    const completionOrder: string[] = []
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 6724n,
+        message: {
+          id: 5724n,
+          date: 1_700_000_007n,
+          fromId: 42n,
+          message: "dm",
+        },
+      }],
+      chats: { "6724": { kind: "direct", title: "Alice" } },
+      mediaLoadDelayMsByUrl: {
+        [firstUrl]: 30,
+        [secondUrl]: 1,
+      },
+      mediaLoadCompletionLog: completionOrder,
+      partialReplies: [{ mediaUrls: [firstUrl, secondUrl] }],
+      dispatchReplyPayload: { mediaUrls: [firstUrl, secondUrl] },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.uploadFile).toHaveBeenCalledTimes(2)
+      expect(completionOrder).toEqual([firstUrl, secondUrl])
+    })
+
+    await handle.stop()
+  })
+
   it("streams completed Markdown image syntax through the normal rich edit path", async () => {
     const partialText = "![Chart](https://example.com/chart.png)"
     const finalText = `${partialText}\n\nUpdated live.`
@@ -8420,6 +8468,43 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("does not resend partial media after an unknown send outcome", async () => {
+    const mediaUrl = "https://example.com/commit-unknown.png"
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 6725n,
+        message: {
+          id: 5725n,
+          date: 1_700_000_007n,
+          fromId: 42n,
+          message: "dm",
+        },
+      }],
+      chats: { "6725": { kind: "direct", title: "Alice" } },
+      sendMessageErrors: [Object.assign(new Error("deadline expired"), {
+        code: "timeout",
+      })],
+      partialReplies: [{ mediaUrls: [mediaUrl] }, { mediaUrls: [mediaUrl] }],
+      dispatchReplyPayload: { mediaUrls: [mediaUrl] },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.uploadFile).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+    })
+
+    await handle.stop()
+  })
+
   it("delivers the final snapshot after an intermediate edit-stream failure", async () => {
     const harness = await setupMonitorHarness({
       events: [{
@@ -8456,6 +8541,125 @@ describe("inline/monitor", () => {
         oneofKind: "editMessage",
         editMessage: expect.objectContaining({ text: "final answer" }),
       }))
+    })
+
+    await handle.stop()
+  })
+
+  it("falls back to the final text after a definite streamed edit rejection", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 67120n,
+        message: {
+          id: 57120n,
+          date: 1_700_000_007n,
+          fromId: 42n,
+          message: "dm",
+        },
+      }],
+      chats: { "67120": { kind: "direct", title: "Alice" } },
+      partialReplies: [{ text: "draft answer" }],
+      editMessageErrors: [new Error("edit rejected before execution")],
+      dispatchReplyPayload: { text: "complete final answer" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ text: "complete final answer", parseMarkdown: true }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not duplicate a streamed draft when its initial send outcome is unknown", async () => {
+    const commitUnknown = Object.assign(new Error("sdk wrapper"), {
+      cause: Object.assign(new Error("response lost after dispatch"), {
+        code: "commit-outcome-unknown",
+      }),
+    })
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 67121n,
+        message: {
+          id: 57121n,
+          date: 1_700_000_007n,
+          fromId: 42n,
+          message: "dm",
+        },
+      }],
+      chats: { "67121": { kind: "direct", title: "Alice" } },
+      sendMessageErrors: [commitUnknown],
+      partialReplies: [{ text: "draft answer" }],
+      dispatchReplyPayload: { text: "complete final answer" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "draft answer" }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not leak an unknown initial-send receipt across assistant-message boundaries", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 67122n,
+        message: {
+          id: 57122n,
+          date: 1_700_000_007n,
+          fromId: 42n,
+          message: "dm",
+        },
+      }],
+      chats: { "67122": { kind: "direct", title: "Alice" } },
+      sendMessageErrors: [Object.assign(new Error("response lost after dispatch"), {
+        code: "commit-outcome-unknown",
+      })],
+      partialReplies: [{ text: "first assistant draft" }],
+      assistantMessageStartAfterPartials: true,
+      dispatchReplyPayload: { text: "second assistant answer" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ text: "second assistant answer" }),
+      )
     })
 
     await handle.stop()

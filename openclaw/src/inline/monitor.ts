@@ -315,6 +315,7 @@ type InlineInboundMediaInfo = {
 
 type InlineEditStreamState = {
   messageId: bigint | null
+  initialSendMayHaveLanded: boolean
   accumulatedText: string
   lastPartialText: string
   finalTextAccumulator: string
@@ -338,6 +339,7 @@ type InlinePartialMediaDeliveryResult = {
   messageId: bigint | null
   sent: boolean
   usedUrlFallback: boolean
+  commitOutcomeUnknown: boolean
 }
 
 type InlineProgressPlaceholderState = {
@@ -852,6 +854,25 @@ function isInlineConnectionRecovered(diagnostics: unknown): boolean {
 function formatInlineOperationError(operation: string, error: unknown): string {
   const detail = summarizeSdkMeta(error) || String(error)
   return `${operation} failed: ${detail}`
+}
+
+function inlineErrorChainHasCode(error: unknown, code: string): boolean {
+  const visited = new Set<unknown>()
+  let current: unknown = error
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current)
+    if ((current as { code?: unknown }).code === code) return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
+
+function isInlineCommitOutcomeUnknown(error: unknown): boolean {
+  return inlineErrorChainHasCode(error, "commit-outcome-unknown")
+}
+
+function isInlineSendOutcomeUnknown(error: unknown): boolean {
+  return isInlineCommitOutcomeUnknown(error) || inlineErrorChainHasCode(error, "timeout")
 }
 
 type InlineHistoryEntryPayload = {
@@ -5047,6 +5068,7 @@ export async function monitorInlineProvider(params: {
         : undefined
     const editStreamState: InlineEditStreamState = {
       messageId: shouldEditCallbackTargetInPlace ? callbackActionEvent?.targetMessageId ?? null : null,
+      initialSendMayHaveLanded: false,
       accumulatedText: callbackTargetMessage?.message ?? "",
       lastPartialText: "",
       finalTextAccumulator: "",
@@ -5194,17 +5216,30 @@ export async function monitorInlineProvider(params: {
     const sendEditStreamSnapshot = async (snapshot: InlineEditStreamSnapshot): Promise<void> => {
       try {
         if (editStreamState.messageId == null) {
-          const sent = await client.sendMessage({
-            chatId: deliveryChatId,
-            text: snapshot.text,
-            ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
-            ...(snapshot.actions !== undefined ? { actions: snapshot.actions } : {}),
-            parseMarkdown,
-          })
+          let sent: Awaited<ReturnType<typeof client.sendMessage>>
+          try {
+            sent = await client.sendMessage({
+              chatId: deliveryChatId,
+              text: snapshot.text,
+              ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
+              ...(snapshot.actions !== undefined ? { actions: snapshot.actions } : {}),
+              parseMarkdown,
+            })
+          } catch (error) {
+            if (isInlineSendOutcomeUnknown(error)) {
+              // The SDK already replays SEND_MESSAGE with its durable randomId.
+              // If that still ends ambiguously, a new final send could duplicate
+              // a draft that the server accepted before the connection failed.
+              editStreamState.initialSendMayHaveLanded = true
+            }
+            throw error
+          }
           if (sent.messageId == null) {
+            editStreamState.initialSendMayHaveLanded = true
             throw new Error("inline edit stream: sendMessage returned no messageId")
           }
           editStreamState.messageId = sent.messageId
+          editStreamState.initialSendMayHaveLanded = false
           rememberSentBotMessage({
             chatId: deliveryChatId,
             messageId: sent.messageId,
@@ -5303,8 +5338,138 @@ export async function monitorInlineProvider(params: {
       Promise<InlinePartialMediaDeliveryResult>
     >()
     const activePartialMediaDeliveries = new Set<Promise<InlinePartialMediaDeliveryResult>>()
+    let partialMediaDeliveryTail: Promise<void> = Promise.resolve()
     let partialMediaReplyClaimed = false
     let partialMediaDelivered = false
+    const recordPartialMediaDelivery = (messageId: bigint | null | undefined): void => {
+      partialMediaDelivered = true
+      try {
+        rememberSentBotMessage({
+          chatId: deliveryChatId,
+          messageId,
+          replyThreadContext: deliveryReplyThreadContext,
+        })
+        publishStatus({ lastOutboundAt: Date.now() })
+      } catch (error) {
+        // Delivery already committed. Local bookkeeping must never turn that
+        // receipt into a second user-visible send.
+        runtime.error?.(`inline partial media bookkeeping failed: ${String(error)}`)
+      }
+    }
+    const deliverPartialMediaUrlFallback = async (params: {
+      mediaUrl: string
+      isFirstMediaForAnswer: boolean
+      replyToMsgId: bigint | undefined
+      attachActions: boolean
+      actions: MessageActions | undefined
+    }): Promise<InlinePartialMediaDeliveryResult> => {
+      try {
+        const sent = await client.sendMessage({
+          chatId: deliveryChatId,
+          text: `Attachment: ${params.mediaUrl}`,
+          ...(params.isFirstMediaForAnswer && params.replyToMsgId != null
+            ? { replyToMsgId: params.replyToMsgId }
+            : {}),
+          ...(params.attachActions && params.actions !== undefined
+            ? { actions: params.actions }
+            : {}),
+          parseMarkdown,
+        })
+        recordPartialMediaDelivery(sent.messageId)
+        return {
+          mediaUrl: params.mediaUrl,
+          messageId: sent.messageId ?? null,
+          sent: true,
+          usedUrlFallback: true,
+          commitOutcomeUnknown: false,
+        }
+      } catch (deliveryError) {
+        if (isInlineSendOutcomeUnknown(deliveryError)) {
+          partialMediaDelivered = true
+          runtime.error?.(
+            `inline partial media fallback outcome is unknown; suppressing duplicate (${String(deliveryError)})`,
+          )
+          return {
+            mediaUrl: params.mediaUrl,
+            messageId: null,
+            sent: true,
+            usedUrlFallback: true,
+            commitOutcomeUnknown: true,
+          }
+        }
+        runtime.error?.(
+          `inline partial media fallback failed (${String(deliveryError)})`,
+        )
+        return {
+          mediaUrl: params.mediaUrl,
+          messageId: null,
+          sent: false,
+          usedUrlFallback: false,
+          commitOutcomeUnknown: false,
+        }
+      }
+    }
+    const deliverPartialMedia = async (params: {
+      mediaUrl: string
+      isFirstMediaForAnswer: boolean
+      replyToMsgId: bigint | undefined
+      attachActions: boolean
+      actions: MessageActions | undefined
+    }): Promise<InlinePartialMediaDeliveryResult> => {
+      let media: Awaited<ReturnType<typeof uploadInlineMediaFromUrl>>
+      try {
+        media = await uploadInlineMediaFromUrl({
+          client,
+          cfg,
+          accountId: account.accountId,
+          mediaUrl: params.mediaUrl,
+        })
+      } catch (uploadError) {
+        runtime.error?.(
+          `inline partial media upload failed; falling back to url text (${String(uploadError)})`,
+        )
+        return deliverPartialMediaUrlFallback(params)
+      }
+
+      try {
+        const sent = await client.sendMessage({
+          chatId: deliveryChatId,
+          media,
+          ...(params.isFirstMediaForAnswer && params.replyToMsgId != null
+            ? { replyToMsgId: params.replyToMsgId }
+            : {}),
+          ...(params.attachActions && params.actions !== undefined
+            ? { actions: params.actions }
+            : {}),
+        })
+        recordPartialMediaDelivery(sent.messageId)
+        return {
+          mediaUrl: params.mediaUrl,
+          messageId: sent.messageId ?? null,
+          sent: true,
+          usedUrlFallback: false,
+          commitOutcomeUnknown: false,
+        }
+      } catch (deliveryError) {
+        if (isInlineSendOutcomeUnknown(deliveryError)) {
+          partialMediaDelivered = true
+          runtime.error?.(
+            `inline partial media send outcome is unknown; suppressing duplicate (${String(deliveryError)})`,
+          )
+          return {
+            mediaUrl: params.mediaUrl,
+            messageId: null,
+            sent: true,
+            usedUrlFallback: false,
+            commitOutcomeUnknown: true,
+          }
+        }
+        runtime.error?.(
+          `inline partial media send failed; falling back to url text (${String(deliveryError)})`,
+        )
+        return deliverPartialMediaUrlFallback(params)
+      }
+    }
     const startPartialMediaDeliveries = (
       payload: InlineReplyPayload,
       actions: MessageActions | undefined,
@@ -5316,75 +5481,19 @@ export async function monitorInlineProvider(params: {
         const isFirstMediaForAnswer = !partialMediaReplyClaimed
         partialMediaReplyClaimed = true
         const attachActions = isFirstMediaForAnswer && !hasVisibleText && actions !== undefined
-        const delivery = (async (): Promise<InlinePartialMediaDeliveryResult> => {
-          try {
-            const media = await uploadInlineMediaFromUrl({
-              client,
-              cfg,
-              accountId: account.accountId,
-              mediaUrl,
-            })
-            const sent = await client.sendMessage({
-              chatId: deliveryChatId,
-              media,
-              ...(isFirstMediaForAnswer && replyToMsgId != null
-                ? { replyToMsgId }
-                : {}),
-              ...(attachActions ? { actions } : {}),
-            })
-            rememberSentBotMessage({
-              chatId: deliveryChatId,
-              messageId: sent.messageId,
-              replyThreadContext: deliveryReplyThreadContext,
-            })
-            partialMediaDelivered = true
-            publishStatus({ lastOutboundAt: Date.now() })
-            return {
-              mediaUrl,
-              messageId: sent.messageId ?? null,
-              sent: true,
-              usedUrlFallback: false,
-            }
-          } catch (uploadError) {
-            runtime.error?.(
-              `inline partial media upload failed; falling back to url text (${String(uploadError)})`,
-            )
-            try {
-              const sent = await client.sendMessage({
-                chatId: deliveryChatId,
-                text: `Attachment: ${mediaUrl}`,
-                ...(isFirstMediaForAnswer && replyToMsgId != null
-                  ? { replyToMsgId }
-                  : {}),
-                ...(attachActions ? { actions } : {}),
-                parseMarkdown,
-              })
-              rememberSentBotMessage({
-                chatId: deliveryChatId,
-                messageId: sent.messageId,
-                replyThreadContext: deliveryReplyThreadContext,
-              })
-              partialMediaDelivered = true
-              publishStatus({ lastOutboundAt: Date.now() })
-              return {
-                mediaUrl,
-                messageId: sent.messageId ?? null,
-                sent: true,
-                usedUrlFallback: true,
-              }
-            } catch (deliveryError) {
-              runtime.error?.(
-                `inline partial media fallback failed (${String(deliveryError)})`,
-              )
-              return {
-                mediaUrl,
-                messageId: null,
-                sent: false,
-                usedUrlFallback: false,
-              }
-            }
-          }
-        })()
+        const delivery = partialMediaDeliveryTail.then(() => deliverPartialMedia({
+          mediaUrl,
+          isFirstMediaForAnswer,
+          replyToMsgId,
+          attachActions,
+          actions,
+        }))
+        // Telegram's durable media funnel commits in input order. Keep the same
+        // ordering here while retaining URL dedupe across cumulative partials.
+        partialMediaDeliveryTail = delivery.then(
+          () => undefined,
+          () => undefined,
+        )
         partialMediaDeliveries.set(mediaUrl, delivery)
         activePartialMediaDeliveries.add(delivery)
         void delivery.then(() => {
@@ -5401,15 +5510,18 @@ export async function monitorInlineProvider(params: {
       await settlePartialMediaDeliveries()
       partialMediaDeliveries.clear()
       activePartialMediaDeliveries.clear()
+      partialMediaDeliveryTail = Promise.resolve()
       partialMediaReplyClaimed = false
       const hasActiveState =
         editStreamState.messageId != null ||
+        editStreamState.initialSendMayHaveLanded ||
         editStreamState.accumulatedText.length > 0 ||
         editStreamState.lastPartialText.length > 0 ||
         editStreamState.finalTextAccumulator.length > 0 ||
         hadPartialMedia
       if (!hasActiveState) return
       editStreamState.messageId = null
+      editStreamState.initialSendMayHaveLanded = false
       editStreamState.accumulatedText = ""
       editStreamState.lastPartialText = ""
       editStreamState.finalTextAccumulator = ""
@@ -5684,6 +5796,9 @@ export async function monitorInlineProvider(params: {
       let skippedSilently = false
       let failedNonSilent = false
       let dispatchError: unknown = null
+      let streamedFinalEditRejected = false
+      let undeliveredFinalText = ""
+      let undeliveredFinalActions: MessageActions | undefined
       try {
         const sessionInitRetries = await dispatchInlineReplyWithSessionInitRetry({
           shouldRetry: () => !delivered && !skippedNonSilent && !failedNonSilent,
@@ -5766,15 +5881,27 @@ export async function monitorInlineProvider(params: {
               ): Promise<void> => {
                 const outbound = sanitizeInlineDeliveryText(text)
                 if (!outbound.trim()) return
-                const sent = await client.sendMessage({
-                  chatId: deliveryChatId,
-                  text: outbound,
-                  ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
-                  ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
-                  parseMarkdown,
-                })
-                rememberSent(sent.messageId)
-                delivered = true
+                try {
+                  const sent = await client.sendMessage({
+                    chatId: deliveryChatId,
+                    text: outbound,
+                    ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
+                    ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
+                    parseMarkdown,
+                  })
+                  delivered = true
+                  try {
+                    rememberSent(sent.messageId)
+                  } catch (error) {
+                    runtime.error?.(`inline text delivery bookkeeping failed: ${String(error)}`)
+                  }
+                } catch (error) {
+                  if (!isInlineSendOutcomeUnknown(error)) throw error
+                  delivered = true
+                  runtime.error?.(
+                    `inline text delivery outcome is unknown; suppressing duplicate (${String(error)})`,
+                  )
+                }
               }
 
               const updateStreamedMessage = async (text: string, actions?: MessageActions): Promise<boolean> => {
@@ -5787,17 +5914,29 @@ export async function monitorInlineProvider(params: {
                   !editStreamState.failed && textForEdit === editStreamState.accumulatedText
                 if (shouldSkipTextUpdate && actions === undefined) return true
 
-                const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
-                  oneofKind: "editMessage",
-                  editMessage: {
-                    messageId: editStreamState.messageId,
-                    peerId: buildChatPeer(deliveryChatId),
-                    text: textForEdit,
-                    parseMarkdown,
-                    ...(actions !== undefined ? { actions } : {}),
-                  },
-                })
+                undeliveredFinalText = textForEdit
+                undeliveredFinalActions = actions
+                let result: Awaited<ReturnType<typeof client.invokeRaw>>
+                try {
+                  result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                    oneofKind: "editMessage",
+                    editMessage: {
+                      messageId: editStreamState.messageId,
+                      peerId: buildChatPeer(deliveryChatId),
+                      text: textForEdit,
+                      parseMarkdown,
+                      ...(actions !== undefined ? { actions } : {}),
+                    },
+                  })
+                } catch (error) {
+                  // A definite edit rejection still needs the final answer via
+                  // the ordinary send path. An unknown commit keeps the one
+                  // existing bubble and must not create a duplicate.
+                  streamedFinalEditRejected = !isInlineCommitOutcomeUnknown(error)
+                  throw error
+                }
                 if (result.oneofKind !== "editMessage") {
+                  streamedFinalEditRejected = true
                   throw new Error(
                     `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
                   )
@@ -5811,6 +5950,9 @@ export async function monitorInlineProvider(params: {
                   editStreamState.latestActions = actions
                 }
                 editStreamState.failed = false
+                streamedFinalEditRejected = false
+                undeliveredFinalText = ""
+                undeliveredFinalActions = undefined
                 return true
               }
 
@@ -5853,6 +5995,10 @@ export async function monitorInlineProvider(params: {
                   return
                 }
                 if (!outboundText.trim()) return
+                if (streamViaEditMessage && editStreamState.initialSendMayHaveLanded) {
+                  delivered = true
+                  return
+                }
                 await sendTextFallback(outboundText, true, true)
                 publishStatus({ lastOutboundAt: Date.now() })
                 return
@@ -5869,12 +6015,22 @@ export async function monitorInlineProvider(params: {
                 const shouldAttachActionsToMedia =
                   isFirst && (!(streamViaEditMessage && editStreamState.messageId != null) || !outboundText.trim())
                 const caption =
-                  isFirst && !(streamViaEditMessage && editStreamState.messageId != null) ? outboundText : ""
+                  isFirst &&
+                  !(streamViaEditMessage && (
+                    editStreamState.messageId != null || editStreamState.initialSendMayHaveLanded
+                  ))
+                    ? outboundText
+                    : ""
                 const partialDelivery = partialMediaDeliveries.get(mediaUrl)
                 if (partialDelivery) {
                   const result = await partialDelivery
                   if (result.sent) {
                     delivered = true
+                    if (result.commitOutcomeUnknown) {
+                      // The first send may already be visible. Do not turn an
+                      // unknown receipt into a duplicate caption/media bubble.
+                      continue
+                    }
                     const mediaText = result.usedUrlFallback
                       ? caption
                         ? `${caption}\n\nAttachment: ${mediaUrl}`
@@ -5907,11 +6063,13 @@ export async function monitorInlineProvider(params: {
                         runtime.error?.(
                           `inline early media finalization failed (${String(error)})`,
                         )
-                        await sendTextFallback(
-                          caption || `Attachment: ${mediaUrl}`,
-                          false,
-                          shouldAttachActionsToMedia,
-                        )
+                        if (!isInlineCommitOutcomeUnknown(error)) {
+                          await sendTextFallback(
+                            caption || `Attachment: ${mediaUrl}`,
+                            false,
+                            shouldAttachActionsToMedia,
+                          )
+                        }
                       }
                     } else if (shouldUpdateEarlyMedia) {
                       await sendTextFallback(
@@ -5923,13 +6081,24 @@ export async function monitorInlineProvider(params: {
                     continue
                   }
                 }
+                let media: Awaited<ReturnType<typeof uploadInlineMediaFromUrl>>
                 try {
-                  const media = await uploadInlineMediaFromUrl({
+                  media = await uploadInlineMediaFromUrl({
                     client,
                     cfg,
                     accountId: account.accountId,
                     mediaUrl,
                   })
+                } catch (error) {
+                  runtime.error?.(`inline media upload failed; falling back to url text (${String(error)})`)
+                  const fallbackText = caption
+                    ? `${caption}\n\nAttachment: ${mediaUrl}`
+                    : `Attachment: ${mediaUrl}`
+                  await sendTextFallback(fallbackText, isFirst, isFirst)
+                  continue
+                }
+
+                try {
                   const sent = await client.sendMessage({
                     chatId: deliveryChatId,
                     ...(caption ? { text: caption } : {}),
@@ -5940,10 +6109,21 @@ export async function monitorInlineProvider(params: {
                       : {}),
                     ...(caption ? { parseMarkdown } : {}),
                   })
-                  rememberSent(sent.messageId)
                   delivered = true
+                  try {
+                    rememberSent(sent.messageId)
+                  } catch (error) {
+                    runtime.error?.(`inline media delivery bookkeeping failed: ${String(error)}`)
+                  }
                 } catch (error) {
-                  runtime.error?.(`inline media upload failed; falling back to url text (${String(error)})`)
+                  if (isInlineSendOutcomeUnknown(error)) {
+                    delivered = true
+                    runtime.error?.(
+                      `inline media delivery outcome is unknown; suppressing duplicate (${String(error)})`,
+                    )
+                    continue
+                  }
+                  runtime.error?.(`inline media send failed; falling back to url text (${String(error)})`)
                   const fallbackText = caption
                     ? `${caption}\n\nAttachment: ${mediaUrl}`
                     : `Attachment: ${mediaUrl}`
@@ -5987,7 +6167,12 @@ export async function monitorInlineProvider(params: {
         delivered = true
       }
       await cleanupInlineProgressPlaceholder()
-      if (!delivered && streamViaEditMessage && editStreamState.messageId != null) {
+      if (
+        !delivered &&
+        streamViaEditMessage &&
+        (editStreamState.messageId != null || editStreamState.initialSendMayHaveLanded) &&
+        !streamedFinalEditRejected
+      ) {
         delivered = true
       }
       if (!delivered && !skippedSilently && (
@@ -5995,13 +6180,16 @@ export async function monitorInlineProvider(params: {
       )) {
         botPresenceLifecycle.fail()
         const fallbackText =
-          dispatchError != null
+          undeliveredFinalText.trim()
+            ? undeliveredFinalText
+            : dispatchError != null
             ? INLINE_REQUEST_ERROR_FALLBACK
             : EMPTY_RESPONSE_FALLBACK
         const sent = await client.sendMessage({
           chatId: deliveryChatId,
           text: fallbackText,
           ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
+          ...(undeliveredFinalActions !== undefined ? { actions: undeliveredFinalActions } : {}),
           parseMarkdown,
         })
         rememberSentBotMessage({
