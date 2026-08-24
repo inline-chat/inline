@@ -76,6 +76,13 @@ const pages: DocPage[] = [
     summary: "WebSocket API and TypeScript SDK quick start.",
   },
   {
+    title: "Realtime Sync Engine",
+    source: "realtime-sync.md",
+    route: "/docs/realtime-sync",
+    markdownPath: "/docs/realtime-sync.md",
+    summary: "Durability, bucket ownership, gap recovery, and message-history coverage.",
+  },
+  {
     title: "Rust SDK",
     source: "rust-sdk.md",
     route: "/docs/rust-sdk",

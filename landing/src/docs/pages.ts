@@ -10,6 +10,7 @@ import hermes from "./content/hermes.md?raw"
 import mcp from "./content/mcp.md?raw"
 import openclaw from "./content/openclaw.md?raw"
 import realtimeApi from "./content/realtime-api.md?raw"
+import realtimeSync from "./content/realtime-sync.md?raw"
 import roadmap from "./content/roadmap.md?raw"
 import rustSdk from "./content/rust-sdk.md?raw"
 import security from "./content/security.md?raw"
@@ -21,6 +22,7 @@ export const DOCS_NAV_GROUPS = [
   { id: "getting-started", title: "Getting Started" },
   { id: "agents", title: "Agents" },
   { id: "developers", title: "Developers" },
+  { id: "technical", title: "Technical" },
   { id: "policies", title: "Policies" },
 ] as const
 
@@ -133,6 +135,16 @@ const DOCS_PAGE_DEFINITIONS = [
     summary: "WebSocket API and TypeScript SDK quick start.",
     navGroup: "developers",
     markdown: realtimeApi,
+  },
+  {
+    slug: "realtime-sync",
+    title: "Realtime Sync Engine",
+    navTitle: "Sync Engine",
+    route: "/docs/realtime-sync",
+    markdownPath: "/docs/realtime-sync.md",
+    summary: "Durability, bucket ownership, gap recovery, and message-history coverage.",
+    navGroup: "technical",
+    markdown: realtimeSync,
   },
   {
     slug: "rust-sdk",
