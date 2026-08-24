@@ -19,6 +19,7 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
   readonly canceled = new Set<string>()
   active = 0
   maxActive = 0
+  failBeforeAcceptCount = 0
   failAfterAcceptOnce = false
   failFinishOnce = false
   acceptedPartsOverride: number[] | undefined
@@ -48,6 +49,11 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
     this.maxPartBytes = Math.max(this.maxPartBytes, input.data.length)
     this.partCalls.push(`${id}:${input.partIndex}`)
     await new Promise((resolve) => setTimeout(resolve, 1))
+    if (this.failBeforeAcceptCount > 0) {
+      this.failBeforeAcceptCount -= 1
+      this.active -= 1
+      throw new Error("transient save failure")
+    }
     this.accepted.get(id)!.add(input.partIndex)
     this.active -= 1
     if (this.failAfterAcceptOnce) {
@@ -284,6 +290,27 @@ describe("native upload coordinator", () => {
     expect(result.fileUniqueId).toContain("file-")
     expect(progress.at(-1)).toBe(12)
     expect(transport.partCalls).toHaveLength(3)
+  })
+
+  test("retries one part when authoritative state says it is still missing", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.partSize = 12
+    transport.failBeforeAcceptCount = 1
+
+    await expect(new NativeUploadClient(transport).upload(input(46))).resolves.toBeDefined()
+    expect(transport.partCalls).toHaveLength(2)
+    expect(transport.stateCalls).toBe(1)
+  })
+
+  test("stops after one replay when a part remains missing", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.partSize = 12
+    transport.failBeforeAcceptCount = 2
+
+    await expect(new NativeUploadClient(transport).upload(input(47)))
+      .rejects.toThrow("transient save failure")
+    expect(transport.partCalls).toHaveLength(2)
+    expect(transport.stateCalls).toBe(2)
   })
 
   test("reconciles a finish whose response was lost after complete publication", async () => {
