@@ -20,16 +20,17 @@ const documents = [
 const requestedDocumentNames = new Set(
   process.argv
     .filter((argument) => argument.startsWith("--only="))
-    .map((argument) => argument.slice("--only=".length)),
+    .map((argument) => argument.slice("--only=".length).trim())
+    .filter((name) => name.length > 0),
 )
 const selectedDocuments = requestedDocumentNames.size === 0
   ? documents
   : documents.filter((document) => requestedDocumentNames.has(document.name))
 
-if (selectedDocuments.length !== requestedDocumentNames.size) {
+if (requestedDocumentNames.size > 0 && selectedDocuments.length !== requestedDocumentNames.size) {
   const knownNames = new Set<string>(documents.map((document) => document.name))
   const unknownNames = [...requestedDocumentNames].filter((name) => !knownNames.has(name))
-  throw new Error(`Unknown OpenAPI document: ${unknownNames.join(", ")}`)
+  throw new Error(`Unknown OpenAPI document: ${JSON.stringify(unknownNames)}`)
 }
 
 const compareStrings = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
