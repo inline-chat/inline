@@ -299,7 +299,7 @@ fn access_name(access: AccessMode) -> &'static str {
 
 pub(crate) async fn setup(
     config: &Config,
-    owner_token: String,
+    owner_auth: Option<inline_client::AuthCredential>,
     resolved: ResolvedSetup,
     json: bool,
     json_format: JsonFormat,
@@ -322,11 +322,12 @@ pub(crate) async fn setup(
         }
         return print_dry_run(&resolved, json, json_format);
     }
+    let owner_auth = owner_auth.ok_or_else(CliError::not_authenticated)?;
     match target {
         AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
             let outcome = match bridge::setup_provider_core(
                 config,
-                owner_token,
+                owner_auth,
                 target.descriptor().id,
                 resolved.args.folder,
                 resolved.args.bot_name,
@@ -379,7 +380,7 @@ pub(crate) async fn setup(
             let instance = gateway_instance(resolved.args.profile.as_deref());
             let bot = match bot::ensure_gateway_bot(
                 config,
-                &owner_token,
+                owner_auth,
                 resolved.installed.descriptor,
                 &instance,
                 &resolved.args,

@@ -328,10 +328,8 @@ pub(super) async fn inbound_from_delivery(
     if message.timestamp < route.accept_messages_after {
         return Ok(None);
     }
-    if !route.allows(message.sender_id.get()) {
-        if message_sender_is_bot(&route.bot_store, message).await? {
-            return Ok(None);
-        }
+    let sender_is_bot = message_sender_is_bot(&route.bot_store, message).await?;
+    if !sender_is_bot && !route.allows(message.sender_id.get()) {
         tokio::time::sleep_until(response_not_before).await;
         let is_direct_message = route
             .bot_store

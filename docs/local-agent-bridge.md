@@ -2,11 +2,15 @@
 
 Inline's local bridge turns an installed coding agent into a private bot. The
 owner can use it in the bot DM, direct mentions, replies to the bot, and followed
-Inline threads. A strict stable-user-ID allowlist is enforced before routing,
-context lookup, workspace binding, or provider work; it contains only the owner
-by default. The Rust bridge is bundled with the Inline CLI and runs as one
-per-user background service; agent processes and project files remain on the
-user's computer.
+Inline threads. Human-authored requests pass a strict stable-user-ID allowlist
+before routing, context lookup, workspace binding, or provider work; it contains
+only the owner by default. Another bot can activate it only with an exact
+structured mention of this bot. Bot DMs, replies, followed-thread traffic,
+generic mention flags, and targeted commands without that mention stay inert.
+Bot authorship is disclosed to the coding harness, whose delivery guidance
+requires explicit handoff mentions and warns against reciprocal loops. The Rust
+bridge is bundled with the Inline CLI and runs as one per-user background
+service; agent processes and project files remain on the user's computer.
 
 ## Setup
 
@@ -27,9 +31,8 @@ waits for the selected provider to become ready. Repeating setup is idempotent.
 Adding a second provider preserves the first provider's bot, credentials,
 workspaces, and sessions.
 
-Without `--folder`, setup reuses the provider's last selected project. On first
-setup it prefers the containing Git root, then the current directory, and asks
-for a project path only when needed.
+Without `--folder`, setup uses the user's home directory. Pass `--folder` to
+use a narrower project directory.
 
 Current beta provider paths:
 

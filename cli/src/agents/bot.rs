@@ -28,13 +28,13 @@ impl ManagedBot {
 
 pub(super) async fn ensure_gateway_bot(
     config: &Config,
-    owner_token: &str,
+    owner_auth: inline_client::AuthCredential,
     target: &'static TargetDescriptor,
     instance: &str,
     args: &AgentsSetupArgs,
     configured_bot_id: Option<i64>,
 ) -> Result<ManagedBot, Box<dyn std::error::Error>> {
-    let mut owner = connect_realtime(&config.realtime_url, owner_token).await?;
+    let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
     let owner_user = owner
         .call(proto::GetMeInput {})
         .await?

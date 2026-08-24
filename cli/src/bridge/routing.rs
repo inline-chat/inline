@@ -59,12 +59,12 @@ pub(super) async fn resolve_message_route(
             .flatten()
             .map(InlineId::get)
     });
-    let mut reply_to_bot = match message.reply_to_message_id {
-        Some(reply_id) => bot_store
+    let mut reply_to_bot = match (sender_is_bot, message.reply_to_message_id) {
+        (false, Some(reply_id)) => bot_store
             .message(message.chat_id, reply_id)
             .await?
             .is_some_and(|reply| reply.is_outgoing || reply.sender_id.get() == bot_user_id),
-        None => false,
+        _ => false,
     };
     let mut followed = if sender_is_bot || owner_dm_conversation {
         false
@@ -90,7 +90,7 @@ pub(super) async fn resolve_message_route(
             followed,
         }
         .resolve(),
-        bot_authored: self_authored,
+        bot_authored: sender_is_bot,
         command_target_bot_user_id,
     })
 }
@@ -329,7 +329,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn other_bots_require_an_exact_mention_or_reply_to_this_bot() {
+    async fn other_bots_require_an_exact_mention_to_this_bot() {
         let store = SqliteStore::open_in_memory().expect("store");
         let mut other_bot = message(11, 77);
         other_bot.metadata.sender_is_bot = Some(true);
@@ -338,8 +338,23 @@ mod tests {
         let route = resolve_message_route(&other_bot, 11, 99, &store, None)
             .await
             .expect("route");
-        assert!(!route.bot_authored);
+        assert!(route.bot_authored);
         assert_eq!(route.addressing, Addressing::None);
+
+        other_bot.metadata.entities = vec![MessageEntityRecord {
+            kind: "TYPE_BOT_COMMAND".to_string(),
+            offset: 0,
+            length: 7,
+            user_id: Some(InlineId::new(99)),
+            group_id: None,
+            chat_id: None,
+            value: None,
+        }];
+        let route = resolve_message_route(&other_bot, 11, 99, &store, None)
+            .await
+            .expect("route");
+        assert_eq!(route.addressing, Addressing::None);
+        assert_eq!(route.command_target_bot_user_id, Some(99));
 
         other_bot.metadata.entities = vec![MessageEntityRecord {
             kind: "TYPE_MENTION".to_string(),
@@ -353,7 +368,29 @@ mod tests {
         let route = resolve_message_route(&other_bot, 11, 99, &store, None)
             .await
             .expect("route");
+        assert!(route.bot_authored);
         assert_eq!(route.addressing, Addressing::Mention);
+        assert!(matches!(
+            TriggerResolver.resolve(
+                &OperatorPolicy::owner_only(7),
+                InboundEnvelope {
+                    event_id: "bot-mention".to_string(),
+                    chat_id: 11,
+                    message_id: 20,
+                    sender_user_id: 77,
+                    text: "fix it".to_string(),
+                    duplicate: false,
+                    bot_authored: route.bot_authored,
+                    addressing: route.addressing,
+                    command: None,
+                    action: None,
+                },
+            ),
+            TriggerDecision::Direction {
+                addressing: Addressing::Mention,
+                ..
+            }
+        ));
 
         let mut unrelated_bot_message = message(11, 66);
         unrelated_bot_message.message_id = InlineId::new(18);
@@ -380,7 +417,7 @@ mod tests {
         let route = resolve_message_route(&other_bot, 11, 99, &store, None)
             .await
             .expect("route");
-        assert_eq!(route.addressing, Addressing::ReplyToBot);
+        assert_eq!(route.addressing, Addressing::None);
     }
 
     #[tokio::test]
@@ -417,6 +454,7 @@ mod tests {
         let route = resolve_message_route(&other_bot, 11, 99, &store, None)
             .await
             .expect("route");
+        assert!(route.bot_authored);
         assert_eq!(route.addressing, Addressing::Mention);
     }
 }

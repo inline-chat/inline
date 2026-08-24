@@ -138,6 +138,8 @@ pub struct InboundEnvelope {
     pub sender_user_id: i64,
     pub text: String,
     pub duplicate: bool,
+    /// Whether the sender is any bot account, including this bridge bot.
+    /// Bot-authored message directions require exact mention addressing.
     pub bot_authored: bool,
     pub addressing: Addressing,
     pub command: Option<CommandInvocation>,
@@ -183,12 +185,12 @@ impl TriggerResolver {
                 reason: IgnoreReason::Duplicate,
             };
         }
-        if envelope.bot_authored {
+        if envelope.bot_authored && !matches!(envelope.addressing, Addressing::Mention) {
             return TriggerDecision::Ignore {
                 reason: IgnoreReason::BotAuthored,
             };
         }
-        if !policy.allows(envelope.sender_user_id) {
+        if !envelope.bot_authored && !policy.allows(envelope.sender_user_id) {
             return TriggerDecision::Ignore {
                 reason: IgnoreReason::Unauthorized,
             };
@@ -302,16 +304,33 @@ mod tests {
     }
 
     #[test]
-    fn bot_authored_message_is_ignored_before_addressing() {
+    fn bot_authored_messages_require_an_explicit_mention() {
         let policy = OperatorPolicy::owner_only(7);
-        let mut envelope = message(7, Addressing::OwnerDm);
+        for addressing in [
+            Addressing::OwnerDm,
+            Addressing::ReplyToBot,
+            Addressing::Followed,
+            Addressing::None,
+        ] {
+            let mut envelope = message(8, addressing);
+            envelope.bot_authored = true;
+            assert_eq!(
+                TriggerResolver.resolve(&policy, envelope),
+                TriggerDecision::Ignore {
+                    reason: IgnoreReason::BotAuthored
+                }
+            );
+        }
+
+        let mut envelope = message(8, Addressing::Mention);
         envelope.bot_authored = true;
-        assert_eq!(
+        assert!(matches!(
             TriggerResolver.resolve(&policy, envelope),
-            TriggerDecision::Ignore {
-                reason: IgnoreReason::BotAuthored
+            TriggerDecision::Direction {
+                addressing: Addressing::Mention,
+                ..
             }
-        );
+        ));
     }
 
     #[test]
@@ -571,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_and_bot_authored_checks_precede_every_active_trigger() {
+    fn duplicate_check_precedes_an_explicit_bot_mention() {
         let policy = OperatorPolicy::owner_only(7);
         let mut envelope = message(7, Addressing::Mention);
         envelope.duplicate = true;
@@ -588,7 +607,7 @@ mod tests {
             }
         );
 
-        let mut envelope = message(7, Addressing::Mention);
+        let mut envelope = message(8, Addressing::Mention);
         envelope.bot_authored = true;
         envelope.command = Some(CommandInvocation {
             name: "status".to_string(),
@@ -596,11 +615,9 @@ mod tests {
             explicit_target: true,
             targets_this_bot: true,
         });
-        assert_eq!(
+        assert!(matches!(
             TriggerResolver.resolve(&policy, envelope),
-            TriggerDecision::Ignore {
-                reason: IgnoreReason::BotAuthored
-            }
-        );
+            TriggerDecision::Command { .. }
+        ));
     }
 }
