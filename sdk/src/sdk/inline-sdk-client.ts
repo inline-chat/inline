@@ -209,6 +209,9 @@ function extractFirstMessageId(updates: Update[] | undefined): bigint | null {
       const message = update.update.newMessage.message
       if (message) return message.id
     }
+    if (update.update.oneofKind === "updateMessageId") {
+      return update.update.updateMessageId.messageId
+    }
   }
   return null
 }

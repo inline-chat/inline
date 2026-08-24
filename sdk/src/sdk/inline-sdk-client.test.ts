@@ -1190,6 +1190,48 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it("sendMessage() returns the existing messageId after an idempotent retry", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+    const pending = client.sendMessage({ chatId: 7, text: "hi", randomId: 42n })
+    await waitFor(() => transport.sent.some(
+      (message) => message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.SEND_MESSAGE,
+    ))
+    const rpc = transport.sent.find(
+      (message) => message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.SEND_MESSAGE,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: rpc.id,
+          result: {
+            oneofKind: "sendMessage",
+            sendMessage: {
+              updates: [Update.create({
+                update: {
+                  oneofKind: "updateMessageId",
+                  updateMessageId: { messageId: 123n, randomId: 42n },
+                },
+              })],
+            },
+          },
+        },
+      },
+    }))
+
+    await expect(pending).resolves.toEqual({ messageId: 123n })
+    await client.close()
+  })
+
   it("sendMessage() rejects specifying both entities and parseMarkdown", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
