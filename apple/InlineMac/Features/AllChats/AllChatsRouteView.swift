@@ -1204,8 +1204,8 @@ private struct ChatListRow: View {
         _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peerId, open: true))
         ToastCenter.shared.showSuccess("Opened in sidebar")
       } catch {
-        Log.shared.error("Failed to open chat in sidebar", error: error)
         ToastCenter.shared.showError("Couldn’t open in sidebar")
+        Log.shared.error("Failed to open chat in sidebar", error: error)
       }
     }
   }
