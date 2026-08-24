@@ -217,6 +217,11 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
     case .richContent:
       [
         .init(
+          .richCompactText,
+          "Compact paragraph + reply",
+          "Short rich text uses its rendered width while the reply remains the bubble minimum"
+        ),
+        .init(
           .richInlineEntities,
           "Paragraph + inline entities",
           "Bold, italic, inline code, raw and labeled links, mention, email, and phone entities"
@@ -271,6 +276,11 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
           .richPendingImage,
           "Pending rich image",
           "A stable landscape placeholder with known dimensions"
+        ),
+        .init(
+          .richUnknownImage,
+          "Unknown-size rich image",
+          "A compact 4:3 fallback that does not claim the full viewport"
         ),
         .init(
           .richReadyImage,
@@ -383,6 +393,7 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case emoji
   case linkedText
   case rtl
+  case richCompactText
   case richInlineEntities
   case richHierarchy
   case richCode
@@ -394,6 +405,7 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case richDisclosures
   case richProgressDisclosure
   case richPendingImage
+  case richUnknownImage
   case richReadyImage
   case richUnavailableImage
   case richAlbum
@@ -456,6 +468,8 @@ private enum DeveloperMessageCatalogFactory {
         text: "این یک پیام نمونه برای بررسی چیدمان راست به چپ است.",
         isRtl: true
       )
+    case .richCompactText:
+      return richFixture(id: id, content: richCompactText(), reply: true)
     case .richInlineEntities:
       return richFixture(id: id, content: richInlineEntities())
     case .richHierarchy:
@@ -478,6 +492,8 @@ private enum DeveloperMessageCatalogFactory {
       return richFixture(id: id, content: richProgressDisclosure())
     case .richPendingImage:
       return richFixture(id: id, content: richPendingImage())
+    case .richUnknownImage:
+      return richFixture(id: id, content: richUnknownImage())
     case .richReadyImage:
       return richFixture(id: id, content: richReadyImage(isReady: localRichMediaReady))
     case .richUnavailableImage:
@@ -669,16 +685,24 @@ private enum DeveloperMessageCatalogFactory {
     id: Int64,
     content: RichCatalogFixture,
     outgoing: Bool = false,
-    reactions: Bool = false
+    reactions: Bool = false,
+    reply: Bool = false
   ) -> DeveloperMessageFixture {
     fixture(
       id: id,
       text: content.text,
       outgoing: outgoing,
       entities: content.entities,
+      reply: reply,
       reactions: reactions,
       richContent: content.blockContent
     )
+  }
+
+  private static func richCompactText() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let text = builder.segment("yo Mo")
+    return builder.finish(blocks: [paragraphBlock(text)])
   }
 
   private static func richInlineEntities() -> RichCatalogFixture {
@@ -940,6 +964,16 @@ private enum DeveloperMessageCatalogFactory {
       imageBlock(pendingImage(alt: alt, width: 1_600, height: 900)),
       footerBlock(footer),
     ])
+  }
+
+  private static func richUnknownImage() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let alt = builder.segment("Image pending without dimensions")
+    let pending = BlockImagePending()
+    var image = BlockImage()
+    image.alt = alt
+    image.pending = pending
+    return builder.finish(blocks: [imageBlock(image)])
   }
 
   private static func richReadyImage(isReady: Bool) -> RichCatalogFixture {
@@ -1518,9 +1552,9 @@ private enum DeveloperMessageCatalogFactory {
   private static func catalogIndex(_ kind: DeveloperMessageCatalogKind) -> Int {
     let all: [DeveloperMessageCatalogKind] = [
       .shortIncoming, .longOutgoing, .emoji, .linkedText, .rtl,
-      .richInlineEntities, .richHierarchy, .richCode, .richCodeLanguages, .richPlainCode,
+      .richCompactText, .richInlineEntities, .richHierarchy, .richCode, .richCodeLanguages, .richPlainCode,
       .richStreaming, .richNestedLists, .richChecklist,
-      .richDisclosures, .richProgressDisclosure, .richPendingImage, .richReadyImage,
+      .richDisclosures, .richProgressDisclosure, .richPendingImage, .richUnknownImage, .richReadyImage,
       .richUnavailableImage, .richAlbum, .richAgentAnswer,
       .richRTLBlocks, .richQuote, .richTable,
       .groupStart, .groupMiddle, .groupEnd, .reply, .forwarded, .reactions, .sending, .failed,

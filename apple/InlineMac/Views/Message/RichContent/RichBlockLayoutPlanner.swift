@@ -118,8 +118,13 @@ final class RichBlockLayoutPlanner {
     ) else {
       return nil
     }
+    let resolvedWidth = builder.resolvedPlanWidth(maximumWidth: availableWidth)
+    builder.normalizeFlexibleFrames(
+      from: availableWidth,
+      to: resolvedWidth
+    )
     let plan = RichBlockLayoutPlan(
-      size: CGSize(width: availableWidth, height: ceil(builder.height)),
+      size: CGSize(width: resolvedWidth, height: ceil(builder.height)),
       contentHorizontalInset: resolvedContentInset,
       nodes: builder.nodes,
       trailingTextLine: builder.trailingTextLine
@@ -282,11 +287,19 @@ final class RichBlockLayoutPlanner {
   }
 
   private struct Builder {
+    private struct TextMeasurement {
+      var height: CGFloat
+      var maxLineUsedWidth: CGFloat
+      var lastLineUsedWidth: CGFloat
+      var lastLineHeight: CGFloat
+    }
+
     private static let blockSpacing: CGFloat = 8
     private static let albumHeight: CGFloat = 126
     private static let albumItemSpacing: CGFloat = 6
     private static let tableHorizontalPadding: CGFloat = 10
     private static let tableVerticalPadding: CGFloat = 7
+    private static let whitespaceExpression = try? NSRegularExpression(pattern: #"\s+"#)
 
     let attributedText: NSAttributedString
     let baseFontSize: CGFloat
@@ -295,6 +308,38 @@ final class RichBlockLayoutPlanner {
     var nodes: [RichBlockLayoutPlan.Node] = []
     var height: CGFloat = 0
     var trailingTextLine: RichBlockLayoutPlan.TrailingTextLine?
+    private var measuredMaxX: CGFloat = 0
+    private var claimsMaximumWidth = false
+
+    func resolvedPlanWidth(maximumWidth: CGFloat) -> CGFloat {
+      guard !claimsMaximumWidth else { return maximumWidth }
+      let measuredWidth = measuredMaxX + contentHorizontalInset
+      return min(maximumWidth, max(1, ceil(measuredWidth)))
+    }
+
+    mutating func normalizeFlexibleFrames(from maximumWidth: CGFloat, to resolvedWidth: CGFloat) {
+      guard resolvedWidth < maximumWidth else { return }
+      for index in nodes.indices {
+        switch nodes[index].kind {
+        case .separator, .quote:
+          let trailingMargin = max(0, maximumWidth - nodes[index].frame.maxX)
+          nodes[index].frame.size.width = max(
+            1,
+            resolvedWidth - trailingMargin - nodes[index].frame.minX
+          )
+        default:
+          break
+        }
+      }
+    }
+
+    private mutating func recordMeasuredFrame(_ frame: CGRect) {
+      measuredMaxX = max(measuredMaxX, frame.maxX)
+    }
+
+    private mutating func claimMaximumWidth() {
+      claimsMaximumWidth = true
+    }
 
     mutating func layout(
       blocks: [InlineProtocol.Block],
@@ -384,6 +429,9 @@ final class RichBlockLayoutPlanner {
       case .separator:
         let frame = CGRect(x: x, y: height + 4, width: width, height: 1)
         nodes.append(.init(path: path, frame: frame, kind: .separator))
+        recordMeasuredFrame(
+          CGRect(x: x, y: frame.minY, width: min(width, 120), height: frame.height)
+        )
         height = frame.maxY + 4
         return true
       case let .image(image):
@@ -391,10 +439,12 @@ final class RichBlockLayoutPlanner {
         let frame = CGRect(x: x, y: height, width: size.width, height: size.height)
         let imageNode = RichBlockLayoutPlan.ImageNode(path: path, frame: frame, state: imageState(image))
         nodes.append(.init(path: path, frame: frame, kind: .image(imageNode)))
+        recordMeasuredFrame(frame)
         height = frame.maxY
         return true
       case let .album(album):
         let container = fullBleedContainer ?? (x: x, width: width)
+        claimMaximumWidth()
         return appendAlbum(album, path: path, x: container.x, width: container.width)
       case let .disclosure(disclosure):
         guard disclosure.hasSummary else { return false }
@@ -441,6 +491,7 @@ final class RichBlockLayoutPlanner {
       case let .table(table):
         let container = fullBleedContainer ?? (x: x, width: width)
         let edgeInset = contentHorizontalInset > 0 ? min(4, contentHorizontalInset) : 0
+        claimMaximumWidth()
         return appendTable(
           table,
           path: path,
@@ -504,6 +555,7 @@ final class RichBlockLayoutPlanner {
             isRTL: isRTL
           ))
         ))
+        recordMeasuredFrame(markerFrame)
         let itemStart = height
         guard layout(
           blocks: item.children,
@@ -555,6 +607,7 @@ final class RichBlockLayoutPlanner {
           lineCount: lineCount
         ))
       ))
+      claimMaximumWidth()
       height = frame.maxY
       return true
     }
@@ -578,6 +631,8 @@ final class RichBlockLayoutPlanner {
       ))
       height += RichBlockQuoteMetrics.verticalInset
       let contentX = x + (isRTL ? RichBlockQuoteMetrics.trailingInset : RichBlockQuoteMetrics.leadingInset)
+      let precedingMaxX = measuredMaxX
+      measuredMaxX = 0
       guard layout(
         blocks: quote.children,
         parent: path,
@@ -587,6 +642,11 @@ final class RichBlockLayoutPlanner {
         inheritedDirection: isRTL,
         fullBleedContainer: nil
       ) else { return false }
+      let quotedContentMaxX = measuredMaxX
+      let endingInset = isRTL
+        ? RichBlockQuoteMetrics.leadingInset
+        : RichBlockQuoteMetrics.trailingInset
+      measuredMaxX = max(precedingMaxX, quotedContentMaxX + endingInset)
       height += RichBlockQuoteMetrics.verticalInset
       nodes[decorationIndex].frame.size.height = max(1, height - startY)
       return true
@@ -610,8 +670,9 @@ final class RichBlockLayoutPlanner {
           isRTL: isRTL
         )
       }
-      var columnWidths = Array(repeating: CGFloat(84), count: columnCount)
-      for row in table.rows {
+      var minimumColumnWidths = Array(repeating: CGFloat(1), count: columnCount)
+      var maximumColumnWidths = Array(repeating: CGFloat(1), count: columnCount)
+      for (rowIndex, row) in table.rows.enumerated() {
         for (column, cell) in row.cells.enumerated() {
           guard let text = RichBlockLayoutPlanner.styledTableText(
             attributedText,
@@ -620,24 +681,36 @@ final class RichBlockLayoutPlanner {
             baseFontSize: baseFontSize,
             isRTL: isRTL,
             alignment: alignments[column],
-            isHeader: false
+            isHeader: rowIndex == 0
           ) else { return false }
-          let intrinsic = text.boundingRect(
+          let minimumTextWidth = minimumUnbreakableTextWidth(text)
+          let maximumTextWidth = text.boundingRect(
             with: CGSize(
               width: CGFloat.greatestFiniteMagnitude,
               height: CGFloat.greatestFiniteMagnitude
             ),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
-          ).width + Self.tableHorizontalPadding * 2
-          columnWidths[column] = min(260, max(columnWidths[column], ceil(intrinsic)))
+          ).width
+          let minimumCellWidth = ceil(
+            max(baseFontSize, minimumTextWidth) + Self.tableHorizontalPadding * 2
+          )
+          let maximumCellWidth = max(
+            minimumCellWidth,
+            min(
+              max(1, width),
+              ceil(maximumTextWidth) + Self.tableHorizontalPadding * 2
+            )
+          )
+          minimumColumnWidths[column] = max(minimumColumnWidths[column], minimumCellWidth)
+          maximumColumnWidths[column] = max(maximumColumnWidths[column], maximumCellWidth)
         }
       }
-      var contentWidth = columnWidths.reduce(0, +)
-      if contentWidth < width {
-        let extra = (width - contentWidth) / CGFloat(columnCount)
-        columnWidths = columnWidths.map { $0 + extra }
-        contentWidth = width
-      }
+      let columnWidths = allocateTableColumnWidths(
+        minimum: minimumColumnWidths,
+        maximum: maximumColumnWidths,
+        viewportWidth: width
+      )
+      let contentWidth = columnWidths.reduce(0, +)
 
       var cells: [RichBlockLayoutPlan.TableNode.Cell] = []
       var rowY: CGFloat = 0
@@ -681,6 +754,69 @@ final class RichBlockLayoutPlanner {
       ))
       height = frame.maxY
       return true
+    }
+
+    private func minimumUnbreakableTextWidth(_ text: NSAttributedString) -> CGFloat {
+      guard text.length > 0, let whitespaceExpression = Self.whitespaceExpression else { return 0 }
+      let tokenLines = NSMutableAttributedString(attributedString: text)
+      whitespaceExpression.replaceMatches(
+        in: tokenLines.mutableString,
+        range: NSRange(location: 0, length: tokenLines.length),
+        withTemplate: "\n"
+      )
+      return measureText(
+        tokenLines,
+        width: CGFloat.greatestFiniteMagnitude
+      ).maxLineUsedWidth
+    }
+
+    private func allocateTableColumnWidths(
+      minimum: [CGFloat],
+      maximum: [CGFloat],
+      viewportWidth: CGFloat
+    ) -> [CGFloat] {
+      guard minimum.count == maximum.count, !minimum.isEmpty else { return [] }
+      let resolvedMinimum = zip(minimum, maximum).map { min($0.0, $0.1) }
+      let resolvedMaximum = zip(resolvedMinimum, maximum).map { max($0.0, $0.1) }
+      let minimumTotal = resolvedMinimum.reduce(0, +)
+      let maximumTotal = resolvedMaximum.reduce(0, +)
+
+      if minimumTotal >= viewportWidth {
+        return resolvedMinimum
+      }
+
+      var widths: [CGFloat]
+      var distributable: CGFloat
+      var weights: [CGFloat]
+      if maximumTotal <= viewportWidth {
+        widths = resolvedMaximum
+        distributable = viewportWidth - maximumTotal
+        weights = resolvedMaximum
+      } else {
+        widths = resolvedMinimum
+        distributable = viewportWidth - minimumTotal
+        weights = zip(resolvedMinimum, resolvedMaximum).map { max(0, $0.1 - $0.0) }
+      }
+
+      var remainingWeight = weights.reduce(0, +)
+      for index in widths.indices {
+        let remainingCount = widths.count - index
+        let growth: CGFloat
+        if remainingWeight > 0 {
+          growth = weights[index] == remainingWeight
+            ? distributable
+            : floor(distributable * weights[index] / remainingWeight)
+        } else {
+          growth = floor(distributable / CGFloat(remainingCount))
+        }
+        widths[index] += max(0, growth)
+        distributable -= max(0, growth)
+        remainingWeight -= weights[index]
+      }
+      if distributable > 0, let last = widths.indices.last {
+        widths[last] += distributable
+      }
+      return widths
     }
 
     private func tableAlignment(
@@ -746,10 +882,20 @@ final class RichBlockLayoutPlanner {
       let measuredWidth = max(1, renderedTextWidth - inset * 2)
       let measurement = measureText(attributed, width: measuredWidth)
       let measuredHeight = measurement.height
+      let accessoryWidth: CGFloat = if case .disclosureSummary = role {
+        RichBlockDisclosureMetrics.preferredChevronSide
+          + RichBlockDisclosureMetrics.titleChevronGap
+      } else {
+        0
+      }
+      let compactWidth = min(
+        width,
+        max(1, measurement.maxLineUsedWidth + inset * 2 + accessoryWidth)
+      )
       let frame = CGRect(
         x: x,
         y: height,
-        width: width,
+        width: compactWidth,
         height: max(measuredHeight + inset * 2, baseFontSize + inset * 2)
       )
       nodes.append(.init(
@@ -763,6 +909,7 @@ final class RichBlockLayoutPlanner {
           isRTL: isRTL
         ))
       ))
+      recordMeasuredFrame(frame)
       height = frame.maxY
       if capturesTrailingLine {
         trailingTextLine = .init(
@@ -806,7 +953,7 @@ final class RichBlockLayoutPlanner {
     private func measureText(
       _ text: NSAttributedString,
       width: CGFloat
-    ) -> (height: CGFloat, lastLineUsedWidth: CGFloat, lastLineHeight: CGFloat) {
+    ) -> TextMeasurement {
       let bounds = text.boundingRect(
         with: CGSize(width: max(1, width), height: .greatestFiniteMagnitude),
         options: [.usesLineFragmentOrigin, .usesFontLeading]
@@ -822,25 +969,45 @@ final class RichBlockLayoutPlanner {
       storage.addLayoutManager(layoutManager)
       layoutManager.ensureLayout(for: container)
       var lastUsedRect = CGRect.zero
+      var maxLineUsedWidth: CGFloat = 0
       let glyphRange = layoutManager.glyphRange(for: container)
       layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, usedRect, _, _, _ in
         lastUsedRect = usedRect
+        maxLineUsedWidth = max(maxLineUsedWidth, usedRect.width)
       }
-      return (
-        max(ceil(bounds.height), ceil(baseFontSize * 1.25)),
-        ceil(lastUsedRect.width),
-        ceil(lastUsedRect.height)
+      return TextMeasurement(
+        height: max(ceil(bounds.height), ceil(baseFontSize * 1.25)),
+        maxLineUsedWidth: ceil(maxLineUsedWidth),
+        lastLineUsedWidth: ceil(lastUsedRect.width),
+        lastLineHeight: ceil(lastUsedRect.height)
       )
     }
 
     private func imageSize(_ image: InlineProtocol.BlockImage, availableWidth: CGFloat) -> CGSize {
-      let ratio = imageAspectRatio(image)
-      let width = min(availableWidth, 420)
-      let height = min(max(width / ratio, 96), 420)
-      return CGSize(width: width, height: height)
+      let maximumSize = CGSize(width: min(availableWidth, 420), height: 420)
+      let naturalSize = imageDimensions(image) ?? CGSize(width: 240, height: 180)
+      guard naturalSize.width > 0, naturalSize.height > 0 else {
+        return CGSize(width: min(maximumSize.width, 240), height: min(maximumSize.height, 180))
+      }
+      let scale = min(
+        1,
+        min(
+          maximumSize.width / naturalSize.width,
+          maximumSize.height / naturalSize.height
+        )
+      )
+      return CGSize(
+        width: max(1, floor(naturalSize.width * scale)),
+        height: max(1, floor(naturalSize.height * scale))
+      )
     }
 
     private func imageAspectRatio(_ image: InlineProtocol.BlockImage) -> CGFloat {
+      guard let dimensions = imageDimensions(image) else { return 4 / 3 }
+      return min(max(dimensions.width / dimensions.height, 0.2), 5)
+    }
+
+    private func imageDimensions(_ image: InlineProtocol.BlockImage) -> CGSize? {
       let dimensions: (UInt32, UInt32)? = switch image.state {
       case let .pending(pending)?:
         pending.hasDimensions ? (pending.dimensions.width, pending.dimensions.height) : nil
@@ -852,8 +1019,8 @@ final class RichBlockLayoutPlanner {
       case nil:
         nil
       }
-      guard let dimensions, dimensions.0 > 0, dimensions.1 > 0 else { return 4 / 3 }
-      return min(max(CGFloat(dimensions.0) / CGFloat(dimensions.1), 0.2), 5)
+      guard let dimensions, dimensions.0 > 0, dimensions.1 > 0 else { return nil }
+      return CGSize(width: CGFloat(dimensions.0), height: CGFloat(dimensions.1))
     }
 
     private func imageState(_ image: InlineProtocol.BlockImage) -> RichBlockLayoutPlan.ImageNode.State {
