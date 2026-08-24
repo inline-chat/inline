@@ -57,6 +57,8 @@ message ServerUpdate {
     ServerUserUpdateDialogCollapsedMaxId user_dialog_collapsed_max_id = 40;
     ServerUserUpdateSettings user_settings = 43;
     ServerUserUpdateDialogFolder user_dialog_folder = 44;
+    ServerUserUpdateAddedToChat user_added_to_chat = 45;
+    ServerUserUpdateRemovedFromChat user_removed_from_chat = 46;
   }
 }
 
@@ -249,6 +251,19 @@ message ServerUserUpdateChatParticipantGroupAdd {
 message ServerUserUpdateChatParticipantGroupDelete {
   int64 chat_id = 1;
   int64 group_id = 2;
+}
+
+// Canonical effective-access transition for new durable user-bucket rows.
+message ServerUserUpdateAddedToChat {
+  int64 chat_id = 1;
+  optional ChatParticipant participant = 2;
+  optional ChatParticipantGroup group = 3;
+}
+
+// Canonical effective-access transition for new durable user-bucket rows.
+message ServerUserUpdateRemovedFromChat {
+  int64 chat_id = 1;
+  optional int64 group_id = 2;
 }
 
 // Update for a user when their effective permissions for a chat changed.

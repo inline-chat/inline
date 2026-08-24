@@ -295,6 +295,18 @@ export interface ServerUpdate {
          */
         userDialogFolder: ServerUserUpdateDialogFolder;
     } | {
+        oneofKind: "userAddedToChat";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateAddedToChat user_added_to_chat = 45;
+         */
+        userAddedToChat: ServerUserUpdateAddedToChat;
+    } | {
+        oneofKind: "userRemovedFromChat";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateRemovedFromChat user_removed_from_chat = 46;
+         */
+        userRemovedFromChat: ServerUserUpdateRemovedFromChat;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -764,6 +776,40 @@ export interface ServerUserUpdateChatParticipantGroupDelete {
     groupId: bigint;
 }
 /**
+ * Canonical effective-access transition for new durable user-bucket rows.
+ *
+ * @generated from protobuf message server.ServerUserUpdateAddedToChat
+ */
+export interface ServerUserUpdateAddedToChat {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: optional ChatParticipant participant = 2;
+     */
+    participant?: ChatParticipant;
+    /**
+     * @generated from protobuf field: optional ChatParticipantGroup group = 3;
+     */
+    group?: ChatParticipantGroup;
+}
+/**
+ * Canonical effective-access transition for new durable user-bucket rows.
+ *
+ * @generated from protobuf message server.ServerUserUpdateRemovedFromChat
+ */
+export interface ServerUserUpdateRemovedFromChat {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 group_id = 2;
+     */
+    groupId?: bigint;
+}
+/**
  * Update for a user when their effective permissions for a chat changed.
  *
  * @generated from protobuf message server.ServerUserUpdateChatPermissions
@@ -1139,7 +1185,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 39, name: "user_chat_permissions", kind: "message", oneof: "update", T: () => ServerUserUpdateChatPermissions },
             { no: 40, name: "user_dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogCollapsedMaxId },
             { no: 43, name: "user_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateSettings },
-            { no: 44, name: "user_dialog_folder", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFolder }
+            { no: 44, name: "user_dialog_folder", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFolder },
+            { no: 45, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateAddedToChat },
+            { no: 46, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateRemovedFromChat }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1408,6 +1456,18 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userDialogFolder: ServerUserUpdateDialogFolder.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogFolder)
                     };
                     break;
+                case /* server.ServerUserUpdateAddedToChat user_added_to_chat */ 45:
+                    message.update = {
+                        oneofKind: "userAddedToChat",
+                        userAddedToChat: ServerUserUpdateAddedToChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAddedToChat)
+                    };
+                    break;
+                case /* server.ServerUserUpdateRemovedFromChat user_removed_from_chat */ 46:
+                    message.update = {
+                        oneofKind: "userRemovedFromChat",
+                        userRemovedFromChat: ServerUserUpdateRemovedFromChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userRemovedFromChat)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1549,6 +1609,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateDialogFolder user_dialog_folder = 44; */
         if (message.update.oneofKind === "userDialogFolder")
             ServerUserUpdateDialogFolder.internalBinaryWrite(message.update.userDialogFolder, writer.tag(44, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateAddedToChat user_added_to_chat = 45; */
+        if (message.update.oneofKind === "userAddedToChat")
+            ServerUserUpdateAddedToChat.internalBinaryWrite(message.update.userAddedToChat, writer.tag(45, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateRemovedFromChat user_removed_from_chat = 46; */
+        if (message.update.oneofKind === "userRemovedFromChat")
+            ServerUserUpdateRemovedFromChat.internalBinaryWrite(message.update.userRemovedFromChat, writer.tag(46, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3148,6 +3214,121 @@ class ServerUserUpdateChatParticipantGroupDelete$Type extends MessageType<Server
  * @generated MessageType for protobuf message server.ServerUserUpdateChatParticipantGroupDelete
  */
 export const ServerUserUpdateChatParticipantGroupDelete = new ServerUserUpdateChatParticipantGroupDelete$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateAddedToChat$Type extends MessageType<ServerUserUpdateAddedToChat> {
+    constructor() {
+        super("server.ServerUserUpdateAddedToChat", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "participant", kind: "message", T: () => ChatParticipant },
+            { no: 3, name: "group", kind: "message", T: () => ChatParticipantGroup }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateAddedToChat>): ServerUserUpdateAddedToChat {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateAddedToChat>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateAddedToChat): ServerUserUpdateAddedToChat {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional ChatParticipant participant */ 2:
+                    message.participant = ChatParticipant.internalBinaryRead(reader, reader.uint32(), options, message.participant);
+                    break;
+                case /* optional ChatParticipantGroup group */ 3:
+                    message.group = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateAddedToChat, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional ChatParticipant participant = 2; */
+        if (message.participant)
+            ChatParticipant.internalBinaryWrite(message.participant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatParticipantGroup group = 3; */
+        if (message.group)
+            ChatParticipantGroup.internalBinaryWrite(message.group, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateAddedToChat
+ */
+export const ServerUserUpdateAddedToChat = new ServerUserUpdateAddedToChat$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateRemovedFromChat$Type extends MessageType<ServerUserUpdateRemovedFromChat> {
+    constructor() {
+        super("server.ServerUserUpdateRemovedFromChat", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateRemovedFromChat>): ServerUserUpdateRemovedFromChat {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateRemovedFromChat>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateRemovedFromChat): ServerUserUpdateRemovedFromChat {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 group_id */ 2:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateRemovedFromChat, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 group_id = 2; */
+        if (message.groupId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateRemovedFromChat
+ */
+export const ServerUserUpdateRemovedFromChat = new ServerUserUpdateRemovedFromChat$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUserUpdateChatPermissions$Type extends MessageType<ServerUserUpdateChatPermissions> {
     constructor() {

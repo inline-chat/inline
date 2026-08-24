@@ -258,6 +258,8 @@ message DialogFolder {
   optional string title = 2;
   // Uses the same fractional ordering coordinate as Dialog.order.
   string order = 3;
+  // Optional emoji chosen by the user for the folder icon.
+  optional string emoji = 4;
 }
 
 enum DialogFollowMode {
@@ -724,6 +726,18 @@ message Space {
 
   // Current sequence of this space's update bucket.
   optional int32 seq = 7;
+}
+
+message GetSpaceInput { int64 space_id = 1; }
+
+message GetSpaceResult {
+  // Authoritative Space snapshot, including its current sequence.
+  Space space = 1;
+
+  // The authenticated user's membership only; never the full member roster.
+  Member membership = 2;
+
+  SpaceSettings settings = 3;
 }
 
 message JoinPublicSpaceInput {
@@ -1271,6 +1285,7 @@ enum Method {
   CREATE_DIALOG_FOLDER = 124;
   UPDATE_DIALOG_FOLDER = 125;
   DELETE_DIALOG_FOLDER = 126;
+  GET_SPACE = 127;
 }
 
 message RpcCall {
@@ -1402,6 +1417,7 @@ message RpcCall {
     CreateDialogFolderInput createDialogFolder = 125;
     UpdateDialogFolderInput updateDialogFolder = 126;
     DeleteDialogFolderInput deleteDialogFolder = 127;
+    GetSpaceInput getSpace = 128;
   }
 }
 
@@ -1535,6 +1551,7 @@ message RpcResult {
     CreateDialogFolderResult createDialogFolder = 125;
     UpdateDialogFolderResult updateDialogFolder = 126;
     DeleteDialogFolderResult deleteDialogFolder = 127;
+    GetSpaceResult getSpace = 128;
   }
 }
 
@@ -1563,14 +1580,13 @@ message GetUpdatesInput {
   // unsure about these
   // int64 start_date = 3;
 
-  // if the difference with the start_seq is greater than this, the result will
-  // contain "too long" result type
+  // Deprecated compatibility field. The server owns the replay ceiling.
   int32 total_limit = 3;
 
   // optional inclusive upper bound for slicing
   int64 seq_end = 4;
 
-  // max number of updates to return in this response
+  // Max number of updates to return in this response. The server caps pages at 100.
   int32 limit = 5;
 }
 
@@ -2480,6 +2496,10 @@ message UpdateDialogFolderInput {
     bool clear_title = 3;
   }
   optional string order = 4;
+  oneof emoji_update {
+    string emoji = 5;
+    bool clear_emoji = 6;
+  }
 }
 
 message UpdateDialogFolderResult {
@@ -3202,6 +3222,8 @@ message Update {
     UpdateChatPermissions chat_permissions = 44;
     UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45;
     UpdateDialogFolder dialog_folder = 46;
+    UpdateUserAddedToChat user_added_to_chat = 47;
+    UpdateUserRemovedFromChat user_removed_from_chat = 48;
   }
 }
 
@@ -3551,6 +3573,25 @@ message UpdateChatParticipantGroupAdd {
 message UpdateChatParticipantGroupDelete {
   int64 chat_id = 1;
   int64 group_id = 2;
+}
+
+// The current user gained effective access to a chat.
+message UpdateUserAddedToChat {
+  int64 chat_id = 1;
+
+  // Direct-access materialization; absent for group, inherited, or public access.
+  optional ChatParticipant participant = 2;
+
+  // Group-access materialization; absent for direct, inherited, or public access.
+  optional ChatParticipantGroup group = 3;
+}
+
+// The current user lost effective access to a chat.
+message UpdateUserRemovedFromChat {
+  int64 chat_id = 1;
+
+  // The final removed group grant, when applicable.
+  optional int64 group_id = 2;
 }
 
 message UserStatus {

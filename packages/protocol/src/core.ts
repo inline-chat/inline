@@ -778,6 +778,12 @@ export interface DialogFolder {
      * @generated from protobuf field: string order = 3;
      */
     order: string;
+    /**
+     * Optional emoji chosen by the user for the folder icon.
+     *
+     * @generated from protobuf field: optional string emoji = 4;
+     */
+    emoji?: string;
 }
 /**
  * Effective actions the current user may take on a chat.
@@ -1978,6 +1984,36 @@ export interface Space {
      * @generated from protobuf field: optional int32 seq = 7;
      */
     seq?: number;
+}
+/**
+ * @generated from protobuf message GetSpaceInput
+ */
+export interface GetSpaceInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetSpaceResult
+ */
+export interface GetSpaceResult {
+    /**
+     * Authoritative Space snapshot, including its current sequence.
+     *
+     * @generated from protobuf field: Space space = 1;
+     */
+    space?: Space;
+    /**
+     * The authenticated user's membership only; never the full member roster.
+     *
+     * @generated from protobuf field: Member membership = 2;
+     */
+    membership?: Member;
+    /**
+     * @generated from protobuf field: SpaceSettings settings = 3;
+     */
+    settings?: SpaceSettings;
 }
 /**
  * @generated from protobuf message JoinPublicSpaceInput
@@ -3728,6 +3764,12 @@ export interface RpcCall {
          */
         deleteDialogFolder: DeleteDialogFolderInput;
     } | {
+        oneofKind: "getSpace";
+        /**
+         * @generated from protobuf field: GetSpaceInput getSpace = 128;
+         */
+        getSpace: GetSpaceInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -4493,6 +4535,12 @@ export interface RpcResult {
          */
         deleteDialogFolder: DeleteDialogFolderResult;
     } | {
+        oneofKind: "getSpace";
+        /**
+         * @generated from protobuf field: GetSpaceResult getSpace = 128;
+         */
+        getSpace: GetSpaceResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -4564,8 +4612,7 @@ export interface GetUpdatesInput {
     // int64 start_date = 3;
 
     /**
-     * if the difference with the start_seq is greater than this, the result will
-     * contain "too long" result type
+     * Deprecated compatibility field. The server owns the replay ceiling.
      *
      * @generated from protobuf field: int32 total_limit = 3;
      */
@@ -4577,7 +4624,7 @@ export interface GetUpdatesInput {
      */
     seqEnd: bigint;
     /**
-     * max number of updates to return in this response
+     * Max number of updates to return in this response. The server caps pages at 100.
      *
      * @generated from protobuf field: int32 limit = 5;
      */
@@ -6991,6 +7038,24 @@ export interface UpdateDialogFolderInput {
      * @generated from protobuf field: optional string order = 4;
      */
     order?: string;
+    /**
+     * @generated from protobuf oneof: emoji_update
+     */
+    emojiUpdate: {
+        oneofKind: "emoji";
+        /**
+         * @generated from protobuf field: string emoji = 5;
+         */
+        emoji: string;
+    } | {
+        oneofKind: "clearEmoji";
+        /**
+         * @generated from protobuf field: bool clear_emoji = 6;
+         */
+        clearEmoji: boolean;
+    } | {
+        oneofKind: undefined;
+    };
 }
 /**
  * @generated from protobuf message UpdateDialogFolderResult
@@ -8860,6 +8925,18 @@ export interface Update {
          */
         dialogFolder: UpdateDialogFolder;
     } | {
+        oneofKind: "userAddedToChat";
+        /**
+         * @generated from protobuf field: UpdateUserAddedToChat user_added_to_chat = 47;
+         */
+        userAddedToChat: UpdateUserAddedToChat;
+    } | {
+        oneofKind: "userRemovedFromChat";
+        /**
+         * @generated from protobuf field: UpdateUserRemovedFromChat user_removed_from_chat = 48;
+         */
+        userRemovedFromChat: UpdateUserRemovedFromChat;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -9717,6 +9794,46 @@ export interface UpdateChatParticipantGroupDelete {
      * @generated from protobuf field: int64 group_id = 2;
      */
     groupId: bigint;
+}
+/**
+ * The current user gained effective access to a chat.
+ *
+ * @generated from protobuf message UpdateUserAddedToChat
+ */
+export interface UpdateUserAddedToChat {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * Direct-access materialization; absent for group, inherited, or public access.
+     *
+     * @generated from protobuf field: optional ChatParticipant participant = 2;
+     */
+    participant?: ChatParticipant;
+    /**
+     * Group-access materialization; absent for direct, inherited, or public access.
+     *
+     * @generated from protobuf field: optional ChatParticipantGroup group = 3;
+     */
+    group?: ChatParticipantGroup;
+}
+/**
+ * The current user lost effective access to a chat.
+ *
+ * @generated from protobuf message UpdateUserRemovedFromChat
+ */
+export interface UpdateUserRemovedFromChat {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * The final removed group grant, when applicable.
+     *
+     * @generated from protobuf field: optional int64 group_id = 2;
+     */
+    groupId?: bigint;
 }
 /**
  * @generated from protobuf message UserStatus
@@ -12070,7 +12187,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_DIALOG_FOLDER = 126;
      */
-    DELETE_DIALOG_FOLDER = 126
+    DELETE_DIALOG_FOLDER = 126,
+    /**
+     * @generated from protobuf enum value: GET_SPACE = 127;
+     */
+    GET_SPACE = 127
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -14284,7 +14405,8 @@ class DialogFolder$Type extends MessageType<DialogFolder> {
         super("DialogFolder", [
             { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "order", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "order", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<DialogFolder>): DialogFolder {
@@ -14309,6 +14431,9 @@ class DialogFolder$Type extends MessageType<DialogFolder> {
                 case /* string order */ 3:
                     message.order = reader.string();
                     break;
+                case /* optional string emoji */ 4:
+                    message.emoji = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14330,6 +14455,9 @@ class DialogFolder$Type extends MessageType<DialogFolder> {
         /* string order = 3; */
         if (message.order !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.order);
+        /* optional string emoji = 4; */
+        if (message.emoji !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.emoji);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -17282,6 +17410,113 @@ class Space$Type extends MessageType<Space> {
  */
 export const Space = new Space$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceInput$Type extends MessageType<GetSpaceInput> {
+    constructor() {
+        super("GetSpaceInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceInput>): GetSpaceInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceInput): GetSpaceInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceInput
+ */
+export const GetSpaceInput = new GetSpaceInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceResult$Type extends MessageType<GetSpaceResult> {
+    constructor() {
+        super("GetSpaceResult", [
+            { no: 1, name: "space", kind: "message", T: () => Space },
+            { no: 2, name: "membership", kind: "message", T: () => Member },
+            { no: 3, name: "settings", kind: "message", T: () => SpaceSettings }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceResult>): GetSpaceResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceResult): GetSpaceResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Space space */ 1:
+                    message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+                    break;
+                case /* Member membership */ 2:
+                    message.membership = Member.internalBinaryRead(reader, reader.uint32(), options, message.membership);
+                    break;
+                case /* SpaceSettings settings */ 3:
+                    message.settings = SpaceSettings.internalBinaryRead(reader, reader.uint32(), options, message.settings);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Space space = 1; */
+        if (message.space)
+            Space.internalBinaryWrite(message.space, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Member membership = 2; */
+        if (message.membership)
+            Member.internalBinaryWrite(message.membership, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* SpaceSettings settings = 3; */
+        if (message.settings)
+            SpaceSettings.internalBinaryWrite(message.settings, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceResult
+ */
+export const GetSpaceResult = new GetSpaceResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class JoinPublicSpaceInput$Type extends MessageType<JoinPublicSpaceInput> {
     constructor() {
         super("JoinPublicSpaceInput", [
@@ -19347,7 +19582,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 124, name: "updateDialogArchived", kind: "message", oneof: "input", T: () => UpdateDialogArchivedInput },
             { no: 125, name: "createDialogFolder", kind: "message", oneof: "input", T: () => CreateDialogFolderInput },
             { no: 126, name: "updateDialogFolder", kind: "message", oneof: "input", T: () => UpdateDialogFolderInput },
-            { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "input", T: () => DeleteDialogFolderInput }
+            { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "input", T: () => DeleteDialogFolderInput },
+            { no: 128, name: "getSpace", kind: "message", oneof: "input", T: () => GetSpaceInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -20116,6 +20352,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteDialogFolder: DeleteDialogFolderInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteDialogFolder)
                     };
                     break;
+                case /* GetSpaceInput getSpace */ 128:
+                    message.input = {
+                        oneofKind: "getSpace",
+                        getSpace: GetSpaceInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpace)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -20506,6 +20748,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteDialogFolderInput deleteDialogFolder = 127; */
         if (message.input.oneofKind === "deleteDialogFolder")
             DeleteDialogFolderInput.internalBinaryWrite(message.input.deleteDialogFolder, writer.tag(127, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceInput getSpace = 128; */
+        if (message.input.oneofKind === "getSpace")
+            GetSpaceInput.internalBinaryWrite(message.input.getSpace, writer.tag(128, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20645,7 +20890,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 124, name: "updateDialogArchived", kind: "message", oneof: "result", T: () => UpdateDialogArchivedResult },
             { no: 125, name: "createDialogFolder", kind: "message", oneof: "result", T: () => CreateDialogFolderResult },
             { no: 126, name: "updateDialogFolder", kind: "message", oneof: "result", T: () => UpdateDialogFolderResult },
-            { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "result", T: () => DeleteDialogFolderResult }
+            { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "result", T: () => DeleteDialogFolderResult },
+            { no: 128, name: "getSpace", kind: "message", oneof: "result", T: () => GetSpaceResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -21414,6 +21660,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteDialogFolder: DeleteDialogFolderResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteDialogFolder)
                     };
                     break;
+                case /* GetSpaceResult getSpace */ 128:
+                    message.result = {
+                        oneofKind: "getSpace",
+                        getSpace: GetSpaceResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpace)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21804,6 +22056,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteDialogFolderResult deleteDialogFolder = 127; */
         if (message.result.oneofKind === "deleteDialogFolder")
             DeleteDialogFolderResult.internalBinaryWrite(message.result.deleteDialogFolder, writer.tag(127, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceResult getSpace = 128; */
+        if (message.result.oneofKind === "getSpace")
+            GetSpaceResult.internalBinaryWrite(message.result.getSpace, writer.tag(128, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30398,13 +30653,16 @@ class UpdateDialogFolderInput$Type extends MessageType<UpdateDialogFolderInput> 
             { no: 1, name: "folder_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", oneof: "titleUpdate", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "clear_title", kind: "scalar", oneof: "titleUpdate", T: 8 /*ScalarType.BOOL*/ },
-            { no: 4, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 4, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "emoji", kind: "scalar", oneof: "emojiUpdate", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "clear_emoji", kind: "scalar", oneof: "emojiUpdate", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateDialogFolderInput>): UpdateDialogFolderInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.folderId = 0n;
         message.titleUpdate = { oneofKind: undefined };
+        message.emojiUpdate = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<UpdateDialogFolderInput>(this, message, value);
         return message;
@@ -30432,6 +30690,18 @@ class UpdateDialogFolderInput$Type extends MessageType<UpdateDialogFolderInput> 
                 case /* optional string order */ 4:
                     message.order = reader.string();
                     break;
+                case /* string emoji */ 5:
+                    message.emojiUpdate = {
+                        oneofKind: "emoji",
+                        emoji: reader.string()
+                    };
+                    break;
+                case /* bool clear_emoji */ 6:
+                    message.emojiUpdate = {
+                        oneofKind: "clearEmoji",
+                        clearEmoji: reader.bool()
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -30456,6 +30726,12 @@ class UpdateDialogFolderInput$Type extends MessageType<UpdateDialogFolderInput> 
         /* optional string order = 4; */
         if (message.order !== undefined)
             writer.tag(4, WireType.LengthDelimited).string(message.order);
+        /* string emoji = 5; */
+        if (message.emojiUpdate.oneofKind === "emoji")
+            writer.tag(5, WireType.LengthDelimited).string(message.emojiUpdate.emoji);
+        /* bool clear_emoji = 6; */
+        if (message.emojiUpdate.oneofKind === "clearEmoji")
+            writer.tag(6, WireType.Varint).bool(message.emojiUpdate.clearEmoji);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35555,7 +35831,9 @@ class Update$Type extends MessageType<Update> {
             { no: 43, name: "space_settings", kind: "message", oneof: "update", T: () => UpdateSpaceSettings },
             { no: 44, name: "chat_permissions", kind: "message", oneof: "update", T: () => UpdateChatPermissions },
             { no: 45, name: "dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => UpdateDialogCollapsedMaxId },
-            { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder }
+            { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder },
+            { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
+            { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -35834,6 +36112,18 @@ class Update$Type extends MessageType<Update> {
                         dialogFolder: UpdateDialogFolder.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogFolder)
                     };
                     break;
+                case /* UpdateUserAddedToChat user_added_to_chat */ 47:
+                    message.update = {
+                        oneofKind: "userAddedToChat",
+                        userAddedToChat: UpdateUserAddedToChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAddedToChat)
+                    };
+                    break;
+                case /* UpdateUserRemovedFromChat user_removed_from_chat */ 48:
+                    message.update = {
+                        oneofKind: "userRemovedFromChat",
+                        userRemovedFromChat: UpdateUserRemovedFromChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userRemovedFromChat)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -35981,6 +36271,12 @@ class Update$Type extends MessageType<Update> {
         /* UpdateDialogFolder dialog_folder = 46; */
         if (message.update.oneofKind === "dialogFolder")
             UpdateDialogFolder.internalBinaryWrite(message.update.dialogFolder, writer.tag(46, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUserAddedToChat user_added_to_chat = 47; */
+        if (message.update.oneofKind === "userAddedToChat")
+            UpdateUserAddedToChat.internalBinaryWrite(message.update.userAddedToChat, writer.tag(47, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUserRemovedFromChat user_removed_from_chat = 48; */
+        if (message.update.oneofKind === "userRemovedFromChat")
+            UpdateUserRemovedFromChat.internalBinaryWrite(message.update.userRemovedFromChat, writer.tag(48, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -38596,6 +38892,121 @@ class UpdateChatParticipantGroupDelete$Type extends MessageType<UpdateChatPartic
  * @generated MessageType for protobuf message UpdateChatParticipantGroupDelete
  */
 export const UpdateChatParticipantGroupDelete = new UpdateChatParticipantGroupDelete$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateUserAddedToChat$Type extends MessageType<UpdateUserAddedToChat> {
+    constructor() {
+        super("UpdateUserAddedToChat", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "participant", kind: "message", T: () => ChatParticipant },
+            { no: 3, name: "group", kind: "message", T: () => ChatParticipantGroup }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateUserAddedToChat>): UpdateUserAddedToChat {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateUserAddedToChat>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateUserAddedToChat): UpdateUserAddedToChat {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional ChatParticipant participant */ 2:
+                    message.participant = ChatParticipant.internalBinaryRead(reader, reader.uint32(), options, message.participant);
+                    break;
+                case /* optional ChatParticipantGroup group */ 3:
+                    message.group = ChatParticipantGroup.internalBinaryRead(reader, reader.uint32(), options, message.group);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateUserAddedToChat, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional ChatParticipant participant = 2; */
+        if (message.participant)
+            ChatParticipant.internalBinaryWrite(message.participant, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatParticipantGroup group = 3; */
+        if (message.group)
+            ChatParticipantGroup.internalBinaryWrite(message.group, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateUserAddedToChat
+ */
+export const UpdateUserAddedToChat = new UpdateUserAddedToChat$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateUserRemovedFromChat$Type extends MessageType<UpdateUserRemovedFromChat> {
+    constructor() {
+        super("UpdateUserRemovedFromChat", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "group_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateUserRemovedFromChat>): UpdateUserRemovedFromChat {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateUserRemovedFromChat>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateUserRemovedFromChat): UpdateUserRemovedFromChat {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 group_id */ 2:
+                    message.groupId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateUserRemovedFromChat, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 group_id = 2; */
+        if (message.groupId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateUserRemovedFromChat
+ */
+export const UpdateUserRemovedFromChat = new UpdateUserRemovedFromChat$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UserStatus$Type extends MessageType<UserStatus> {
     constructor() {
