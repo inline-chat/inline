@@ -1,0 +1,112 @@
+import GRDB
+import Testing
+
+@testable import InlineKit
+
+@Suite("Database Migration Order")
+struct DatabaseMigrationOrderTests {
+  private let dialogFoldersMigration = "dialog folders"
+  private let messagePayloadMigration = "message block content payload"
+  private let repairMigration = "repair invalid cached user presence"
+  private let previousTailMigration = "dialog folder pinned order"
+
+  @Test("message payload follows the earlier dialog folders migration")
+  func messagePayloadFollowsDialogFolders() {
+    let migrations = makeMigrator().migrations
+
+    #expect(migrations.firstIndex(of: dialogFoldersMigration).map { folderIndex in
+      migrations.firstIndex(of: messagePayloadMigration).map { payloadIndex in
+        payloadIndex == folderIndex + 1
+      } ?? false
+    } ?? false)
+  }
+
+  @Test("databases with both historically inverted migration IDs remain compatible")
+  func acceptsHistoricallyInvertedMigrationIdentifiers() throws {
+    let migrator = makeMigrator()
+    let writer = try DatabaseQueue()
+
+    // GRDB records applied identifiers as a set, so applying these two migrations
+    // in the historical order produces the same durable state as this prefix.
+    try migrator.migrate(writer, upTo: messagePayloadMigration)
+
+    #expect(try writer.read { db in
+      try migrator.hasSchemaChanges(db) == false
+    })
+    try migrator.migrate(writer)
+    #expect(try writer.read(migrator.appliedMigrations) == migrator.migrations)
+  }
+
+  @Test("presence repair follows the committed migration tail")
+  func presenceRepairIsAppended() {
+    let migrations = makeMigrator().migrations
+
+    #expect(migrations.firstIndex(of: previousTailMigration).map { tailIndex in
+      migrations.firstIndex(of: repairMigration).map { repairIndex in
+        repairIndex > tailIndex
+      } ?? false
+    } ?? false)
+  }
+
+  @Test("an existing database applies the appended presence repair")
+  func upgradesFromPreviousTail() throws {
+    let migrator = makeMigrator()
+    let writer = try DatabaseQueue()
+    try migrator.migrate(writer, upTo: previousTailMigration)
+
+    try writer.write { db in
+      try User(id: 1, email: nil, firstName: "Mo").insert(db)
+      try db.execute(
+        sql: "UPDATE user SET lastOnline = ? WHERE id = 1",
+        arguments: [Int64(1_723_000_000_000)]
+      )
+    }
+
+    #expect(try writer.read { db in
+      try Bool.fetchOne(
+        db,
+        sql: "SELECT lastOnline IS NULL FROM user WHERE id = 1"
+      ) == false
+    })
+
+    try migrator.migrate(writer)
+
+    #expect(try writer.read { db in
+      try Bool.fetchOne(
+        db,
+        sql: "SELECT lastOnline IS NULL FROM user WHERE id = 1"
+      ) == true
+    })
+    #expect(try writer.read(migrator.appliedMigrations).contains(repairMigration))
+  }
+
+  @Test("development databases tolerate the repair identifier from its old WIP position")
+  func acceptsPreviouslyRecordedWIPOrder() throws {
+    let migrator = makeMigrator()
+    let writer = try DatabaseQueue()
+    try migrator.migrate(writer, upTo: "dialog collapsed max id")
+
+    try writer.write { db in
+      try User(id: 1, email: nil, firstName: "Mo").insert(db)
+      try db.execute(
+        sql: "UPDATE user SET lastOnline = ? WHERE id = 1",
+        arguments: [Int64(1_723_000_000_000)]
+      )
+      _ = try AppDatabase.repairInvalidCachedUserPresence(in: db)
+      try db.execute(
+        sql: "INSERT INTO grdb_migrations (identifier) VALUES (?)",
+        arguments: [repairMigration]
+      )
+    }
+
+    try migrator.migrate(writer)
+
+    #expect(try writer.read(migrator.appliedMigrations) == migrator.migrations)
+  }
+
+  private func makeMigrator() -> DatabaseMigrator {
+    var migrator = AppDatabase.empty().migrator
+    migrator.eraseDatabaseOnSchemaChange = false
+    return migrator
+  }
+}

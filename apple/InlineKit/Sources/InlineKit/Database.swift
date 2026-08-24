@@ -967,12 +967,6 @@ public extension AppDatabase {
       }
     }
 
-    migrator.registerMigration("message block content payload") { db in
-      try db.alter(table: "message") { table in
-        table.add(column: "blockContentPayload", .blob)
-      }
-    }
-
     migrator.registerMigration("dialog folders") { db in
       try db.create(table: "dialogFolder") { table in
         table.column("id", .integer).primaryKey()
@@ -989,6 +983,12 @@ public extension AppDatabase {
         on: "dialog",
         columns: ["folderId", "order"]
       )
+    }
+
+    migrator.registerMigration("message block content payload") { db in
+      try db.alter(table: "message") { table in
+        table.add(column: "blockContentPayload", .blob)
+      }
     }
 
     migrator.registerMigration("message history holes and space recovery state") { db in
@@ -1056,10 +1056,43 @@ public extension AppDatabase {
       )
     }
 
+    // Keep this identifier stable for development databases that may have
+    // recorded the WIP migration before it was appended to the committed tail.
+    migrator.registerMigration("repair invalid cached user presence") { db in
+      let repairedCount = try Self.repairInvalidCachedUserPresence(in: db)
+      if repairedCount > 0 {
+        Self.log.error("Repaired invalid cached user presence values count=\(repairedCount)")
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
     return migrator
+  }
+}
+
+extension AppDatabase {
+  /// Repairs the known legacy presence representation before GRDB records are observed.
+  /// `lastOnline` is cache metadata, so an undecodable or out-of-range value safely degrades to unknown.
+  @discardableResult
+  static func repairInvalidCachedUserPresence(in db: Database) throws -> Int {
+    try db.execute(
+      sql: """
+      UPDATE "user"
+      SET "lastOnline" = NULL
+      WHERE "lastOnline" IS NOT NULL
+        AND (
+          typeof("lastOnline") NOT IN ('integer', 'real', 'text')
+          OR (typeof("lastOnline") = 'text' AND julianday("lastOnline") IS NULL)
+          OR (
+            typeof("lastOnline") IN ('integer', 'real')
+            AND ("lastOnline" < 0 OR "lastOnline" > 253402300799)
+          )
+        )
+      """
+    )
+    return db.changesCount
   }
 }
 
