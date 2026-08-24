@@ -101,7 +101,6 @@ private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
 
 private actor PassthroughUploadStaging: NativeUploadStaging {
   func stage(logicalID _: String, sourceURL: URL) -> URL { sourceURL }
-  func recordProgress(logicalID _: String, acceptedBytes _: Int64, totalBytes _: Int64) {}
   func discard(logicalID _: String) {}
 }
 

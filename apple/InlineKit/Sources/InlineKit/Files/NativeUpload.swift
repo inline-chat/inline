@@ -48,7 +48,6 @@ public protocol MediaUploading: Sendable {
 
 public protocol NativeUploadStaging: Sendable {
   func stage(logicalID: String, sourceURL: URL) async throws -> URL
-  func recordProgress(logicalID: String, acceptedBytes: Int64, totalBytes: Int64) async
   func discard(logicalID: String) async
 }
 
@@ -58,12 +57,6 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
   public static let shared = FileNativeUploadStagingStore()
 
   private let root: URL
-
-  private struct ProgressRecord: Codable {
-    let acceptedBytes: Int64
-    let totalBytes: Int64
-    let updatedAt: Date
-  }
 
   public init(root: URL? = nil) {
     self.root = root ?? Self.defaultRoot()
@@ -96,24 +89,6 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     let baseName = Self.fileName(for: logicalID)
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).body"))
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).json"))
-  }
-
-  public func recordProgress(
-    logicalID: String,
-    acceptedBytes: Int64,
-    totalBytes: Int64
-  ) {
-    let baseName = Self.fileName(for: logicalID)
-    let record = ProgressRecord(
-      acceptedBytes: max(0, min(acceptedBytes, totalBytes)),
-      totalBytes: max(0, totalBytes),
-      updatedAt: Date()
-    )
-    guard let data = try? JSONEncoder().encode(record) else { return }
-    try? data.write(
-      to: root.appendingPathComponent("\(baseName).json"),
-      options: .atomic
-    )
   }
 
   private static func fileName(for logicalID: String) -> String {
@@ -289,11 +264,6 @@ public actor DurableUploadCoordinator: MediaUploading {
       partSize: partSize,
       total: byteCount
     )
-    await staging.recordProgress(
-      logicalID: ownerScopedLogicalID,
-      acceptedBytes: durableAcceptedBytes,
-      totalBytes: byteCount
-    )
     progress(durableAcceptedBytes, byteCount)
 
     do {
@@ -322,11 +292,6 @@ public actor DurableUploadCoordinator: MediaUploading {
                 accepted,
                 partSize: partSize,
                 total: byteCount
-              )
-              await staging.recordProgress(
-                logicalID: ownerScopedLogicalID,
-                acceptedBytes: durableAcceptedBytes,
-                totalBytes: byteCount
               )
               progress(durableAcceptedBytes, byteCount)
 
@@ -384,11 +349,6 @@ public actor DurableUploadCoordinator: MediaUploading {
             )
             if reconciledBytes > durableAcceptedBytes {
               durableAcceptedBytes = reconciledBytes
-              await staging.recordProgress(
-                logicalID: ownerScopedLogicalID,
-                acceptedBytes: durableAcceptedBytes,
-                totalBytes: byteCount
-              )
               progress(durableAcceptedBytes, byteCount)
             }
           case let .failed(failure):
