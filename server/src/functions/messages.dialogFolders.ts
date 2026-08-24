@@ -27,10 +27,16 @@ import { and, eq, inArray } from "drizzle-orm"
 
 const MAX_FOLDER_TITLE_LENGTH = 80
 const MAX_FOLDER_DIALOGS = 100
+const MAX_FOLDER_EMOJI_INPUT_LENGTH = 128
 
 type TitleUpdate =
   | { oneofKind: "title"; title: string }
   | { oneofKind: "clearTitle"; clearTitle: boolean }
+  | { oneofKind: undefined }
+
+type EmojiUpdate =
+  | { oneofKind: "emoji"; emoji: string }
+  | { oneofKind: "clearEmoji"; clearEmoji: boolean }
   | { oneofKind: undefined }
 
 type ResolvedChat = Awaited<ReturnType<typeof ChatModel.getChatFromInputPeer>>
@@ -43,7 +49,7 @@ export async function createDialogFolder(
     throw RealtimeRpcError.BadRequest()
   }
   const title = normalizeOptionalTitle(input.title)
-  const chats = await resolveUniquePrivateChats(input.peers, context)
+  const chats = await resolveUniqueChats(input.peers, context)
 
   const result = await db.transaction(async (tx) => {
     await lockUser(tx, context.currentUserId)
@@ -117,18 +123,19 @@ export async function createDialogFolder(
 }
 
 export async function updateDialogFolder(
-  input: { folderId: number; titleUpdate: TitleUpdate; order?: string },
+  input: { folderId: number; titleUpdate: TitleUpdate; emojiUpdate: EmojiUpdate; order?: string },
   context: FunctionContext,
 ): Promise<UpdateDialogFolderResult> {
   if (
     input.folderId <= 0 ||
     (input.order != null && !FractionalIndex.isValid(input.order)) ||
-    (input.order == null && input.titleUpdate.oneofKind === undefined)
+    (input.order == null && input.titleUpdate.oneofKind === undefined && input.emojiUpdate.oneofKind === undefined)
   ) {
     throw RealtimeRpcError.BadRequest()
   }
 
   const title = titleValue(input.titleUpdate)
+  const emoji = emojiValue(input.emojiUpdate)
   const result = await db.transaction(async (tx) => {
     await lockUser(tx, context.currentUserId)
     const folder = await ownedDialogFolder(tx, context.currentUserId, input.folderId)
@@ -158,6 +165,7 @@ export async function updateDialogFolder(
     const updateSet: Partial<typeof dialogFolders.$inferInsert> = {}
     if (input.order != null) updateSet.order = input.order
     if (title !== undefined) updateSet.title = title
+    if (emoji !== undefined) updateSet.emoji = emoji
     const [updatedFolder] = await tx
       .update(dialogFolders)
       .set(updateSet)
@@ -233,19 +241,47 @@ export async function deleteDialogFolder(
   return { folderId: result.folderId, dialogs: result.dialogs }
 }
 
-async function resolveUniquePrivateChats(peers: InputPeer[], context: FunctionContext): Promise<ResolvedChat[]> {
+async function resolveUniqueChats(peers: InputPeer[], context: FunctionContext): Promise<ResolvedChat[]> {
   const result: ResolvedChat[] = []
   const seen = new Set<number>()
   for (const peer of peers) {
     const chat = await ChatModel.getChatFromInputPeer(peer, context)
     await AccessGuards.ensureChatAccess(chat, context.currentUserId)
-    if (chat.type !== "private") throw RealtimeRpcError.BadRequest()
     if (!seen.has(chat.id)) {
       seen.add(chat.id)
       result.push(chat)
     }
   }
   return result
+}
+
+function emojiValue(update: EmojiUpdate): string | null | undefined {
+  switch (update.oneofKind) {
+    case "emoji":
+      return normalizeEmoji(update.emoji)
+    case "clearEmoji":
+      if (!update.clearEmoji) throw RealtimeRpcError.BadRequest()
+      return null
+    case undefined:
+      return undefined
+  }
+}
+
+function normalizeEmoji(value: string): string {
+  if (value.length > MAX_FOLDER_EMOJI_INPUT_LENGTH) throw RealtimeRpcError.BadRequest()
+  const trimmed = value.trim()
+  const graphemes = Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(trimmed))
+  if (graphemes.length !== 1) throw RealtimeRpcError.BadRequest()
+  const emoji = graphemes[0]?.segment
+  const containsEmoji = emoji != null
+    && (
+      /[\p{Emoji_Presentation}\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}]/u.test(emoji)
+      || emoji.includes("\u{20E3}")
+    )
+  if (!emoji || !containsEmoji || Array.from(emoji).length > 16) {
+    throw RealtimeRpcError.BadRequest()
+  }
+  return emoji
 }
 
 function normalizeOptionalTitle(title: string | undefined): string | null {

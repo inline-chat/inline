@@ -30,6 +30,7 @@ export async function updateDialogFolderHandler(
     {
       folderId: positiveSafeId(input.folderId),
       titleUpdate: input.titleUpdate,
+      emojiUpdate: input.emojiUpdate,
       order: input.order,
     },
     functionContext(context),

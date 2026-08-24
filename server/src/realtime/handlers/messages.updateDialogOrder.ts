@@ -19,6 +19,7 @@ export const updateDialogOrder = async (
       order: input.order,
       pinnedOrder: input.pinnedOrder,
       pinned: input.pinned,
+      destination: input.destination,
     },
     {
       currentSessionId: handlerContext.sessionId,

@@ -904,6 +904,13 @@
       "when": 1787497691973,
       "tag": "0128_bot-update-queue-limits",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1787575362652,
+      "tag": "0129_dialog-folder-emoji",
+      "breakpoints": true
     }
   ]
 }

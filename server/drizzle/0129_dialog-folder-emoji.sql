@@ -1,0 +1,1 @@
+ALTER TABLE "dialog_folders" ADD COLUMN "emoji" text;

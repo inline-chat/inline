@@ -17,6 +17,10 @@ describe("dialog folders", () => {
     type: { oneofKind: "user", user: { userId: BigInt(userId) } },
   })
 
+  const peerThread = (chatId: number): InputPeer => ({
+    type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } },
+  })
+
   test("creates a folder and moves DM dialogs into one contiguous ordered block", async () => {
     const owner = await testUtils.createUser("dialog-folder-create-owner@example.com")
     const first = await testUtils.createUser("dialog-folder-create-first@example.com")
@@ -67,6 +71,62 @@ describe("dialog folders", () => {
         .from(dialogFolders)
         .where(and(eq(dialogFolders.id, Number(result.folder?.id)), eq(dialogFolders.userId, owner.id))),
     ).toHaveLength(1)
+  })
+
+  test("creates a folder containing an accessible thread", async () => {
+    const owner = await testUtils.createUser("dialog-folder-thread-owner@example.com")
+    const chat = await testUtils.createChat(null, "Folder thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Failed to create folder thread")
+    await testUtils.addParticipant(chat.id, owner.id)
+    await db.insert(dialogs).values({ chatId: chat.id, userId: owner.id, open: true })
+
+    const result = await createDialogFolder(
+      { peers: [peerThread(chat.id)] },
+      testUtils.functionContext({ userId: owner.id, sessionId: 25 }),
+    )
+
+    expect(result.dialogs).toHaveLength(1)
+    expect(result.dialogs[0]?.folderId).toBe(result.folder?.id)
+  })
+
+  test("sets and clears a synced folder emoji", async () => {
+    const owner = await testUtils.createUser("dialog-folder-emoji-owner@example.com")
+    const created = await createDialogFolder(
+      { peers: [] },
+      testUtils.functionContext({ userId: owner.id, sessionId: 26 }),
+    )
+    const folderId = Number(created.folder?.id)
+
+    const updated = await updateDialogFolder(
+      {
+        folderId,
+        titleUpdate: { oneofKind: undefined },
+        emojiUpdate: { oneofKind: "emoji", emoji: "🚀" },
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 26 }),
+    )
+    expect(updated.folder?.emoji).toBe("🚀")
+
+    const cleared = await updateDialogFolder(
+      {
+        folderId,
+        titleUpdate: { oneofKind: undefined },
+        emojiUpdate: { oneofKind: "clearEmoji", clearEmoji: true },
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 26 }),
+    )
+    expect(cleared.folder?.emoji).toBeUndefined()
+
+    await expect(
+      updateDialogFolder(
+        {
+          folderId,
+          titleUpdate: { oneofKind: undefined },
+          emojiUpdate: { oneofKind: "emoji", emoji: "not emoji" },
+        },
+        testUtils.functionContext({ userId: owner.id, sessionId: 26 }),
+      ),
+    ).rejects.toThrow()
   })
 
   test("close deletes the folder and closes every child dialog", async () => {
@@ -120,6 +180,7 @@ describe("dialog folders", () => {
       {
         folderId: Number(created.folder?.id),
         titleUpdate: { oneofKind: "title", title: "Friends" },
+        emojiUpdate: { oneofKind: undefined },
       },
       testUtils.functionContext({ userId: owner.id, sessionId: 23 }),
     )

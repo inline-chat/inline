@@ -10,6 +10,7 @@ export const dialogFolders = pgTable(
       .notNull()
       .references(() => users.id),
     title: text("title"),
+    emoji: text("emoji"),
     order: text("order").notNull(),
     date: creationDate,
   },

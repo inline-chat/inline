@@ -113,7 +113,7 @@ export async function updateDialogOrder(input: Input, context: FunctionContext):
         }
         case "folderId": {
           const folderId = Number(input.destination.destination.folderId)
-          if (!Number.isSafeInteger(folderId) || folderId <= 0 || chat.type !== "private") {
+          if (!Number.isSafeInteger(folderId) || folderId <= 0) {
             throw RealtimeRpcError.BadRequest()
           }
           const folder = await ownedDialogFolder(tx, context.currentUserId, folderId)

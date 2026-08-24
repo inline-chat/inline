@@ -5,6 +5,7 @@ export function encodeDialogFolder(folder: DbDialogFolder): DialogFolder {
   return {
     id: BigInt(folder.id),
     title: folder.title ?? undefined,
+    emoji: folder.emoji ?? undefined,
     order: folder.order,
   }
 }
