@@ -21,7 +21,7 @@ struct ProviderSignInProgress: View {
         .foregroundStyle(.secondary)
 
       Text("Continue in your browser")
-        .font(.title2.weight(.semibold))
+        .font(.onboardingIOSTitle.weight(.medium))
         .multilineTextAlignment(.center)
 
       if let error = coordinator.errorMessage {
@@ -35,7 +35,7 @@ struct ProviderSignInProgress: View {
           signInURL = nil
           attemptID = UUID()
         }
-        .buttonStyle(SimpleButtonStyle())
+        .buttonStyle(OnboardingAccentButtonStyle())
       } else {
         Text(statusDescription)
           .foregroundStyle(.secondary)
@@ -52,14 +52,14 @@ struct ProviderSignInProgress: View {
             Text(buttonTitle)
           }
         }
-        .buttonStyle(SimpleButtonStyle())
+        .buttonStyle(OnboardingAccentButtonStyle())
         .disabled(isBusy)
         .frame(maxWidth: 340)
       }
 
       Spacer()
     }
-    .padding()
+    .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .task(id: attemptID) {
       await start()
     }

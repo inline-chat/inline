@@ -13,7 +13,6 @@ struct InviteCode: View {
   @State private var errorMsg = ""
   @State private var isChecking = false
   @FocusState private var isFocused: Bool
-  @Environment(\.colorScheme) private var colorScheme
   @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient
 
@@ -23,14 +22,6 @@ struct InviteCode: View {
 
   private var isInputValid: Bool {
     normalizedCode.count == 8
-  }
-
-  private var focusColor: Color {
-    if colorScheme == .dark {
-      Color(hex: "#8b77dc")
-    } else {
-      Color(hex: "#a28cf2")
-    }
   }
 
   var body: some View {
@@ -45,7 +36,7 @@ struct InviteCode: View {
           .foregroundColor(.primary)
 
         Text("Enter access invite code", comment: "Access invite code input title")
-          .font(.system(size: 21.0, weight: .semibold))
+          .font(.onboardingIOSTitle.weight(.medium))
           .foregroundStyle(.primary)
 
         Text(
@@ -76,7 +67,7 @@ struct InviteCode: View {
       Button(isChecking ? NSLocalizedString("Checking...", comment: "Checking invite code button loading state") : NSLocalizedString("Continue", comment: "Continue button")) {
         submit()
       }
-      .buttonStyle(SimpleButtonStyle())
+      .buttonStyle(OnboardingAccentButtonStyle())
       .frame(maxWidth: .infinity)
       .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
@@ -96,7 +87,6 @@ struct InviteCode: View {
       .autocorrectionDisabled(true)
       .monospaced()
       .font(.title2)
-      .fontWeight(.semibold)
       .multilineTextAlignment(.center)
       .padding(.horizontal, 20)
       .padding(.vertical, 16)
@@ -106,7 +96,7 @@ struct InviteCode: View {
           .overlay(
             RoundedRectangle(cornerRadius: 16)
               .stroke(
-                isFocused ? focusColor : Color(.systemGray4),
+                isFocused ? Color.accentColor : Color.onboardingSystemGray4,
                 lineWidth: isFocused ? 2 : 0.5
               )
           )

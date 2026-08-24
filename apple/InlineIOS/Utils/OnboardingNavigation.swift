@@ -3,6 +3,7 @@ import InlineKit
 
 enum OnboardingStep: Identifiable, Hashable {
   case welcome
+  case getStarted
   case email(prevEmail: String? = nil)
   case code(email: String, challengeToken: String? = nil, inviteCode: String? = nil)
   case inviteCodeForEmail(email: String, challengeToken: String? = nil)
@@ -16,6 +17,7 @@ enum OnboardingStep: Identifiable, Hashable {
   var id: String {
     switch self {
       case .welcome: "welcome"
+      case .getStarted: "getStarted"
       case let .email(prevEmail): "email-\(prevEmail ?? "")"
       case let .code(email, challengeToken, inviteCode): "code-\(email)-\(challengeToken ?? "")-\(inviteCode ?? "")"
       case let .inviteCodeForEmail(email, challengeToken): "inviteCodeForEmail-\(email)-\(challengeToken ?? "")"

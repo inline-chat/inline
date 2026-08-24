@@ -9,6 +9,8 @@ struct OnboardingView: View {
       Welcome()
         .navigationDestination(for: OnboardingStep.self) { step in
           switch step {
+            case .getStarted:
+              GetStarted()
             case let .email(prevEmail):
               Email(prevEmail: prevEmail)
             case let .code(email, challengeToken, inviteCode):

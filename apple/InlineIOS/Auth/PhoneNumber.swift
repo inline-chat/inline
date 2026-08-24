@@ -33,7 +33,7 @@ struct PhoneNumber: View {
           .foregroundColor(.primary)
 
         Text(NSLocalizedString("Sign in with phone", comment: "Phone sign in title"))
-          .font(.system(size: 21.0, weight: .semibold))
+          .font(.onboardingIOSTitle.weight(.medium))
           .foregroundStyle(.primary)
       }
 
@@ -64,7 +64,7 @@ struct PhoneNumber: View {
       ) {
         submit()
       }
-      .buttonStyle(SimpleButtonStyle())
+      .buttonStyle(OnboardingAccentButtonStyle())
       .frame(maxWidth: .infinity)
       .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)

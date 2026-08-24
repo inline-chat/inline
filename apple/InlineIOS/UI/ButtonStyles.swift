@@ -9,9 +9,10 @@ struct SimpleWhiteButtonStyle: ButtonStyle {
       .font(.body)
       .frame(height: 52)
       .frame(maxWidth: .infinity)
-      .fontWeight(.medium)
-      .background(colorScheme == .light ? Color(.systemGray6) : .white.opacity(0.96))
-      .cornerRadius(16)
+      .background(
+        colorScheme == .light ? Color.onboardingSystemGray6 : Color.white.opacity(0.96),
+        in: Capsule()
+      )
       .opacity(configuration.isPressed ? 0.8 : 1)
       .scaleEffect(configuration.isPressed ? 0.9 : 1)
       .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
@@ -30,6 +31,20 @@ struct SimpleButtonStyle: ButtonStyle {
       .fontWeight(.medium)
       .background(colorScheme == .dark ? Color(hex: "#8b77dc") : Color(hex: "#a28cf2"))
       .cornerRadius(16)
+      .opacity(configuration.isPressed ? 0.8 : 1)
+      .scaleEffect(configuration.isPressed ? 0.9 : 1)
+      .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+  }
+}
+
+struct OnboardingAccentButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .foregroundStyle(.white)
+      .font(.onboardingIOSBody)
+      .frame(height: 52)
+      .frame(maxWidth: .infinity)
+      .background(Color.accentColor, in: Capsule())
       .opacity(configuration.isPressed ? 0.8 : 1)
       .scaleEffect(configuration.isPressed ? 0.9 : 1)
       .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)

@@ -13,62 +13,54 @@ struct Welcome: View {
     VStack {
       Spacer()
 
-      Image("AppIconSmall")
-        .opacity(isVisible ? 1 : 0)
-        .offset(y: isVisible ? 0 : -30)
-        .animation(animation.delay(0.05), value: isVisible)
+      VStack(alignment: .leading, spacing: 18) {
+        Image(onboardingAppIconName)
+          .resizable()
+          .scaledToFit()
+          .frame(width: 64, height: 64)
+          .opacity(isVisible ? 1 : 0)
+          .offset(y: isVisible ? 0 : -30)
+          .animation(animation.delay(0.05), value: isVisible)
 
-      Text("Welcome to Inline")
-        .font(.largeTitle)
-        .fontWeight(.bold)
-        .padding(.bottom, 0.5)
-        .opacity(isVisible ? 1 : 0)
-        .offset(y: isVisible ? 0 : 20)
-        .animation(animation.delay(0.2), value: isVisible)
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Welcome to Inline")
+            .font(.onboardingIOSTitle.weight(.medium))
+            .opacity(isVisible ? 1 : 0)
+            .offset(y: isVisible ? 0 : 20)
+            .animation(animation.delay(0.2), value: isVisible)
 
-      Text("A fresh chatting experience")
-        .font(.system(size: 20.0, weight: .regular))
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
-        .opacity(isVisible ? 1 : 0)
-        .offset(y: isVisible ? 0 : 20)
-        .animation(animation.delay(0.25), value: isVisible)
+          Text("A fast, tranquil, AI native work chat app")
+            .font(.onboardingIOSTitle2)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .opacity(isVisible ? 1 : 0)
+            .offset(y: isVisible ? 0 : 20)
+            .animation(animation.delay(0.25), value: isVisible)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, OnboardingUtils.shared.hPadding)
 
       Spacer()
 
-      VStack(spacing: 8) {
-        providerButton(.google)
-        providerButton(.apple)
-
-        Button {
-          nav.push(.email())
-        } label: {
-          Text("Continue with Email").padding(.horizontal, 40)
-        }
-        .buttonStyle(SimpleButtonStyle())
-        .frame(maxWidth: .infinity)
-        .opacity(isVisible ? 1 : 0)
-        .offset(y: isVisible ? 0 : 20)
-        .animation(animation.delay(0.3), value: isVisible)
-
-        Button("Continue with Phone") {
-          nav.push(.phoneNumber())
-        }
-        .buttonStyle(SimpleWhiteButtonStyle())
-        .frame(maxWidth: .infinity)
-        .opacity(isVisible ? 1 : 0)
-        .offset(y: isVisible ? 0 : 20)
-        .animation(animation.delay(0.35), value: isVisible)
-
+      Button {
+        nav.push(.getStarted)
+      } label: {
+        Text("Get Started").padding(.horizontal, 40)
       }
-      // .padding(.horizontal, OnboardingUtils.shared.hPadding)
+      .buttonStyle(OnboardingAccentButtonStyle())
+      .frame(maxWidth: .infinity)
+      .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+      .opacity(isVisible ? 1 : 0)
+      .offset(y: isVisible ? 0 : 20)
+      .animation(animation.delay(0.3), value: isVisible)
 
       Footer()
+        .padding(.horizontal, OnboardingUtils.shared.hPadding)
         .opacity(isVisible ? 1 : 0)
         .animation(animation.delay(0.45), value: isVisible)
     }
-    .padding()
     .frame(minHeight: 400)
     .onAppear {
       isVisible = true
@@ -76,34 +68,12 @@ struct Welcome: View {
     .navigationBarBackButtonHidden()
   }
 
-  @ViewBuilder
-  private func providerButton(_ provider: ProviderSignInProvider) -> some View {
-    Button {
-      nav.push(.provider(provider))
-    } label: {
-      HStack(spacing: 10) {
-        if provider == .google {
-          Image("google-g")
-            .resizable()
-            .scaledToFit()
-            .frame(width: 18, height: 18)
-        } else {
-          Image(systemName: "apple.logo")
-            .font(.system(size: 18, weight: .medium))
-        }
-        if provider == .google {
-          Text("Continue with Google")
-        } else {
-          Text("Continue with Apple")
-        }
-      }
-      .padding(.horizontal, 40)
-    }
-    .buttonStyle(SimpleWhiteButtonStyle())
-    .frame(maxWidth: .infinity)
-    .opacity(isVisible ? 1 : 0)
-    .offset(y: isVisible ? 0 : 20)
-    .animation(animation.delay(provider == .google ? 0.3 : 0.33), value: isVisible)
+  private var onboardingAppIconName: String {
+    #if IOS_ONBOARDING_GALLERY_APP
+    "AppIcon-384"
+    #else
+    "AppIconSmall"
+    #endif
   }
 
   struct Footer: View {
@@ -114,11 +84,11 @@ struct Welcome: View {
         Text(
           "By continuing, you acknowledge that you understand and agree to the [Terms of Service](https://inline.chat/legal/terms) and [Privacy Policy](https://inline.chat/legal/privacy)."
         )
-        .font(.footnote)
+        .font(.onboardingIOSFootnote)
         .tint(Color.secondary)
         .foregroundStyle(.tertiary)
         .multilineTextAlignment(.center)
-        .frame(maxWidth: 300)
+        .frame(maxWidth: .infinity)
 
         Spacer()
       }

@@ -19,7 +19,6 @@ struct Profile: View {
   @State private var errorMsg = ""
   @State private var isInputValid = false
   @State private var usernameStatus: UsernameStatus = .checking
-  @Environment(\.colorScheme) private var colorScheme
 
   // MARK: - Focus Management
 
@@ -43,14 +42,6 @@ struct Profile: View {
 
   private let placeHolder = "Name"
 
-  private func buttonColor() -> Color {
-    if colorScheme == .dark {
-      Color(red: 0x8B / 255.0, green: 0x77 / 255.0, blue: 0xDC / 255.0)
-    } else {
-      Color(red: 0xA2 / 255.0, green: 0x8C / 255.0, blue: 0xF2 / 255.0)
-    }
-  }
-
   // MARK: - Body
 
   var body: some View {
@@ -66,7 +57,7 @@ struct Profile: View {
           .foregroundColor(.primary)
 
         Text(NSLocalizedString("Setup your profile", comment: "Profile setup title"))
-          .font(.system(size: 21.0, weight: .semibold))
+          .font(.onboardingIOSTitle.weight(.medium))
           .foregroundStyle(.primary)
       }
 
@@ -200,7 +191,7 @@ extension Profile {
           .overlay(
             RoundedRectangle(cornerRadius: 16)
               .stroke(
-                focusedField == .fullName ? buttonColor() : Color(.systemGray4),
+                focusedField == .fullName ? Color.accentColor : Color.onboardingSystemGray4,
                 lineWidth: focusedField == .fullName ? 2 : 0.5
               )
           )
@@ -226,7 +217,7 @@ extension Profile {
           .overlay(
             RoundedRectangle(cornerRadius: 16)
               .stroke(
-                focusedField == .username ? buttonColor() : Color(.systemGray4),
+                focusedField == .username ? Color.accentColor : Color.onboardingSystemGray4,
                 lineWidth: focusedField == .username ? 2 : 0.5
               )
           )
@@ -268,7 +259,7 @@ extension Profile {
     Button(formState.isLoading ? "Creating Account..." : "Continue") {
       submitAccount()
     }
-    .buttonStyle(SimpleButtonStyle())
+    .buttonStyle(OnboardingAccentButtonStyle())
     .frame(maxWidth: .infinity)
     .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)

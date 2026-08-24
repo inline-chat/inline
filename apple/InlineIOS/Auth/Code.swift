@@ -15,7 +15,6 @@ struct Code: View {
   @State var animate: Bool = false
   @State var errorMsg: String = ""
   @State var isInputValid: Bool = false
-  @Environment(\.colorScheme) private var colorScheme
 
   @FocusState private var isFocused: Bool
   @FormState var formState
@@ -34,14 +33,6 @@ struct Code: View {
     self.inviteCode = inviteCode
   }
 
-  private var focusColor: Color {
-    if colorScheme == .dark {
-      Color(hex: "#8b77dc")
-    } else {
-      Color(hex: "#a28cf2")
-    }
-  }
-
   var body: some View {
     VStack(spacing: 20) {
       Spacer()
@@ -55,7 +46,7 @@ struct Code: View {
           .foregroundColor(.primary)
 
         Text(NSLocalizedString("Enter the code", comment: "Code input title"))
-          .font(.system(size: 21.0, weight: .semibold))
+          .font(.onboardingIOSTitle.weight(.medium))
           .foregroundStyle(.primary)
       }
 
@@ -164,7 +155,6 @@ extension Code {
       .kerning(5)
       .autocorrectionDisabled(true)
       .font(.title2)
-      .fontWeight(.semibold)
       .multilineTextAlignment(.center)
       .padding(.horizontal, 20)
       .padding(.vertical, 16)
@@ -174,7 +164,7 @@ extension Code {
           .overlay(
             RoundedRectangle(cornerRadius: 16)
               .stroke(
-                isFocused ? focusColor : Color(.systemGray4),
+                isFocused ? Color.accentColor : Color.onboardingSystemGray4,
                 lineWidth: isFocused ? 2 : 0.5
               )
           )
@@ -211,7 +201,7 @@ extension Code {
       ) {
         submitCode()
       }
-      .buttonStyle(SimpleButtonStyle())
+      .buttonStyle(OnboardingAccentButtonStyle())
       .frame(maxWidth: .infinity)
       .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
