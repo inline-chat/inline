@@ -20,7 +20,6 @@ export type BotInputId = number | string
 export type BotUpdateKey =
   | "message"
   | "edited_message"
-  | "deleted_messages"
   | "message_reaction"
   | "message_action"
   | "bot_participation"
@@ -29,7 +28,6 @@ export type BotDefaultUpdateKey = Exclude<BotUpdateKey, "message_reaction">
 export const BOT_DEFAULT_UPDATE_KEYS = [
   "message",
   "edited_message",
-  "deleted_messages",
   "message_action",
   "bot_participation",
 ] as const satisfies ReadonlyArray<BotDefaultUpdateKey>
@@ -92,7 +90,6 @@ export type BotMessageEntityInput = {
   offset: BotInputId
   length: BotInputId
   user_id?: BotInputId
-  agent_id?: BotInputId
   url?: string
   language?: string
   chat_id?: BotInputId
@@ -108,7 +105,6 @@ export type BotMessageEntityOutput = {
   offset: number
   length: number
   user?: BotUser
-  agent_id?: number
   url?: string
   language?: string
   chat_id?: number
@@ -259,21 +255,12 @@ export type BotChatParticipant = {
 type BotUpdateBase = {
   update_id: number
   activation_reason?: BotActivationReason
-  activated_agent?: BotAgent
 }
 
 export type BotUpdate = BotUpdateBase &
   (
     | { message: BotEventMessage }
     | { edited_message: BotEventMessage }
-    | {
-        deleted_messages: {
-          chat: BotEventChat
-          message_ids: number[]
-          actor?: BotUser
-          date: number
-        }
-      }
     | {
         message_reaction: {
           chat: BotEventChat
@@ -317,23 +304,6 @@ export type BotCommand = {
   description: string
   sort_order?: number
 }
-
-export type BotAgent = {
-  id: number
-  bot_user_id: number
-  name: string
-  handle?: string
-  emoji?: string
-  description?: string
-  skill_key?: string
-  instructions?: string
-}
-
-export type CreateAgentParams = Omit<BotAgent, "id" | "bot_user_id">
-export type GetAgentParams = { agent_id: BotInputId }
-export type CreateAgentResult = { agent: BotAgent }
-export type GetAgentResult = { bot: BotUser; agent: BotAgent }
-export type GetMyAgentsResult = { agents: BotAgent[] }
 
 export type GetMeResult = { user: BotUser }
 export type GetChatResult = { chat: BotChat }
@@ -406,6 +376,13 @@ export type GetChatParticipantParams = {
 export type GetChatParticipantCountParams = {
   chat_id: BotInputId
 }
+
+export type AddThreadParticipantParams = {
+  chat_id: BotInputId
+  user_id: BotInputId
+}
+
+export type RemoveThreadParticipantParams = AddThreadParticipantParams
 
 export type SetThreadTitleParams = {
   chat_id: BotInputId
@@ -500,7 +477,7 @@ export type CreateThreadParams = {
   emoji?: string
   space_id?: BotInputId
   is_public?: boolean
-  participant_ids?: BotInputId[]
+  participants?: BotInputId[]
 }
 
 export type CreateReplyThreadParams = {
@@ -508,7 +485,7 @@ export type CreateReplyThreadParams = {
   message_id: BotInputId
   title?: string
   emoji?: string
-  participant_ids?: BotInputId[]
+  participants?: BotInputId[]
 }
 
 export type SetMyCommandsParams = {
@@ -534,6 +511,8 @@ export type BotMethodName =
   | "unpinMessage"
   | "getChatParticipant"
   | "getChatParticipantCount"
+  | "addThreadParticipant"
+  | "removeThreadParticipant"
   | "setThreadTitle"
   | "sendReaction"
   | "deleteReaction"
@@ -545,9 +524,6 @@ export type BotMethodName =
   | "setWebhook"
   | "deleteWebhook"
   | "getWebhookInfo"
-  | "createAgent"
-  | "getAgent"
-  | "getMyAgents"
 
 export type BotMethodParamsByName = {
   getMe: undefined
@@ -568,6 +544,8 @@ export type BotMethodParamsByName = {
   unpinMessage: UnpinMessageParams
   getChatParticipant: GetChatParticipantParams
   getChatParticipantCount: GetChatParticipantCountParams
+  addThreadParticipant: AddThreadParticipantParams
+  removeThreadParticipant: RemoveThreadParticipantParams
   setThreadTitle: SetThreadTitleParams
   sendReaction: SendReactionParams
   deleteReaction: DeleteReactionParams
@@ -579,9 +557,6 @@ export type BotMethodParamsByName = {
   setWebhook: SetWebhookParams
   deleteWebhook: DeleteWebhookParams
   getWebhookInfo: undefined
-  createAgent: CreateAgentParams
-  getAgent: GetAgentParams
-  getMyAgents: undefined
 }
 
 export type BotMethodResultByName = {
@@ -603,6 +578,8 @@ export type BotMethodResultByName = {
   unpinMessage: EmptyResult
   getChatParticipant: GetChatParticipantResult
   getChatParticipantCount: GetChatParticipantCountResult
+  addThreadParticipant: EmptyResult
+  removeThreadParticipant: EmptyResult
   setThreadTitle: EmptyResult
   sendReaction: EmptyResult
   deleteReaction: EmptyResult
@@ -614,9 +591,6 @@ export type BotMethodResultByName = {
   setWebhook: SetWebhookResult
   deleteWebhook: DeleteWebhookResult
   getWebhookInfo: GetWebhookInfoResult
-  createAgent: CreateAgentResult
-  getAgent: GetAgentResult
-  getMyAgents: GetMyAgentsResult
 }
 
 export type BotMethodParams<M extends BotMethodName> = BotMethodParamsByName[M]

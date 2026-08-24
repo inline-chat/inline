@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { BotCapability_Kind, ConnectionError_Reason, DialogFollowMode, GetUpdatesResult_ResultType, Method, RpcError_Code, ServerProtocolMessage, SyncSkippedSequence_Reason, Update } from "@inline-chat/protocol/core"
 import { InlineSdkClient } from "./inline-sdk-client.js"
 import { MockTransport } from "../realtime/mock-transport.js"
-import type { InlineSdkState, InlineSdkStateStore } from "./types.js"
+import type { InlineSdkAuthoritativeRepairRequest, InlineSdkState, InlineSdkStateStore } from "./types.js"
 import { InlineSdkAuthenticationError } from "./errors.js"
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 300) => {
@@ -3568,16 +3568,21 @@ describe("InlineSdkClient", () => {
 
     vi.useRealTimers()
 
-    // Now cover the current server's TOO_LONG meaning: history is retained, but
-    // the first requested difference is larger than one bounded response.
+    // TOO_LONG is an authoritative replacement instruction, never a retained
+    // backlog boundary for another GET_UPDATES loop.
     const transport2 = new MockTransport()
     let warned = 0
+    const repairs: InlineSdkAuthoritativeRepairRequest[] = []
     const client2 = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
       token: "test-token",
       transport: transport2,
       state: new MemoryStateStore({ version: 1, lastSeqByChatId: { "10": 1 } }),
       logger: { warn: () => warned++ } as any,
+      repairUpdatesBucket: async (request) => {
+        repairs.push(request)
+        return { appliedSeq: request.serverSeq }
+      },
     })
 
     await connectAndOpen(client2, transport2)
@@ -3635,72 +3640,12 @@ describe("InlineSdkClient", () => {
       }),
     )
 
-    await waitFor(() => transport2.sent.filter((message) =>
-      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    ).length >= 2)
-    const replay1 = transport2.sent.filter((message) =>
-      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    ).at(1)
-    if (!replay1 || replay1.body.oneofKind !== "rpcCall") throw new Error("missing first retained replay slice")
-    if (replay1.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing first replay input")
-    expect(replay1.body.rpcCall.input.getUpdates.startSeq).toBe(1n)
-    expect(replay1.body.rpcCall.input.getUpdates.seqEnd).toBe(1001n)
-    expect(client2.exportState().lastSeqByChatId?.["10"]).toBe(1)
-
-    await transport2.emitMessage(ServerProtocolMessage.create({
-      id: 13n,
-      body: {
-        oneofKind: "rpcResult",
-        rpcResult: {
-          reqMsgId: replay1.id,
-          result: {
-            oneofKind: "getUpdates",
-            getUpdates: {
-              updates: [],
-              seq: 1001n,
-              date: 221n,
-              resultType: GetUpdatesResult_ResultType.EMPTY,
-              final: true,
-              skippedSequences: irrelevantSkippedSequences(1, 1001),
-            },
-          },
-        },
-      },
-    }))
-
-    await waitFor(() => transport2.sent.filter((message) =>
-      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    ).length >= 3)
-    const replay2 = transport2.sent.filter((message) =>
-      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    ).at(2)
-    if (!replay2 || replay2.body.oneofKind !== "rpcCall") throw new Error("missing second retained replay slice")
-    if (replay2.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing second replay input")
-    expect(replay2.body.rpcCall.input.getUpdates.startSeq).toBe(1001n)
-    expect(replay2.body.rpcCall.input.getUpdates.seqEnd).toBe(1002n)
-
-    await transport2.emitMessage(ServerProtocolMessage.create({
-      id: 14n,
-      body: {
-        oneofKind: "rpcResult",
-        rpcResult: {
-          reqMsgId: replay2.id,
-          result: {
-            oneofKind: "getUpdates",
-            getUpdates: {
-              updates: [],
-              seq: 1002n,
-              date: 222n,
-              resultType: GetUpdatesResult_ResultType.EMPTY,
-              final: true,
-              skippedSequences: irrelevantSkippedSequences(1001, 1002),
-            },
-          },
-        },
-      },
-    }))
-
     await waitFor(() => client2.exportState().lastSeqByChatId?.["10"] === 1002)
+    expect(repairs).toHaveLength(1)
+    expect(repairs[0]?.bucket.kind).toBe("chat")
+    expect(transport2.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    )).toHaveLength(1)
     expect(client2.exportState().dateCursor).toBeUndefined()
     expect(client2.getSyncStatus()).toEqual({ state: "live", degradedBuckets: [] })
     expect(warned).toBe(0)
@@ -3739,7 +3684,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  it("degrades instead of looping when retained-history replay stops making progress", async () => {
+  it("degrades without retrying when TOO_LONG has no authoritative repair owner", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
@@ -3787,49 +3732,27 @@ describe("InlineSdkClient", () => {
         },
       },
     }))
-    await waitFor(() => transport.sent.filter((message) =>
-      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    ).length === 2)
-    const replay = transport.sent.filter((message) =>
-      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    )[1]
-    if (!replay || replay.body.oneofKind !== "rpcCall") throw new Error("missing retained replay request")
-    await transport.emitMessage(ServerProtocolMessage.create({
-      id: 21n,
-      body: {
-        oneofKind: "rpcResult",
-        rpcResult: {
-          reqMsgId: replay.id,
-          result: {
-            oneofKind: "getUpdates",
-            getUpdates: {
-              updates: [],
-              seq: 1n,
-              date: 302n,
-              resultType: GetUpdatesResult_ResultType.EMPTY,
-              final: true,
-            },
-          },
-        },
-      },
-    }))
-
     await waitFor(() => client.getSyncStatus().state === "degraded")
     await new Promise((resolve) => setTimeout(resolve, 25))
     expect(transport.sent.filter((message) =>
       message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    )).toHaveLength(2)
+    )).toHaveLength(1)
     expect(client.exportState().lastSeqBySpaceId?.["20"]).toBe(1)
     await client.close()
   })
 
-  it("replays a retained user backlog without requiring a host snapshot callback", async () => {
+  it("repairs a TOO_LONG user bucket before advancing its cursor", async () => {
     const transport = new MockTransport()
+    const repairs: InlineSdkAuthoritativeRepairRequest[] = []
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
       token: "test-token",
       transport,
       state: new MemoryStateStore({ version: 1, lastUserSeq: 0 }),
+      repairUpdatesBucket: async (request) => {
+        repairs.push(request)
+        return { appliedSeq: request.serverSeq }
+      },
     })
 
     await connectAndOpen(client, transport)
@@ -3867,61 +3790,10 @@ describe("InlineSdkClient", () => {
       },
     }))
 
-    await waitFor(() => calls().length >= 2)
-    const replay1 = calls()[1]
-    if (!replay1 || replay1.body.oneofKind !== "rpcCall") throw new Error("missing first user replay slice")
-    if (replay1.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing first user replay input")
-    expect(replay1.body.rpcCall.input.getUpdates.startSeq).toBe(0n)
-    expect(replay1.body.rpcCall.input.getUpdates.seqEnd).toBe(1000n)
-    await transport.emitMessage(ServerProtocolMessage.create({
-      id: 23n,
-      body: {
-        oneofKind: "rpcResult",
-        rpcResult: {
-          reqMsgId: replay1.id,
-          result: {
-            oneofKind: "getUpdates",
-            getUpdates: {
-              updates: [],
-              seq: 1000n,
-              date: 302n,
-              resultType: GetUpdatesResult_ResultType.EMPTY,
-              final: true,
-              skippedSequences: irrelevantSkippedSequences(0, 1000),
-            },
-          },
-        },
-      },
-    }))
-
-    await waitFor(() => calls().length >= 3)
-    const replay2 = calls()[2]
-    if (!replay2 || replay2.body.oneofKind !== "rpcCall") throw new Error("missing second user replay slice")
-    if (replay2.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing second user replay input")
-    expect(replay2.body.rpcCall.input.getUpdates.startSeq).toBe(1000n)
-    expect(replay2.body.rpcCall.input.getUpdates.seqEnd).toBe(1001n)
-    await transport.emitMessage(ServerProtocolMessage.create({
-      id: 24n,
-      body: {
-        oneofKind: "rpcResult",
-        rpcResult: {
-          reqMsgId: replay2.id,
-          result: {
-            oneofKind: "getUpdates",
-            getUpdates: {
-              updates: [],
-              seq: 1001n,
-              date: 303n,
-              resultType: GetUpdatesResult_ResultType.EMPTY,
-              final: true,
-              skippedSequences: irrelevantSkippedSequences(1000, 1001),
-            },
-          },
-        },
-      },
-    }))
-
     await waitFor(() => client.exportState().lastUserSeq === 1001)
+    expect(repairs).toHaveLength(1)
+    expect(repairs[0]?.bucket.kind).toBe("user")
+    expect(calls()).toHaveLength(1)
     expect(client.getSyncStatus()).toEqual({ state: "live", degradedBuckets: [] })
     await client.close()
   })

@@ -390,6 +390,32 @@ describe("InlineProtocolV3Connection", () => {
     await permanent.close()
   }, 30_000)
 
+  it("keeps a carrier pre-execution rejection request-local and the V3 session connected", async () => {
+    const fixture = await testServer({ carrierRpcErrorCode: 503 })
+    const permanent = await InlineProtocolV3Connection.connect({
+      url: fixture.url,
+      rsaPublicKeys: fixture.publicKeys,
+    })
+    const challenge = await permanent.authBegin({ identifier: { oneofKind: "email", email: "v3@example.com" } })
+    await permanent.authComplete({ challengeId: challenge.challengeId, code: "123456" })
+    const connection = await InlineProtocolV3Connection.connect({
+      url: fixture.url,
+      rsaPublicKeys: fixture.publicKeys,
+      temporary: true,
+    })
+    await connection.bindTemporary(permanent.authorization)
+
+    await expect(connection.callRpc({ method: Method.DELETE_CHAT, input: { oneofKind: "deleteChat", deleteChat: {} } }))
+      .rejects.toMatchObject({ code: "rejected-before-execution" })
+    await expect(connection.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } })).resolves.toEqual({
+      oneofKind: "getMe",
+      getMe: { user: { id: 7n } },
+    })
+
+    await connection.close()
+    await permanent.close()
+  }, 30_000)
+
   it("keeps a protobuf application 504 as an ordinary V3 result", async () => {
     const fixture = await testServer({ applicationRpcErrorCode: 504 })
     const permanent = await InlineProtocolV3Connection.connect({
@@ -620,6 +646,36 @@ describe("InlineProtocolV3Connection", () => {
     })).rejects.toMatchObject({ code: "timeout" })
 
     await connection.close()
+  })
+
+  it("distinguishes a post-dispatch mutation close from a query close", async () => {
+    const mutationSocket = new OpenWebSocketStub()
+    const mutationConnection = await InlineProtocolV3Connection.connect({
+      url: "ws://inline.test/realtime/v3",
+      rsaPublicKeys: [],
+      authorization: testAuthorization(),
+      webSocketFactory: () => mutationSocket as unknown as WebSocket,
+    })
+    const mutation = mutationConnection.callRpc({
+      method: Method.DELETE_CHAT,
+      input: { oneofKind: "deleteChat", deleteChat: {} },
+    })
+    await mutationConnection.close()
+    await expect(mutation).rejects.toMatchObject({ code: "commit-outcome-unknown" })
+
+    const querySocket = new OpenWebSocketStub()
+    const queryConnection = await InlineProtocolV3Connection.connect({
+      url: "ws://inline.test/realtime/v3",
+      rsaPublicKeys: [],
+      authorization: testAuthorization(),
+      webSocketFactory: () => querySocket as unknown as WebSocket,
+    })
+    const query = queryConnection.callRpc({
+      method: Method.GET_SPACE,
+      input: { oneofKind: "getSpace", getSpace: { spaceId: 7n } },
+    })
+    await queryConnection.close()
+    await expect(query).rejects.toMatchObject({ code: "closed" })
   })
 
   it("maps the authenticated session-revoked close code to a terminal authorization failure", async () => {

@@ -19,6 +19,8 @@ type State = "idle" | "connecting" | "connected"
 const pendingUpdateCapacity = 256
 const pendingUpdateByteCapacity = 8 * 1024 * 1024
 const transportEventByteCapacity = 8 * 1024 * 1024
+const rejectedBeforeExecutionRetryLimit = 2
+const rejectedBeforeExecutionRetryDelayMs = 1_000
 
 const transportEventByteLength = (event: TransportEvent): number =>
   event.type === "message" ? ServerProtocolMessage.toBinary(event.message).byteLength : 32
@@ -178,11 +180,30 @@ export class InlineProtocolV3Transport implements Transport {
         return
       case "rpcCall": {
         this.#activeRequests += 1
-        let response
+        let response: Awaited<ReturnType<InlineProtocolV3Connection["invoke"]>>
         try {
-          response = await connection.invoke({
-            body: { oneofKind: "rpc", rpc: message.body.rpcCall },
-          })
+          const request = { body: { oneofKind: "rpc" as const, rpc: message.body.rpcCall } }
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              response = await connection.invoke(request)
+              break
+            } catch (error) {
+              if (!(error instanceof InlineProtocolV3Error) || error.code !== "rejected-before-execution") {
+                throw error
+              }
+              if (attempt >= rejectedBeforeExecutionRetryLimit) {
+                throw TransportError.capacityExceeded(
+                  "Inline Protocol application remained overloaded before execution",
+                )
+              }
+              await new Promise((resolve) => setTimeout(resolve, rejectedBeforeExecutionRetryDelayMs))
+              if (this.#state !== "connected" || this.#connection !== connection || this.#rotationDue) {
+                throw TransportError.rejectedBeforeExecution(
+                  "Inline Protocol connection changed before rejected work could be redelivered",
+                )
+              }
+            }
+          }
         } catch (error) {
           if (error instanceof InlineProtocolV3Error && error.code === "commit-outcome-unknown") {
             throw TransportError.commitOutcomeUnknown(error.message)

@@ -249,6 +249,15 @@ message Dialog {
   optional DialogFollowMode follow_mode = 16;
   // Personal history-collapse boundary; messages at or below this ID stay hidden.
   optional int64 collapsed_max_id = 17;
+  // Optional personal dialog folder. Unsupported clients continue rendering the dialog flat.
+  optional int64 folder_id = 18;
+}
+
+message DialogFolder {
+  int64 id = 1;
+  optional string title = 2;
+  // Uses the same fractional ordering coordinate as Dialog.order.
+  string order = 3;
 }
 
 enum DialogFollowMode {
@@ -386,6 +395,133 @@ message MessageServicePinnedMessage {
   optional int64 message_id = 1;
 }
 
+// Structural rich content projected alongside Message.message and
+// Message.entities. Text-bearing blocks use UTF-16 ranges into Message.message;
+// inline entities remain owned by Message.entities so there is one text/entity
+// source of truth across legacy and rich renderers.
+message BlockContent { repeated Block blocks = 1; }
+
+message BlockText {
+  int64 offset = 1;
+  int64 length = 2;
+  // Server-computed first-strong direction. Unset means the text contains no
+  // strong character or that direction is owned by a containing block.
+  optional bool is_rtl = 3;
+}
+
+message Block {
+  oneof kind {
+    BlockText paragraph = 1;
+    BlockHeading heading = 2;
+    BlockCode code = 3;
+    BlockList list = 4;
+    BlockSeparator separator = 5;
+    BlockImage image = 6;
+    BlockAlbum album = 7;
+    BlockDisclosure disclosure = 8;
+    BlockText footer = 9;
+    BlockQuote quote = 10;
+    BlockTable table = 11;
+  }
+}
+
+message BlockHeading {
+  BlockText text = 1;
+  uint32 level = 2;
+}
+
+message BlockCode {
+  // Code direction is intentionally not encoded; clients always render it LTR.
+  BlockText text = 1;
+  optional string language = 2;
+}
+
+message BlockList {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_UNORDERED = 1;
+    KIND_ORDERED = 2;
+  }
+
+  Kind kind = 1;
+  optional int64 start = 2;
+  repeated BlockListItem items = 3;
+  // Aggregate direction of the first strong text in the list. Items do not
+  // carry an independent direction override.
+  optional bool is_rtl = 4;
+}
+
+message BlockListItem {
+  repeated Block children = 1;
+  // Presence distinguishes a task-list item from an ordinary list item.
+  // Older clients ignore this field and retain the ordinary list fallback.
+  optional bool checked = 2;
+}
+
+message BlockSeparator {}
+
+message BlockImageDimensions {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
+message BlockImagePending {
+  optional BlockImageDimensions dimensions = 1;
+  optional bytes stripped_thumbnail = 2;
+}
+
+message BlockImageUnavailable { optional BlockImageDimensions dimensions = 1; }
+
+message BlockImage {
+  BlockText alt = 1;
+
+  oneof state {
+    BlockImagePending pending = 2;
+    Photo ready = 3;
+    BlockImageUnavailable unavailable = 4;
+  }
+}
+
+// Albums intentionally have no album-specific presentation properties. The
+// codec coalesces consecutive images into chunks of at most ten ordinary image
+// children.
+message BlockAlbum { repeated BlockImage images = 1; }
+
+message BlockDisclosure {
+  enum Kind {
+    KIND_DEFAULT = 0;
+    KIND_PROGRESS = 1;
+  }
+
+  BlockText summary = 1;
+  Kind kind = 2;
+  optional bool initially_open = 3;
+  repeated Block children = 4;
+  optional bool is_rtl = 5;
+}
+
+message BlockQuote {
+  repeated Block children = 1;
+  optional bool is_rtl = 2;
+}
+
+message BlockTable {
+  enum Alignment {
+    ALIGNMENT_UNSPECIFIED = 0;
+    ALIGNMENT_LEFT = 1;
+    ALIGNMENT_CENTER = 2;
+    ALIGNMENT_RIGHT = 3;
+  }
+
+  // The first row is the GFM header. All rows have exactly alignments.size
+  // cells. Cells remain inline text ranges rather than nested block trees.
+  repeated BlockTableRow rows = 1;
+  repeated Alignment alignments = 2;
+  optional bool is_rtl = 3;
+}
+
+message BlockTableRow { repeated BlockText cells = 1; }
+
 message Message {
   int64 id = 1;
 
@@ -454,6 +590,10 @@ message Message {
   // Typed service/system message metadata. Older clients ignore this and use
   // `message` as fallback text.
   optional MessageService service_message = 22;
+
+  // Optional structural projection of message/entities. Older clients ignore
+  // this field and keep rendering the unchanged flat projection.
+  optional BlockContent block_content = 23;
 }
 
 enum MessageSendMode {
@@ -584,6 +724,18 @@ message Space {
 
   // Current sequence of this space's update bucket.
   optional int32 seq = 7;
+}
+
+message GetSpaceInput { int64 space_id = 1; }
+
+message GetSpaceResult {
+  // Authoritative Space snapshot, including its current sequence.
+  Space space = 1;
+
+  // The authenticated user's membership only; never the full member roster.
+  Member membership = 2;
+
+  SpaceSettings settings = 3;
 }
 
 message JoinPublicSpaceInput {
@@ -1128,6 +1280,10 @@ enum Method {
   CANCEL_UPLOAD = 121;
   UPDATE_SESSION = 122;
   UPDATE_DIALOG_ARCHIVED = 123;
+  CREATE_DIALOG_FOLDER = 124;
+  UPDATE_DIALOG_FOLDER = 125;
+  DELETE_DIALOG_FOLDER = 126;
+  GET_SPACE = 127;
 }
 
 message RpcCall {
@@ -1256,6 +1412,10 @@ message RpcCall {
     CancelUploadInput cancelUpload = 122;
     UpdateSessionInput updateSession = 123;
     UpdateDialogArchivedInput updateDialogArchived = 124;
+    CreateDialogFolderInput createDialogFolder = 125;
+    UpdateDialogFolderInput updateDialogFolder = 126;
+    DeleteDialogFolderInput deleteDialogFolder = 127;
+    GetSpaceInput getSpace = 128;
   }
 }
 
@@ -1386,6 +1546,10 @@ message RpcResult {
     CancelUploadResult cancelUpload = 122;
     UpdateSessionResult updateSession = 123;
     UpdateDialogArchivedResult updateDialogArchived = 124;
+    CreateDialogFolderResult createDialogFolder = 125;
+    UpdateDialogFolderResult updateDialogFolder = 126;
+    DeleteDialogFolderResult deleteDialogFolder = 127;
+    GetSpaceResult getSpace = 128;
   }
 }
 
@@ -1414,14 +1578,13 @@ message GetUpdatesInput {
   // unsure about these
   // int64 start_date = 3;
 
-  // if the difference with the start_seq is greater than this, the result will
-  // contain "too long" result type
+  // Deprecated compatibility field. The server owns the replay ceiling.
   int32 total_limit = 3;
 
   // optional inclusive upper bound for slicing
   int64 seq_end = 4;
 
-  // max number of updates to return in this response
+  // Max number of updates to return in this response. The server caps pages at 100.
   int32 limit = 5;
 }
 
@@ -1807,6 +1970,18 @@ message UpdateDialogOrderInput {
 
   // Optional pin state change when reordering across sidebar lanes.
   optional bool pinned = 4;
+
+  // Optional placement change. Omit to leave folder membership unchanged.
+  optional DialogFolderDestination destination = 5;
+}
+
+message DialogFolderDestination {
+  oneof destination {
+    // Move the dialog to the root open lane.
+    bool root = 1;
+    // Move the dialog into this folder.
+    int64 folder_id = 2;
+  }
 }
 
 message UpdateDialogOrderResult {
@@ -2301,6 +2476,47 @@ message UpdateDialogArchivedInput {
 
 message UpdateDialogArchivedResult { repeated Update updates = 1; }
 
+message CreateDialogFolderInput {
+  optional string title = 1;
+  repeated InputPeer peers = 2;
+  optional string order = 3;
+}
+
+message CreateDialogFolderResult {
+  DialogFolder folder = 1;
+  repeated Dialog dialogs = 2;
+}
+
+message UpdateDialogFolderInput {
+  int64 folder_id = 1;
+  oneof title_update {
+    string title = 2;
+    bool clear_title = 3;
+  }
+  optional string order = 4;
+}
+
+message UpdateDialogFolderResult {
+  DialogFolder folder = 1;
+  repeated Dialog dialogs = 2;
+}
+
+enum DeleteDialogFolderDisposition {
+  DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED = 0;
+  CLOSE_DIALOGS = 1;
+  KEEP_DIALOGS = 2;
+}
+
+message DeleteDialogFolderInput {
+  int64 folder_id = 1;
+  DeleteDialogFolderDisposition disposition = 2;
+}
+
+message DeleteDialogFolderResult {
+  int64 folder_id = 1;
+  repeated Dialog dialogs = 2;
+}
+
 message GetChatsInput {}
 
 message GetChatsResult {
@@ -2318,6 +2534,9 @@ message GetChatsResult {
 
   // Messages referenced in the chats
   repeated Message messages = 5;
+
+  // Personal dialog folders. Dialogs remain present for unsupported clients.
+  repeated DialogFolder folders = 6;
 }
 
 message TranslateMessagesInput {
@@ -2996,7 +3215,19 @@ message Update {
     UpdateSpaceSettings space_settings = 43;
     UpdateChatPermissions chat_permissions = 44;
     UpdateDialogCollapsedMaxId dialog_collapsed_max_id = 45;
+    UpdateDialogFolder dialog_folder = 46;
+    UpdateUserAddedToChat user_added_to_chat = 47;
+    UpdateUserRemovedFromChat user_removed_from_chat = 48;
   }
+}
+
+message UpdateDialogFolder {
+  oneof folder_change {
+    DialogFolder folder = 1;
+    int64 deleted_folder_id = 2;
+  }
+  // Complete authoritative dialog snapshots changed by this folder mutation.
+  repeated Dialog dialogs = 3;
 }
 
 message UpdateSpaceHasNewUpdates {
@@ -3336,6 +3567,25 @@ message UpdateChatParticipantGroupAdd {
 message UpdateChatParticipantGroupDelete {
   int64 chat_id = 1;
   int64 group_id = 2;
+}
+
+// The current user gained effective access to a chat.
+message UpdateUserAddedToChat {
+  int64 chat_id = 1;
+
+  // Direct-access materialization; absent for group, inherited, or public access.
+  optional ChatParticipant participant = 2;
+
+  // Group-access materialization; absent for direct, inherited, or public access.
+  optional ChatParticipantGroup group = 3;
+}
+
+// The current user lost effective access to a chat.
+message UpdateUserRemovedFromChat {
+  int64 chat_id = 1;
+
+  // The final removed group grant, when applicable.
+  optional int64 group_id = 2;
 }
 
 message UserStatus {

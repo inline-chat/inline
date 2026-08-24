@@ -75,12 +75,15 @@ The deprecated HTTP-upload request/result constructors are reserved wire history
 - Clients reconcile accepted indices after lost responses, reconnects, restarts, or temporary-key rotation.
 - Apple clients first copy each source into an owner-scoped immutable app-group/Application Support staging file and durably record server-accepted progress. The server remains authoritative after restart; local progress is never trusted to skip a part.
 - Finish uses a reclaimable processing lease, verifies ordered length and SHA-256, invokes existing media processing, and caches the typed `Photo`, `Video`, `Document`, or `Voice` result.
+- Clients clamp authenticated `processing.retry_after_seconds` hints to 1–30 seconds so a malformed server value cannot stall an upload owner indefinitely.
 - Jobs bind to user, account session, and permanent key. Revocation/logout prevents further access. Idle expiry is 24 hours and hard expiry is seven days.
 - Client scheduling permits at most three globally and two per upload in flight with fair round-robin selection. A carrier may apply a lower bound while preserving the same RPC/state semantics; these are private tuning values, not feature API.
 
 Feature code sees only a high-level media upload operation with progress, cancellation, and typed completion. Realtime V2 may temporarily carry the same typed RPCs behind the transport adapter; user HTTP upload APIs are not the fallback. CDN downloads and Bot API uploads remain outside this contract.
 
 Client edge behavior is normative: iOS suspension pauses transfer; a killed Share Extension does not silently send later; logout/account switch invalidates owner-scoped staging; lost responses reconcile from server state; an immutable staged source cannot be replaced beneath an upload; and cancellation racing finalization resolves to one server-authoritative terminal state.
+
+Apple and TypeScript upload owners send `cancelUpload` during deliberate cancellation. The beta Rust/CLI owner currently treats future cancellation as “stop waiting”: server staging remains resumable until normal expiry/cleanup. It must not claim remote cancellation until a dedicated Rust cancellation API owns that RPC.
 
 Finalization ownership is fenced by `(upload row, processing status, lock token)`. The owner renews its lease, verifies the fence before staging reads and permanent publication, and is the only attempt allowed to complete/fail or clean staging. Cancellation of an actively processing upload returns processing/non-cancelable and never removes its parts. Expiry cleanup first claims its own conditional fence.
 
@@ -110,9 +113,27 @@ The update collector is installed before startup/reconnect discovery. `GET_UPDAT
 
 Discovery ordering is semantic, not timer-based. The server queues every hint caused by one `GET_UPDATES_STATE` call before that call's RPC result on the same authenticated stream. Before completing the RPC to its sync owner, a client collector hands all preceding update batches to that existing owner so it can register the round's targets. The result closes target collection for that round; later live hints belong to later work and cannot satisfy or enlarge the old checkpoint. This handoff is distinct from downstream UI acknowledgement: each targeted bucket still owns application, durable cursor commit, and only then release of the shared checkpoint. Implementations must not substitute an event-loop delay, queue snapshot taken outside the receive owner, or unrelated future hint for this boundary.
 
-`TOO_LONG` currently means the incremental difference exceeds the server's bounded response budget; the server does not currently prune sequenced update rows. Apple replaces a cold chat bucket and continues a warm backlog in bounded background tranches; Rust replaces any affected bucket through its existing authoritative user/space/chat snapshot owner. TypeScript prefers the host's optional authoritative bucket-repair callback and advances only after that callback durably replaces the complete bucket. Without that callback, and only under the current no-pruning contract, TypeScript treats the returned server sequence as a replay target rather than a cursor: it issues bounded `seq_end <= cursor + 1,000` slices, validates complete `updates + skipped_sequences` coverage, awaits host application, and then advances. A malformed, non-progressing, or `SNAPSHOT_REPAIR_REQUIRED` page remains degraded through `getSyncStatus()` when no authoritative host owner exists. No client fast-forwards from server sequence metadata alone. Before update-row retention is introduced, this contract must gain an authenticated retention floor (or equivalent authoritative reseed marker); deleting an unannounced prefix would make a small missing range indistinguishable from corruption.
+Incremental pages contain at most 100 logical updates. The server owns a 10,000-logical-update replay ceiling. A gap through 10,000 is pagination; a larger gap returns `TOO_LONG`, whose `seq` is the authoritative replacement target and never a cursor. Every bucket then uses its existing snapshot owner: user first captures the current user checkpoint through `GET_UPDATES_STATE` with no date, then fetches `GET_CHATS`, `GET_ME`, and settings; space uses the small `GET_SPACE` result (`Space.seq`, the authenticated user's `membership`, and settings); chat uses `GET_CHAT` plus a bounded latest history read. A repair validates identity and checkpoint coverage, preserves useful cached message rows, applies the replacement projection, and commits projection plus cursor together. Failure preserves the prior cursor and degrades only that bucket. There is no cold-50 path, local 1,000-update slicing, or 5/14-day lookback.
 
 Sequenced user/space/chat bucket records are durable and recoverable through `getUpdates`. A client that does not project a known or future update kind treats it as an application no-op only inside a page whose complete `updates + skipped_sequences` coverage has been authenticated; it then advances the page cursor so older clients cannot be stranded by schema growth. A malformed update kind that the client claims to project remains an apply failure and cannot silently advance. Server updates emitted by the explicitly transient presence/compose owner, direct `GridEvent`, and `BotEvent` are ephemeral/lossy; Grid snapshots repair current media state, while bot interactions have no history contract.
+
+Unknown-page accounting is a forward-progress guarantee, not a capability guarantee. A new durable constructor may be emitted only after the minimum compatible client versions can account for unknown page entries; during beta, canonical server emissions are release-gated on that rollout. An older client may safely advance over content it cannot project, but it cannot materialize that content until an authoritative snapshot or a compatible client version supplies the projection.
+
+### Content-derived bucket catalog
+
+Updates do not carry a bucket field. Ownership is inferred from their content and kept consistent across server and clients:
+
+| Bucket | Durable content |
+| --- | --- |
+| User | account/settings/profile changes; dialog open/archive/follow/read/unread state; space join/leave; top-level `userAddedToChat` / `userRemovedFromChat` access transitions |
+| Space | membership and space-settings changes |
+| Chat | messages, attachments, pins, chat metadata/visibility, participants/groups, chat move/delete, and scoped clear-history effects |
+
+Reactions and new-message notifications are ephemeral. Message-action invoke/answer remain a documented legacy exception until their RPC-callback migration; new durable producers must not copy them. Subthreads are discoverable from their parent chat and emit no durable user access event on creation, including for initial explicit participants. Their chat bucket becomes relevant through the existing follow/open dialog path. Optional `group` / `group_id` on a top-level access event is provenance, not another access constructor.
+
+### Message-history coverage
+
+Realtime sequence continuity and history continuity are separate. Apple persists merged inclusive message-ID holes and never treats a chat-list top message, `GET_CHAT`, or `GET_MESSAGES` as contiguous history proof. Only a successfully applied `GET_CHAT_HISTORY` response subtracts its proven numeric interval. Missing `AROUND` anchors are valid coordinates: history is selected below, at, and above the numeric ID without requiring the anchor row to exist. Cached rows render immediately; a dedicated repair owner fills holes as the visible window approaches them, without destructive chat replacement.
 
 ## Resource limits and overload behavior
 
@@ -124,6 +145,7 @@ Limits live with existing owners and reject before execution, close with an over
 | Server socket inbound | 32 copied frames; 32 MiB | WebSocket 1013 |
 | Server socket outbound | 4,096 records; 32 MiB | WebSocket 1013 |
 | Secure session / process | 64 active RPCs per connection and per account authority; 512 globally; 16 MiB packet/result-update budget per request; 256 MiB retained update bytes globally | request-local 503 before execution, or 504/commit-unknown if update capacity is exhausted after execution starts |
+| Apple transaction owner | 32 active ordinary transactions; queued ephemeral work expires after its transaction-defined age (five seconds by default) | durable work waits locally; ephemeral work coalesces/expires and never crosses reconnect |
 | Apple writer / update pipe | 256 items; 16 MiB each owner | explicit transport failure or catch-up |
 | Apple bucket repair buffer | 4,096 updates; 16 MiB | clear buffer and force authoritative repair |
 | TypeScript RPC / update owners | 64 pending RPCs; 256 events/updates; 8 MiB event/update bytes | capacity error or reconnect/catch-up |
@@ -131,6 +153,14 @@ Limits live with existing owners and reject before execution, close with an over
 | Native uploads | 20 active and 2 GiB reserved bytes per session; 4 finalizers | reject before new work |
 
 These are implementation defaults, not protobuf schema promises. Changes require load evidence and release notes because clients use overload classification to choose retry versus repair.
+
+### Timeout and cancellation ownership
+
+The server application deadline is 30 seconds, but it bounds the caller's response wait rather than pretending to cancel arbitrary handler code. The request keeps its application/replay permit until the handler actually settles; a pre-entry deadline is 503/`rejectedBeforeExecution`, while a post-entry deadline is 504/`commitUnknown`. Deployment shutdown has its own outer drain/force-close deadline.
+
+Client wait guards are deliberately later or independently scoped: Apple V3 application requests use 45 seconds and direct calls default to 15 seconds; the TypeScript high-level client defaults to 30 seconds while its low-level V3 request owner uses 60 seconds; Rust defaults to 60 seconds. A client guard never converts a dispatched mutation into a definitive failure: queries may retry under their declared replay policy, while mutations after admission surface `commitUnknown`. Cancellation before admission is known-not-sent; cancellation after admission normally stops only the caller's interest.
+
+The Share Extension's 15-second connection admission and 12-second message wait do not bound a file transfer. Its upload coordinator assigns 60 seconds to each create/part/finalize RPC and 15 seconds to state reconciliation; an earlier shared carrier/server deadline becomes the normal lost-result reconciliation path rather than a whole-upload failure. Only best-effort terminal cancellation cleanup is capped at five seconds. Temporary-key rotation stops admitting new RPCs at the authenticated boundary, lets already-admitted bounded requests settle, and then reconnects through the existing session owner; it is not a high-level multipart-operation lease.
 
 ## Authorization generations and logout
 

@@ -37,7 +37,10 @@ const fakeConnection = (temporary = authorization(true)) => {
 }
 
 describe("InlineProtocolV3Transport", () => {
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 
   it("closes a connection that finishes opening after stop", async () => {
     const pending = deferred<InlineProtocolV3Connection>()
@@ -158,6 +161,45 @@ describe("InlineProtocolV3Transport", () => {
     response.resolve({ body: { oneofKind: "rpcResult", rpcResult: { reqMsgId: 0n, result: { oneofKind: undefined } } } })
     await admitted
     await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2))
+    await transport.stop()
+  })
+
+  it("redelivers a server-rejected request after bounded backoff without reconnecting", async () => {
+    vi.useFakeTimers()
+    const connection = fakeConnection()
+    connection.invoke = vi.fn()
+      .mockRejectedValueOnce(new InlineProtocolV3Error(
+        "rejected-before-execution",
+        "server overloaded before execution",
+      ))
+      .mockResolvedValueOnce({
+        body: { oneofKind: "rpcResult", rpcResult: { reqMsgId: 0n, result: { oneofKind: undefined } } },
+      })
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValue(connection)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+    await transport.start()
+
+    const send = transport.send({
+      id: 1n,
+      seq: 0,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: { method: 1, input: { oneofKind: undefined } },
+      },
+    })
+    await vi.waitFor(() => expect(connection.invoke).toHaveBeenCalledOnce())
+    await vi.advanceTimersByTimeAsync(100)
+    expect(connection.invoke).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(900)
+    await send
+
+    expect(connection.invoke).toHaveBeenCalledTimes(2)
+    expect(connect).toHaveBeenCalledOnce()
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected", connected: true })
     await transport.stop()
   })
 

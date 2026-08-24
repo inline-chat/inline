@@ -20,6 +20,12 @@ const DEFAULT_GLOBAL_CONCURRENCY = 3
 const DEFAULT_UPLOAD_CONCURRENCY = 2
 const MAX_FINISH_RECONCILIATION_ATTEMPTS = 3
 const FINISH_RECONCILIATION_DELAY_SECONDS = 1
+const MAX_PROCESSING_RETRY_SECONDS = 30
+
+const boundedUploadProcessingRetrySeconds = (seconds: number): number =>
+  Number.isNaN(seconds)
+    ? 1
+    : Math.min(MAX_PROCESSING_RETRY_SECONDS, Math.max(1, Math.floor(seconds)))
 
 export interface UploadByteSource {
   readonly byteCount: number
@@ -104,11 +110,15 @@ const validatePartIndices = (indices: number[], partCount: number): void => {
 const delay = async (seconds: number, signal?: AbortSignal): Promise<void> => {
   if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, Math.max(1, seconds) * 1_000)
-    signal?.addEventListener("abort", () => {
+    const onAbort = () => {
       clearTimeout(timeout)
       reject(new NativeUploadError("canceled", "Upload was canceled"))
-    }, { once: true })
+    }
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, Math.max(1, seconds) * 1_000)
+    signal?.addEventListener("abort", onAbort, { once: true })
   })
 }
 
@@ -310,7 +320,10 @@ export class NativeUploadClient {
             this.#pump()
             return
           case "processing":
-            await delay(result.state.processing.retryAfterSeconds, job.input.signal)
+            await delay(
+              boundedUploadProcessingRetrySeconds(result.state.processing.retryAfterSeconds),
+              job.input.signal,
+            )
             break
           default:
             throw new NativeUploadError("protocol", "Server returned an empty finish result")

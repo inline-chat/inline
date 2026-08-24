@@ -87,6 +87,7 @@ const readOnlyRpcMethods = new Set<Method>([
   Method.GET_SPACE_URL_PREVIEW_EXCLUSIONS,
   Method.GET_USER_GROUPS,
   Method.GET_SPACE_SETTINGS,
+  Method.GET_SPACE,
   Method.GET_THREAD_REFERENCES,
   Method.GET_THREAD_SUBTHREADS,
   Method.GET_PEER_BOTS,
@@ -146,7 +147,7 @@ export type InlineProtocolV3ConnectionOptions = {
 
 export class InlineProtocolV3Error extends Error {
   constructor(
-    readonly code: "capacity-exceeded" | "closed" | "commit-outcome-unknown" | "invalid-key" | "protocol" | "rotation-due" | "timeout" | "unauthorized",
+    readonly code: "capacity-exceeded" | "closed" | "commit-outcome-unknown" | "invalid-key" | "protocol" | "rejected-before-execution" | "rotation-due" | "timeout" | "unauthorized",
     message: string,
     options?: ErrorOptions,
   ) {
@@ -389,14 +390,24 @@ export class InlineProtocolV3Connection {
   }
 
   async invoke(request: RealtimeV3Request): Promise<RealtimeV3Response> {
+    return await this.#invoke(request)
+  }
+
+  async #invoke(
+    request: RealtimeV3Request,
+    onDispatched?: () => void,
+  ): Promise<RealtimeV3Response> {
     const payload = RealtimeV3Request.toBinary(request)
-    const result = await this.#sendContent(encodeInlineInvoke(payload))
+    const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched)
     let application
     try {
       application = decodeInlineApplicationObject(result)
     } catch (error) {
       if (serviceConstructor(result) === ServiceConstructor.rpcError) {
         const rpcError = decodeRpcError(result)
+        if (rpcError.code === 503) {
+          throw new InlineProtocolV3Error("rejected-before-execution", rpcError.message)
+        }
         if (rpcError.code === 504) {
           throw new InlineProtocolV3Error("commit-outcome-unknown", rpcError.message)
         }
@@ -417,27 +428,17 @@ export class InlineProtocolV3Connection {
   }
 
   async authComplete(request: AuthCompleteRequest): Promise<AuthCompleteResult> {
-    const response = await this.invoke({ body: { oneofKind: "authComplete", authComplete: request } })
+    const response = await this.#invokeMutation({ body: { oneofKind: "authComplete", authComplete: request } })
     if (response.body.oneofKind === "rpcError") throw new InlineProtocolV3Error("unauthorized", response.body.rpcError.message)
     if (response.body.oneofKind !== "authComplete") throw new InlineProtocolV3Error("protocol", "Unexpected auth.complete response")
     return response.body.authComplete
   }
 
   async callRpc(rpc: RpcCall): Promise<RpcResult["result"]> {
-    let response: RealtimeV3Response
-    try {
-      response = await this.invoke({ body: { oneofKind: "rpc", rpc } })
-    } catch (error) {
-      if (error instanceof InlineProtocolV3Error && error.code === "timeout" &&
-          !readOnlyRpcMethods.has(rpc.method)) {
-        throw new InlineProtocolV3Error(
-          "commit-outcome-unknown",
-          "Mutation timed out after Inline Protocol dispatch; the authoritative outcome is unknown",
-          { cause: error },
-        )
-      }
-      throw error
-    }
+    const request = { body: { oneofKind: "rpc" as const, rpc } }
+    const response = readOnlyRpcMethods.has(rpc.method)
+      ? await this.#invoke(request)
+      : await this.#invokeMutation(request)
     if (response.body.oneofKind === "rpcError") throw new InlineProtocolV3Error("protocol", response.body.rpcError.message)
     if (response.body.oneofKind !== "rpcResult") throw new InlineProtocolV3Error("protocol", "Unexpected RPC response")
     return response.body.rpcResult.result
@@ -539,17 +540,34 @@ export class InlineProtocolV3Connection {
   }
 
   async createHttpUpload(request: CreateHttpUploadRequest): Promise<CreateHttpUploadResult> {
-    const response = await this.invoke({ body: { oneofKind: "createHttpUpload", createHttpUpload: request } })
+    const response = await this.#invokeMutation({ body: { oneofKind: "createHttpUpload", createHttpUpload: request } })
     if (response.body.oneofKind === "rpcError") throw new InlineProtocolV3Error("protocol", response.body.rpcError.message)
     if (response.body.oneofKind !== "createHttpUpload") throw new InlineProtocolV3Error("protocol", "Unexpected upload response")
     return response.body.createHttpUpload
   }
 
   async finishHttpUpload(request: FinishHttpUploadRequest): Promise<FinishHttpUploadResult> {
-    const response = await this.invoke({ body: { oneofKind: "finishHttpUpload", finishHttpUpload: request } })
+    const response = await this.#invokeMutation({ body: { oneofKind: "finishHttpUpload", finishHttpUpload: request } })
     if (response.body.oneofKind === "rpcError") throw new InlineProtocolV3Error("protocol", response.body.rpcError.message)
     if (response.body.oneofKind !== "finishHttpUpload") throw new InlineProtocolV3Error("protocol", "Unexpected upload response")
     return response.body.finishHttpUpload
+  }
+
+  async #invokeMutation(request: RealtimeV3Request): Promise<RealtimeV3Response> {
+    let dispatched = false
+    try {
+      return await this.#invoke(request, () => { dispatched = true })
+    } catch (error) {
+      if (dispatched && error instanceof InlineProtocolV3Error &&
+          ["closed", "protocol", "timeout", "unauthorized"].includes(error.code)) {
+        throw new InlineProtocolV3Error(
+          "commit-outcome-unknown",
+          "Mutation lost its authoritative result after Inline Protocol dispatch; the outcome is unknown",
+          { cause: error },
+        )
+      }
+      throw error
+    }
   }
 
   async bindTemporary(permanent: InlineProtocolAuthorization): Promise<void> {
@@ -636,16 +654,17 @@ export class InlineProtocolV3Connection {
     }
   }
 
-  async #sendContent(body: Uint8Array): Promise<Uint8Array> {
+  async #sendContent(body: Uint8Array, onDispatched?: () => void): Promise<Uint8Array> {
     const messageId = this.#nextClientMessageId()
     const sequenceNumber = this.#sequenceNumbers.next(true)
-    return (await this.#sendPreparedContent(messageId, sequenceNumber, body)).result
+    return (await this.#sendPreparedContent(messageId, sequenceNumber, body, onDispatched)).result
   }
 
   async #sendPreparedContent(
     initialMessageId: bigint,
     sequenceNumber: number,
     body: Uint8Array,
+    onDispatched?: () => void,
   ): Promise<{ messageId: bigint; result: Uint8Array }> {
     this.#admitPending(body)
     return await new Promise((resolve, reject) => {
@@ -670,6 +689,7 @@ export class InlineProtocolV3Connection {
       this.#pendingContent.set(initialMessageId, pending)
       try {
         this.#sendEncrypted(initialMessageId, sequenceNumber, body, true)
+        onDispatched?.()
       } catch (error) {
         this.#pendingContent.delete(initialMessageId)
         this.#releasePending(body)

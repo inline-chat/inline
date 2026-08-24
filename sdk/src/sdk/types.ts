@@ -3,6 +3,7 @@ import type {
   BotChatSettingsResponse,
   BotChatSettingsValue,
   ChatParticipant,
+  ChatParticipantGroup,
   DialogFollowMode,
   Message,
   MessageActionResponseUi,
@@ -48,6 +49,10 @@ type InlineSdkClientCommonOptions = {
 }
 
 export type InlineSdkCredentialOwner = {
+  /**
+   * Persist a durable logout marker. Credential storage used by
+   * inlineProtocol.onCredentials must reject stale writes after this resolves.
+   */
   beginLogout(): void | Promise<void>
   clearCredentials(): void | Promise<void>
   finishLogout(): void | Promise<void>
@@ -84,6 +89,10 @@ export type InlineSdkProtocolV3Options = {
   /** Defaults to Inline's pinned overlapping production ring. Override for custom servers. */
   rsaPublicKeys?: readonly InlineProtocolPublicKey[]
   realtimeUrl?: string
+  /**
+   * Persist replacement authority before it is used. The storage owner must
+   * reject a write that races after credentialOwner.beginLogout() completes.
+   */
   onCredentials?: (credentials: InlineProtocolV3Credentials) => void | Promise<void>
 }
 
@@ -325,6 +334,21 @@ export type InlineInboundEvent =
   | { kind: "chat.participant.add"; chatId: InlineId; participant?: ChatParticipant; seq: number; date: InlineUnixSeconds }
   | { kind: "chat.participant.delete"; chatId: InlineId; userId: InlineId; seq: number; date: InlineUnixSeconds }
   | {
+      kind: "chat.access.added"
+      chatId: InlineId
+      participant?: ChatParticipant
+      group?: ChatParticipantGroup
+      seq: number
+      date: InlineUnixSeconds
+    }
+  | {
+      kind: "chat.access.removed"
+      chatId: InlineId
+      groupId?: InlineId
+      seq: number
+      date: InlineUnixSeconds
+    }
+  | {
       kind: "message.action.invoke"
       interactionId: InlineId
       chatId: InlineId
@@ -429,6 +453,7 @@ export const rpcInputKindByMethod = {
   119: "getUploadState",
   120: "finishUpload",
   121: "cancelUpload",
+  127: "getSpace",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -493,6 +518,7 @@ export const rpcResultKindByMethod = {
   119: "getUploadState",
   120: "finishUpload",
   121: "cancelUpload",
+  127: "getSpace",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod
