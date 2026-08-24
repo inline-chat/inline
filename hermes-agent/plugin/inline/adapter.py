@@ -69,6 +69,8 @@ _DEFAULT_OBSERVED_CONTEXT_LIMIT = 20
 _MAX_OBSERVED_CONTEXT_LIMIT = 100
 _MAX_CONTEXT_HISTORY_LIMIT = 20
 _MAX_CONTEXT_REQUEST_LIMIT = 100
+_JOIN_MENTION_LOOKBACK_SECONDS = 60
+_JOIN_HISTORY_PAGE_LIMIT = 100
 _CONTEXT_MESSAGE_TEXT_LIMIT = 360
 _OBSERVED_CONTEXT_CACHE_MAX_SIZE = 512
 _STATE_DIR = Path.home() / ".hermes" / "inline"
@@ -855,6 +857,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._me_id: Optional[str] = None
         self._me_username: Optional[str] = None
         self._seen_messages: Dict[str, float] = {}
+        self._seen_message_instances: Dict[str, float] = {}
         self._clarify_choices: "OrderedDict[str, List[str]]" = OrderedDict()
         self._clarify_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
@@ -2048,7 +2051,12 @@ class InlineAdapter(BasePlatformAdapter):
             if self._system_events:
                 await self._dispatch_message(event, edit=True)
             return
-        if kind in {"message.delete", "message.history.clear", "chat.participant.add", "chat.participant.delete"}:
+        if kind == "chat.participant.add":
+            if await self._recover_self_join_mentions(event):
+                return
+            await self._dispatch_system_event(event)
+            return
+        if kind in {"message.delete", "message.history.clear", "chat.participant.delete"}:
             await self._dispatch_system_event(event)
             return
         if kind != "message.new":
@@ -2066,6 +2074,28 @@ class InlineAdapter(BasePlatformAdapter):
         if len(self._seen_messages) > _DEDUP_MAX_SIZE:
             for stale in list(self._seen_messages.keys())[: len(self._seen_messages) - _DEDUP_MAX_SIZE]:
                 del self._seen_messages[stale]
+        return False
+
+    def _is_duplicate_message_instance(self, chat_id: str, msg: Dict[str, Any], event: Dict[str, Any]) -> bool:
+        message_date = str(msg.get("date") or event.get("date") or "").strip()
+        content = json.dumps({
+            "fromId": msg.get("fromId"),
+            "message": msg.get("message"),
+            "entities": msg.get("entities"),
+            "media": msg.get("media"),
+        }, sort_keys=True, default=str, separators=(",", ":"))
+        fingerprint = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+        key = f"{chat_id}:{str(msg.get('id') or '')}:{message_date}:{fingerprint}"
+        now = time.time()
+        old = self._seen_message_instances.get(key)
+        if old is not None and now - old < _DEDUP_WINDOW_SECONDS:
+            return True
+        if key in self._seen_message_instances:
+            del self._seen_message_instances[key]
+        self._seen_message_instances[key] = now
+        if len(self._seen_message_instances) > _DEDUP_MAX_SIZE:
+            for stale in list(self._seen_message_instances.keys())[: len(self._seen_message_instances) - _DEDUP_MAX_SIZE]:
+                del self._seen_message_instances[stale]
         return False
 
     async def _dispatch_message(self, event: Dict[str, Any], *, edit: bool = False) -> None:
@@ -2088,6 +2118,8 @@ class InlineAdapter(BasePlatformAdapter):
             else:
                 dedup_key = f"new:{chat_id}:msg:{msg_id}"
         if self._is_duplicate(dedup_key):
+            return
+        if not edit and self._is_duplicate_message_instance(chat_id, msg, event):
             return
         from_id = str(msg.get("fromId") or "")
         if msg.get("out") or (self._me_id and from_id == self._me_id):
@@ -2312,6 +2344,92 @@ class InlineAdapter(BasePlatformAdapter):
             metadata=metadata,
             timestamp=self._timestamp(event.get("date") or msg.get("date")),
         ))
+
+    def _message_explicitly_mentions_me(self, msg: Dict[str, Any]) -> bool:
+        if not self._me_id:
+            return False
+        if bool(msg.get("mentioned")):
+            return True
+        for entity in self._message_entities(msg):
+            if self._entity_kind(entity) != "mention":
+                continue
+            payload = self._entity_payload(entity, "mention")
+            if self._entity_id(payload, "userId") == self._me_id:
+                return True
+        username = str(self._me_username or "").strip().lstrip("@")
+        text = str(msg.get("message") or "")
+        if not username or not text:
+            return False
+        return bool(re.search(rf"(^|\s)@{re.escape(username)}(?=$|[\s,.:;!?])", text, re.IGNORECASE))
+
+    async def _recover_self_join_mentions(self, event: Dict[str, Any]) -> bool:
+        participant = event.get("participant") if isinstance(event.get("participant"), dict) else {}
+        if not self._me_id or str(participant.get("userId") or "").strip() != self._me_id:
+            return False
+
+        chat_id = str(event.get("chatId") or "").strip()
+        joined_at = _to_int(participant.get("date") or event.get("date"))
+        if not chat_id or joined_at is None or joined_at <= 0:
+            logger.warning("[inline] cannot recover join mentions without chat and participant date")
+            return True
+
+        cutoff = joined_at - _JOIN_MENTION_LOOKBACK_SECONDS
+        messages: Dict[str, Dict[str, Any]] = {}
+        anchor_id: Optional[str] = None
+        while True:
+            body: Dict[str, Any] = {
+                "target": _target_from_chat_id(chat_id),
+                "limit": _JOIN_HISTORY_PAGE_LIMIT,
+            }
+            if anchor_id:
+                body["anchorId"] = anchor_id
+            try:
+                data = await self._sidecar_call("/history", body)
+            except Exception as exc:
+                logger.warning("[inline] join mention history unavailable for chat %s: %s", chat_id, exc)
+                return True
+            page = (data.get("result") or {}).get("messages") or []
+            page = [message for message in page if isinstance(message, dict)]
+            if not page:
+                break
+
+            oldest: Optional[Dict[str, Any]] = None
+            added = 0
+            for message in page:
+                message_id = str(message.get("id") or "").strip()
+                message_date = _to_int(message.get("date"))
+                if not message_id or message_date is None:
+                    continue
+                key = f"{message_id}:{message_date}"
+                if key not in messages:
+                    messages[key] = message
+                    added += 1
+                if oldest is None or message_date < int(oldest["date"]):
+                    oldest = {**message, "date": message_date}
+            if oldest is None or int(oldest["date"]) < cutoff or len(page) < _JOIN_HISTORY_PAGE_LIMIT or added == 0:
+                break
+            anchor_id = str(oldest.get("id") or "").strip() or None
+            if not anchor_id:
+                break
+
+        candidates = []
+        for message in messages.values():
+            message_date = _to_int(message.get("date"))
+            if message_date is None or message_date < cutoff or message_date > joined_at:
+                continue
+            if str(message.get("fromId") or "") == self._me_id:
+                continue
+            if self._message_explicitly_mentions_me(message):
+                candidates.append(message)
+        candidates.sort(key=lambda message: (_to_int(message.get("date")) or 0, str(message.get("id") or "")))
+
+        for message in candidates:
+            await self._dispatch_message({
+                "kind": "message.new",
+                "chatId": chat_id,
+                "message": {**message, "mentioned": True},
+            })
+        return True
 
     async def _dispatch_reaction(self, event: Dict[str, Any], *, added: bool) -> None:
         reaction = event.get("reaction") if isinstance(event.get("reaction"), dict) else {}

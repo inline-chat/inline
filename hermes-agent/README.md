@@ -146,7 +146,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.8    inline-platform
+enabled      user     0.0.8-alpha.0    inline-platform
 ```
 
 ## Update Or Reinstall

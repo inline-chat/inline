@@ -69,9 +69,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.8",
-      "@inline-chat/hermes-agent-adapter@0.0.8",
-      "@inline-chat/hermes-agent-adapter@0.0.8",
+      "@inline-chat/hermes-agent-adapter@0.0.8-alpha.0",
+      "@inline-chat/hermes-agent-adapter@0.0.8-alpha.0",
+      "@inline-chat/hermes-agent-adapter@0.0.8-alpha.0",
     ])
   })
 

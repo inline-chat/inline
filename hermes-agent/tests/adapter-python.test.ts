@@ -1047,7 +1047,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.8",
+    "pluginVersion": "0.0.8-alpha.0",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1087,7 +1087,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.8"
+assert probe_payload["pluginVersion"] == "0.0.8-alpha.0"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -3391,6 +3391,127 @@ async def assert_inline_lifecycle_events():
     assert system_events[-1].source.chat_type == "dm"
 
 asyncio.run(assert_inline_lifecycle_events())
+
+async def assert_join_mention_recovery():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "group_policy": "open",
+        "require_mention": True,
+        "context_backfill": "off",
+        "reply_threads": False,
+    }))
+    adapter._me_id = "777"
+    adapter._me_username = "inlinebot"
+    events = []
+    history_calls = []
+
+    def mention_entity():
+        return {
+            "type": 1,
+            "offset": 0,
+            "length": 10,
+            "entity": {"oneofKind": "mention", "mention": {"userId": "777"}},
+        }
+
+    recent = {
+        "id": "5001",
+        "date": "985",
+        "fromId": "51",
+        "message": "@inlinebot please handle this once",
+        "entities": {"entities": [mention_entity()]},
+        "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": "88"}}},
+    }
+    boundary = {
+        "id": "5000",
+        "date": "940",
+        "fromId": "51",
+        "message": "@inlinebot boundary message",
+        "entities": {"entities": [mention_entity()]},
+        "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": "88"}}},
+    }
+    too_old = {
+        "id": "4999",
+        "date": "939",
+        "fromId": "51",
+        "message": "@inlinebot too old",
+        "entities": {"entities": [mention_entity()]},
+        "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": "88"}}},
+    }
+
+    async def capture(event):
+        events.append(event)
+
+    async def fake_sidecar_call(path, body):
+        if path == "/history":
+            history_calls.append(body)
+            return {"ok": True, "result": {"messages": [recent, boundary, too_old]}}
+        return {"ok": True, "result": {}}
+
+    async def fake_get_chat_info(chat_id):
+        return {"chatId": chat_id, "title": "Project Room"}
+
+    adapter.handle_message = capture
+    adapter._sidecar_call = fake_sidecar_call
+    adapter._get_chat_info = fake_get_chat_info
+
+    await adapter._on_inbound(json.dumps({
+        "kind": "chat.participant.add",
+        "chatId": "88",
+        "date": "1000",
+        "participant": {"userId": "777", "date": "1000"},
+    }))
+
+    assert [event.message_id for event in events] == ["5000", "5001"]
+    assert history_calls == [{"target": {"chatId": "88"}, "limit": 100}]
+
+    await adapter._on_inbound(json.dumps({
+        "kind": "message.new",
+        "chatId": "88",
+        "seq": 50,
+        "message": recent,
+    }))
+    assert [event.message_id for event in events] == ["5000", "5001"]
+
+    paged = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "group_policy": "open",
+        "require_mention": True,
+        "context_backfill": "off",
+        "reply_threads": False,
+    }))
+    paged._me_id = "777"
+    paged._me_username = "inlinebot"
+    paged_events = []
+    first_page = [{
+        "id": str(7000 - index),
+        "date": str(1000 - index // 2),
+        "fromId": "51",
+        "message": f"busy message {index}",
+        "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": "88"}}},
+    } for index in range(100)]
+
+    async def capture_paged(event):
+        paged_events.append(event)
+
+    async def paged_sidecar_call(path, body):
+        if path != "/history":
+            return {"ok": True, "result": {}}
+        if "anchorId" not in body:
+            return {"ok": True, "result": {"messages": first_page}}
+        return {"ok": True, "result": {"messages": [boundary, too_old]}}
+
+    paged.handle_message = capture_paged
+    paged._sidecar_call = paged_sidecar_call
+    paged._get_chat_info = fake_get_chat_info
+    await paged._on_inbound(json.dumps({
+        "kind": "chat.participant.add",
+        "chatId": "88",
+        "date": "1000",
+        "participant": {"userId": "777", "date": "1000"},
+    }))
+    assert [event.message_id for event in paged_events] == ["5000"]
+
+asyncio.run(assert_join_mention_recovery())
 
 async def assert_inline_media_normalization():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))

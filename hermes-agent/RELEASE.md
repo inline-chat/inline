@@ -93,7 +93,7 @@ the trusted-publishing workflow through the repository wrapper:
 
 ```sh
 cd ..
-bun run release:npm hermes-agent --version 0.0.8 --tag latest
+bun run release:npm hermes-agent --version 0.0.8-alpha.0 --tag alpha
 npm view @inline-chat/hermes-agent-adapter version
 npm view @inline-chat/hermes-agent-adapter dist-tags --json
 ```

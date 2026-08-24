@@ -7,7 +7,6 @@ import {
   BotCapability_Kind,
   DialogFollowMode,
   InlineSdkClient,
-  InlineSdkAuthenticationError,
   JsonFileStateStore,
   GetMeInput,
   GetChatInput,
@@ -119,16 +118,6 @@ const clientOptions: InlineSdkClientOptions = {
   token,
   baseUrl,
   state: new JsonFileStateStore(statePath),
-  onAuthenticationError: (error) => {
-    connected = false
-    connecting = false
-    connectError = redactError(error)
-    nextConnectRetryAt = null
-    process.exitCode = 3
-    console.error(
-      `inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`,
-    )
-  },
   ...(rpcTimeoutMs != null ? { rpcTimeoutMs } : {}),
   logger: {
     debug: (...args) => log("debug", args),
@@ -173,9 +162,7 @@ async function connectClientLoop() {
       connecting = false
       connectError = redactError(error)
       process.exitCode = 3
-      await client.close().catch(() => {})
       if (stopping) return
-      if (error instanceof InlineSdkAuthenticationError) return
       nextConnectRetryAt = new Date(Date.now() + delayMs).toISOString()
       console.error(`inline-sidecar: connect attempt ${connectAttempts} failed: ${connectError}; retrying in ${delayMs}ms`)
       await sleep(delayMs)
@@ -192,7 +179,11 @@ async function consumeEvents() {
     }
   } catch (error) {
     if (!stopping) {
-      console.error(`inline-sidecar: inbound loop failed: ${redactError(error)}`)
+      connected = false
+      connecting = false
+      connectError = redactError(error)
+      console.error(`inline-sidecar: inbound loop failed: ${connectError}; terminating for owner restart`)
+      await shutdown(1)
     }
   }
 }
