@@ -55,12 +55,12 @@ export interface OAuthHttpHandlers {
     body: unknown,
   ) => Promise<Response>
   readonly providerStart: (request: Request, clientIp?: string) => Promise<Response>
-  readonly providerCallbackGoogle: (request: Request) => Promise<Response>
-  readonly providerCallbackApple: (request: Request, body: unknown) => Promise<Response>
-  readonly providerContinueInvite: (body: unknown) => Promise<Response>
+  readonly providerCallbackGoogle: (request: Request, clientIp?: string) => Promise<Response>
+  readonly providerCallbackApple: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
+  readonly providerContinueInvite: (body: unknown, clientIp?: string) => Promise<Response>
   readonly providerSendEmailCode: (body: unknown, clientIp?: string) => Promise<Response>
   readonly providerVerifyEmailCode: (body: unknown, clientIp?: string) => Promise<Response>
-  readonly providerRedeem: (body: unknown) => Promise<Response>
+  readonly providerRedeem: (body: unknown, clientIp?: string) => Promise<Response>
   readonly hostedLoginGet: (request: Request) => Promise<Response>
   readonly hostedLoginSendEmail: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
   readonly hostedLoginVerifyEmail: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
@@ -95,7 +95,7 @@ const execute = async (
     return handlers.providerStart(request, clientIp)
   }
   if (operation === "providerCallbackGoogle") {
-    return handlers.providerCallbackGoogle(request)
+    return handlers.providerCallbackGoogle(request, clientIp)
   }
   if (operation === "hostedLoginGet") return handlers.hostedLoginGet(request)
 
@@ -133,15 +133,15 @@ const execute = async (
     case "introspect":
       return handlers.introspect(request, body)
     case "providerCallbackApple":
-      return handlers.providerCallbackApple(request, body)
+      return handlers.providerCallbackApple(request, body, clientIp)
     case "providerContinueInvite":
-      return handlers.providerContinueInvite(body)
+      return handlers.providerContinueInvite(body, clientIp)
     case "providerSendEmailCode":
       return handlers.providerSendEmailCode(body, clientIp)
     case "providerVerifyEmailCode":
       return handlers.providerVerifyEmailCode(body, clientIp)
     case "providerRedeem":
-      return handlers.providerRedeem(body)
+      return handlers.providerRedeem(body, clientIp)
     case "hostedLoginSendEmail":
       return handlers.hostedLoginSendEmail(request, body, clientIp)
     case "hostedLoginVerifyEmail":

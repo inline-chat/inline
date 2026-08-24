@@ -1,5 +1,5 @@
 import { Apple, generateCodeVerifier, Google } from "arctic"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { randomBytes, randomUUID, createHash } from "node:crypto"
 import { db } from "@in/server/db"
 import { ProviderAuthModel } from "@in/server/db/models/providerAuth"
@@ -10,6 +10,7 @@ import {
   type ProviderAuthClient,
   type ProviderAuthPurpose,
 } from "@in/server/db/schema"
+import { userNotDeleted } from "@in/server/db/schema/users"
 import { encodeFullUserInfo } from "@in/server/api-types"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
@@ -18,7 +19,7 @@ import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
 import { generateToken } from "@in/server/utils/auth"
 import { validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { InlineError } from "@in/server/types/errors"
-import { providerAuthConfig } from "./config"
+import { providerAuthConfig, type ProviderAuthConfig } from "./config"
 import { verifyAppleIdToken, verifyGoogleIdToken, type ProviderClaims } from "./claims"
 import { fetchBinary } from "@inline-chat/url-preview"
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
@@ -27,9 +28,15 @@ import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
 import { createAppCodeChallenge, isValidAppCodeVerifier } from "./appHandoff"
 import { applyAppleAuthorizationParameters } from "./authorizationUrl"
+import { finishSessionRevocation } from "@in/server/modules/sessions/revokeSession"
 
-const config = providerAuthConfig()
 const log = new Log("providerAuth")
+let cachedConfig: ProviderAuthConfig | undefined
+
+function getProviderAuthConfig(): ProviderAuthConfig {
+  cachedConfig ??= providerAuthConfig()
+  return cachedConfig
+}
 
 export type ProviderLoginResult = {
   userId: number
@@ -40,6 +47,11 @@ export type ProviderLoginResult = {
 export type ProviderCallbackOutcome =
   | { kind: "login"; attempt: DbProviderAuthAttempt; result: ProviderLoginResult }
   | { kind: "invite" | "email"; attempt: DbProviderAuthAttempt; continuation: string }
+
+export type ProviderCallbackFailureContext = Pick<
+  DbProviderAuthAttempt,
+  "id" | "provider" | "purpose" | "appCallbackScheme" | "appCodeChallenge"
+>
 
 export function hashProviderSecret(value: string): string {
   return createHash("sha256").update(value).digest("hex")
@@ -58,6 +70,7 @@ export async function beginProviderAuth(input: {
   loginTransactionId?: string
   client: ProviderAuthClient
 }): Promise<URL> {
+  const config = getProviderAuthConfig()
   if (input.purpose === "app" && (!input.appCallbackScheme || !input.appCodeChallenge)) {
     throw new Error("App provider sign-in requires a callback scheme and code challenge")
   }
@@ -123,28 +136,32 @@ export async function completeProviderCallback(input: {
     throw new Error("Provider sign-in attempt is invalid or expired")
   }
 
-  const nonce = recoverNonce(attempt)
-  const claims = await exchangeAndVerify(input, attempt, nonce)
-  const subjectHash = hashProviderSecret(`${claims.provider}\0${claims.subject}`)
-  const existingUserId = await ProviderAuthModel.findIdentity(claims.provider, subjectHash)
-  if (existingUserId) {
-    const result = await createProviderResult(attempt, existingUserId)
-    const updated = await storeCompletedAttempt(attempt, result)
-    return { kind: "login", attempt: updated, result }
-  }
+  try {
+    const nonce = recoverNonce(attempt)
+    const claims = await exchangeAndVerify(input, attempt, nonce)
+    const subjectHash = hashProviderSecret(`${claims.provider}\0${claims.subject}`)
+    const existingUserId = await ProviderAuthModel.findIdentity(claims.provider, subjectHash)
+    if (existingUserId) {
+      const result = await createProviderResult(attempt, existingUserId)
+      const updated = await storeCompletedAttempt(attempt, result)
+      return { kind: "login", attempt: updated, result }
+    }
 
-  if (!claims.authoritativeEmail || !claims.email) {
-    const continuation = randomSecret()
-    const updated = await ProviderAuthModel.transition(attempt.id, "pending_provider", {
-      status: "pending_email",
-      continuationHash: hashProviderSecret(continuation),
-      subjectHash,
-      pendingProfileEncrypted: encryptClaims({ ...claims, email: undefined }),
-    })
-    return { kind: "email", attempt: updated, continuation }
-  }
+    if (!claims.authoritativeEmail || !claims.email) {
+      const continuation = randomSecret()
+      const updated = await ProviderAuthModel.transition(attempt.id, "pending_provider", {
+        status: "pending_email",
+        continuationHash: hashProviderSecret(continuation),
+        subjectHash,
+        pendingProfileEncrypted: encryptClaims({ ...claims, email: undefined }),
+      })
+      return { kind: "email", attempt: updated, continuation }
+    }
 
-  return resolveTrustedClaims(attempt, claims, subjectHash)
+    return await resolveTrustedClaims(attempt, claims, subjectHash)
+  } catch (cause) {
+    throw new ProviderCallbackCompletionError(callbackFailureContext(attempt), { cause })
+  }
 }
 
 export async function continueProviderWithInvite(input: {
@@ -198,23 +215,6 @@ export async function restoreProviderEmailAttempt(
   })
 }
 
-export async function attachProviderAfterEmailVerification(input: {
-  attempt: DbProviderAuthAttempt
-  result: ProviderLoginResult
-}): Promise<DbProviderAuthAttempt> {
-  if (!input.attempt.subjectHash) throw new Error("Provider identity is unavailable")
-  const userId = await ProviderAuthModel.attachIdentity({
-    provider: input.attempt.provider,
-    subjectHash: input.attempt.subjectHash,
-    userId: input.result.userId,
-  })
-  if (userId !== input.result.userId) {
-    throw new Error("Provider identity belongs to another Inline account")
-  }
-  await applyProviderProfile(userId, decryptClaims(input.attempt))
-  return storeCompletedAttempt(input.attempt, input.result)
-}
-
 export async function attachProviderAfterEmailProof(input: {
   attempt: DbProviderAuthAttempt
   userId: number
@@ -237,16 +237,62 @@ export async function redeemProviderTicket(
   appCodeVerifier: string,
 ): Promise<ProviderLoginResult | undefined> {
   if (!isValidAppCodeVerifier(appCodeVerifier)) return undefined
-  const attempt = await ProviderAuthModel.consumeTicket(
-    hashProviderSecret(ticket),
-    createAppCodeChallenge(appCodeVerifier),
-  )
-  if (!attempt?.inlineUserId || !attempt.inlineTokenEncrypted) return undefined
-  const user = await loadActiveProviderUser(attempt.inlineUserId)
+  const ticketHash = hashProviderSecret(ticket)
+  const appCodeChallenge = createAppCodeChallenge(appCodeVerifier)
+  const preview = await ProviderAuthModel.getRedeemableTicket(ticketHash, appCodeChallenge)
+  if (!preview?.inlineUserId || preview.purpose !== "app") return undefined
+
+  const user = await loadActiveProviderUser(preview.inlineUserId)
+  const encodedUser = encodeFullUserInfo(user)
+  const legacyToken = preview.inlineTokenEncrypted
+    ? Encryption2.decryptToString(preview.inlineTokenEncrypted)
+    : undefined
+  const credentials = legacyToken ? undefined : await generateToken(preview.inlineUserId)
+  const now = new Date()
+  const outcome = await db.transaction(async (tx) => {
+    const attempt = await ProviderAuthModel.lockRedeemableTicket(tx, ticketHash, appCodeChallenge)
+    if (!attempt || attempt.id !== preview.id || attempt.inlineUserId !== preview.inlineUserId || attempt.purpose !== "app") {
+      return undefined
+    }
+    const userId = attempt.inlineUserId
+    if (!userId) return undefined
+
+    const [activeUser] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, userId), userNotDeleted()))
+      .limit(1)
+    if (!activeUser) throw new InlineError(InlineError.ApiError.USER_DEACTIVATED)
+
+    if (attempt.inlineTokenEncrypted) {
+      if (!legacyToken) throw new Error("Legacy provider ticket token is unavailable")
+      await ProviderAuthModel.markUsedInTransaction(tx, attempt.id, now)
+      return { token: legacyToken, replacement: undefined }
+    }
+    if (!credentials) throw new Error("Provider redemption credentials are unavailable")
+
+    const created = await SessionsModel.createReplacingInTransaction(tx, {
+      userId,
+      tokenHash: credentials.tokenHash,
+      ...providerSessionMetadata(attempt.client),
+    }, now)
+    await ProviderAuthModel.markUsedInTransaction(tx, attempt.id, now)
+    return { token: credentials.token, replacement: created.replacement }
+  })
+  if (!outcome) return undefined
+  if (outcome.replacement) {
+    await finishSessionRevocation(outcome.replacement.outcome, outcome.replacement.input).catch((cause) => {
+      log.warn("Provider session replacement follow-up failed after commit", {
+        userId: preview.inlineUserId,
+        sessionId: outcome.replacement?.input.sessionId,
+        cause,
+      })
+    })
+  }
   return {
-    userId: attempt.inlineUserId,
-    token: Encryption2.decryptToString(attempt.inlineTokenEncrypted),
-    user: encodeFullUserInfo(user),
+    userId: preview.inlineUserId,
+    token: outcome.token,
+    user: encodedUser,
   }
 }
 
@@ -264,6 +310,7 @@ async function exchangeAndVerify(
   attempt: DbProviderAuthAttempt,
   nonce: string,
 ): Promise<ProviderClaims> {
+  const config = getProviderAuthConfig()
   if (input.provider === "google") {
     if (!config.google || !attempt.pkceVerifierEncrypted) throw new ProviderUnavailableError("google")
     const provider = new Google(config.google.clientId, config.google.clientSecret, callbackUrl("google"))
@@ -323,30 +370,35 @@ async function resolveTrustedClaims(
 
 async function createProviderSession(userId: number, client: ProviderAuthClient): Promise<ProviderLoginResult> {
   const user = await loadActiveProviderUser(userId)
-  const clientType = normalizeAuthClientType(client.clientType, "providerSignIn") ?? "web"
   const { token, tokenHash } = await generateToken(userId)
   await SessionsModel.create({
     userId,
     tokenHash,
+    ...providerSessionMetadata(client),
+  })
+  return { userId, token, user: encodeFullUserInfo(user) }
+}
+
+function providerSessionMetadata(client: ProviderAuthClient) {
+  return {
     deviceId: client.deviceId,
     personalData: {
       deviceName: client.deviceName,
       timezone: client.timezone && validateIanaTimezone(client.timezone) ? client.timezone : undefined,
     },
-    clientType,
+    clientType: normalizeAuthClientType(client.clientType, "providerSignIn") ?? "web",
     clientVersion: client.clientVersion && validateUpToFourSegementSemver(client.clientVersion)
       ? client.clientVersion
       : undefined,
     osVersion: client.osVersion && validateUpToFourSegementSemver(client.osVersion) ? client.osVersion : undefined,
-  })
-  return { userId, token, user: encodeFullUserInfo(user) }
+  }
 }
 
 async function createProviderResult(
   attempt: DbProviderAuthAttempt,
   userId: number,
 ): Promise<ProviderLoginResult> {
-  if (attempt.purpose !== "hosted_login") return createProviderSession(userId, attempt.client)
+  if (attempt.purpose === "mcp_oauth") return createProviderSession(userId, attempt.client)
   const user = await loadActiveProviderUser(userId)
   return { userId, user: encodeFullUserInfo(user) }
 }
@@ -462,6 +514,7 @@ function decryptClaims(attempt: DbProviderAuthAttempt): ProviderClaims {
 }
 
 function callbackUrl(provider: AccountProvider): string {
+  const config = getProviderAuthConfig()
   return `${config.baseUrl}/v1/auth/provider/callback/${provider}`
 }
 
@@ -489,5 +542,24 @@ function parseAppleUser(value: string | undefined): { name?: { firstName?: strin
 export class ProviderUnavailableError extends Error {
   constructor(readonly provider: AccountProvider) {
     super(`${provider} sign-in is not configured`)
+  }
+}
+
+export class ProviderCallbackCompletionError extends Error {
+  constructor(
+    readonly context: ProviderCallbackFailureContext,
+    options: ErrorOptions,
+  ) {
+    super("Provider callback could not be completed", options)
+  }
+}
+
+export function callbackFailureContext(attempt: DbProviderAuthAttempt): ProviderCallbackFailureContext {
+  return {
+    id: attempt.id,
+    provider: attempt.provider,
+    purpose: attempt.purpose,
+    appCallbackScheme: attempt.appCallbackScheme,
+    appCodeChallenge: attempt.appCodeChallenge,
   }
 }

@@ -40,6 +40,7 @@ import {
 } from "node:events"
 import { startBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
 import { startBlockContentImageWorker } from "@in/server/modules/message/blockContentImageWorker"
+import { assertProviderAuthStartupConfiguration } from "@in/server/modules/auth/provider/startup"
 
 const sentryRelease =
   buildServerSentryRelease(
@@ -101,6 +102,7 @@ export interface StartServerOptions {
 export const startServer = (
   options: StartServerOptions = {},
 ): Promise<CoreProductionServerHandle> => {
+  assertProviderAuthStartupConfiguration()
   const clientIpMode =
     parseClientIpMode(
       process.env[

@@ -6,7 +6,14 @@ import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
 import { Log } from "@in/server/utils/log"
-import { revokeSession } from "@in/server/modules/sessions/revokeSession"
+import {
+  revokeSession,
+  revokeSessionInTransaction,
+  type RevokeSessionInput,
+  type RevokeSessionTransactionOutcome,
+} from "@in/server/modules/sessions/revokeSession"
+import { lockGridMutations } from "@in/server/modules/grid/roomLifecycle"
+import type { Transaction } from "@in/server/db/types"
 
 type SessionClientType = NonNullable<DbNewSession["clientType"]>
 export type SessionPushNotificationProvider = "apns" | "expo_android"
@@ -55,6 +62,16 @@ export interface UpdateSessionMetadataData {
   osVersion?: string | undefined
 }
 
+export type SessionReplacement = {
+  input: RevokeSessionInput
+  outcome: RevokeSessionTransactionOutcome
+}
+
+export type TransactionalSessionCreateResult = {
+  session: SessionWithDecryptedData
+  replacement?: SessionReplacement
+}
+
 // Interface for session with decrypted data
 export interface SessionWithDecryptedData
   extends Omit<
@@ -93,42 +110,7 @@ export class SessionsModel {
     const now = new Date()
 
     try {
-      // Encrypt personal data
-      const personalData = JSON.stringify(data.personalData)
-      const encryptedPersonalData = encrypt(personalData)
-
-      // Encrypt push token if present
-      let applePushTokenData: EncryptedData | null = null
-      if (data.applePushToken) {
-        applePushTokenData = encrypt(data.applePushToken)
-      }
-
-      const sessionData: DbNewSession = {
-        userId: data.userId,
-        tokenHash: data.tokenHash,
-        lastActive: now,
-        date: now,
-        deviceId: data.deviceId ?? null,
-
-        // Store encrypted personal data
-        personalDataEncrypted: encryptedPersonalData.encrypted,
-        personalDataIv: encryptedPersonalData.iv,
-        personalDataTag: encryptedPersonalData.authTag,
-
-        // Store encrypted push token if present
-        ...(applePushTokenData && {
-          applePushTokenEncrypted: applePushTokenData.encrypted,
-          applePushTokenIv: applePushTokenData.iv,
-          applePushTokenTag: applePushTokenData.authTag,
-          pushNotificationProvider:
-            data.pushNotificationProvider ?? this.defaultPushProviderForClientType(data.clientType),
-        }),
-
-        // Client info
-        clientType: data.clientType,
-        clientVersion: data.clientVersion ?? null,
-        osVersion: data.osVersion ?? null,
-      }
+      const sessionData = this.makeSessionData(data, now)
 
       // check if a previous userId session deviceId exists, delete that session
       if (data.deviceId) {
@@ -158,6 +140,46 @@ export class SessionsModel {
     } catch (error) {
       throw new Error(`Failed to create session: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
+  }
+
+  /** Creates the session inside an existing authority transaction.
+   * Any same-device session is revoked in that transaction so ticket use and
+   * session replacement either both commit or both roll back.
+   */
+  static async createReplacingInTransaction(
+    tx: Transaction,
+    data: CreateSessionData,
+    now = new Date(),
+  ): Promise<TransactionalSessionCreateResult> {
+    if (!data.userId || !data.tokenHash) {
+      throw new Error("Missing required fields: userId and tokenHash are required")
+    }
+
+    let replacement: SessionReplacement | undefined
+    if (data.deviceId) {
+      await lockGridMutations(tx)
+      const [existing] = await tx
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.deviceId, data.deviceId), eq(sessions.userId, data.userId)))
+        .for("update")
+        .limit(1)
+      if (existing) {
+        const input: RevokeSessionInput = {
+          actor: "system",
+          targetUserId: data.userId,
+          sessionId: existing.id,
+        }
+        replacement = {
+          input,
+          outcome: await revokeSessionInTransaction(tx, input, { releaseDeviceId: true }),
+        }
+      }
+    }
+
+    const [session] = await tx.insert(sessions).values(this.makeSessionData(data, now)).returning()
+    if (!session) throw new Error("Failed to create session")
+    return { session: this.decryptSessionData(session), replacement }
   }
 
   // Get session by ID with decrypted data
@@ -357,6 +379,33 @@ export class SessionsModel {
       ...strippedSession,
       personalData: this.decryptPersonalData(session),
       applePushToken: this.decryptApplePushToken(session),
+    }
+  }
+
+  private static makeSessionData(data: CreateSessionData, now: Date): DbNewSession {
+    const encryptedPersonalData = encrypt(JSON.stringify(data.personalData))
+    const applePushTokenData: EncryptedData | null = data.applePushToken
+      ? encrypt(data.applePushToken)
+      : null
+    return {
+      userId: data.userId,
+      tokenHash: data.tokenHash,
+      lastActive: now,
+      date: now,
+      deviceId: data.deviceId ?? null,
+      personalDataEncrypted: encryptedPersonalData.encrypted,
+      personalDataIv: encryptedPersonalData.iv,
+      personalDataTag: encryptedPersonalData.authTag,
+      ...(applePushTokenData && {
+        applePushTokenEncrypted: applePushTokenData.encrypted,
+        applePushTokenIv: applePushTokenData.iv,
+        applePushTokenTag: applePushTokenData.authTag,
+        pushNotificationProvider:
+          data.pushNotificationProvider ?? this.defaultPushProviderForClientType(data.clientType),
+      }),
+      clientType: data.clientType,
+      clientVersion: data.clientVersion ?? null,
+      osVersion: data.osVersion ?? null,
     }
   }
 

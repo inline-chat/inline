@@ -72,13 +72,13 @@ export const oauth = new Elysia({ name: "oauth" })
     executeLegacyOAuth(() => handleProviderStart(request, legacyOAuthClientIp(request))),
   )
   .get("/v1/auth/provider/callback/google", ({ request }) =>
-    executeLegacyOAuth(() => handleProviderCallback("google", request)),
+    executeLegacyOAuth(() => handleProviderCallback("google", request, undefined, legacyOAuthClientIp(request))),
   )
   .post("/v1/auth/provider/callback/apple", ({ request, body }) =>
-    executeLegacyOAuth(() => handleProviderCallback("apple", request, body)),
+    executeLegacyOAuth(() => handleProviderCallback("apple", request, body, legacyOAuthClientIp(request))),
   )
-  .post("/v1/auth/provider/continue-invite", ({ body }) =>
-    executeLegacyOAuth(() => handleProviderContinueInvite(body)),
+  .post("/v1/auth/provider/continue-invite", ({ request, body }) =>
+    executeLegacyOAuth(() => handleProviderContinueInvite(body, legacyOAuthClientIp(request))),
   )
   .post("/v1/auth/provider/send-email-code", ({ request, body }) =>
     executeLegacyOAuth(() => handleProviderSendEmailCode(body, legacyOAuthClientIp(request))),
@@ -86,8 +86,8 @@ export const oauth = new Elysia({ name: "oauth" })
   .post("/v1/auth/provider/verify-email-code", ({ request, body }) =>
     executeLegacyOAuth(() => handleProviderVerifyEmailCode(body, legacyOAuthClientIp(request))),
   )
-  .post("/v1/auth/provider/redeem", ({ body }) =>
-    executeLegacyOAuth(() => handleProviderRedeem(body)),
+  .post("/v1/auth/provider/redeem", ({ request, body }) =>
+    executeLegacyOAuth(() => handleProviderRedeem(body, legacyOAuthClientIp(request))),
   )
   .get("/.well-known/oauth-authorization-server", () =>
     executeLegacyOAuth(() =>

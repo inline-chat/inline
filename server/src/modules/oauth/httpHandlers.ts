@@ -45,9 +45,9 @@ import { members, spaces, users, type DbProviderAuthAttempt } from "@in/server/d
 import { and, eq, isNull } from "drizzle-orm"
 import { ProviderAuthModel } from "@in/server/db/models/providerAuth"
 import {
-  attachProviderAfterEmailVerification,
   attachProviderAfterEmailProof,
   beginProviderAuth,
+  callbackFailureContext,
   claimProviderEmailAttempt,
   completeProviderCallback,
   continueProviderWithInvite,
@@ -57,6 +57,8 @@ import {
   requireProviderEmailAttempt,
   restoreProviderEmailAttempt,
   supportedAppCallbackScheme,
+  ProviderCallbackCompletionError,
+  type ProviderCallbackFailureContext,
   type ProviderLoginResult,
 } from "@in/server/modules/auth/provider/service"
 import {
@@ -81,6 +83,8 @@ const PROVIDER_CLEANUP_INTERVAL_MS = 60_000
 const PROVIDER_CLEANUP_BATCH_SIZE = 250
 const PROVIDER_EMAIL_ATTEMPT_COOLDOWN = { max: 1, windowMs: 45_000 } as const
 const PROVIDER_EMAIL_ATTEMPT_LIMIT = { max: 3, windowMs: 15 * 60_000 } as const
+const PROVIDER_EMAIL_VERIFY_ATTEMPT_LIMIT = { max: 10, windowMs: 15 * 60_000 } as const
+const PROVIDER_INVITE_ATTEMPT_LIMIT = { max: 5, windowMs: 15 * 60_000 } as const
 const PROVIDER_CLIENT_METADATA_LIMITS = [
   ["device_id", 128],
   ["client_version", 64],
@@ -328,27 +332,35 @@ export function providerAppErrorResponse(input: {
 
 async function providerBrowserError(input: {
   state?: string
+  context?: ProviderCallbackFailureContext
   code: "cancelled" | "failed"
   title: string
   description: string
 }): Promise<Response> {
   let appUrl: string | undefined
-  if (input.state) {
+  let context = input.context
+  if (!context && input.state) {
     const attempt = await ProviderAuthModel.getActiveByStateHash(
       hashProviderSecret(input.state),
     ).catch(() => undefined)
-    if (attempt?.purpose === "app" && attempt.appCallbackScheme) {
-      appUrl = `${attempt.appCallbackScheme}://auth/provider?error=${input.code}`
-      await ProviderAuthModel.update(attempt.id, {
-        status: "used",
-        usedAt: new Date(),
-      }).catch((cause) => {
-        Log.shared.error("Failed to close provider attempt after callback error", {
-          provider: attempt.provider,
-          cause,
-        })
-      })
+    if (attempt) context = callbackFailureContext(attempt)
+  }
+  if (context) {
+    if (context.purpose === "app" && context.appCallbackScheme) {
+      const callback = new URL(`${context.appCallbackScheme}://auth/provider`)
+      callback.searchParams.set("error", input.code)
+      if (context.appCodeChallenge) callback.searchParams.set("code_challenge", context.appCodeChallenge)
+      appUrl = callback.toString()
     }
+    await ProviderAuthModel.update(context.id, {
+      status: "used",
+      usedAt: new Date(),
+    }).catch((cause) => {
+      Log.shared.error("Failed to close provider attempt after callback error", {
+        provider: context?.provider,
+        cause,
+      })
+    })
   }
   return providerAppErrorResponse({
     appUrl,
@@ -1486,7 +1498,19 @@ export async function handleProviderCallback(
   provider: "google" | "apple",
   request: Request,
   body?: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
 ): Promise<Response> {
+  const nowMs = Date.now()
+  const callbackRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-callback:${resolveClientIp(clientIpOverride)}`,
+    nowMs,
+    rule: config.endpointRateLimits.providerCallback,
+  })
+  if (!callbackRate.allowed) {
+    return rateLimitedHtml(callbackRate.retryAfterSeconds, "Too many sign-in callbacks. Try again shortly.")
+  }
+
   const url = new URL(request.url)
   const state = provider === "google" ? url.searchParams.get("state") ?? "" : readParam(body, "state")
   const code = provider === "google" ? url.searchParams.get("code") ?? "" : readParam(body, "code")
@@ -1508,6 +1532,7 @@ export async function handleProviderCallback(
     })
   }
 
+  let context: ProviderCallbackFailureContext | undefined
   try {
     const outcome = await completeProviderCallback({
       provider,
@@ -1516,6 +1541,7 @@ export async function handleProviderCallback(
       idTokenFromAuthorization: provider === "apple" ? readParam(body, "id_token") : undefined,
       appleUserJson: provider === "apple" ? readParam(body, "user") : undefined,
     })
+    context = callbackFailureContext(outcome.attempt)
     if (outcome.kind === "login") {
       return finishProviderBrowserLogin(outcome.attempt, outcome.result)
     }
@@ -1538,9 +1564,14 @@ export async function handleProviderCallback(
   <button type="submit">Send verification code</button>
 </form>`), { "cache-control": "no-store" })
   } catch (cause) {
-    Log.shared.error("Provider callback failed", { provider, cause })
+    if (cause instanceof ProviderCallbackCompletionError) context = cause.context
+    Log.shared.error("Provider callback failed", {
+      provider,
+      cause: cause instanceof ProviderCallbackCompletionError ? cause.cause : cause,
+    })
     return providerBrowserError({
-      state,
+      state: context ? undefined : state,
+      context,
       code: "failed",
       title: "Sign-in could not finish",
       description: "Return to Inline and try again. No session was shared with this browser.",
@@ -1548,10 +1579,33 @@ export async function handleProviderCallback(
   }
 }
 
-export async function handleProviderContinueInvite(body: unknown): Promise<Response> {
+export async function handleProviderContinueInvite(
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(clientIpOverride)
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-invite:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.providerContinueInvite,
+  })
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many invite attempts. Try again shortly.")
+  }
+  const attemptId = readParam(body, "attempt_id")
+  const attemptRate = rateLimiter.consume({
+    key: `oauth:abuse:provider-invite:attempt:${normalizeRateLimitKeyPart(attemptId)}`,
+    nowMs,
+    rule: PROVIDER_INVITE_ATTEMPT_LIMIT,
+  })
+  if (!attemptRate.allowed) {
+    return rateLimitedHtml(attemptRate.retryAfterSeconds, "Too many invite attempts for this sign-in.")
+  }
   try {
     const outcome = await continueProviderWithInvite({
-      attemptId: readParam(body, "attempt_id"),
+      attemptId,
       continuation: readParam(body, "continuation"),
       inviteCode: readParam(body, "invite_code"),
     })
@@ -1644,36 +1698,64 @@ export async function handleProviderSendEmailCode(
   }
 }
 
-export async function handleProviderVerifyEmailCode(body: unknown, clientIp?: string): Promise<Response> {
+export async function handleProviderVerifyEmailCode(
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(clientIpOverride)
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-verify-email:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.verifyEmailCode,
+  })
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many verification attempts. Try again shortly.")
+  }
+
   const attemptId = readParam(body, "attempt_id")
   const continuation = readParam(body, "continuation")
   let claimed = false
   try {
+    const pending = await requireProviderEmailAttempt(attemptId, continuation)
+    if (!pending.confirmationEmail || !pending.challengeToken) throw new Error("Email challenge is missing")
+    const attemptRate = rateLimiter.consume({
+      key: `oauth:abuse:provider-email:verify-attempt:${pending.id}`,
+      nowMs,
+      rule: PROVIDER_EMAIL_VERIFY_ATTEMPT_LIMIT,
+    })
+    if (!attemptRate.allowed) {
+      return rateLimitedHtml(attemptRate.retryAfterSeconds, "Too many verification attempts for this sign-in.")
+    }
+    const emailHash = await sha256Hex(pending.confirmationEmail)
+    const perEmail = rateLimiter.consume({
+      key: `oauth:abuse:provider-email:verify-email:${emailHash}`,
+      nowMs,
+      rule: config.emailAbuseRateLimits.verifyPerEmail,
+    })
+    if (!perEmail.allowed) {
+      return rateLimitedHtml(perEmail.retryAfterSeconds, "Too many verification attempts for this email.")
+    }
+    const perContext = rateLimiter.consume({
+      key: `oauth:abuse:provider-email:verify-context:${emailHash}:${normalizeRateLimitKeyPart(pending.client.deviceId ?? "unknown")}:${clientIp}`,
+      nowMs,
+      rule: config.emailAbuseRateLimits.verifyPerContext,
+    })
+    if (!perContext.allowed) {
+      return rateLimitedHtml(perContext.retryAfterSeconds, "Too many attempts from this client context.")
+    }
+
     const attempt = await claimProviderEmailAttempt(attemptId, continuation)
     claimed = true
     if (!attempt.confirmationEmail || !attempt.challengeToken) throw new Error("Email challenge is missing")
-    if (attempt.purpose === "hosted_login") {
-      const proof = await verifyEmailAccountProof({
-        email: attempt.confirmationEmail,
-        code: readParam(body, "code"),
-        challengeToken: attempt.challengeToken,
-      })
-      const completed = await attachProviderAfterEmailProof({ attempt, userId: proof.user.id })
-      return finishProviderBrowserLogin(completed.attempt, completed.result)
-    }
-    const result = await verifyEmailCodeHandler({
+    const proof = await verifyEmailAccountProof({
       email: attempt.confirmationEmail,
       code: readParam(body, "code"),
       challengeToken: attempt.challengeToken,
-      deviceId: attempt.client.deviceId,
-      clientType: attempt.client.clientType,
-      clientVersion: attempt.client.clientVersion,
-      osVersion: attempt.client.osVersion,
-      deviceName: attempt.client.deviceName,
-      timezone: attempt.client.timezone,
-    }, { ip: clientIp, source: "/v1/auth/provider/verify-email-code" }) as ProviderLoginResult
-    const completed = await attachProviderAfterEmailVerification({ attempt, result })
-    return finishProviderBrowserLogin(completed, result)
+    })
+    const completed = await attachProviderAfterEmailProof({ attempt, userId: proof.user.id })
+    return finishProviderBrowserLogin(completed.attempt, completed.result)
   } catch (cause) {
     if (claimed && isRetryableProviderEmailProofFailure(cause)) {
       const restored = await restoreProviderEmailAttempt(attemptId, continuation).catch(() => false)
@@ -1705,7 +1787,20 @@ function isRetryableProviderEmailProofFailure(cause: unknown): boolean {
       cause.type === InlineError.ApiError.EMAIL_CODE_INVALID[0])
 }
 
-export async function handleProviderRedeem(body: unknown): Promise<Response> {
+export async function handleProviderRedeem(
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const redeemRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-redeem:${resolveClientIp(clientIpOverride)}`,
+    nowMs,
+    rule: config.endpointRateLimits.providerRedeem,
+  })
+  if (!redeemRate.allowed) {
+    return rateLimitedJson(redeemRate.retryAfterSeconds, "Too many ticket redemption attempts. Try again shortly.")
+  }
   const ticket = readParam(body, "ticket")
   const codeVerifier = readParam(body, "code_verifier")
   if (!ticket || !codeVerifier) {
@@ -1738,8 +1833,10 @@ async function finishProviderBrowserLogin(
   }
   if (attempt.purpose === "app") {
     const ticket = await issueAppTicket(attempt)
-    const location = `${attempt.appCallbackScheme}://auth/provider?ticket=${encodeURIComponent(ticket)}`
-    return providerAppHandoffResponse(location)
+    const callback = new URL(`${attempt.appCallbackScheme}://auth/provider`)
+    callback.searchParams.set("ticket", ticket)
+    if (attempt.appCodeChallenge) callback.searchParams.set("code_challenge", attempt.appCodeChallenge)
+    return providerAppHandoffResponse(callback.toString())
   }
   if (!attempt.oauthAuthRequestId) throw new Error("Connected-app authorization request is missing")
   const authRequest = await OauthModel.getAuthRequest(attempt.oauthAuthRequestId, Date.now())

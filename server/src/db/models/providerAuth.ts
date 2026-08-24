@@ -1,5 +1,6 @@
 import { and, eq, gt, inArray, isNull, lt, or } from "drizzle-orm"
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import {
   accountIdentities,
   providerAuthAttempts,
@@ -161,32 +162,55 @@ export const ProviderAuthModel = {
     return owner
   },
 
-  async consumeTicket(
+  async getRedeemableTicket(
     ticketHash: string,
     appCodeChallenge: string,
   ): Promise<DbProviderAuthAttempt | undefined> {
-    return db.transaction(async (tx) => {
-      const [attempt] = await tx
-        .select()
-        .from(providerAuthAttempts)
-        .where(and(
-          eq(providerAuthAttempts.ticketHash, ticketHash),
-          eq(providerAuthAttempts.appCodeChallenge, appCodeChallenge),
-          eq(providerAuthAttempts.status, "complete"),
-          gt(providerAuthAttempts.expiresAt, new Date()),
-          isNull(providerAuthAttempts.usedAt),
-        ))
-        .for("update")
-        .limit(1)
-      if (!attempt) return undefined
+    return db.select().from(providerAuthAttempts).where(and(
+      eq(providerAuthAttempts.ticketHash, ticketHash),
+      eq(providerAuthAttempts.appCodeChallenge, appCodeChallenge),
+      eq(providerAuthAttempts.status, "complete"),
+      gt(providerAuthAttempts.expiresAt, new Date()),
+      isNull(providerAuthAttempts.usedAt),
+    )).limit(1).then(([attempt]) => attempt)
+  },
 
-      const [used] = await tx
-        .update(providerAuthAttempts)
-        .set({ status: "used", usedAt: new Date() })
-        .where(and(eq(providerAuthAttempts.id, attempt.id), isNull(providerAuthAttempts.usedAt)))
-        .returning()
-      return used
-    })
+  async lockRedeemableTicket(
+    tx: Transaction,
+    ticketHash: string,
+    appCodeChallenge: string,
+  ): Promise<DbProviderAuthAttempt | undefined> {
+    const [attempt] = await tx
+      .select()
+      .from(providerAuthAttempts)
+      .where(and(
+        eq(providerAuthAttempts.ticketHash, ticketHash),
+        eq(providerAuthAttempts.appCodeChallenge, appCodeChallenge),
+        eq(providerAuthAttempts.status, "complete"),
+        gt(providerAuthAttempts.expiresAt, new Date()),
+        isNull(providerAuthAttempts.usedAt),
+      ))
+      .for("update")
+      .limit(1)
+    return attempt
+  },
+
+  async markUsedInTransaction(
+    tx: Transaction,
+    id: string,
+    usedAt = new Date(),
+  ): Promise<DbProviderAuthAttempt> {
+    const [used] = await tx
+      .update(providerAuthAttempts)
+      .set({ status: "used", usedAt })
+      .where(and(
+        eq(providerAuthAttempts.id, id),
+        eq(providerAuthAttempts.status, "complete"),
+        isNull(providerAuthAttempts.usedAt),
+      ))
+      .returning()
+    if (!used) throw new Error("Provider ticket changed before it could be consumed")
+    return used
   },
 
   async cleanupExpired(limit = 250): Promise<number> {

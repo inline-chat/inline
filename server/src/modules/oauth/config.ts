@@ -12,6 +12,9 @@ export type OauthServerConfig = {
   endpointRateLimits: {
     register: RateLimitRule
     providerStart: RateLimitRule
+    providerCallback: RateLimitRule
+    providerContinueInvite: RateLimitRule
+    providerRedeem: RateLimitRule
     sendEmailCode: RateLimitRule
     verifyEmailCode: RateLimitRule
     sendSmsCode: RateLimitRule
@@ -79,6 +82,9 @@ export function oauthConfig(): OauthServerConfig {
     endpointRateLimits: {
       register: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_REGISTER", { max: 30, windowMs: 60_000 }),
       providerStart: parseRateLimitRuleEnv("PROVIDER_AUTH_RATE_LIMIT_START", { max: 20, windowMs: 10 * 60_000 }),
+      providerCallback: parseRateLimitRuleEnv("PROVIDER_AUTH_RATE_LIMIT_CALLBACK", { max: 60, windowMs: 10 * 60_000 }),
+      providerContinueInvite: parseRateLimitRuleEnv("PROVIDER_AUTH_RATE_LIMIT_INVITE", { max: 20, windowMs: 10 * 60_000 }),
+      providerRedeem: parseRateLimitRuleEnv("PROVIDER_AUTH_RATE_LIMIT_REDEEM", { max: 60, windowMs: 60_000 }),
       sendEmailCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_SEND_EMAIL_CODE", { max: 10, windowMs: 10 * 60_000 }),
       verifyEmailCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_VERIFY_EMAIL_CODE", { max: 20, windowMs: 10 * 60_000 }),
       sendSmsCode: parseRateLimitRuleEnv("MCP_OAUTH_RATE_LIMIT_SEND_SMS_CODE", { max: 10, windowMs: 10 * 60_000 }),

@@ -6,7 +6,9 @@ import { finishGridSessionAccess } from "@in/server/modules/grid/accessLifecycle
 import {
   lockGridMutations,
   removeGridSessionPresenceInTransaction,
+  type GridPresenceRemovalState,
 } from "@in/server/modules/grid/roomLifecycle"
+import type { Transaction } from "@in/server/db/types"
 
 type RevokeActor = "admin" | "user" | "system"
 
@@ -24,39 +26,54 @@ export type RevokeSessionResult = {
   alreadyRevoked: boolean
 }
 
+export type RevokeSessionTransactionOutcome = {
+  result: RevokeSessionResult
+  gridState: GridPresenceRemovalState | undefined
+}
+
 export async function revokeSession(input: RevokeSessionInput): Promise<RevokeSessionResult> {
-  const outcome = await db.transaction(async (tx) => {
-    // Grid mutations take this lock before checking the session row. Reusing
-    // that order makes a claim either complete before revocation and get
-    // removed here, or observe the revoked session after this transaction.
-    await lockGridMutations(tx)
-    const [session] = await tx
-      .select()
-      .from(sessions)
-      .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId)))
-      .for("update")
-      .limit(1)
+  const outcome = await db.transaction((tx) => revokeSessionInTransaction(tx, input))
 
-    if (!session) {
-      return {
-        result: { session: null, revoked: false, alreadyRevoked: false } satisfies RevokeSessionResult,
-        gridState: undefined,
-      }
+  await finishSessionRevocation(outcome, input)
+  return outcome.result
+}
+
+export async function revokeSessionInTransaction(
+  tx: Transaction,
+  input: RevokeSessionInput,
+  options: { releaseDeviceId?: boolean } = {},
+): Promise<RevokeSessionTransactionOutcome> {
+  // Grid mutations take this lock before checking the session row. Reusing
+  // that order makes a claim either complete before revocation and get
+  // removed here, or observe the revoked session after this transaction.
+  await lockGridMutations(tx)
+  const [session] = await tx
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId)))
+    .for("update")
+    .limit(1)
+
+  if (!session) {
+    return {
+      result: { session: null, revoked: false, alreadyRevoked: false },
+      gridState: undefined,
     }
+  }
 
-    if (session.revoked) {
-      const gridState = await removeGridSessionPresenceInTransaction(tx, input.targetUserId, input.sessionId)
-      return {
-        result: { session, revoked: false, alreadyRevoked: true } satisfies RevokeSessionResult,
-        gridState,
-      }
+  let result: RevokeSessionResult
+  if (session.revoked) {
+    if (options.releaseDeviceId && session.deviceId !== null) {
+      await tx.update(sessions).set({ deviceId: null }).where(eq(sessions.id, session.id))
     }
-
+    result = { session, revoked: false, alreadyRevoked: true }
+  } else {
     const [updated] = await tx
       .update(sessions)
       .set({
         revoked: new Date(),
         active: false,
+        ...(options.releaseDeviceId ? { deviceId: null } : {}),
         applePushToken: null,
         applePushTokenEncrypted: null,
         applePushTokenIv: null,
@@ -70,14 +87,17 @@ export async function revokeSession(input: RevokeSessionInput): Promise<RevokeSe
       .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId), isNull(sessions.revoked)))
       .returning()
     if (!updated) throw new Error("Session revocation lost its row lock")
+    result = { session: updated, revoked: true, alreadyRevoked: false }
+  }
 
-    const gridState = await removeGridSessionPresenceInTransaction(tx, input.targetUserId, input.sessionId)
-    return {
-      result: { session: updated, revoked: true, alreadyRevoked: false } satisfies RevokeSessionResult,
-      gridState,
-    }
-  })
+  const gridState = await removeGridSessionPresenceInTransaction(tx, input.targetUserId, input.sessionId)
+  return { result, gridState }
+}
 
+export async function finishSessionRevocation(
+  outcome: RevokeSessionTransactionOutcome,
+  input: RevokeSessionInput,
+): Promise<void> {
   if (outcome.gridState) {
     await finishGridSessionAccess(outcome.gridState, input.targetUserId, input.sessionId)
   }
@@ -86,5 +106,4 @@ export async function revokeSession(input: RevokeSessionInput): Promise<RevokeSe
       authenticationInvalidated: true,
     }, input.preserveConnectionId)
   }
-  return outcome.result
 }
