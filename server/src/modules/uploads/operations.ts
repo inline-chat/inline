@@ -184,7 +184,7 @@ export class NativeUploadOperations {
     this.#scheduleCleanup()
     const owner = await this.#owner(context)
     const ownerDoneAt = Date.now()
-    const upload = requireValue(await this.repository.get(input.uploadId, owner))
+    const upload = requireValue(await this.repository.getPartTarget(input.uploadId, owner))
     const uploadLookupDoneAt = Date.now()
     if (upload.status !== "uploading" || upload.expiresAt <= new Date() ||
         upload.hardExpiresAt <= new Date() ||

@@ -69,6 +69,11 @@ export type InlineUploadPartRecord = {
   objectKey: string
 }
 
+export type InlineUploadPartTarget = Pick<
+  DbInlineUpload,
+  "id" | "byteCount" | "partSize" | "partCount" | "status" | "expiresAt" | "hardExpiresAt"
+>
+
 export type InlineUploadPartAcceptance = {
   kind: "accepted" | "already-present" | "conflict" | "terminal"
   /** Object key already owned by the durable manifest, if one exists. */
@@ -410,6 +415,27 @@ export class InlineUploadRepository {
     return row ? { ...row, acceptedParts: await acceptedPartsFor(row.id) } : undefined
   }
 
+  async getPartTarget(
+    uploadId: Uint8Array,
+    owner: InlineUploadOwner,
+  ): Promise<InlineUploadPartTarget | undefined> {
+    if (uploadId.length !== 16) return undefined
+    return (await db.select({
+      id: inlineUploads.id,
+      byteCount: inlineUploads.byteCount,
+      partSize: inlineUploads.partSize,
+      partCount: inlineUploads.partCount,
+      status: inlineUploads.status,
+      expiresAt: inlineUploads.expiresAt,
+      hardExpiresAt: inlineUploads.hardExpiresAt,
+    }).from(inlineUploads).where(and(
+      eq(inlineUploads.uploadId, Buffer.from(uploadId)),
+      eq(inlineUploads.userId, owner.userId),
+      eq(inlineUploads.accountSessionId, owner.accountSessionId),
+      eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId)),
+    )).limit(1))[0]
+  }
+
   async getPart(uploadDbId: number, partIndex: number): Promise<InlineUploadPartRecord | undefined> {
     const row = (await db.select().from(inlineUploadParts).where(and(
       eq(inlineUploadParts.uploadDbId, uploadDbId),
@@ -431,7 +457,7 @@ export class InlineUploadRepository {
   }
 
   async acceptPart(input: {
-    upload: InlineUploadRecord
+    upload: Pick<InlineUploadRecord, "id">
     partIndex: number
     byteCount: number
     sha256: Uint8Array
@@ -767,16 +793,12 @@ export class InlineUploadRepository {
     })
   }
 
-  async listExpired(limit = 100): Promise<InlineUploadRecord[]> {
+  async listExpired(limit = 100): Promise<Array<{ id: number }>> {
     const now = new Date()
-    const rows = await db.select().from(inlineUploads)
+    return db.select({ id: inlineUploads.id }).from(inlineUploads)
       .where(or(lt(inlineUploads.expiresAt, now), lt(inlineUploads.hardExpiresAt, now)))
       .orderBy(asc(inlineUploads.expiresAt))
       .limit(limit)
-    return Promise.all(rows.map(async (row) => ({
-      ...row,
-      acceptedParts: await acceptedPartsFor(row.id),
-    })))
   }
 
   async parts(uploadDbId: number): Promise<InlineUploadPartRecord[]> {

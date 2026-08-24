@@ -157,6 +157,16 @@ describe("native upload repository", () => {
       objectKey: "part-1",
     })).toEqual({ kind: "accepted", durableObjectKey: "part-1" })
     expect((await repository.get(created.upload.uploadId, owner))?.acceptedParts).toEqual([1])
+    const partTarget = await repository.getPartTarget(created.upload.uploadId, owner)
+    expect(Object.keys(partTarget ?? {}).sort()).toEqual([
+      "byteCount",
+      "expiresAt",
+      "hardExpiresAt",
+      "id",
+      "partCount",
+      "partSize",
+      "status",
+    ])
 
     const first = bytes.subarray(0, INLINE_UPLOAD_PART_SIZE)
     const firstDigest = createHash("sha256").update(first).digest()
@@ -321,7 +331,9 @@ describe("native upload repository", () => {
     await db.update(inlineUploads).set({ expiresAt: new Date(0) })
       .where(eq(inlineUploads.id, created.upload.id))
     expect(await repository.activeCount(owner)).toBe(0)
-    expect((await repository.listExpired()).map(({ id }) => id)).toContain(created.upload.id)
+    const expired = await repository.listExpired()
+    expect(expired.map(({ id }) => id)).toContain(created.upload.id)
+    expect(expired.every((row) => Object.keys(row).length === 1)).toBe(true)
 
     expect(await repository.cancel(created.upload.uploadId, owner))
       .toEqual({ canceled: true, alreadyTerminal: false })
