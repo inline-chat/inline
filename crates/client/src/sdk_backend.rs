@@ -31,7 +31,7 @@ use tokio::sync::{Mutex, Notify};
 use crate::backend::{
     retry_after_seconds_from_message, validate_action_toast, validate_message_actions,
 };
-use crate::sync::{SyncHost, SyncManager};
+use crate::sync::{SyncBucketRepair, SyncHost, SyncManager};
 use crate::{
     AccountStateSnapshot, AddChatParticipantRequest, AnswerBotChatSettingsRequest,
     AnswerMessageActionRequest, AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult,
@@ -2541,23 +2541,49 @@ impl SyncHost for SdkBackend {
     fn repair_bucket(
         &self,
         key: crate::SyncBucketKey,
-    ) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
+        target_seq: i64,
+    ) -> BoxFuture<'static, BackendResult<SyncBucketRepair>> {
         let backend = self.clone();
         Box::pin(async move {
             match key {
-                crate::SyncBucketKey::User => backend.repair_user_bucket().await,
+                crate::SyncBucketKey::User => backend.repair_user_bucket(target_seq).await,
                 crate::SyncBucketKey::Space { space_id } => {
-                    backend.repair_space_bucket(space_id).await
+                    let events = backend.repair_space_bucket(space_id, target_seq).await?;
+                    Ok(SyncBucketRepair {
+                        events,
+                        checkpoint: None,
+                    })
                 }
-                crate::SyncBucketKey::Chat { peer } => backend.repair_chat_bucket(peer).await,
+                crate::SyncBucketKey::Chat { peer } => {
+                    let events = backend.repair_chat_bucket(peer, target_seq).await?;
+                    Ok(SyncBucketRepair {
+                        events,
+                        checkpoint: None,
+                    })
+                }
             }
         })
     }
 }
 
 impl SdkBackend {
-    async fn repair_user_bucket(&self) -> BackendResult<Vec<ClientEvent>> {
+    async fn repair_user_bucket(&self, target_seq: i64) -> BackendResult<SyncBucketRepair> {
         let session = self.require_session().await?;
+        let checkpoint = self
+            .call_realtime(&session, proto::GetUpdatesStateInput { date: None })
+            .await?;
+        let checkpoint_seq = checkpoint.seq.map(i64::from).ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "user bucket repair state did not include a sequence",
+            )
+        })?;
+        if checkpoint_seq < target_seq || checkpoint.date <= 0 {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "user bucket repair checkpoint did not cover the recovery target",
+            ));
+        }
         let chats = self
             .call_realtime(&session, proto::GetChatsInput {})
             .await?;
@@ -2592,141 +2618,89 @@ impl SdkBackend {
             user_id: user.user_id,
         });
         events.push(ClientEvent::UserSettingsChanged {});
-        Ok(events)
+        Ok(SyncBucketRepair {
+            events,
+            checkpoint: Some(crate::SyncBucketState {
+                seq: checkpoint_seq,
+                date: checkpoint.date,
+            }),
+        })
     }
 
-    async fn repair_space_bucket(&self, space_id: InlineId) -> BackendResult<Vec<ClientEvent>> {
-        let session = self.require_session().await?;
-        let chats = self
-            .call_realtime(&session, proto::GetChatsInput {})
-            .await?;
-        let space_is_current = chats.spaces.iter().any(|space| space.id == space_id.get());
-        let mut events = self.apply_get_chats_snapshot(chats).await?;
-        if space_is_current {
-            let settings = self
-                .call_realtime(
-                    &session,
-                    proto::GetSpaceSettingsInput {
-                        space_id: space_id.get(),
-                    },
-                )
-                .await?
-                .settings
-                .ok_or_else(|| {
-                    BackendError::new(
-                        ClientErrorCategory::ProtocolMismatch,
-                        "space settings snapshot did not include settings",
-                    )
-                })?;
-            let mut space = self
-                .store
-                .space(space_id)
-                .await
-                .map_err(store_error_to_backend)?
-                .ok_or_else(|| {
-                    BackendError::new(
-                        ClientErrorCategory::ProtocolMismatch,
-                        "space settings snapshot did not resolve to a stored space",
-                    )
-                })?;
-            space.grid_enabled = Some(settings.grid_enabled);
-            self.store
-                .record_space(space)
-                .await
-                .map_err(store_error_to_backend)?;
-            events.push(ClientEvent::SpaceUpserted { space_id });
-        }
-        events.extend(
-            self.repair_space_members(&session, space_id, space_is_current)
-                .await?,
-        );
-        Ok(events)
-    }
-
-    async fn repair_space_members(
+    async fn repair_space_bucket(
         &self,
-        session: &StoredSession,
         space_id: InlineId,
-        space_is_current: bool,
+        target_seq: i64,
     ) -> BackendResult<Vec<ClientEvent>> {
-        let members = if space_is_current {
-            Some(
-                self.call_realtime(
-                    session,
-                    proto::GetSpaceMembersInput {
-                        space_id: space_id.get(),
-                    },
-                )
-                .await?,
+        let session = self.require_session().await?;
+        let result = self
+            .call_realtime(
+                &session,
+                proto::GetSpaceInput {
+                    space_id: space_id.get(),
+                },
             )
-        } else {
-            None
-        };
-        let previous_members = self
+            .await?;
+        let snapshot = result.space.ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "space bucket snapshot did not include the space",
+            )
+        })?;
+        if snapshot.id != space_id.get() || i64::from(snapshot.seq.unwrap_or_default()) < target_seq
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "space bucket snapshot did not cover the repair target",
+            ));
+        }
+        let membership = result.membership.ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "space bucket snapshot did not include membership",
+            )
+        })?;
+        if membership.space_id != space_id.get() {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "space bucket snapshot returned mismatched membership",
+            ));
+        }
+        let mut record = space_record_from_proto(&snapshot);
+        if let Some(settings) = result.settings {
+            record.grid_enabled = Some(settings.grid_enabled);
+        } else if let Some(existing) = self
             .store
-            .space_members(space_id)
+            .space(space_id)
             .await
-            .map_err(store_error_to_backend)?;
-        let (current_members, users) = if let Some(result) = members {
-            (
-                result
-                    .members
-                    .iter()
-                    .map(space_member_record_from_proto)
-                    .collect::<Vec<_>>(),
-                result
-                    .users
-                    .iter()
-                    .map(user_record_from_proto)
-                    .collect::<Vec<_>>(),
-            )
-        } else {
-            (Vec::new(), Vec::new())
-        };
+            .map_err(store_error_to_backend)?
+        {
+            record.grid_enabled = existing.grid_enabled;
+        }
         self.store
-            .record_users(users.clone())
+            .record_space(record)
             .await
             .map_err(store_error_to_backend)?;
+        let membership = space_member_record_from_proto(&membership);
         self.store
-            .record_space_members(space_id, current_members.clone())
+            .record_space_member(membership.clone())
             .await
             .map_err(store_error_to_backend)?;
-
-        let mut events = users
-            .into_iter()
-            .map(|user| ClientEvent::UserUpserted {
-                user_id: user.user_id,
-            })
-            .collect::<Vec<_>>();
-        let current_ids = current_members
-            .iter()
-            .map(|member| member.user_id)
-            .collect::<HashSet<_>>();
-        events.extend(
-            current_members
-                .into_iter()
-                .map(|member| ClientEvent::SpaceMemberChanged {
-                    space_id,
-                    user_id: member.user_id,
-                    removed: false,
-                }),
-        );
-        events.extend(
-            previous_members
-                .into_iter()
-                .filter(|member| !current_ids.contains(&member.user_id))
-                .map(|member| ClientEvent::SpaceMemberChanged {
-                    space_id,
-                    user_id: member.user_id,
-                    removed: true,
-                }),
-        );
+        let events = vec![
+            ClientEvent::SpaceUpserted { space_id },
+            ClientEvent::SpaceMemberChanged {
+                space_id,
+                user_id: membership.user_id,
+                removed: false,
+            },
+        ];
         Ok(events)
     }
 
     async fn repair_chat_bucket(
         &self,
         peer: crate::SyncBucketPeer,
+        target_seq: i64,
     ) -> BackendResult<Vec<ClientEvent>> {
         let session = self.require_session().await?;
         let peer_id = input_peer_for_sync_bucket_peer(peer);
@@ -2758,15 +2732,13 @@ impl SdkBackend {
                 "chat bucket snapshot did not include the chat",
             )
         })?;
+        if i64::from(chat.seq.unwrap_or_default()) < target_seq {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "chat bucket snapshot did not cover the repair target",
+            ));
+        }
         let chat_id = InlineId::new(chat.id);
-        let participants = self
-            .call_realtime(
-                &session,
-                proto::GetChatParticipantsInput {
-                    chat_id: chat_id.get(),
-                },
-            )
-            .await?;
         let history = self.fetch_chat_repair_history(&session, peer_id).await?;
 
         let dialog = chat_result.dialog;
@@ -2779,37 +2751,16 @@ impl SdkBackend {
             .map(InlineId::new)
             .collect::<Vec<_>>();
 
-        // A scoped repair is a replacement, not an overlay. Drop stale
-        // chat-owned projections only after every authoritative network read
-        // has succeeded, then rebuild the bucket from the fetched snapshot.
         self.store
-            .remove_dialog(chat_id)
+            .mark_chat_participants_incomplete(chat_id)
             .await
             .map_err(store_error_to_backend)?;
         let mut events = self.record_chat_update(chat, dialog, None).await?;
+        events.push(ClientEvent::ChatParticipantsChanged { chat_id });
         self.mutate_dialog(chat_id, |dialog| {
             dialog.pinned_message_ids = pinned_message_ids;
         })
         .await?;
-
-        let participant_page = chat_participants_page_from_proto(participants);
-        self.store
-            .record_users(participant_page.users.clone())
-            .await
-            .map_err(store_error_to_backend)?;
-        self.store
-            .record_chat_participants(chat_id, participant_page.participants)
-            .await
-            .map_err(store_error_to_backend)?;
-        events.extend(
-            participant_page
-                .users
-                .into_iter()
-                .map(|user| ClientEvent::UserUpserted {
-                    user_id: user.user_id,
-                }),
-        );
-        events.push(ClientEvent::ChatParticipantsChanged { chat_id });
 
         for message in history {
             let record = self
@@ -3654,6 +3605,32 @@ impl SdkBackend {
                         events.push(ClientEvent::ChatDeleted { chat_id });
                     }
                 }
+                Some(proto::update::Update::UserAddedToChat(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    if let Some(participant) = update.participant {
+                        self.store
+                            .record_chat_participant(
+                                chat_id,
+                                ChatParticipantRecord {
+                                    user_id: InlineId::new(participant.user_id),
+                                    date: Some(participant.date),
+                                },
+                            )
+                            .await
+                            .map_err(store_error_to_backend)?;
+                        events.push(ClientEvent::ChatParticipantsChanged { chat_id });
+                    }
+                    events.push(ClientEvent::UserAddedToChat { chat_id });
+                }
+                Some(proto::update::Update::UserRemovedFromChat(update)) => {
+                    let chat_id = InlineId::new(update.chat_id);
+                    self.store
+                        .remove_dialog(chat_id)
+                        .await
+                        .map_err(store_error_to_backend)?;
+                    events.push(ClientEvent::UserRemovedFromChat { chat_id });
+                    events.push(ClientEvent::ChatDeleted { chat_id });
+                }
                 Some(proto::update::Update::ParticipantAdd(update)) => {
                     let chat_id = InlineId::new(update.chat_id);
                     if let Some(participant) = update.participant {
@@ -3929,13 +3906,13 @@ impl SdkBackend {
                         format!("Inline update is not implemented: {kind}"),
                     ));
                 }
-                None if seq > 0 => {
-                    return Err(BackendError::new(
-                        ClientErrorCategory::ProtocolMismatch,
-                        "sequenced Inline update had no payload",
-                    ));
+                None => {
+                    if seq > 0 {
+                        log::warn!(
+                            "advancing past forward-compatible unknown Inline update seq={seq}"
+                        );
+                    }
                 }
-                None => {}
             }
         }
         Ok(events)
@@ -4291,6 +4268,7 @@ fn space_record_from_proto(space: &proto::Space) -> SpaceRecord {
         creator: space.creator,
         date: space.date,
         is_public: space.is_public,
+        seq: space.seq,
         grid_enabled: None,
     }
 }
@@ -6163,6 +6141,22 @@ mod tests {
     }
 
     #[test]
+    fn preexecution_carrier_rejection_is_retryable_without_closing_session() {
+        let realtime_error = RealtimeError::RpcError {
+            code: 503,
+            error_code: proto::rpc_error::Code::Unknown as i32,
+            error_name: "REJECTED_BEFORE_EXECUTION".to_string(),
+            message: "Realtime application rejected before execution".to_string(),
+            friendly: "Realtime application rejected before execution (status 503)".to_string(),
+        };
+
+        assert!(!realtime_error_closes_session(&realtime_error));
+        let backend_error = realtime_error_to_backend(realtime_error);
+        assert_eq!(backend_error.category, ClientErrorCategory::Internal);
+        assert!(retryable_transaction_category(backend_error.category));
+    }
+
+    #[test]
     fn converts_native_message_actions_to_protocol_shape() {
         let actions = MessageActions {
             rows: vec![crate::MessageActionRow {
@@ -7713,6 +7707,7 @@ mod tests {
                             id: 7,
                             title: "Repaired".to_owned(),
                             peer_id: Some(peer.clone()),
+                            seq: Some(400),
                             ..Default::default()
                         }),
                         dialog: Some(proto::Dialog {
@@ -7724,26 +7719,6 @@ mod tests {
                         anchor_message: None,
                         user: None,
                     }),
-                ),
-            )
-            .await;
-
-            let participants = read_test_client_message(&mut ws).await;
-            assert!(matches!(
-                &participants.body,
-                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
-                    method,
-                    input: Some(proto::rpc_call::Input::GetChatParticipants(_)),
-                })) if *method == proto::Method::GetChatParticipants as i32
-            ));
-            send_test_server_message(
-                &mut ws,
-                rpc_result_message(
-                    6,
-                    participants.id,
-                    proto::rpc_result::Result::GetChatParticipants(
-                        proto::GetChatParticipantsResult::default(),
-                    ),
                 ),
             )
             .await;
@@ -7810,6 +7785,16 @@ mod tests {
         });
         store.insert_message(test_message_record(10));
         store
+            .record_chat_participants(
+                InlineId::new(7),
+                vec![ChatParticipantRecord {
+                    user_id: InlineId::new(2),
+                    date: Some(100),
+                }],
+            )
+            .await
+            .unwrap();
+        store
             .save_sync_bucket_state(
                 crate::SyncBucketKey::User,
                 crate::SyncBucketState { seq: 1, date: 100 },
@@ -7833,6 +7818,11 @@ mod tests {
             event,
             ClientEvent::MessageStored { message } if message.message_id == InlineId::new(11)
         )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::ChatParticipantsChanged { chat_id }
+                if *chat_id == InlineId::new(7)
+        )));
         let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
         assert_eq!(dialog.title.as_deref(), Some("Repaired"));
         assert_eq!(dialog.pinned_message_ids, vec![InlineId::new(11)]);
@@ -7841,7 +7831,7 @@ mod tests {
                 .message(InlineId::new(7), InlineId::new(10))
                 .await
                 .unwrap()
-                .is_none()
+                .is_some()
         );
         assert!(
             store
@@ -7849,6 +7839,12 @@ mod tests {
                 .await
                 .unwrap()
                 .is_some()
+        );
+        assert!(
+            !store
+                .chat_participants_complete(InlineId::new(7))
+                .await
+                .unwrap()
         );
         assert_eq!(
             store
@@ -7890,11 +7886,34 @@ mod tests {
             )
             .await;
 
-            let chats = read_test_client_message(&mut ws).await;
+            let state = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                state.body,
+                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                    input: Some(proto::rpc_call::Input::GetUpdatesState(
+                        proto::GetUpdatesStateInput { date: None }
+                    )),
+                    ..
+                }))
+            ));
             send_test_server_message(
                 &mut ws,
                 rpc_result_message(
                     2,
+                    state.id,
+                    proto::rpc_result::Result::GetUpdatesState(proto::GetUpdatesStateResult {
+                        date: 95,
+                        updates_found: Some(true),
+                        seq: Some(5),
+                    }),
+                ),
+            )
+            .await;
+            let chats = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    3,
                     chats.id,
                     proto::rpc_result::Result::GetChats(proto::GetChatsResult::default()),
                 ),
@@ -7904,7 +7923,7 @@ mod tests {
             send_test_server_message(
                 &mut ws,
                 rpc_result_message(
-                    3,
+                    4,
                     me.id,
                     proto::rpc_result::Result::GetMe(proto::GetMeResult {
                         user: Some(proto::User {
@@ -7920,7 +7939,7 @@ mod tests {
             send_test_server_message(
                 &mut ws,
                 rpc_result_message(
-                    4,
+                    5,
                     settings.id,
                     proto::rpc_result::Result::GetUserSettings(proto::GetUserSettingsResult {
                         user_settings: Some(proto::UserSettings::default()),
@@ -7943,7 +7962,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let events = backend.repair_user_bucket().await.unwrap();
+        let repair = backend.repair_user_bucket(1).await.unwrap();
+        let events = repair.events;
+
+        assert_eq!(
+            repair.checkpoint,
+            Some(crate::SyncBucketState { seq: 5, date: 95 })
+        );
 
         assert!(!events.iter().any(|event| matches!(
             event,
@@ -8720,6 +8745,7 @@ mod tests {
                         actions: None,
                         rev: None,
                         service_message: None,
+                        block_content: None,
                     }),
                 })),
             }],

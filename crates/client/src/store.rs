@@ -500,6 +500,12 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
         participants: Vec<ChatParticipantRecord>,
     ) -> BoxFuture<'static, StoreResult<()>>;
 
+    /// Preserves cached participants while marking the snapshot incomplete.
+    fn mark_chat_participants_incomplete(
+        &self,
+        chat_id: InlineId,
+    ) -> BoxFuture<'static, StoreResult<()>>;
+
     /// Inserts or replaces one durable chat participant.
     fn record_chat_participant(
         &self,
@@ -1394,6 +1400,22 @@ impl ClientStore for InMemoryStore {
             let mut state = store.state.lock().expect("in-memory store poisoned");
             state.participants.insert(chat_id.get(), snapshot);
             state.participant_snapshots.insert(chat_id.get());
+            Ok(())
+        })
+    }
+
+    fn mark_chat_participants_incomplete(
+        &self,
+        chat_id: InlineId,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .participant_snapshots
+                .remove(&chat_id.get());
             Ok(())
         })
     }
@@ -2774,6 +2796,17 @@ impl SqliteStore {
         Ok(())
     }
 
+    fn mark_chat_participants_incomplete_sync(&self, chat_id: InlineId) -> StoreResult<()> {
+        let connection = self.connection.lock().expect("sqlite store poisoned");
+        connection
+            .execute(
+                "DELETE FROM chat_participant_snapshots WHERE chat_id = ?1",
+                params![chat_id.get()],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     fn record_chat_participant_sync(
         &self,
         chat_id: InlineId,
@@ -3618,6 +3651,14 @@ impl ClientStore for SqliteStore {
     ) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move { store.record_chat_participants_sync(chat_id, participants) })
+    }
+
+    fn mark_chat_participants_incomplete(
+        &self,
+        chat_id: InlineId,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move { store.mark_chat_participants_incomplete_sync(chat_id) })
     }
 
     fn record_chat_participant(
@@ -5321,6 +5362,7 @@ mod tests {
             creator: true,
             date: 100,
             is_public: Some(false),
+            seq: Some(7),
             grid_enabled: Some(true),
         };
         let member = SpaceMemberRecord {
@@ -5684,6 +5726,21 @@ mod tests {
                 .unwrap(),
             vec![message.message_id]
         );
+
+        store
+            .mark_chat_participants_incomplete(message.chat_id)
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .chat_participants_complete(message.chat_id)
+                .await
+                .unwrap()
+        );
+        store
+            .record_chat_participants(message.chat_id, Vec::new())
+            .await
+            .unwrap();
 
         store.remove_dialog(message.chat_id).await.unwrap();
         drop(store);

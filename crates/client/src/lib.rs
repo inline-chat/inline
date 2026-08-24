@@ -508,6 +508,16 @@ pub enum ClientEvent {
         /// Inline chat ID.
         chat_id: InlineId,
     },
+    /// The authenticated user gained effective access to a chat.
+    UserAddedToChat {
+        /// Inline chat ID.
+        chat_id: InlineId,
+    },
+    /// The authenticated user lost effective access to a chat.
+    UserRemovedFromChat {
+        /// Inline chat ID.
+        chat_id: InlineId,
+    },
     /// The participant snapshot for a chat changed.
     ChatParticipantsChanged {
         /// Inline chat ID.
@@ -653,6 +663,8 @@ impl ClientEvent {
             | Self::BotInteraction(_)
             | Self::ChatUpserted { .. }
             | Self::ChatDeleted { .. }
+            | Self::UserAddedToChat { .. }
+            | Self::UserRemovedFromChat { .. }
             | Self::ChatParticipantsChanged { .. }
             | Self::UserUpserted { .. }
             | Self::SpaceUpserted { .. }

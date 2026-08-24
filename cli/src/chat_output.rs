@@ -462,6 +462,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
 
         let trimmed = apply_chat_list_filter(payload, Some("launch"));

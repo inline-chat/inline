@@ -918,6 +918,9 @@ pub struct SpaceRecord {
     pub date: i64,
     /// Whether this is a public community space.
     pub is_public: Option<bool>,
+    /// Authoritative realtime sequence captured with this space snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<i32>,
     /// Whether the space uses grid layout, when the setting has been loaded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_enabled: Option<bool>,
