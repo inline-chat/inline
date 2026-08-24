@@ -148,11 +148,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     guard kind == .replyInMessage || kind == .pinnedInHeader else { return nil }
 
     if style == .colored {
-      guard kind == .replyInMessage else {
-        return NSColor.controlAccentColor.withAlphaComponent(0.08)
-      }
-      let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-      return (isDark ? NSColor.black : NSColor.white).withAlphaComponent(0.08)
+      let baseColor = shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
+      return baseColor.withAlphaComponent(0.08)
     } else {
       return NSColor.white.withAlphaComponent(0.09)
     }
