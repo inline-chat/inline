@@ -496,7 +496,7 @@ final class AppSettings: ObservableObject {
     ) as? Bool ?? false
     richContentRendererEnabled = UserDefaults.standard.object(
       forKey: Self.richContentRendererEnabledKey
-    ) as? Bool ?? false
+    ) as? Bool ?? true
     let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
       .flatMap(SidebarMode.init(rawValue:))
     let legacyInbox = persistentDefaults?[ExperimentalFeatureFlags.sidebarAsInboxKey] as? Bool
