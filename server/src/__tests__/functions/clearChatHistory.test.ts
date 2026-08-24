@@ -12,6 +12,7 @@ import { clearChatHistoryHandler } from "@in/server/realtime/handlers/messages.c
 import type { HandlerContext } from "@in/server/realtime/types"
 import type { ClearChatHistoryInput } from "@inline-chat/protocol/core"
 import { setupTestLifecycle, testUtils } from "../setup"
+import { resetServerConfigCacheForTests } from "@in/server/modules/serverConfig"
 
 const inputPeerForChat = (chatId: number) => ({
   type: {
@@ -338,14 +339,15 @@ describe("messages.clearChatHistory", () => {
       testUtils.functionContext({ userId: admin.id }),
     )
 
-    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["clearChatHistory", "newChat"])
-    const resultUpdate = result.updates[0]?.update
-    expect(resultUpdate?.oneofKind).toBe("clearChatHistory")
-    if (resultUpdate?.oneofKind === "clearChatHistory") {
-      expect(resultUpdate.clearChatHistory.target.oneofKind).toBe("spaceId")
-      expect(resultUpdate.clearChatHistory.deletedChatIds).toEqual([])
-      expect(resultUpdate.clearChatHistory.orphanedChatIds).toEqual([BigInt(replyThread.id)])
-      expect(resultUpdate.clearChatHistory.detachedChatIds).toEqual([])
+    const clearUpdates = result.updates.filter((update) => update.update.oneofKind === "clearChatHistory")
+    expect(clearUpdates.length).toBeGreaterThan(1)
+    expect(result.updates.at(-1)?.update.oneofKind).toBe("newChat")
+    for (const update of clearUpdates) {
+      if (update.update.oneofKind !== "clearChatHistory") continue
+      expect(update.update.clearChatHistory.target.oneofKind).toBe("peerId")
+      expect(update.update.clearChatHistory.deletedChatIds).toEqual([])
+      expect(update.update.clearChatHistory.orphanedChatIds).toEqual([])
+      expect(update.update.clearChatHistory.detachedChatIds).toEqual([])
     }
 
     const messagesByChat = await db
@@ -373,23 +375,65 @@ describe("messages.clearChatHistory", () => {
         ),
       )
 
-    expect(spaceUpdates).toHaveLength(1)
-    const spaceUpdate = UpdatesModel.decrypt(spaceUpdates[0]!)
-    expect(spaceUpdate.payload.update.oneofKind).toBe("spaceClearHistory")
-    if (spaceUpdate.payload.update.oneofKind === "spaceClearHistory") {
-      expect(spaceUpdate.payload.update.spaceClearHistory.deletedChatIds).toEqual([])
-      expect(spaceUpdate.payload.update.spaceClearHistory.orphanedChatIds).toEqual([BigInt(replyThread.id)])
-      expect(spaceUpdate.payload.update.spaceClearHistory.detachedChatIds).toEqual([])
-    }
+    expect(spaceUpdates).toHaveLength(0)
 
     const replyThreadUpdates = await db
       .select()
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, UpdateBucket.Chat), eq(schema.updates.entityId, replyThread.id)))
 
-    expect(replyThreadUpdates).toHaveLength(1)
-    const replyThreadUpdate = UpdatesModel.decrypt(replyThreadUpdates[0]!)
-    expect(replyThreadUpdate.payload.update.oneofKind).toBe("newChat")
+    expect(replyThreadUpdates).toHaveLength(2)
+    expect(replyThreadUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind).sort()).toEqual([
+      "clearChatHistory",
+      "newChat",
+    ])
+  })
+
+  test("legacy rollout mode keeps one space-scoped history-clear sequence", async () => {
+    const originalMode = process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"]
+    process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"] = "legacy"
+    resetServerConfigCacheForTests()
+
+    try {
+      const space = await testUtils.createSpace("legacy-clear-space")
+      const owner = await testUtils.createUser("legacy-clear-owner@example.com")
+      if (!space) throw new Error("Space not created")
+      await addSpaceMembers(space.id, [{ userId: owner.id, role: "owner" }])
+
+      const first = await testUtils.createChat(space.id, "First", "thread", true, owner.id)
+      const second = await testUtils.createChat(space.id, "Second", "thread", true, owner.id)
+      if (!first || !second) throw new Error("Threads not created")
+      await insertMessage({ chatId: first.id, messageId: 1, fromId: owner.id })
+      await insertMessage({ chatId: second.id, messageId: 1, fromId: owner.id })
+
+      const result = await clearChatHistory(
+        { spaceId: space.id, keepLastDays: 0, deleteReplyThreads: false },
+        testUtils.functionContext({ userId: owner.id }),
+      )
+
+      const clearUpdates = result.updates.filter((update) => update.update.oneofKind === "clearChatHistory")
+      expect(clearUpdates).toHaveLength(1)
+      if (clearUpdates[0]?.update.oneofKind !== "clearChatHistory") {
+        throw new Error("Expected clearChatHistory update")
+      }
+      expect(clearUpdates[0].update.clearChatHistory.target).toEqual({
+        oneofKind: "spaceId",
+        spaceId: BigInt(space.id),
+      })
+
+      const stored = await db.select().from(schema.updates)
+      const storedClearKinds = stored
+        .map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)
+        .filter((kind) => kind === "spaceClearHistory" || kind === "clearChatHistory")
+      expect(storedClearKinds).toEqual(["spaceClearHistory"])
+    } finally {
+      if (originalMode === undefined) {
+        delete process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"]
+      } else {
+        process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"] = originalMode
+      }
+      resetServerConfigCacheForTests()
+    }
   })
 
   test("space clear publishes metadata updates for detached external reply threads", async () => {
@@ -452,7 +496,7 @@ describe("messages.clearChatHistory", () => {
     }
     expect(clearUpdate.clearChatHistory.deletedChatIds).toEqual([])
     expect(clearUpdate.clearChatHistory.orphanedChatIds).toEqual([])
-    expect(clearUpdate.clearChatHistory.detachedChatIds).toEqual([BigInt(externalReplyThread.id)])
+    expect(clearUpdate.clearChatHistory.detachedChatIds).toEqual([])
 
     const [retained] = await db
       .select()
@@ -480,9 +524,9 @@ describe("messages.clearChatHistory", () => {
 
     expect(ownerUserUpdates).toHaveLength(1)
     const ownerUserUpdate = UpdatesModel.decrypt(ownerUserUpdates[0]!)
-    expect(ownerUserUpdate.payload.update.oneofKind).toBe("userChatParticipantDelete")
-    if (ownerUserUpdate.payload.update.oneofKind === "userChatParticipantDelete") {
-      expect(ownerUserUpdate.payload.update.userChatParticipantDelete.chatId).toBe(BigInt(externalReplyThread.id))
+    expect(ownerUserUpdate.payload.update.oneofKind).toBe("userRemovedFromChat")
+    if (ownerUserUpdate.payload.update.oneofKind === "userRemovedFromChat") {
+      expect(ownerUserUpdate.payload.update.userRemovedFromChat.chatId).toBe(BigInt(externalReplyThread.id))
     }
 
     const spaceUpdates = await db
@@ -490,14 +534,7 @@ describe("messages.clearChatHistory", () => {
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, UpdateBucket.Space), eq(schema.updates.entityId, targetSpace.id)))
 
-    expect(spaceUpdates).toHaveLength(1)
-    const spaceUpdate = UpdatesModel.decrypt(spaceUpdates[0]!)
-    expect(spaceUpdate.payload.update.oneofKind).toBe("spaceClearHistory")
-    if (spaceUpdate.payload.update.oneofKind === "spaceClearHistory") {
-      expect(spaceUpdate.payload.update.spaceClearHistory.deletedChatIds).toEqual([])
-      expect(spaceUpdate.payload.update.spaceClearHistory.orphanedChatIds).toEqual([])
-      expect(spaceUpdate.payload.update.spaceClearHistory.detachedChatIds).toEqual([BigInt(externalReplyThread.id)])
-    }
+    expect(spaceUpdates).toHaveLength(0)
   })
 
   test("space clear publishes scoped updates for external descendants of deleted reply threads", async () => {
@@ -579,14 +616,15 @@ describe("messages.clearChatHistory", () => {
       "clearChatHistory",
       "newChat",
       "deleteChat",
+      "userRemovedFromChat",
     ])
     const clearUpdate = result.updates[0]?.update
     if (clearUpdate?.oneofKind !== "clearChatHistory") {
       throw new Error("Expected clearChatHistory update")
     }
-    expect(clearUpdate.clearChatHistory.deletedChatIds).toEqual([BigInt(deletedReplyThread.id)])
+    expect(clearUpdate.clearChatHistory.deletedChatIds).toEqual([])
     expect(clearUpdate.clearChatHistory.orphanedChatIds).toEqual([])
-    expect(clearUpdate.clearChatHistory.detachedChatIds).toEqual([BigInt(externalGrandchild.id)])
+    expect(clearUpdate.clearChatHistory.detachedChatIds).toEqual([])
 
     expect(await db.select().from(schema.chats).where(eq(schema.chats.id, deletedReplyThread.id)).limit(1)).toEqual([])
     const [retained] = await db.select().from(schema.chats).where(eq(schema.chats.id, externalGrandchild.id)).limit(1)
@@ -609,7 +647,7 @@ describe("messages.clearChatHistory", () => {
       ownerUpdates
         .map((update) => {
           const payload = UpdatesModel.decrypt(update).payload.update
-          return payload.oneofKind === "userChatParticipantDelete" ? Number(payload.userChatParticipantDelete.chatId) : 0
+          return payload.oneofKind === "userRemovedFromChat" ? Number(payload.userRemovedFromChat.chatId) : 0
         })
         .sort((a, b) => a - b),
     ).toEqual([externalGrandchild.id, deletedReplyThread.id].sort((a, b) => a - b))
@@ -670,12 +708,16 @@ describe("messages.clearChatHistory", () => {
       testUtils.functionContext({ userId: admin.id }),
     )
 
-    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["clearChatHistory", "deleteChat"])
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual([
+      "clearChatHistory",
+      "deleteChat",
+      "userRemovedFromChat",
+    ])
     const clearUpdate = result.updates[0]?.update
     if (clearUpdate?.oneofKind !== "clearChatHistory") {
       throw new Error("Expected clearChatHistory update")
     }
-    expect(clearUpdate.clearChatHistory.deletedChatIds).toEqual([BigInt(replyThread.id)])
+    expect(clearUpdate.clearChatHistory.deletedChatIds).toEqual([])
     expect(clearUpdate.clearChatHistory.orphanedChatIds).toEqual([])
     expect(clearUpdate.clearChatHistory.detachedChatIds).toEqual([])
 
@@ -686,14 +728,7 @@ describe("messages.clearChatHistory", () => {
       .select()
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, UpdateBucket.Space), eq(schema.updates.entityId, targetSpace.id)))
-    expect(spaceUpdates).toHaveLength(1)
-    const spaceUpdate = UpdatesModel.decrypt(spaceUpdates[0]!)
-    if (spaceUpdate.payload.update.oneofKind !== "spaceClearHistory") {
-      throw new Error("Expected spaceClearHistory update")
-    }
-    expect(spaceUpdate.payload.update.spaceClearHistory.deletedChatIds).toEqual([BigInt(replyThread.id)])
-    expect(spaceUpdate.payload.update.spaceClearHistory.orphanedChatIds).toEqual([])
-    expect(spaceUpdate.payload.update.spaceClearHistory.detachedChatIds).toEqual([])
+    expect(spaceUpdates).toHaveLength(0)
 
     const chatUpdates = await db
       .select()
@@ -722,9 +757,9 @@ describe("messages.clearChatHistory", () => {
     ].sort((a, b) => a - b))
     for (const update of userUpdates) {
       const decrypted = UpdatesModel.decrypt(update)
-      expect(decrypted.payload.update.oneofKind).toBe("userChatParticipantDelete")
-      if (decrypted.payload.update.oneofKind === "userChatParticipantDelete") {
-        expect(decrypted.payload.update.userChatParticipantDelete.chatId).toBe(BigInt(replyThread.id))
+      expect(decrypted.payload.update.oneofKind).toBe("userRemovedFromChat")
+      if (decrypted.payload.update.oneofKind === "userRemovedFromChat") {
+        expect(decrypted.payload.update.userRemovedFromChat.chatId).toBe(BigInt(replyThread.id))
       }
     }
   })

@@ -3,6 +3,7 @@ import type { DbChat } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { and, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { deleteUnreferencedBlockContents } from "@in/server/modules/message/blockContentStorage"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 
 export type ClearHistoryOptions = {
   beforeDate?: Date
@@ -400,101 +401,10 @@ async function getBlockContentIdsForChats(tx: Transaction, chatIds: number[]): P
 }
 
 async function getChatRecipientRows(tx: Transaction, chatIds: number[]): Promise<ChatRecipientRow[]> {
-  if (chatIds.length === 0) {
-    return []
-  }
-
-  const chatIdList = sql.join(chatIds, sql`, `)
-
-  return await tx.execute<ChatRecipientRow>(sql`
-    with recursive ancestors as (
-      select
-        c.id as "chatId",
-        c.id as "ancestorId",
-        c.parent_chat_id as "parentChatId",
-        0::int as "depth"
-      from chats c
-      where c.id in (${chatIdList})
-
-      union all
-
-      select
-        ancestors."chatId",
-        parent.id as "ancestorId",
-        parent.parent_chat_id as "parentChatId",
-        ancestors."depth" + 1
-      from ancestors
-      join chats parent on parent.id = ancestors."parentChatId"
-    ),
-    roots as (
-      select distinct on ("chatId")
-        "chatId",
-        "ancestorId" as "rootChatId"
-      from ancestors
-      order by "chatId", "depth" desc
-    ),
-    access as (
-      select
-        cp.chat_id as "chatId",
-        cp.user_id as "userId"
-      from chat_participants cp
-      where cp.chat_id in (${chatIdList})
-
-      union
-
-      select
-        r."chatId",
-        root.min_user_id as "userId"
-      from roots r
-      join chats root on root.id = r."rootChatId"
-      where root.type = 'private'
-        and root.min_user_id is not null
-
-      union
-
-      select
-        r."chatId",
-        root.max_user_id as "userId"
-      from roots r
-      join chats root on root.id = r."rootChatId"
-      where root.type = 'private'
-        and root.max_user_id is not null
-
-      union
-
-      select
-        r."chatId",
-        m.user_id as "userId"
-      from roots r
-      join chats root on root.id = r."rootChatId"
-      join members m on m.space_id = root.space_id
-      where root.type = 'thread'
-        and root.space_id is not null
-        and root.public_thread is true
-        and m.can_access_public_chats is true
-
-      union
-
-      select
-        r."chatId",
-        cp.user_id as "userId"
-      from roots r
-      join chats root on root.id = r."rootChatId"
-      join chat_participants cp on cp.chat_id = root.id
-      where root.type = 'thread'
-        and (
-          root.space_id is null
-          or root.public_thread is distinct from true
-        )
-    )
-    select distinct
-      access."chatId",
-      access."userId"
-    from access
-    join users u on u.id = access."userId"
-    where u.deleted is distinct from true
-    order by access."chatId", access."userId"
-  `)
+  const access = await getEffectiveChatAccessUserIds(tx, chatIds)
+  return Array.from(access.entries()).flatMap(([chatId, userIds]) =>
+    Array.from(userIds).map((userId) => ({ chatId, userId })),
+  )
 }
 
 async function orphanReplyThreadsForClearedChatMessages(

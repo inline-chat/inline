@@ -24,6 +24,10 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { and, eq } from "drizzle-orm"
 import {
+  getSyncV3UpdateProducerMode,
+  type SyncV3UpdateProducerMode,
+} from "@in/server/modules/serverConfig"
+import {
   clearChatHistoryData,
   clearSpaceHistoryData,
   type ClearHistoryAccessLoss,
@@ -71,6 +75,7 @@ type ClearHistoryUpdate = {
 
 type DeletedChatUpdate = ClearHistoryDeletedChat & {
   update: UpdateSeqAndDate
+  accessUpdates: { userId: number; update: UpdateSeqAndDate }[]
 }
 
 type RemovedChatAccessUpdate = {
@@ -90,6 +95,7 @@ export const clearChatHistory = async (
 ): Promise<ClearHistoryOutput> => {
   const cutoff = resolveCutoff(input.keepLastDays)
   const deleteReplyThreads = Boolean(input.deleteReplyThreads)
+  const updateProducerMode = await getSyncV3UpdateProducerMode()
 
   if (input.spaceId != null) {
     return clearSpaceHistory({
@@ -97,6 +103,7 @@ export const clearChatHistory = async (
       cutoff,
       deleteReplyThreads,
       context,
+      updateProducerMode,
     })
   }
 
@@ -105,6 +112,7 @@ export const clearChatHistory = async (
     cutoff,
     deleteReplyThreads,
     context,
+    updateProducerMode,
   })
 }
 
@@ -113,6 +121,7 @@ async function clearPeerHistory(input: {
   cutoff: Cutoff | undefined
   deleteReplyThreads: boolean
   context: ClearHistoryContext
+  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<ClearHistoryOutput> {
   const chat = await ChatModel.getChatFromInputPeer(input.peer, input.context)
 
@@ -134,6 +143,7 @@ async function clearPeerHistory(input: {
         chat: lockedChat,
         cutoff: input.cutoff,
         deleteReplyThreads: input.deleteReplyThreads,
+        updateProducerMode: input.updateProducerMode,
       })
     })
 
@@ -158,11 +168,13 @@ async function clearPeerHistory(input: {
   const { selfUpdates: deletedSelfUpdates } = await pushDeletedChatUpdates({
     currentUserId: input.context.currentUserId,
     chatUpdates: deletedChatUpdates,
+    updateProducerMode: input.updateProducerMode,
   })
 
   const { selfUpdates: removedAccessSelfUpdates } = await pushRemovedChatAccessUpdates({
     currentUserId: input.context.currentUserId,
     chatUpdates: removedAccessUpdates,
+    updateProducerMode: input.updateProducerMode,
   })
 
   await emitReplyThreadParentRepliesUpdateIfNeeded({
@@ -197,6 +209,7 @@ async function clearSpaceHistory(input: {
   cutoff: Cutoff | undefined
   deleteReplyThreads: boolean
   context: ClearHistoryContext
+  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<ClearHistoryOutput> {
   const spaceId = normalizeSpaceId(input.spaceId)
   await ensureCanClearSpaceHistory(spaceId, input.context.currentUserId)
@@ -205,61 +218,75 @@ async function clearSpaceHistory(input: {
     beforeDate: input.cutoff?.date,
   })
 
-  const { clearUpdate, sideEffects, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } = await db.transaction(
+  const { clearHistoryUpdates, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } = await db.transaction(
     async (tx) => {
       const [lockedSpace] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
       if (!lockedSpace) {
         throw RealtimeRpcError.SpaceIdInvalid()
       }
 
-      const { sideEffects, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } = await clearLockedSpaceHistory({
+      const result = await clearLockedSpaceHistory({
         tx,
         spaceId,
         cutoff: input.cutoff,
         deleteReplyThreads: input.deleteReplyThreads,
+        updateProducerMode: input.updateProducerMode,
       })
 
-      const updatePayload: ServerUpdate["update"] = {
-        oneofKind: "spaceClearHistory",
-        spaceClearHistory: {
-          spaceId: BigInt(spaceId),
-          beforeDate: input.cutoff?.seconds,
-          deleteReplyThreads: input.deleteReplyThreads,
-          deletedChatIds: sideEffects.deletedChatIds.map(BigInt),
-          orphanedChatIds: sideEffects.orphanedChatIds.map(BigInt),
-          detachedChatIds: sideEffects.detachedChatIds.map(BigInt),
-        },
+      if (input.updateProducerMode === "canonical_v3") {
+        return {
+          ...result,
+          clearHistoryUpdates: result.clearUpdates.map((clearUpdate) => ({
+            inputPeer: {
+              type: {
+                oneofKind: "chat" as const,
+                chat: { chatId: BigInt(clearUpdate.chat.id) },
+              },
+            },
+            update: clearUpdate.update,
+            beforeDate: input.cutoff?.seconds,
+            deleteReplyThreads: input.deleteReplyThreads,
+            sideEffects: emptyClearHistorySideEffects(),
+          })),
+        }
       }
 
       const update = await UpdatesModel.insertUpdate(tx, {
-        update: updatePayload,
+        update: {
+          oneofKind: "spaceClearHistory",
+          spaceClearHistory: {
+            spaceId: BigInt(spaceId),
+            beforeDate: input.cutoff?.seconds,
+            deleteReplyThreads: input.deleteReplyThreads,
+            deletedChatIds: result.sideEffects.deletedChatIds.map(BigInt),
+            orphanedChatIds: result.sideEffects.orphanedChatIds.map(BigInt),
+            detachedChatIds: result.sideEffects.detachedChatIds.map(BigInt),
+          },
+        },
         bucket: UpdateBucket.Space,
         entity: lockedSpace,
       })
-
       await tx
         .update(spaces)
-        .set({
-          updateSeq: update.seq,
-          lastUpdateDate: update.date,
-        })
+        .set({ updateSeq: update.seq, lastUpdateDate: update.date })
         .where(eq(spaces.id, spaceId))
 
-      return { clearUpdate: update, sideEffects, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates }
+      return {
+        ...result,
+        clearHistoryUpdates: [{
+          spaceId,
+          update,
+          beforeDate: input.cutoff?.seconds,
+          deleteReplyThreads: input.deleteReplyThreads,
+          sideEffects: result.sideEffects,
+        }],
+      }
     },
   )
 
   const { selfUpdates } = await pushClearHistoryUpdates({
     currentUserId: input.context.currentUserId,
-    clearUpdates: [
-      {
-        spaceId,
-        update: clearUpdate,
-        beforeDate: input.cutoff?.seconds,
-        deleteReplyThreads: input.deleteReplyThreads,
-        sideEffects,
-      },
-    ],
+    clearUpdates: clearHistoryUpdates,
   })
 
   const { selfUpdates: metadataSelfUpdates } = await pushChatMetadataUpdates({
@@ -270,11 +297,13 @@ async function clearSpaceHistory(input: {
   const { selfUpdates: deletedSelfUpdates } = await pushDeletedChatUpdates({
     currentUserId: input.context.currentUserId,
     chatUpdates: deletedChatUpdates,
+    updateProducerMode: input.updateProducerMode,
   })
 
   const { selfUpdates: removedAccessSelfUpdates } = await pushRemovedChatAccessUpdates({
     currentUserId: input.context.currentUserId,
     chatUpdates: removedAccessUpdates,
+    updateProducerMode: input.updateProducerMode,
   })
 
   const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
@@ -304,6 +333,7 @@ async function clearLockedChatHistory(input: {
   chat: DbChat
   cutoff: Cutoff | undefined
   deleteReplyThreads: boolean
+  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<{
   clearUpdate: UpdateSeqAndDate
   sideEffects: ClearHistorySideEffects
@@ -322,7 +352,7 @@ async function clearLockedChatHistory(input: {
     },
     {
       beforeDeleteChats: async (deletedChats) => {
-        deletedChatUpdates = await persistDeletedChatUpdates(input.tx, deletedChats)
+        deletedChatUpdates = await persistDeletedChatUpdates(input.tx, deletedChats, input.updateProducerMode)
       },
     },
   )
@@ -356,7 +386,11 @@ async function clearLockedChatHistory(input: {
 
   const metadataChatUpdates = await persistChatMetadataUpdates(input.tx, result.orphanedChatIds)
 
-  const removedAccessUpdates = await persistRemovedChatAccessUpdates(input.tx, result.detachedAccessLosses)
+  const removedAccessUpdates = await persistRemovedChatAccessUpdates(
+    input.tx,
+    result.detachedAccessLosses,
+    input.updateProducerMode,
+  )
 
   return { clearUpdate, sideEffects: result, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates }
 }
@@ -366,7 +400,9 @@ async function clearLockedSpaceHistory(input: {
   spaceId: number
   cutoff: Cutoff | undefined
   deleteReplyThreads: boolean
+  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<{
+  clearUpdates: { chat: DbChat; update: UpdateSeqAndDate }[]
   sideEffects: ClearHistorySideEffects
   metadataChatUpdates: ChatMetadataUpdate[]
   deletedChatUpdates: DeletedChatUpdate[]
@@ -385,7 +421,7 @@ async function clearLockedSpaceHistory(input: {
     },
     {
       beforeDeleteChats: async (deletedChats) => {
-        deletedChatUpdates = await persistDeletedChatUpdates(input.tx, deletedChats)
+        deletedChatUpdates = await persistDeletedChatUpdates(input.tx, deletedChats, input.updateProducerMode)
       },
     },
   )
@@ -394,14 +430,50 @@ async function clearLockedSpaceHistory(input: {
     ...result.orphanedChatIds,
     ...result.detachedChatIds,
   ])
-  const removedAccessUpdates = await persistRemovedChatAccessUpdates(input.tx, result.detachedAccessLosses)
+  const removedAccessUpdates = await persistRemovedChatAccessUpdates(
+    input.tx,
+    result.detachedAccessLosses,
+    input.updateProducerMode,
+  )
 
-  return { sideEffects: result, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates }
+  const clearUpdates: { chat: DbChat; update: UpdateSeqAndDate }[] = []
+  if (input.updateProducerMode === "canonical_v3") {
+    const survivingChats = await input.tx
+      .select()
+      .from(chats)
+      .where(eq(chats.spaceId, input.spaceId))
+      .orderBy(chats.id)
+    for (const chat of survivingChats) {
+      const update = await UpdatesModel.insertUpdate(input.tx, {
+        update: {
+          oneofKind: "clearChatHistory",
+          clearChatHistory: {
+            chatId: BigInt(chat.id),
+            beforeDate: input.cutoff?.seconds,
+            deleteReplyThreads: input.deleteReplyThreads,
+            deletedChatIds: [],
+            orphanedChatIds: [],
+            detachedChatIds: [],
+          },
+        },
+        bucket: UpdateBucket.Chat,
+        entity: chat,
+      })
+      await input.tx
+        .update(chats)
+        .set({ updateSeq: update.seq, lastUpdateDate: update.date })
+        .where(eq(chats.id, chat.id))
+      clearUpdates.push({ chat, update })
+    }
+  }
+
+  return { clearUpdates, sideEffects: result, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates }
 }
 
 async function persistDeletedChatUpdates(
   tx: Transaction,
   deletedChats: ClearHistoryDeletedChat[],
+  updateProducerMode: SyncV3UpdateProducerMode,
 ): Promise<DeletedChatUpdate[]> {
   const updates: DeletedChatUpdate[] = []
 
@@ -421,23 +493,40 @@ async function persistDeletedChatUpdates(
       ...deletedChat,
       userIds: uniqueUserIds(deletedChat.userIds),
       update,
+      accessUpdates: [],
     })
   }
 
-  await UserBucketUpdates.enqueueMany(
-    updates.flatMap((chatUpdate) =>
+  const inputs = updates.flatMap((chatUpdate) =>
       chatUpdate.userIds.map((userId) => ({
+        chatId: chatUpdate.chat.id,
         userId,
-        update: {
-          oneofKind: "userChatParticipantDelete" as const,
-          userChatParticipantDelete: {
-            chatId: BigInt(chatUpdate.chat.id),
-          },
-        },
+        update: updateProducerMode === "canonical_v3"
+          ? {
+              oneofKind: "userRemovedFromChat" as const,
+              userRemovedFromChat: {
+                chatId: BigInt(chatUpdate.chat.id),
+              },
+            }
+          : {
+              oneofKind: "userChatParticipantDelete" as const,
+              userChatParticipantDelete: {
+                chatId: BigInt(chatUpdate.chat.id),
+              },
+            },
       })),
-    ),
-    { tx },
-  )
+    )
+  const userUpdates = await UserBucketUpdates.enqueueMany(inputs, { tx })
+
+  if (updateProducerMode === "canonical_v3") {
+    const updateByChatId = new Map(updates.map((item) => [item.chat.id, item]))
+    for (const [index, input] of inputs.entries()) {
+      updateByChatId.get(input.chatId)?.accessUpdates.push({
+        userId: input.userId,
+        update: userUpdates[index]!,
+      })
+    }
+  }
 
   return updates
 }
@@ -445,17 +534,25 @@ async function persistDeletedChatUpdates(
 async function persistRemovedChatAccessUpdates(
   tx: Transaction,
   losses: ClearHistoryAccessLoss[],
+  updateProducerMode: SyncV3UpdateProducerMode,
 ): Promise<RemovedChatAccessUpdate[]> {
   const inputs = losses.flatMap((loss) =>
     uniqueUserIds(loss.userIds).map((userId) => ({
       chatId: loss.chatId,
       userId,
-      update: {
-        oneofKind: "userChatParticipantDelete" as const,
-        userChatParticipantDelete: {
-          chatId: BigInt(loss.chatId),
-        },
-      },
+      update: updateProducerMode === "canonical_v3"
+        ? {
+            oneofKind: "userRemovedFromChat" as const,
+            userRemovedFromChat: {
+              chatId: BigInt(loss.chatId),
+            },
+          }
+        : {
+            oneofKind: "userChatParticipantDelete" as const,
+            userChatParticipantDelete: {
+              chatId: BigInt(loss.chatId),
+            },
+          },
     })),
   )
 
@@ -624,9 +721,11 @@ const pushClearHistoryUpdates = async ({
 const pushDeletedChatUpdates = async ({
   currentUserId,
   chatUpdates,
+  updateProducerMode,
 }: {
   currentUserId: number
   chatUpdates: DeletedChatUpdate[]
+  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<{ selfUpdates: Update[] }> => {
   const selfUpdates: Update[] = []
 
@@ -643,6 +742,18 @@ const pushDeletedChatUpdates = async ({
         selfUpdates.push(update)
       }
     }
+
+    if (updateProducerMode === "canonical_v3") {
+      for (const accessUpdate of chatUpdate.accessUpdates) {
+        const update = buildAccessRemovedUpdate({
+          chatId: chatUpdate.chat.id,
+          userId: accessUpdate.userId,
+          update: accessUpdate.update,
+        }, updateProducerMode)
+        RealtimeUpdates.pushToUser(accessUpdate.userId, [update])
+        if (accessUpdate.userId === currentUserId) selfUpdates.push(update)
+      }
+    }
   }
 
   return { selfUpdates }
@@ -651,14 +762,16 @@ const pushDeletedChatUpdates = async ({
 const pushRemovedChatAccessUpdates = async ({
   currentUserId,
   chatUpdates,
+  updateProducerMode,
 }: {
   currentUserId: number
   chatUpdates: RemovedChatAccessUpdate[]
+  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<{ selfUpdates: Update[] }> => {
   const selfUpdates: Update[] = []
 
   for (const chatUpdate of chatUpdates) {
-    const update = buildParticipantDeleteUpdate(chatUpdate)
+    const update = buildAccessRemovedUpdate(chatUpdate, updateProducerMode)
     RealtimeUpdates.pushToUser(chatUpdate.userId, [update])
 
     if (chatUpdate.userId === currentUserId) {
@@ -703,17 +816,27 @@ function buildClearHistoryUpdate(input: {
   }
 }
 
-function buildParticipantDeleteUpdate(input: RemovedChatAccessUpdate): Update {
+function buildAccessRemovedUpdate(
+  input: RemovedChatAccessUpdate,
+  updateProducerMode: SyncV3UpdateProducerMode,
+): Update {
   return {
     seq: input.update.seq,
     date: encodeDateStrict(input.update.date),
-    update: {
-      oneofKind: "participantDelete",
-      participantDelete: {
-        chatId: BigInt(input.chatId),
-        userId: BigInt(input.userId),
-      },
-    },
+    update: updateProducerMode === "canonical_v3"
+      ? {
+          oneofKind: "userRemovedFromChat" as const,
+          userRemovedFromChat: {
+            chatId: BigInt(input.chatId),
+          },
+        }
+      : {
+          oneofKind: "participantDelete" as const,
+          participantDelete: {
+            chatId: BigInt(input.chatId),
+            userId: BigInt(input.userId),
+          },
+        },
   }
 }
 
@@ -732,6 +855,16 @@ function buildDeleteChatUpdate(input: { chat: DbChat; update: UpdateSeqAndDate; 
 
 function uniqueUserIds(userIds: number[]): number[] {
   return Array.from(new Set(userIds))
+}
+
+function emptyClearHistorySideEffects(): ClearHistorySideEffects {
+  return {
+    deletedChatIds: [],
+    orphanedChatIds: [],
+    detachedChatIds: [],
+    deletedChats: [],
+    detachedAccessLosses: [],
+  }
 }
 
 function buildPeerClearHistoryTarget(inputPeer: InputPeer | undefined, currentUserId: number | undefined) {
