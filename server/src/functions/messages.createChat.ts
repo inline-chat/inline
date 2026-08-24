@@ -24,10 +24,6 @@ import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spa
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { Transaction } from "@in/server/db/types"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
-import {
-  getSyncV3UpdateProducerMode,
-  type SyncV3UpdateProducerMode,
-} from "@in/server/modules/serverConfig"
 
 type InitialParticipant = {
   chatId: number
@@ -116,8 +112,6 @@ export async function createChat(
   if (participantUserIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
     throw RealtimeRpcError.UserIdInvalid()
   }
-
-  const updateProducerMode = await getSyncV3UpdateProducerMode()
 
   if (!hasSpaceId && isPublic === false) {
     const activeUserIds = await UsersModel.getActiveUserIds(participantUserIds)
@@ -227,7 +221,6 @@ export async function createChat(
           chat.id,
           participants,
           context.currentUserId,
-          updateProducerMode,
         )
       }
 
@@ -261,9 +254,7 @@ export async function createChat(
     const encodedDialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
     const persisted = await persistNewChatUpdate(createdChat.id)
     await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
-    if (updateProducerMode === "canonical_v3") {
-      pushInitialAccessUpdates(createdChat.id, accessUpdates)
-    }
+    pushInitialAccessUpdates(createdChat.id, accessUpdates)
 
     return {
       chat: await Encoders.chatForUser(createdChat, { encodingForUserId: context.currentUserId }),
@@ -324,7 +315,6 @@ export async function createChat(
           chat.id,
           participants,
           context.currentUserId,
-          updateProducerMode,
         )
       }
 
@@ -361,9 +351,7 @@ export async function createChat(
 
   // Broadcast the new chat update
   await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
-  if (updateProducerMode === "canonical_v3") {
-    pushInitialAccessUpdates(createdChat.id, initialAccessUpdates)
-  }
+  pushInitialAccessUpdates(createdChat.id, initialAccessUpdates)
 
   return {
     chat: await Encoders.chatForUser(createdChat, { encodingForUserId: context.currentUserId }),
@@ -381,27 +369,18 @@ async function enqueueInitialParticipantAdds(
   chatId: number,
   participants: InitialParticipant[],
   currentUserId: number,
-  updateProducerMode: SyncV3UpdateProducerMode,
 ): Promise<InitialAccessUpdate[]> {
   const targets = participants.filter((participant) => participant.userId !== currentUserId)
   const updates = await UserBucketUpdates.enqueueMany(
     targets.map((participant) => ({
-        userId: participant.userId,
-        update: updateProducerMode === "canonical_v3"
-          ? {
-              oneofKind: "userAddedToChat" as const,
-              userAddedToChat: {
-                chatId: BigInt(chatId),
-                participant: encodeParticipant(participant),
-              },
-            }
-          : {
-              oneofKind: "userChatParticipantAdd" as const,
-              userChatParticipantAdd: {
-                chatId: BigInt(chatId),
-                participant: encodeParticipant(participant),
-              },
-            },
+      userId: participant.userId,
+      update: {
+        oneofKind: "userAddedToChat" as const,
+        userAddedToChat: {
+          chatId: BigInt(chatId),
+          participant: encodeParticipant(participant),
+        },
+      },
       })),
     { tx },
   )

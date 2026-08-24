@@ -12,7 +12,6 @@ import { clearChatHistoryHandler } from "@in/server/realtime/handlers/messages.c
 import type { HandlerContext } from "@in/server/realtime/types"
 import type { ClearChatHistoryInput } from "@inline-chat/protocol/core"
 import { setupTestLifecycle, testUtils } from "../setup"
-import { resetServerConfigCacheForTests } from "@in/server/modules/serverConfig"
 
 const inputPeerForChat = (chatId: number) => ({
   type: {
@@ -387,53 +386,6 @@ describe("messages.clearChatHistory", () => {
       "clearChatHistory",
       "newChat",
     ])
-  })
-
-  test("legacy rollout mode keeps one space-scoped history-clear sequence", async () => {
-    const originalMode = process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"]
-    process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"] = "legacy"
-    resetServerConfigCacheForTests()
-
-    try {
-      const space = await testUtils.createSpace("legacy-clear-space")
-      const owner = await testUtils.createUser("legacy-clear-owner@example.com")
-      if (!space) throw new Error("Space not created")
-      await addSpaceMembers(space.id, [{ userId: owner.id, role: "owner" }])
-
-      const first = await testUtils.createChat(space.id, "First", "thread", true, owner.id)
-      const second = await testUtils.createChat(space.id, "Second", "thread", true, owner.id)
-      if (!first || !second) throw new Error("Threads not created")
-      await insertMessage({ chatId: first.id, messageId: 1, fromId: owner.id })
-      await insertMessage({ chatId: second.id, messageId: 1, fromId: owner.id })
-
-      const result = await clearChatHistory(
-        { spaceId: space.id, keepLastDays: 0, deleteReplyThreads: false },
-        testUtils.functionContext({ userId: owner.id }),
-      )
-
-      const clearUpdates = result.updates.filter((update) => update.update.oneofKind === "clearChatHistory")
-      expect(clearUpdates).toHaveLength(1)
-      if (clearUpdates[0]?.update.oneofKind !== "clearChatHistory") {
-        throw new Error("Expected clearChatHistory update")
-      }
-      expect(clearUpdates[0].update.clearChatHistory.target).toEqual({
-        oneofKind: "spaceId",
-        spaceId: BigInt(space.id),
-      })
-
-      const stored = await db.select().from(schema.updates)
-      const storedClearKinds = stored
-        .map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)
-        .filter((kind) => kind === "spaceClearHistory" || kind === "clearChatHistory")
-      expect(storedClearKinds).toEqual(["spaceClearHistory"])
-    } finally {
-      if (originalMode === undefined) {
-        delete process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"]
-      } else {
-        process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"] = originalMode
-      }
-      resetServerConfigCacheForTests()
-    }
   })
 
   test("space clear publishes metadata updates for detached external reply threads", async () => {

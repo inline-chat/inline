@@ -3,9 +3,6 @@ import { mock } from "bun:test"
 // Set test environment
 process.env.NODE_ENV = "test"
 process.env["INLINE_CONFIG_AGENTS_ROLLOUT"] = "enabled"
-// Existing Sync V3 producer coverage explicitly exercises the canonical path.
-// Production has no such override and therefore retains the legacy default.
-process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"] = "canonical_v3"
 process.env.RESEND_API_KEY = process.env.RESEND_API_KEY || "test-key"
 process.env["ENCRYPTION_KEY"] =
   process.env["ENCRYPTION_KEY"] || "1234567890123456789012345678901212345678901234567890123456789012"

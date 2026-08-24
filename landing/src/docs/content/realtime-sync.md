@@ -2,7 +2,7 @@
 
 Inline Realtime V3 keeps the server and every client converged without replacing useful cached state during ordinary recovery. This page is the public technical contract for update ownership, gap handling, and message-history coverage.
 
-The server defaults access-transition and space history-clear producers to the legacy-compatible family. The bucket catalog below describes `canonical_v3` mode, which operators enable globally only after compatible clients are admitted. Rollback selects legacy producers again; Inline never emits both families for one mutation.
+The server emits canonical access-transition and per-chat history-clear updates. Legacy constructors remain decodable for already-persisted update rows, but new mutations do not emit them and Inline never dual-writes both families.
 
 ## The three buckets
 

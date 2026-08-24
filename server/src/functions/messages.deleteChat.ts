@@ -22,7 +22,6 @@ import {
   getRootChatIdsForAccessEvents,
   getEffectiveChatAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
-import { getSyncV3UpdateProducerMode } from "@in/server/modules/serverConfig"
 
 const log = new Log("functions.deleteChat")
 /**
@@ -46,7 +45,6 @@ async function deleteChatWithOptions(
 ): Promise<{}> {
   const { peer } = input
   const { currentUserId } = context
-  const updateProducerMode = await getSyncV3UpdateProducerMode()
 
   try {
     // Get chat
@@ -177,17 +175,14 @@ async function deleteChatWithOptions(
         const recipientAccess = await getEffectiveChatAccessUserIds(tx, [lockedChat.id])
         recipientIds = Array.from(recipientAccess.get(lockedChat.id) ?? [])
 
-        let accessRecipients = recipientIds.map((userId) => ({ userId, chatId: lockedChat.id }))
-        if (updateProducerMode === "canonical_v3") {
-          const accessEventChatIds = await getRootChatIdsForAccessEvents(tx, [lockedChat.id])
-          const accessBefore = await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
-          accessRecipients = accessEventChatIds.flatMap((affectedChatId) =>
-            Array.from(accessBefore.get(affectedChatId) ?? []).map((userId) => ({
-              userId,
-              chatId: affectedChatId,
-            })),
-          )
-        }
+        const accessEventChatIds = await getRootChatIdsForAccessEvents(tx, [lockedChat.id])
+        const accessBefore = await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        const accessRecipients = accessEventChatIds.flatMap((affectedChatId) =>
+          Array.from(accessBefore.get(affectedChatId) ?? []).map((userId) => ({
+            userId,
+            chatId: affectedChatId,
+          })),
+        )
         const chatServerUpdatePayload: ServerUpdate["update"] = {
           oneofKind: "deleteChat",
           deleteChat: {
@@ -206,19 +201,12 @@ async function deleteChatWithOptions(
         const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
           accessRecipients.map((recipient) => ({
             userId: recipient.userId,
-            update: updateProducerMode === "canonical_v3"
-              ? {
-                  oneofKind: "userRemovedFromChat" as const,
-                  userRemovedFromChat: {
-                    chatId: BigInt(recipient.chatId),
-                  },
-                }
-              : {
-                  oneofKind: "userChatParticipantDelete" as const,
-                  userChatParticipantDelete: {
-                    chatId: BigInt(lockedChat.id),
-                  },
-                },
+            update: {
+              oneofKind: "userRemovedFromChat" as const,
+              userRemovedFromChat: {
+                chatId: BigInt(recipient.chatId),
+              },
+            },
           })),
           { tx },
         )
@@ -255,18 +243,16 @@ async function deleteChatWithOptions(
           RealtimeUpdates.pushToUser(userId, [update])
         })
 
-        if (updateProducerMode === "canonical_v3") {
-          accessUpdates.forEach((accessUpdate) => {
-            RealtimeUpdates.pushToUser(accessUpdate.userId, [{
-              seq: accessUpdate.update.seq,
-              date: encodeDateStrict(accessUpdate.update.date),
-              update: {
-                oneofKind: "userRemovedFromChat",
-                userRemovedFromChat: { chatId: BigInt(accessUpdate.chatId) },
-              },
-            }])
-          })
-        }
+        accessUpdates.forEach((accessUpdate) => {
+          RealtimeUpdates.pushToUser(accessUpdate.userId, [{
+            seq: accessUpdate.update.seq,
+            date: encodeDateStrict(accessUpdate.update.date),
+            update: {
+              oneofKind: "userRemovedFromChat",
+              userRemovedFromChat: { chatId: BigInt(accessUpdate.chatId) },
+            },
+          }])
+        })
       }
 
       await deleteBacklinkMessages(backlinkMessages, { currentUserId }).catch((error) => {

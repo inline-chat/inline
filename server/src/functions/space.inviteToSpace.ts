@@ -30,10 +30,6 @@ import {
   getEffectiveChatAccessUserIds,
   getSpaceRootChatIdsForAccessEvents,
 } from "@in/server/modules/authorization/chatAccessProjection"
-import {
-  getSyncV3UpdateProducerMode,
-  type SyncV3UpdateProducerMode,
-} from "@in/server/modules/serverConfig"
 
 const log = new Log("space.inviteToSpace")
 
@@ -45,7 +41,6 @@ export const inviteToSpace = async (
   if (!isValidSpaceId(spaceId)) {
     throw RealtimeRpcError.BadRequest()
   }
-  const updateProducerMode = await getSyncV3UpdateProducerMode()
 
   // Get space
   const space = await SpaceModel.getSpaceById(spaceId)
@@ -107,7 +102,6 @@ export const inviteToSpace = async (
     inviteUserId: inviteInfo.user.id,
     space,
     member,
-    updateProducerMode,
   })
 
   // Send updates
@@ -117,9 +111,7 @@ export const inviteToSpace = async (
     inviteUserId: inviteInfo.user.id,
     persisted: joinUpdates.joinUpdate,
   })
-  if (updateProducerMode === "canonical_v3") {
-    pushInvitedUserAccessUpdates(inviteInfo.user.id, joinUpdates.accessUpdates)
-  }
+  pushInvitedUserAccessUpdates(inviteInfo.user.id, joinUpdates.accessUpdates)
   pushUpdatesForSpace({
     spaceId,
     space,
@@ -428,12 +420,10 @@ const persistJoinSpaceUpdate = async ({
   inviteUserId,
   space,
   member,
-  updateProducerMode,
 }: {
   inviteUserId: number
   space: DbSpace
   member: DbMember
-  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<{
   joinUpdate: UpdateSeqAndDate
   accessUpdates: Array<{ chatId: number; update: UpdateSeqAndDate }>
@@ -451,15 +441,9 @@ const persistJoinSpaceUpdate = async ({
       { userId: inviteUserId, update: userServerUpdatePayload },
       { tx },
     )
-    const affectedChatIds = updateProducerMode === "canonical_v3"
-      ? await getSpaceRootChatIdsForAccessEvents(tx, space.id)
-      : []
-    const accessAfter = updateProducerMode === "canonical_v3"
-      ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
-      : null
-    const gainedChatIds = updateProducerMode === "canonical_v3"
-      ? affectedChatIds.filter((chatId) => accessAfter!.get(chatId)?.has(inviteUserId))
-      : []
+    const affectedChatIds = await getSpaceRootChatIdsForAccessEvents(tx, space.id)
+    const accessAfter = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+    const gainedChatIds = affectedChatIds.filter((chatId) => accessAfter.get(chatId)?.has(inviteUserId))
     const persisted = await UserBucketUpdates.enqueueMany(
       gainedChatIds.map((chatId) => ({
         userId: inviteUserId,

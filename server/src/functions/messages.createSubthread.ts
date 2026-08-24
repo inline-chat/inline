@@ -19,21 +19,14 @@ import {
   setDialogFollowModeForUsers,
 } from "@in/server/modules/dialogFollow"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
-import type { Chat, ChatParticipant, Dialog, Message } from "@inline-chat/protocol/core"
+import type { Chat, Dialog, Message } from "@inline-chat/protocol/core"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 import { and, eq, inArray } from "drizzle-orm"
 import { queueReplyThreadGraphMaterialization } from "@in/server/modules/threadGraph"
-import type { Transaction } from "@in/server/db/types"
-import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import {
-  getSyncV3UpdateProducerMode,
-  type SyncV3UpdateProducerMode,
-} from "@in/server/modules/serverConfig"
 
 type Input = {
   parentChatId: bigint
@@ -126,8 +119,6 @@ export async function createSubthread(input: Input, context: FunctionContext): P
       : undefined)
   const description = normalizeOptionalString(input.description)
   const emoji = normalizeOptionalString(input.emoji)
-  const updateProducerMode = await getSyncV3UpdateProducerMode()
-
   const chat = await createSubthreadChat({
     parentChat,
     parentMessageId,
@@ -137,7 +128,6 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     emoji,
     createdBy: context.currentUserId,
     directParticipantUserIds,
-    updateProducerMode,
   })
 
   const { dialogs: materializedDialogs } =
@@ -254,7 +244,6 @@ async function createSubthreadChat(input: {
   emoji?: string
   createdBy: number
   directParticipantUserIds: number[]
-  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<DbChat> {
   try {
     const result = await db.transaction(async (tx): Promise<{
@@ -297,9 +286,6 @@ async function createSubthreadChat(input: {
         }))
 
         await tx.insert(chatParticipants).values(participants).onConflictDoNothing()
-        if (input.updateProducerMode === "legacy") {
-          await enqueueLegacyInitialParticipantAdds(tx, chat.id, participants, input.createdBy)
-        }
       }
 
       return { chat, participants }
@@ -328,36 +314,6 @@ async function createSubthreadChat(input: {
     }
 
     throw error
-  }
-}
-
-async function enqueueLegacyInitialParticipantAdds(
-  tx: Transaction,
-  chatId: number,
-  participants: InitialParticipant[],
-  currentUserId: number,
-): Promise<void> {
-  await UserBucketUpdates.enqueueMany(
-    participants
-      .filter((participant) => participant.userId !== currentUserId)
-      .map((participant) => ({
-        userId: participant.userId,
-        update: {
-          oneofKind: "userChatParticipantAdd" as const,
-          userChatParticipantAdd: {
-            chatId: BigInt(chatId),
-            participant: encodeParticipant(participant),
-          },
-        },
-      })),
-    { tx },
-  )
-}
-
-function encodeParticipant(participant: InitialParticipant): ChatParticipant {
-  return {
-    userId: BigInt(participant.userId),
-    date: encodeDateStrict(participant.date),
   }
 }
 

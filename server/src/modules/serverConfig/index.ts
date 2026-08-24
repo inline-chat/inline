@@ -7,28 +7,16 @@ export const SERVER_CONFIG_KEYS = [
   "auth.signup_mode",
   "agents.rollout",
   "email.default_provider",
-  "sync.v3_update_producers",
 ] as const
-
-// Keep rollout-only switches out of the current Admin HTTP contract. They use
-// the same cached registry and precedence, but are changed through deployment
-// configuration until an Admin API/UI expansion is reviewed separately.
-const LISTED_SERVER_CONFIG_KEYS = [
-  "auth.signup_mode",
-  "agents.rollout",
-  "email.default_provider",
-] as const satisfies readonly ServerConfigKey[]
 
 export type ServerConfigKey = (typeof SERVER_CONFIG_KEYS)[number]
 export type SignupMode = "open" | "invite_only" | "disabled"
 export type AgentsRollout = "disabled" | "enabled"
 export type EmailProvider = "ses" | "resend"
-export type SyncV3UpdateProducerMode = "legacy" | "canonical_v3"
 export interface ServerConfigValueByKey {
   readonly "auth.signup_mode": SignupMode
   readonly "agents.rollout": AgentsRollout
   readonly "email.default_provider": EmailProvider
-  readonly "sync.v3_update_producers": SyncV3UpdateProducerMode
 }
 export type ServerConfigValue<K extends ServerConfigKey = ServerConfigKey> =
   ServerConfigValueByKey[K]
@@ -77,7 +65,6 @@ const warnedInvalidLayers = new Set<string>()
 const signupModes: readonly SignupMode[] = ["open", "invite_only", "disabled"]
 const agentsRolloutValues: readonly AgentsRollout[] = ["disabled", "enabled"]
 const emailProviders: readonly EmailProvider[] = ["ses", "resend"]
-const syncV3UpdateProducerModes: readonly SyncV3UpdateProducerMode[] = ["legacy", "canonical_v3"]
 
 const legacySignupMode = (): SignupMode | null => {
   const value = process.env["INVITE_CODES_REQUIRED"]?.trim().toLowerCase()
@@ -117,15 +104,6 @@ const definitions: { readonly [K in ServerConfigKey]: ServerConfigDefinition<K> 
     allowedValues: emailProviders,
     defaultValue: "resend",
     legacyEnvironmentValue: legacyEmailProvider,
-  },
-  "sync.v3_update_producers": {
-    key: "sync.v3_update_producers",
-    label: "Sync V3 update producers",
-    description: "Selects legacy-compatible or canonical V3 access and history-clear events globally.",
-    environmentName: "INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS",
-    allowedValues: syncV3UpdateProducerModes,
-    defaultValue: "legacy",
-    legacyEnvironmentValue: () => null,
   },
 }
 
@@ -247,12 +225,9 @@ export const getServerConfig = async <K extends ServerConfigKey>(
   key: K,
 ): Promise<ResolvedServerConfig<K>> => resolveEntry(key, await refreshRows())
 
-export const getSyncV3UpdateProducerMode = async (): Promise<SyncV3UpdateProducerMode> =>
-  (await getServerConfig("sync.v3_update_producers")).value
-
 export const listServerConfig = async (): Promise<readonly ResolvedServerConfig[]> => {
   const rows = await refreshRows()
-  return LISTED_SERVER_CONFIG_KEYS.map((key) => resolveEntry(key, rows))
+  return SERVER_CONFIG_KEYS.map((key) => resolveEntry(key, rows))
 }
 
 export type UpdateServerConfigResult<K extends ServerConfigKey = ServerConfigKey> =

@@ -38,7 +38,6 @@ import {
   getEffectiveChatAccessUserIds,
   removedAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
-import { getSyncV3UpdateProducerMode } from "@in/server/modules/serverConfig"
 
 const log = new Log("functions.updateChatVisibility")
 
@@ -93,7 +92,6 @@ export async function updateChatVisibility(
   }
 
   const isPublic = Boolean(input.isPublic)
-  const updateProducerMode = await getSyncV3UpdateProducerMode()
 
   let removedUserIds: number[] = []
   let groupRevocations: GroupGrantRevocation[] = []
@@ -126,12 +124,8 @@ export async function updateChatVisibility(
         throw RealtimeRpcError.SpaceAdminRequired()
       }
 
-      const affectedChatIds = updateProducerMode === "canonical_v3"
-        ? await getRootChatIdsForAccessEvents(tx, [chatId])
-        : [chatId]
-      const accessBefore = updateProducerMode === "canonical_v3"
-        ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
-        : null
+      const affectedChatIds = await getRootChatIdsForAccessEvents(tx, [chatId])
+      const accessBefore = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
 
       const existingGroupGrants = await tx
         .select()
@@ -267,23 +261,19 @@ export async function updateChatVisibility(
         throw RealtimeRpcError.InternalError()
       }
 
-      const accessAfter = updateProducerMode === "canonical_v3"
-        ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
-        : null
-      const transitions = updateProducerMode === "canonical_v3"
-        ? affectedChatIds.flatMap((affectedChatId) => [
-            ...addedAccessUserIds(affectedChatId, accessBefore!, accessAfter!).map((userId) => ({
-              userId,
-              chatId: affectedChatId,
-              kind: "added" as const,
-            })),
-            ...removedAccessUserIds(affectedChatId, accessBefore!, accessAfter!).map((userId) => ({
-              userId,
-              chatId: affectedChatId,
-              kind: "removed" as const,
-            })),
-          ])
-        : []
+      const accessAfter = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+      const transitions = affectedChatIds.flatMap((affectedChatId) => [
+        ...addedAccessUserIds(affectedChatId, accessBefore, accessAfter).map((userId) => ({
+          userId,
+          chatId: affectedChatId,
+          kind: "added" as const,
+        })),
+        ...removedAccessUserIds(affectedChatId, accessBefore, accessAfter).map((userId) => ({
+          userId,
+          chatId: affectedChatId,
+          kind: "removed" as const,
+        })),
+      ])
       const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
         transitions.map((transition) => ({
           userId: transition.userId,

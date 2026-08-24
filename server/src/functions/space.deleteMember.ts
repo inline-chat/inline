@@ -34,10 +34,6 @@ import {
   getSpaceRootChatIdsForAccessEvents,
   removedAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
-import {
-  getSyncV3UpdateProducerMode,
-  type SyncV3UpdateProducerMode,
-} from "@in/server/modules/serverConfig"
 
 const log = new Log("space.removeMember")
 
@@ -70,12 +66,11 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
     }
 
     log.debug("Deleting member", { spaceId, userId, currentUserId: context.currentUserId })
-    const updateProducerMode = yield* Effect.promise(getSyncV3UpdateProducerMode)
 
     // Membership and Grid media authority are one durable state transition.
     // Provider revocation is inserted into the outbox before this commits.
     const { gridRemovalState, persisted, accessUpdates } = yield* Effect.tryPromise({
-      try: () => removeMemberAndGridPresence(spaceId, userId, context.currentUserId, updateProducerMode),
+      try: () => removeMemberAndGridPresence(spaceId, userId, context.currentUserId),
       catch: (error) =>
         error instanceof MemberNotExistsError
           ? error
@@ -97,17 +92,15 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
     const { updates } = yield* Effect.promise(() =>
       pushUpdatesForSpace({ spaceId, userId, currentUserId: context.currentUserId, persisted }),
     )
-    if (updateProducerMode === "canonical_v3") {
-      for (const accessUpdate of accessUpdates) {
-        RealtimeUpdates.pushToUser(userId, [{
-          seq: accessUpdate.update.seq,
-          date: encodeDateStrict(accessUpdate.update.date),
-          update: {
-            oneofKind: "userRemovedFromChat",
-            userRemovedFromChat: { chatId: BigInt(accessUpdate.chatId) },
-          },
-        }])
-      }
+    for (const accessUpdate of accessUpdates) {
+      RealtimeUpdates.pushToUser(userId, [{
+        seq: accessUpdate.update.seq,
+        date: encodeDateStrict(accessUpdate.update.date),
+        update: {
+          oneofKind: "userRemovedFromChat",
+          userRemovedFromChat: { chatId: BigInt(accessUpdate.chatId) },
+        },
+      }])
     }
 
     // Return result
@@ -120,7 +113,6 @@ async function removeMemberAndGridPresence(
   spaceId: number,
   userId: number,
   currentUserId: number,
-  updateProducerMode: SyncV3UpdateProducerMode,
 ): Promise<{
   gridRemovalState: GridPresenceRemovalState
   persisted: UpdateSeqAndDate
@@ -160,12 +152,8 @@ async function removeMemberAndGridPresence(
       throw RealtimeRpcError.SpaceAdminRequired()
     }
 
-    const accessEventChatIds = updateProducerMode === "canonical_v3"
-      ? await getSpaceRootChatIdsForAccessEvents(tx, spaceId)
-      : []
-    const accessBefore = updateProducerMode === "canonical_v3"
-      ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds, { userIds: [userId] })
-      : null
+    const accessEventChatIds = await getSpaceRootChatIdsForAccessEvents(tx, spaceId)
+    const accessBefore = await getEffectiveChatAccessUserIds(tx, accessEventChatIds, { userIds: [userId] })
 
     const removed = await tx
       .delete(members)
@@ -204,14 +192,10 @@ async function removeMemberAndGridPresence(
     await tx.delete(dialogs).where(and(eq(dialogs.spaceId, spaceId), eq(dialogs.userId, userId)))
 
     const persisted = await persistSpaceMemberDeleteUpdateInTransaction(tx, space, userId)
-    const accessAfter = updateProducerMode === "canonical_v3"
-      ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds, { userIds: [userId] })
-      : null
-    const lostChatIds = updateProducerMode === "canonical_v3"
-      ? accessEventChatIds.filter((chatId) =>
-          removedAccessUserIds(chatId, accessBefore!, accessAfter!).includes(userId),
-        )
-      : []
+    const accessAfter = await getEffectiveChatAccessUserIds(tx, accessEventChatIds, { userIds: [userId] })
+    const lostChatIds = accessEventChatIds.filter((chatId) =>
+      removedAccessUserIds(chatId, accessBefore, accessAfter).includes(userId),
+    )
     const userAccessUpdates = await UserBucketUpdates.enqueueMany(
       lostChatIds.map((chatId) => ({
         userId,

@@ -26,7 +26,6 @@ import {
 } from "@in/server/modules/authorization/chatAccessProjection"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
-import { getSyncV3UpdateProducerMode } from "@in/server/modules/serverConfig"
 
 const DEFAULT_CAN_ACCESS_PUBLIC_CHATS = true
 
@@ -61,8 +60,6 @@ export const updateMemberAccess = async (
     throw RealtimeRpcError.BadRequest()
   }
 
-  const updateProducerMode = await getSyncV3UpdateProducerMode()
-
   // Validate, mutate, and persist the space update under one lock boundary.
   // This prevents a delete/re-add on another connection from allowing this
   // request to update a newly-created membership or publish an out-of-order
@@ -96,12 +93,8 @@ export const updateMemberAccess = async (
       throw RealtimeRpcError.SpaceOwnerRequired()
     }
 
-    const affectedChatIds = updateProducerMode === "canonical_v3"
-      ? await getSpaceRootChatIdsForAccessEvents(tx, spaceId)
-      : []
-    const accessBefore = updateProducerMode === "canonical_v3"
-      ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
-      : null
+    const affectedChatIds = await getSpaceRootChatIdsForAccessEvents(tx, spaceId)
+    const accessBefore = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
 
     const newCanAccessPublicChats =
       roleKind === "admin"
@@ -139,19 +132,15 @@ export const updateMemberAccess = async (
       })
       .where(eq(spaces.id, spaceId))
 
-    const accessAfter = updateProducerMode === "canonical_v3"
-      ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
-      : null
-    const transitions = updateProducerMode === "canonical_v3"
-      ? affectedChatIds.flatMap((chatId) => [
-          ...addedAccessUserIds(chatId, accessBefore!, accessAfter!)
-            .filter((candidateUserId) => candidateUserId === userId)
-            .map(() => ({ chatId, kind: "added" as const })),
-          ...removedAccessUserIds(chatId, accessBefore!, accessAfter!)
-            .filter((candidateUserId) => candidateUserId === userId)
-            .map(() => ({ chatId, kind: "removed" as const })),
-        ])
-      : []
+    const accessAfter = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+    const transitions = affectedChatIds.flatMap((chatId) => [
+      ...addedAccessUserIds(chatId, accessBefore, accessAfter)
+        .filter((candidateUserId) => candidateUserId === userId)
+        .map(() => ({ chatId, kind: "added" as const })),
+      ...removedAccessUserIds(chatId, accessBefore, accessAfter)
+        .filter((candidateUserId) => candidateUserId === userId)
+        .map(() => ({ chatId, kind: "removed" as const })),
+    ])
     const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
       transitions.map((transition) => ({
         userId,
@@ -191,9 +180,7 @@ export const updateMemberAccess = async (
     seq: persisted.seq,
     date: persisted.date,
   })
-  if (updateProducerMode === "canonical_v3") {
-    pushAccessUpdates(userId, accessUpdates)
-  }
+  pushAccessUpdates(userId, accessUpdates)
   pushChatPermissionUpdates(permissionUpdates)
 
   return { updates }
