@@ -8,7 +8,6 @@ actor TranslationManager {
   static let shared = TranslationManager()
   private let log = Log.scoped("TranslationManager")
   private let db = AppDatabase.shared
-  private let realtime = Realtime.shared
   private let realtimeV2 = Api.realtime
 
   // Cache for pending translation requests to avoid duplicates

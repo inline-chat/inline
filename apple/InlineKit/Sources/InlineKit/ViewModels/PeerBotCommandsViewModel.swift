@@ -207,8 +207,8 @@ public final class PeerBotCommandsViewModel {
   }
 
   private static func fetchPeerBotCommands(for peer: Peer) async throws -> [InlineProtocol.PeerBotCommands] {
-    let response = try await Realtime.shared.invoke(
-      .getPeerBotCommands,
+    let response = try await Api.realtime.callRpcDirect(
+      method: .getPeerBotCommands,
       input: .getPeerBotCommands(.with {
         $0.peerID = peer.toInputPeer()
       })

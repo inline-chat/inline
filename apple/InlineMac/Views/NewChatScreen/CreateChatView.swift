@@ -1,11 +1,12 @@
 import InlineKit
 import InlineProtocol
 import Logger
+import RealtimeV2
 import SwiftUI
 
 public struct CreateChatView: View {
   @Environment(\.appDatabase) var db
-  @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.dismiss) private var dismiss
 
   @FormState var formState
@@ -169,16 +170,13 @@ public struct CreateChatView: View {
         let spaceId = spaceId
         let participants = isPublic ? [] : selectedPeople.map(\.self)
 
-        let result = try await realtime.invokeWithHandler(
-          .createChat,
-          input: .createChat(.with {
-            $0.title = title
-            $0.spaceID = spaceId
-            if let emoji { $0.emoji = emoji }
-            $0.isPublic = isPublic
-            $0.participants = participants.map { userId in InputChatParticipant.with { $0.userID = userId } }
-          })
-        )
+        let result = try await realtimeV2.send(.createChat(
+          title: title,
+          emoji: emoji,
+          isPublic: isPublic,
+          spaceId: spaceId,
+          participants: participants
+        ))
 
         if case let .createChat(createChatResult) = result {
           formState.succeeded()
