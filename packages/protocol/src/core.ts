@@ -778,6 +778,18 @@ export interface DialogFolder {
      * @generated from protobuf field: string order = 3;
      */
     order: string;
+    /**
+     * Optional emoji chosen by the user for the folder icon.
+     *
+     * @generated from protobuf field: optional string emoji = 4;
+     */
+    emoji?: string;
+    /**
+     * Presence is both pinned state and the coordinate in the shared Pinned lane.
+     *
+     * @generated from protobuf field: optional string pinned_order = 5;
+     */
+    pinnedOrder?: string;
 }
 /**
  * Effective actions the current user may take on a chat.
@@ -6988,6 +7000,10 @@ export interface CreateDialogFolderInput {
      * @generated from protobuf field: optional string order = 3;
      */
     order?: string;
+    /**
+     * @generated from protobuf field: optional string pinned_order = 4;
+     */
+    pinnedOrder?: string;
 }
 /**
  * @generated from protobuf message CreateDialogFolderResult
@@ -7032,6 +7048,42 @@ export interface UpdateDialogFolderInput {
      * @generated from protobuf field: optional string order = 4;
      */
     order?: string;
+    /**
+     * @generated from protobuf oneof: emoji_update
+     */
+    emojiUpdate: {
+        oneofKind: "emoji";
+        /**
+         * @generated from protobuf field: string emoji = 5;
+         */
+        emoji: string;
+    } | {
+        oneofKind: "clearEmoji";
+        /**
+         * @generated from protobuf field: bool clear_emoji = 6;
+         */
+        clearEmoji: boolean;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * @generated from protobuf oneof: pinned_order_update
+     */
+    pinnedOrderUpdate: {
+        oneofKind: "pinnedOrder";
+        /**
+         * @generated from protobuf field: string pinned_order = 7;
+         */
+        pinnedOrder: string;
+    } | {
+        oneofKind: "clearPinnedOrder";
+        /**
+         * @generated from protobuf field: bool clear_pinned_order = 8;
+         */
+        clearPinnedOrder: boolean;
+    } | {
+        oneofKind: undefined;
+    };
 }
 /**
  * @generated from protobuf message UpdateDialogFolderResult
@@ -14381,7 +14433,9 @@ class DialogFolder$Type extends MessageType<DialogFolder> {
         super("DialogFolder", [
             { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "order", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "order", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<DialogFolder>): DialogFolder {
@@ -14406,6 +14460,12 @@ class DialogFolder$Type extends MessageType<DialogFolder> {
                 case /* string order */ 3:
                     message.order = reader.string();
                     break;
+                case /* optional string emoji */ 4:
+                    message.emoji = reader.string();
+                    break;
+                case /* optional string pinned_order */ 5:
+                    message.pinnedOrder = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -14427,6 +14487,12 @@ class DialogFolder$Type extends MessageType<DialogFolder> {
         /* string order = 3; */
         if (message.order !== "")
             writer.tag(3, WireType.LengthDelimited).string(message.order);
+        /* optional string emoji = 4; */
+        if (message.emoji !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.emoji);
+        /* optional string pinned_order = 5; */
+        if (message.pinnedOrder !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.pinnedOrder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30506,7 +30572,8 @@ class CreateDialogFolderInput$Type extends MessageType<CreateDialogFolderInput> 
         super("CreateDialogFolderInput", [
             { no: 1, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "peers", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputPeer },
-            { no: 3, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "pinned_order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<CreateDialogFolderInput>): CreateDialogFolderInput {
@@ -30530,6 +30597,9 @@ class CreateDialogFolderInput$Type extends MessageType<CreateDialogFolderInput> 
                 case /* optional string order */ 3:
                     message.order = reader.string();
                     break;
+                case /* optional string pinned_order */ 4:
+                    message.pinnedOrder = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -30551,6 +30621,9 @@ class CreateDialogFolderInput$Type extends MessageType<CreateDialogFolderInput> 
         /* optional string order = 3; */
         if (message.order !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.order);
+        /* optional string pinned_order = 4; */
+        if (message.pinnedOrder !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.pinnedOrder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30622,13 +30695,19 @@ class UpdateDialogFolderInput$Type extends MessageType<UpdateDialogFolderInput> 
             { no: 1, name: "folder_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", oneof: "titleUpdate", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "clear_title", kind: "scalar", oneof: "titleUpdate", T: 8 /*ScalarType.BOOL*/ },
-            { no: 4, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 4, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "emoji", kind: "scalar", oneof: "emojiUpdate", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "clear_emoji", kind: "scalar", oneof: "emojiUpdate", T: 8 /*ScalarType.BOOL*/ },
+            { no: 7, name: "pinned_order", kind: "scalar", oneof: "pinnedOrderUpdate", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "clear_pinned_order", kind: "scalar", oneof: "pinnedOrderUpdate", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateDialogFolderInput>): UpdateDialogFolderInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.folderId = 0n;
         message.titleUpdate = { oneofKind: undefined };
+        message.emojiUpdate = { oneofKind: undefined };
+        message.pinnedOrderUpdate = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<UpdateDialogFolderInput>(this, message, value);
         return message;
@@ -30656,6 +30735,30 @@ class UpdateDialogFolderInput$Type extends MessageType<UpdateDialogFolderInput> 
                 case /* optional string order */ 4:
                     message.order = reader.string();
                     break;
+                case /* string emoji */ 5:
+                    message.emojiUpdate = {
+                        oneofKind: "emoji",
+                        emoji: reader.string()
+                    };
+                    break;
+                case /* bool clear_emoji */ 6:
+                    message.emojiUpdate = {
+                        oneofKind: "clearEmoji",
+                        clearEmoji: reader.bool()
+                    };
+                    break;
+                case /* string pinned_order */ 7:
+                    message.pinnedOrderUpdate = {
+                        oneofKind: "pinnedOrder",
+                        pinnedOrder: reader.string()
+                    };
+                    break;
+                case /* bool clear_pinned_order */ 8:
+                    message.pinnedOrderUpdate = {
+                        oneofKind: "clearPinnedOrder",
+                        clearPinnedOrder: reader.bool()
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -30680,6 +30783,18 @@ class UpdateDialogFolderInput$Type extends MessageType<UpdateDialogFolderInput> 
         /* optional string order = 4; */
         if (message.order !== undefined)
             writer.tag(4, WireType.LengthDelimited).string(message.order);
+        /* string emoji = 5; */
+        if (message.emojiUpdate.oneofKind === "emoji")
+            writer.tag(5, WireType.LengthDelimited).string(message.emojiUpdate.emoji);
+        /* bool clear_emoji = 6; */
+        if (message.emojiUpdate.oneofKind === "clearEmoji")
+            writer.tag(6, WireType.Varint).bool(message.emojiUpdate.clearEmoji);
+        /* string pinned_order = 7; */
+        if (message.pinnedOrderUpdate.oneofKind === "pinnedOrder")
+            writer.tag(7, WireType.LengthDelimited).string(message.pinnedOrderUpdate.pinnedOrder);
+        /* bool clear_pinned_order = 8; */
+        if (message.pinnedOrderUpdate.oneofKind === "clearPinnedOrder")
+            writer.tag(8, WireType.Varint).bool(message.pinnedOrderUpdate.clearPinnedOrder);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -4,7 +4,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe("inline/agents-tool", () => {
   it("creates a name-only Agent without inventing skill or instructions", async () => {
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
       new Response(JSON.stringify({
         ok: true,
         result: { agent: { id: 7, bot_user_id: 200, name: "Concierge" } },
@@ -21,7 +21,7 @@ describe("inline/agents-tool", () => {
   })
 
   it("gets an Agent by globally unique ID", async () => {
-    const fetchMock = vi.fn(async (url: string) =>
+    const fetchMock = vi.fn(async (_url: string) =>
       new Response(JSON.stringify({ ok: true, result: { agent: { id: 7, name: "Concierge" } } }), {
         status: 200,
         headers: { "content-type": "application/json" },

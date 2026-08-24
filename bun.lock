@@ -48,9 +48,9 @@
     },
     "openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.57",
+      "version": "0.0.58",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.14",
+        "@inline-chat/realtime-sdk": "0.0.15",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -98,7 +98,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.8-alpha.0",
+      "version": "0.0.8",
       "dependencies": {
         "@noble/ciphers": "^1.3.0",
         "@noble/hashes": "^1.8.0",
@@ -110,9 +110,9 @@
     },
     "sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.15-alpha.0",
+      "version": "0.0.15",
       "dependencies": {
-        "@inline-chat/protocol": "0.0.8-alpha.0",
+        "@inline-chat/protocol": "0.0.8",
         "ws": "^8.18.3",
       },
       "devDependencies": {

@@ -117,9 +117,11 @@ Incremental pages contain at most 100 logical updates. The server owns a 10,000-
 
 Sequenced user/space/chat bucket records are durable and recoverable through `getUpdates`. A client that does not project a known or future update kind treats it as an application no-op only inside a page whose complete `updates + skipped_sequences` coverage has been authenticated; it then advances the page cursor so older clients cannot be stranded by schema growth. A malformed update kind that the client claims to project remains an apply failure and cannot silently advance. Server updates emitted by the explicitly transient presence/compose owner, direct `GridEvent`, and `BotEvent` are ephemeral/lossy; Grid snapshots repair current media state, while bot interactions have no history contract.
 
-Unknown-page accounting is a forward-progress guarantee, not a capability guarantee. A new durable constructor may be emitted only after the minimum compatible client versions can account for unknown page entries; during beta, canonical server emissions are release-gated on that rollout. An older client may safely advance over content it cannot project, but it cannot materialize that content until an authoritative snapshot or a compatible client version supplies the projection.
+Unknown-page accounting is a forward-progress guarantee, not a capability guarantee. A new durable constructor may be emitted only after the minimum compatible client versions can account for unknown page entries. The canonical access and history-clear constructors are part of the current Sync V3 contract; future constructors still require explicit client-compatibility review. An older client may safely advance over content it cannot project, but it cannot materialize that content until an authoritative snapshot or a compatible client version supplies the projection.
 
 ### Content-derived bucket catalog
+
+The server emits the canonical access-transition and per-chat history-clear families described below. Legacy constructors remain decodable for already-persisted update rows, but new mutations do not emit them and the server never dual-writes both families.
 
 Updates do not carry a bucket field. Ownership is inferred from their content and kept consistent across server and clients:
 

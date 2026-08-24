@@ -19,6 +19,7 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
   readonly canceled = new Set<string>()
   active = 0
   maxActive = 0
+  failBeforeAcceptCount = 0
   failAfterAcceptOnce = false
   failFinishOnce = false
   acceptedPartsOverride: number[] | undefined
@@ -48,6 +49,11 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
     this.maxPartBytes = Math.max(this.maxPartBytes, input.data.length)
     this.partCalls.push(`${id}:${input.partIndex}`)
     await new Promise((resolve) => setTimeout(resolve, 1))
+    if (this.failBeforeAcceptCount > 0) {
+      this.failBeforeAcceptCount -= 1
+      this.active -= 1
+      throw new Error("transient save failure")
+    }
     this.accepted.get(id)!.add(input.partIndex)
     this.active -= 1
     if (this.failAfterAcceptOnce) {
@@ -110,6 +116,12 @@ const virtualInput = (seed: number, byteCount: number) => ({
   clientUploadId: Uint8Array.from({ length: 16 }, () => seed),
 })
 
+const deferred = () => {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 describe("native upload coordinator", () => {
   test("bounds authenticated processing retry hints", async () => {
     const transport = new MemoryUploadTransport()
@@ -151,6 +163,130 @@ describe("native upload coordinator", () => {
     expect(transport.canceled).toHaveLength(1)
   })
 
+  test("does not create an upload when canceled during source hashing", async () => {
+    const transport = new MemoryUploadTransport()
+    const source = uploadByteSource(Uint8Array.from({ length: 12 }, (_, index) => 22 + index))
+    const controller = new AbortController()
+
+    const upload = new NativeUploadClient(transport).upload({
+      ...input(22),
+      source: {
+        byteCount: source.byteCount,
+        read: async (offset, length) => {
+          controller.abort()
+          return source.read(offset, length)
+        },
+      },
+      signal: controller.signal,
+    })
+
+    await expect(upload).rejects.toThrow("Upload was canceled")
+    expect(transport.accepted.size).toBe(0)
+    expect(transport.canceled.size).toBe(0)
+  })
+
+  test("cancels before scheduling parts when aborted during create", async () => {
+    const transport = new MemoryUploadTransport()
+    const createStarted = deferred()
+    const releaseCreate = deferred()
+    const releaseCancel = deferred()
+    const create = transport.create.bind(transport)
+    const cancel = transport.cancel.bind(transport)
+    transport.create = async (createInput) => {
+      createStarted.resolve()
+      await releaseCreate.promise
+      return create(createInput)
+    }
+    transport.cancel = async (cancelInput) => {
+      const result = await cancel(cancelInput)
+      await releaseCancel.promise
+      return result
+    }
+    const controller = new AbortController()
+    const upload = new NativeUploadClient(transport).upload({ ...input(22), signal: controller.signal })
+
+    await createStarted.promise
+    controller.abort()
+    releaseCreate.resolve()
+    const outcome = await Promise.race([
+      upload.then(() => "resolved", () => "rejected"),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 50)),
+    ])
+    releaseCancel.resolve()
+
+    expect(outcome).toBe("rejected")
+    expect(transport.partCalls).toHaveLength(0)
+    expect(transport.canceled).toHaveLength(1)
+  })
+
+  test("does not send a part after cancellation during its source read", async () => {
+    const transport = new MemoryUploadTransport()
+    const source = uploadByteSource(Uint8Array.from({ length: 12 }, (_, index) => 24 + index))
+    const partReadStarted = deferred()
+    const releasePartRead = deferred()
+    const partReadCompleted = deferred()
+    let readCount = 0
+    const controller = new AbortController()
+    const upload = new NativeUploadClient(transport).upload({
+      ...input(24),
+      source: {
+        byteCount: source.byteCount,
+        read: async (offset, length) => {
+          readCount += 1
+          if (readCount === 2) {
+            partReadStarted.resolve()
+            await releasePartRead.promise
+            partReadCompleted.resolve()
+          }
+          return source.read(offset, length)
+        },
+      },
+      signal: controller.signal,
+    })
+
+    await partReadStarted.promise
+    controller.abort()
+    await expect(upload).rejects.toThrow("Upload was canceled")
+    releasePartRead.resolve()
+    await partReadCompleted.promise
+    await Promise.resolve()
+
+    expect(transport.partCalls).toHaveLength(0)
+    expect(transport.canceled).toHaveLength(1)
+  })
+
+  test("does not report progress after local cancellation", async () => {
+    const transport = new MemoryUploadTransport()
+    const partStarted = deferred()
+    const releasePart = deferred()
+    const partCompleted = deferred()
+    const savePart = transport.savePart.bind(transport)
+    transport.savePart = async (partInput) => {
+      partStarted.resolve()
+      await releasePart.promise
+      const result = await savePart(partInput)
+      partCompleted.resolve()
+      return result
+    }
+    const controller = new AbortController()
+    const progress: number[] = []
+    const upload = new NativeUploadClient(transport).upload({
+      ...input(23),
+      signal: controller.signal,
+      onProgress: (value) => progress.push(value.acceptedBytes),
+    })
+
+    await partStarted.promise
+    controller.abort()
+    await expect(upload).rejects.toThrow("Upload was canceled")
+    releasePart.resolve()
+    await partCompleted.promise
+    await Promise.resolve()
+
+    expect(progress).toEqual([0])
+    expect(transport.canceled).toHaveLength(1)
+  })
+
   test("bounds global work and fairly completes ten concurrent files", async () => {
     const transport = new MemoryUploadTransport()
     const uploads = new NativeUploadClient(transport)
@@ -176,6 +312,27 @@ describe("native upload coordinator", () => {
     expect(result.fileUniqueId).toContain("file-")
     expect(progress.at(-1)).toBe(12)
     expect(transport.partCalls).toHaveLength(3)
+  })
+
+  test("retries one part when authoritative state says it is still missing", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.partSize = 12
+    transport.failBeforeAcceptCount = 1
+
+    await expect(new NativeUploadClient(transport).upload(input(46))).resolves.toBeDefined()
+    expect(transport.partCalls).toHaveLength(2)
+    expect(transport.stateCalls).toBe(1)
+  })
+
+  test("stops after one replay when a part remains missing", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.partSize = 12
+    transport.failBeforeAcceptCount = 2
+
+    await expect(new NativeUploadClient(transport).upload(input(47)))
+      .rejects.toThrow("transient save failure")
+    expect(transport.partCalls).toHaveLength(2)
+    expect(transport.stateCalls).toBe(2)
   })
 
   test("reconciles a finish whose response was lost after complete publication", async () => {

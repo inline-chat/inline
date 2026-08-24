@@ -40,12 +40,12 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.57` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Current | Hardens exact CLI-managed upgrades, deterministic channel listing, default/help consistency, and packed-artifact validation. |
-| `0.0.56` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Previous | Finalizes unified Inline CLI setup compatibility while preserving the separately installed OpenClaw plugin boundary. |
+| `0.0.58` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.15` | Current | Promotes the stable realtime v3 SDK; hardens terminal authentication, model settings, recovered replies and joins, rich streaming delivery, and monitor failure reporting. |
+| `0.0.57` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Previous | Hardens exact CLI-managed upgrades, deterministic channel listing, default/help consistency, and packed-artifact validation. |
+| `0.0.56` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Stable | Finalizes unified Inline CLI setup compatibility while preserving the separately installed OpenClaw plugin boundary. |
 | `0.0.55` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Stable | Enforces empty-payload nudges, canonical visible-text sanitizing, hard access-before-mention policy, explicit auto-threading, and clearer formatting guidance; explicitly admits npm's `2026.7.1-2` stable host version. |
 | `0.0.54` | `>=2026.6.11` | `0.0.13` | Stable | Keeps recovered WebSocket and best-effort cursor warnings out of healthy channel status; validated through OpenClaw `2026.7.1-2`. |
 | `0.0.53` | `>=2026.6.11` | `0.0.13` | Stable | Clears recovered Inline WebSocket errors from channel status after reconnect. |
-| `0.0.52` | `>=2026.6.11` | `0.0.13` | Stable | Patch release for the SDK protocol dependency. |
 
 From npm:
 

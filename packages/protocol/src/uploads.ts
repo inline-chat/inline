@@ -18,6 +18,7 @@ const HASH_READ_SIZE = 1024 * 1024
 const MAX_NEGOTIATED_PART_SIZE = 16 * 1024 * 1024
 const DEFAULT_GLOBAL_CONCURRENCY = 3
 const DEFAULT_UPLOAD_CONCURRENCY = 2
+const MAX_PART_ATTEMPTS = 2
 const MAX_FINISH_RECONCILIATION_ATTEMPTS = 3
 const FINISH_RECONCILIATION_DELAY_SECONDS = 1
 const MAX_PROCESSING_RETRY_SECONDS = 30
@@ -68,6 +69,7 @@ type UploadJob = {
   resolve: (complete: UploadComplete) => void
   reject: (error: Error) => void
   settled: boolean
+  removeAbortListener?: () => void
 }
 
 const randomUploadId = (): Uint8Array => {
@@ -87,7 +89,9 @@ const sourceHash = async (source: UploadByteSource, signal?: AbortSignal): Promi
   for (let offset = 0; offset < source.byteCount; offset += HASH_READ_SIZE) {
     if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
     const length = Math.min(HASH_READ_SIZE, source.byteCount - offset)
-    hash.update(await exactRead(source, offset, length))
+    const bytes = await exactRead(source, offset, length)
+    if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
+    hash.update(bytes)
   }
   return hash.digest()
 }
@@ -179,9 +183,18 @@ export class NativeUploadClient {
         settled: false,
       }
       this.#jobs.push(job)
+      const signal = input.signal
+      if (signal) {
+        const onAbort = () => this.#abort(job)
+        signal.addEventListener("abort", onAbort, { once: true })
+        job.removeAbortListener = () => signal.removeEventListener("abort", onAbort)
+      }
+      if (signal?.aborted) {
+        this.#abort(job)
+        return
+      }
       input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: input.source.byteCount })
-      input.signal?.addEventListener("abort", () => void this.#abort(job), { once: true })
-      this.#pump()
+      if (!job.settled) this.#pump()
     })
   }
 
@@ -226,22 +239,14 @@ export class NativeUploadClient {
       const offset = partIndex * job.upload.partSize
       const length = Math.min(job.upload.partSize, job.input.source.byteCount - offset)
       const data = await exactRead(job.input.source, offset, length)
-      await this.rpc.savePart({ uploadId: job.upload.uploadId, partIndex, data })
+      if (job.settled) return
+      await this.#savePart(job, partIndex, data)
+      if (job.settled) return
       job.accepted.add(partIndex)
       job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount })
     } catch (error) {
       if (!job.settled && !job.input.signal?.aborted) {
-        try {
-          const state = await this.rpc.state({ uploadId: job.upload.uploadId })
-          if (state.acceptedParts.includes(partIndex)) {
-            job.accepted.add(partIndex)
-            job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount })
-          } else {
-            this.#reject(job, error)
-          }
-        } catch {
-          this.#reject(job, error)
-        }
+        this.#reject(job, error)
       }
     } finally {
       job.queued.delete(partIndex)
@@ -249,6 +254,31 @@ export class NativeUploadClient {
       this.#active -= 1
       this.#pump()
       if (!job.settled && job.active === 0 && this.#nextPart(job) === undefined) void this.#finish(job)
+    }
+  }
+
+  async #savePart(job: UploadJob, partIndex: number, data: Uint8Array): Promise<void> {
+    for (let attempt = 0; attempt < MAX_PART_ATTEMPTS; attempt += 1) {
+      if (job.settled || job.input.signal?.aborted) {
+        throw new NativeUploadError("canceled", "Upload was canceled")
+      }
+      try {
+        await this.rpc.savePart({ uploadId: job.upload.uploadId, partIndex, data })
+        return
+      } catch (error) {
+        if (job.settled || job.input.signal?.aborted) {
+          throw new NativeUploadError("canceled", "Upload was canceled")
+        }
+        let state: GetUploadStateResult
+        try {
+          state = await this.rpc.state({ uploadId: job.upload.uploadId })
+        } catch {
+          throw error
+        }
+        validatePartIndices(state.acceptedParts, job.upload.partCount)
+        if (state.acceptedParts.includes(partIndex)) return
+        if (state.status !== UploadStatus.UPLOADING || attempt + 1 === MAX_PART_ATTEMPTS) throw error
+      }
     }
   }
 
@@ -334,10 +364,10 @@ export class NativeUploadClient {
     }
   }
 
-  async #abort(job: UploadJob): Promise<void> {
+  #abort(job: UploadJob): void {
     if (job.settled) return
-    await this.rpc.cancel({ uploadId: job.upload.uploadId }).catch(() => {})
     this.#reject(job, new NativeUploadError("canceled", "Upload was canceled"))
+    void this.rpc.cancel({ uploadId: job.upload.uploadId }).catch(() => {})
   }
 
   #reject(job: UploadJob, error: unknown): void {
@@ -348,6 +378,8 @@ export class NativeUploadClient {
   }
 
   #remove(job: UploadJob): void {
+    job.removeAbortListener?.()
+    job.removeAbortListener = undefined
     const index = this.#jobs.indexOf(job)
     if (index >= 0) this.#jobs.splice(index, 1)
     this.#cursor = this.#jobs.length === 0 ? 0 : this.#cursor % this.#jobs.length

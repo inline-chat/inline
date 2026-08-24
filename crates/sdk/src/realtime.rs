@@ -5,7 +5,7 @@ use prost::Message;
 use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot, watch};
@@ -32,6 +32,10 @@ pub const DEFAULT_SESSION_EVENT_CAPACITY: usize = 256;
 pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// Default deadline for a matching protocol pong.
 pub const DEFAULT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(12);
+
+const SESSION_COMMAND_QUEUED: u8 = 0;
+const SESSION_COMMAND_ADMITTED: u8 = 1;
+const SESSION_COMMAND_CANCELLED: u8 = 2;
 
 /// Error returned by realtime connection and RPC operations.
 #[derive(thiserror::Error)]
@@ -284,9 +288,36 @@ pub(crate) enum SessionCommand {
     Invoke {
         method: proto::Method,
         input: proto::rpc_call::Input,
+        admission: Arc<AtomicU8>,
         attempted: Arc<AtomicBool>,
         response: oneshot::Sender<Result<proto::rpc_result::Result, RealtimeError>>,
     },
+}
+
+struct SessionCommandCancellationGuard {
+    admission: Arc<AtomicU8>,
+}
+
+impl Drop for SessionCommandCancellationGuard {
+    fn drop(&mut self) {
+        let _ = self.admission.compare_exchange(
+            SESSION_COMMAND_QUEUED,
+            SESSION_COMMAND_CANCELLED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+}
+
+pub(crate) fn admit_session_command(admission: &AtomicU8) -> bool {
+    admission
+        .compare_exchange(
+            SESSION_COMMAND_QUEUED,
+            SESSION_COMMAND_ADMITTED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .is_ok()
 }
 
 /// Builder for [`RealtimeClient`].
@@ -364,6 +395,7 @@ pub(crate) fn rpc_method_is_read_only(method: proto::Method) -> bool {
             | proto::Method::GetSpaceUrlPreviewExclusions
             | proto::Method::GetUserGroups
             | proto::Method::GetSpaceSettings
+            | proto::Method::GetSpace
             | proto::Method::GetThreadReferences
             | proto::Method::GetThreadSubthreads
             | proto::Method::GetPeerBots
@@ -462,11 +494,17 @@ impl RealtimeSession {
             return Err(RealtimeError::ConnectionClosed);
         }
         let (response_tx, response_rx) = oneshot::channel();
+        let admission = Arc::new(AtomicU8::new(SESSION_COMMAND_QUEUED));
+        let admission_by_actor = admission.clone();
+        let admission_by_caller = admission.clone();
         let attempted = Arc::new(AtomicBool::new(false));
         let attempted_by_actor = attempted.clone();
         let commands = self.commands.clone();
         let permits = self.rpc_permits.clone();
         let response = async move {
+            let _cancellation_guard = SessionCommandCancellationGuard {
+                admission: admission_by_caller,
+            };
             let _permit = permits
                 .acquire_owned()
                 .await
@@ -475,6 +513,7 @@ impl RealtimeSession {
                 .send(SessionCommand::Invoke {
                     method,
                     input,
+                    admission: admission_by_actor,
                     attempted: attempted_by_actor,
                     response: response_tx,
                 })
@@ -487,7 +526,9 @@ impl RealtimeSession {
         let read_only = rpc_method_is_read_only(method);
         match with_optional_timeout("rpc", self.rpc_timeout, response).await {
             Err(RealtimeError::Timeout { .. } | RealtimeError::ConnectionClosed)
-                if attempted.load(Ordering::Acquire) && !read_only =>
+                if (admission.load(Ordering::Acquire) == SESSION_COMMAND_ADMITTED
+                    || attempted.load(Ordering::Acquire))
+                    && !read_only =>
             {
                 Err(RealtimeError::CommitOutcomeUnknown)
             }
@@ -1048,7 +1089,10 @@ async fn run_realtime_session(
                     break;
                 };
                 match command {
-                    SessionCommand::Invoke { method, input, attempted, response } => {
+                    SessionCommand::Invoke { method, input, admission, attempted, response } => {
+                        if !admit_session_command(&admission) {
+                            continue;
+                        }
                         match client.send_rpc_call(method, input).await {
                             Ok(message_id) => {
                                 attempted.store(true, Ordering::Release);
@@ -1860,6 +1904,7 @@ rpc_requests!(
         CancelUploadResult,
         CancelUpload
     ),
+    (GetSpaceInput, GetSpace, GetSpace, GetSpaceResult, GetSpace),
 );
 
 fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::ConnectionInit {
@@ -2858,6 +2903,50 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, RealtimeError::CommitOutcomeUnknown));
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn timed_out_queued_session_command_cannot_be_admitted_later() {
+        let (command_tx, mut command_rx) = mpsc::channel(1);
+        let (event_tx, initial_event_rx) = broadcast::channel(1);
+        let (_closed_tx, closed_rx) = watch::channel(false);
+        let session = RealtimeSession {
+            commands: command_tx,
+            events: event_tx,
+            initial_events: Arc::new(Mutex::new(Some(initial_event_rx))),
+            closed: closed_rx,
+            rpc_timeout: Some(Duration::from_millis(20)),
+            heartbeat_interval: None,
+            heartbeat_timeout: DEFAULT_HEARTBEAT_TIMEOUT,
+            rpc_permits: Arc::new(Semaphore::new(1)),
+        };
+
+        let invocation = tokio::spawn(async move {
+            session
+                .invoke(
+                    proto::Method::DeleteChat,
+                    proto::rpc_call::Input::DeleteChat(proto::DeleteChatInput::default()),
+                )
+                .await
+        });
+        let command = command_rx.recv().await.unwrap();
+
+        assert!(matches!(
+            invocation.await.unwrap(),
+            Err(RealtimeError::Timeout {
+                operation: "rpc",
+                ..
+            })
+        ));
+        let SessionCommand::Invoke {
+            admission,
+            attempted,
+            response,
+            ..
+        } = command;
+        assert!(!admit_session_command(&admission));
+        assert!(!attempted.load(Ordering::Acquire));
+        assert!(response.is_closed());
     }
 
     #[tokio::test]

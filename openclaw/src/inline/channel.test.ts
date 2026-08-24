@@ -78,7 +78,9 @@ describe("inline/channel", () => {
     expect(inlineChannelPlugin.agentPrompt?.inboundFormattingHints?.({})).toEqual({
       text_markup: "inline_markdown",
       rules: expect.arrayContaining([
-        "Prefer bullet lists over markdown tables.",
+        "Use ordinary Markdown tables for genuinely tabular data; never put a table in a fenced code block.",
+        'For collapsible work, use <details open> followed by <summary>Title</summary>, body Markdown, and </details>; add kind="progress" to summary only while work is in progress.',
+        "Use <footer>Attribution or brief metadata</footer> for a short message footer.",
         "Use plain URLs or markdown links; do not wrap bare URLs in inline code or backticks.",
         "Mention Inline users as [@FirstName](inline://user?id=123), falling back to [@username](inline://user?id=123). Use inline://user?username=username only when the user id is unavailable, and never show user:<id> as the visible label.",
         "Link Inline chats/threads with markdown links like [Planning](inline://chat?id=123) or [Planning](inline://thread?id=123); use inline://thread?space_id=7 when only the title and space are known.",

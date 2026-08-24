@@ -7392,8 +7392,10 @@ export async function monitorInlineProvider(params: {
         }
       }
     } catch (err) {
-      publishStatus({ lastError: String(err) })
+      publishStatus({ connected: false, lastError: String(err) })
       runtime.error?.(`inline monitor loop crashed: ${String(err)}`)
+      await client.close().catch(() => {})
+      throw err
     }
   })()
 
@@ -7426,6 +7428,12 @@ export async function monitorInlineProvider(params: {
     { once: true },
   )
 
-  const done = loop.catch(() => {}).then(drainInboundTasks)
+  const done = loop.then(
+    drainInboundTasks,
+    async (error) => {
+      await drainInboundTasks()
+      throw error
+    },
+  )
   return { stop, done }
 }

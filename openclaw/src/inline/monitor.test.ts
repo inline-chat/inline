@@ -201,6 +201,7 @@ type MonitorSetup = {
         documentRevision: string
       }
   >
+  eventLoopError?: Error
   chats: Record<string, {
     kind: "direct" | "group"
     title?: string
@@ -889,6 +890,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           date: event.date ?? 1_700_000_000n,
         }
       }
+      if (setup.eventLoopError) throw setup.eventLoopError
     }
 
     return {
@@ -1789,6 +1791,34 @@ describe("inline/monitor", () => {
       expect(typeof inbound?.lastTransportActivityAt).toBe("number")
     })
 
+    await handle.stop()
+  })
+
+  it("marks the monitor disconnected and surfaces an unexpected event-loop failure", async () => {
+    const statusPatches: Array<Record<string, unknown>> = []
+    const eventLoopError = new Error("event stream failed")
+    const harness = await setupMonitorHarness({
+      events: [],
+      chats: {},
+      eventLoopError,
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statusSink: (patch: Record<string, unknown>) => {
+        statusPatches.push(patch)
+      },
+    })
+
+    await expect(handle.done).rejects.toThrow("event stream failed")
+    expect(statusPatches).toEqual(expect.arrayContaining([
+      expect.objectContaining({ connected: false, lastError: "Error: event stream failed" }),
+    ]))
+    expect(harness.calls.closeClient).toHaveBeenCalled()
     await handle.stop()
   })
 

@@ -52,6 +52,7 @@ describe("createInlineApi", () => {
     const requestedSpaceIds: bigint[] = []
     const getChats: GetChatsResult = {
       dialogs: [],
+      folders: [],
       chats: [spaceChat(7n, "Allowed", 10n, 100n), spaceChat(8n, "Secret", 20n, 200n)],
       spaces: [space(10n, "Allowed Space"), space(20n, "Secret Space")],
       users: [allowedPayloadUser, disallowedPayloadUser],
