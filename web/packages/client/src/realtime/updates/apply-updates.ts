@@ -740,6 +740,9 @@ const applyUpdate = (
     case "spaceMemberUpdate":
     case "updateUserSettings":
     case "dialogNotificationSettings":
+    case "dialogFolder":
+    case "userAddedToChat":
+    case "userRemovedFromChat":
     case "participantGroupAdd":
     case "participantGroupDelete":
     case "spaceSettings":
