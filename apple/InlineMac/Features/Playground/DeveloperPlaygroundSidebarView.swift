@@ -144,7 +144,11 @@ final class DeveloperSidebarPlaygroundModel {
     }
 
     if pinned.isEmpty == false, layout != .archived {
-      result.append(.sectionHeader(.pinned, isExpanded: pinnedExpanded))
+      result.append(.sectionHeader(
+        .pinned,
+        isExpanded: pinnedExpanded,
+        height: SidebarCollectionRow.pinnedSectionHeaderHeight
+      ))
       if pinnedExpanded {
         result.append(contentsOf: chatRows(pinned))
       } else if let selected = selectedProjectedItem(in: pinned) {
@@ -402,7 +406,7 @@ final class DeveloperSidebarPlaygroundModel {
     case let .sectionHeader(section, expanded):
       .header(.init(
         title: section == .pinned ? "Pinned" : "Open",
-        style: .section,
+        style: section == .pinned ? .pinnedSection : .section,
         isExpanded: context.disclosureExpandedOverride ?? expanded,
         topSpacing: SidebarCollectionRow.sectionTopSpacing,
         onToggle: { [weak self] in self?.toggleSection(section) },

@@ -258,6 +258,7 @@ final class AppUndoHistory {
         guard case let .createDialogFolder(response) = result, response.hasFolder else {
           throw ExecutionError.invalidFolderResult
         }
+        folder.folderID = response.folder.id
         if folder.emoji != nil || folder.pinnedOrder != nil {
           _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
             folderId: folder.folderID,
@@ -266,7 +267,6 @@ final class AppUndoHistory {
               .map(UpdateDialogFolderTransaction.PinnedOrderUpdate.set) ?? .unchanged
           ))
         }
-        folder.folderID = response.folder.id
         return .closeFolder(folder)
 
       case .redo:
