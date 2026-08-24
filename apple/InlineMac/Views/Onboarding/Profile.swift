@@ -49,6 +49,7 @@ final class OnboardingProfileSetupModel {
   private(set) var usernameState: UsernameState = .idle
   var errorMessage: String?
   private(set) var currentUsername: String?
+  private(set) var savedUserInfo: UserInfo?
 
   private var hydrated = false
 
@@ -57,6 +58,7 @@ final class OnboardingProfileSetupModel {
 
     if let user {
       hydrated = true
+      savedUserInfo = UserInfo(user: user)
       let fullName = user.fullName.trimmingCharacters(in: .whitespacesAndNewlines)
       name = fullName.isEmpty ? Self.systemFullName : fullName
       username = user.username ?? ""
@@ -171,7 +173,8 @@ final class OnboardingProfileSetupModel {
       )
       let result = try await realtimeV2.setProfilePhoto(fileUniqueID: upload.fileUniqueId)
       await realtimeV2.applyUpdates(result.updates)
-      try await save(result.user)
+      try await save(result.user, preservesProfilePhoto: false)
+      await cacheSelectedPhoto(prepared, userID: result.user.id)
       previewImage = NSImage(data: prepared)
       hasPhoto = true
       return true
@@ -191,7 +194,7 @@ final class OnboardingProfileSetupModel {
     do {
       let result = try await realtimeV2.setProfilePhoto(fileUniqueID: nil)
       await realtimeV2.applyUpdates(result.updates)
-      try await save(result.user)
+      try await save(result.user, preservesProfilePhoto: false)
       previewImage = nil
       hasPhoto = false
     } catch {
@@ -199,10 +202,64 @@ final class OnboardingProfileSetupModel {
     }
   }
 
-  private func save(_ user: InlineProtocol.User) async throws {
-    _ = try await AppDatabase.shared.dbWriter.write { db in
+  private func save(
+    _ user: InlineProtocol.User,
+    preservesProfilePhoto: Bool = true
+  ) async throws {
+    let previousUserInfo = savedUserInfo
+    let savedUser = try await AppDatabase.shared.dbWriter.write { db in
       try User.save(db, user: user)
     }
+
+    var previewUser = savedUser
+    if preservesProfilePhoto, hasPhoto, let previousUser = previousUserInfo?.user {
+      previewUser.profileFileId = previewUser.profileFileId ?? previousUser.profileFileId
+      previewUser.profileFileUniqueId = previewUser.profileFileUniqueId ?? previousUser.profileFileUniqueId
+      previewUser.profileCdnUrl = previewUser.profileCdnUrl ?? previousUser.profileCdnUrl
+      previewUser.profileLocalPath = previewUser.profileLocalPath ?? previousUser.profileLocalPath
+    }
+    savedUserInfo = UserInfo(
+      user: previewUser,
+      profilePhotos: preservesProfilePhoto ? previousUserInfo?.profilePhoto : nil
+    )
+  }
+
+  private func cacheSelectedPhoto(_ data: Data, userID: Int64) async {
+    do {
+      try await User.cacheImageData(userId: userID, data: data)
+      if let cachedUser = try await AppDatabase.shared.dbWriter.read({ db in
+        try User.fetchOne(db, id: userID)
+      }) {
+        savedUserInfo = UserInfo(user: cachedUser)
+      }
+    } catch {
+      Log.shared.error("Failed to cache onboarding profile photo", error: error)
+    }
+  }
+
+  var messagePreviewUserInfo: UserInfo {
+    if var savedUserInfo {
+      let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmedName.isEmpty == false {
+        let components = Self.nameComponents(trimmedName)
+        savedUserInfo.user.firstName = components.firstName
+        savedUserInfo.user.lastName = components.lastName
+      }
+
+      let cleanedUsername = cleanUsername(username)
+      if cleanedUsername.isEmpty == false {
+        savedUserInfo.user.username = cleanedUsername
+      }
+      return savedUserInfo
+    }
+
+    let fallbackName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    return UserInfo(user: User(
+      id: -9_002,
+      email: nil,
+      firstName: fallbackName.isEmpty ? "You" : fallbackName,
+      username: username.trimmingCharacters(in: .whitespacesAndNewlines)
+    ))
   }
 
   private func cleanUsername(_ value: String) -> String {
@@ -356,30 +413,59 @@ struct OnboardingUsername: View {
   var body: some View {
     @Bindable var model = model
 
-    OnboardingStepLayout(
-      title: "Choose a username"
-    ) {
-      VStack(spacing: 12) {
-        GrayTextField("username", text: $model.username, prefix: "@")
-          .textContentType(.username)
-          .focused($isFocused)
-          .frame(width: 280)
-          .onSubmit(finishOnboarding)
+    VStack {
+      Image(systemName: "person.crop.circle.fill")
+        .resizable()
+        .scaledToFit()
+        .frame(width: 34, height: 34)
+        .foregroundColor(.primary)
+        .padding(.bottom, 4)
 
-        UsernameAvailabilityHint(state: model.usernameState)
-          .frame(width: 280)
+      Text("Choose a username")
+        .font(.system(size: 21.0, weight: .semibold))
+        .foregroundStyle(.primary)
 
-        OnboardingInlineError(message: model.errorMessage)
-
-        InlineButton {
-          finishOnboarding()
-        } label: {
-          OnboardingLoadingLabel(title: "Continue", isLoading: model.isSavingUsername)
-        }
-        .disabled(!model.usernameState.canContinue || model.isSavingUsername)
+      GrayTextField(
+        "username",
+        text: $model.username,
+        prefix: "@",
+        centersPlaceholder: true
+      )
+        .textContentType(.username)
+        .focused($isFocused)
+        .frame(width: 280)
         .padding(.top, 6)
+        .padding(.bottom, 10)
+        .onSubmit(continueToAppearance)
+
+      if let message = model.usernameState.message {
+        Text(message)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .frame(width: 260)
+          .padding(.bottom, 8)
+          .contentTransition(.opacity)
       }
+
+      if let error = model.errorMessage {
+        Text(error)
+          .font(.callout)
+          .foregroundStyle(.red)
+          .multilineTextAlignment(.center)
+          .frame(width: 300)
+          .padding(.bottom, 8)
+      }
+
+      InlineButton {
+        continueToAppearance()
+      } label: {
+        OnboardingLoadingLabel(title: "Continue", isLoading: model.isSavingUsername)
+      }
+      .disabled(!model.usernameState.canContinue || model.isSavingUsername)
     }
+    .padding()
+    .animation(.easeOut(duration: 0.15), value: model.usernameState)
     .task {
       isFocused = true
     }
@@ -391,10 +477,10 @@ struct OnboardingUsername: View {
     }
   }
 
-  private func finishOnboarding() {
+  private func continueToAppearance() {
     Task {
       if await model.saveUsername(currentUsername: model.currentUsername, realtimeV2: realtimeV2) {
-        onboarding.finishSetup()
+        onboarding.navigate(to: .appearance)
       }
     }
   }
@@ -447,20 +533,6 @@ private struct OnboardingAvatarContent: View {
       Circle()
         .fill(.primary.opacity(0.07))
     }
-  }
-}
-
-private struct UsernameAvailabilityHint: View {
-  let state: OnboardingProfileSetupModel.UsernameState
-
-  var body: some View {
-    Text(state.message ?? " ")
-      .font(.callout)
-      .foregroundStyle(.secondary)
-      .multilineTextAlignment(.center)
-      .frame(maxWidth: .infinity, minHeight: 20, alignment: .center)
-      .contentTransition(.opacity)
-      .animation(.easeOut(duration: 0.15), value: state)
   }
 }
 

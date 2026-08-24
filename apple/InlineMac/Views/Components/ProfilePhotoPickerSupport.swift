@@ -21,6 +21,8 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
   @State private var selectedMemojiPhoto: MemojiPhoto?
   @State private var isHovering = false
   @State private var isDropTargeted = false
+  @State private var xProfileHandle = ""
+  @State private var xProfileImageData: Data?
 
   let size: CGFloat
   let hasPhoto: Bool
@@ -72,8 +74,10 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
       switch sheet {
       case .x:
         XProfilePhotoPicker(
+          initialHandle: xProfileHandle,
+          initialImageData: xProfileImageData,
           isUploading: isBusy,
-          onUse: onUsePhotoData
+          onUse: useXProfilePhoto
         )
       case .memoji:
         MemojiPicker(
@@ -120,6 +124,13 @@ struct EditableProfileAvatar<AvatarContent: View>: View {
     case let .failure(error):
       onFilePickerFailure(error)
     }
+  }
+
+  private func useXProfilePhoto(handle: String, data: Data) async -> Bool {
+    guard await onUsePhotoData(data) else { return false }
+    xProfileHandle = handle
+    xProfileImageData = data
+    return true
   }
 }
 
@@ -381,12 +392,27 @@ struct XProfilePhotoPicker: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.realtimeV2) private var realtimeV2
   @FocusState private var isHandleFocused: Bool
-  @State private var handle = ""
-  @State private var lookupState = XAvatarLookupState.idle
+  @State private var handle: String
+  @State private var lookupState: XAvatarLookupState
   @State private var lastAttemptedHandle: String?
 
   let isUploading: Bool
-  let onUse: (Data) async -> Bool
+  let onUse: (String, Data) async -> Bool
+
+  init(
+    initialHandle: String = "",
+    initialImageData: Data? = nil,
+    isUploading: Bool,
+    onUse: @escaping (String, Data) async -> Bool
+  ) {
+    self.isUploading = isUploading
+    self.onUse = onUse
+    _handle = State(initialValue: initialHandle)
+    _lookupState = State(initialValue: initialImageData.map(XAvatarLookupState.found) ?? .idle)
+    _lastAttemptedHandle = State(
+      initialValue: initialImageData == nil ? nil : XProfileHandle.normalize(initialHandle)
+    )
+  }
 
   var body: some View {
     VStack(spacing: 16) {
@@ -396,7 +422,7 @@ struct XProfilePhotoPicker: View {
 
       XProfilePhotoPreview(
         image: lookupState.image,
-        isLoading: lookupState.isLoading || isUploading
+        isLoading: lookupState.isLoading
       )
 
       GrayTextField("username", text: $handle, prefix: "@", size: .small)
@@ -422,13 +448,23 @@ struct XProfilePhotoPicker: View {
         }
         .keyboardShortcut(.cancelAction)
 
-        Button("Use Photo") {
+        Button {
           guard let data = lookupState.imageData else { return }
           usePhoto(data)
+        } label: {
+          ZStack {
+            Text("Use Photo")
+              .opacity(isUploading ? 0 : 1)
+            if isUploading {
+              ProgressView()
+                .controlSize(.small)
+            }
+          }
         }
         .buttonStyle(.borderedProminent)
         .keyboardShortcut(.defaultAction)
         .disabled(lookupState.imageData == nil || isUploading)
+        .accessibilityLabel(isUploading ? "Using photo" : "Use Photo")
       }
     }
     .frame(width: 320, alignment: .topLeading)
@@ -452,7 +488,8 @@ struct XProfilePhotoPicker: View {
 
   private func usePhoto(_ data: Data) {
     Task {
-      if await onUse(data) {
+      guard let normalizedHandle = XProfileHandle.normalize(handle) else { return }
+      if await onUse(normalizedHandle, data) {
         dismiss()
       }
     }

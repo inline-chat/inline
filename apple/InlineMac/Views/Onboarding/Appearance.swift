@@ -1,9 +1,210 @@
 import AppKit
+import InlineKit
 import InlineMacUI
 import MacTheme
 import SwiftUI
 
 struct OnboardingAppearance: View {
+  @EnvironmentObject private var onboarding: OnboardingViewModel
+  @Environment(OnboardingProfileSetupModel.self) private var profile
+
+  @State private var selectedStyle = AppSettings.shared.messageRenderStyle
+
+  var body: some View {
+    let currentUserInfo = profile.messagePreviewUserInfo
+
+    VStack(spacing: 0) {
+      Spacer()
+
+      OnboardingAppearanceHeader()
+
+      OnboardingMessageStylePreview(
+        style: selectedStyle,
+        currentUserInfo: currentUserInfo
+      )
+      .id(selectedStyle)
+      .transition(.opacity)
+      .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
+      }
+      .accessibilityHidden(true)
+      .padding(.top, 20)
+
+      HStack(spacing: 4) {
+        OnboardingAppearanceStyleChoice(
+          style: .minimal,
+          isSelected: selectedStyle == .minimal,
+          action: { selectStyle(.minimal) }
+        )
+
+        OnboardingAppearanceStyleChoice(
+          style: .bubble,
+          isSelected: selectedStyle == .bubble,
+          action: { selectStyle(.bubble) }
+        )
+      }
+      .padding(.top, 10)
+
+      InlineButton {
+        AppSettings.shared.messageRenderStyle = selectedStyle
+        onboarding.finishSetup()
+      } label: {
+        Text("Continue")
+          .padding(.horizontal, 16)
+      }
+      .padding(.top, 10)
+
+      Spacer()
+    }
+    .padding(32)
+    .frame(minHeight: 520)
+  }
+
+  private func selectStyle(_ style: MessageRenderStyle) {
+    withAnimation(.easeInOut(duration: 0.18)) {
+      selectedStyle = style
+    }
+  }
+}
+
+private struct OnboardingAppearanceHeader: View {
+  var body: some View {
+    VStack(spacing: 4) {
+      Image(systemName: "bubble.left.and.bubble.right.fill")
+        .resizable()
+        .scaledToFit()
+        .frame(width: 34, height: 34)
+        .foregroundStyle(.primary)
+
+      Text("Pick your style")
+        .font(.title2.weight(.semibold))
+        .foregroundStyle(.primary)
+    }
+  }
+}
+
+private struct OnboardingAppearanceStyleChoice: View {
+  @State private var isHovered = false
+
+  let style: MessageRenderStyle
+  let isSelected: Bool
+  let action: () -> Void
+
+  private var title: LocalizedStringResource {
+    switch style {
+      case .minimal: "Minimal"
+      case .bubble: "Bubble"
+    }
+  }
+
+  private var accentColor: Color {
+    Color(nsColor: .controlAccentColor)
+  }
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 7) {
+        ZStack {
+          Circle()
+            .fill(isSelected ? accentColor : .clear)
+
+          Circle()
+            .strokeBorder(
+              isSelected ? accentColor : Color.secondary.opacity(0.55),
+              lineWidth: 1
+            )
+
+          if isSelected {
+            Image(systemName: "checkmark")
+              .font(.system(size: 9, weight: .bold))
+              .foregroundStyle(.white)
+              .transition(.scale.combined(with: .opacity))
+          }
+        }
+        .frame(width: 16, height: 16)
+        .animation(.easeInOut(duration: 0.16), value: isSelected)
+
+        Text(title)
+          .font(.body)
+          .foregroundStyle(.primary)
+      }
+      .frame(width: 92, height: 34)
+      .background(
+        Color.gray.opacity(isHovered ? 0.14 : 0),
+        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+      )
+      .contentShape(Rectangle())
+      .animation(.easeOut(duration: 0.14), value: isHovered)
+    }
+    .buttonStyle(OnboardingAppearanceButtonStyle())
+    .onHover { isHovered = $0 }
+    .accessibilityLabel(Text(title))
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
+  }
+}
+
+// Preserved as a dormant reference to the superseded two-preview layout.
+private struct LegacyOnboardingAppearanceOption: View {
+  let style: MessageRenderStyle
+  let currentUserInfo: UserInfo
+  let isSelected: Bool
+  let action: () -> Void
+
+  private var title: LocalizedStringResource {
+    switch style {
+      case .minimal: "Minimal"
+      case .bubble: "Bubble"
+    }
+  }
+
+  private var accentColor: Color {
+    Color(nsColor: .controlAccentColor)
+  }
+
+  var body: some View {
+    Button(action: action) {
+      VStack(spacing: 12) {
+        OnboardingMessageStylePreview(
+          style: style,
+          currentUserInfo: currentUserInfo
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+          RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(
+              isSelected ? accentColor : .primary.opacity(0.12),
+              lineWidth: isSelected ? 2 : 1
+            )
+        }
+        .accessibilityHidden(true)
+
+        HStack(spacing: 7) {
+          Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .foregroundStyle(isSelected ? accentColor : .secondary)
+
+          Text(title)
+            .font(.body)
+            .foregroundStyle(.primary)
+        }
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(OnboardingAppearanceButtonStyle())
+    .accessibilityLabel(Text(title))
+    .accessibilityAddTraits(isSelected ? .isSelected : [])
+  }
+}
+
+private struct OnboardingAppearanceButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+  }
+}
+
+// Preserved as a dormant reference while the two option previews are designed.
+private struct LegacyOnboardingAppearance: View {
   @EnvironmentObject private var onboarding: OnboardingViewModel
   @Environment(OnboardingProfileSetupModel.self) private var profile
   @Environment(\.colorScheme) private var colorScheme

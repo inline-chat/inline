@@ -11,6 +11,7 @@ struct GrayTextField: View {
   var value: Binding<String>
   var prompt: Text?
   var prefix: LocalizedStringKey?
+  var centersPlaceholder = false
   var size: Size = .large
 
   init(_ titleKey: LocalizedStringKey, text value: Binding<String>) {
@@ -35,12 +36,14 @@ struct GrayTextField: View {
     _ titleKey: LocalizedStringKey,
     text value: Binding<String>,
     prefix: LocalizedStringKey,
+    centersPlaceholder: Bool = false,
     size: Size = .large
   ) {
     self.titleKey = titleKey
     self.value = value
     prompt = nil
     self.prefix = prefix
+    self.centersPlaceholder = centersPlaceholder
     self.size = size
   }
 
@@ -80,18 +83,30 @@ struct GrayTextField: View {
   }
 
   var body: some View {
-    HStack(spacing: 4) {
-      if let prefix {
-        Text(prefix)
-          .foregroundStyle(.secondary)
-      }
+    ZStack {
+      HStack(spacing: 4) {
+        if let prefix {
+          Text(prefix)
+            .foregroundStyle(.secondary)
+        }
 
-      TextField(titleKey, text: value, prompt: prompt)
+        TextField(
+          titleKey,
+          text: value,
+          prompt: showsCenteredPlaceholder ? Text("") : prompt
+        )
         .multilineTextAlignment(prefix == nil ? .center : .leading)
         .textFieldStyle(.plain)
         .focused($isFocused)
+      }
+      .padding(.horizontal, prefix == nil ? 0 : 12)
+
+      if showsCenteredPlaceholder {
+        Text(titleKey)
+          .foregroundStyle(.tertiary)
+          .allowsHitTesting(false)
+      }
     }
-    .padding(.horizontal, prefix == nil ? 0 : 12)
     .font(font)
     .frame(height: height)
     .cornerRadius(cornerRadius)
@@ -101,6 +116,10 @@ struct GrayTextField: View {
         .animation(.snappy, value: isFocused)
         .frame(height: height)
     )
+  }
+
+  private var showsCenteredPlaceholder: Bool {
+    centersPlaceholder && value.wrappedValue.isEmpty
   }
 }
 
