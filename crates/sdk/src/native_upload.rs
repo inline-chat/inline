@@ -11,6 +11,11 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 const HASH_READ_SIZE: usize = 1024 * 1024;
 const MAX_NEGOTIATED_PART_SIZE: u32 = 16 * 1024 * 1024;
+const MAX_PROCESSING_RETRY_SECONDS: u64 = 30;
+
+fn bounded_processing_retry_seconds(seconds: u32) -> u64 {
+    u64::from(seconds.max(1)).min(MAX_PROCESSING_RETRY_SECONDS)
+}
 
 /// High-level file input for a native Inline upload.
 #[derive(Clone, Debug)]
@@ -345,9 +350,9 @@ async fn upload_with_transport(
                 }
             }
             proto::finish_upload_result::State::Processing(processing) => {
-                tokio::time::sleep(std::time::Duration::from_secs(u64::from(
-                    processing.retry_after_seconds.max(1),
-                )))
+                tokio::time::sleep(std::time::Duration::from_secs(
+                    bounded_processing_retry_seconds(processing.retry_after_seconds),
+                ))
                 .await;
             }
             proto::finish_upload_result::State::Failed(failure) => {
@@ -374,6 +379,13 @@ fn is_ambiguous_finish_error(error: &NativeUploadError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounds_authenticated_processing_retry_hints() {
+        assert_eq!(bounded_processing_retry_seconds(0), 1);
+        assert_eq!(bounded_processing_retry_seconds(2), 2);
+        assert_eq!(bounded_processing_retry_seconds(u32::MAX), 30);
+    }
 
     struct LostResponseTransport {
         accepted: bool,
