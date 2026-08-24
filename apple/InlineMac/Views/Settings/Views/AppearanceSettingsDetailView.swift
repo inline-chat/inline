@@ -51,12 +51,40 @@ struct AppearanceSettingsDetailView: View {
       }
 
       ToolbarSettingsSection(usesCompactToolbar: $appSettings.usesCompactToolbar)
+
+      ChatTypographySettingsSection(settings: appSettings)
     }
     .settingsFormStyle()
   }
 }
 
 private struct MessagesAppearanceSettingsSection: View {
+  @ObservedObject var settings: AppSettings
+
+  var body: some View {
+    Section {
+      LabeledContent {
+        Picker("Message Style", selection: $settings.messageRenderStyle) {
+          ForEach(MessageRenderStyle.allCases, id: \.self) { style in
+            Text(style.title).tag(style)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .frame(width: 220, alignment: .trailing)
+      } label: {
+        SettingsRowLabel(
+          "Message Style",
+          description: "Choose how messages are arranged in chats."
+        )
+      }
+    } header: {
+      SettingsSectionHeader("Messages")
+    }
+  }
+}
+
+private struct ChatTypographySettingsSection: View {
   @ObservedObject var settings: AppSettings
 
   var body: some View {
@@ -84,34 +112,27 @@ private struct MessagesAppearanceSettingsSection: View {
       }
 
       LabeledContent {
-        TextField(
-          "Font Size",
-          text: $settings.chatFontSize,
-          prompt: Text(systemPointSizeLabel)
-        )
-        .labelsHidden()
-        .frame(width: 72)
+        HStack(spacing: 6) {
+          TextField(
+            "Font Size",
+            text: $settings.chatFontSize,
+            prompt: Text(systemPointSizeLabel)
+          )
+          .labelsHidden()
+          .frame(width: 72)
+
+          Stepper("Font Size", value: $settings.chatFontSizeStepperValue)
+            .labelsHidden()
+            .fixedSize()
+        }
       } label: {
         SettingsRowLabel("Size")
       }
-
-      LabeledContent {
-        Picker("Message Style", selection: $settings.messageRenderStyle) {
-          ForEach(MessageRenderStyle.allCases, id: \.self) { style in
-            Text(style.title).tag(style)
-          }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .frame(width: 220, alignment: .trailing)
-      } label: {
-        SettingsRowLabel(
-          "Message Style",
-          description: "Choose how messages are arranged in chats."
-        )
-      }
     } header: {
-      SettingsSectionHeader("Messages")
+      SettingsSectionHeader(
+        "Typography",
+        subtitle: "Power-user controls for message text."
+      )
     } footer: {
       if settings.chatTypographyNeedsRestart {
         Text("Restart Inline to apply typography changes.")

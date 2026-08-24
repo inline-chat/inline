@@ -297,6 +297,23 @@ final class AppSettings: ObservableObject {
     !chatFontFamilies.isEmpty || !chatFontSize.isEmpty
   }
 
+  var chatFontSizeStepperValue: Double {
+    get {
+      let value = Double(chatFontSize.trimmingCharacters(in: .whitespacesAndNewlines))
+      return value.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        ?? Double(ChatTypography.systemPointSize)
+    }
+    set {
+      guard newValue.isFinite else { return }
+      let value = max(1, newValue)
+      if value <= Double(Int.max), value.rounded() == value {
+        chatFontSize = String(Int(value))
+      } else {
+        chatFontSize = String(value)
+      }
+    }
+  }
+
   func resetChatTypography() {
     chatFontFamilies = ""
     chatFontSize = ""
