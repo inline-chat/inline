@@ -33,9 +33,23 @@ struct OnboardingEnterEmail: View {
         .onSubmit {
           sendCode()
         }
+        .onChange(of: onboardingViewModel.email) { _, _ in
+          if formState.error != nil {
+            formState.reset()
+          }
+        }
         .onAppear {
           focusedField = .codeField
         }
+
+      if let error = formState.error, !error.isEmpty {
+        Text(error)
+          .font(.callout)
+          .foregroundStyle(.red)
+          .multilineTextAlignment(.center)
+          .frame(width: 260)
+          .padding(.bottom, 8)
+      }
 
       InlineButton {
         sendCode()
@@ -48,6 +62,7 @@ struct OnboardingEnterEmail: View {
             .scaleEffect(0.5)
         }
       }
+      .disabled(formState.isLoading)
     }
     .padding()
   }
@@ -65,6 +80,11 @@ struct OnboardingEnterEmail: View {
   }
 
   func sendCode() {
+    guard EmailAddressValidator.isValid(onboardingViewModel.email) else {
+      formState.failed(error: String(localized: "Enter a valid email address."))
+      return
+    }
+
     formState.startLoading()
 
     Task {
@@ -78,7 +98,7 @@ struct OnboardingEnterEmail: View {
         onboardingViewModel.emailChallengeToken = data.challengeToken
         onboardingViewModel.navigate(to: data.needsInviteCode == true ? .inviteCode : .enterCode)
       } catch {
-        formState.failed(error: "Failed: \(error.localizedDescription)")
+        formState.failed(error: error.localizedDescription)
         Log.shared.error("Failed to send code", error: error)
       }
     }

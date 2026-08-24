@@ -1,13 +1,53 @@
+const MAX_EMAIL_BYTES = 254
+const MAX_EMAIL_LOCAL_PART_BYTES = 64
+const MAX_EMAIL_DOMAIN_BYTES = 253
+const MAX_EMAIL_DOMAIN_LABEL_BYTES = 63
+const EMAIL_LOCAL_PART_PATTERN = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/
+const EMAIL_DOMAIN_LABEL_PATTERN = /^[A-Za-z0-9-]+$/
+const EMAIL_TOP_LEVEL_DOMAIN_PATTERN = /^[A-Za-z]{2,63}$/
+const EMAIL_PUNYCODE_TOP_LEVEL_DOMAIN_PATTERN = /^xn--[A-Za-z0-9-]{1,59}$/i
+
 export const isValidEmail = (email: string | undefined | null): boolean => {
-  if (!email) {
+  if (!email || Buffer.byteLength(email, "utf8") > MAX_EMAIL_BYTES || email.includes("\0") || /\s/.test(email)) {
     return false
   }
 
-  if (!/^\S+@\S+\.\S+$/.test(email)) {
+  const addressParts = email.split("@")
+  if (addressParts.length !== 2) return false
+  const [localPart, domain] = addressParts
+
+  if (
+    !localPart ||
+    Buffer.byteLength(localPart, "utf8") > MAX_EMAIL_LOCAL_PART_BYTES ||
+    localPart.startsWith(".") ||
+    localPart.endsWith(".") ||
+    localPart.includes("..") ||
+    !EMAIL_LOCAL_PART_PATTERN.test(localPart)
+  ) {
     return false
   }
 
-  return true
+  if (!domain || Buffer.byteLength(domain, "utf8") > MAX_EMAIL_DOMAIN_BYTES) return false
+  const domainLabels = domain.split(".")
+  if (
+    domainLabels.length < 2 ||
+    domainLabels.some(
+      (label) =>
+        !label ||
+        Buffer.byteLength(label, "utf8") > MAX_EMAIL_DOMAIN_LABEL_BYTES ||
+        label.startsWith("-") ||
+        label.endsWith("-") ||
+        !EMAIL_DOMAIN_LABEL_PATTERN.test(label),
+    )
+  ) {
+    return false
+  }
+
+  const topLevelDomain = domainLabels.at(-1)
+  if (!topLevelDomain) return false
+
+  return EMAIL_TOP_LEVEL_DOMAIN_PATTERN.test(topLevelDomain) ||
+    EMAIL_PUNYCODE_TOP_LEVEL_DOMAIN_PATTERN.test(topLevelDomain)
 }
 
 export const isValidPhoneNumber = (phoneNumber: string | undefined | null): boolean => {

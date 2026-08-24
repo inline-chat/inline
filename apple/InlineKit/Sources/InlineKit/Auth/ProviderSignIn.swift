@@ -11,6 +11,7 @@ public enum ProviderSignInProvider: String, Hashable, Sendable {
 
 public struct ProviderSignInCompletion: Equatable, Sendable {
   public let id: UUID
+  public let userId: Int64
   public let pendingSetup: Bool
   public let userCreatedAt: Date
 }
@@ -104,6 +105,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
       )
       completion = ProviderSignInCompletion(
         id: UUID(),
+        userId: result.userId,
         pendingSetup: result.user.pendingSetup == true || result.user.firstName?.isEmpty != false,
         userCreatedAt: Date(timeIntervalSince1970: TimeInterval(result.user.date))
       )

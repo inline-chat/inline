@@ -3,6 +3,7 @@ import Foundation
 import InlineConfig
 import InlineProtocol
 import Logger
+import RealtimeV2
 
 public enum InlineProtocolNativeLoginError: Error, Sendable {
   case unavailable
@@ -146,7 +147,7 @@ public actor InlineProtocolNativeLogin {
       return result
     } catch {
       clearCompletionTask(generation: generation)
-      throw error
+      throw Self.presentationError(error)
     }
   }
 
@@ -209,7 +210,7 @@ public actor InlineProtocolNativeLogin {
       if let temporaryConnection { await temporaryConnection.close() }
       await pending.connection.close()
       if self.pending?.generation == generation { self.pending = nil }
-      throw error
+      throw Self.presentationError(error)
     }
   }
 
@@ -249,7 +250,7 @@ public actor InlineProtocolNativeLogin {
       ))
     } catch {
       log.error("Native login permanent authorization handshake failed", error: error)
-      throw error
+      throw Self.presentationError(error)
     }
     do {
       try requireGeneration(generation)
@@ -275,7 +276,7 @@ public actor InlineProtocolNativeLogin {
     } catch {
       log.error("Native login challenge start failed", error: error)
       await connection.close()
-      throw error
+      throw Self.presentationError(error)
     }
   }
 
@@ -310,5 +311,39 @@ public actor InlineProtocolNativeLogin {
 
   private func clearCompletionTask(generation: UInt64) {
     if completionTask?.generation == generation { completionTask = nil }
+  }
+
+  static func presentationError(_ error: any Error) -> any Error {
+    if error is CancellationError ||
+      error is InlineProtocolNativeLoginError ||
+      error is RealtimeDirectRpcError {
+      return error
+    }
+
+    guard let connectionError = error as? InlineProtocolV3ConnectionError else {
+      return RealtimeDirectRpcError.unknown(error)
+    }
+
+    return switch connectionError {
+    case .authorizationInvalidated:
+      RealtimeDirectRpcError.notAuthorized
+    case .closed, .temporaryAuthorizationRotationDue:
+      RealtimeDirectRpcError.notConnected
+    case .commitOutcomeUnknown:
+      RealtimeDirectRpcError.commitOutcomeUnknown
+    case .requestCapacityExceeded:
+      RealtimeDirectRpcError.capacityExceeded
+    case .timeout:
+      RealtimeDirectRpcError.timeout
+    case let .rpc(error):
+      RealtimeDirectRpcError.rpcError(
+        errorCode: error.errorCode,
+        message: error.message,
+        code: Int(error.code)
+      )
+    case .invalidKey, .outboundBufferOverflow, .protocolFailure, .unexpectedResponse,
+         .updateBufferOverflow:
+      RealtimeDirectRpcError.unknown(connectionError)
+    }
   }
 }

@@ -19,8 +19,9 @@ struct OnboardingView: View {
               InviteCode(destination: .email(email: email, challengeToken: challengeToken))
             case let .inviteCodeForPhone(phoneNumber):
               InviteCode(destination: .phone(phoneNumber: phoneNumber))
-            case .profile:
+            case let .profile(userId):
               Profile()
+                .id(userId)
             case .welcome:
               Welcome()
             case .main:

@@ -110,7 +110,7 @@ extension PhoneNumberCode {
 
         formState.reset()
         if result.user.firstName == nil || result.user.firstName?.isEmpty == true || result.user.pendingSetup == true {
-          nav.push(.profile)
+          nav.push(.profile(userId: result.userId))
         } else {
           nav.reset()
           mainViewRouter.setRoute(route: .main)
@@ -142,8 +142,7 @@ extension PhoneNumberCode {
   var codeInput: some View {
     TextField(placeHolder, text: $code)
       .focused($isFocused)
-      .keyboardType(.numberPad)
-      .textInputAutocapitalization(.never)
+      .onboardingNumberInput()
       .monospaced()
       .kerning(5)
       .autocorrectionDisabled(true)

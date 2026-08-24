@@ -74,9 +74,24 @@ describe("validate email", () => {
 
   test.each([
     ["test@test.com", true, "Valid email"],
-    ["c@c.c", true, "Valid email"],
+    ["Person+work@sub.example.com", true, "Valid email with uppercase, plus, and subdomain"],
+    ["first.last@example.co.uk", true, "Valid email with multiple domain labels"],
+    ["person@xn--bcher-kva.example", true, "Valid email with a punycode domain label"],
     ["test", false, "Invalid email"],
     ["test@test", false, "Invalid email"],
+    ["person@other@example.com", false, "Multiple at signs"],
+    ["person..name@example.com", false, "Consecutive local-part dots"],
+    [".person@example.com", false, "Leading local-part dot"],
+    ["person.@example.com", false, "Trailing local-part dot"],
+    ["person@example..com", false, "Empty domain label"],
+    ["person@-example.com", false, "Leading domain hyphen"],
+    ["person@example-.com", false, "Trailing domain hyphen"],
+    ["person@exam_ple.com", false, "Invalid domain character"],
+    ["person@example.c", false, "One-character top-level domain"],
+    ["person@example.123", false, "Numeric top-level domain"],
+    ["person @example.com", false, "Whitespace"],
+    ["person@example.com\0", false, "Null byte"],
+    [`${"a".repeat(244)}@example.com`, false, "Address longer than 254 bytes"],
     ["", false, "Empty string"],
   ])("%s should return %s (%s)", (input: string, expected: boolean, _label: string) => {
     expect(isValidEmail(input)).toBe(expected)

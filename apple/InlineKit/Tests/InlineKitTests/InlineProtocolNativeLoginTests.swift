@@ -1,6 +1,7 @@
 import Auth
 import Foundation
 import InlineProtocol
+import RealtimeV2
 import Testing
 @testable import InlineKit
 
@@ -75,6 +76,29 @@ private actor NativeLoginConnectionFactory {
 
 @Suite("Inline Protocol native login")
 struct InlineProtocolNativeLoginTests {
+  @Test("native login preserves actionable RPC errors")
+  func nativeLoginPreservesRPCError() {
+    var rpcError = InlineProtocol.RpcError()
+    rpcError.errorCode = .emailInvalid
+    rpcError.message = "Email is invalid"
+    rpcError.code = 400
+
+    let presented = InlineProtocolNativeLogin.presentationError(
+      InlineProtocolV3ConnectionError.rpc(rpcError)
+    )
+
+    guard let realtimeError = presented as? RealtimeDirectRpcError,
+          case let .rpcError(errorCode, message, code) = realtimeError
+    else {
+      Issue.record("Expected a typed realtime RPC error")
+      return
+    }
+    #expect(errorCode == .emailInvalid)
+    #expect(message == "Email is invalid")
+    #expect(code == 400)
+    #expect(presented.localizedDescription == "Email is invalid")
+  }
+
   @Test("temporary authorization rotation uses the exact authenticated 80 percent boundary")
   func temporaryAuthorizationRotationBoundary() {
     let expiresAt: Int32 = 2_000_086_400

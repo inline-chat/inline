@@ -36,10 +36,8 @@ struct Email: View {
       VStack(spacing: 8) {
         TextField(NSLocalizedString("Your Email", comment: "Email input placeholder"), text: $email)
           .focused($isFocused)
-          .keyboardType(.emailAddress)
-          .textInputAutocapitalization(.never)
+          .onboardingEmailInput()
           .autocorrectionDisabled(true)
-          .textContentType(.emailAddress)
           .font(.body)
           .padding(.horizontal, 20)
           .padding(.vertical, 16)
@@ -59,6 +57,11 @@ struct Email: View {
           .disabled(formState.isLoading)
           .onSubmit {
             sendCode()
+          }
+          .onChange(of: email) { _, _ in
+            if !errorMsg.isEmpty {
+              errorMsg = ""
+            }
           }
 
         if !errorMsg.isEmpty {
@@ -84,8 +87,8 @@ struct Email: View {
       .frame(maxWidth: .infinity)
       .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-      .disabled(!isEmailValid || formState.isLoading)
-      .opacity((!isEmailValid || formState.isLoading) ? 0.5 : 1)
+      .disabled(formState.isLoading)
+      .opacity(formState.isLoading ? 0.5 : 1)
     }
     .onAppear {
       if let prevEmail {
@@ -96,14 +99,14 @@ struct Email: View {
   }
 
   private var isEmailValid: Bool {
-    let emailRegex =
-      #"(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])"#
-    let emailPredicate = NSPredicate(format: "SELF MATCHES %@", emailRegex)
-    return !email.isEmpty && emailPredicate.evaluate(with: email)
+    EmailAddressValidator.isValid(email)
   }
 
   func sendCode() {
-    guard isEmailValid else { return }
+    guard isEmailValid else {
+      errorMsg = String(localized: "Enter a valid email address.")
+      return
+    }
 
     formState.startLoading()
 

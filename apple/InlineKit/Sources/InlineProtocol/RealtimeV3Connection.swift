@@ -259,7 +259,7 @@ public enum InlineProtocolV3ConnectionError: Error, Equatable, Sendable {
   /// The authenticated temporary authorization reached its rotation boundary. The owning
   /// transport closes the carrier so the normal reconnect owner can replace and persist it.
   case temporaryAuthorizationRotationDue
-  case rpc(String)
+  case rpc(RpcError)
   case timeout
   case unexpectedResponse
   case updateBufferOverflow
@@ -578,7 +578,7 @@ public actor InlineProtocolV3Connection {
     envelope.body = .authBegin(request)
     switch try await invoke(envelope).body {
     case let .authBegin(value): return value
-    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error.message)
+    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error)
     default: throw InlineProtocolV3ConnectionError.unexpectedResponse
     }
   }
@@ -588,7 +588,7 @@ public actor InlineProtocolV3Connection {
     envelope.body = .authComplete(request)
     switch try await invoke(envelope).body {
     case let .authComplete(value): return value
-    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error.message)
+    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error)
     default: throw InlineProtocolV3ConnectionError.unexpectedResponse
     }
   }
@@ -598,7 +598,7 @@ public actor InlineProtocolV3Connection {
     envelope.body = .rpc(request)
     switch try await invoke(envelope).body {
     case let .rpcResult(value): return value
-    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error.message)
+    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error)
     default: throw InlineProtocolV3ConnectionError.unexpectedResponse
     }
   }
@@ -608,7 +608,7 @@ public actor InlineProtocolV3Connection {
     envelope.body = .createHTTPUpload(request)
     switch try await invoke(envelope).body {
     case let .createHTTPUpload(value): return value
-    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error.message)
+    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error)
     default: throw InlineProtocolV3ConnectionError.unexpectedResponse
     }
   }
@@ -618,7 +618,7 @@ public actor InlineProtocolV3Connection {
     envelope.body = .finishHTTPUpload(request)
     switch try await invoke(envelope).body {
     case let .finishHTTPUpload(value): return value
-    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error.message)
+    case let .rpcError(error): throw InlineProtocolV3ConnectionError.rpc(error)
     default: throw InlineProtocolV3ConnectionError.unexpectedResponse
     }
   }

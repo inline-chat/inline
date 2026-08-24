@@ -8,7 +8,7 @@ enum OnboardingStep: Identifiable, Hashable {
   case code(email: String, challengeToken: String? = nil, inviteCode: String? = nil)
   case inviteCodeForEmail(email: String, challengeToken: String? = nil)
   case inviteCodeForPhone(phoneNumber: String)
-  case profile
+  case profile(userId: Int64)
   case main
   case phoneNumber(prevPhoneNumber: String? = nil)
   case phoneNumberCode(phoneNumber: String, inviteCode: String? = nil)
@@ -22,7 +22,7 @@ enum OnboardingStep: Identifiable, Hashable {
       case let .code(email, challengeToken, inviteCode): "code-\(email)-\(challengeToken ?? "")-\(inviteCode ?? "")"
       case let .inviteCodeForEmail(email, challengeToken): "inviteCodeForEmail-\(email)-\(challengeToken ?? "")"
       case let .inviteCodeForPhone(phoneNumber): "inviteCodeForPhone-\(phoneNumber)"
-      case .profile: "profile"
+      case let .profile(userId): "profile-\(userId)"
       case .main: "main"
       case let .phoneNumber(prevPhoneNumber): "phoneNumber-\(prevPhoneNumber ?? "")"
       case let .phoneNumberCode(phoneNumber, inviteCode): "phoneNumberCode-\(phoneNumber)-\(inviteCode ?? "")"

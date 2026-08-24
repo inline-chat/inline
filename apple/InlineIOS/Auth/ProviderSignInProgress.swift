@@ -66,7 +66,7 @@ struct ProviderSignInProgress: View {
     .onChange(of: coordinator.completion?.id) { _, _ in
       guard let completion = coordinator.completion else { return }
       if completion.pendingSetup {
-        navigation.push(.profile)
+        navigation.push(.profile(userId: completion.userId))
       } else {
         navigation.reset()
         mainViewRouter.setRoute(route: .main)
