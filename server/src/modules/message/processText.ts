@@ -1,5 +1,5 @@
 import { MessageEntities } from "@inline-chat/protocol/core"
-import { parseMarkdown } from "@in/server/modules/message/parseMarkdown"
+import { parseMarkdown, type ParsedMarkdown } from "@in/server/modules/message/parseMarkdown"
 
 type ProcessMessageTextInput = {
   // Text from user which may contain markdown entities, URLs or global mentions
@@ -7,6 +7,9 @@ type ProcessMessageTextInput = {
 
   // Entities passed from client which may contain parts of patterns already, we should ignore these ranges when computing additional entities
   entities: MessageEntities | undefined
+
+  /** Reuse the parser result when the rich-content path already produced it. */
+  parsedMarkdown?: ParsedMarkdown
 }
 
 type ProcessMessageTextOutput = {
@@ -20,7 +23,7 @@ type ProcessMessageTextOutput = {
 export const processMessageText = (input: ProcessMessageTextInput): ProcessMessageTextOutput => {
   const { text, entities } = input
 
-  const parsed = parseMarkdown(text)
+  const parsed = input.parsedMarkdown ?? parseMarkdown(text)
 
   // Combine parsed entities with any client-provided entities
   // Client entities are only valid if no markdown was parsed (text unchanged)

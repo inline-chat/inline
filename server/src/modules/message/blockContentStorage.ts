@@ -9,13 +9,16 @@ import {
   type BlockImageSource,
   type ParsedBlockContent,
 } from "./blockContent"
-import { decryptStoredBlockContent, encryptStoredBlockContent } from "./blockContentPayload"
+import {
+  assertStoredBlockContentPayloadFits,
+  decryptStoredBlockContent,
+  encryptStoredBlockContent,
+} from "./blockContentPayload"
 
 export type PreparedBlockContent = {
   text: string
   entities?: MessageEntities
   blockContent: BlockContent
-  payload: EncryptedData
   imageJobs: PreparedBlockImageJob[]
 }
 
@@ -32,17 +35,16 @@ export function prepareBlockContent(input: {
 }): PreparedBlockContent | undefined {
   if (!input.parsed) return undefined
 
-  return {
+  const prepared: PreparedBlockContent = {
     text: input.text,
     entities: input.entities,
     blockContent: input.parsed.blockContent,
-    payload: encryptStoredBlockContent({
-      text: input.text,
-      entities: input.entities,
-      blockContent: input.parsed.blockContent,
-    }),
     imageJobs: input.parsed.imageSources.map(prepareImageJob),
   }
+  // Keep canonical-size failures inside the caller's plain-text fallback
+  // boundary without paying the encryption cost before the transaction.
+  assertStoredBlockContentPayloadFits(prepared)
+  return prepared
 }
 
 export async function insertPreparedBlockContent(
@@ -50,12 +52,17 @@ export async function insertPreparedBlockContent(
   prepared: PreparedBlockContent,
   revision: number,
 ): Promise<bigint> {
+  const payload = encryptStoredBlockContent({
+    text: prepared.text,
+    entities: prepared.entities,
+    blockContent: prepared.blockContent,
+  })
   const [content] = await tx
     .insert(blockContents)
     .values({
-      payloadEncrypted: prepared.payload.encrypted,
-      payloadIv: prepared.payload.iv,
-      payloadTag: prepared.payload.authTag,
+      payloadEncrypted: payload.encrypted,
+      payloadIv: payload.iv,
+      payloadTag: payload.authTag,
       revision,
     })
     .returning({ id: blockContents.id })

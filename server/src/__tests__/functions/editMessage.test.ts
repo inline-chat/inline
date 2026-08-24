@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
   InputPeer,
+  BlockTable_Alignment,
   Message,
   MessageEntity_Type,
+  Photo_Format,
   type EditMessageResult,
 } from "@inline-chat/protocol/core"
 import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
@@ -11,10 +13,21 @@ import { editMessage } from "@in/server/functions/messages.editMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { blockContentImageJobs, files, messages, threadGraphLinks, users, voices } from "@in/server/db/schema"
+import {
+  blockContentImageJobs,
+  blockContents,
+  files,
+  messages,
+  photos,
+  threadGraphLinks,
+  users,
+  voices,
+} from "@in/server/db/schema"
 import { and, eq, isNull } from "drizzle-orm"
 import { replaceMessageThreadLinks } from "@in/server/modules/threadGraph/links"
 import { getOutlinks } from "@in/server/modules/threadGraph/queries"
+import { publishClaimedBlockImageJobForTests } from "@in/server/modules/message/blockContentImageWorker"
+import { decryptStoredBlockContent, encryptStoredBlockContent } from "@in/server/modules/message/blockContentPayload"
 
 let currentUser: DbUser
 let privateChat: DbChat
@@ -248,6 +261,134 @@ describe("editMessage function", () => {
     expect(afterJobs[0]?.id).toBe(beforeJobs[0]?.id)
     expect(afterJobs[0]?.expectedRevision).toBe(1)
     expect(afterJobs[0]?.state).toBe("pending")
+  })
+
+  test("keeps thread links current when image enrichment advances the message revision", async () => {
+    const source = await testUtils.createChat(null, "Image graph source", "thread", false, currentUser.id)
+    const target = await testUtils.createChat(null, "Image graph target", "thread", false, currentUser.id)
+    if (!source || !target) throw new Error("Failed to create image graph chats")
+    await testUtils.addParticipant(source.id, currentUser.id)
+    await testUtils.addParticipant(target.id, currentUser.id)
+    const sourcePeer: InputPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(source.id) } },
+    }
+
+    const sent = await sendMessage({ peerId: sourcePeer, message: "draft" }, context)
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    const edited = await editMessage(
+      {
+        messageId: messageId!,
+        peer: sourcePeer,
+        text: `[target](inline://thread?id=${target.id})\n\n![Preview](https://images.example.test/graph.png)`,
+        parseMarkdown: true,
+      },
+      context,
+    )
+    expect(extractEditedMessage(edited)?.entities?.entities.some(
+      (entity) => entity.type === MessageEntity_Type.THREAD,
+    )).toBe(true)
+
+    const beforeLinks = await waitForThreadGraphLinks({
+      fromChatId: source.id,
+      fromMessageId: Number(messageId),
+      count: 1,
+      withBacklink: true,
+    })
+    expect(beforeLinks[0]?.fromMessageRevision).toBe(1)
+
+    const [storedMessage] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.chatId, source.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    if (!storedMessage?.blockContentId) throw new Error("Expected rich message")
+
+    const [storedContent] = await db
+      .select()
+      .from(blockContents)
+      .where(eq(blockContents.id, storedMessage.blockContentId))
+      .limit(1)
+    if (!storedContent) throw new Error("Expected stored rich content")
+    const legacySnapshot = decryptStoredBlockContent({
+      encrypted: storedContent.payloadEncrypted,
+      iv: storedContent.payloadIv,
+      authTag: storedContent.payloadTag,
+    })
+    legacySnapshot.blockContent.blocks.push({
+      kind: {
+        oneofKind: "table",
+        table: {
+          alignments: Array.from({ length: 16 }, () => BlockTable_Alignment.LEFT),
+          rows: Array.from({ length: 17 }, () => ({
+            cells: Array.from({ length: 16 }, () => ({ offset: 0n, length: 1n })),
+          })),
+        },
+      },
+    })
+    const legacyPayload = encryptStoredBlockContent(legacySnapshot)
+    await db
+      .update(blockContents)
+      .set({
+        payloadEncrypted: legacyPayload.encrypted,
+        payloadIv: legacyPayload.iv,
+        payloadTag: legacyPayload.authTag,
+      })
+      .where(eq(blockContents.id, storedMessage.blockContentId))
+
+    const leaseToken = crypto.randomUUID()
+    const [job] = await db
+      .update(blockContentImageJobs)
+      .set({
+        state: "processing",
+        leaseToken,
+        leaseUntil: new Date(Date.now() + 60_000),
+      })
+      .where(eq(blockContentImageJobs.contentId, storedMessage.blockContentId))
+      .returning()
+    if (!job) throw new Error("Expected image job")
+
+    const [photo] = await db
+      .insert(photos)
+      .values({ format: "jpeg", width: 1, height: 1 })
+      .returning({ id: photos.id })
+    if (!photo) throw new Error("Expected image photo")
+
+    expect(await publishClaimedBlockImageJobForTests(
+      { ...job, leaseToken },
+      {
+        oneofKind: "ready",
+        ready: {
+          id: BigInt(photo.id),
+          date: 1n,
+          format: Photo_Format.JPEG,
+          sizes: [],
+        },
+      },
+    )).toBe("published")
+
+    const [afterMessage] = await db
+      .select({ rev: messages.rev })
+      .from(messages)
+      .where(and(eq(messages.chatId, source.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    expect(afterMessage?.rev).toBe(2)
+
+    const afterLinks = await waitForThreadGraphLinks({
+      fromChatId: source.id,
+      fromMessageId: Number(messageId),
+      count: 1,
+      withBacklink: true,
+    })
+    expect(afterLinks[0]?.fromMessageRevision).toBe(2)
+
+    const projected = await getOutlinks({
+      chatId: source.id,
+      currentUserId: currentUser.id,
+      kind: "thread_link",
+    })
+    expect(projected.links.some((link) => link.id === afterLinks[0]?.id)).toBe(true)
   })
 
   test("resolves @username mentions while parsing markdown edits", async () => {

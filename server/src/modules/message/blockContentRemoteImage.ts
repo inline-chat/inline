@@ -5,7 +5,10 @@ import { isIP } from "node:net"
 import { isBlockedIp } from "@inline-chat/url-preview"
 import sharp from "sharp"
 
-const allowedContentTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
+const supportedContentTypes = ["image/webp", "image/png", "image/jpeg", "image/gif"] as const
+const allowedContentTypes = new Set<string>(supportedContentTypes)
+const genericContentTypes = new Set(["application/octet-stream", "binary/octet-stream"])
+export const remoteBlockImageAcceptHeader = supportedContentTypes.join(",")
 const maxBytes = 20 * 1024 * 1024
 const idleTimeoutMs = 15_000
 const totalTimeoutMs = 20_000
@@ -133,8 +136,9 @@ export async function downloadBlockImage(
         })
       }
 
-      const contentType = response.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase()
-      if (!contentType || !allowedContentTypes.has(contentType)) {
+      const declaredContentType = response.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase()
+      const contentType = normalizedContentType(declaredContentType)
+      if (declaredContentType && !contentType && !genericContentTypes.has(declaredContentType)) {
         response.destroy()
         throw new RemoteBlockImageError("unsupported_content_type", true, {
           ...target.diagnostic,
@@ -147,11 +151,11 @@ export async function downloadBlockImage(
         controller.signal,
         () => response.destroy(),
       )
-      await abortable(
+      const decodedContentType = await abortable(
         validateDecodeBudget(bytes, contentType, target.diagnostic),
         controller.signal,
       )
-      return { bytes, contentType }
+      return { bytes, contentType: decodedContentType }
     }
 
     throw new RemoteBlockImageError("too_many_redirects", true, {
@@ -307,7 +311,7 @@ function requestPinned(
     const request = (target.url.protocol === "https:" ? httpsRequest : httpRequest)(target.url, {
       method: "GET",
       headers: {
-        Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8",
+        Accept: remoteBlockImageAcceptHeader,
         "User-Agent": "InlineRichContent/1.0",
       },
       servername: isIP(normalizedHostname(target.url)) === 0 ? normalizedHostname(target.url) : undefined,
@@ -365,9 +369,9 @@ function isRedirect(status: number | undefined): boolean {
 
 async function validateDecodeBudget(
   bytes: Uint8Array,
-  contentType: string,
+  declaredContentType: string | undefined,
   diagnostic: RemoteBlockImageDiagnostic,
-): Promise<void> {
+): Promise<string> {
   try {
     const metadata = await sharp(bytes, { failOn: "error", limitInputPixels: maxFramePixels }).metadata()
     const width = metadata.width ?? 0
@@ -382,12 +386,13 @@ async function validateDecodeBudget(
     }
 
     const actualContentType = contentTypeForSharpFormat(metadata.format)
-    if (!actualContentType || actualContentType !== contentType) {
+    if (!actualContentType || (declaredContentType && actualContentType !== declaredContentType)) {
       throw new RemoteBlockImageError("invalid_image", true, {
         ...diagnostic,
         cause: "content_type_mismatch",
       })
     }
+    return actualContentType
   } catch (error) {
     if (error instanceof RemoteBlockImageError) throw error
     throw new RemoteBlockImageError("invalid_image", true, {
@@ -395,6 +400,11 @@ async function validateDecodeBudget(
       cause: "image_decode_failed",
     })
   }
+}
+
+function normalizedContentType(contentType: string | undefined): string | undefined {
+  if (contentType === "image/jpg") return "image/jpeg"
+  return contentType && allowedContentTypes.has(contentType) ? contentType : undefined
 }
 
 function contentTypeForSharpFormat(format: string | undefined): string | undefined {

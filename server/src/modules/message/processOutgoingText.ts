@@ -5,6 +5,7 @@ import { getServerConfig } from "@in/server/modules/serverConfig"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
 import { parseBlockContent, type BlockImageSource } from "@in/server/modules/message/blockContent"
+import { parseMarkdownWithSourceMap } from "@in/server/modules/message/parseMarkdown"
 
 type ProcessOutgoingTextInput = {
   text: string
@@ -744,10 +745,15 @@ export const processOutgoingText = async (
 ): Promise<ProcessOutgoingTextOutput> => {
   let text = input.text
   let entities = input.entities
-  const parsedBlocks = input.parseMarkdown ? parseBlockContent(input.text) : undefined
+  const parsedMarkdown = input.parseMarkdown ? parseMarkdownWithSourceMap(input.text) : undefined
+  const parsedBlocks = parsedMarkdown ? parseBlockContent(input.text, parsedMarkdown) : undefined
 
-  if (input.parseMarkdown) {
-    const processed = processMessageText({ text: input.text, entities: input.entities })
+  if (parsedMarkdown) {
+    const processed = processMessageText({
+      text: input.text,
+      entities: input.entities,
+      parsedMarkdown,
+    })
     text = processed.text
     entities = processed.entities
   }

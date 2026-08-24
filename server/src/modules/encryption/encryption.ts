@@ -7,6 +7,13 @@ const AUTH_TAG_LENGTH = 16
 
 const log = new Log("encryption")
 
+export class EncryptionConfigurationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "EncryptionConfigurationError"
+  }
+}
+
 // This should be loaded from environment variables
 const ENCRYPTION_KEY = process.env["ENCRYPTION_KEY"] as string
 
@@ -17,9 +24,18 @@ if (!ENCRYPTION_KEY) {
 const getEncryptionKey = (): string => {
   const key = process.env["ENCRYPTION_KEY"] as string
   if (!key) {
-    throw new Error("Missing MESSAGE_ENCRYPTION_KEY in environment variables")
+    throw new EncryptionConfigurationError("Missing MESSAGE_ENCRYPTION_KEY in environment variables")
   }
   return key
+}
+
+export function assertEncryptionConfigured(): void {
+  const key = new Uint8Array(Buffer.from(getEncryptionKey(), "hex"))
+  try {
+    validateKey(key)
+  } finally {
+    key.fill(0)
+  }
 }
 
 export interface EmptyEncryptedData {
@@ -96,13 +112,15 @@ export function encryptBinaryWithLimit(data: Buffer | Uint8Array, maxLength: num
  */
 export function decryptBinary(data: EncryptedData): Buffer {
   const ENCRYPTION_KEY = getEncryptionKey()
+  let key: Uint8Array | undefined
   try {
     if (!data.encrypted || !data.iv || !data.authTag) {
       throw new Error("Invalid encrypted data structure")
     }
 
     // Convert inputs to Uint8Array for internal use
-    const key = new Uint8Array(Buffer.from(ENCRYPTION_KEY, "hex"))
+    key = new Uint8Array(Buffer.from(ENCRYPTION_KEY, "hex"))
+    validateKey(key)
     const iv = new Uint8Array(data.iv)
     const encrypted = new Uint8Array(data.encrypted)
     const authTag = new Uint8Array(data.authTag)
@@ -114,13 +132,15 @@ export function decryptBinary(data: EncryptedData): Buffer {
       Buffer.concat([new Uint8Array(decipher.update(encrypted)), new Uint8Array(decipher.final())]),
     )
 
-    key.fill(0)
     return Buffer.from(decryptedArray)
   } catch (error) {
+    if (error instanceof EncryptionConfigurationError) throw error
     if (error instanceof Error) {
       throw new Error(`Binary decryption failed: ${error.message}`)
     }
     throw error
+  } finally {
+    key?.fill(0)
   }
 }
 
@@ -147,7 +167,7 @@ export function decrypt(data: EncryptedData): string {
 const validateKey = (key: Uint8Array): void => {
   if (key.length !== 32) {
     // 256 bits = 32 bytes
-    throw new Error("Invalid key length. Expected 32 bytes")
+    throw new EncryptionConfigurationError("Invalid key length. Expected 32 bytes")
   }
 }
 

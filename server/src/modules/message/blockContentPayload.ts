@@ -1,7 +1,9 @@
 import type { BlockContent, MessageEntities } from "@inline-chat/protocol/core"
 import { StoredBlockContent } from "@in/server/protocol/server"
 import {
+  assertEncryptionConfigured,
   decryptBinary,
+  EncryptionConfigurationError,
   encryptBinaryWithLimit,
   type EncryptedData,
 } from "@in/server/modules/encryption/encryption"
@@ -14,23 +16,56 @@ export type StoredBlockContentValue = {
   blockContent: BlockContent
 }
 
-export function encryptStoredBlockContent(value: StoredBlockContentValue): EncryptedData {
-  const binary = StoredBlockContent.toBinary({
+export class StoredBlockContentPayloadError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = "StoredBlockContentPayloadError"
+  }
+}
+
+function encodeStoredBlockContent(value: StoredBlockContentValue): Uint8Array {
+  return StoredBlockContent.toBinary({
     text: value.text,
     entities: value.entities,
     blockContent: value.blockContent,
   })
+}
+
+export function assertStoredBlockContentPayloadFits(value: StoredBlockContentValue): void {
+  if (encodeStoredBlockContent(value).byteLength > maxStoredBlockContentBytes) {
+    throw new StoredBlockContentPayloadError("Binary data exceeds maximum length")
+  }
+}
+
+export function encryptStoredBlockContent(value: StoredBlockContentValue): EncryptedData {
+  const binary = encodeStoredBlockContent(value)
   return encryptBinaryWithLimit(binary, maxStoredBlockContentBytes)
 }
 
 export function decryptStoredBlockContent(encrypted: EncryptedData): StoredBlockContentValue {
+  // Configuration failure takes precedence over payload quarantine: a deploy
+  // with a missing/wrongly sized key is recoverable, regardless of payload size.
+  assertEncryptionConfigured()
   if (encrypted.encrypted.byteLength > maxStoredBlockContentBytes) {
-    throw new Error("Stored block content exceeds maximum length")
+    throw new StoredBlockContentPayloadError("Stored block content exceeds maximum length")
   }
 
-  const decoded = StoredBlockContent.fromBinary(decryptBinary(encrypted))
+  let binary: Buffer
+  try {
+    binary = decryptBinary(encrypted)
+  } catch (error) {
+    if (error instanceof EncryptionConfigurationError) throw error
+    throw new StoredBlockContentPayloadError("Stored block content could not be decrypted", error)
+  }
+
+  let decoded: StoredBlockContent
+  try {
+    decoded = StoredBlockContent.fromBinary(binary)
+  } catch (error) {
+    throw new StoredBlockContentPayloadError("Stored block content could not be decoded", error)
+  }
   if (!decoded.blockContent) {
-    throw new Error("Stored block content is missing its block snapshot")
+    throw new StoredBlockContentPayloadError("Stored block content is missing its block snapshot")
   }
 
   return {

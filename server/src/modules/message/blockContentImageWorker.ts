@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { BlockImage, type Update } from "@inline-chat/protocol/core"
+import { BlockImage, MessageEntity_Type, type Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { FileModel } from "@in/server/db/models/files"
@@ -13,6 +13,7 @@ import {
   messages,
   photos,
   photoSizes,
+  threadGraphLinks,
   type DbBlockContentImageJob,
 } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
@@ -23,15 +24,26 @@ import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
 import { deleteFromBucket } from "@in/server/modules/files/uploadToBucket"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
+import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
-import { and, asc, eq, gt, inArray, isNotNull, lte, not, or, sql } from "drizzle-orm"
-import { getBlockImageAtPath, replaceBlockImageAtPath, validateBlockContent } from "./blockContent"
-import { decryptStoredBlockContent, encryptStoredBlockContent } from "./blockContentPayload"
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, not, or, sql } from "drizzle-orm"
+import {
+  blockContentLimits,
+  getBlockImageAtPath,
+  replaceBlockImageAtPath,
+  validateBlockContent,
+} from "./blockContent"
+import {
+  assertStoredBlockContentPayloadFits,
+  decryptStoredBlockContent,
+  encryptStoredBlockContent,
+  StoredBlockContentPayloadError,
+} from "./blockContentPayload"
 import { downloadBlockImage, RemoteBlockImageError } from "./blockContentRemoteImage"
 import { deleteUnreferencedBlockContents } from "./blockContentStorage"
 
@@ -64,6 +76,13 @@ class BlockImageCompensationError extends Error {
   constructor(error: unknown) {
     super("block image media compensation failed", { cause: error })
     this.name = "BlockImageCompensationError"
+  }
+}
+
+class InvalidStoredBlockContentError extends Error {
+  constructor(error: unknown) {
+    super("stored block content failed validation during image publication", { cause: error })
+    this.name = "InvalidStoredBlockContentError"
   }
 }
 
@@ -754,7 +773,8 @@ async function deleteBlockImageObject(path: string): Promise<void> {
 
 async function handleFailure(job: ClaimedJob, error: unknown): Promise<void> {
   const attempts = job.attempts + 1
-  const terminal = error instanceof RemoteBlockImageError ? error.permanent : attempts >= maxAttempts
+  const terminal = error instanceof InvalidStoredBlockContentError ||
+    (error instanceof RemoteBlockImageError ? error.permanent : attempts >= maxAttempts)
   const code = error instanceof RemoteBlockImageError ? error.code : errorName(error)
   const diagnostic = error instanceof RemoteBlockImageError ? error.diagnostic : undefined
   const metadata = {
@@ -794,7 +814,9 @@ async function handleFailure(job: ClaimedJob, error: unknown): Promise<void> {
         jobId: job.id.toString(),
         errorType: errorName(publishError),
       })
-      if (!(publishError instanceof BlockImageLeaseLostError)) {
+      if (publishError instanceof InvalidStoredBlockContentError) {
+        await quarantineInvalidStoredBlockContentJob(job, publishError, attempts)
+      } else if (!(publishError instanceof BlockImageLeaseLostError)) {
         await rescheduleJob(job, publishError, Math.min(attempts, maxAttempts))
       }
     }
@@ -802,6 +824,35 @@ async function handleFailure(job: ClaimedJob, error: unknown): Promise<void> {
   }
 
   await rescheduleJob(job, error, attempts)
+}
+
+async function quarantineInvalidStoredBlockContentJob(
+  job: ClaimedJob,
+  error: InvalidStoredBlockContentError,
+  attempts: number,
+): Promise<void> {
+  const [failed] = await db
+    .update(blockContentImageJobs)
+    .set({
+      state: "failed",
+      attempts,
+      leaseToken: null,
+      leaseUntil: null,
+      lastErrorCode: error.name,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(blockContentImageJobs.id, job.id),
+      eq(blockContentImageJobs.state, "processing"),
+      eq(blockContentImageJobs.leaseToken, job.leaseToken),
+    ))
+    .returning({ id: blockContentImageJobs.id })
+  if (failed) {
+    log.warn("quarantined invalid stored block content image job", {
+      jobId: job.id.toString(),
+      contentId: job.contentId.toString(),
+    })
+  }
 }
 
 async function rescheduleJob(job: ClaimedJob, error: unknown, attempts: number): Promise<void> {
@@ -892,11 +943,19 @@ async function publishJob(
       return { kind: "superseded" } as const
     }
 
-    const stored = decryptStoredBlockContent({
-      encrypted: content.payloadEncrypted,
-      iv: content.payloadIv,
-      authTag: content.payloadTag,
-    })
+    let stored: ReturnType<typeof decryptStoredBlockContent>
+    try {
+      stored = decryptStoredBlockContent({
+        encrypted: content.payloadEncrypted,
+        iv: content.payloadIv,
+        authTag: content.payloadTag,
+      })
+    } catch (error) {
+      if (error instanceof StoredBlockContentPayloadError) {
+        throw new InvalidStoredBlockContentError(error)
+      }
+      throw error
+    }
     const existingImage = getBlockImageAtPath(stored.blockContent, currentJob.blockPath)
     if (!existingImage || existingImage.state.oneofKind !== "pending") {
       return { kind: "superseded" } as const
@@ -916,7 +975,14 @@ async function publishJob(
     if (!replaceBlockImageAtPath(stored.blockContent, currentJob.blockPath, replacement)) {
       throw new Error("Block image path changed while publishing")
     }
-    validateBlockContent(stored.text, stored.blockContent)
+    try {
+      validateBlockContent(stored.text, stored.blockContent, {
+        maxTableCells: blockContentLimits.maxPersistedTableCells,
+      })
+      assertStoredBlockContentPayloadFits(stored)
+    } catch (error) {
+      throw new InvalidStoredBlockContentError(error)
+    }
     const encrypted = encryptStoredBlockContent(stored)
     const nextRevision = content.revision + 1
 
@@ -964,8 +1030,29 @@ async function publishJob(
           .update(messages)
           .set({ rev: sql`${messages.rev} + 1` })
           .where(inArray(messages.globalId, lockedMessages.map((message) => message.globalId)))
-          .returning({ chatId: messages.chatId, messageId: messages.messageId, senderId: messages.fromId })
+          .returning({
+            chatId: messages.chatId,
+            messageId: messages.messageId,
+            senderId: messages.fromId,
+            globalId: messages.globalId,
+            rev: messages.rev,
+          })
       : []
+
+    // Image enrichment changes presentation, not text or entities. Advance
+    // existing graph fences atomically with the message revision so links do
+    // not disappear until an asynchronous materializer catches up.
+    for (const message of editedMessages) {
+      await tx
+        .update(threadGraphLinks)
+        .set({ fromMessageRevision: message.rev, updatedAt: new Date() })
+        .where(and(
+          eq(threadGraphLinks.kind, "thread_link"),
+          eq(threadGraphLinks.fromMessageGlobalId, message.globalId),
+          eq(threadGraphLinks.fromMessageRevision, message.rev - 1),
+          isNull(threadGraphLinks.deletedAt),
+        ))
+    }
 
     const chatsById = new Map(lockedChats.map((chat) => [chat.id, chat]))
     const nextSeq = new Map(lockedChats.map((chat) => [chat.id, chat.updateSeq ?? 0]))
@@ -998,6 +1085,13 @@ async function publishJob(
   })
 }
 
+export async function publishClaimedBlockImageJobForTests(
+  job: DbBlockContentImageJob & { leaseToken: string },
+  state: BlockImage["state"],
+): Promise<"published" | "superseded"> {
+  return (await publishJob({ ...job, claimReason: "process" }, state)).kind
+}
+
 async function pushPublishedEdits(edits: PublishedEdit[]): Promise<void> {
   for (const edit of edits) {
     try {
@@ -1006,6 +1100,19 @@ async function pushPublishedEdits(edits: PublishedEdit[]): Promise<void> {
         MessageModel.getMessage(edit.messageId, edit.chatId),
       ])
       if (!chat || !message) continue
+      if (message.entities?.entities.some((entity) => entity.type === MessageEntity_Type.THREAD)) {
+        // The initial graph task can race the image revision before a link row
+        // exists. Requeue the current snapshot; graph deduplication owns reuse.
+        queueMessageThreadLinkMaterialization({
+          sourceChat: chat,
+          sourceChatId: chat.id,
+          sourceMessageGlobalId: message.globalId,
+          sourceMessageId: message.messageId,
+          sourceMessageFromId: message.fromId,
+          sourceMessageRevision: message.rev,
+          entities: message.entities,
+        })
+      }
       const senderPeer = encodePeerFromChat(chat, { currentUserId: edit.senderId })
       const updateGroup = await getUpdateGroupFromInputPeer(senderPeer, { currentUserId: edit.senderId })
       for (const userId of updateGroup.userIds) {

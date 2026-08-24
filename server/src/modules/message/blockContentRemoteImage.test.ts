@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http"
 import sharp from "sharp"
 import {
   downloadBlockImage,
+  remoteBlockImageAcceptHeader,
   RemoteBlockImageError,
   resolvePublicImageUrl,
   type RemoteImageRequest,
@@ -38,7 +39,24 @@ async function pngBytes(): Promise<Buffer> {
   }).png().toBuffer()
 }
 
+async function jpegBytes(): Promise<Buffer> {
+  return sharp({
+    create: {
+      width: 2,
+      height: 2,
+      channels: 3,
+      background: { r: 20, g: 40, b: 60 },
+    },
+  }).jpeg().toBuffer()
+}
+
 describe("remote block image boundary", () => {
+  test("advertises only formats accepted by decoded validation", () => {
+    expect(remoteBlockImageAcceptHeader).toBe("image/webp,image/png,image/jpeg,image/gif")
+    expect(remoteBlockImageAcceptHeader).not.toContain("avif")
+    expect(remoteBlockImageAcceptHeader).not.toContain("image/*")
+  })
+
   test("accepts a public address and strips fragments", async () => {
     const result = await resolvePublicImageUrl("https://example.com/image.png#secret", async () => [
       publicAddress,
@@ -193,5 +211,29 @@ describe("remote block image boundary", () => {
       code: "invalid_image",
       diagnostic: { cause: "content_type_mismatch", hostname: "images.example" },
     })
+  })
+
+  test("uses safely decoded type when metadata is absent or generic", async () => {
+    const png = await pngBytes()
+    for (const contentType of [undefined, "application/octet-stream"]) {
+      const request: RemoteImageRequest = async () => response({
+        headers: contentType ? { "content-type": contentType } : {},
+        bytes: png,
+      })
+      const image = await downloadBlockImage("https://images.example/image", {
+        lookup: async () => [publicAddress],
+        request,
+      })
+      expect(image.contentType).toBe("image/png")
+    }
+  })
+
+  test("normalizes the common image/jpg alias after decode", async () => {
+    const jpeg = await jpegBytes()
+    const image = await downloadBlockImage("https://images.example/image.jpg", {
+      lookup: async () => [publicAddress],
+      request: async () => response({ headers: { "content-type": "image/jpg" }, bytes: jpeg }),
+    })
+    expect(image.contentType).toBe("image/jpeg")
   })
 })

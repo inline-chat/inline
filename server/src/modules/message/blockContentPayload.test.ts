@@ -42,12 +42,65 @@ describe("stored block content encryption", () => {
   })
 
   test("rejects a canonical payload beyond 512 KiB", async () => {
-    const { encryptStoredBlockContent } = await import("./blockContentPayload")
+    const { assertStoredBlockContentPayloadFits, encryptStoredBlockContent } = await import("./blockContentPayload")
+    const oversized = {
+      text: "x".repeat(512 * 1024),
+      blockContent: BlockContent.create({ blocks: [] }),
+    }
+    expect(() => assertStoredBlockContentPayloadFits(oversized)).toThrow(
+      "Binary data exceeds maximum length",
+    )
     expect(() =>
-      encryptStoredBlockContent({
-        text: "x".repeat(512 * 1024),
-        blockContent: BlockContent.create({ blocks: [] }),
-      }),
+      encryptStoredBlockContent(oversized),
     ).toThrow("Binary data exceeds maximum length")
+  })
+
+  test("rejects oversized preparation before entering the storage transaction", async () => {
+    const { prepareBlockContent } = await import("./blockContentStorage")
+    expect(() => prepareBlockContent({
+      text: "x".repeat(512 * 1024),
+      parsed: {
+        blockContent: BlockContent.create({ blocks: [] }),
+        imageSources: [],
+      },
+    })).toThrow("Binary data exceeds maximum length")
+  })
+
+  test("classifies corrupt stored ciphertext separately from encryption configuration", async () => {
+    const {
+      decryptStoredBlockContent,
+      encryptStoredBlockContent,
+      StoredBlockContentPayloadError,
+    } = await import("./blockContentPayload")
+    const encrypted = encryptStoredBlockContent({
+      text: "hello",
+      blockContent: BlockContent.create({ blocks: [] }),
+    })
+
+    expect(() => decryptStoredBlockContent({
+      ...encrypted,
+      authTag: Buffer.alloc(encrypted.authTag.length),
+    })).toThrow(StoredBlockContentPayloadError)
+  })
+
+  test("does not quarantine an oversized payload while encryption is misconfigured", async () => {
+    const { EncryptionConfigurationError } = await import("@in/server/modules/encryption/encryption")
+    const { decryptStoredBlockContent, maxStoredBlockContentBytes } = await import("./blockContentPayload")
+    const previousKey = process.env["ENCRYPTION_KEY"]
+    process.env["ENCRYPTION_KEY"] = "invalid"
+
+    try {
+      expect(() => decryptStoredBlockContent({
+        encrypted: Buffer.alloc(maxStoredBlockContentBytes + 1),
+        iv: Buffer.alloc(12),
+        authTag: Buffer.alloc(16),
+      })).toThrow(EncryptionConfigurationError)
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env["ENCRYPTION_KEY"]
+      } else {
+        process.env["ENCRYPTION_KEY"] = previousKey
+      }
+    }
   })
 })

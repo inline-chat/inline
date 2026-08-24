@@ -24,7 +24,12 @@ export const blockContentLimits = {
   maxAlbumImages: 10,
   maxTableRows: 256,
   maxTableColumns: 64,
-  maxTableCells: 4_096,
+  // Every cell becomes a native text surface on macOS. Keep rich rendering
+  // bounded; oversized GFM tables retain the ordinary flat-text projection.
+  maxTableCells: 256,
+  // Stored snapshots written before the native-surface ceiling was reduced
+  // remain mutable so pending image jobs can finish instead of retrying forever.
+  maxPersistedTableCells: 4_096,
   maxImageDimension: 16_384,
   maxImageRatio: 100,
   maxStrippedThumbnailBytes: 8 * 1_024,
@@ -57,13 +62,16 @@ type Fence = {
   length: number
 }
 
-export function parseBlockContent(markdown: string): ParsedBlockContent | undefined {
+export function parseBlockContent(
+  markdown: string,
+  parsedMarkdown?: ParsedMarkdownWithSourceMap,
+): ParsedBlockContent | undefined {
   if (markdown.length === 0) {
     return undefined
   }
 
   try {
-    const legacy = parseMarkdownWithSourceMap(markdown)
+    const legacy = parsedMarkdown ?? parseMarkdownWithSourceMap(markdown)
     const positionedSources: PositionedImageSource[] = []
     const blocks = coalesceImages(parseRegion(markdown, legacy, 0, markdown.length, positionedSources))
     if (blocks.length === 0) {
@@ -482,7 +490,11 @@ function coalesceImages(blocks: Block[]): Block[] {
   return output
 }
 
-export function validateBlockContent(text: string, content: BlockContent): void {
+export function validateBlockContent(
+  text: string,
+  content: BlockContent,
+  options?: { maxTableCells?: number },
+): void {
   let blockCount = 0
   let imageCount = 0
   let tableCellCount = 0
@@ -610,7 +622,9 @@ export function validateBlockContent(text: string, content: BlockContent): void 
           for (const row of block.kind.table.rows) {
             if (row.cells.length !== columnCount) throw new Error("Inconsistent block table row")
             tableCellCount += row.cells.length
-            if (tableCellCount > blockContentLimits.maxTableCells) throw new Error("Too many block table cells")
+            if (tableCellCount > (options?.maxTableCells ?? blockContentLimits.maxTableCells)) {
+              throw new Error("Too many block table cells")
+            }
             for (const cell of row.cells) {
               validateText(cell)
               if (cell.isRtl !== undefined) throw new Error("Block table cell direction must be absent")
