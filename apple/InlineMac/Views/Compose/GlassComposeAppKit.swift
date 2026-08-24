@@ -1769,6 +1769,8 @@ class GlassComposeAppKit: NSView {
     let attributedString = trimmedAttributedString(textEditor.attributedString)
     let replyToMsgId = state.replyingToMsgId
     let attachmentItemsSnapshot = drafts2.load(peer: peerId)?.attachments.map(\.media) ?? Array(attachmentItems.values)
+    let destinationPeerId = peerId
+    let destinationChatId = chatId ?? 0
     // keep a copy of editingMessageId before we clear it
     let editingMessageId = state.editingMsgId
     let forwardContext = state.forwardContext
@@ -1813,8 +1815,8 @@ class GlassComposeAppKit: NSView {
           .sendMessage(
             TransactionSendMessage(
               text: isFirst ? text : nil,
-              peerId: peerId,
-              chatId: chatId ?? 0, // FIXME: chatId fallback
+              peerId: destinationPeerId,
+              chatId: destinationChatId, // FIXME: chatId fallback
               mediaItems: [attachment],
               replyToMsgId: isFirst ? replyToMessageId : nil,
               isSticker: nil,
@@ -1830,17 +1832,16 @@ class GlassComposeAppKit: NSView {
 
     // Edit message
     if let editingMessageId {
-      mentionedParticipants.handle(entities: entities, peer: peerId, chat: chat)
-
-      // Edit message
-      Task.detached(priority: .userInitiated) { // @MainActor in
-        try await Api.realtime.send(.editMessage(
-          messageId: editingMessageId,
-          text: text ?? "",
-          chatId: self.chatId ?? 0,
-          peerId: self.peerId,
-          entities: entities
-        ))
+      mentionedParticipants.handle(entities: entities, peer: destinationPeerId, chat: chat) {
+        Task.detached(priority: .userInitiated) { // @MainActor in
+          try await Api.realtime.send(.editMessage(
+            messageId: editingMessageId,
+            text: text ?? "",
+            chatId: destinationChatId,
+            peerId: destinationPeerId,
+            entities: entities
+          ))
+        }
       }
     }
 
@@ -1893,23 +1894,22 @@ class GlassComposeAppKit: NSView {
 
     // Send message
     else if attachmentItemsSnapshot.isEmpty {
-      mentionedParticipants.handle(entities: entities, peer: peerId, chat: chat)
       keepCurrentChatInSidebar()
 
-      // Text-only
-      // Send via V2
-      Task.detached(priority: .userInitiated) { // @MainActor in
-        try await Api.realtime.send(
-          .sendMessage(
-            text: text,
-            peerId: self.peerId,
-            chatId: self.chatId ?? 0, // FIXME: chatId fallback
-            replyToMsgId: replyToMsgId,
-            isSticker: nil,
-            entities: entities,
-            sendMode: effectiveSendMode
+      mentionedParticipants.handle(entities: entities, peer: destinationPeerId, chat: chat) {
+        Task.detached(priority: .userInitiated) { // @MainActor in
+          try await Api.realtime.send(
+            .sendMessage(
+              text: text,
+              peerId: destinationPeerId,
+              chatId: destinationChatId, // FIXME: chatId fallback
+              replyToMsgId: replyToMsgId,
+              isSticker: nil,
+              entities: entities,
+              sendMode: effectiveSendMode
+            )
           )
-        )
+        }
       }
       // let _ = Transactions.shared.mutate(
       //   transaction:
@@ -1929,9 +1929,10 @@ class GlassComposeAppKit: NSView {
 
     // With image/file/video
     else {
-      mentionedParticipants.handle(entities: entities, peer: peerId, chat: chat)
       keepCurrentChatInSidebar()
-      enqueueAttachments(replyToMessageId: replyToMsgId)
+      mentionedParticipants.handle(entities: entities, peer: destinationPeerId, chat: chat) {
+        enqueueAttachments(replyToMessageId: replyToMsgId)
+      }
     }
 
     // Clear immediately

@@ -40,14 +40,22 @@ final class MentionedParticipantsAutoAddManager {
     self.toolbarState = toolbarState
   }
 
-  func handle(entities: MessageEntities?, peer: InlineKit.Peer, chat: InlineKit.Chat?) {
+  func handle(
+    entities: MessageEntities?,
+    peer: InlineKit.Peer,
+    chat: InlineKit.Chat?,
+    completion: @escaping @MainActor @Sendable () -> Void
+  ) {
     let mentionedUserIds = Self.mentionedUserIds(from: entities)
     let mentionedGroupIds = Self.mentionedGroupIds(from: entities)
     let previousPendingUserIds = pendingUserIds
     let previousPendingGroupIds = pendingGroupIds
     let reservedUserIds = mentionedUserIds.subtracting(previousPendingUserIds)
     let reservedGroupIds = mentionedGroupIds.subtracting(previousPendingGroupIds)
-    guard !reservedUserIds.isEmpty || !reservedGroupIds.isEmpty else { return }
+    guard !reservedUserIds.isEmpty || !reservedGroupIds.isEmpty else {
+      completion()
+      return
+    }
 
     pendingUserIds.formUnion(reservedUserIds)
     pendingGroupIds.formUnion(reservedGroupIds)
@@ -95,6 +103,7 @@ final class MentionedParticipantsAutoAddManager {
 
         var releasedUserIds = request.reservedUserIds
         var releasedGroupIds = request.reservedGroupIds
+        var promptItems: [MentionCompletionItem] = []
         switch action {
           case .none:
             break
@@ -106,7 +115,7 @@ final class MentionedParticipantsAutoAddManager {
 
           case let .prompt(userIds):
             let users = Self.userInfos(for: userIds, from: snapshot.users)
-            await self?.prompt(Self.userItems(for: users))
+            promptItems.append(contentsOf: Self.userItems(for: users))
             releasedUserIds.subtract(userIds)
         }
 
@@ -117,13 +126,18 @@ final class MentionedParticipantsAutoAddManager {
             await self?.autoAdd(items, chatId: snapshot.chat.id)
             releasedGroupIds.subtract(items.compactMap(\.group?.id))
           case let .prompt(items):
-            await self?.prompt(items)
+            promptItems.append(contentsOf: items)
             releasedGroupIds.subtract(items.compactMap(\.group?.id))
         }
 
         await self?.release(userIds: releasedUserIds, groupIds: releasedGroupIds)
+        await completion()
+        if !promptItems.isEmpty {
+          await self?.prompt(promptItems)
+        }
       } catch {
         await self?.fail(userIds: request.reservedUserIds, groupIds: request.reservedGroupIds, error: error)
+        await completion()
       }
     }
   }
