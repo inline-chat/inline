@@ -6,7 +6,6 @@ enum ReplyThreadPaneMetrics {
   static let preferredWidthDefaultsKey = "replyThreadPanePreferredWidth"
   static let minimumContentWidth = Theme.chatViewMinWidth
   static let idealContentWidth: CGFloat = 380
-  static let nativeInspectorMinimumWidth: CGFloat = 330
   static let minimumPrimaryContentWidth = Theme.chatViewMinWidth
   static let separatorWidth: CGFloat = 0.5
   static let floatingToolbarHeight: CGFloat = 40
@@ -29,27 +28,17 @@ enum ReplyThreadPaneMetrics {
     contentWidth + separatorWidth
   }
 
-  static func minimumWindowWidth(
-    isSidebarCollapsed: Bool,
-    replyPaneMinimumWidth: CGFloat = minimumContentWidth
-  ) -> CGFloat {
+  static func minimumWindowWidth(isSidebarCollapsed: Bool) -> CGFloat {
     minimumPrimaryContentWidth
-      + replyPaneMinimumWidth
+      + minimumContentWidth
       + separatorWidth
       + (isSidebarCollapsed ? 0 : Theme.maximumSidebarWidth)
   }
 }
 
-enum ReplyThreadPaneChrome: Equatable {
-  case floating
-  case nativeInspector
-}
-
 struct ReplyThreadPaneView: View {
   let peer: Peer
   let dependencies: AppDependencies
-  let chrome: ReplyThreadPaneChrome
-  let showsNativeToolbar: Bool
   let onExpand: () -> Void
   let onClose: () -> Void
 
@@ -60,15 +49,11 @@ struct ReplyThreadPaneView: View {
   init(
     peer: Peer,
     dependencies: AppDependencies,
-    chrome: ReplyThreadPaneChrome,
-    showsNativeToolbar: Bool,
     onExpand: @escaping () -> Void,
     onClose: @escaping () -> Void
   ) {
     self.peer = peer
     self.dependencies = dependencies
-    self.chrome = chrome
-    self.showsNativeToolbar = showsNativeToolbar
     self.onExpand = onExpand
     self.onClose = onClose
     _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
@@ -81,48 +66,32 @@ struct ReplyThreadPaneView: View {
   var body: some View {
     let appearance = ChatViewAppearance(
       surfaceStyle: .replyThread,
-      isTransparent: chrome == .nativeInspector,
-      additionalTopContentInset: chrome == .floating
-        ? ReplyThreadPaneMetrics.floatingToolbarContentInset
-        : 0
+      additionalTopContentInset: ReplyThreadPaneMetrics.floatingToolbarContentInset
     )
 
     ReplyThreadPaneChatView(
       peer: peer,
       dependencies: dependencies,
       toolbarState: toolbarState,
-      appearance: appearance,
-      usesInspectorSizingIsolation: chrome == .nativeInspector
+      appearance: appearance
     )
     .overlay {
-      if chrome == .floating {
-        GeometryReader { geometry in
-          ReplyThreadPaneControls(
-            title: titleModel.title,
-            status: titleModel.status,
-            botChatSettingsCoordinator: botChatSettingsCoordinator,
-            toolbarState: toolbarState,
-            onExpand: onExpand,
-            onClose: onClose
-          )
-            .padding(
-              .top,
-              geometry.safeAreaInsets.top + Theme.toolbarHeight
-                + ReplyThreadPaneMetrics.floatingToolbarTopSpacing
-            )
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        }
-      }
-    }
-    .toolbar {
-      if chrome == .nativeInspector, showsNativeToolbar {
-        ReplyThreadInspectorToolbar(
+      GeometryReader { geometry in
+        ReplyThreadPaneControls(
           title: titleModel.title,
           status: titleModel.status,
+          botChatSettingsCoordinator: botChatSettingsCoordinator,
+          toolbarState: toolbarState,
           onExpand: onExpand,
           onClose: onClose
         )
+          .padding(
+            .top,
+            geometry.safeAreaInsets.top + Theme.toolbarHeight
+              + ReplyThreadPaneMetrics.floatingToolbarTopSpacing
+          )
+          .padding(.horizontal, 8)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
       }
     }
     .modifier(ChatToolbarParticipantsTitlePresentations(
@@ -138,100 +107,6 @@ struct ReplyThreadPaneView: View {
       toolbarState.dismissPresentation()
       botChatSettingsCoordinator.cancel()
     }
-  }
-}
-
-private struct ReplyThreadInspectorToolbar: ToolbarContent {
-  let title: String
-  let status: ChatRouteToolbarTitleModel.Status
-  let onExpand: () -> Void
-  let onClose: () -> Void
-
-  var body: some ToolbarContent {
-    if #available(macOS 26.0, *) {
-      ToolbarItem(placement: .primaryAction) {
-        expandButton
-      }
-
-      ToolbarItem(placement: .primaryAction) {
-        ReplyThreadInspectorTitle(title: title, status: status)
-      }
-
-      ToolbarSpacer(.flexible, placement: .primaryAction)
-
-      ToolbarItem(placement: .primaryAction) {
-        closeButton
-      }
-    } else {
-      ToolbarItem(placement: .primaryAction) {
-        HStack {
-          expandButton
-          ReplyThreadInspectorTitle(title: title, status: status)
-          Spacer()
-          closeButton
-        }
-        .frame(width: ReplyThreadPaneMetrics.nativeInspectorMinimumWidth - 30)
-      }
-    }
-  }
-
-  private var expandButton: some View {
-    Button(action: onExpand) {
-      Label("Open Thread as Chat", systemImage: "arrow.up.left.and.arrow.down.right")
-    }
-    .labelStyle(.iconOnly)
-    .help("Open as Chat")
-  }
-
-  private var closeButton: some View {
-    Button(action: onClose) {
-      Label("Close Thread", systemImage: "xmark")
-    }
-    .labelStyle(.iconOnly)
-    .help("Close Thread")
-  }
-}
-
-private struct ReplyThreadInspectorTitle: View {
-  let title: String
-  let status: ChatRouteToolbarTitleModel.Status
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      Text(title)
-        .font(.system(size: 12, weight: .semibold))
-        .lineLimit(1)
-        .truncationMode(.tail)
-
-      if let statusText = status.text {
-        HStack(spacing: 3) {
-          if status.isTyping {
-            TypingActivityIndicator(
-              dotSize: 2,
-              spacing: 1,
-              color: .accentColor,
-              lift: 1
-            )
-          } else if status.isRecordingVoice {
-            VoiceRecordingActivityIndicator(
-              barWidth: 1,
-              spacing: 1,
-              minBarHeight: 2,
-              maxBarHeight: 6,
-              color: .accentColor
-            )
-          }
-
-          Text(statusText)
-            .font(.system(size: 9))
-            .foregroundStyle(status.usesAccentColor ? Color.accentColor : Color.secondary)
-            .lineLimit(1)
-            .truncationMode(.tail)
-        }
-      }
-    }
-    .frame(minWidth: 0, idealWidth: 140, maxWidth: 180, alignment: .leading)
-    .accessibilityElement(children: .combine)
   }
 }
 
@@ -348,35 +223,6 @@ private struct ReplyThreadPaneControlButtonStyle: ButtonStyle {
 }
 
 private struct ReplyThreadPaneChatView: View {
-  let peer: Peer
-  let dependencies: AppDependencies
-  let toolbarState: ChatToolbarState
-  let appearance: ChatViewAppearance
-  let usesInspectorSizingIsolation: Bool
-
-  var body: some View {
-    if usesInspectorSizingIsolation {
-      GeometryReader { geometry in
-        ReplyThreadPaneAppKitChat(
-          peer: peer,
-          dependencies: dependencies,
-          toolbarState: toolbarState,
-          appearance: appearance
-        )
-        .frame(width: geometry.size.width, height: geometry.size.height)
-      }
-    } else {
-      ReplyThreadPaneAppKitChat(
-        peer: peer,
-        dependencies: dependencies,
-        toolbarState: toolbarState,
-        appearance: appearance
-      )
-    }
-  }
-}
-
-private struct ReplyThreadPaneAppKitChat: View {
   let peer: Peer
   let dependencies: AppDependencies
   let toolbarState: ChatToolbarState

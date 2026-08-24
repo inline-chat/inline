@@ -81,11 +81,11 @@ final class AppBridge {
   }
 
   @MainActor
-  func setWindowMinSize(_ size: NSSize, display: Bool = true) {
+  func setWindowMinSize(_ size: NSSize) {
     guard let window = window() else { return }
 
     window.minSize = size
-    enforceMinSize(size, for: window, display: display)
+    enforceMinSize(size, for: window)
   }
 
   @MainActor
@@ -113,7 +113,7 @@ final class AppBridge {
   }
 
   @MainActor
-  private func enforceMinSize(_ size: NSSize, for window: NSWindow, display: Bool) {
+  private func enforceMinSize(_ size: NSSize, for window: NSWindow) {
     let frame = window.frame
     let width = max(frame.width, size.width)
     let height = max(frame.height, size.height)
@@ -126,7 +126,7 @@ final class AppBridge {
       height: height
     )
     let constrainedRect = window.screen.map { window.constrainFrameRect(rect, to: $0) } ?? rect
-    window.setFrame(constrainedRect, display: display)
+    window.setFrame(constrainedRect, display: true)
   }
 }
 

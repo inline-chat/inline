@@ -39,7 +39,6 @@ public struct AppDependencies {
   var nav3ChatOpenPreloader: Nav3ChatOpenPreloadBridge? = nil
   var forwardMessages: ForwardMessagesPresenter? = nil
   var keyMonitor: KeyMonitor?
-  var prepareReplyThreadPanePresentation: (() -> Void)?
 
   // Optional
   var rootData: RootData?
@@ -153,11 +152,7 @@ extension AppDependencies {
   }
 
   func openReplyThreadInPane(parentPeer: Peer, threadPeer: Peer) {
-    guard nav3?.openReplyThread(
-      parentPeer: parentPeer,
-      threadPeer: threadPeer,
-      preparePresentation: prepareReplyThreadPanePresentation
-    ) == true else {
+    guard nav3?.openReplyThread(parentPeer: parentPeer, threadPeer: threadPeer) == true else {
       openChatRoute(peer: threadPeer)
       return
     }

@@ -26,7 +26,6 @@ final class ComposeAppKit: NSView {
   private let implementation: any ComposeImplementation
   private let usesGlassCompose: Bool
   private let surfaceStyle: ChatViewAppearance.SurfaceStyle
-  private let isTransparent: Bool
 
   weak var messageList: MessageListAppKit? {
     get { implementation.messageList }
@@ -42,11 +41,9 @@ final class ComposeAppKit: NSView {
     toolbarState: ChatToolbarState? = nil,
     parentChatView: ChatViewAppKit? = nil,
     dialog: InlineKit.Dialog?,
-    surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
-    isTransparent: Bool = false
+    surfaceStyle: ChatViewAppearance.SurfaceStyle = .content
   ) {
     self.surfaceStyle = surfaceStyle
-    self.isTransparent = isTransparent
     if #available(macOS 26.0, *) {
       implementation = GlassComposeAppKit(
         peerId: peerId,
@@ -112,7 +109,7 @@ final class ComposeAppKit: NSView {
 
     var constraints: [NSLayoutConstraint] = []
 
-    if usesGlassCompose, !isTransparent {
+    if usesGlassCompose {
       let backgroundView = GlassComposeBackgroundUnderlayView(surfaceStyle: surfaceStyle)
       backgroundView.translatesAutoresizingMaskIntoConstraints = false
       addSubview(backgroundView)

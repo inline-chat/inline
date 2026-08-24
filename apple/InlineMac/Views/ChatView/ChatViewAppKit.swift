@@ -30,20 +30,17 @@ struct ChatViewAppearance {
   }
 
   let surfaceStyle: SurfaceStyle
-  let isTransparent: Bool
   let additionalTopContentInset: CGFloat
 
   var surfaceBackgroundColor: NSColor {
-    isTransparent ? .clear : surfaceStyle.backgroundColor
+    surfaceStyle.backgroundColor
   }
 
   init(
     surfaceStyle: SurfaceStyle,
-    isTransparent: Bool = false,
     additionalTopContentInset: CGFloat = 0
   ) {
     self.surfaceStyle = surfaceStyle
-    self.isTransparent = isTransparent
     self.additionalTopContentInset = additionalTopContentInset.isFinite
       ? max(0, additionalTopContentInset)
       : 0
@@ -51,7 +48,6 @@ struct ChatViewAppearance {
 
   static let standard = ChatViewAppearance(
     surfaceStyle: .content,
-    isTransparent: false,
     additionalTopContentInset: 0
   )
 }
@@ -177,7 +173,6 @@ class ChatViewAppKit: NSViewController {
 
     let rootView = ChatDropView()
     rootView.surfaceStyle = appearance.surfaceStyle
-    rootView.isTransparent = appearance.isTransparent
     view = rootView
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
@@ -374,7 +369,6 @@ class ChatViewAppKit: NSViewController {
         collapsedMaxId: dialog?.collapsedMaxId,
         initialPinnedMessage: preparedPayload?.pinnedMessage,
         surfaceStyle: appearance.surfaceStyle,
-        isTransparent: appearance.isTransparent,
         additionalTopContentInset: appearance.additionalTopContentInset
       )
     }
@@ -400,8 +394,7 @@ class ChatViewAppKit: NSViewController {
         toolbarState: toolbarState,
         parentChatView: self,
         dialog: dialog,
-        surfaceStyle: appearance.surfaceStyle,
-        isTransparent: appearance.isTransparent
+        surfaceStyle: appearance.surfaceStyle
       )
     }
     view.addSubview(compose)

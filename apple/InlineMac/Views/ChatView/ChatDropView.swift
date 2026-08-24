@@ -6,9 +6,6 @@ class ChatDropView: NSView {
   var surfaceStyle: ChatViewAppearance.SurfaceStyle = .content {
     didSet { updateSurfaceBackgroundColor() }
   }
-  var isTransparent = false {
-    didSet { updateSurfaceBackgroundColor() }
-  }
 
   override var wantsUpdateLayer: Bool { true }
 
@@ -64,8 +61,7 @@ class ChatDropView: NSView {
   }
 
   private func updateSurfaceBackgroundColor() {
-    let backgroundColor = isTransparent ? NSColor.clear : surfaceStyle.backgroundColor
-    layer?.backgroundColor = backgroundColor
+    layer?.backgroundColor = surfaceStyle.backgroundColor
       .resolvedColor(with: effectiveAppearance)
       .cgColor
   }

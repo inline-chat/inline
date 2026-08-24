@@ -23,29 +23,11 @@ struct MainWindowRootView: View {
 
   private var windowDependencies: AppDependencies? {
     guard var dependencies else { return nil }
-    let appBridge = dependencies.appBridge
-    let columnVisibility = $columnVisibility
     dependencies.nav3 = nav3
     dependencies.nav3ChatOpenPreloader = chatOpenPreloader
     dependencies.forwardMessages = forwardMessages
     dependencies.keyMonitor = keyMonitor
     dependencies.overlay = overlay
-    dependencies.prepareReplyThreadPanePresentation = {
-      guard AppSettings.shared.swiftUIReplyThreadInspectorEnabled else { return }
-
-      let isSidebarCollapsed = columnVisibility.wrappedValue == .detailOnly
-      var size = isSidebarCollapsed
-        ? MainWindowController.minSizeWithoutSidebar
-        : MainWindowController.minSizeWithSidebar
-      size.width = max(
-        size.width,
-        ReplyThreadPaneMetrics.minimumWindowWidth(
-          isSidebarCollapsed: isSidebarCollapsed,
-          replyPaneMinimumWidth: ReplyThreadPaneMetrics.nativeInspectorMinimumWidth
-        )
-      )
-      appBridge.setWindowMinSize(size, display: false)
-    }
     return dependencies
   }
 
@@ -349,9 +331,6 @@ private struct MainWindowRoot: View {
   let dependencies: AppDependencies?
   let toggleSidebar: () -> Void
 
-  @AppStorage(AppSettings.swiftUIReplyThreadInspectorEnabledKey)
-  private var swiftUIReplyThreadInspectorEnabled = false
-
   var body: some View {
     ZStack(alignment: .top) {
       NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -364,36 +343,11 @@ private struct MainWindowRoot: View {
           max: Theme.maximumSidebarWidth
         )
       } detail: {
-        MainContentView(
-          showsCustomReplyThreadPane: swiftUIReplyThreadInspectorEnabled == false
-        )
+        MainContentView()
           .toastOverlayHost(dependencies?.overlay)
       }
       .toolbar {
         MainWindowToolbar(nav: nav3)
-      }
-      .inspector(isPresented: nativeReplyThreadInspectorIsPresented) {
-        if swiftUIReplyThreadInspectorEnabled,
-           let replyThreadPeer = nav3.currentReplyThreadPeer,
-           let dependencies {
-          ReplyThreadPaneView(
-            peer: replyThreadPeer,
-            dependencies: dependencies,
-            chrome: .nativeInspector,
-            showsNativeToolbar: nativeReplyThreadInspectorIsPresented.wrappedValue,
-            onExpand: {
-              dependencies.openChatRoute(peer: replyThreadPeer)
-            },
-            onClose: {
-              nav3.closeReplyThread()
-            }
-          )
-          .inspectorColumnWidth(
-            min: ReplyThreadPaneMetrics.nativeInspectorMinimumWidth,
-            ideal: ReplyThreadPaneMetrics.nativeInspectorMinimumWidth
-          )
-          .id(replyThreadPeer.toString())
-        }
       }
 
       CommandBar()
@@ -408,23 +362,6 @@ private struct MainWindowRoot: View {
     .onChange(of: nav3.currentReplyThreadPeer) { _, _ in
       updateWindowMinSize()
     }
-    .onChange(of: swiftUIReplyThreadInspectorEnabled) { _, _ in
-      updateWindowMinSize()
-    }
-  }
-
-  private var nativeReplyThreadInspectorIsPresented: Binding<Bool> {
-    Binding(
-      get: {
-        swiftUIReplyThreadInspectorEnabled
-          && nav3.currentReplyThreadPeer != nil
-          && dependencies != nil
-      },
-      set: { isPresented in
-        guard swiftUIReplyThreadInspectorEnabled, isPresented == false else { return }
-        nav3.closeReplyThread()
-      }
-    )
   }
 
   private var isSidebarCollapsed: Bool {
@@ -440,15 +377,9 @@ private struct MainWindowRoot: View {
       : MainWindowController.minSizeWithSidebar
 
     if nav3.currentReplyThreadPeer != nil {
-      let replyPaneMinimumWidth = swiftUIReplyThreadInspectorEnabled
-        ? ReplyThreadPaneMetrics.nativeInspectorMinimumWidth
-        : ReplyThreadPaneMetrics.minimumContentWidth
       size.width = max(
         size.width,
-        ReplyThreadPaneMetrics.minimumWindowWidth(
-          isSidebarCollapsed: isSidebarCollapsed,
-          replyPaneMinimumWidth: replyPaneMinimumWidth
-        )
+        ReplyThreadPaneMetrics.minimumWindowWidth(isSidebarCollapsed: isSidebarCollapsed)
       )
     }
 

@@ -26,7 +26,6 @@ class MessageListAppKit: NSViewController {
   private let showUnreadAfter: Int64?
   private let initialPinnedMessage: PreparedPinnedMessage?
   private let surfaceStyle: ChatViewAppearance.SurfaceStyle
-  private let isTransparent: Bool
   private let additionalTopContentInset: CGFloat
   var viewModel: MessagesProgressiveViewModel { chatRows.progressiveViewModel }
   private var messages: [FullMessage] { chatRows.messages }
@@ -125,7 +124,6 @@ class MessageListAppKit: NSViewController {
     collapsedMaxId: Int64? = nil,
     initialPinnedMessage: PreparedPinnedMessage? = nil,
     surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
-    isTransparent: Bool = false,
     additionalTopContentInset: CGFloat = 0
   ) {
     self.dependencies = dependencies
@@ -134,7 +132,6 @@ class MessageListAppKit: NSViewController {
     self.showUnreadAfter = showUnreadAfter
     self.initialPinnedMessage = initialPinnedMessage
     self.surfaceStyle = surfaceStyle
-    self.isTransparent = isTransparent
     self.additionalTopContentInset = additionalTopContentInset
     chatRows = ChatRowListViewModel(
       peer: peerId,
@@ -246,10 +243,7 @@ class MessageListAppKit: NSViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private lazy var toolbarBgView = ToolbarBackgroundView(
-    surfaceStyle: surfaceStyle,
-    isTransparent: isTransparent
-  )
+  private lazy var toolbarBgView = ToolbarBackgroundView(surfaceStyle: surfaceStyle)
   private var pinnedHeaderHeight: CGFloat = 0
   private var pinnedHeaderTopConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?

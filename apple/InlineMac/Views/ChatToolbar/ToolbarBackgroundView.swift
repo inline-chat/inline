@@ -31,15 +31,11 @@ class ToolbarBackgroundView: NSView {
 
   init(
     separatorEdge: ToolbarBackgroundSeparatorEdge = .bottom,
-    surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
-    isTransparent: Bool = false
+    surfaceStyle: ChatViewAppearance.SurfaceStyle = .content
   ) {
     self.separatorEdge = separatorEdge
 
-    if isTransparent {
-      backgroundView = NSView()
-      materialView = nil
-    } else if #available(macOS 27.0, *) {
+    if #available(macOS 27.0, *) {
       let view = ToolbarBackgroundMaterialView(surfaceStyle: surfaceStyle)
       backgroundView = view
       materialView = view
