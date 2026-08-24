@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { constants, generateKeyPairSync, privateDecrypt, randomBytes } from "node:crypto"
 import type { Server, ServerWebSocket } from "bun"
 import {
@@ -40,6 +40,7 @@ import {
 } from "@inline-chat/protocol/server"
 import {
   makeInlineProtocolRealtimeTransport,
+  realtimeV3Log,
   type InlineProtocolRuntime,
   type InlineProtocolWebSocketData,
 } from "./realtimeV3Host"
@@ -269,6 +270,7 @@ describe("Inline Protocol WebSocket carrier", () => {
 
   test("rejects handshakes above the per-IP admission limit before upgrading", async () => {
     const transport = makeInlineProtocolRealtimeTransport(fixture())
+    const warnSpy = spyOn(realtimeV3Log, "warn")
     let upgrades = 0
     const server = {
       requestIP: () => ({ address: "127.0.0.1" }),
@@ -283,11 +285,26 @@ describe("Inline Protocol WebSocket carrier", () => {
       expect(transport.tryUpgrade(request, server)).toBe(true)
     }
 
-    const rejected = new Request("http://inline.test/realtime/v3")
-    expect(transport.tryUpgrade(rejected, server)).toBe(false)
-    expect(transport.rejectUnsupportedUpgrade(rejected)?.status).toBe(503)
-    expect(upgrades).toBe(8)
-    await transport.shutdown()
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const rejected = new Request("http://inline.test/realtime/v3")
+        expect(transport.tryUpgrade(rejected, server)).toBe(false)
+        expect(transport.rejectUnsupportedUpgrade(rejected)?.status).toBe(503)
+      }
+      expect(upgrades).toBe(8)
+      const overloadWarnings = warnSpy.mock.calls.filter(
+        ([message]) => message === "Inline Protocol V3 handshake admission overloaded",
+      )
+      expect(overloadWarnings).toHaveLength(1)
+      expect(overloadWarnings[0]?.[1]).toMatchObject({
+        activeHandshakes: 8,
+        perIpCapacity: 8,
+        suppressedCount: 0,
+      })
+    } finally {
+      warnSpy.mockRestore()
+      await transport.shutdown()
+    }
   })
 
   test("rate-limits repeated handshake starts from one IP", async () => {

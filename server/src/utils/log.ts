@@ -190,11 +190,12 @@ export enum LogLevel {
 const globalLogLevel: Record<string, LogLevel> = {
   // shared: LogLevel.INFO,
   // server: LogLevel.INFO,
-  //"modules/translation/translation": LogLevel.DEBUG,
+  // "InlineProtocol.V3": LogLevel.TRACE,
+  // "Realtime.RPC": LogLevel.TRACE,
+  // "modules/translation/translation": LogLevel.DEBUG,
 }
 
 export class Log {
-  static shared = new Log("shared")
   static fmt = Sentry.logger.fmt
 
   private disableLogging = isTest && !process.env["DEBUG"]
@@ -211,6 +212,7 @@ export class Log {
     }
     return defaultLevel
   })()
+  static shared = new Log("shared")
 
   private logLevel: LogLevel
 

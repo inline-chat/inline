@@ -45,6 +45,7 @@ import {
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import type { TrustedClientIpHeader } from "./middleware"
 import { Log } from "@in/server/utils/log"
+import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
 
 const REALTIME_V3_PATH = "/realtime/v3"
 const INLINE_PROTOCOL_VERIFICATION_PATH = "/.well-known/inline-protocol"
@@ -65,6 +66,8 @@ const MAX_HANDSHAKE_STARTS_PER_IP_PER_WINDOW = 60
 const MAX_CONCURRENT_APPLICATIONS = 512
 const MAX_CONCURRENT_APPLICATIONS_PER_AUTHORITY = 64
 const MAX_BUFFERED_APPLICATION_UPDATE_BYTES = 256 * 1024 * 1024
+const OVERLOAD_LOG_WINDOW_MS = 60_000
+export const realtimeV3Log = new Log("InlineProtocol.V3")
 
 export type InlineProtocolRuntime = {
   rsaKeys: readonly HandshakeRsaServerKey[]
@@ -94,6 +97,7 @@ type InlineProtocolConnectionState = {
   inboundQueuedBytes: number
   outboundQueuedRecords: number
   outboundQueuedBytes: number
+  compatibilityQueuedUpdates: number
   overloaded: boolean
   registered: boolean
 }
@@ -209,6 +213,20 @@ export const makeInlineProtocolRealtimeTransport = (
   const activeApplicationsByAuthority = new Map<string, number>()
   let bufferedApplicationUpdateBytes = 0
   let accepting = true
+  const overloadLogs = new BoundedLogAggregator(OVERLOAD_LOG_WINDOW_MS, 8)
+
+  const warnOverload = (
+    key: string,
+    message: string,
+    metadata: Record<string, unknown>,
+  ): void => {
+    const decision = overloadLogs.record(key)
+    if (!decision.emit) return
+    realtimeV3Log.warn(message, {
+      ...metadata,
+      suppressedCount: decision.suppressedCount,
+    })
+  }
 
   const applicationAuthorityKey = (authorization: ServerApplicationAuthorization): string =>
     authorization.accountSessionId === undefined
@@ -222,7 +240,7 @@ export const makeInlineProtocolRealtimeTransport = (
     const authorityApplications = activeApplicationsByAuthority.get(authorityKey) ?? 0
     if (activeApplications >= MAX_CONCURRENT_APPLICATIONS ||
         authorityApplications >= MAX_CONCURRENT_APPLICATIONS_PER_AUTHORITY) {
-      Log.shared.warn("Inline Protocol V3 application admission overloaded", {
+      warnOverload("application", "Inline Protocol V3 application admission overloaded", {
         activeApplications,
         globalCapacity: MAX_CONCURRENT_APPLICATIONS,
         authorityApplications,
@@ -313,14 +331,14 @@ export const makeInlineProtocolRealtimeTransport = (
       if (socket.data.closed && !allowClosed) return
       const queueWaitMs = Math.round(performance.now() - queuedAt)
       if (queueWaitMs >= 100) {
-        Log.shared.debug("Inline Protocol V3 session queue delayed", {
+        realtimeV3Log.trace("Inline Protocol V3 session queue delayed", {
           connectionId: socket.data.id,
           queueWaitMs,
         })
       }
       await operation()
     }).catch((error) => {
-      Log.shared.debug("Inline Protocol V3 connection failed", {
+      realtimeV3Log.trace("Inline Protocol V3 connection failed", {
         connectionId: socket.data.id,
         error,
       })
@@ -343,8 +361,7 @@ export const makeInlineProtocolRealtimeTransport = (
     if (!state || socket.data.closed || state.overloaded) return Promise.resolve()
     if (state.outboundQueuedRecords + records > MAX_QUEUED_OUTBOUND_RECORDS ||
         state.outboundQueuedBytes + bytes > MAX_QUEUED_OUTBOUND_BYTES) {
-      Log.shared.warn("Inline Protocol V3 outbound queue overloaded", {
-        connectionId: socket.data.id,
+      warnOverload("outbound", "Inline Protocol V3 outbound queue overloaded", {
         queuedRecords: state.outboundQueuedRecords,
         queuedBytes: state.outboundQueuedBytes,
         incomingRecords: records,
@@ -366,7 +383,7 @@ export const makeInlineProtocolRealtimeTransport = (
         state.outboundQueuedBytes -= bytes
       }
     }).catch((error) => {
-      Log.shared.debug("Inline Protocol V3 outbound carrier failed", {
+      realtimeV3Log.trace("Inline Protocol V3 outbound carrier failed", {
         connectionId: socket.data.id,
         error,
       })
@@ -416,7 +433,7 @@ export const makeInlineProtocolRealtimeTransport = (
     const execution = (async () => {
       const completion = await task.dispatch()
       const responseDurationMs = Math.round(performance.now() - handlerStartedAt)
-      Log.shared.debug("Inline Protocol V3 application response ready", {
+      realtimeV3Log.trace("Inline Protocol V3 application response ready", {
         connectionId: socket.data.id,
         requestMessageId: task.messageId.toString(),
         responseDurationMs,
@@ -430,7 +447,7 @@ export const makeInlineProtocolRealtimeTransport = (
         const finalizationStartedAt = performance.now()
         const finalized = await applicationCompletion.finalize()
         const finalizationDurationMs = Math.round(performance.now() - finalizationStartedAt)
-        Log.shared.debug("Inline Protocol V3 application finalized", {
+        realtimeV3Log.trace("Inline Protocol V3 application finalized", {
           connectionId: socket.data.id,
           requestMessageId: task.messageId.toString(),
           responseDurationMs,
@@ -449,7 +466,7 @@ export const makeInlineProtocolRealtimeTransport = (
         await finalize(settlement, false)
       }
     })().catch((error) => {
-      Log.shared.debug("Inline Protocol V3 application dispatch failed", {
+      realtimeV3Log.trace("Inline Protocol V3 application dispatch failed", {
         connectionId: socket.data.id,
         requestMessageId: task.messageId.toString(),
         error,
@@ -493,7 +510,7 @@ export const makeInlineProtocolRealtimeTransport = (
             if (legacy.body.oneofKind !== "message") return bytes.length
             payload = RealtimeV3Update.toBinary({ message: legacy.body.message })
           } catch (error) {
-            Log.shared.debug("Inline Protocol V3 compatibility update was malformed", {
+            realtimeV3Log.trace("Inline Protocol V3 compatibility update was malformed", {
               connectionId: socket.data.id,
               error,
             })
@@ -502,16 +519,30 @@ export const makeInlineProtocolRealtimeTransport = (
           }
           const releaseUpdateBytes = tryReserveApplicationUpdateBytes(payload.length)
           if (!releaseUpdateBytes) {
-            Log.shared.warn("Inline Protocol V3 compatibility update capacity exceeded", {
-              connectionId: socket.data.id,
+            warnOverload("retained-update", "Inline Protocol V3 compatibility update capacity exceeded", {
               updateBytes: payload.length,
+              bufferedUpdateBytes: bufferedApplicationUpdateBytes,
+              updateCapacity: maximumBufferedApplicationUpdateBytes,
             })
             closeOverloaded(socket)
             return 0
           }
+          if (state.compatibilityQueuedUpdates >= MAX_QUEUED_OUTBOUND_RECORDS) {
+            releaseUpdateBytes()
+            warnOverload("compatibility-update", "Inline Protocol V3 compatibility update queue overloaded", {
+              queuedUpdates: state.compatibilityQueuedUpdates,
+              updateCapacity: MAX_QUEUED_OUTBOUND_RECORDS,
+            })
+            closeOverloaded(socket)
+            return 0
+          }
+          state.compatibilityQueuedUpdates += 1
           void enqueue(socket, async () => {
             await sendRecords(socket, [state.session.sendApplicationUpdate(payload)])
-          }).finally(releaseUpdateBytes)
+          }).finally(() => {
+            state.compatibilityQueuedUpdates -= 1
+            releaseUpdateBytes()
+          })
           return bytes.length
         },
       },
@@ -553,6 +584,7 @@ export const makeInlineProtocolRealtimeTransport = (
       inboundQueuedBytes: 0,
       outboundQueuedRecords: 0,
       outboundQueuedBytes: 0,
+      compatibilityQueuedUpdates: 0,
       overloaded: false,
       registered: false,
       session,
@@ -575,8 +607,7 @@ export const makeInlineProtocolRealtimeTransport = (
     const frameBytes = message.byteLength
     if (state.inboundQueuedFrames >= MAX_QUEUED_INBOUND_FRAMES ||
         state.inboundQueuedBytes + frameBytes > MAX_QUEUED_INBOUND_BYTES) {
-      Log.shared.warn("Inline Protocol V3 inbound queue overloaded", {
-        connectionId: socket.data.id,
+      warnOverload("inbound", "Inline Protocol V3 inbound queue overloaded", {
         queuedFrames: state.inboundQueuedFrames,
         queuedBytes: state.inboundQueuedBytes,
         incomingBytes: frameBytes,
@@ -661,6 +692,16 @@ export const makeInlineProtocolRealtimeTransport = (
       const metadata = requestMetadata(request, server, clientIpHeader)
       const ip = handshakeAdmissionIp(metadata)
       if (!canAdmitHandshake(ip)) {
+        warnOverload("handshake", "Inline Protocol V3 handshake admission overloaded", {
+          activeHandshakes,
+          globalCapacity: MAX_CONCURRENT_HANDSHAKES,
+          activeHandshakesForIp: handshakesByIp.get(ip) ?? 0,
+          perIpCapacity: MAX_CONCURRENT_HANDSHAKES_PER_IP,
+          startsInWindow: handshakeStarts,
+          globalStartsPerWindow: MAX_HANDSHAKE_STARTS_PER_WINDOW,
+          startsForIpInWindow: handshakeStartsByIp.get(ip) ?? 0,
+          perIpStartsPerWindow: MAX_HANDSHAKE_STARTS_PER_IP_PER_WINDOW,
+        })
         handshakeCapacityRejectedRequests.add(request)
         return false
       }

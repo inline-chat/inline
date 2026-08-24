@@ -1,5 +1,28 @@
-import { describe, expect, it } from "bun:test"
-import { beforeSendLog, redactString, redactValue } from "./log"
+import { describe, expect, it, spyOn } from "bun:test"
+import { beforeSendLog, Log, LogLevel, redactString, redactValue } from "./log"
+
+describe("log levels", () => {
+  it("constructs the shared logger with the configured default level", () => {
+    expect(Reflect.get(Log.shared, "logLevel")).toBe(Reflect.get(Log, "logLevel"))
+  })
+
+  it("requires explicit trace enablement for verbose diagnostics", () => {
+    const previousDebug = process.env["DEBUG"]
+    const traceSpy = spyOn(console, "trace").mockImplementation(() => {})
+    process.env["DEBUG"] = "1"
+    try {
+      new Log("InlineProtocol.V3", LogLevel.DEBUG).trace("hidden")
+      expect(traceSpy).not.toHaveBeenCalled()
+
+      new Log("InlineProtocol.V3", LogLevel.TRACE).trace("visible")
+      expect(traceSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      traceSpy.mockRestore()
+      if (previousDebug === undefined) Reflect.deleteProperty(process.env, "DEBUG")
+      else process.env["DEBUG"] = previousDebug
+    }
+  })
+})
 
 describe("log redaction", () => {
   it("redacts bearer and path tokens in strings", () => {

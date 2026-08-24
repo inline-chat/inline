@@ -30,6 +30,8 @@ import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import { Log } from "@in/server/utils/log"
 
+const log = new Log("InlineProtocol.V3.Application")
+
 export type InlineProtocolApplicationContext = {
   authorization: ServerApplicationAuthorization
   metadata?: RealtimeRequestMetadata
@@ -58,7 +60,7 @@ const unauthorizedResponse = (): Uint8Array => RealtimeV3Response.toBinary({
 const errorResponse = (error: unknown): Uint8Array => {
   const rpc = toRealtimeRpcError(error)
   if (rpc.codeNumber >= 500) {
-    Log.shared.error("Inline Protocol application request failed", error)
+    log.error("Inline Protocol application request failed", error)
   }
   return RealtimeV3Response.toBinary({
     body: {

@@ -6,6 +6,7 @@ import { InlineProtocolReplayError } from "./errors"
 const REPLAY_CLEANUP_INTERVAL_MS = 60_000
 const REPLAY_CLEANUP_FULL_BATCH_DELAY_MS = 250
 const REPLAY_CLEANUP_BATCH_SIZE = 1_000
+const log = new Log("InlineProtocol.V3.Replay")
 
 export type InlineProtocolReplayOwner = ServerReplayRepository & {
   close(): void
@@ -30,7 +31,7 @@ export const makeInlineProtocolReplayRepository = (
             : REPLAY_CLEANUP_INTERVAL_MS)
         })
         .catch((error) => {
-          Log.shared.warn("Inline Protocol replay cleanup failed", { error })
+          log.warn("Inline Protocol replay cleanup failed", { error })
           scheduleCleanup(REPLAY_CLEANUP_INTERVAL_MS)
         })
         .finally(() => { cleanup = undefined })
