@@ -279,6 +279,17 @@ describe("block content parser", () => {
 
     expect(parseBlockContent(markdown)).toBeUndefined()
     expect(parseMarkdown(markdown).text).toBe(markdown)
+
+    const boundedHeader = `| ${Array.from({ length: 16 }, (_, index) => `h${index}`).join(" | ")} |`
+    const boundedDelimiter = `| ${Array.from({ length: 16 }, () => "---").join(" | ")} |`
+    const rows = Array.from(
+      { length: 16 },
+      (_, row) => `| ${Array.from({ length: 16 }, (_, column) => `${row}:${column}`).join(" | ")} |`,
+    )
+    const tooManyCells = [boundedHeader, boundedDelimiter, ...rows].join("\n")
+
+    expect(parseBlockContent(tooManyCells)).toBeUndefined()
+    expect(parseMarkdown(tooManyCells).text).toBe(tooManyCells)
   })
 
   test("canonical Markdown is semantically idempotent", () => {
