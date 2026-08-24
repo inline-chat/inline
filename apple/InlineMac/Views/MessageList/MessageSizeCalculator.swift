@@ -54,7 +54,7 @@ class MessageSizeCalculator {
   static let minimalInlineTimeSpacing: CGFloat = 6
   static let minimalFollowUpTimeTopOffset: CGFloat = 1
   static let minimalInlineTimeVerticalOffset: CGFloat = 1
-  static let minimalTextFontSize: Double = Theme.messageTextFontSize
+  static let minimalTextFontSize: Double = Double(ChatTypography.current.pointSize)
   static let minimalMinTextWidth: CGFloat = 36
   static let minimalTextOnlyMinHeight: CGFloat = 22
   static let minimalFollowUpMinHeight: CGFloat = 22
@@ -159,11 +159,11 @@ class MessageSizeCalculator {
   static func minimalTextFontSize(for emojiInfo: (count: Int, isAllEmojis: Bool)) -> Double {
     switch emojiInfo {
     case let (count, true) where count == 1:
-      Theme.messageTextFontSizeSingleEmoji
+      Double(ChatTypography.current.singleEmojiPointSize)
     case let (count, true) where count <= 3:
-      Theme.messageTextFontSizeThreeEmojis
+      Double(ChatTypography.current.threeEmojisPointSize)
     case (_, true):
-      Theme.messageTextFontSizeManyEmojis
+      Double(ChatTypography.current.manyEmojisPointSize)
     default:
       Self.minimalTextFontSize
     }
@@ -824,19 +824,19 @@ class MessageSizeCalculator {
     let bubbleContentHorizontalInset = horizontalBubbleInset(for: .bubble)
 
     // Font size
-    var fontSize: Double = switch emojiInfo {
+    let fontSize: Double = switch emojiInfo {
       case let (count, true) where count == 1:
-        Theme.messageTextFontSizeSingleEmoji
+        Double(ChatTypography.current.singleEmojiPointSize)
       case let (count, true) where count <= 3:
-        Theme.messageTextFontSizeThreeEmojis
-      case let (count, true):
-        Theme.messageTextFontSizeManyEmojis
+        Double(ChatTypography.current.threeEmojisPointSize)
+      case (_, true):
+        Double(ChatTypography.current.manyEmojisPointSize)
       default:
-        Theme.messageTextFontSize
+        Double(ChatTypography.current.pointSize)
     }
 
     // Font - use this for measuring text
-    var font: NSFont = MessageTextConfiguration.font.withSize(fontSize)
+    let font = ChatTypography.current.font.withSize(fontSize)
 
     // Attributed String
     let attributedString: NSAttributedString
@@ -849,6 +849,7 @@ class MessageSizeCalculator {
         configuration: .init(
           font: font,
           boldWeight: .semibold,
+          monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
           palette: richTextPalette(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
         )
       )
@@ -1731,7 +1732,7 @@ class MessageSizeCalculator {
 
     // Font size
     let fontSize = Self.minimalTextFontSize(for: emojiInfo)
-    let font = MessageTextConfiguration.font.withSize(fontSize)
+    let font = ChatTypography.current.font.withSize(fontSize)
     let usesOutgoingBubbleStyle = false
     let richTextStyleKey = richTextStyleKey(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
 
@@ -1745,6 +1746,7 @@ class MessageSizeCalculator {
         configuration: .init(
           font: font,
           boldWeight: .semibold,
+          monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
           palette: richTextPalette(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
         )
       )
@@ -2408,7 +2410,8 @@ class MessageSizeCalculator {
 }
 
 enum MessageTextConfiguration {
-  static let font = Theme.messageTextFont
+  static let font = ChatTypography.current.font
+  static let monospaceBaseFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
   static let lineFragmentPadding = Theme.messageTextLineFragmentPadding
   static let containerInset = Theme.messageTextContainerInset
   static let useTextKit2ViewportWorkarounds: Bool = {
@@ -2427,4 +2430,5 @@ enum MessageTextConfiguration {
     textView.font = font
     textView.textContainerInset = containerInset
   }
+
 }

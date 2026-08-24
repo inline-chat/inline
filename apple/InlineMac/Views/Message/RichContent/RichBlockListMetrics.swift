@@ -15,7 +15,7 @@ enum RichBlockListMetrics {
     guard ordered else { return unorderedMarkerWidth }
     let marker = "\(lastOrdinal)." as NSString
     let markerWidth = marker.size(
-      withAttributes: [.font: NSFont.systemFont(ofSize: baseFontSize)]
+      withAttributes: [.font: ChatTypography.current.font(sized: baseFontSize)]
     ).width
     return ceil(max(unorderedMarkerWidth, markerWidth + markerContentGap))
   }

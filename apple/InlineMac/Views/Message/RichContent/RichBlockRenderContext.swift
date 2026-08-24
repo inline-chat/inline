@@ -58,7 +58,7 @@ struct RichBlockRenderContext {
       value = NSMutableAttributedString(
         string: literal,
         attributes: [
-          .font: NSFont.systemFont(ofSize: baseFontSize),
+          .font: ChatTypography.current.font(sized: baseFontSize),
           .foregroundColor: palette.primary,
           .paragraphStyle: paragraphStyle(isRTL: node.isRTL),
         ]
@@ -131,7 +131,7 @@ struct RichBlockRenderContext {
         with: NSRange(location: node.rangeOffset, length: node.rangeLength)
       ),
       attributes: [
-        .font: NSFont.monospacedSystemFont(ofSize: baseFontSize * 0.92, weight: .regular),
+        .font: RichBlockCodeMetrics.bodyFont,
         .foregroundColor: palette.primary,
         .paragraphStyle: paragraph,
       ]

@@ -268,6 +268,40 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var chatFontFamilies: String {
+    didSet {
+      Self.persistOptionalString(
+        chatFontFamilies,
+        forKey: ChatTypography.fontFamiliesDefaultsKey
+      )
+    }
+  }
+
+  @Published var chatFontSize: String {
+    didSet {
+      Self.persistOptionalString(
+        chatFontSize,
+        forKey: ChatTypography.fontSizeDefaultsKey
+      )
+    }
+  }
+
+  var chatTypographyNeedsRestart: Bool {
+    ChatTypography.current.source != ChatTypography.Source(
+      fontFamilies: chatFontFamilies,
+      fontSize: chatFontSize
+    )
+  }
+
+  var hasChatTypographyOverrides: Bool {
+    !chatFontFamilies.isEmpty || !chatFontSize.isEmpty
+  }
+
+  func resetChatTypography() {
+    chatFontFamilies = ""
+    chatFontSize = ""
+  }
+
   @Published var preferredEmojiSkinTone: EmojiSkinTone {
     didSet {
       EmojiSkinTonePreferenceStore.set(preferredEmojiSkinTone)
@@ -438,6 +472,9 @@ final class AppSettings: ObservableObject {
     } else {
       messageRenderStyle = .bubble
     }
+    let chatTypographySource = ChatTypography.storedSource()
+    chatFontFamilies = chatTypographySource.fontFamilies
+    chatFontSize = chatTypographySource.fontSize
 
     preferredEmojiSkinTone = EmojiSkinTonePreferenceStore.current()
 
@@ -513,6 +550,14 @@ final class AppSettings: ObservableObject {
     if sidebarModeNeedsAccountMigration == false {
       UserDefaults.standard.set(sidebarMode.rawValue, forKey: Self.sidebarModeKey)
       UserDefaults.standard.set(sidebarMode == .inbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)
+    }
+  }
+
+  private static func persistOptionalString(_ value: String, forKey key: String) {
+    if value.isEmpty {
+      UserDefaults.standard.removeObject(forKey: key)
+    } else {
+      UserDefaults.standard.set(value, forKey: key)
     }
   }
 

@@ -36,25 +36,7 @@ struct AppearanceSettingsDetailView: View {
         SettingsSectionHeader("Sidebar")
       }
 
-      Section {
-        LabeledContent {
-          Picker("Message Style", selection: $appSettings.messageRenderStyle) {
-            ForEach(MessageRenderStyle.allCases, id: \.self) { style in
-              Text(style.title).tag(style)
-            }
-          }
-          .labelsHidden()
-          .pickerStyle(.segmented)
-          .frame(width: 220, alignment: .trailing)
-        } label: {
-          SettingsRowLabel(
-            "Message Style",
-            description: "Choose how messages are arranged in chats."
-          )
-        }
-      } header: {
-        SettingsSectionHeader("Messages")
-      }
+      MessagesAppearanceSettingsSection(settings: appSettings)
 
       EmojiSkinToneSettingsSection(selection: $appSettings.preferredEmojiSkinTone)
 
@@ -71,6 +53,74 @@ struct AppearanceSettingsDetailView: View {
       ToolbarSettingsSection(usesCompactToolbar: $appSettings.usesCompactToolbar)
     }
     .settingsFormStyle()
+  }
+}
+
+private struct MessagesAppearanceSettingsSection: View {
+  @ObservedObject var settings: AppSettings
+
+  var body: some View {
+    Section {
+      LabeledContent {
+        HStack(spacing: 8) {
+          TextField(
+            "Font Families",
+            text: $settings.chatFontFamilies,
+            prompt: Text("System")
+          )
+          .labelsHidden()
+          .frame(width: 220)
+
+          Button("Reset") {
+            settings.resetChatTypography()
+          }
+          .disabled(!settings.hasChatTypographyOverrides)
+        }
+      } label: {
+        SettingsRowLabel(
+          "Fonts",
+          description: "Comma-separated font families or faces, in fallback order."
+        )
+      }
+
+      LabeledContent {
+        TextField(
+          "Font Size",
+          text: $settings.chatFontSize,
+          prompt: Text(systemPointSizeLabel)
+        )
+        .labelsHidden()
+        .frame(width: 72)
+      } label: {
+        SettingsRowLabel("Size")
+      }
+
+      LabeledContent {
+        Picker("Message Style", selection: $settings.messageRenderStyle) {
+          ForEach(MessageRenderStyle.allCases, id: \.self) { style in
+            Text(style.title).tag(style)
+          }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .frame(width: 220, alignment: .trailing)
+      } label: {
+        SettingsRowLabel(
+          "Message Style",
+          description: "Choose how messages are arranged in chats."
+        )
+      }
+    } header: {
+      SettingsSectionHeader("Messages")
+    } footer: {
+      if settings.chatTypographyNeedsRestart {
+        Text("Restart Inline to apply typography changes.")
+      }
+    }
+  }
+
+  private var systemPointSizeLabel: String {
+    String(format: "%g", Double(ChatTypography.systemPointSize))
   }
 }
 

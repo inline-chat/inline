@@ -374,6 +374,39 @@ struct ProcessEntitiesTests {
 
     return NSFont.Weight.regular.rawValue
   }
+
+  @Test("Monospaced entities can retain an independent base font")
+  func monospacedEntitiesRetainIndependentBaseFont() throws {
+    let bodyFont = try #require(NSFont(name: "Menlo", size: 20))
+    let codeBaseFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    let text = "plain inline block"
+    let entities = createMessageEntities([
+      createCodeEntity(offset: 6, length: 6),
+      createPreEntity(offset: 13, length: 5),
+    ])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: .init(
+        font: bodyFont,
+        monospaceBaseFont: codeBaseFont,
+        primaryColor: .black,
+        linkColor: .blue
+      )
+    )
+
+    let plainFont = try #require(result.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+    let inlineCodeFont = try #require(result.attribute(.font, at: 6, effectiveRange: nil) as? NSFont)
+    let blockCodeFont = try #require(result.attribute(.font, at: 13, effectiveRange: nil) as? NSFont)
+
+    #expect(plainFont.familyName == bodyFont.familyName)
+    #expect(plainFont.pointSize == 20)
+    #expect(NSFontManager.shared.traits(of: inlineCodeFont).contains(.fixedPitchFontMask))
+    #expect(NSFontManager.shared.traits(of: blockCodeFont).contains(.fixedPitchFontMask))
+    #expect(inlineCodeFont.pointSize == NSFont.systemFontSize - 1)
+    #expect(blockCodeFont.pointSize == NSFont.systemFontSize - 1)
+  }
   #endif
 
   @Test("URL and text_url entities apply link attributes")

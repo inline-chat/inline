@@ -143,7 +143,7 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     layer?.backgroundColor = context.palette.codeFill.cgColor
     gutter.apply(
       lineCount: code.lineCount,
-      font: RichBlockCodeMetrics.gutterFont(baseFontSize: context.baseFontSize),
+      font: RichBlockCodeMetrics.gutterFont,
       color: context.palette.tertiary
     )
     surface.apply(

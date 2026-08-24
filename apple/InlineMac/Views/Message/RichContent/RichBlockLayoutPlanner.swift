@@ -226,18 +226,21 @@ final class RichBlockLayoutPlanner {
       let scale = [1.22, 1.14, 1.07, 1.02, 1.0, 1.0][clamped - 1]
       value.addAttribute(
         .font,
-        value: NSFont.systemFont(ofSize: baseFontSize * scale, weight: clamped == 1 ? .semibold : .medium),
+        value: ChatTypography.current.font(
+          sized: baseFontSize * scale,
+          weight: clamped == 1 ? .semibold : .medium
+        ),
         range: fullRange
       )
     case .footer:
       value.addAttributes([
-        .font: NSFont.systemFont(ofSize: baseFontSize * 0.82),
+        .font: ChatTypography.current.font(sized: baseFontSize * 0.82),
         .foregroundColor: NSColor.secondaryLabelColor,
       ], range: fullRange)
     case .disclosureSummary:
       value.addAttribute(
         .font,
-        value: NSFont.systemFont(ofSize: baseFontSize, weight: .semibold),
+        value: ChatTypography.current.font(sized: baseFontSize, weight: .semibold),
         range: fullRange
       )
     case .listMarker:
@@ -279,7 +282,7 @@ final class RichBlockLayoutPlanner {
     if isHeader {
       value.addAttribute(
         .font,
-        value: NSFont.systemFont(ofSize: baseFontSize, weight: .semibold),
+        value: ChatTypography.current.font(sized: baseFontSize, weight: .semibold),
         range: range
       )
     }
@@ -581,10 +584,7 @@ final class RichBlockLayoutPlanner {
       let lineCount = max(1, attributed.string.components(separatedBy: .newlines).count)
       let language = code.hasLanguage && !code.language.isEmpty ? code.language : nil
       let hasLanguage = language != nil
-      let gutterWidth = language == nil ? 0 : RichBlockCodeMetrics.gutterWidth(
-        lineCount: lineCount,
-        baseFontSize: baseFontSize
-      )
+      let gutterWidth = language == nil ? 0 : RichBlockCodeMetrics.gutterWidth(lineCount: lineCount)
       let bodyWidth = RichBlockCodeMetrics.bodyWidth(
         containerWidth: width,
         gutterWidth: gutterWidth
@@ -848,7 +848,7 @@ final class RichBlockLayoutPlanner {
       return NSAttributedString(
         string: (attributedText.string as NSString).substring(with: range),
         attributes: [
-          .font: NSFont.monospacedSystemFont(ofSize: baseFontSize * 0.92, weight: .regular),
+          .font: RichBlockCodeMetrics.bodyFont,
           .foregroundColor: NSColor.labelColor,
           .paragraphStyle: paragraph,
         ]

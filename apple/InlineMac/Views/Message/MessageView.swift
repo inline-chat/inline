@@ -833,8 +833,7 @@ class MessageViewAppKit: NSView {
       // Clips to bounds = false fucks up performance so badly. what!?
       // textView.clipsToBounds = true
       textView.textContainerInset = MessageTextConfiguration.containerInset
-      // FIXME: Extract font to a variable
-      textView.font = .systemFont(ofSize: props.layout.fontSize)
+      textView.font = ChatTypography.current.font(sized: props.layout.fontSize)
       textView.textColor = textColor
       textView.wantsLayer = true
       textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -2914,9 +2913,9 @@ class MessageViewAppKit: NSView {
       text: text,
       entities: entities,
       configuration: .init(
-        // FIXME: Extract to a variable
-        font: .systemFont(ofSize: props.layout.fontSize),
+        font: ChatTypography.current.font(sized: props.layout.fontSize),
         boldWeight: .semibold,
+        monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
         palette: richTextPalette,
         codeBlockBackgroundColor: codeBlockBackgroundColor,
         inlineCodeBackgroundColor: inlineCodeBackgroundColor

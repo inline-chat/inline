@@ -99,6 +99,7 @@ public class ProcessEntities {
 
     var font: PlatformFont
     var boldWeight: PlatformFontWeight?
+    var monospaceBaseFont: PlatformFont?
 
     /// Colors used for the rendered rich-text surface.
     var palette: Palette
@@ -127,6 +128,7 @@ public class ProcessEntities {
     public init(
       font: PlatformFont,
       boldWeight: PlatformFontWeight? = nil,
+      monospaceBaseFont: PlatformFont? = nil,
       palette: Palette,
       convertMentionsToLink: Bool = true,
       renderPhoneNumbers: Bool = true,
@@ -135,6 +137,7 @@ public class ProcessEntities {
     ) {
       self.font = font
       self.boldWeight = boldWeight
+      self.monospaceBaseFont = monospaceBaseFont
       self.palette = palette
       self.convertMentionsToLink = convertMentionsToLink
       self.renderPhoneNumbers = renderPhoneNumbers
@@ -145,6 +148,7 @@ public class ProcessEntities {
     public init(
       font: PlatformFont,
       boldWeight: PlatformFontWeight? = nil,
+      monospaceBaseFont: PlatformFont? = nil,
       primaryColor: PlatformColor,
       linkColor: PlatformColor,
       secondaryColor: PlatformColor? = nil,
@@ -156,6 +160,7 @@ public class ProcessEntities {
       self.init(
         font: font,
         boldWeight: boldWeight,
+        monospaceBaseFont: monospaceBaseFont,
         palette: Palette(
           primaryColor: primaryColor,
           linkColor: linkColor,
@@ -171,6 +176,7 @@ public class ProcessEntities {
     public init(
       font: PlatformFont,
       boldWeight: PlatformFontWeight? = nil,
+      monospaceBaseFont: PlatformFont? = nil,
       textColor: PlatformColor,
       linkColor: PlatformColor,
       secondaryColor: PlatformColor? = nil,
@@ -182,6 +188,7 @@ public class ProcessEntities {
       self.init(
         font: font,
         boldWeight: boldWeight,
+        monospaceBaseFont: monospaceBaseFont,
         primaryColor: textColor,
         linkColor: linkColor,
         secondaryColor: secondaryColor,
@@ -471,7 +478,9 @@ public class ProcessEntities {
 
         case .code:
           // monospace font with custom marker
-          let monospaceFont = createMonospaceFont(from: configuration.font)
+          let monospaceFont = createMonospaceFont(
+            from: configuration.monospaceBaseFont ?? configuration.font
+          )
           let inlineFont = monospaceFont.withSize(max(11, monospaceFont.pointSize - 1))
           attributedString.addAttributes([
             .font: inlineFont,
@@ -480,7 +489,9 @@ public class ProcessEntities {
           ], range: range)
 
         case .pre:
-          let monospaceFont = createMonospaceFont(from: configuration.font)
+          let monospaceFont = createMonospaceFont(
+            from: configuration.monospaceBaseFont ?? configuration.font
+          )
           #if os(iOS)
           let blockFont = monospaceFont.withSize(max(11, monospaceFont.pointSize - 2))
           #else

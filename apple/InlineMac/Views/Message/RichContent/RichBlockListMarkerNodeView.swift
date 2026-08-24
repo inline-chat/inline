@@ -23,7 +23,7 @@ final class RichBlockListMarkerNodeView: RichBlockRenderableView {
     self.marker = marker
     isRTL = text.isRTL
     color = context.palette.primary
-    font = .systemFont(ofSize: context.baseFontSize)
+    font = ChatTypography.current.font(sized: context.baseFontSize)
     needsDisplay = true
   }
 

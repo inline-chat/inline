@@ -54,6 +54,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillFinishLaunching(_: Notification) {
     NSWindow.allowsAutomaticWindowTabbing = true
 
+    // Freeze the chat font before any message layout or settings UI is created.
+    _ = ChatTypography.current
+
     MacDevtools.bootstrap()
     registerMacGlobalSettings()
 

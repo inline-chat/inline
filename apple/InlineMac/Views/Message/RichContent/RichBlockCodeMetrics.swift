@@ -10,14 +10,13 @@ enum RichBlockCodeMetrics {
   static let bodyBottomInset: CGFloat = 9
   static let gutterTextTrailingInset: CGFloat = 4
   static let gutterContentGap: CGFloat = 15
+  static let bodyFontSize = NSFont.systemFontSize * 0.92
+  static let bodyFont = NSFont.monospacedSystemFont(ofSize: bodyFontSize, weight: .regular)
+  static let gutterFont = NSFont.monospacedDigitSystemFont(ofSize: bodyFontSize, weight: .regular)
 
-  static func gutterFont(baseFontSize: CGFloat) -> NSFont {
-    .monospacedDigitSystemFont(ofSize: baseFontSize * 0.92, weight: .regular)
-  }
-
-  static func gutterWidth(lineCount: Int, baseFontSize: CGFloat) -> CGFloat {
+  static func gutterWidth(lineCount: Int) -> CGFloat {
     let label = "\(max(1, lineCount))" as NSString
-    let labelWidth = label.size(withAttributes: [.font: gutterFont(baseFontSize: baseFontSize)]).width
+    let labelWidth = label.size(withAttributes: [.font: gutterFont]).width
     return ceil(labelWidth + gutterTextTrailingInset)
   }
 
