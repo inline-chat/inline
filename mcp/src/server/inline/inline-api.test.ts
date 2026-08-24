@@ -7,6 +7,7 @@ const realtimeSdk = vi.hoisted(() => {
   const client = {
     close: vi.fn(),
     connect: vi.fn(),
+    events: vi.fn(),
     invoke: vi.fn(),
   }
   return {
@@ -42,7 +43,59 @@ describe("createInlineApi", () => {
     realtimeSdk.InlineSdkClient.mockClear()
     realtimeSdk.client.close.mockReset().mockResolvedValue(undefined)
     realtimeSdk.client.connect.mockReset().mockResolvedValue(undefined)
+    realtimeSdk.client.events.mockReset().mockReturnValue({
+      async *[Symbol.asyncIterator]() {},
+    })
     realtimeSdk.client.invoke.mockReset()
+  })
+
+  it("acknowledges the SDK event stream and joins it on close", async () => {
+    const next = vi.fn()
+      .mockResolvedValueOnce({ value: { kind: "chat.updated" }, done: false })
+      .mockResolvedValueOnce({ value: undefined, done: true })
+    realtimeSdk.client.events.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({ next }),
+    })
+
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test",
+      token: "test-token",
+      allowed: {
+        allowedSpaceIds: [],
+        allowDms: false,
+        allowHomeThreads: false,
+      },
+    })
+    realtimeSdk.client.invoke.mockResolvedValue({
+      getChats: { dialogs: [], folders: [], chats: [], spaces: [], users: [], messages: [] },
+    })
+
+    await api.listSpaces({ limit: 1 })
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(2))
+    await api.close()
+
+    expect(realtimeSdk.client.events).toHaveBeenCalledTimes(1)
+    expect(realtimeSdk.client.close).toHaveBeenCalledTimes(1)
+  })
+
+  it("closes before connecting without waiting on the event stream", async () => {
+    realtimeSdk.client.events.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+    })
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test",
+      token: "test-token",
+      allowed: {
+        allowedSpaceIds: [],
+        allowDms: false,
+        allowHomeThreads: false,
+      },
+    })
+
+    await api.close()
+
+    expect(realtimeSdk.client.connect).not.toHaveBeenCalled()
+    expect(realtimeSdk.client.close).toHaveBeenCalledTimes(1)
   })
 
   it("limits people search to users from allowed contexts", async () => {

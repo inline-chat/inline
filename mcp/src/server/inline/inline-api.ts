@@ -243,9 +243,18 @@ export function createInlineApi(params: {
   allowed: InlineAllowedContext
 }): InlineApi {
   const client = new InlineSdkClient({ baseUrl: params.baseUrl, token: params.token })
+  // This request/response owner has no local projection, but it must still
+  // acknowledge the SDK's bounded update stream so durable account fanout
+  // cannot fill the queue and force a recovery loop.
+  const eventDrain = (async () => {
+    for await (const _event of client.events()) {
+      // Asking for the next event acknowledges the previous receipt.
+    }
+  })().catch(() => {})
   const allowedSpaceIdList = params.allowed.allowedSpaceIds
   const allowedSpaceIds = new Set(params.allowed.allowedSpaceIds.map((id) => id.toString()))
   let connected: Promise<void> | null = null
+  let connectedSuccessfully = false
   let eligibleChatsCache:
     | {
         expiresAtMs: number
@@ -266,6 +275,7 @@ export function createInlineApi(params: {
       })
     }
     await connected
+    connectedSuccessfully = true
   }
 
   const allowDms = params.allowed.allowDms === true
@@ -780,6 +790,7 @@ export function createInlineApi(params: {
   return {
     async close() {
       await client.close()
+      if (connectedSuccessfully) await eventDrain
     },
 
     async listSpaces({ query, limit }) {
