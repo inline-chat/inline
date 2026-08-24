@@ -294,6 +294,7 @@ describe("messages.updateDialogOrder", () => {
     )
     const orders = results.map((result) => {
       if (!result.dialog) throw new Error("Expected moved dialog")
+      if (result.dialog.order == null) throw new Error("Expected moved dialog order")
       return result.dialog.order
     })
 
