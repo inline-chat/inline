@@ -76,11 +76,13 @@ private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
   enum ReconciliationMode {
     case complete
     case uploading
+    case processingThenComplete
   }
 
   private let reconciliationMode: ReconciliationMode
   private(set) var methods: [InlineProtocol.Method] = []
   private var finishCommitted = false
+  private var finishAttempts = 0
 
   init(reconciliationMode: ReconciliationMode = .complete) {
     self.reconciliationMode = reconciliationMode
@@ -104,6 +106,17 @@ private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
       #expect(save.data == Data([1, 2, 3]))
       return .saveUploadPart(SaveUploadPartResult())
     case (.finishUpload, .finishUpload):
+      finishAttempts += 1
+      if reconciliationMode == .processingThenComplete, finishAttempts > 1 {
+        var photo = Photo()
+        photo.id = 79
+        var complete = UploadComplete()
+        complete.fileUniqueID = "INP_finish_replayed"
+        complete.photo = photo
+        var finish = FinishUploadResult()
+        finish.complete = complete
+        return .finishUpload(finish)
+      }
       finishCommitted = true
       throw SimulatedUploadFailure.responseLost
     case (.getUploadState, .getUploadState):
@@ -111,6 +124,12 @@ private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
       if reconciliationMode == .uploading {
         var state = GetUploadStateResult()
         state.status = .uploading
+        state.acceptedParts = [0]
+        return .getUploadState(state)
+      }
+      if reconciliationMode == .processingThenComplete {
+        var state = GetUploadStateResult()
+        state.status = .processing
         state.acceptedParts = [0]
         return .getUploadState(state)
       }
@@ -385,6 +404,41 @@ struct NativeUploadTests {
       .saveUploadPart,
       .finishUpload,
       .getUploadState,
+    ])
+  }
+
+  @Test("replays finish after a lost response reports processing")
+  func replaysFinishAfterProcessingProbe() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-processing-replay-test-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+
+    let transport = FinishResponseLostUploadRPCMock(reconciliationMode: .processingThenComplete)
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: PassthroughUploadStaging(),
+      ownerScope: { "test-owner" }
+    )
+    let complete = try await coordinator.upload(
+      NativeMediaUploadRequest(
+        logicalID: "photo:processing-replay",
+        fileURL: source,
+        fileName: "photo.jpg",
+        mimeType: "image/jpeg",
+        kind: .photo
+      ),
+      progress: { _, _ in }
+    )
+
+    #expect(complete.fileUniqueID == "INP_finish_replayed")
+    #expect(complete.photo.id == 79)
+    #expect(await transport.calledMethods() == [
+      .createUpload,
+      .saveUploadPart,
+      .finishUpload,
+      .getUploadState,
+      .finishUpload,
     ])
   }
 

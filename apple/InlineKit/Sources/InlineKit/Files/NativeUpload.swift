@@ -179,6 +179,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private enum FinishReconciliation {
     case complete(UploadComplete)
     case uploading(Set<UInt32>)
+    case processing
     case failed(UploadFailure)
     case canceled
     case expired
@@ -284,6 +285,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     var finishReconciliationAttempts = 0
     do {
       while true {
+        try Task.checkCancellation()
         let missingParts = (0 ..< created.partCount).filter { !accepted.contains($0) }
         if !missingParts.isEmpty {
           try await withThrowingTaskGroup(of: UInt32.self) { group in
@@ -374,6 +376,10 @@ public actor DurableUploadCoordinator: MediaUploading {
               durableAcceptedBytes = reconciledBytes
               progress(durableAcceptedBytes, byteCount)
             }
+          case .processing:
+            // Replay the idempotent finish operation so it can reclaim a stale server lease.
+            // A normal processing response below supplies the authoritative retry delay.
+            continue
           case let .failed(failure):
             throw NativeMediaUploadError.rejected(
               code: failure.code,
@@ -455,28 +461,24 @@ public actor DurableUploadCoordinator: MediaUploading {
   }
 
   private func reconcileLostFinish(uploadID: Data) async throws -> FinishReconciliation {
-    while true {
-      let state = try await uploadState(uploadID: uploadID)
-      switch state.status {
-      case .complete:
-        guard state.hasComplete else { throw NativeMediaUploadError.unexpectedResponse }
-        return .complete(state.complete)
-      case .uploading:
-        return .uploading(Set(state.acceptedParts))
-      case .processing:
-        // The finalizer owns this state. Keep querying authoritative state
-        // instead of replaying FINISH_UPLOAD while the response is unknown.
-        try await Task.sleep(for: .seconds(1))
-      case .failed:
-        guard state.hasFailure else { throw NativeMediaUploadError.unexpectedResponse }
-        return .failed(state.failure)
-      case .canceled:
-        return .canceled
-      case .expired:
-        return .expired
-      case .unspecified, .UNRECOGNIZED:
-        throw NativeMediaUploadError.unexpectedResponse
-      }
+    let state = try await uploadState(uploadID: uploadID)
+    switch state.status {
+    case .complete:
+      guard state.hasComplete else { throw NativeMediaUploadError.unexpectedResponse }
+      return .complete(state.complete)
+    case .uploading:
+      return .uploading(Set(state.acceptedParts))
+    case .processing:
+      return .processing
+    case .failed:
+      guard state.hasFailure else { throw NativeMediaUploadError.unexpectedResponse }
+      return .failed(state.failure)
+    case .canceled:
+      return .canceled
+    case .expired:
+      return .expired
+    case .unspecified, .UNRECOGNIZED:
+      throw NativeMediaUploadError.unexpectedResponse
     }
   }
 
