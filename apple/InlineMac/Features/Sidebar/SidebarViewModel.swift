@@ -139,15 +139,6 @@ final class SidebarViewModel {
     case home(ContentMode)
     case space(Int64, ContentMode)
 
-    var isInbox: Bool {
-      switch self {
-      case .home(.inbox), .space(_, .inbox):
-        true
-      case .home(.chatList), .space(_, .chatList):
-        false
-      }
-    }
-
     var spaceId: Int64? {
       switch self {
       case .home:
@@ -349,7 +340,7 @@ final class SidebarViewModel {
           includeSpaceChatsInHome: true,
           translationLanguage: UserLocale.getCurrentLanguage()
         )
-        let folders = source.spaceId == nil && source.isInbox
+        let folders = source.spaceId == nil
           ? try DialogFolder.order(DialogFolder.Columns.order, DialogFolder.Columns.id)
             .fetchAll(db)
             .map(Folder.init)
