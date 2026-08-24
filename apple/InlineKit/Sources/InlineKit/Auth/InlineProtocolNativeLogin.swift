@@ -42,6 +42,7 @@ extension InlineProtocolV3Connection: InlineProtocolNativeLoginConnection {
 typealias NativeLoginConnectionFactory = @Sendable (
   InlineProtocolV3Options
 ) async throws -> any InlineProtocolNativeLoginConnection
+typealias NativeLoginCredentialStoragePreparation = @Sendable () async throws -> Void
 
 public actor InlineProtocolNativeLogin {
   public static let shared = InlineProtocolNativeLogin()
@@ -64,6 +65,7 @@ public actor InlineProtocolNativeLogin {
   private let rsaPublicKeys: [InlineProtocolRSAPublicKey]
   private let localDebugTrustHost: String?
   private let connect: NativeLoginConnectionFactory
+  private let prepareCredentialStorage: NativeLoginCredentialStoragePreparation
   private var pending: Pending?
   private var completionTask: CompletionTask?
   private var generation: UInt64 = 0
@@ -92,19 +94,22 @@ public actor InlineProtocolNativeLogin {
     localDebugTrustHost = nil
     #endif
     connect = { try await InlineProtocolV3Connection.connect($0) }
+    prepareCredentialStorage = { try await AppDatabase.authenticated() }
   }
 
   init(
     auth: AuthHandle,
     url: URL,
     rsaPublicKeys: [InlineProtocolRSAPublicKey],
-    connect: @escaping NativeLoginConnectionFactory
+    connect: @escaping NativeLoginConnectionFactory,
+    prepareCredentialStorage: @escaping NativeLoginCredentialStoragePreparation = {}
   ) {
     self.auth = auth
     self.url = url
     self.rsaPublicKeys = rsaPublicKeys
     localDebugTrustHost = nil
     self.connect = connect
+    self.prepareCredentialStorage = prepareCredentialStorage
   }
 
   @discardableResult
@@ -183,8 +188,14 @@ public actor InlineProtocolNativeLogin {
       let temporary = await connection.nativeLoginAuthorization()
       try requireCurrent(generation)
 
-      // Credential persistence is the commit point. Once it starts, cancellation no longer
-      // tears down a session whose authority may already be stored by AuthStore.
+      // Rotate the already-open account database away from a legacy bearer passphrase before
+      // V3 credential persistence deletes that bearer authority. Either side of a crash now has
+      // enough key material to reopen the same database.
+      try await prepareCredentialStorage()
+      try requireCurrent(generation)
+
+      // Credential persistence is the authority commit point. Once it starts, cancellation no
+      // longer tears down a session whose authority may already be stored by AuthStore.
       self.pending = nil
       try await auth.saveInlineProtocolCredentials(.init(
         userId: authorized.user.id,

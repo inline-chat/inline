@@ -74,6 +74,61 @@ private actor NativeLoginConnectionFactory {
   func callCount() -> Int { calls }
 }
 
+private actor SuccessfulNativeLoginConnection: InlineProtocolNativeLoginConnection {
+  private let authorization: InlineProtocolAuthorization
+
+  init(authorization: InlineProtocolAuthorization) {
+    self.authorization = authorization
+  }
+
+  func authBegin(_: AuthBeginRequest) -> AuthBeginResult {
+    var result = AuthBeginResult()
+    result.challengeID = Data(repeating: 8, count: 32)
+    result.delivery = .email
+    return result
+  }
+
+  func authComplete(_: AuthCompleteRequest) -> AuthCompleteResult {
+    var user = InlineProtocol.User()
+    user.id = 42
+    var authorized = AuthAuthorized()
+    authorized.user = user
+    authorized.accountSessionID = 77
+    var result = AuthCompleteResult()
+    result.authorized = authorized
+    return result
+  }
+
+  func nativeLoginAuthorization() -> InlineProtocolAuthorization { authorization }
+  func bindNativeLoginTemporary(to _: InlineProtocolAuthorization) async throws {}
+  func verifyNativeLoginAuthorization() async throws {}
+  func close() {}
+}
+
+private actor SuccessfulNativeLoginConnectionFactory {
+  private var connections: [SuccessfulNativeLoginConnection]
+
+  init(_ connections: [SuccessfulNativeLoginConnection]) {
+    self.connections = connections
+  }
+
+  func connect(_: InlineProtocolV3Options) throws -> any InlineProtocolNativeLoginConnection {
+    try #require(connections.isEmpty == false)
+    return connections.removeFirst()
+  }
+}
+
+private actor CredentialStorageProbe {
+  private var prepared = false
+
+  func markPrepared() { prepared = true }
+  func wasPrepared() -> Bool { prepared }
+}
+
+private enum CredentialStoragePreparationTestError: Error {
+  case unavailable
+}
+
 @Suite("Inline Protocol native login")
 struct InlineProtocolNativeLoginTests {
   @Test("native login preserves actionable RPC errors")
@@ -97,6 +152,68 @@ struct InlineProtocolNativeLoginTests {
     #expect(message == "Email is invalid")
     #expect(code == 400)
     #expect(presented.localizedDescription == "Email is invalid")
+  }
+
+  @Test("prepares durable database authority before bearer credentials are replaced")
+  func preparesDatabaseBeforeCredentialCommit() async throws {
+    let auth = Auth.mocked(authenticated: false)
+    try await auth.saveCredentials(token: "42:legacy", userId: 42)
+    let permanent = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: false)
+    )
+    let temporary = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: true)
+    )
+    let factory = SuccessfulNativeLoginConnectionFactory([permanent, temporary])
+    let probe = CredentialStorageProbe()
+    let login = InlineProtocolNativeLogin(
+      auth: auth.handle,
+      url: URL(string: "ws://inline.test/realtime/v3")!,
+      rsaPublicKeys: [try publicKey()],
+      connect: { options in try await factory.connect(options) },
+      prepareCredentialStorage: {
+        #expect(auth.handle.token() == "42:legacy")
+        #expect(auth.handle.inlineProtocolCredentials() == nil)
+        await probe.markPrepared()
+      }
+    )
+
+    _ = try await login.beginEmail("test@example.com")
+    _ = try await login.complete(code: "123456")
+
+    #expect(await probe.wasPrepared())
+    #expect(auth.handle.token() == nil)
+    #expect(auth.handle.inlineProtocolCredentials()?.userId == 42)
+  }
+
+  @Test("preserves bearer credentials when durable database preparation fails")
+  func databasePreparationFailurePreservesBearerCredentials() async throws {
+    let auth = Auth.mocked(authenticated: false)
+    try await auth.saveCredentials(token: "42:legacy", userId: 42)
+    let permanent = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: false)
+    )
+    let temporary = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: true)
+    )
+    let factory = SuccessfulNativeLoginConnectionFactory([permanent, temporary])
+    let login = InlineProtocolNativeLogin(
+      auth: auth.handle,
+      url: URL(string: "ws://inline.test/realtime/v3")!,
+      rsaPublicKeys: [try publicKey()],
+      connect: { options in try await factory.connect(options) },
+      prepareCredentialStorage: {
+        throw CredentialStoragePreparationTestError.unavailable
+      }
+    )
+
+    _ = try await login.beginEmail("test@example.com")
+    await #expect(throws: CredentialStoragePreparationTestError.unavailable) {
+      try await login.complete(code: "123456")
+    }
+
+    #expect(auth.handle.token() == "42:legacy")
+    #expect(auth.handle.inlineProtocolCredentials() == nil)
   }
 
   @Test("temporary authorization rotation uses the exact authenticated 80 percent boundary")

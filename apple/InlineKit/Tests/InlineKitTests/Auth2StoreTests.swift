@@ -333,8 +333,8 @@ final class Auth2StoreTests {
     #expect(await recovered.hasPendingLogout() == false)
   }
 
-  @Test("pending logout rejects stale bearer credential writers")
-  func pendingLogoutRejectsBearerCredentialWriter() async throws {
+  @Test("pending logout rejects stale bearer and V3 credential writers")
+  func pendingLogoutRejectsCredentialWriters() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
@@ -350,9 +350,19 @@ final class Auth2StoreTests {
       Issue.record("Unexpected bearer credential persistence error: \(error)")
     }
 
+    do {
+      try await store.saveInlineProtocolCredentials(v3Credentials())
+      Issue.record("Expected pending logout to reject V3 credential persistence")
+    } catch AuthStorageError.logoutInProgress {
+      // The logout marker owns authority destruction until app cleanup finishes.
+    } catch {
+      Issue.record("Unexpected credential persistence error: \(error)")
+    }
+
     #expect(await store.hasPendingLogout())
     #expect(cache.snapshot().status == .unauthenticated)
     #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
   }
 
   @Test("broadcasts login and logout events to every subscriber")

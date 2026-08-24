@@ -317,6 +317,10 @@ actor AuthStore {
   }
 
   func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {
+    guard !hasPendingLogout() else {
+      throw AuthStorageError.logoutInProgress
+    }
+
     let data: Data
     do {
       data = try JSONEncoder().encode(credentials)

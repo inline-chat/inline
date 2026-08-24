@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import Testing
@@ -6,6 +7,46 @@ import Testing
 
 @Suite("Database Promotion")
 final class DatabasePromotionTests {
+  @Test("credential preparation fails closed when durable key authority is unavailable")
+  func credentialPreparationRequiresDatabaseKey() throws {
+    #expect(try AppDatabase.requiredDatabaseKey(for: .available(key: "stable")) == "stable")
+    #expect(throws: DatabaseCredentialPreparationError.keychainLocked) {
+      try AppDatabase.requiredDatabaseKey(for: .locked)
+    }
+    #expect(throws: DatabaseCredentialPreparationError.keyUnavailable) {
+      try AppDatabase.requiredDatabaseKey(for: .notFound)
+    }
+    #expect(throws: DatabaseCredentialPreparationError.keychainFailure(-50)) {
+      try AppDatabase.requiredDatabaseKey(for: .error(status: -50))
+    }
+  }
+
+  @Test("waits for short-lived database contention")
+  func configuresBusyTimeout() {
+    let configuration = AppDatabase.makeConfiguration(passphrase: "123")
+    guard case let .timeout(duration) = configuration.busyMode else {
+      Issue.record("Expected a database busy timeout")
+      return
+    }
+    #expect(duration == 5)
+  }
+
+  @Test("credential preparation is idempotent for the current writer and key")
+  func tracksPreparedCredentialStorageKey() throws {
+    let db = AppDatabase.empty()
+
+    #expect(db.isCredentialStoragePrepared(for: "stable") == false)
+    db.markCredentialStoragePrepared(for: "stable")
+    #expect(db.isCredentialStoragePrepared(for: "stable"))
+    #expect(db.isCredentialStoragePrepared(for: "replacement") == false)
+
+    let replacement = try DatabaseQueue(
+      configuration: AppDatabase.makeConfiguration(passphrase: "replacement")
+    )
+    db.swapWriter(replacement)
+    #expect(db.isCredentialStoragePrepared(for: "stable") == false)
+  }
+
   @Test("promotes in-memory DB to persistent once the persistent DB becomes openable")
   func promotesToPersistentIfPossible() async throws {
     let db = AppDatabase.empty()

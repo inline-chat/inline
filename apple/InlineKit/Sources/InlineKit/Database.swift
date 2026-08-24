@@ -4,11 +4,19 @@ import GRDB
 import InlineConfig
 import Logger
 
+enum DatabaseCredentialPreparationError: Error, Equatable {
+  case keychainLocked
+  case keyUnavailable
+  case keychainFailure(Int32)
+  case persistentDatabaseUnavailable
+}
+
 // MARK: - DB main class
 
 public final class AppDatabase: @unchecked Sendable {
   private let writerLock = NSLock()
   private var _dbWriter: any DatabaseWriter
+  private var preparedDatabaseKey: String?
 #if DEBUG
   private static let warnLock = NSLock()
   nonisolated(unsafe) private static var warnedInMemoryObservationSites: Set<String> = []
@@ -70,11 +78,23 @@ public final class AppDatabase: @unchecked Sendable {
 
   public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
     _dbWriter = dbWriter
+    preparedDatabaseKey = nil
     try migrator.migrate(dbWriter)
   }
 
   internal func swapWriter(_ newWriter: any DatabaseWriter) {
-    writerLock.withLock { _dbWriter = newWriter }
+    writerLock.withLock {
+      _dbWriter = newWriter
+      preparedDatabaseKey = nil
+    }
+  }
+
+  internal func isCredentialStoragePrepared(for key: String) -> Bool {
+    writerLock.withLock { preparedDatabaseKey == key }
+  }
+
+  internal func markCredentialStoragePrepared(for key: String?) {
+    writerLock.withLock { preparedDatabaseKey = key }
   }
 }
 
@@ -1072,6 +1092,10 @@ public extension AppDatabase {
   static func makeConfiguration(passphrase: String, _ base: Configuration = Configuration()) -> Configuration {
     var config = base
 
+    // Let short-lived contention between database connections finish instead
+    // of turning ordinary reads and writes into SQLITE_BUSY.
+    config.busyMode = .timeout(5)
+
     config.prepareDatabase { db in
       db.trace(options: .statement) { log.trace($0.expandedDescription) }
       try db.usePassphrase(passphrase)
@@ -1081,15 +1105,41 @@ public extension AppDatabase {
   }
 
   static func authenticated() async throws {
-    switch DatabaseKeyStore.getOrCreate() {
+    let key = try requiredDatabaseKey(for: DatabaseKeyStore.getOrCreate())
+
+    if AppDatabase.shared.isPersistent,
+       AppDatabase.shared.isCredentialStoragePrepared(for: key)
+    {
+      return
+    }
+
+    if !AppDatabase.shared.isPersistent {
+      _ = await promoteSharedToPersistentIfPossible()
+      guard AppDatabase.shared.isPersistent else {
+        log.error("AppDatabase.authenticated could not promote the in-memory database")
+        throw DatabaseCredentialPreparationError.persistentDatabaseUnavailable
+      }
+    }
+
+    try AppDatabase.changePassphrase(key)
+    AppDatabase.shared.markCredentialStoragePrepared(for: key)
+  }
+
+  static func requiredDatabaseKey(
+    for availability: DatabaseKeyAvailability
+  ) throws -> String {
+    switch availability {
     case .available(let key):
-      try AppDatabase.changePassphrase(key)
+      return key
     case .locked:
       log.warning("AppDatabase.authenticated called while keychain is locked")
+      throw DatabaseCredentialPreparationError.keychainLocked
     case .notFound:
       log.warning("AppDatabase.authenticated called without database key")
+      throw DatabaseCredentialPreparationError.keyUnavailable
     case .error(let status):
       log.error("AppDatabase.authenticated failed to get database key status=\(status)")
+      throw DatabaseCredentialPreparationError.keychainFailure(status)
     }
   }
 
@@ -1213,8 +1263,10 @@ public extension AppDatabase {
         switch DatabaseKeyStore.getOrCreate() {
         case .available(let key):
           try AppDatabase.changePassphrase(key)
+          AppDatabase.shared.markCredentialStoragePrepared(for: key)
         default:
           try AppDatabase.changePassphrase("123")
+          AppDatabase.shared.markCredentialStoragePrepared(for: nil)
         }
       } catch {
         throw logoutCleanupError(phase: .rotatePassphrase, error: error)
