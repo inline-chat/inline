@@ -144,7 +144,7 @@ describe("InlineBotClient", () => {
 
     await client.getMessages({ chat_id: 42, message_ids: [7, 8] })
     await client.searchMessages({ chat_id: 42, query: "incident", limit: 20 })
-    await client.createThread({ title: "Triage", participant_ids: [9] })
+    await client.createThread({ title: "Triage", participants: [9] })
     await client.createReplyThread({ chat_id: 42, message_id: 7, title: "Follow-up" })
 
     expect(calls).toEqual([
@@ -161,7 +161,7 @@ describe("InlineBotClient", () => {
       {
         url: "https://api.inline.chat/bot/createThread",
         method: "POST",
-        body: { title: "Triage", participant_ids: [9] },
+        body: { title: "Triage", participants: [9] },
       },
       {
         url: "https://api.inline.chat/bot/createReplyThread",
@@ -216,6 +216,8 @@ describe("InlineBotClient", () => {
     await client.unpinMessage({ chat_id: 9, message_id: 7 })
     await client.getChatParticipant({ chat_id: 9, user_id: 6 })
     await client.getChatParticipantCount({ chat_id: 9 })
+    await client.addThreadParticipant({ chat_id: 9, user_id: 5 })
+    await client.removeThreadParticipant({ chat_id: 9, user_id: 5 })
     await client.setThreadTitle({ chat_id: 9, title: "Triage" })
 
     expect(calls.map(({ url, method }) => ({ url, method }))).toEqual([
@@ -224,6 +226,8 @@ describe("InlineBotClient", () => {
       { url: "https://api.inline.chat/bot/unpinMessage", method: "POST" },
       { url: "https://api.inline.chat/bot/getChatParticipant?chat_id=9&user_id=6", method: "GET" },
       { url: "https://api.inline.chat/bot/getChatParticipantCount?chat_id=9", method: "GET" },
+      { url: "https://api.inline.chat/bot/addThreadParticipant", method: "POST" },
+      { url: "https://api.inline.chat/bot/removeThreadParticipant", method: "POST" },
       { url: "https://api.inline.chat/bot/setThreadTitle", method: "POST" },
     ])
   })

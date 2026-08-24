@@ -5,7 +5,6 @@ import type {
   BotMethodResultByName,
   CreateReplyThreadParams,
   CreateThreadParams,
-  CreateAgentParams,
   AnswerMessageActionParams,
   DeleteReactionParams,
   DeleteWebhookParams,
@@ -16,7 +15,8 @@ import type {
   GetChatParams,
   GetChatParticipantParams,
   GetChatParticipantCountParams,
-  GetAgentParams,
+  AddThreadParticipantParams,
+  RemoveThreadParticipantParams,
   GetFileParams,
   GetMessagesParams,
   GetUpdatesParams,
@@ -49,13 +49,11 @@ const getMethodNames = new Set<BotMethodName>([
   "getFile",
   "getUpdates",
   "getWebhookInfo",
-  "getAgent",
-  "getMyAgents",
 ])
 
 function isGetMethod(
   method: string,
-): method is "getMe" | "getChat" | "getChatHistory" | "getChatParticipant" | "getChatParticipantCount" | "getMyCommands" | "getFile" | "getUpdates" | "getWebhookInfo" | "getAgent" | "getMyAgents" {
+): method is "getMe" | "getChat" | "getChatHistory" | "getChatParticipant" | "getChatParticipantCount" | "getMyCommands" | "getFile" | "getUpdates" | "getWebhookInfo" {
   return getMethodNames.has(method as BotMethodName)
 }
 
@@ -195,18 +193,6 @@ export class InlineBotClient {
     return this.method("getMe", undefined, options)
   }
 
-  createAgent(params: CreateAgentParams, options?: InlineBotClientMethodOptions) {
-    return this.method("createAgent", params, options)
-  }
-
-  getAgent(params: GetAgentParams, options?: InlineBotClientMethodOptions) {
-    return this.method("getAgent", params, options)
-  }
-
-  getMyAgents(options?: InlineBotClientMethodOptions) {
-    return this.method("getMyAgents", undefined, options)
-  }
-
   getChat(params: GetChatParams, options?: InlineBotClientMethodOptions) {
     return this.method("getChat", params, options)
   }
@@ -273,6 +259,14 @@ export class InlineBotClient {
 
   getChatParticipantCount(params: GetChatParticipantCountParams, options?: InlineBotClientMethodOptions) {
     return this.method("getChatParticipantCount", params, options)
+  }
+
+  addThreadParticipant(params: AddThreadParticipantParams, options?: InlineBotClientMethodOptions) {
+    return this.method("addThreadParticipant", params, options)
+  }
+
+  removeThreadParticipant(params: RemoveThreadParticipantParams, options?: InlineBotClientMethodOptions) {
+    return this.method("removeThreadParticipant", params, options)
   }
 
   setThreadTitle(params: SetThreadTitleParams, options?: InlineBotClientMethodOptions) {

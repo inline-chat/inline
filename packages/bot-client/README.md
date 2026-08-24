@@ -12,12 +12,28 @@ if (history.ok) {
   await bot.sendMessage({ chat_id: 42, text: `I read ${history.result.messages.length} messages.` })
 }
 
+const created = await bot.createThread({
+  title: "Support",
+  participants: [userId],
+})
+
+if (created.ok) {
+  const chatId = created.result.chat.chat_id
+  await bot.sendMessage({
+    chat_id: chatId,
+    text: `Hello [@Mo](inline://user/${userId})`,
+  })
+  await bot.addThreadParticipant({ chat_id: chatId, user_id: teammateId })
+}
+
 await bot.setWebhook({
   url: "https://agent.example.com/inline",
   secret_token: process.env.INLINE_WEBHOOK_SECRET, // optional, recommended
   message_trigger: "mentions",
 })
 ```
+
+`createThread` accepts `title`, `emoji`, `space_id`, `is_public`, and `participants`. Inline automatically adds the authenticated bot to private threads. Public threads do not accept an explicit participant list. Resolved Markdown user links become structured mentions. Participant changes remain separate calls; a bot may add or remove users when it can manage the thread, but it cannot remove itself.
 
 Polling uses the same ordered backlog and is mutually exclusive with an enabled webhook:
 

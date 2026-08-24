@@ -63,6 +63,8 @@ export type {
   GetChatParticipantResult,
   GetChatParticipantCountParams,
   GetChatParticipantCountResult,
+  AddThreadParticipantParams,
+  RemoveThreadParticipantParams,
   GetFileParams,
   GetFileResult,
   GetMeResult,
