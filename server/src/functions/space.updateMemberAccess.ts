@@ -18,6 +18,15 @@ import {
   prepareSpaceChatPermissionUpdates,
   pushChatPermissionUpdates,
 } from "@in/server/modules/authorization/chatPermissionUpdates"
+import {
+  addedAccessUserIds,
+  getEffectiveChatAccessUserIds,
+  getSpaceRootChatIdsForAccessEvents,
+  removedAccessUserIds,
+} from "@in/server/modules/authorization/chatAccessProjection"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { getSyncV3UpdateProducerMode } from "@in/server/modules/serverConfig"
 
 const DEFAULT_CAN_ACCESS_PUBLIC_CHATS = true
 
@@ -52,11 +61,13 @@ export const updateMemberAccess = async (
     throw RealtimeRpcError.BadRequest()
   }
 
+  const updateProducerMode = await getSyncV3UpdateProducerMode()
+
   // Validate, mutate, and persist the space update under one lock boundary.
   // This prevents a delete/re-add on another connection from allowing this
   // request to update a newly-created membership or publish an out-of-order
   // member update after a delete update.
-  const { updatedMember, persisted } = await db.transaction(async (tx) => {
+  const { updatedMember, persisted, accessUpdates } = await db.transaction(async (tx) => {
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
     if (!space) {
       throw RealtimeRpcError.SpaceIdInvalid()
@@ -84,6 +95,13 @@ export const updateMemberAccess = async (
     if (targetMembership.role === "owner") {
       throw RealtimeRpcError.SpaceOwnerRequired()
     }
+
+    const affectedChatIds = updateProducerMode === "canonical_v3"
+      ? await getSpaceRootChatIdsForAccessEvents(tx, spaceId)
+      : []
+    const accessBefore = updateProducerMode === "canonical_v3"
+      ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+      : null
 
     const newCanAccessPublicChats =
       roleKind === "admin"
@@ -121,9 +139,43 @@ export const updateMemberAccess = async (
       })
       .where(eq(spaces.id, spaceId))
 
+    const accessAfter = updateProducerMode === "canonical_v3"
+      ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+      : null
+    const transitions = updateProducerMode === "canonical_v3"
+      ? affectedChatIds.flatMap((chatId) => [
+          ...addedAccessUserIds(chatId, accessBefore!, accessAfter!)
+            .filter((candidateUserId) => candidateUserId === userId)
+            .map(() => ({ chatId, kind: "added" as const })),
+          ...removedAccessUserIds(chatId, accessBefore!, accessAfter!)
+            .filter((candidateUserId) => candidateUserId === userId)
+            .map(() => ({ chatId, kind: "removed" as const })),
+        ])
+      : []
+    const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
+      transitions.map((transition) => ({
+        userId,
+        update: transition.kind === "added"
+          ? {
+              oneofKind: "userAddedToChat" as const,
+              userAddedToChat: { chatId: BigInt(transition.chatId) },
+            }
+          : {
+              oneofKind: "userRemovedFromChat" as const,
+              userRemovedFromChat: { chatId: BigInt(transition.chatId) },
+            },
+      })),
+      { tx },
+    )
+    const accessUpdates = transitions.map((transition, index) => ({
+      ...transition,
+      update: persistedAccessUpdates[index]!,
+    }))
+
     return {
       updatedMember: updated,
       persisted: { seq: update.seq, date: update.date },
+      accessUpdates,
     }
   })
 
@@ -139,9 +191,33 @@ export const updateMemberAccess = async (
     seq: persisted.seq,
     date: persisted.date,
   })
+  if (updateProducerMode === "canonical_v3") {
+    pushAccessUpdates(userId, accessUpdates)
+  }
   pushChatPermissionUpdates(permissionUpdates)
 
   return { updates }
+}
+
+function pushAccessUpdates(
+  userId: number,
+  accessUpdates: { chatId: number; kind: "added" | "removed"; update: UpdateSeqAndDate }[],
+) {
+  for (const accessUpdate of accessUpdates) {
+    RealtimeUpdates.pushToUser(userId, [{
+      seq: accessUpdate.update.seq,
+      date: encodeDateStrict(accessUpdate.update.date),
+      update: accessUpdate.kind === "added"
+        ? {
+            oneofKind: "userAddedToChat",
+            userAddedToChat: { chatId: BigInt(accessUpdate.chatId) },
+          }
+        : {
+            oneofKind: "userRemovedFromChat",
+            userRemovedFromChat: { chatId: BigInt(accessUpdate.chatId) },
+          },
+    }])
+  }
 }
 
 // ------------------------------------------------------------

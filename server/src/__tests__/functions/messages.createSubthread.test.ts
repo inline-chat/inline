@@ -37,6 +37,7 @@ describe("messages.createSubthread", () => {
       {
         parentChatId: BigInt(parentChat.id),
         parentMessageId: 1n,
+        participants: [{ userId: BigInt(anchorAuthor.id) }],
       },
       testUtils.functionContext({ userId: creator.id }),
     )
@@ -105,6 +106,16 @@ describe("messages.createSubthread", () => {
       .where(and(eq(schema.updates.bucket, schema.UpdateBucket.Chat), eq(schema.updates.entityId, childChatId)))
 
     expect(childChatUpdates).toHaveLength(0)
+
+    const replyDiscoveryUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, anchorAuthor.id)))
+    expect(
+      replyDiscoveryUpdates
+        .map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)
+        .filter((kind) => kind === "userAddedToChat"),
+    ).toEqual([])
 
     const parentMessages = await getMessages(
       {
@@ -365,7 +376,7 @@ describe("messages.createSubthread", () => {
     expect(childChat?.isUntitled).toBe(true)
   })
 
-  test("enqueues participant-add user updates for initial subthread participants", async () => {
+  test("does not enqueue durable access updates for discoverable subthreads", async () => {
     const creator = await testUtils.createUser("subthread-initial-owner@example.com")
     const bot = await testUtils.createUser("subthread-initial-bot@example.com")
     const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
@@ -389,14 +400,8 @@ describe("messages.createSubthread", () => {
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, bot.id)))
 
-    expect(botUpdates).toHaveLength(1)
-    const update = UpdatesModel.decrypt(botUpdates[0]!)
-    expect(update.payload.update.oneofKind).toBe("userChatParticipantAdd")
-    if (update.payload.update.oneofKind !== "userChatParticipantAdd") {
-      throw new Error("Expected userChatParticipantAdd update")
-    }
-    expect(update.payload.update.userChatParticipantAdd.chatId).toBe(result.chat.id)
-    expect(update.payload.update.userChatParticipantAdd.participant?.userId).toBe(BigInt(bot.id))
+    expect(botUpdates).toHaveLength(0)
+    expect(result.chat.parentChatId).toBe(BigInt(parentChat.id))
   })
 
   test("getChat creates a hidden dialog when opening a linked subthread", async () => {

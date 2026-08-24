@@ -24,6 +24,15 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { ensureCanManageChatParticipants } from "@in/server/modules/authorization/spaceThreadGuards"
 import { ensureGroupCanParticipateInChat, loadActiveGroupMemberIds } from "@in/server/modules/userGroups"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
+import {
+  getRootChatIdsForAccessEvents,
+  getEffectiveChatAccessUserIds,
+  removedAccessUserIds,
+} from "@in/server/modules/authorization/chatAccessProjection"
+import {
+  getSyncV3UpdateProducerMode,
+  type SyncV3UpdateProducerMode,
+} from "@in/server/modules/serverConfig"
 
 export async function removeChatParticipant(
   input: {
@@ -40,16 +49,19 @@ export async function removeChatParticipant(
       throw RealtimeRpcError.BadRequest()
     }
 
+    const updateProducerMode = await getSyncV3UpdateProducerMode()
+
     if (groupId != null) {
-      await removeChatParticipantGroup({ chatId: input.chatId, groupId }, context)
+      await removeChatParticipantGroup({ chatId: input.chatId, groupId }, context, updateProducerMode)
       return
     }
     if (userId == null) {
       throw RealtimeRpcError.BadRequest()
     }
 
-    const { update, permissionUpdates } = await db.transaction(async (tx): Promise<{
+    const { update, accessUpdates, permissionUpdates } = await db.transaction(async (tx): Promise<{
       update: UpdateSeqAndDate
+      accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
@@ -78,6 +90,13 @@ export async function removeChatParticipant(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "User is not a participant of this chat", 404)
       }
 
+      const accessEventChatIds = updateProducerMode === "canonical_v3"
+        ? await getRootChatIdsForAccessEvents(tx, [input.chatId])
+        : [input.chatId]
+      const accessBefore = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
+
       await tx
         .delete(chatParticipants)
         .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, userId)))
@@ -89,13 +108,6 @@ export async function removeChatParticipant(
         participantDelete: {
           chatId: BigInt(input.chatId),
           userId: BigInt(userId),
-        },
-      }
-
-      const userServerUpdatePayload: ServerUpdate["update"] = {
-        oneofKind: "userChatParticipantDelete",
-        userChatParticipantDelete: {
-          chatId: BigInt(input.chatId),
         },
       }
 
@@ -113,19 +125,39 @@ export async function removeChatParticipant(
         })
         .where(eq(chats.id, chat.id))
 
-      await UserBucketUpdates.enqueue(
-        {
+      const accessAfter = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
+      const lostChatIds = updateProducerMode === "canonical_v3"
+        ? accessEventChatIds.filter((affectedChatId) =>
+            removedAccessUserIds(affectedChatId, accessBefore!, accessAfter!).includes(userId),
+          )
+        : [input.chatId]
+      const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
+        lostChatIds.map((affectedChatId) => ({
           userId,
-          update: userServerUpdatePayload,
-        },
+          update: updateProducerMode === "canonical_v3"
+            ? {
+                oneofKind: "userRemovedFromChat" as const,
+                userRemovedFromChat: { chatId: BigInt(affectedChatId) },
+              }
+            : {
+                oneofKind: "userChatParticipantDelete" as const,
+                userChatParticipantDelete: { chatId: BigInt(input.chatId) },
+              },
+        })),
         { tx },
       )
+      const accessUpdates = lostChatIds.map((chatId, index) => ({
+        chatId,
+        update: persistedAccessUpdates[index]!,
+      }))
       const permissionUpdates = await prepareChatPermissionUpdates(
         { userIds: [userId], chatIds: [input.chatId] },
         { tx },
       )
 
-      return { update, permissionUpdates }
+      return { update, accessUpdates, permissionUpdates }
     })
 
     await pushUpdates({
@@ -134,6 +166,11 @@ export async function removeChatParticipant(
       currentUserId: context.currentUserId,
       update,
     })
+    if (updateProducerMode === "canonical_v3") {
+      for (const accessUpdate of accessUpdates) {
+        pushUserRemovedFromChat(userId, accessUpdate.chatId, undefined, accessUpdate.update)
+      }
+    }
     pushChatPermissionUpdates(permissionUpdates)
     const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
     if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: false })
@@ -149,11 +186,13 @@ export async function removeChatParticipant(
 async function removeChatParticipantGroup(
   input: { chatId: number; groupId: number },
   context: FunctionContext,
+  updateProducerMode: SyncV3UpdateProducerMode,
 ): Promise<void> {
-  const { update, affectedUserIds, permissionUpdates } = await db.transaction(
+  const { update, affectedUserIds, accessUpdates, permissionUpdates } = await db.transaction(
     async (tx): Promise<{
       update: UpdateSeqAndDate
       affectedUserIds: number[]
+      accessUpdates: { userId: number; chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
@@ -178,7 +217,13 @@ async function removeChatParticipantGroup(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Group is not a participant of this chat", 404)
       }
 
-      const affectedUserIds = await loadActiveGroupMemberIds(input.groupId)
+      const affectedUserIds = await loadActiveGroupMemberIds(input.groupId, tx)
+      const accessEventChatIds = updateProducerMode === "canonical_v3"
+        ? await getRootChatIdsForAccessEvents(tx, [input.chatId])
+        : [input.chatId]
+      const accessBefore = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
 
       await tx
         .delete(chatParticipantGroups)
@@ -206,29 +251,48 @@ async function removeChatParticipantGroup(
         })
         .where(eq(chats.id, chat.id))
 
-      await Promise.all(
-        affectedUserIds.map((memberId) =>
-          UserBucketUpdates.enqueue(
-            {
-              userId: memberId,
-              update: {
-                oneofKind: "userChatParticipantGroupDelete",
+      const accessAfter = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
+      const transitions = updateProducerMode === "canonical_v3"
+        ? accessEventChatIds.flatMap((affectedChatId) => {
+            const lostAccess = new Set(removedAccessUserIds(affectedChatId, accessBefore!, accessAfter!))
+            return affectedUserIds
+              .filter((userId) => lostAccess.has(userId))
+              .map((userId) => ({ userId, chatId: affectedChatId }))
+          })
+        : affectedUserIds.map((userId) => ({ userId, chatId: input.chatId }))
+      const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
+        transitions.map((transition) => ({
+          userId: transition.userId,
+          update: updateProducerMode === "canonical_v3"
+            ? {
+                oneofKind: "userRemovedFromChat" as const,
+                userRemovedFromChat: {
+                  chatId: BigInt(transition.chatId),
+                  groupId: transition.chatId === input.chatId ? BigInt(input.groupId) : undefined,
+                },
+              }
+            : {
+                oneofKind: "userChatParticipantGroupDelete" as const,
                 userChatParticipantGroupDelete: {
                   chatId: BigInt(input.chatId),
                   groupId: BigInt(input.groupId),
                 },
               },
-            },
-            { tx },
-          ),
-        ),
+        })),
+        { tx },
       )
+      const accessUpdates = transitions.map((transition, index) => ({
+        ...transition,
+        update: persistedAccessUpdates[index]!,
+      }))
       const permissionUpdates = await prepareChatPermissionUpdates(
         { userIds: affectedUserIds, chatIds: [input.chatId] },
         { tx },
       )
 
-      return { update, affectedUserIds, permissionUpdates }
+      return { update, affectedUserIds, accessUpdates, permissionUpdates }
     },
   )
 
@@ -239,7 +303,36 @@ async function removeChatParticipantGroup(
     affectedUserIds,
     update,
   })
+  if (updateProducerMode === "canonical_v3") {
+    for (const accessUpdate of accessUpdates) {
+      pushUserRemovedFromChat(
+        accessUpdate.userId,
+        accessUpdate.chatId,
+        accessUpdate.chatId === input.chatId ? input.groupId : undefined,
+        accessUpdate.update,
+      )
+    }
+  }
   pushChatPermissionUpdates(permissionUpdates)
+}
+
+function pushUserRemovedFromChat(
+  userId: number,
+  chatId: number,
+  groupId: number | undefined,
+  update: UpdateSeqAndDate,
+): void {
+  RealtimeUpdates.pushToUser(userId, [{
+    seq: update.seq,
+    date: encodeDateStrict(update.date),
+    update: {
+      oneofKind: "userRemovedFromChat",
+      userRemovedFromChat: {
+        chatId: BigInt(chatId),
+        groupId: groupId === undefined ? undefined : BigInt(groupId),
+      },
+    },
+  }])
 }
 
 /** Push updates for new chat creation */

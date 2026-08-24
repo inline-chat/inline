@@ -9,6 +9,7 @@ import * as schema from "../../db/schema"
 import { and, eq } from "drizzle-orm"
 import type { FunctionContext } from "../../functions/_types"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { resetServerConfigCacheForTests } from "@in/server/modules/serverConfig"
 
 describe("messages.createChat", () => {
   // Setup test lifecycle
@@ -230,18 +231,61 @@ describe("messages.createChat", () => {
 
     expect(otherUpdates).toHaveLength(1)
     const update = UpdatesModel.decrypt(otherUpdates[0]!)
-    expect(update.payload.update.oneofKind).toBe("userChatParticipantAdd")
-    if (update.payload.update.oneofKind !== "userChatParticipantAdd") {
-      throw new Error("Expected userChatParticipantAdd update")
+    expect(update.payload.update.oneofKind).toBe("userAddedToChat")
+    if (update.payload.update.oneofKind !== "userAddedToChat") {
+      throw new Error("Expected userAddedToChat update")
     }
-    expect(update.payload.update.userChatParticipantAdd.chatId).toBe(result.chat.id)
-    expect(update.payload.update.userChatParticipantAdd.participant?.userId).toBe(BigInt(otherUser.id))
+    expect(update.payload.update.userAddedToChat.chatId).toBe(result.chat.id)
+    expect(update.payload.update.userAddedToChat.participant?.userId).toBe(BigInt(otherUser.id))
 
     const currentUserUpdates = await db
       .select()
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, currentUser.id)))
     expect(currentUserUpdates).toHaveLength(0)
+  })
+
+  test("selects one access-event family and supports rollback to legacy", async () => {
+    const originalMode = process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"]
+
+    const createAndReadUpdate = async (mode: "legacy" | "canonical_v3", suffix: string) => {
+      process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"] = mode
+      resetServerConfigCacheForTests()
+      const currentUser = await testUtils.createUser(`rollout-owner-${suffix}@example.com`)
+      const otherUser = await testUtils.createUser(`rollout-participant-${suffix}@example.com`)
+
+      await createChat(
+        {
+          title: `Rollout ${suffix}`,
+          isPublic: false,
+          participants: [{ userId: BigInt(otherUser.id) }],
+        },
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      )
+
+      const rows = await db
+        .select()
+        .from(schema.updates)
+        .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, otherUser.id)))
+      expect(rows).toHaveLength(1)
+      return UpdatesModel.decrypt(rows[0]!).payload.update.oneofKind
+    }
+
+    try {
+      expect(await createAndReadUpdate("legacy", "legacy")).toBe("userChatParticipantAdd")
+      expect(await createAndReadUpdate("canonical_v3", "canonical")).toBe("userAddedToChat")
+      expect(await createAndReadUpdate("legacy", "rollback")).toBe("userChatParticipantAdd")
+    } finally {
+      if (originalMode === undefined) {
+        delete process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"]
+      } else {
+        process.env["INLINE_CONFIG_SYNC_V3_UPDATE_PRODUCERS"] = originalMode
+      }
+      resetServerConfigCacheForTests()
+    }
   })
 
   test("allows duplicate home thread titles (not unique)", async () => {

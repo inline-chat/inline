@@ -25,11 +25,15 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { Chat, ChatParticipant, Dialog, Message } from "@inline-chat/protocol/core"
-import type { Transaction } from "@in/server/db/types"
-import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 import { and, eq, inArray } from "drizzle-orm"
 import { queueReplyThreadGraphMaterialization } from "@in/server/modules/threadGraph"
+import type { Transaction } from "@in/server/db/types"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import {
+  getSyncV3UpdateProducerMode,
+  type SyncV3UpdateProducerMode,
+} from "@in/server/modules/serverConfig"
 
 type Input = {
   parentChatId: bigint
@@ -122,6 +126,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
       : undefined)
   const description = normalizeOptionalString(input.description)
   const emoji = normalizeOptionalString(input.emoji)
+  const updateProducerMode = await getSyncV3UpdateProducerMode()
 
   const chat = await createSubthreadChat({
     parentChat,
@@ -132,6 +137,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     emoji,
     createdBy: context.currentUserId,
     directParticipantUserIds,
+    updateProducerMode,
   })
 
   const { dialogs: materializedDialogs } =
@@ -248,9 +254,13 @@ async function createSubthreadChat(input: {
   emoji?: string
   createdBy: number
   directParticipantUserIds: number[]
+  updateProducerMode: SyncV3UpdateProducerMode
 }): Promise<DbChat> {
   try {
-    const result = await db.transaction(async (tx): Promise<{ chat: DbChat; participants: InitialParticipant[] }> => {
+    const result = await db.transaction(async (tx): Promise<{
+      chat: DbChat
+      participants: InitialParticipant[]
+    }> => {
       const spaceId = input.parentChat.spaceId ?? null
       const threadNumber = await allocateThreadNumber(
         tx,
@@ -287,7 +297,9 @@ async function createSubthreadChat(input: {
         }))
 
         await tx.insert(chatParticipants).values(participants).onConflictDoNothing()
-        await enqueueInitialParticipantAdds(tx, chat.id, participants, input.createdBy)
+        if (input.updateProducerMode === "legacy") {
+          await enqueueLegacyInitialParticipantAdds(tx, chat.id, participants, input.createdBy)
+        }
       }
 
       return { chat, participants }
@@ -296,7 +308,6 @@ async function createSubthreadChat(input: {
     result.participants.forEach((participant) => {
       AccessGuardsCache.setChatParticipant(participant.chatId, participant.userId)
     })
-
     return result.chat
   } catch (error) {
     if (
@@ -317,6 +328,36 @@ async function createSubthreadChat(input: {
     }
 
     throw error
+  }
+}
+
+async function enqueueLegacyInitialParticipantAdds(
+  tx: Transaction,
+  chatId: number,
+  participants: InitialParticipant[],
+  currentUserId: number,
+): Promise<void> {
+  await UserBucketUpdates.enqueueMany(
+    participants
+      .filter((participant) => participant.userId !== currentUserId)
+      .map((participant) => ({
+        userId: participant.userId,
+        update: {
+          oneofKind: "userChatParticipantAdd" as const,
+          userChatParticipantAdd: {
+            chatId: BigInt(chatId),
+            participant: encodeParticipant(participant),
+          },
+        },
+      })),
+    { tx },
+  )
+}
+
+function encodeParticipant(participant: InitialParticipant): ChatParticipant {
+  return {
+    userId: BigInt(participant.userId),
+    date: encodeDateStrict(participant.date),
   }
 }
 
@@ -352,36 +393,6 @@ function uniquePositiveUserIds(participants: { userId: bigint }[]): number[] {
   }
 
   return Array.from(result)
-}
-
-async function enqueueInitialParticipantAdds(
-  tx: Transaction,
-  chatId: number,
-  participants: InitialParticipant[],
-  currentUserId: number,
-): Promise<void> {
-  await UserBucketUpdates.enqueueMany(
-    participants
-      .filter((participant) => participant.userId !== currentUserId)
-      .map((participant) => ({
-        userId: participant.userId,
-        update: {
-          oneofKind: "userChatParticipantAdd" as const,
-          userChatParticipantAdd: {
-            chatId: BigInt(chatId),
-            participant: encodeParticipant(participant),
-          },
-        },
-      })),
-    { tx },
-  )
-}
-
-function encodeParticipant(participant: InitialParticipant): ChatParticipant {
-  return {
-    userId: BigInt(participant.userId),
-    date: encodeDateStrict(participant.date),
-  }
 }
 
 async function persistNewChatUpdate(chatId: number): Promise<UpdateSeqAndDate> {

@@ -92,7 +92,7 @@ describe("messages.updateChatVisibility", () => {
       (update) => UpdatesModel.decrypt(update).payload.update.oneofKind,
     )
     expect(removedKinds).toEqual([
-      "userChatParticipantDelete",
+      "userRemovedFromChat",
       "userChatPermissions",
     ])
     const removedPermission = UpdatesModel.decrypt(removedUpdates[1]!).payload.update
@@ -209,7 +209,7 @@ describe("messages.updateChatVisibility", () => {
       (update) => UpdatesModel.decrypt(update).payload.update.oneofKind,
     )
     expect(removedKinds).toEqual([
-      "userChatParticipantDelete",
+      "userRemovedFromChat",
       "userChatPermissions",
     ])
     const removedPermission = UpdatesModel.decrypt(removedUpdates[1]!).payload.update
@@ -342,7 +342,6 @@ describe("messages.updateChatVisibility", () => {
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, publicMember.id)))
       .orderBy(asc(updates.seq))
     expect(publicMemberUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind)).toEqual([
-      "userChatParticipantGroupDelete",
       "userChatPermissions",
     ])
 
@@ -352,8 +351,7 @@ describe("messages.updateChatVisibility", () => {
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, blockedMember.id)))
       .orderBy(asc(updates.seq))
     expect(blockedMemberUpdates.map((update) => UpdatesModel.decrypt(update).payload.update.oneofKind)).toEqual([
-      "userChatParticipantGroupDelete",
-      "userChatParticipantDelete",
+      "userRemovedFromChat",
       "userChatPermissions",
     ])
 

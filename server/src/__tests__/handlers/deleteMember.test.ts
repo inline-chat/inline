@@ -10,6 +10,7 @@ import { createGridRoom, getGrid, joinGridRoom } from "@in/server/functions/grid
 import { toggleSpaceGrid } from "@in/server/functions/space.settings"
 import { joinPublicSpace } from "@in/server/functions/space.joinPublicSpace"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
+import { UpdatesModel } from "@in/server/db/models/updates"
 
 describe("deleteMemberHandler", () => {
   setupTestLifecycle()
@@ -191,6 +192,65 @@ describe("deleteMemberHandler", () => {
       .from(schema.dialogs)
       .where(and(eq(schema.dialogs.chatId, privateThreadId), eq(schema.dialogs.userId, adminUser.id)))
     expect(adminDialogs.length).toBe(1)
+  })
+
+  test("removes descendant chat grants while keeping durable access events root-only", async () => {
+    await db.insert(schema.messages).values({
+      chatId: privateThreadId,
+      messageId: 1,
+      fromId: adminUser.id,
+      text: "anchor",
+    })
+    const [child] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: "Private Child",
+        spaceId: space.id,
+        publicThread: false,
+        parentChatId: privateThreadId,
+        parentMessageId: 1,
+      })
+      .returning()
+    if (!child) throw new Error("Child chat not created")
+    await db.insert(schema.chatParticipants).values({ chatId: child.id, userId: memberUser.id })
+    const [group] = await db
+      .insert(schema.userGroups)
+      .values({ spaceId: space.id, name: "Private child access", createdBy: adminUser.id })
+      .returning()
+    if (!group) throw new Error("Child access group not created")
+    await db.insert(schema.userGroupMembers).values({ groupId: group.id, userId: memberUser.id })
+    await db.insert(schema.chatParticipantGroups).values({ chatId: child.id, groupId: group.id })
+
+    await deleteMemberHandler(
+      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+      handlerContext,
+    )
+
+    const remainingGrants = await db
+      .select({ chatId: schema.chatParticipants.chatId })
+      .from(schema.chatParticipants)
+      .where(eq(schema.chatParticipants.userId, memberUser.id))
+    expect(remainingGrants).toEqual([])
+    const remainingGroupMemberships = await db
+      .select({ groupId: schema.userGroupMembers.groupId })
+      .from(schema.userGroupMembers)
+      .where(eq(schema.userGroupMembers.userId, memberUser.id))
+    expect(remainingGroupMemberships).toEqual([])
+
+    const userUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, memberUser.id)))
+      .orderBy(schema.updates.seq)
+    const removedChatIds = userUpdates.flatMap((row) => {
+      const payload = UpdatesModel.decrypt(row).payload.update
+      return payload.oneofKind === "userRemovedFromChat"
+        ? [Number(payload.userRemovedFromChat.chatId)]
+        : []
+    })
+    expect(removedChatIds).toEqual([privateThreadId])
+    expect(removedChatIds).not.toContain(child.id)
   })
 
   test("serializes member deletion with a concurrent public-space join", async () => {

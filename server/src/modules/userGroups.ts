@@ -28,6 +28,17 @@ import {
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { and, asc, count, eq, inArray, isNull } from "drizzle-orm"
+import {
+  addedAccessUserIds,
+  getRootChatIdsForAccessEvents,
+  getEffectiveChatAccessUserIds,
+  removedAccessUserIds,
+  type ChatAccessMap,
+} from "@in/server/modules/authorization/chatAccessProjection"
+import {
+  getSyncV3UpdateProducerMode,
+  type SyncV3UpdateProducerMode,
+} from "@in/server/modules/serverConfig"
 
 const MAX_GROUP_MEMBERS = 25
 const MAX_NAME_LENGTH = 80
@@ -45,12 +56,12 @@ type MembershipAccessUpdate = {
     | {
         kind: "add"
         chatId: number
-        groupParticipant: ChatParticipantGroup
+        groupParticipant?: ChatParticipantGroup
       }
     | {
         kind: "delete"
         chatId: number
-        groupId: number
+        groupId?: number
       }
 }
 
@@ -152,6 +163,7 @@ export async function updateUserGroup(
   context: FunctionContext,
 ): Promise<{ group: UserGroup; users: User[] }> {
   try {
+    const updateProducerMode = await getSyncV3UpdateProducerMode()
     const existing = await loadGroup(input.groupId)
     const privacy = await getSpacePrivacyContext(existing.spaceId, context.currentUserId)
     if (!privacy.canManageMembers) {
@@ -172,6 +184,17 @@ export async function updateUserGroup(
         .from(userGroupMembers)
         .where(eq(userGroupMembers.groupId, input.groupId))
       const oldUserIds = oldRows.map((row) => row.userId)
+      const grants = await tx
+        .select({ chatId: chatParticipantGroups.chatId })
+        .from(chatParticipantGroups)
+        .where(eq(chatParticipantGroups.groupId, input.groupId))
+      const permissionTargetChatIds = uniquePositiveIds(grants.map((grant) => grant.chatId))
+      const accessEventChatIds = updateProducerMode === "canonical_v3"
+        ? await getRootChatIdsForAccessEvents(tx, permissionTargetChatIds)
+        : []
+      const accessBefore = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
 
       const [updatedGroup] = await tx
         .update(userGroups)
@@ -201,12 +224,15 @@ export async function updateUserGroup(
         groupId: input.groupId,
         oldUserIds,
         newUserIds: values.userIds,
+        accessBefore,
+        permissionTargetChatIds,
+        updateProducerMode,
       })
 
       return { group: updatedGroup, membershipUpdates }
     })
 
-    pushMembershipAccessUpdates(result.membershipUpdates.accessUpdates)
+    pushMembershipAccessUpdates(result.membershipUpdates.accessUpdates, updateProducerMode)
     pushChatPermissionUpdates(result.membershipUpdates.permissionUpdates)
 
     return {
@@ -284,8 +310,11 @@ export async function loadGroupsByIdsWithUsers(
   }
 }
 
-export async function loadActiveGroupMemberIds(groupId: number): Promise<number[]> {
-  const rows = await db
+export async function loadActiveGroupMemberIds(
+  groupId: number,
+  database: typeof db | Transaction = db,
+): Promise<number[]> {
+  const rows = await database
     .select({ userId: userGroupMembers.userId })
     .from(userGroups)
     .innerJoin(userGroupMembers, eq(userGroups.id, userGroupMembers.groupId))
@@ -521,7 +550,14 @@ async function loadActiveMemberRowsForGroups(groupIds: number[]): Promise<{ grou
 
 async function enqueueGroupMembershipAccessUpdates(
   tx: Transaction,
-  input: { groupId: number; oldUserIds: number[]; newUserIds: number[] },
+  input: {
+    groupId: number
+    oldUserIds: number[]
+    newUserIds: number[]
+    accessBefore: ChatAccessMap | null
+    permissionTargetChatIds: number[]
+    updateProducerMode: SyncV3UpdateProducerMode
+  },
 ): Promise<{
   accessUpdates: MembershipAccessUpdate[]
   permissionUpdates: PreparedChatPermissionUpdate[]
@@ -544,48 +580,79 @@ async function enqueueGroupMembershipAccessUpdates(
     return { accessUpdates: [], permissionUpdates: [] }
   }
 
+  const accessEventChatIds = input.updateProducerMode === "canonical_v3"
+    ? await getRootChatIdsForAccessEvents(tx, grants.map((grant) => grant.chatId))
+    : input.permissionTargetChatIds
+  const accessAfter = input.updateProducerMode === "canonical_v3"
+    ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+    : null
+  const directGrantByChatId = new Map(grants.map((grant) => [grant.chatId, grant]))
+
   const updates: MembershipAccessUpdate[] = []
-  for (const grant of grants) {
-    const groupParticipant = encodeChatParticipantGroup(grant)
-    for (const userId of addedUserIds) {
+  for (const chatId of accessEventChatIds) {
+    const directGrant = directGrantByChatId.get(chatId)
+    const groupParticipant = directGrant ? encodeChatParticipantGroup(directGrant) : undefined
+    const newlyAccessible = input.updateProducerMode === "canonical_v3"
+      ? new Set(addedAccessUserIds(chatId, input.accessBefore!, accessAfter!))
+      : new Set(addedUserIds)
+    const noLongerAccessible = input.updateProducerMode === "canonical_v3"
+      ? new Set(removedAccessUserIds(chatId, input.accessBefore!, accessAfter!))
+      : new Set(removedUserIds)
+    for (const userId of addedUserIds.filter((id) => newlyAccessible.has(id))) {
       const update = await UserBucketUpdates.enqueue(
         {
           userId,
-          update: {
-            oneofKind: "userChatParticipantGroupAdd",
-            userChatParticipantGroupAdd: {
-              chatId: BigInt(grant.chatId),
-              groupParticipant,
-            },
-          },
+          update: input.updateProducerMode === "canonical_v3"
+            ? {
+                oneofKind: "userAddedToChat" as const,
+                userAddedToChat: {
+                  chatId: BigInt(chatId),
+                  group: groupParticipant,
+                },
+              }
+            : {
+                oneofKind: "userChatParticipantGroupAdd" as const,
+                userChatParticipantGroupAdd: {
+                  chatId: BigInt(chatId),
+                  groupParticipant: groupParticipant!,
+                },
+              },
         },
         { tx },
       )
       updates.push({
         userId,
         update,
-        payload: { kind: "add", chatId: grant.chatId, groupParticipant },
+        payload: { kind: "add", chatId, groupParticipant },
       })
     }
 
-    for (const userId of removedUserIds) {
+    for (const userId of removedUserIds.filter((id) => noLongerAccessible.has(id))) {
       const update = await UserBucketUpdates.enqueue(
         {
           userId,
-          update: {
-            oneofKind: "userChatParticipantGroupDelete",
-            userChatParticipantGroupDelete: {
-              chatId: BigInt(grant.chatId),
-              groupId: BigInt(input.groupId),
-            },
-          },
+          update: input.updateProducerMode === "canonical_v3"
+            ? {
+                oneofKind: "userRemovedFromChat" as const,
+                userRemovedFromChat: {
+                  chatId: BigInt(chatId),
+                  groupId: directGrant ? BigInt(input.groupId) : undefined,
+                },
+              }
+            : {
+                oneofKind: "userChatParticipantGroupDelete" as const,
+                userChatParticipantGroupDelete: {
+                  chatId: BigInt(chatId),
+                  groupId: BigInt(input.groupId),
+                },
+              },
         },
         { tx },
       )
       updates.push({
         userId,
         update,
-        payload: { kind: "delete", chatId: grant.chatId, groupId: input.groupId },
+        payload: { kind: "delete", chatId, groupId: directGrant ? input.groupId : undefined },
       })
     }
   }
@@ -593,7 +660,7 @@ async function enqueueGroupMembershipAccessUpdates(
   const permissionUpdates = await prepareChatPermissionUpdates(
     {
       userIds: [...addedUserIds, ...removedUserIds],
-      chatIds: grants.map((grant) => grant.chatId),
+      chatIds: input.permissionTargetChatIds,
     },
     { tx },
   )
@@ -601,11 +668,26 @@ async function enqueueGroupMembershipAccessUpdates(
   return { accessUpdates: updates, permissionUpdates }
 }
 
-function pushMembershipAccessUpdates(updates: MembershipAccessUpdate[]): void {
+function pushMembershipAccessUpdates(
+  updates: MembershipAccessUpdate[],
+  updateProducerMode: SyncV3UpdateProducerMode,
+): void {
   for (const item of updates) {
-    const update: Update =
-      item.payload.kind === "add"
+    let update: Update
+    if (item.payload.kind === "add") {
+      update = updateProducerMode === "canonical_v3"
         ? {
+            seq: item.update.seq,
+            date: encodeDateStrict(item.update.date),
+            update: {
+              oneofKind: "userAddedToChat",
+              userAddedToChat: {
+                chatId: BigInt(item.payload.chatId),
+                group: item.payload.groupParticipant,
+              },
+            },
+          }
+        : {
             update: {
               oneofKind: "participantGroupAdd",
               participantGroupAdd: {
@@ -614,15 +696,29 @@ function pushMembershipAccessUpdates(updates: MembershipAccessUpdate[]): void {
               },
             },
           }
+    } else {
+      update = updateProducerMode === "canonical_v3"
+        ? {
+            seq: item.update.seq,
+            date: encodeDateStrict(item.update.date),
+            update: {
+              oneofKind: "userRemovedFromChat",
+              userRemovedFromChat: {
+                chatId: BigInt(item.payload.chatId),
+                groupId: item.payload.groupId === undefined ? undefined : BigInt(item.payload.groupId),
+              },
+            },
+          }
         : {
             update: {
               oneofKind: "participantGroupDelete",
               participantGroupDelete: {
                 chatId: BigInt(item.payload.chatId),
-                groupId: BigInt(item.payload.groupId),
+                groupId: BigInt(item.payload.groupId!),
               },
             },
           }
+    }
 
     RealtimeUpdates.pushToUser(item.userId, [update])
   }

@@ -24,11 +24,21 @@ import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spa
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { Transaction } from "@in/server/db/types"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
+import {
+  getSyncV3UpdateProducerMode,
+  type SyncV3UpdateProducerMode,
+} from "@in/server/modules/serverConfig"
 
 type InitialParticipant = {
   chatId: number
   userId: number
   date: Date
+}
+
+type InitialAccessUpdate = {
+  userId: number
+  participant: ChatParticipant
+  update: UpdateSeqAndDate
 }
 
 export async function createChat(
@@ -107,6 +117,8 @@ export async function createChat(
     throw RealtimeRpcError.UserIdInvalid()
   }
 
+  const updateProducerMode = await getSyncV3UpdateProducerMode()
+
   if (!hasSpaceId && isPublic === false) {
     const activeUserIds = await UsersModel.getActiveUserIds(participantUserIds)
     if (activeUserIds.length !== new Set(participantUserIds).size) {
@@ -150,7 +162,12 @@ export async function createChat(
   }
 
   if (reservedChatId !== undefined) {
-    const { chat: createdChat, dialog: createdDialog, participants: createdParticipants } = await db.transaction(async (tx) => {
+    const {
+      chat: createdChat,
+      dialog: createdDialog,
+      participants: createdParticipants,
+      accessUpdates,
+    } = await db.transaction(async (tx) => {
       const threadNumber = await allocateThreadNumber(
         tx,
         hasSpaceId
@@ -196,6 +213,7 @@ export async function createChat(
       }
 
       let participants: InitialParticipant[] = []
+      let accessUpdates: InitialAccessUpdate[] = []
       if (isPublic === false && input.participants) {
         participants = input.participants.map((p) => ({
           chatId: chat.id,
@@ -204,7 +222,13 @@ export async function createChat(
         }))
 
         await tx.insert(chatParticipants).values(participants)
-        await enqueueInitialParticipantAdds(tx, chat.id, participants, context.currentUserId)
+        accessUpdates = await enqueueInitialParticipantAdds(
+          tx,
+          chat.id,
+          participants,
+          context.currentUserId,
+          updateProducerMode,
+        )
       }
 
       const [dialog] = await tx
@@ -229,7 +253,7 @@ export async function createChat(
         })
         .where(eq(chatIdReservations.chatId, reservedChatId))
 
-      return { chat, dialog, participants }
+      return { chat, dialog, participants, accessUpdates }
     })
 
     createdParticipants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
@@ -237,6 +261,9 @@ export async function createChat(
     const encodedDialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
     const persisted = await persistNewChatUpdate(createdChat.id)
     await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
+    if (updateProducerMode === "canonical_v3") {
+      pushInitialAccessUpdates(createdChat.id, accessUpdates)
+    }
 
     return {
       chat: await Encoders.chatForUser(createdChat, { encodingForUserId: context.currentUserId }),
@@ -247,8 +274,14 @@ export async function createChat(
   let createdChat: DbChat
   let createdDialog: DbDialog
   let createdParticipants: InitialParticipant[] = []
+  let initialAccessUpdates: InitialAccessUpdate[] = []
   try {
-    ;({ chat: createdChat, dialog: createdDialog, participants: createdParticipants } = await db.transaction(async (tx) => {
+    ;({
+      chat: createdChat,
+      dialog: createdDialog,
+      participants: createdParticipants,
+      accessUpdates: initialAccessUpdates,
+    } = await db.transaction(async (tx) => {
       const threadNumber = await allocateThreadNumber(
         tx,
         hasSpaceId
@@ -277,6 +310,7 @@ export async function createChat(
       }
 
       let participants: InitialParticipant[] = []
+      let accessUpdates: InitialAccessUpdate[] = []
       if (isPublic === false && input.participants) {
         participants = input.participants.map((p) => ({
           chatId: chat.id,
@@ -285,7 +319,13 @@ export async function createChat(
         }))
 
         await tx.insert(chatParticipants).values(participants)
-        await enqueueInitialParticipantAdds(tx, chat.id, participants, context.currentUserId)
+        accessUpdates = await enqueueInitialParticipantAdds(
+          tx,
+          chat.id,
+          participants,
+          context.currentUserId,
+          updateProducerMode,
+        )
       }
 
       const [dialog] = await tx
@@ -303,7 +343,7 @@ export async function createChat(
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
       }
 
-      return { chat, dialog, participants }
+      return { chat, dialog, participants, accessUpdates }
     }))
   } catch (error) {
     Log.shared.error(`Failed to create chat: ${error}`)
@@ -321,6 +361,9 @@ export async function createChat(
 
   // Broadcast the new chat update
   await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
+  if (updateProducerMode === "canonical_v3") {
+    pushInitialAccessUpdates(createdChat.id, initialAccessUpdates)
+  }
 
   return {
     chat: await Encoders.chatForUser(createdChat, { encodingForUserId: context.currentUserId }),
@@ -338,22 +381,52 @@ async function enqueueInitialParticipantAdds(
   chatId: number,
   participants: InitialParticipant[],
   currentUserId: number,
-): Promise<void> {
-  await UserBucketUpdates.enqueueMany(
-    participants
-      .filter((participant) => participant.userId !== currentUserId)
-      .map((participant) => ({
+  updateProducerMode: SyncV3UpdateProducerMode,
+): Promise<InitialAccessUpdate[]> {
+  const targets = participants.filter((participant) => participant.userId !== currentUserId)
+  const updates = await UserBucketUpdates.enqueueMany(
+    targets.map((participant) => ({
         userId: participant.userId,
-        update: {
-          oneofKind: "userChatParticipantAdd" as const,
-          userChatParticipantAdd: {
-            chatId: BigInt(chatId),
-            participant: encodeParticipant(participant),
-          },
-        },
+        update: updateProducerMode === "canonical_v3"
+          ? {
+              oneofKind: "userAddedToChat" as const,
+              userAddedToChat: {
+                chatId: BigInt(chatId),
+                participant: encodeParticipant(participant),
+              },
+            }
+          : {
+              oneofKind: "userChatParticipantAdd" as const,
+              userChatParticipantAdd: {
+                chatId: BigInt(chatId),
+                participant: encodeParticipant(participant),
+              },
+            },
       })),
     { tx },
   )
+
+  return targets.map((participant, index) => ({
+    userId: participant.userId,
+    participant: encodeParticipant(participant),
+    update: updates[index]!,
+  }))
+}
+
+function pushInitialAccessUpdates(chatId: number, accessUpdates: InitialAccessUpdate[]): void {
+  for (const item of accessUpdates) {
+    RealtimeUpdates.pushToUser(item.userId, [{
+      seq: item.update.seq,
+      date: encodeDateStrict(item.update.date),
+      update: {
+        oneofKind: "userAddedToChat",
+        userAddedToChat: {
+          chatId: BigInt(chatId),
+          participant: item.participant,
+        },
+      },
+    }])
+  }
 }
 
 function encodeParticipant(participant: InitialParticipant): ChatParticipant {

@@ -33,6 +33,18 @@ describe("joinPublicSpace", () => {
       })
       .returning()
     if (!primaryChat) throw new Error("Failed to create primary chat")
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        spaceId: space.id,
+        type: "thread",
+        title: "Announcements",
+        publicThread: true,
+        parentChatId: primaryChat.id,
+        threadNumber: 2,
+      })
+      .returning()
+    if (!childChat) throw new Error("Failed to create descendant chat")
 
     const result = await joinPublicSpace({ handle: "  @TOWNHALL  " }, context(user.id))
 
@@ -63,13 +75,19 @@ describe("joinPublicSpace", () => {
       .select()
       .from(updates)
       .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
-    expect(userUpdates).toHaveLength(2)
+    expect(userUpdates).toHaveLength(3)
     const userPayload = UpdatesModel.decrypt(userUpdates[0]!).payload.update
     expect(userPayload.oneofKind).toBe("userJoinSpace")
     if (userPayload.oneofKind !== "userJoinSpace") throw new Error("Expected userJoinSpace")
     if (!userPayload.userJoinSpace.space) throw new Error("Expected joined space update")
     expect(userPayload.userJoinSpace.space.handle).toBe("TownHall")
-    expect(UpdatesModel.decrypt(userUpdates[1]!).payload.update.oneofKind).toBe("userChatOpen")
+    const accessChatIds = userUpdates
+      .map((row) => UpdatesModel.decrypt(row).payload.update)
+      .filter((update) => update.oneofKind === "userAddedToChat")
+      .map((update) => update.userAddedToChat.chatId)
+    expect(accessChatIds).toEqual([BigInt(primaryChat.id)])
+    expect(accessChatIds).not.toContain(BigInt(childChat.id))
+    expect(UpdatesModel.decrypt(userUpdates[2]!).payload.update.oneofKind).toBe("userChatOpen")
 
     const spaceUpdates = await db
       .select()
@@ -123,7 +141,7 @@ describe("joinPublicSpace", () => {
         .from(dialogs)
         .where(and(eq(dialogs.chatId, primaryChat.id), eq(dialogs.userId, user.id))),
     ).toHaveLength(1)
-    expect(await db.select().from(updates)).toHaveLength(3)
+    expect(await db.select().from(updates)).toHaveLength(4)
   })
 
   test("serializes concurrent retries into one membership", async () => {

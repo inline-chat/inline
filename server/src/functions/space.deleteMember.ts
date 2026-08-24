@@ -29,6 +29,15 @@ import {
 } from "@in/server/modules/grid/roomLifecycle"
 import { connectionManager } from "@in/server/ws/connections"
 import type { Transaction } from "@in/server/db/types"
+import {
+  getEffectiveChatAccessUserIds,
+  getSpaceRootChatIdsForAccessEvents,
+  removedAccessUserIds,
+} from "@in/server/modules/authorization/chatAccessProjection"
+import {
+  getSyncV3UpdateProducerMode,
+  type SyncV3UpdateProducerMode,
+} from "@in/server/modules/serverConfig"
 
 const log = new Log("space.removeMember")
 
@@ -61,11 +70,12 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
     }
 
     log.debug("Deleting member", { spaceId, userId, currentUserId: context.currentUserId })
+    const updateProducerMode = yield* Effect.promise(getSyncV3UpdateProducerMode)
 
     // Membership and Grid media authority are one durable state transition.
     // Provider revocation is inserted into the outbox before this commits.
-    const { gridRemovalState, privateThreadIds, persisted } = yield* Effect.tryPromise({
-      try: () => removeMemberAndGridPresence(spaceId, userId, context.currentUserId),
+    const { gridRemovalState, persisted, accessUpdates } = yield* Effect.tryPromise({
+      try: () => removeMemberAndGridPresence(spaceId, userId, context.currentUserId, updateProducerMode),
       catch: (error) =>
         error instanceof MemberNotExistsError
           ? error
@@ -81,13 +91,24 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
       catch: (error) => (error instanceof Error ? error : new Error("finishGridMemberAccess failed")),
     })
 
-    privateThreadIds.forEach((chatId) => AccessGuardsCache.resetChatParticipant(chatId, userId))
     AccessGuardsCache.resetForUser(userId)
 
     // Push updates
     const { updates } = yield* Effect.promise(() =>
       pushUpdatesForSpace({ spaceId, userId, currentUserId: context.currentUserId, persisted }),
     )
+    if (updateProducerMode === "canonical_v3") {
+      for (const accessUpdate of accessUpdates) {
+        RealtimeUpdates.pushToUser(userId, [{
+          seq: accessUpdate.update.seq,
+          date: encodeDateStrict(accessUpdate.update.date),
+          update: {
+            oneofKind: "userRemovedFromChat",
+            userRemovedFromChat: { chatId: BigInt(accessUpdate.chatId) },
+          },
+        }])
+      }
+    }
 
     // Return result
     return {
@@ -99,10 +120,11 @@ async function removeMemberAndGridPresence(
   spaceId: number,
   userId: number,
   currentUserId: number,
+  updateProducerMode: SyncV3UpdateProducerMode,
 ): Promise<{
   gridRemovalState: GridPresenceRemovalState
-  privateThreadIds: number[]
   persisted: UpdateSeqAndDate
+  accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
 }> {
   return db.transaction(async (tx) => {
     // Grid mutations use the process-wide advisory lock as their owner. Take
@@ -138,6 +160,13 @@ async function removeMemberAndGridPresence(
       throw RealtimeRpcError.SpaceAdminRequired()
     }
 
+    const accessEventChatIds = updateProducerMode === "canonical_v3"
+      ? await getSpaceRootChatIdsForAccessEvents(tx, spaceId)
+      : []
+    const accessBefore = updateProducerMode === "canonical_v3"
+      ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds, { userIds: [userId] })
+      : null
+
     const removed = await tx
       .delete(members)
       .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
@@ -148,38 +177,56 @@ async function removeMemberAndGridPresence(
     // membership delete. A re-add on another connection must wait for this
     // transaction to commit, otherwise it can be followed by cleanup that
     // removes the new member's rows.
-    const privateThreads = await tx
-      .select({ chatId: chats.id })
-      .from(chats)
-      .innerJoin(chatParticipants, eq(chatParticipants.chatId, chats.id))
+    await tx
+      .delete(chatParticipants)
       .where(
         and(
-          eq(chats.spaceId, spaceId),
-          eq(chats.type, "thread"),
-          eq(chats.publicThread, false),
           eq(chatParticipants.userId, userId),
+          inArray(
+            chatParticipants.chatId,
+            tx.select({ id: chats.id }).from(chats).where(eq(chats.spaceId, spaceId)),
+          ),
         ),
       )
-    const privateThreadIds = privateThreads.map((thread) => thread.chatId)
 
-    if (privateThreadIds.length > 0) {
-      await tx
-        .delete(chatParticipants)
-        .where(and(eq(chatParticipants.userId, userId), inArray(chatParticipants.chatId, privateThreadIds)))
-    }
-
-    const groups = await tx.select({ groupId: userGroups.id }).from(userGroups).where(eq(userGroups.spaceId, spaceId))
-    const groupIds = groups.map((group) => group.groupId)
-    if (groupIds.length > 0) {
-      await tx
-        .delete(userGroupMembers)
-        .where(and(eq(userGroupMembers.userId, userId), inArray(userGroupMembers.groupId, groupIds)))
-    }
+    await tx
+      .delete(userGroupMembers)
+      .where(
+        and(
+          eq(userGroupMembers.userId, userId),
+          inArray(
+            userGroupMembers.groupId,
+            tx.select({ id: userGroups.id }).from(userGroups).where(eq(userGroups.spaceId, spaceId)),
+          ),
+        ),
+      )
 
     await tx.delete(dialogs).where(and(eq(dialogs.spaceId, spaceId), eq(dialogs.userId, userId)))
 
     const persisted = await persistSpaceMemberDeleteUpdateInTransaction(tx, space, userId)
-    return { gridRemovalState, privateThreadIds, persisted }
+    const accessAfter = updateProducerMode === "canonical_v3"
+      ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds, { userIds: [userId] })
+      : null
+    const lostChatIds = updateProducerMode === "canonical_v3"
+      ? accessEventChatIds.filter((chatId) =>
+          removedAccessUserIds(chatId, accessBefore!, accessAfter!).includes(userId),
+        )
+      : []
+    const userAccessUpdates = await UserBucketUpdates.enqueueMany(
+      lostChatIds.map((chatId) => ({
+        userId,
+        update: {
+          oneofKind: "userRemovedFromChat" as const,
+          userRemovedFromChat: { chatId: BigInt(chatId) },
+        },
+      })),
+      { tx },
+    )
+    const accessUpdates = lostChatIds.map((chatId, index) => ({
+      chatId,
+      update: userAccessUpdates[index]!,
+    }))
+    return { gridRemovalState, persisted, accessUpdates }
   })
 }
 

@@ -52,4 +52,23 @@ describe("server configuration precedence", () => {
       source: "environment",
     })
   })
+
+  it("keeps Sync V3 producers on legacy events until explicitly switched", () => {
+    expect(resolveServerConfigValue("sync.v3_update_producers", {})).toEqual({
+      value: "legacy",
+      source: "default",
+    })
+    expect(resolveServerConfigValue("sync.v3_update_producers", {
+      databaseValue: "canonical_v3",
+    })).toEqual({
+      value: "canonical_v3",
+      source: "database",
+    })
+    expect(resolveServerConfigValue("sync.v3_update_producers", {
+      databaseValue: "legacy",
+    })).toEqual({
+      value: "legacy",
+      source: "database",
+    })
+  })
 })

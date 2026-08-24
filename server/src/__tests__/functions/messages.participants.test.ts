@@ -9,6 +9,7 @@ import * as schema from "../../db/schema"
 import { eq, and } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { UpdatesModel } from "@in/server/db/models/updates"
 
 const makeFunctionContext = (userId: number): any => ({
   currentUserId: userId,
@@ -222,6 +223,130 @@ describe("space thread participant management", () => {
     await expect(AccessGuards.ensureChatAccess(chat, member.id)).rejects.toMatchObject({
       code: RealtimeRpcError.Code.PEER_ID_INVALID,
     })
+  })
+
+  test("emits user access events only for effective transitions", async () => {
+    const space = await testUtils.createSpace("participant-effective-access-space")
+    const owner = await testUtils.createUser("effective-access-owner@example.com")
+    const member = await testUtils.createUser("effective-access-member@example.com")
+    if (!space || !owner || !member) throw new Error("Failed to create test data")
+
+    await addSpaceMembers(space.id, [
+      { userId: owner.id, role: "owner" },
+      { userId: member.id },
+    ])
+    const createdGroup = await createUserGroup(
+      { spaceId: space.id, name: "Effective", userIds: [member.id] },
+      makeFunctionContext(owner.id),
+    )
+    const groupId = Number(createdGroup.group.id)
+    const chat = await testUtils.createChat(space.id, "Effective Access Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, owner.id)
+
+    await addChatParticipant({ chatId: chat.id, groupId }, makeFunctionContext(owner.id))
+    await addChatParticipant({ chatId: chat.id, userId: member.id }, makeFunctionContext(owner.id))
+    await removeChatParticipant({ chatId: chat.id, userId: member.id }, makeFunctionContext(owner.id))
+
+    const beforeFinalLoss = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, member.id)))
+    expect(
+      beforeFinalLoss
+        .map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)
+        .filter((kind) => kind === "userAddedToChat" || kind === "userRemovedFromChat"),
+    ).toEqual(["userAddedToChat"])
+
+    await removeChatParticipant({ chatId: chat.id, groupId }, makeFunctionContext(owner.id))
+
+    const afterFinalLoss = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, member.id)))
+      .orderBy(schema.updates.seq)
+    const accessPayloads = afterFinalLoss
+      .map((row) => UpdatesModel.decrypt(row).payload.update)
+      .filter((payload) => payload.oneofKind === "userAddedToChat" || payload.oneofKind === "userRemovedFromChat")
+
+    expect(accessPayloads.map((payload) => payload.oneofKind)).toEqual([
+      "userAddedToChat",
+      "userRemovedFromChat",
+    ])
+    const removed = accessPayloads[1]
+    expect(removed?.oneofKind).toBe("userRemovedFromChat")
+    if (removed?.oneofKind === "userRemovedFromChat") {
+      expect(Number(removed.userRemovedFromChat.chatId)).toBe(chat.id)
+      expect(Number(removed.userRemovedFromChat.groupId)).toBe(groupId)
+    }
+  })
+
+  test("refreshes child-thread permissions for direct and group grant changes without child access events", async () => {
+    const space = await testUtils.createSpace("participant-child-permission-space")
+    const owner = await testUtils.createUser("child-permission-owner@example.com")
+    const directMember = await testUtils.createUser("child-permission-direct@example.com")
+    const groupMember = await testUtils.createUser("child-permission-group@example.com")
+    if (!space || !owner || !directMember || !groupMember) throw new Error("Failed to create test data")
+
+    await addSpaceMembers(space.id, [
+      { userId: owner.id, role: "owner" },
+      { userId: directMember.id },
+      { userId: groupMember.id },
+    ])
+    const createdGroup = await createUserGroup(
+      { spaceId: space.id, name: "Child editors", userIds: [groupMember.id] },
+      makeFunctionContext(owner.id),
+    )
+    const groupId = Number(createdGroup.group.id)
+    const parent = await testUtils.createChat(space.id, "Permission Parent", "thread", false, owner.id)
+    if (!parent) throw new Error("Parent chat not created")
+    await testUtils.addParticipant(parent.id, owner.id)
+    await db.insert(schema.messages).values({ chatId: parent.id, messageId: 1, fromId: owner.id, text: "anchor" })
+    const [child] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: "Permission Child",
+        spaceId: space.id,
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parent.id,
+        parentMessageId: 1,
+      })
+      .returning()
+    if (!child) throw new Error("Child chat not created")
+
+    await addChatParticipant({ chatId: child.id, userId: directMember.id }, makeFunctionContext(owner.id))
+    await removeChatParticipant({ chatId: child.id, userId: directMember.id }, makeFunctionContext(owner.id))
+    await addChatParticipant({ chatId: child.id, groupId }, makeFunctionContext(owner.id))
+    await removeChatParticipant({ chatId: child.id, groupId }, makeFunctionContext(owner.id))
+
+    for (const userId of [directMember.id, groupMember.id]) {
+      const userUpdates = await db
+        .select()
+        .from(schema.updates)
+        .where(and(eq(schema.updates.bucket, schema.UpdateBucket.User), eq(schema.updates.entityId, userId)))
+        .orderBy(schema.updates.seq)
+      const payloads = userUpdates.map((row) => UpdatesModel.decrypt(row).payload.update)
+      expect(
+        payloads.filter((payload) =>
+          payload.oneofKind === "userAddedToChat" || payload.oneofKind === "userRemovedFromChat"
+        ),
+      ).toEqual([])
+      expect(
+        payloads.flatMap((payload) =>
+          payload.oneofKind === "userChatPermissions"
+            ? [{
+                chatId: Number(payload.userChatPermissions.chatId),
+                canUpdateInfo: payload.userChatPermissions.permissions?.canUpdateInfo,
+              }]
+            : []
+        ),
+      ).toEqual([
+        { chatId: child.id, canUpdateInfo: true },
+        { chatId: child.id, canUpdateInfo: false },
+      ])
+    }
   })
 
   test("blocks deleting groups that are used by threads", async () => {

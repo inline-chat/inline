@@ -76,6 +76,26 @@ describe("inviteToSpace", () => {
       { currentUserId: owner.id, currentSessionId: 1, ip: undefined },
     )
 
+    const [primaryChat] = await db
+      .select()
+      .from(schema.chats)
+      .where(and(eq(schema.chats.spaceId, created.space.id), eq(schema.chats.threadNumber, 1)))
+      .limit(1)
+    expect(primaryChat).toBeTruthy()
+    if (!primaryChat) throw new Error("Expected primary chat")
+    const [childChat] = await db
+      .insert(schema.chats)
+      .values({
+        spaceId: created.space.id,
+        type: "thread",
+        title: "Announcements",
+        publicThread: true,
+        parentChatId: primaryChat.id,
+        threadNumber: 2,
+      })
+      .returning()
+    if (!childChat) throw new Error("Expected descendant chat")
+
     await inviteToSpace(
       {
         spaceId: BigInt(created.space.id),
@@ -84,14 +104,6 @@ describe("inviteToSpace", () => {
       },
       makeFunctionContext(owner.id),
     )
-
-    const [primaryChat] = await db
-      .select()
-      .from(schema.chats)
-      .where(and(eq(schema.chats.spaceId, created.space.id), eq(schema.chats.threadNumber, 1)))
-      .limit(1)
-    expect(primaryChat).toBeTruthy()
-    if (!primaryChat) throw new Error("Expected primary chat")
 
     const [dialog] = await db
       .select()
@@ -105,10 +117,22 @@ describe("inviteToSpace", () => {
       .select()
       .from(schema.updates)
       .where(and(eq(schema.updates.bucket, UpdateBucket.User), eq(schema.updates.entityId, invitee.id)))
-    expect(userUpdates.map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)).toEqual([
+    const decodedUpdates = userUpdates.map((row) => UpdatesModel.decrypt(row).payload.update)
+    expect(decodedUpdates.map((update) => update.oneofKind)).toEqual([
       "userJoinSpace",
+      "userAddedToChat",
       "userChatOpen",
     ])
+    expect(
+      decodedUpdates
+        .filter((update) => update.oneofKind === "userAddedToChat")
+        .map((update) => update.userAddedToChat.chatId),
+    ).toEqual([BigInt(primaryChat.id)])
+    expect(
+      decodedUpdates
+        .filter((update) => update.oneofKind === "userAddedToChat")
+        .map((update) => update.userAddedToChat.chatId),
+    ).not.toContain(BigInt(childChat.id))
   })
 
   test("does not open the public primary chat for a restricted member", async () => {

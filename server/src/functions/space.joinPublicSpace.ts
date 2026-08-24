@@ -26,6 +26,12 @@ import type { JoinPublicSpaceInput, JoinPublicSpaceResult, Update } from "@inlin
 import { and, eq, isNull } from "drizzle-orm"
 import { openPrimarySpaceChatForUser } from "@in/server/modules/dialogOpen"
 import { emitChatListOpenUpdates } from "@in/server/modules/subthreads"
+import {
+  addedAccessUserIds,
+  getEffectiveChatAccessUserIds,
+  getSpaceRootChatIdsForAccessEvents,
+} from "@in/server/modules/authorization/chatAccessProjection"
+import { getSyncV3UpdateProducerMode } from "@in/server/modules/serverConfig"
 
 const log = new Log("space.joinPublicSpace")
 type JoinOutcome = {
@@ -35,6 +41,7 @@ type JoinOutcome = {
   user?: DbUser
   userUpdate?: UpdateSeqAndDate
   spaceUpdate?: UpdateSeqAndDate
+  accessUpdates?: Array<{ chatId: number; update: UpdateSeqAndDate }>
 }
 
 export const joinPublicSpace = async (
@@ -46,6 +53,7 @@ export const joinPublicSpace = async (
     throw RealtimeRpcError.BadRequest()
   }
   const handle = normalizedHandle.toLowerCase()
+  const updateProducerMode = await getSyncV3UpdateProducerMode()
 
   const outcome = await db.transaction(async (tx): Promise<JoinOutcome> => {
     const [user] = await tx.select().from(users).where(eq(users.id, context.currentUserId)).for("update").limit(1)
@@ -72,6 +80,13 @@ export const joinPublicSpace = async (
     if (existingMember) {
       return { space, member: existingMember, alreadyMember: true }
     }
+
+    const affectedChatIds = updateProducerMode === "canonical_v3"
+      ? await getSpaceRootChatIdsForAccessEvents(tx, space.id)
+      : []
+    const accessBefore = updateProducerMode === "canonical_v3"
+      ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+      : null
 
     const [member] = await tx
       .insert(members)
@@ -115,13 +130,39 @@ export const joinPublicSpace = async (
       { tx },
     )
 
-    return { space, member, alreadyMember: false, user, userUpdate, spaceUpdate }
+    const accessAfter = updateProducerMode === "canonical_v3"
+      ? await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+      : null
+    const gainedChatIds = updateProducerMode === "canonical_v3"
+      ? affectedChatIds.filter((chatId) =>
+          addedAccessUserIds(chatId, accessBefore!, accessAfter!).includes(context.currentUserId),
+        )
+      : []
+    const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
+      gainedChatIds.map((chatId) => ({
+        userId: context.currentUserId,
+        update: {
+          oneofKind: "userAddedToChat" as const,
+          userAddedToChat: { chatId: BigInt(chatId) },
+        },
+      })),
+      { tx },
+    )
+    const accessUpdates = gainedChatIds.map((chatId, index) => ({
+      chatId,
+      update: persistedAccessUpdates[index]!,
+    }))
+
+    return { space, member, alreadyMember: false, user, userUpdate, spaceUpdate, accessUpdates }
   })
 
   if (!outcome.alreadyMember && outcome.user && outcome.userUpdate && outcome.spaceUpdate) {
     AccessGuardsCache.resetSpaceMember(outcome.space.id, context.currentUserId)
     AccessGuardsCache.setSpaceMember(outcome.space.id, context.currentUserId)
     pushJoinUpdate(outcome, context.currentUserId)
+    if (updateProducerMode === "canonical_v3") {
+      pushAccessUpdates(outcome, context.currentUserId)
+    }
     await pushSpaceMemberUpdate(outcome, context.currentUserId).catch((error: unknown) => {
       // The durable space-bucket update repairs missed live fanout.
       log.error("Failed to fan out public-space join", { spaceId: outcome.space.id, error })
@@ -144,6 +185,19 @@ export const joinPublicSpace = async (
     space: Encoders.space(outcome.space, { encodingForUserId: context.currentUserId }),
     member: Encoders.member(outcome.member),
     alreadyMember: outcome.alreadyMember,
+  }
+}
+
+function pushAccessUpdates(outcome: JoinOutcome, userId: number): void {
+  for (const accessUpdate of outcome.accessUpdates ?? []) {
+    RealtimeUpdates.pushToUser(userId, [{
+      seq: accessUpdate.update.seq,
+      date: encodeDateStrict(accessUpdate.update.date),
+      update: {
+        oneofKind: "userAddedToChat",
+        userAddedToChat: { chatId: BigInt(accessUpdate.chatId) },
+      },
+    }])
   }
 }
 

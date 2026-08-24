@@ -1,10 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { and, eq } from "drizzle-orm"
 import { MessageEntity_Type } from "@inline-chat/protocol/core"
 import { db, schema } from "@in/server/db"
 import { deleteChat, deleteEmptyUntitledThreadAfterClose } from "@in/server/functions/messages.deleteChat"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { setupTestLifecycle, testUtils } from "../setup"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 const inputPeerForChat = (chatId: number) => ({
   type: {
@@ -148,6 +149,44 @@ describe("messages.deleteChat", () => {
 
     const [savedThread] = await db.select().from(schema.chats).where(eq(schema.chats.id, thread.id)).limit(1)
     expect(savedThread).toBeDefined()
+  })
+
+  test("fans out child-thread deletion to its effective recipients", async () => {
+    const owner = await testUtils.createUser("delete-child-owner@example.com")
+    const participant = await testUtils.createUser("delete-child-participant@example.com")
+    if (!owner || !participant) throw new Error("Delete child users not created")
+    const parent = await testUtils.createChat(null, "Delete Child Parent", "thread", false, owner.id)
+    if (!parent) throw new Error("Delete child parent not created")
+    await testUtils.addParticipant(parent.id, owner.id)
+    await testUtils.addParticipant(parent.id, participant.id)
+    await db.insert(schema.messages).values({ chatId: parent.id, messageId: 1, fromId: owner.id, text: "anchor" })
+    const [child] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: "Delete Child",
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parent.id,
+        parentMessageId: 1,
+      })
+      .returning()
+    if (!child) throw new Error("Delete child not created")
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(() => {})
+    try {
+      await deleteChat(
+        { peer: inputPeerForChat(child.id) },
+        testUtils.functionContext({ userId: owner.id }),
+      )
+
+      const deleteRecipients = push.mock.calls.flatMap(([userId, updates]) =>
+        updates.some((update) => update.update.oneofKind === "deleteChat") ? [userId] : []
+      )
+      expect(new Set(deleteRecipients)).toEqual(new Set([owner.id, participant.id]))
+    } finally {
+      push.mockRestore()
+    }
   })
 })
 

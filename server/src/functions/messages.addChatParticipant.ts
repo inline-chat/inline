@@ -32,6 +32,15 @@ import {
   loadGroupsByIdsWithUsers,
 } from "@in/server/modules/userGroups"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
+import {
+  addedAccessUserIds,
+  getRootChatIdsForAccessEvents,
+  getEffectiveChatAccessUserIds,
+} from "@in/server/modules/authorization/chatAccessProjection"
+import {
+  getSyncV3UpdateProducerMode,
+  type SyncV3UpdateProducerMode,
+} from "@in/server/modules/serverConfig"
 
 type AddChatParticipantOutput = {
   participant?: ChatParticipant
@@ -55,8 +64,10 @@ export async function addChatParticipant(
       throw RealtimeRpcError.BadRequest()
     }
 
+    const updateProducerMode = await getSyncV3UpdateProducerMode()
+
     if (groupId != null) {
-      return addChatParticipantGroup({ chatId: input.chatId, groupId }, context)
+      return addChatParticipantGroup({ chatId: input.chatId, groupId }, context, updateProducerMode)
     }
     if (userId == null) {
       throw RealtimeRpcError.BadRequest()
@@ -65,6 +76,7 @@ export async function addChatParticipant(
     const result = await db.transaction(async (tx): Promise<{
       participant: ChatParticipant
       update: UpdateSeqAndDate | null
+      accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
       // Check if chat exists
@@ -104,9 +116,17 @@ export async function addChatParticipant(
             date: encodeDateStrict(participant.date),
           },
           update: null,
+          accessUpdates: [],
           permissionUpdates: [],
         }
       }
+
+      const accessEventChatIds = updateProducerMode === "canonical_v3"
+        ? await getRootChatIdsForAccessEvents(tx, [input.chatId])
+        : [input.chatId]
+      const accessBefore = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
 
       const [newParticipant] = await tx
         .insert(chatParticipants)
@@ -147,19 +167,39 @@ export async function addChatParticipant(
         })
         .where(eq(chats.id, chat.id))
 
-      await UserBucketUpdates.enqueue(
-        {
+      const accessAfter = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
+      const gainedChatIds = updateProducerMode === "canonical_v3"
+        ? accessEventChatIds.filter((affectedChatId) =>
+            addedAccessUserIds(affectedChatId, accessBefore!, accessAfter!).includes(userId),
+          )
+        : [input.chatId]
+      const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
+        gainedChatIds.map((affectedChatId) => ({
           userId,
-          update: {
-            oneofKind: "userChatParticipantAdd",
-            userChatParticipantAdd: {
-              chatId: BigInt(input.chatId),
-              participant: participantForUpdate,
-            },
-          },
-        },
+          update: updateProducerMode === "canonical_v3"
+            ? {
+                oneofKind: "userAddedToChat" as const,
+                userAddedToChat: {
+                  chatId: BigInt(affectedChatId),
+                  participant: affectedChatId === input.chatId ? participantForUpdate : undefined,
+                },
+              }
+            : {
+                oneofKind: "userChatParticipantAdd" as const,
+                userChatParticipantAdd: {
+                  chatId: BigInt(input.chatId),
+                  participant: participantForUpdate,
+                },
+              },
+        })),
         { tx },
       )
+      const accessUpdates = gainedChatIds.map((chatId, index) => ({
+        chatId,
+        update: persistedAccessUpdates[index]!,
+      }))
       const permissionUpdates = await prepareChatPermissionUpdates(
         { userIds: [userId], chatIds: [input.chatId] },
         { tx },
@@ -168,6 +208,7 @@ export async function addChatParticipant(
       return {
         participant: participantForUpdate,
         update,
+        accessUpdates,
         permissionUpdates,
       }
     })
@@ -181,6 +222,17 @@ export async function addChatParticipant(
         participant: result.participant,
         update: result.update,
       })
+      if (updateProducerMode === "canonical_v3") {
+        for (const accessUpdate of result.accessUpdates) {
+          pushUserAddedToChat(
+            userId,
+            accessUpdate.chatId,
+            accessUpdate.chatId === input.chatId ? result.participant : undefined,
+            undefined,
+            accessUpdate.update,
+          )
+        }
+      }
       pushChatPermissionUpdates(result.permissionUpdates)
       const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
       if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: true })
@@ -199,11 +251,13 @@ export async function addChatParticipant(
 async function addChatParticipantGroup(
   input: { chatId: number; groupId: number },
   context: FunctionContext,
+  updateProducerMode: SyncV3UpdateProducerMode,
 ): Promise<AddChatParticipantOutput> {
   const result = await db.transaction(
     async (tx): Promise<{
       groupParticipant: ChatParticipantGroup
       update: UpdateSeqAndDate | null
+      accessUpdates: { userId: number; chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
@@ -228,9 +282,17 @@ async function addChatParticipantGroup(
         return {
           groupParticipant: encodeChatParticipantGroup(existing),
           update: null,
+          accessUpdates: [],
           permissionUpdates: [],
         }
       }
+
+      const accessEventChatIds = updateProducerMode === "canonical_v3"
+        ? await getRootChatIdsForAccessEvents(tx, [input.chatId])
+        : [input.chatId]
+      const accessBefore = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
 
       const [newGroupParticipant] = await tx
         .insert(chatParticipantGroups)
@@ -268,30 +330,49 @@ async function addChatParticipantGroup(
         })
         .where(eq(chats.id, chat.id))
 
-      const groupMemberIds = await loadActiveGroupMemberIds(input.groupId)
-      await Promise.all(
-        groupMemberIds.map((memberId) =>
-          UserBucketUpdates.enqueue(
-            {
-              userId: memberId,
-              update: {
-                oneofKind: "userChatParticipantGroupAdd",
+      const groupMemberIds = await loadActiveGroupMemberIds(input.groupId, tx)
+      const accessAfter = updateProducerMode === "canonical_v3"
+        ? await getEffectiveChatAccessUserIds(tx, accessEventChatIds)
+        : null
+      const transitions = updateProducerMode === "canonical_v3"
+        ? accessEventChatIds.flatMap((affectedChatId) => {
+            const newlyAccessible = new Set(addedAccessUserIds(affectedChatId, accessBefore!, accessAfter!))
+            return groupMemberIds
+              .filter((memberId) => newlyAccessible.has(memberId))
+              .map((userId) => ({ userId, chatId: affectedChatId }))
+          })
+        : groupMemberIds.map((userId) => ({ userId, chatId: input.chatId }))
+      const persistedAccessUpdates = await UserBucketUpdates.enqueueMany(
+        transitions.map((transition) => ({
+          userId: transition.userId,
+          update: updateProducerMode === "canonical_v3"
+            ? {
+                oneofKind: "userAddedToChat" as const,
+                userAddedToChat: {
+                  chatId: BigInt(transition.chatId),
+                  group: transition.chatId === input.chatId ? groupParticipant : undefined,
+                },
+              }
+            : {
+                oneofKind: "userChatParticipantGroupAdd" as const,
                 userChatParticipantGroupAdd: {
                   chatId: BigInt(input.chatId),
                   groupParticipant,
                 },
               },
-            },
-            { tx },
-          ),
-        ),
+        })),
+        { tx },
       )
+      const accessUpdates = transitions.map((transition, index) => ({
+        ...transition,
+        update: persistedAccessUpdates[index]!,
+      }))
       const permissionUpdates = await prepareChatPermissionUpdates(
         { userIds: groupMemberIds, chatIds: [input.chatId] },
         { tx },
       )
 
-      return { groupParticipant, update, permissionUpdates }
+      return { groupParticipant, update, accessUpdates, permissionUpdates }
     },
   )
 
@@ -305,6 +386,17 @@ async function addChatParticipantGroup(
       groupParticipant: result.groupParticipant,
       update: result.update,
     })
+    if (updateProducerMode === "canonical_v3") {
+      for (const accessUpdate of result.accessUpdates) {
+        pushUserAddedToChat(
+          accessUpdate.userId,
+          accessUpdate.chatId,
+          undefined,
+          accessUpdate.chatId === input.chatId ? result.groupParticipant : undefined,
+          accessUpdate.update,
+        )
+      }
+    }
     pushChatPermissionUpdates(result.permissionUpdates)
   }
 
@@ -313,6 +405,27 @@ async function addChatParticipantGroup(
     group,
     users: sidecars.users,
   }
+}
+
+function pushUserAddedToChat(
+  userId: number,
+  chatId: number,
+  participant: ChatParticipant | undefined,
+  group: ChatParticipantGroup | undefined,
+  update: UpdateSeqAndDate,
+): void {
+  RealtimeUpdates.pushToUser(userId, [{
+    seq: update.seq,
+    date: encodeDateStrict(update.date),
+    update: {
+      oneofKind: "userAddedToChat",
+      userAddedToChat: {
+        chatId: BigInt(chatId),
+        participant,
+        group,
+      },
+    },
+  }])
 }
 
 /** Push participant-add updates to currently connected clients. */
