@@ -68,6 +68,7 @@ type UploadJob = {
   resolve: (complete: UploadComplete) => void
   reject: (error: Error) => void
   settled: boolean
+  removeAbortListener?: () => void
 }
 
 const randomUploadId = (): Uint8Array => {
@@ -179,9 +180,18 @@ export class NativeUploadClient {
         settled: false,
       }
       this.#jobs.push(job)
+      const signal = input.signal
+      if (signal) {
+        const onAbort = () => this.#abort(job)
+        signal.addEventListener("abort", onAbort, { once: true })
+        job.removeAbortListener = () => signal.removeEventListener("abort", onAbort)
+      }
+      if (signal?.aborted) {
+        this.#abort(job)
+        return
+      }
       input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: input.source.byteCount })
-      input.signal?.addEventListener("abort", () => void this.#abort(job), { once: true })
-      this.#pump()
+      if (!job.settled) this.#pump()
     })
   }
 
@@ -226,7 +236,9 @@ export class NativeUploadClient {
       const offset = partIndex * job.upload.partSize
       const length = Math.min(job.upload.partSize, job.input.source.byteCount - offset)
       const data = await exactRead(job.input.source, offset, length)
+      if (job.settled) return
       await this.rpc.savePart({ uploadId: job.upload.uploadId, partIndex, data })
+      if (job.settled) return
       job.accepted.add(partIndex)
       job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount })
     } catch (error) {
@@ -334,10 +346,10 @@ export class NativeUploadClient {
     }
   }
 
-  async #abort(job: UploadJob): Promise<void> {
+  #abort(job: UploadJob): void {
     if (job.settled) return
-    await this.rpc.cancel({ uploadId: job.upload.uploadId }).catch(() => {})
     this.#reject(job, new NativeUploadError("canceled", "Upload was canceled"))
+    void this.rpc.cancel({ uploadId: job.upload.uploadId }).catch(() => {})
   }
 
   #reject(job: UploadJob, error: unknown): void {
@@ -348,6 +360,8 @@ export class NativeUploadClient {
   }
 
   #remove(job: UploadJob): void {
+    job.removeAbortListener?.()
+    job.removeAbortListener = undefined
     const index = this.#jobs.indexOf(job)
     if (index >= 0) this.#jobs.splice(index, 1)
     this.#cursor = this.#jobs.length === 0 ? 0 : this.#cursor % this.#jobs.length
