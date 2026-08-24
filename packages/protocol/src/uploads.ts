@@ -89,7 +89,9 @@ const sourceHash = async (source: UploadByteSource, signal?: AbortSignal): Promi
   for (let offset = 0; offset < source.byteCount; offset += HASH_READ_SIZE) {
     if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
     const length = Math.min(HASH_READ_SIZE, source.byteCount - offset)
-    hash.update(await exactRead(source, offset, length))
+    const bytes = await exactRead(source, offset, length)
+    if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
+    hash.update(bytes)
   }
   return hash.digest()
 }

@@ -163,6 +163,28 @@ describe("native upload coordinator", () => {
     expect(transport.canceled).toHaveLength(1)
   })
 
+  test("does not create an upload when canceled during source hashing", async () => {
+    const transport = new MemoryUploadTransport()
+    const source = uploadByteSource(Uint8Array.from({ length: 12 }, (_, index) => 22 + index))
+    const controller = new AbortController()
+
+    const upload = new NativeUploadClient(transport).upload({
+      ...input(22),
+      source: {
+        byteCount: source.byteCount,
+        read: async (offset, length) => {
+          controller.abort()
+          return source.read(offset, length)
+        },
+      },
+      signal: controller.signal,
+    })
+
+    await expect(upload).rejects.toThrow("Upload was canceled")
+    expect(transport.accepted.size).toBe(0)
+    expect(transport.canceled.size).toBe(0)
+  })
+
   test("cancels before scheduling parts when aborted during create", async () => {
     const transport = new MemoryUploadTransport()
     const createStarted = deferred()
