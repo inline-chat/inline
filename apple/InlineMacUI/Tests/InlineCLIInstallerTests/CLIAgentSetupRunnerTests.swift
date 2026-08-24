@@ -41,6 +41,35 @@ struct CLIAgentSetupRunnerTests {
     #expect(result.target == "codex")
     #expect(result.bot.id == 42)
     #expect(result.service.ready)
+    #expect(result.readiness == nil)
+  }
+
+  @Test("decodes a configured result that still needs a model provider")
+  func decodesProviderRequiredResult() throws {
+    let data = Data(
+      #"{"protocolVersion":1,"ok":true,"action":"agents.setup","status":"configured","documentationUrl":"https://inline.chat/docs/agents","openUrl":"in://user/42","target":"hermes","family":"gateway","instance":"default","bot":{"id":42,"username":"hermes_bot","name":"Hermes"},"service":{"kind":"gateway","action":"reconciled","ready":true},"readiness":{"ready":false,"code":"provider_configuration_required","message":"Hermes is connected to Inline, but credentials for its selected model provider could not be resolved.","command":"hermes model","verified":false},"integration":{"kind":"plugin","action":"kept","version":"0.0.8"},"mapping":{"source":"inline_config","action":"upserted"}}"#.utf8
+    )
+
+    let result = try CLIAgentSetupRunner.parseSetup(data)
+
+    #expect(result.status == "configured")
+    #expect(result.service.ready)
+    #expect(result.readiness?.ready == false)
+    #expect(result.readiness?.code == "provider_configuration_required")
+    #expect(result.readiness?.command == "hermes model")
+    #expect(result.readiness?.verified == false)
+  }
+
+  @Test("decodes readiness metadata from an older producer without verification")
+  func decodesReadinessWithoutVerification() throws {
+    let data = Data(
+      #"{"protocolVersion":1,"ok":true,"action":"agents.setup","status":"configured","documentationUrl":"https://inline.chat/docs/agents","openUrl":"in://user/42","target":"hermes","family":"gateway","instance":"default","bot":{"id":42,"username":"hermes_bot","name":"Hermes"},"service":{"kind":"gateway","action":"reconciled","ready":true},"readiness":{"ready":false,"code":"inline_adapter_not_ready","message":"The Inline adapter did not connect.","command":"hermes logs"},"integration":{"kind":"plugin","action":"kept","version":"0.0.8"},"mapping":{"source":"inline_config","action":"upserted"}}"#.utf8
+    )
+
+    let result = try CLIAgentSetupRunner.parseSetup(data)
+
+    #expect(result.readiness?.code == "inline_adapter_not_ready")
+    #expect(result.readiness?.verified == nil)
   }
 
   @Test("rejects a future protocol version")

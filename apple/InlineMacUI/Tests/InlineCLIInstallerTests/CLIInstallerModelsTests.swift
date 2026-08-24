@@ -50,7 +50,7 @@ struct CLIInstallerModelsTests {
       ),
       CLIInstallation(
         executableURL: URL(fileURLWithPath: "/Users/example/.local/bin/inline"),
-        version: "0.7.3",
+        version: "0.7.4",
         source: .inline,
         isOnPath: false
       ),
@@ -58,7 +58,7 @@ struct CLIInstallerModelsTests {
 
     let compatible = CLIInstallerService.compatibleInstallationForAgentSetup(
       in: installations,
-      minimumVersion: "0.7.3"
+      minimumVersion: "0.7.4"
     )
 
     #expect(compatible?.executableURL.path == "/Users/example/.local/bin/inline")
@@ -74,10 +74,10 @@ struct CLIInstallerModelsTests {
     )
     let requiredVersion = CLIInstallerService.requiredAgentSetupVersion(for: "0.7.2")
 
-    #expect(CLIInstallerService.minimumAgentSetupVersion == "0.7.3")
-    #expect(!CLIInstallerService.supportsAgentSetup(releaseVersion: "0.7.2"))
-    #expect(CLIInstallerService.supportsAgentSetup(releaseVersion: "0.7.3"))
-    #expect(requiredVersion == "0.7.3")
+    #expect(CLIInstallerService.minimumAgentSetupVersion == "0.7.4")
+    #expect(!CLIInstallerService.supportsAgentSetup(releaseVersion: "0.7.3"))
+    #expect(CLIInstallerService.supportsAgentSetup(releaseVersion: "0.7.4"))
+    #expect(requiredVersion == "0.7.4")
     #expect(
       CLIInstallerService.compatibleInstallationForAgentSetup(
         in: [stale],
@@ -113,7 +113,7 @@ struct CLIInstallerModelsTests {
     let installations = [
       CLIInstallation(
         executableURL: currentURL,
-        version: "0.7.3",
+        version: "0.7.4",
         source: .inline,
         isOnPath: false
       ),
@@ -127,7 +127,7 @@ struct CLIInstallerModelsTests {
 
     let compatible = CLIInstallerService.compatibleInstallationForAgentSetup(
       in: installations,
-      minimumVersion: "0.7.3",
+      minimumVersion: "0.7.4",
       excluding: currentURL
     )
 

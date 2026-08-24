@@ -142,19 +142,39 @@ struct AgentSetupWizardView: View {
 
   private var completion: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Label(completionTitle, systemImage: "checkmark.circle.fill")
+      Label(completionTitle, systemImage: completionSystemImage)
         .font(.title3.weight(.semibold))
-        .foregroundStyle(.green)
+        .foregroundStyle(completionColor)
 
       if let result = model.result {
-        Text("\(result.bot.name) is connected through \(result.target) as @\(result.bot.username).")
+        Text(completionSummary(for: result))
           .fixedSize(horizontal: false, vertical: true)
         if !result.service.ready {
           Text("Configuration finished, but the service still needs to be restarted.")
             .foregroundStyle(.orange)
+        } else if let readiness = result.readiness, !readiness.ready {
+          if let message = readiness.message {
+            Text(message)
+              .foregroundStyle(.orange)
+              .fixedSize(horizontal: false, vertical: true)
+          } else {
+            Text("Hermes is connected to Inline, but another setup step is required.")
+              .foregroundStyle(.orange)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          if let command = readiness.command {
+            Text("Run this command in Terminal, then check again:")
+              .foregroundStyle(.secondary)
+            Text(command)
+              .font(.body.monospaced())
+              .textSelection(.enabled)
+          }
         }
         if model.isReady {
           Text("The bot chat is open. Send a first message to verify the full conversation path.")
+            .foregroundStyle(.secondary)
+        } else if result.service.ready, result.readiness?.ready == false {
+          Text("After completing that step, check again to verify readiness and open the bot.")
             .foregroundStyle(.secondary)
         } else {
           Text("Finish the required service action, then retry setup to verify readiness before opening the bot.")
@@ -166,7 +186,41 @@ struct AgentSetupWizardView: View {
 
   private var completionTitle: String {
     guard model.result != nil else { return "Setup Complete" }
-    return model.isReady ? "Agent Ready" : "Configuration Saved"
+    if model.isReady { return "Agent Ready" }
+    if model.result?.service.ready == true {
+      switch model.result?.readiness?.code {
+      case "provider_configuration_required":
+        return "Provider Setup Required"
+      case "provider_readiness_unknown":
+        return "Provider Check Required"
+      case "inline_adapter_not_ready":
+        return "Inline Connection Required"
+      case "inline_adapter_status_unsupported":
+        return "Hermes Update Required"
+      case "inline_adapter_readiness_unknown":
+        return "Readiness Check Required"
+      default:
+        break
+      }
+    }
+    return "Configuration Saved"
+  }
+
+  private func completionSummary(for result: AgentSetupResult) -> String {
+    let readinessCode = result.readiness?.code
+    let adapterUnavailable = readinessCode == "inline_adapter_not_ready"
+      || readinessCode == "inline_adapter_status_unsupported"
+      || readinessCode == "inline_adapter_readiness_unknown"
+    let state = result.service.ready && !adapterUnavailable ? "connected through" : "configured for"
+    return "\(result.bot.name) is \(state) \(result.target) as @\(result.bot.username)."
+  }
+
+  private var completionSystemImage: String {
+    model.isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+  }
+
+  private var completionColor: Color {
+    model.isReady ? .green : .orange
   }
 
   private var noHarnesses: some View {
@@ -249,10 +303,17 @@ struct AgentSetupWizardView: View {
         Button("Set Up Another") {
           model.chooseAnotherHarness()
         }
-        Button("Try Again") {
-          model.start()
+        if model.result?.service.ready == true, model.result?.readiness?.ready == false {
+          Button("Check Again") {
+            model.setUpSelectedTarget()
+          }
+          .keyboardShortcut(.defaultAction)
+        } else {
+          Button("Try Again") {
+            model.start()
+          }
+          .keyboardShortcut(.defaultAction)
         }
-        .keyboardShortcut(.defaultAction)
       case .noHarnesses:
         Button("Check Again") {
           model.start()

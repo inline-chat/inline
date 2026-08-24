@@ -1,5 +1,6 @@
 import Foundation
 import InlineCLIInstaller
+import Logger
 import Observation
 
 @MainActor
@@ -26,6 +27,7 @@ final class AgentSetupWizardModel {
 
   @ObservationIgnored private let dependencies: AppDependencies
   @ObservationIgnored private let runner: any AgentSetupCLIRunning
+  @ObservationIgnored private let log = Log.scoped("AgentSetup")
   @ObservationIgnored private var installation: CLIInstallation?
   @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -60,7 +62,8 @@ final class AgentSetupWizardModel {
   }
 
   var isReady: Bool {
-    result?.status == "ready" && result?.service.ready == true
+    guard result?.status == "ready", result?.service.ready == true else { return false }
+    return result?.readiness?.ready ?? true
   }
 
   var canRepairSelectedSetup: Bool {
@@ -103,6 +106,9 @@ final class AgentSetupWizardModel {
       phase = .settingUp(target.displayName)
       failure = nil
       result = nil
+      log.info(
+        "AGENT_SETUP phase=setup_start target=\(target.id) replaceExisting=\(replaceExisting)"
+      )
       do {
         let setupResult = try await runner.setup(
           target: target,
@@ -112,6 +118,10 @@ final class AgentSetupWizardModel {
         try Task.checkCancellation()
         result = setupResult
         phase = .completed
+        let readinessCode = setupResult.readiness?.code ?? "none"
+        log.info(
+          "AGENT_SETUP phase=setup_complete target=\(target.id) status=\(setupResult.status) serviceReady=\(setupResult.service.ready) readinessCode=\(readinessCode)"
+        )
         if isReady {
           openBot()
         }
@@ -160,6 +170,7 @@ final class AgentSetupWizardModel {
     failure = nil
     selectedTargetID = nil
     isCancelling = false
+    log.info("AGENT_SETUP phase=prepare_start")
 
     do {
       guard dependencies.auth.getIsLoggedIn() else {
@@ -196,9 +207,13 @@ final class AgentSetupWizardModel {
       try Task.checkCancellation()
       discovery = harnesses
       guard harnesses.targets.contains(where: { $0.installed }) else {
+        log.info("AGENT_SETUP phase=discovery_complete installedTargets=0")
         phase = .noHarnesses
         return
       }
+      log.info(
+        "AGENT_SETUP phase=discovery_complete installedTargets=\(harnesses.targets.count(where: \.installed))"
+      )
       phase = .choosing
     } catch is CancellationError {
       isCancelling = false
@@ -274,6 +289,11 @@ final class AgentSetupWizardModel {
         recoveryURL: URL(string: "https://inline.chat/docs/agents")!
       )
     }
+    let failureCode = failure?.code ?? "unknown"
+    let failedPhase = failure?.failedPhase ?? "unknown"
+    log.error(
+      "AGENT_SETUP phase=failed code=\(failureCode) failedPhase=\(failedPhase)"
+    )
     phase = .failed
   }
 

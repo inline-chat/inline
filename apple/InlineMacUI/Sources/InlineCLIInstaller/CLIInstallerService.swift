@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 public actor CLIInstallerService: CLIInstalling {
-  static let minimumAgentSetupVersion = "0.7.3"
+  static let minimumAgentSetupVersion = "0.7.4"
 
   private struct ReleaseManifest: Decodable {
     let version: String

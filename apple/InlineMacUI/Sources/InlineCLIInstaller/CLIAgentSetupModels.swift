@@ -64,6 +64,14 @@ public struct AgentSetupResult: Codable, Equatable, Sendable {
     public let status: String?
   }
 
+  public struct Readiness: Codable, Equatable, Sendable {
+    public let ready: Bool
+    public let code: String?
+    public let message: String?
+    public let command: String?
+    public let verified: Bool?
+  }
+
   public let protocolVersion: Int
   public let ok: Bool
   public let action: String
@@ -75,6 +83,7 @@ public struct AgentSetupResult: Codable, Equatable, Sendable {
   public let instance: String
   public let bot: Bot
   public let service: Service
+  public let readiness: Readiness?
 
   private enum CodingKeys: String, CodingKey {
     case protocolVersion
@@ -88,6 +97,7 @@ public struct AgentSetupResult: Codable, Equatable, Sendable {
     case instance
     case bot
     case service
+    case readiness
   }
 }
 
