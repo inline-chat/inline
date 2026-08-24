@@ -171,6 +171,7 @@ final class AppSettings: ObservableObject {
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
   static let sidebarItemSizeKey = "sidebarItemSize"
   static let sidebarModeKey = "sidebarMode"
+  static let nativeSidebarRowsEnabledKey = "experimental.nativeSidebarRowsEnabled"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
@@ -379,6 +380,15 @@ final class AppSettings: ObservableObject {
 
   // MARK: - Experimental Settings
 
+  @Published var nativeSidebarRowsEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(
+        nativeSidebarRowsEnabled,
+        forKey: Self.nativeSidebarRowsEnabledKey
+      )
+    }
+  }
+
   @Published var richContentRendererEnabled: Bool {
     didSet {
       UserDefaults.standard.set(
@@ -481,6 +491,9 @@ final class AppSettings: ObservableObject {
       unreadBadgeStyle = .defaultValue
     }
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
+    nativeSidebarRowsEnabled = UserDefaults.standard.object(
+      forKey: Self.nativeSidebarRowsEnabledKey
+    ) as? Bool ?? false
     richContentRendererEnabled = UserDefaults.standard.object(
       forKey: Self.richContentRendererEnabledKey
     ) as? Bool ?? false
