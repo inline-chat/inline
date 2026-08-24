@@ -56,23 +56,48 @@ final class RichBlockTextSurface: NSView {
     linkColor: NSColor,
     onEntityClick: @escaping (MessageTextEntityHit, NSAttributedString) -> Bool
   ) {
-    if !self.text.isEqual(to: text) {
+    let textChanged = !self.text.isEqual(to: text)
+    let preservedSelections = textChanged ? clampedSelections(to: text.length) : []
+    if textChanged {
       renderRevision &+= 1
     }
     self.text = text
-    self.onEntityClick = onEntityClick
     label.linkTextAttributes = [
       .foregroundColor: linkColor,
       .cursor: NSCursor.pointingHand,
     ]
-    label.textStorage?.setAttributedString(text)
+    if textChanged {
+      label.textStorage?.setAttributedString(text)
+      if !preservedSelections.isEmpty {
+        label.selectedRanges = preservedSelections
+      }
+    }
+    updateInteraction(onEntityClick)
+    if textChanged {
+      needsLayout = true
+    }
+  }
+
+  func updateInteraction(
+    _ onEntityClick: @escaping (MessageTextEntityHit, NSAttributedString) -> Bool
+  ) {
+    self.onEntityClick = onEntityClick
     label.onEntityClick = { [weak self, weak label] point, _ in
       guard let self, let label,
             let hit = label.entityHit(at: point, extraTextRanges: [])
       else { return false }
       return self.onEntityClick?(hit, self.text) ?? false
     }
-    needsLayout = true
+  }
+
+  private func clampedSelections(to textLength: Int) -> [NSValue] {
+    label.selectedRanges.compactMap { value in
+      let range = value.rangeValue
+      guard range.location != NSNotFound else { return nil }
+      let location = min(max(0, range.location), textLength)
+      let length = min(max(0, range.length), textLength - location)
+      return NSValue(range: NSRange(location: location, length: length))
+    }
   }
 
   override func layout() {

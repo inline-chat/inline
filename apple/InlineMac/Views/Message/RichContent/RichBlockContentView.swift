@@ -87,6 +87,11 @@ final class RichBlockContentView: NSView {
         nodeViews[node.path] = view
         addSubview(view)
       }
+      // New renderers need their measured bounds before apply; image views use
+      // those bounds to choose an initial decode target.
+      if view.frame == .zero {
+        view.frame = node.frame
+      }
       view.apply(node: node, context: context)
       view.setContentVisible(isContentVisible)
       if shouldAnimate, view.frame != .zero, view.frame != node.frame {

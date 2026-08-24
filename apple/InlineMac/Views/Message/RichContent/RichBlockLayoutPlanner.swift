@@ -4,6 +4,9 @@ import InlineProtocol
 
 final class RichBlockLayoutPlanner {
   static let shared = RichBlockLayoutPlanner()
+  // Mirrors the server validation ceiling. A larger/forged snapshot falls
+  // back to the ordinary message projection before creating native surfaces.
+  private static let maxTableCells = 256
 
   private final class PlanBox: NSObject {
     let plan: RichBlockLayoutPlan
@@ -72,6 +75,10 @@ final class RichBlockLayoutPlanner {
     disclosureOverrides: [BlockContentPath: Bool] = [:]
   ) -> RichBlockLayoutPlan? {
     guard availableWidth >= 1 else { return nil }
+    var remainingTableCells = Self.maxTableCells
+    guard Self.consumeTableCellBudget(content.blocks, remaining: &remainingTableCells, depth: 0) else {
+      return nil
+    }
     let resolvedContentInset = min(max(0, contentHorizontalInset), max(0, (availableWidth - 1) / 2))
     let key = cacheKey(
       contentCacheSignature: contentCacheSignature,
@@ -130,6 +137,47 @@ final class RichBlockLayoutPlanner {
     let estimatedCost = contentByteCount + attributedText.length * 8 + plan.nodes.count * 128
     cache.setObject(box, forKey: key, cost: estimatedCost)
     return plan
+  }
+
+  private static func consumeTableCellBudget(
+    _ blocks: [InlineProtocol.Block],
+    remaining: inout Int,
+    depth: Int
+  ) -> Bool {
+    guard depth <= 16 else { return false }
+    for block in blocks {
+      guard let kind = block.kind else { continue }
+      switch kind {
+      case let .table(table):
+        for row in table.rows {
+          guard row.cells.count <= remaining else { return false }
+          remaining -= row.cells.count
+        }
+      case let .list(list):
+        for item in list.items {
+          guard consumeTableCellBudget(
+            item.children,
+            remaining: &remaining,
+            depth: depth + 1
+          ) else { return false }
+        }
+      case let .disclosure(disclosure):
+        guard consumeTableCellBudget(
+          disclosure.children,
+          remaining: &remaining,
+          depth: depth + 1
+        ) else { return false }
+      case let .quote(quote):
+        guard consumeTableCellBudget(
+          quote.children,
+          remaining: &remaining,
+          depth: depth + 1
+        ) else { return false }
+      default:
+        break
+      }
+    }
+    return true
   }
 
   private func cacheKey(
@@ -554,6 +602,7 @@ final class RichBlockLayoutPlanner {
       guard let firstRow = table.rows.first, !firstRow.cells.isEmpty else { return false }
       let columnCount = firstRow.cells.count
       guard table.rows.allSatisfy({ $0.cells.count == columnCount }) else { return false }
+      guard table.rows.count <= RichBlockLayoutPlanner.maxTableCells / columnCount else { return false }
       let isRTL = table.hasIsRtl ? table.isRtl : (inheritedDirection ?? false)
       let alignments = (0 ..< columnCount).map { index in
         tableAlignment(

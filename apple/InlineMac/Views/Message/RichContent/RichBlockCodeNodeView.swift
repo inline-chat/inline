@@ -33,6 +33,7 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
   private var highlightTask: Task<Void, Never>?
   private var copyFeedbackTask: Task<Void, Never>?
   private var highlightInput: HighlightInput?
+  private var renderSignature: RenderSignature?
 
   private struct HighlightInput {
     let baseText: NSAttributedString
@@ -40,6 +41,51 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     let palette: RichBlockPalette
     let linkColor: NSColor
     let onEntityClick: (MessageTextEntityHit, NSAttributedString) -> Bool
+  }
+
+  private struct RenderSignature: Equatable {
+    let text: NSAttributedString
+    let language: String?
+    let presentation: RichBlockCodePresentation
+    let baseFontSize: CGFloat
+    let gutterWidth: CGFloat
+    let lineCount: Int
+    let primary: ResolvedColor
+    let secondary: ResolvedColor
+    let tertiary: ResolvedColor
+    let link: ResolvedColor
+    let codeFill: ResolvedColor
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+      lhs.text.isEqual(to: rhs.text)
+        && lhs.language == rhs.language
+        && lhs.presentation == rhs.presentation
+        && lhs.baseFontSize == rhs.baseFontSize
+        && lhs.gutterWidth == rhs.gutterWidth
+        && lhs.lineCount == rhs.lineCount
+        && lhs.primary == rhs.primary
+        && lhs.secondary == rhs.secondary
+        && lhs.tertiary == rhs.tertiary
+        && lhs.link == rhs.link
+        && lhs.codeFill == rhs.codeFill
+    }
+  }
+
+  /// Theme colors are dynamic and recreated on access. Compare their resolved
+  /// components so equivalent palettes still hit the render cache.
+  private struct ResolvedColor: Equatable {
+    let red: CGFloat
+    let green: CGFloat
+    let blue: CGFloat
+    let alpha: CGFloat
+
+    init(_ color: NSColor) {
+      let resolved = color.usingColorSpace(.deviceRGB) ?? color
+      red = resolved.redComponent
+      green = resolved.greenComponent
+      blue = resolved.blueComponent
+      alpha = resolved.alphaComponent
+    }
   }
 
   init() {
@@ -62,11 +108,29 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
 
   override func apply(node: RichBlockLayoutPlan.Node, context: RichBlockRenderContext) {
     guard case let .code(code) = node.kind else { return }
+    let text = context.codeText(for: code)
+    let signature = RenderSignature(
+      text: text,
+      language: code.language,
+      presentation: context.codePresentation,
+      baseFontSize: context.baseFontSize,
+      gutterWidth: code.gutterWidth,
+      lineCount: code.lineCount,
+      primary: ResolvedColor(context.palette.primary),
+      secondary: ResolvedColor(context.palette.secondary),
+      tertiary: ResolvedColor(context.palette.tertiary),
+      link: ResolvedColor(context.palette.link),
+      codeFill: ResolvedColor(context.palette.codeFill)
+    )
+    if renderSignature == signature {
+      surface.updateInteraction(context.interactions.onTextEntityClick)
+      return
+    }
+    renderSignature = signature
     highlightGeneration &+= 1
     highlightTask?.cancel()
     highlightTask = nil
     highlightInput = nil
-    let text = context.codeText(for: code)
     rawText = text.string
     let showsGutter = context.codePresentation == .syntaxHighlighted
       && CodeSyntaxHighlighter.supports(language: code.language)
@@ -118,6 +182,7 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     copyFeedbackTask = nil
     setCopyFeedback(copied: false)
     highlightInput = nil
+    renderSignature = nil
   }
 
   override func layout() {
