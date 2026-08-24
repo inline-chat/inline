@@ -8,6 +8,8 @@ import Observation
 final class AgentSetupWizardModel {
   enum Phase: Equatable {
     case idle
+    case choosingLocation
+    case remoteSetup
     case installingCLI
     case signingIn
     case discovering
@@ -18,7 +20,7 @@ final class AgentSetupWizardModel {
     case failed
   }
 
-  private(set) var phase: Phase = .idle
+  private(set) var phase: Phase = .choosingLocation
   private(set) var discovery: AgentHarnessDiscovery?
   private(set) var result: AgentSetupResult?
   private(set) var failure: AgentSetupFailure?
@@ -56,7 +58,7 @@ final class AgentSetupWizardModel {
     switch phase {
     case .installingCLI, .signingIn, .discovering, .settingUp:
       true
-    case .idle, .choosing, .noHarnesses, .completed, .failed:
+    case .idle, .choosingLocation, .remoteSetup, .choosing, .noHarnesses, .completed, .failed:
       false
     }
   }
@@ -74,6 +76,32 @@ final class AgentSetupWizardModel {
     discovery?.documentationURL
       ?? failure?.recoveryURL
       ?? URL(string: "https://inline.chat/docs/agents")!
+  }
+
+  var agentInstructionsURL: URL {
+    URL(string: "https://inline.chat/docs/agents.md")!
+  }
+
+  var remoteSetupPrompt: String {
+    "Set up Inline for this agent on this machine by following \(agentInstructionsURL.absoluteString)"
+  }
+
+  func chooseLocalSetup() {
+    start()
+  }
+
+  func chooseRemoteSetup() {
+    guard !isBusy else { return }
+    phase = .remoteSetup
+  }
+
+  func returnToLocationChoice() {
+    guard !isBusy else { return }
+    discovery = nil
+    result = nil
+    failure = nil
+    selectedTargetID = nil
+    phase = .choosingLocation
   }
 
   func start() {
@@ -217,7 +245,7 @@ final class AgentSetupWizardModel {
       phase = .choosing
     } catch is CancellationError {
       isCancelling = false
-      phase = .idle
+      phase = .choosingLocation
     } catch {
       fail(error)
     }

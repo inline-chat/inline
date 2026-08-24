@@ -1,3 +1,4 @@
+import AppKit
 import InlineCLIInstaller
 import SwiftUI
 
@@ -8,25 +9,27 @@ struct AgentSetupWizardView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       header
-        .padding(24)
+        .padding(.horizontal, 32)
+        .padding(.top, 28)
+        .padding(.bottom, 22)
 
       Divider()
 
       content
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(24)
+        .frame(maxWidth: 480, maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 32)
+        .padding(.vertical, 28)
 
       Divider()
 
       actions
-        .padding(16)
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
     .frame(minWidth: 560, minHeight: 460)
-    .task {
-      if model.phase == .idle {
-        model.start()
-      }
-    }
     .alert(
       "Replace Existing Harness Setup?",
       isPresented: $showsReplacementConfirmation
@@ -44,33 +47,41 @@ struct AgentSetupWizardView: View {
   }
 
   private var header: some View {
-    HStack(spacing: 14) {
+    VStack(spacing: 10) {
       Image(systemName: "cpu")
-        .font(.system(size: 28))
-        .frame(width: 44, height: 44)
+        .font(.system(size: 30, weight: .medium))
+        .frame(width: 52, height: 52)
         .accessibilityHidden(true)
 
-      VStack(alignment: .leading, spacing: 3) {
+      VStack(spacing: 5) {
         Text("Set Up an Inline Agent")
           .font(.title2.weight(.semibold))
-        Text("Inline installs its CLI, finds your local harnesses, and connects the one you choose.")
+        Text("Connect an agent on this Mac or hand setup off to another machine.")
           .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
       }
     }
+    .frame(maxWidth: .infinity)
   }
 
   @ViewBuilder
   private var content: some View {
     switch model.phase {
-    case .idle, .installingCLI:
+    case .choosingLocation:
+      machinePicker
+    case .remoteSetup:
+      remoteSetup
+    case .idle:
+      machinePicker
+    case .installingCLI:
       progress(
-        title: "Preparing Inline CLI",
-        detail: "Checking for a trusted CLI and installing or updating it when needed."
+        title: "Checking Inline CLI",
+        detail: "Reusing a compatible Inline CLI when one is already installed, or installing the version setup needs."
       )
     case .signingIn:
       progress(
-        title: "Signing In",
-        detail: "Giving the CLI its own revocable Inline session."
+        title: "Checking CLI Access",
+        detail: "Keeping an existing sign-in when it matches this account, or creating a separate revocable CLI session when needed."
       )
     case .discovering:
       progress(
@@ -94,18 +105,90 @@ struct AgentSetupWizardView: View {
   }
 
   private func progress(title: String, detail: String) -> some View {
-    HStack(alignment: .top, spacing: 14) {
+    VStack(spacing: 14) {
       ProgressView()
         .controlSize(.regular)
-      VStack(alignment: .leading, spacing: 5) {
+      VStack(spacing: 6) {
         Text(title)
           .font(.headline)
         Text(detail)
           .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
           .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: 380)
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+  }
+
+  private var machinePicker: some View {
+    VStack(spacing: 20) {
+      VStack(spacing: 6) {
+        Text("Where is your agent running?")
+          .font(.headline)
+        Text("Choose this Mac for a local setup, or another machine for servers, cloud hosts, and other computers.")
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      VStack(spacing: 12) {
+        AgentSetupChoiceButton(
+          title: "This Mac",
+          description: "Set up an agent or harness installed on this Mac.",
+          systemImage: "laptopcomputer",
+          action: model.chooseLocalSetup
+        )
+        AgentSetupChoiceButton(
+          title: "Another Machine",
+          description: "Continue setup on a server, cloud host, or another computer.",
+          systemImage: "server.rack",
+          action: model.chooseRemoteSetup
+        )
+      }
+    }
+  }
+
+  private var remoteSetup: some View {
+    VStack(spacing: 20) {
+      VStack(spacing: 6) {
+        Text("Continue on the other machine")
+          .font(.headline)
+        Text("Let the agent handle setup there, or follow the guide yourself.")
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+      }
+
+      VStack(spacing: 12) {
+        AgentSetupChoiceButton(
+          title: "Copy Prompt for Agent",
+          description: "Paste one instruction into the agent running on that machine.",
+          systemImage: "doc.on.doc"
+        ) {
+          let pasteboard = NSPasteboard.general
+          pasteboard.clearContents()
+          pasteboard.setString(model.remoteSetupPrompt, forType: .string)
+          ToastCenter.shared.showSuccess("Copied setup prompt")
+        }
+
+        Link(destination: model.documentationURL) {
+          AgentSetupChoiceLabel(
+            title: "Read Setup Guide",
+            description: "Open the instructions and set up your agent manually.",
+            systemImage: "book.pages"
+          )
+        }
+        .buttonStyle(.plain)
+      }
+
+      Text(model.remoteSetupPrompt)
+        .font(.caption.monospaced())
+        .foregroundStyle(.tertiary)
+        .textSelection(.enabled)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: 420)
+    }
   }
 
   private var harnessPicker: some View {
@@ -280,18 +363,26 @@ struct AgentSetupWizardView: View {
   @ViewBuilder
   private var actions: some View {
     HStack(spacing: 10) {
-      Link("Setup Guide", destination: model.documentationURL)
-
-      Spacer()
-
       switch model.phase {
+      case .choosingLocation, .idle:
+        Link("Setup Guide", destination: model.documentationURL)
+        Spacer()
+      case .remoteSetup:
+        Button("Back") {
+          model.returnToLocationChoice()
+        }
+        Spacer()
       case .choosing:
+        Link("Setup Guide", destination: model.documentationURL)
+        Spacer()
         Button("Set Up Selected Harness") {
           model.setUpSelectedTarget()
         }
         .keyboardShortcut(.defaultAction)
         .disabled(model.selectedTarget == nil)
       case .completed where model.isReady:
+        Link("Setup Guide", destination: model.documentationURL)
+        Spacer()
         Button("Set Up Another") {
           model.chooseAnotherHarness()
         }
@@ -300,6 +391,8 @@ struct AgentSetupWizardView: View {
         }
         .keyboardShortcut(.defaultAction)
       case .completed:
+        Link("Setup Guide", destination: model.documentationURL)
+        Spacer()
         Button("Set Up Another") {
           model.chooseAnotherHarness()
         }
@@ -315,11 +408,15 @@ struct AgentSetupWizardView: View {
           .keyboardShortcut(.defaultAction)
         }
       case .noHarnesses:
+        Link("Setup Guide", destination: model.documentationURL)
+        Spacer()
         Button("Check Again") {
           model.start()
         }
         .keyboardShortcut(.defaultAction)
       case .failed:
+        Link("Setup Guide", destination: model.documentationURL)
+        Spacer()
         if model.canRepairSelectedSetup {
           Button("Repair Existing Setup…") {
             showsReplacementConfirmation = true
@@ -330,16 +427,71 @@ struct AgentSetupWizardView: View {
         }
         .keyboardShortcut(.defaultAction)
       case .installingCLI, .signingIn, .discovering, .settingUp:
+        Link("Setup Guide", destination: model.documentationURL)
+        Spacer()
         Button(model.isCancelling ? "Cancelling…" : "Cancel") {
           model.cancelOperation()
         }
         .disabled(model.isCancelling)
-      case .idle:
-        Button("Start Setup") {
-          model.start()
-        }
-        .keyboardShortcut(.defaultAction)
       }
     }
+  }
+}
+
+private struct AgentSetupChoiceButton: View {
+  let title: LocalizedStringResource
+  let description: LocalizedStringResource
+  let systemImage: String
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      AgentSetupChoiceLabel(
+        title: title,
+        description: description,
+        systemImage: systemImage
+      )
+    }
+    .buttonStyle(.plain)
+  }
+}
+
+private struct AgentSetupChoiceLabel: View {
+  let title: LocalizedStringResource
+  let description: LocalizedStringResource
+  let systemImage: String
+
+  var body: some View {
+    HStack(spacing: 14) {
+      Image(systemName: systemImage)
+        .font(.system(size: 20))
+        .foregroundStyle(.secondary)
+        .frame(width: 28)
+        .accessibilityHidden(true)
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text(title)
+          .font(.body.weight(.medium))
+        Text(description)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Image(systemName: "chevron.right")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.tertiary)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityHidden(true)
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+    .overlay {
+      RoundedRectangle(cornerRadius: 10)
+        .stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1)
+    }
+    .contentShape(Rectangle())
   }
 }
