@@ -114,7 +114,7 @@ private struct SidebarCollectionUnreadButtonHost: View {
 @MainActor
 @Observable
 private final class SidebarCollectionUnreadButtonModel {
-  var state: SidebarUnreadViewportDirection<SidebarCollectionNodeID>? = nil
+  var state: SidebarUnreadViewportDirection<SidebarCollectionNodeID>?
 }
 
 private struct SidebarCollectionBodyInput {
@@ -264,7 +264,7 @@ final class SidebarCollectionBodyController: NSViewController {
     var isExpandable: Bool {
       switch self {
       case let .chat(item): item.isExpandable
-      case let .folder(folder): folder.childCount > 0
+      case .folder: true
       }
     }
 
@@ -1696,9 +1696,7 @@ final class SidebarCollectionBodyController: NSViewController {
       else { return nil }
       return item.isExpanded ? 1 : 0
     case let .folder(id):
-      guard let folder = presentation.rowByID[.folder(id)]?.projectedFolder,
-            folder.childCount > 0
-      else { return nil }
+      guard let folder = presentation.rowByID[.folder(id)]?.projectedFolder else { return nil }
       return folder.isExpanded ? 1 : 0
     }
   }
@@ -1936,7 +1934,7 @@ final class SidebarCollectionBodyController: NSViewController {
         headerCount += 1
       case .pinDropGuide:
         guideCount += 1
-      case .allChats, .grid, .newThread, .emptyState:
+      case .allChats, .grid, .folderNewThread, .newThread, .emptyState:
         chromeCount += 1
       }
     }
@@ -2212,6 +2210,7 @@ final class SidebarCollectionBodyController: NSViewController {
       dimsPinDropInstruction: row.id == .pinDropGuide
         && reorderSession?.pinDropInstructionIsDimmed == true,
       forceHoverAppearance: false,
+      isDropTargeted: row.id.folderID == reorderSession?.proposal?.slot.parentID?.folderID,
       disclosureExpandedOverride: disclosureExpandedOverride,
       suppressesAnimations: isSidebarLiveResizeActive
     )
@@ -2707,6 +2706,9 @@ final class SidebarCollectionBodyController: NSViewController {
     session.proposal = originalProposal
     _ = updateEmptyPinnedSectionVisibility(session: &session)
     reorderSession = session
+    if let folderID = session.proposal?.slot.parentID?.folderID {
+      refreshVisibleContent(.rowIDs([.folder(folderID)]))
+    }
     let nativeDragPreviewContent: (
       (SidebarCollectionRow) -> SidebarNativeRowConfiguration
     )? = if renderer == .appKit, let nativeContent {
@@ -2738,6 +2740,7 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func updateReorder(location _: CGPoint, translation _: CGPoint) {
     guard var session = reorderSession, session.isSettling == false else { return }
+    let previousDropTargetFolderID = session.proposal?.slot.parentID?.folderID
     // Gesture locations are event-time samples and can lag after a brief main
     // thread stall. Screen cursor state is the authoritative current pointer.
     resamplePointer(for: &session)
@@ -2749,6 +2752,7 @@ final class SidebarCollectionBodyController: NSViewController {
       session: &session
     )
     reorderSession = session
+    let dropTargetFolderID = session.proposal?.slot.parentID?.folderID
 
     if emptyPinnedVisibilityChanged || proposalChanged {
       updateLayoutForReorder(animated: true)
@@ -2756,7 +2760,10 @@ final class SidebarCollectionBodyController: NSViewController {
     let pinInstructionChanged = updatePinDropInstructionDimming(session: &session)
     reorderSession = session
     if emptyPinnedVisibilityChanged || proposalChanged || pinInstructionChanged {
-      refreshVisibleContent(.rowIDs([.pinDropGuide]))
+      var rowIDs: Set<SidebarCollectionRow.ID> = [.pinDropGuide]
+      if let previousDropTargetFolderID { rowIDs.insert(.folder(previousDropTargetFolderID)) }
+      if let dropTargetFolderID { rowIDs.insert(.folder(dropTargetFolderID)) }
+      refreshVisibleContent(.rowIDs(rowIDs))
     }
     if proposalChanged {
       NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -3171,20 +3178,29 @@ final class SidebarCollectionBodyController: NSViewController {
       .replacing(snapshot: snapshot)
       .projectedNodes(orderLaneOverrides: laneOverrides)
     func nodeRows(_ nodes: [SidebarProjectedNode]) -> [SidebarCollectionRow] {
-      nodes.map { node in
+      nodes.flatMap { node -> [SidebarCollectionRow] in
         switch node {
         case let .chat(item):
-          SidebarCollectionRow(
+          return [SidebarCollectionRow(
             id: .chat(item.id),
             kind: .chat(item),
             height: baseRows.first(where: { $0.id == .chat(item.id) })?.height ?? rowHeight
-          )
+          )]
         case let .folder(folder):
-          SidebarCollectionRow(
+          var rows = [SidebarCollectionRow(
             id: .folder(folder.id),
             kind: .folder(folder),
             height: baseRows.first(where: { $0.id == .folder(folder.id) })?.height ?? rowHeight
-          )
+          )]
+          if folder.childCount == 0, folder.isExpanded {
+            rows.append(SidebarCollectionRow(
+              id: .folderNewThread(folder.id),
+              kind: .folderNewThread(folder.id),
+              height: baseRows.first(where: { $0.id == .folderNewThread(folder.id) })?.height
+                ?? rowHeight
+            ))
+          }
+          return rows
         }
       }
     }
@@ -4462,6 +4478,7 @@ final class SidebarCollectionBodyController: NSViewController {
 
   private func autoscrollTick() {
     guard var session = reorderSession, session.isSettling == false else { return }
+    let previousDropTargetFolderID = session.proposal?.slot.parentID?.folderID
     resamplePointer(for: &session)
     let visible = scrollView.contentView.bounds
     let edge: CGFloat = 28
@@ -4485,13 +4502,17 @@ final class SidebarCollectionBodyController: NSViewController {
     )
     let proposalChanged = acceptProposal(at: session.pointerInCollection, session: &session)
     reorderSession = session
+    let dropTargetFolderID = session.proposal?.slot.parentID?.folderID
     if emptyPinnedVisibilityChanged || proposalChanged {
       updateLayoutForReorder(animated: true)
     }
     let pinInstructionChanged = updatePinDropInstructionDimming(session: &session)
     reorderSession = session
     if emptyPinnedVisibilityChanged || proposalChanged || pinInstructionChanged {
-      refreshVisibleContent(.rowIDs([.pinDropGuide]))
+      var rowIDs: Set<SidebarCollectionRow.ID> = [.pinDropGuide]
+      if let previousDropTargetFolderID { rowIDs.insert(.folder(previousDropTargetFolderID)) }
+      if let dropTargetFolderID { rowIDs.insert(.folder(dropTargetFolderID)) }
+      refreshVisibleContent(.rowIDs(rowIDs))
     }
     if proposalChanged {
       NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)

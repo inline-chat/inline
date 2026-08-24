@@ -78,11 +78,13 @@ final class SidebarViewModel {
   struct Folder: Equatable, Identifiable {
     let id: Int64
     let title: String?
+    let emoji: String?
     let order: String
 
     init(_ folder: DialogFolder) {
       id = folder.id
       title = folder.title
+      emoji = folder.emoji
       order = folder.order
     }
   }

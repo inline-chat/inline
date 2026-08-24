@@ -87,7 +87,7 @@ struct SidebarCollectionDisclosureDescriptor {
     if let sectionHeader = row.sectionHeader {
       return (.section(sectionHeader.section), sectionHeader.isExpanded)
     }
-    if let folder = row.projectedFolder, folder.childCount > 0 {
+    if let folder = row.projectedFolder {
       return (.folder(folder.id), folder.isExpanded)
     }
     guard let item = row.projectedItem, item.isExpandable else { return nil }
@@ -126,6 +126,8 @@ struct SidebarCollectionDisclosureDescriptor {
           return item.lane == .normal
         case (.content, let .folder(folder)):
           return folder.lane == .normal
+        case (.content, .folderNewThread):
+          return true
         case (.content, .newThread):
           return true
         case (.content, .emptyState):

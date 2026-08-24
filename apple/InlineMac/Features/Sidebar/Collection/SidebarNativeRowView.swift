@@ -65,6 +65,7 @@ struct SidebarNativeRowConfiguration {
     let selected: Bool
     let titleDimmed: Bool
     let size: SidebarItemSize
+    var indentationLevel = 0
     let prominentUnreadCount: Int
     let otherUnreadCount: Int
     let avatars: [Avatar]
@@ -176,11 +177,13 @@ struct SidebarNativeRowConfiguration {
 
   struct FolderPresentation: Equatable {
     let title: String
+    let emoji: String?
     let childCount: Int
     let unreadCount: Int
 
     init(_ folder: SidebarProjectedFolder) {
       title = folder.title
+      emoji = folder.folder.emoji
       childCount = folder.childCount
       unreadCount = folder.unreadCount
     }
@@ -188,6 +191,7 @@ struct SidebarNativeRowConfiguration {
 
   struct FolderActions {
     let toggleDisclosure: () -> Void
+    let setEmoji: (String) -> Void
     let close: () -> Void
     let ungroup: () -> Void
   }
@@ -197,6 +201,7 @@ struct SidebarNativeRowConfiguration {
     let titleDimmed: Bool
     let size: SidebarItemSize
     let disclosureExpanded: Bool
+    let isDropTargeted: Bool
     let forceHoverAppearance: Bool
     let actions: FolderActions
   }
@@ -234,7 +239,8 @@ struct SidebarNativeRowConfiguration {
     case let .folder(value):
       InteractionPresentation(
         selected: false,
-        dragMode: value.forceHoverAppearance ? .lifted : .idle
+        dragMode: value.isDropTargeted ? .dropTarget
+          : (value.forceHoverAppearance ? .lifted : .idle)
       )
     case .header, .pinDropGuide, .emptyState:
       .idle
@@ -254,6 +260,7 @@ private enum SidebarNativeChatRowMetrics {
 private enum SidebarNativeFolderRowMetrics {
   static let accessoryHitSize: CGFloat = 28
   static let disclosureWidth: CGFloat = 24
+  static let titleDisclosureSpacing: CGFloat = 4
 }
 
 /// A narrow SwiftUI rendering leaf inside an AppKit-owned row. The hosting
@@ -534,7 +541,6 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
     pressedInteractionTarget == .primary
   }
 
-
   var hasHoverPresentation: Bool {
     isHovered || interactionPresentation.dragMode != .idle
   }
@@ -810,7 +816,8 @@ private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveCont
     backgroundLayer.cornerRadius = Theme.sidebarItemRadius
 
     let iconSize = configuration.size.iconSize
-    var leading = painted.minX + Theme.sidebarItemInnerSpacing
+    let indentation = CGFloat(configuration.indentationLevel) * (iconSize + 8)
+    var leading = painted.minX + Theme.sidebarItemInnerSpacing + indentation
     iconView.frame = CGRect(
       x: leading,
       y: painted.midY - iconSize / 2,
@@ -1315,6 +1322,17 @@ private final class SidebarNativeTextButton: NSButton {
 
 @MainActor
 private final class SidebarNativeTextField: NSTextField {
+  var unconstrainedTextWidth: CGFloat {
+    if let cell {
+      // NSTextFieldCell reserves horizontal drawing space beyond the glyph
+      // bounds. Measuring only NSString makes a fitting title truncate by a
+      // few points (for example, `New Folder` became `New Fol…`).
+      return ceil(cell.cellSize.width)
+    }
+    let font = font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    return ceil((stringValue as NSString).size(withAttributes: [.font: font]).width + 4)
+  }
+
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     isEditable = false
@@ -1381,9 +1399,13 @@ private enum SidebarNativeColors {
   static func rowBackground(
     selected: Bool,
     hovered: Bool,
+    dropTargeted: Bool = false,
     appearance: NSAppearance
   ) -> NSColor {
     let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    if dropTargeted {
+      return Theme.accentColor.withAlphaComponent(isDark ? 0.24 : 0.16)
+    }
     if selected {
       return isDark
         ? NSColor.white.withAlphaComponent(0.10)
@@ -1425,12 +1447,12 @@ private enum SidebarNativeLayerUpdates {
 private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentView {
   private let backgroundLayer = CALayer()
   private let disclosureView = SidebarNativeHostedVisualView()
-  private let folderImageView = NSImageView()
+  private let folderIconView = SidebarNativeHostedVisualView()
   private let titleField = SidebarNativeTextField()
   private let detailField = SidebarNativeTextField()
-  private let closeView = SidebarNativeCloseAccessoryView()
   private var configuration: SidebarNativeRowConfiguration.Folder?
   private var displayedExpanded = true
+  private var emojiPopover: NSPopover?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -1438,15 +1460,12 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     SidebarNativeLayerUpdates.disableImplicitAnimations(on: backgroundLayer)
     layer?.addSublayer(backgroundLayer)
     addSubview(disclosureView)
-    addSubview(folderImageView)
+    addSubview(folderIconView)
     addSubview(titleField)
     addSubview(detailField)
-    addSubview(closeView)
-    folderImageView.imageScaling = .scaleProportionallyDown
     titleField.font = .systemFont(ofSize: 13)
     detailField.font = .systemFont(ofSize: 11)
     detailField.textColor = .secondaryLabelColor
-    closeView.configureIcon()
     setAccessibilityRole(.button)
   }
 
@@ -1459,13 +1478,11 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     self.configuration = configuration
     displayedExpanded = configuration.disclosureExpanded
     primaryAction = configuration.actions.toggleDisclosure
-    closeView.configure(action: configuration.actions.close)
     titleField.stringValue = configuration.presentation.title
     titleField.textColor = configuration.titleDimmed ? .secondaryLabelColor : .labelColor
     detailField.stringValue = folderDetail(configuration.presentation)
     configureFolderIcon()
     configureDisclosureVisual()
-    updateControlPresentation(animated: false)
     updateBackground()
     updateAccessibility()
     needsLayout = true
@@ -1479,32 +1496,28 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     backgroundLayer.frame = painted
     backgroundLayer.cornerRadius = Theme.sidebarItemRadius
 
-    let disclosureFrame = CGRect(
-      x: painted.minX + max((Theme.sidebarItemInnerSpacing - 24) / 2, 0),
-      y: painted.minY,
-      width: SidebarNativeFolderRowMetrics.disclosureWidth,
-      height: painted.height
-    )
-    disclosureView.frame = disclosureFrame
-    var leading = disclosureFrame.maxX + 1
+    var leading = painted.minX + Theme.sidebarItemInnerSpacing
     let iconSize = configuration.size.iconSize
-    folderImageView.frame = CGRect(
+    folderIconView.frame = CGRect(
       x: leading,
       y: painted.midY - iconSize / 2,
       width: iconSize,
       height: iconSize
     )
-    leading = folderImageView.frame.maxX + 8
+    leading = folderIconView.frame.maxX + 8
 
-    closeView.frame = closeHitRect(in: painted)
-    let trailing = closeView.alphaValue > 0.01
-      ? closeView.frame.minX - 8
-      : painted.maxX - Theme.sidebarItemInnerSpacing
+    let trailing = painted.maxX - Theme.sidebarItemInnerSpacing
+    let disclosureSpace = SidebarNativeFolderRowMetrics.titleDisclosureSpacing
+      + SidebarNativeFolderRowMetrics.disclosureWidth
+    let titleWidth = min(
+      titleField.unconstrainedTextWidth,
+      max(trailing - leading - disclosureSpace, 0)
+    )
     if configuration.size == .compact {
       titleField.frame = CGRect(
         x: leading,
         y: painted.midY - 9,
-        width: max(trailing - leading, 0),
+        width: titleWidth,
         height: 18
       )
       detailField.frame = .zero
@@ -1513,7 +1526,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       titleField.frame = CGRect(
         x: leading,
         y: painted.midY - 15,
-        width: max(trailing - leading, 0),
+        width: titleWidth,
         height: 16
       )
       detailField.frame = CGRect(
@@ -1524,10 +1537,15 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       )
       detailField.isHidden = false
     }
+    disclosureView.frame = CGRect(
+      x: titleField.frame.maxX + SidebarNativeFolderRowMetrics.titleDisclosureSpacing,
+      y: painted.minY,
+      width: SidebarNativeFolderRowMetrics.disclosureWidth,
+      height: painted.height
+    )
   }
 
   override func hoverDidChange() {
-    updateControlPresentation(animated: true)
     updateBackground()
   }
 
@@ -1536,7 +1554,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   }
 
   override func keyDown(with event: NSEvent) {
-    guard let configuration else {
+    guard configuration != nil else {
       super.keyDown(with: event)
       return
     }
@@ -1548,16 +1566,20 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       performDisclosureToggle()
       return
     }
-    if event.keyCode == 51 {
-      configuration.actions.close()
-      return
-    }
     super.keyDown(with: event)
   }
 
   override func menu(for _: NSEvent) -> NSMenu? {
     guard let configuration else { return nil }
     let menu = NSMenu()
+    if configuration.presentation.childCount == 0 {
+      menu.addItem(SidebarNativeMenuItem(
+        title: "Delete Folder",
+        systemImage: "trash",
+        action: configuration.actions.ungroup
+      ))
+      return menu
+    }
     menu.addItem(SidebarNativeMenuItem(
       title: "Ungroup (Keep Chats)",
       systemImage: "folder.badge.minus",
@@ -1576,15 +1598,15 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     super.prepareForReuse()
     configuration = nil
     primaryAction = nil
-    closeView.prepareForReuse()
+    emojiPopover?.performClose(nil)
+    emojiPopover = nil
     disclosureView.prepareForReuse()
-    folderImageView.image = nil
+    folderIconView.prepareForReuse()
     setAccessibilityCustomActions([])
   }
 
   override func interactionTarget(at point: NSPoint) -> InteractionTarget {
-    let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
-    if closeHitRect(in: painted).contains(point) { return .accessory(0) }
+    if folderIconHitRect().contains(point) { return .accessory(0) }
     if disclosureView.frame.contains(point) { return .accessory(1) }
     return .primary
   }
@@ -1594,19 +1616,14 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   }
 
   override func performAccessoryAction(_ target: InteractionTarget) {
-    guard let configuration else { return }
     switch target {
-    case .accessory(0): configuration.actions.close()
+    case .accessory(0): showEmojiPicker()
     case .accessory(1): performDisclosureToggle()
     default: break
     }
   }
 
   override func interactionPresentationDidChange() {
-    closeView.configureInteraction(
-      hovered: hoveredInteractionTarget == .accessory(0),
-      pressed: pressedInteractionTarget == .accessory(0)
-    )
     updateAccessibility()
   }
 
@@ -1620,11 +1637,15 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   }
 
   private func configureFolderIcon() {
-    folderImageView.image = NSImage(
-      systemSymbolName: displayedExpanded ? "folder.fill" : "folder",
-      accessibilityDescription: nil
-    )
-    folderImageView.contentTintColor = .secondaryLabelColor
+    guard let configuration else { return }
+    folderIconView.toolTip = "Choose folder emoji"
+    folderIconView.configure {
+      SidebarFolderIcon(
+        emoji: configuration.presentation.emoji,
+        isExpanded: displayedExpanded,
+        size: configuration.size.iconSize
+      )
+    }
   }
 
   private func configureDisclosureVisual() {
@@ -1640,29 +1661,13 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     }
   }
 
-  private func updateControlPresentation(animated: Bool) {
-    guard let configuration else { return }
-    let visible = hasHoverPresentation
-    let alpha: CGFloat = visible ? 1 : 0
-    if animated, allowsAnimations,
-       !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.14
-        closeView.animator().alphaValue = alpha
-      }
-    } else {
-      closeView.alphaValue = alpha
-    }
-    closeView.setAccessibilityHidden(false)
-    needsLayout = true
-  }
-
   private func updateBackground() {
-    guard let configuration else { return }
+    guard configuration != nil else { return }
     SidebarNativeLayerUpdates.setBackgroundColor(
       SidebarNativeColors.rowBackground(
         selected: hasSelectedPresentation,
         hovered: hasHoverPresentation,
+        dropTargeted: interactionPresentation.dragMode == .dropTarget,
         appearance: effectiveAppearance
       ).cgColor,
       on: backgroundLayer
@@ -1673,22 +1678,36 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     guard let configuration else { return }
     setAccessibilityLabel(configuration.presentation.title)
     setAccessibilityValue(folderDetail(configuration.presentation))
-    setAccessibilityCustomActions([
+    var actions = [
+      NSAccessibilityCustomAction(
+        name: "Choose folder emoji"
+      ) { [weak self] in
+        self?.showEmojiPicker()
+        return self != nil
+      },
       NSAccessibilityCustomAction(
         name: displayedExpanded ? "Collapse folder" : "Expand folder"
       ) { [weak self] in
         self?.performDisclosureToggle()
         return self != nil
       },
-      NSAccessibilityCustomAction(name: "Ungroup and keep chats") {
+    ]
+    if configuration.presentation.childCount == 0 {
+      actions.append(NSAccessibilityCustomAction(name: "Delete folder") {
         configuration.actions.ungroup()
         return true
-      },
-      NSAccessibilityCustomAction(name: "Close folder and chats") {
+      })
+    } else {
+      actions.append(NSAccessibilityCustomAction(name: "Ungroup and keep chats") {
+        configuration.actions.ungroup()
+        return true
+      })
+      actions.append(NSAccessibilityCustomAction(name: "Close folder and chats") {
         configuration.actions.close()
         return true
-      },
-    ])
+      })
+    }
+    setAccessibilityCustomActions(actions)
   }
 
   private func folderDetail(
@@ -1699,13 +1718,28 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     return "\(chats), \(presentation.unreadCount) unread"
   }
 
-  private func closeHitRect(in painted: CGRect) -> CGRect {
+  private func folderIconHitRect() -> CGRect {
     let size = SidebarNativeFolderRowMetrics.accessoryHitSize
     return CGRect(
-      x: painted.maxX - Theme.sidebarItemInnerSpacing - size,
-      y: painted.midY - size / 2,
+      x: folderIconView.frame.midX - size / 2,
+      y: folderIconView.frame.midY - size / 2,
       width: size,
       height: size
+    )
+  }
+
+  private func showEmojiPicker() {
+    guard configuration != nil else { return }
+    if emojiPopover?.isShown == true { return }
+    let popover = EmojiPickerPopover2.makePopover { [weak self] selectedEmoji in
+      guard let emoji = EmojiPickerValue.normalizedEmoji(from: selectedEmoji) else { return }
+      self?.configuration?.actions.setEmoji(emoji)
+    }
+    emojiPopover = popover
+    popover.show(
+      relativeTo: folderIconView.bounds,
+      of: folderIconView,
+      preferredEdge: .maxX
     )
   }
 }

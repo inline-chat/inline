@@ -3,7 +3,12 @@ import RealtimeV2
 
 @MainActor
 enum NewThreadAction {
-  static func start(dependencies: AppDependencies, spaceId: Int64?, title: String = "") {
+  static func start(
+    dependencies: AppDependencies,
+    spaceId: Int64?,
+    title: String = "",
+    destinationFolderId: Int64? = nil
+  ) {
     ToastCenter.shared.showLoading("Creating thread")
 
     let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,9 +33,18 @@ enum NewThreadAction {
         )
         let peer: Peer = .thread(id: chatId)
 
-        await dependencies.realtimeV2.sendQueued(
-          .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
-        )
+        if let destinationFolderId {
+          await dependencies.realtimeV2.sendQueued(.updateDialogOrder(
+            peerId: peer,
+            pinned: false,
+            destination: .folder(destinationFolderId),
+            requiresChatCreated: true
+          ))
+        } else {
+          await dependencies.realtimeV2.sendQueued(
+            .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
+          )
+        }
 
         await MainActor.run {
           ToastCenter.shared.dismiss()

@@ -85,8 +85,14 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case pinDropGuide
     case chat(ChatListItem.Identifier)
     case folder(Int64)
+    case folderNewThread(Int64)
     case newThread
     case emptyState
+
+    var folderID: Int64? {
+      guard case let .folder(id) = self else { return nil }
+      return id
+    }
   }
 
   enum Kind: Equatable {
@@ -98,6 +104,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     case pinDropGuide
     case chat(SidebarProjectedItem)
     case folder(SidebarProjectedFolder)
+    case folderNewThread(Int64)
     case newThread
     case emptyState
   }
@@ -125,13 +132,17 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   }
 
   var presentationParentID: SidebarCollectionNodeID? {
-    projectedItem?.parentID
+    switch kind {
+    case let .folderNewThread(folderID): .folder(folderID)
+    default: projectedItem?.parentID
+    }
   }
 
   var presentationDepth: Int? {
     switch kind {
     case let .chat(item): item.depth
     case let .folder(folder): folder.depth
+    case .folderNewThread: 1
     default: nil
     }
   }
@@ -140,6 +151,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
     switch kind {
     case let .chat(item): item.lane
     case let .folder(folder): folder.lane
+    case .folderNewThread: .normal
     default: nil
     }
   }
@@ -159,7 +171,7 @@ struct SidebarCollectionRow: Equatable, Identifiable {
   var usesFullWidthCollectionLayout: Bool {
     switch id {
     case .allChats, .grid, .sectionHeader, .timelineHeader, .pinDropGuide, .chat, .folder,
-         .newThread:
+         .folderNewThread, .newThread:
       true
     case .archiveHeader, .emptyState:
       false
@@ -260,24 +272,28 @@ struct SidebarCollectionRenderState: Equatable {
 struct SidebarCollectionRowRenderContext: Equatable {
   let dimsPinDropInstruction: Bool
   let forceHoverAppearance: Bool
+  let isDropTargeted: Bool
   let disclosureExpandedOverride: Bool?
   let suppressesAnimations: Bool
 
   static let idle = Self(
     dimsPinDropInstruction: false,
     forceHoverAppearance: false,
+    isDropTargeted: false,
     disclosureExpandedOverride: nil,
     suppressesAnimations: false
   )
   static let dragPreview = Self(
     dimsPinDropInstruction: false,
     forceHoverAppearance: true,
+    isDropTargeted: false,
     disclosureExpandedOverride: nil,
     suppressesAnimations: true
   )
   static let transitioningDragPreview = Self(
     dimsPinDropInstruction: false,
     forceHoverAppearance: true,
+    isDropTargeted: false,
     disclosureExpandedOverride: nil,
     suppressesAnimations: false
   )

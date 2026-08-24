@@ -52,7 +52,7 @@ struct SidebarProjectedFolder: Equatable, Identifiable {
        title.isEmpty == false {
       return title
     }
-    return "\(childCount) Chat\(childCount == 1 ? "" : "s")"
+    return "New Folder"
   }
 }
 
@@ -122,10 +122,10 @@ struct SidebarCollectionTree {
   ) -> [SidebarProjectedNode] {
     snapshot.visibleProjection().compactMap { projected in
       guard let node = snapshot.nodes[projected.id] else { return nil }
-      let isExpanded = node.childIDs.isEmpty == false && node.isExpanded
       switch projected.id {
       case let .chat(id):
         guard let item = itemByID[id] else { return nil }
+        let isExpanded = node.childIDs.isEmpty == false && node.isExpanded
         return .chat(SidebarProjectedItem(
           item: item,
           depth: projected.depth,
@@ -152,7 +152,7 @@ struct SidebarCollectionTree {
           childCount: node.childIDs.count,
           unreadCount: unreadCount,
           prominentUnreadCount: prominentUnreadCount,
-          isExpanded: isExpanded
+          isExpanded: node.isExpanded
         ))
       }
     }

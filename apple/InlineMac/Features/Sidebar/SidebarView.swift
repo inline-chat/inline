@@ -508,6 +508,13 @@ struct SidebarView: View {
           kind: .folder(folder),
           height: settings.sidebarItemSize.rowHeight
         ))
+        if folder.childCount == 0, folder.isExpanded {
+          rows.append(SidebarCollectionRow(
+            id: .folderNewThread(folder.id),
+            kind: .folderNewThread(folder.id),
+            height: settings.sidebarItemSize.rowHeight
+          ))
+        }
       }
     }
   }
@@ -556,7 +563,17 @@ struct SidebarView: View {
     case let .folder(folder):
       AnyView(appKitFolderRow(
         folder,
+        isDropTargeted: context.isDropTargeted,
         disclosureExpandedOverride: context.disclosureExpandedOverride
+      ))
+    case let .folderNewThread(folderID):
+      AnyView(SidebarNewThreadRow(
+        size: settings.sidebarItemSize,
+        titleDimmed: sidebarTitlesDimmed,
+        usesFullWidthCollectionLayout: true,
+        indentationLevel: 1,
+        systemImage: "plus",
+        action: { createNewThread(inFolder: folderID) }
       ))
     case .newThread:
       AnyView(newThreadRow(usesFullWidthCollectionLayout: true))
@@ -658,12 +675,29 @@ struct SidebarView: View {
         titleDimmed: sidebarTitlesDimmed,
         size: settings.sidebarItemSize,
         disclosureExpanded: context.disclosureExpandedOverride ?? folder.isExpanded,
+        isDropTargeted: context.isDropTargeted,
         forceHoverAppearance: context.forceHoverAppearance,
         actions: .init(
           toggleDisclosure: { toggleAppKitFolder(folder.id) },
+          setEmoji: { updateFolderEmoji(folder.id, emoji: $0) },
           close: { removeFolder(folder, disposition: .closeDialogs) },
           ungroup: { removeFolder(folder, disposition: .keepDialogs) }
         )
+      ))
+    case let .folderNewThread(folderID):
+      .navigation(SidebarNativeRowConfiguration.Navigation(
+        title: "New thread",
+        systemImage: "plus",
+        iconStyle: .newThread,
+        selected: false,
+        titleDimmed: sidebarTitlesDimmed,
+        size: settings.sidebarItemSize,
+        indentationLevel: 1,
+        prominentUnreadCount: 0,
+        otherUnreadCount: 0,
+        avatars: [],
+        accessibilityValue: "",
+        action: { createNewThread(inFolder: folderID) }
       ))
     case .newThread:
       .navigation(SidebarNativeRowConfiguration.Navigation(
@@ -743,16 +777,20 @@ struct SidebarView: View {
 
   private func appKitFolderRow(
     _ folder: SidebarProjectedFolder,
+    isDropTargeted: Bool = false,
     disclosureExpandedOverride: Bool? = nil
   ) -> some View {
     SidebarFolderItemView(
       title: folder.title,
+      emoji: folder.folder.emoji,
       childCount: folder.childCount,
       unreadCount: folder.unreadCount,
       isExpanded: disclosureExpandedOverride ?? folder.isExpanded,
+      isDropTargeted: isDropTargeted,
       titleDimmed: sidebarTitlesDimmed,
       size: settings.sidebarItemSize,
       onToggle: { toggleAppKitFolder(folder.id) },
+      onSetEmoji: { updateFolderEmoji(folder.id, emoji: $0) },
       onClose: { removeFolder(folder, disposition: .closeDialogs) },
       onUngroup: { removeFolder(folder, disposition: .keepDialogs) }
     )
@@ -1552,7 +1590,6 @@ struct SidebarView: View {
     guard settings.sidebarAsInbox,
           isArchiveVisible == false,
           nav.selectedSpaceId == nil,
-          item.chatType == .privateChat,
           isTemporaryItem(item) == false
     else { return nil }
 
@@ -1565,7 +1602,7 @@ struct SidebarView: View {
         let title = folder.title?.trimmingCharacters(in: .whitespacesAndNewlines)
         return SidebarChatFolderMenu.Destination(
           id: folder.id,
-          title: title.flatMap { $0.isEmpty ? nil : $0 } ?? "Untitled Folder",
+          title: title.flatMap { $0.isEmpty ? nil : $0 } ?? "New Folder",
           move: { moveChat(item, toFolder: folder.id) }
         )
       }
@@ -1604,61 +1641,15 @@ struct SidebarView: View {
   }
 
   private func moveChat(_ item: SidebarViewModel.Item, toFolder folderID: Int64) {
-    guard let order = orderForAppending(toFolder: folderID, moving: item) else {
-      ToastCenter.shared.showError("That folder’s order needs to refresh before moving this chat.")
-      return
-    }
-    persistFolderMembership(item, order: order, destination: .folder(folderID))
+    persistFolderMembership(item, destination: .folder(folderID))
   }
 
   private func moveChatToRoot(_ item: SidebarViewModel.Item) {
-    let tree = appKitSidebarTree
-    let roots = tree.snapshot.sections.first(where: { $0.id == .normal })?.rootIDs
-      .filter { $0 != .chat(item.id) } ?? []
-    let previousOrder = roots.last.flatMap {
-      tree.trailingPersistedOrder(for: $0, lane: .normal)
-    }
-    guard let order = safeSidebarInsertionOrder(
-      hasPrevious: roots.isEmpty == false,
-      previousOrder: previousOrder,
-      hasNext: false,
-      nextOrder: nil
-    ) else {
-      ToastCenter.shared.showError("Sidebar order needs to refresh before moving this chat.")
-      return
-    }
-    persistFolderMembership(item, order: order, destination: .root)
-  }
-
-  private func orderForAppending(
-    toFolder folderID: Int64,
-    moving item: SidebarViewModel.Item
-  ) -> String? {
-    let tree = appKitSidebarTree
-    let folderNodeID = SidebarCollectionNodeID.folder(folderID)
-    guard let folderNode = tree.snapshot.nodes[folderNodeID],
-          let folderOrder = tree.persistedOrder(for: folderNodeID, lane: .normal),
-          let roots = tree.snapshot.sections.first(where: { $0.id == .normal })?.rootIDs,
-          let folderIndex = roots.firstIndex(of: folderNodeID)
-    else { return nil }
-    let childIDs = folderNode.childIDs.filter { $0 != .chat(item.id) }
-    let previousOrder = childIDs.last.flatMap {
-      tree.persistedOrder(for: $0, lane: .normal)
-    } ?? folderOrder
-    let nextIndex = roots.index(after: folderIndex)
-    let nextNodeID = nextIndex < roots.endIndex ? roots[nextIndex] : nil
-    let nextOrder = nextNodeID.flatMap { tree.persistedOrder(for: $0, lane: .normal) }
-    return safeSidebarInsertionOrder(
-      hasPrevious: true,
-      previousOrder: previousOrder,
-      hasNext: nextNodeID != nil,
-      nextOrder: nextOrder
-    )
+    persistFolderMembership(item, destination: .root)
   }
 
   private func persistFolderMembership(
     _ item: SidebarViewModel.Item,
-    order: String,
     destination: DialogOrderDestination
   ) {
     guard let dependencies else { return }
@@ -1666,13 +1657,27 @@ struct SidebarView: View {
       do {
         _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
           peerId: item.peerId,
-          order: order,
           pinned: false,
           destination: destination
         ))
       } catch {
         sidebarInteractionLog.error("folder membership update failed", error: error)
         ToastCenter.shared.showError("Couldn’t move that chat. Please try again.")
+      }
+    }
+  }
+
+  private func updateFolderEmoji(_ folderID: Int64, emoji: String) {
+    guard let dependencies else { return }
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await dependencies.realtimeV2.send(.updateDialogFolder(
+          folderId: folderID,
+          emoji: .set(emoji)
+        ))
+      } catch {
+        sidebarInteractionLog.error("folder emoji update failed", error: error)
+        ToastCenter.shared.showError("Couldn’t update the folder emoji. Please try again.")
       }
     }
   }
@@ -2861,6 +2866,19 @@ struct SidebarView: View {
     NewThreadAction.start(dependencies: dependencies, spaceId: activeSpaceId)
   }
 
+  private func createNewThread(inFolder folderID: Int64) {
+    guard let dependencies else {
+      nav.open(.newChat(spaceId: activeSpaceId))
+      return
+    }
+
+    NewThreadAction.start(
+      dependencies: dependencies,
+      spaceId: activeSpaceId,
+      destinationFolderId: folderID
+    )
+  }
+
   private func performSpaceAction(_ pending: SidebarSpacePendingAction) {
     pendingSpaceAction = nil
     let shouldNavigateOut = isActiveSpace(pending.space.id)
@@ -3561,6 +3579,8 @@ private struct SidebarNewThreadRow: View {
   let size: SidebarItemSize
   let titleDimmed: Bool
   var usesFullWidthCollectionLayout = false
+  var indentationLevel = 0
+  var systemImage = "square.and.pencil"
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -3589,7 +3609,10 @@ private struct SidebarNewThreadRow: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
       .frame(height: SidebarCollectionRow.paintedItemHeight(for: rowHeight))
-      .padding(.leading, Theme.sidebarItemInnerSpacing)
+      .padding(
+        .leading,
+        Theme.sidebarItemInnerSpacing + CGFloat(indentationLevel) * (iconSize + 8)
+      )
       .padding(.trailing, Theme.sidebarItemOuterSpacing)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
@@ -3607,7 +3630,7 @@ private struct SidebarNewThreadRow: View {
 
   private var icon: some View {
     SidebarActionRowIcon(
-      systemImage: "square.and.pencil",
+      systemImage: systemImage,
       size: size,
       weight: .regular
     )

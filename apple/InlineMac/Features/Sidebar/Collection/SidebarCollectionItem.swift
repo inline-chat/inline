@@ -38,6 +38,7 @@ enum SidebarCollectionTransitionDiagnostics {
     case .pinDropGuide: "pin-drop-guide"
     case .chat: "chat"
     case .folder: "folder"
+    case .folderNewThread: "folder-new-thread"
     case .newThread: "new-thread"
     case .emptyState: "empty-state"
     case nil: "none"
