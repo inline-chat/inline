@@ -75,4 +75,48 @@ describe("native upload finalizer integrity", () => {
       assertOwnership: async () => {},
     })).rejects.toBeInstanceOf(UploadIntegrityError)
   })
+
+  test("prefetches four parts while preserving ordered assembly", async () => {
+    const partBytes = Array.from({ length: 9 }, (_, index) => new Uint8Array([index + 1]))
+    const parts = partBytes.map((value, partIndex): InlineUploadPartRecord => ({
+      partIndex,
+      byteCount: value.length,
+      sha256: createHash("sha256").update(value).digest(),
+      objectKey: `part-${partIndex}`,
+    }))
+    let activeReads = 0
+    let maximumActiveReads = 0
+    let readCount = 0
+    const store: UploadPartStore = {
+      async put() { throw new Error("not used") },
+      async read(key) {
+        const index = Number(key.slice("part-".length))
+        activeReads += 1
+        readCount += 1
+        maximumActiveReads = Math.max(maximumActiveReads, activeReads)
+        await Bun.sleep(9 - index)
+        activeReads -= 1
+        return partBytes[index]!
+      },
+      async remove() {},
+    }
+    const publicationBoundary = new Error("publication boundary")
+    let ownershipChecks = 0
+
+    await expect(new UploadMediaFinalizer(store).preparePublication({
+      upload: {
+        ...upload,
+        byteCount: 9n,
+        sha256: createHash("sha256").update(Buffer.concat(partBytes)).digest(),
+      },
+      parts,
+      assertOwnership: async () => {
+        ownershipChecks += 1
+        if (ownershipChecks === 2) throw publicationBoundary
+      },
+    })).rejects.toBe(publicationBoundary)
+
+    expect(readCount).toBe(parts.length)
+    expect(maximumActiveReads).toBe(4)
+  })
 })

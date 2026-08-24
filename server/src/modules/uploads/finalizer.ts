@@ -32,6 +32,7 @@ import { Log } from "@in/server/utils/log"
 import type { UploadPartStore } from "./partStore"
 
 const log = new Log("modules/uploads/finalizer")
+const PART_READ_CONCURRENCY = 4
 
 export interface MediaUploadFinalizer {
   preparePublication(input: {
@@ -76,15 +77,22 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     const assemblyStartedAt = Date.now()
     try {
       await input.assertOwnership()
-      for (const part of input.parts) {
-        const bytes = await this.partStore.read(part.objectKey)
-        const partDigest = createHash("sha256").update(bytes).digest()
-        if (bytes.length !== part.byteCount || !sameBytes(partDigest, part.sha256)) {
-          throw new UploadIntegrityError()
+      for (let start = 0; start < input.parts.length; start += PART_READ_CONCURRENCY) {
+        const prefetched = await Promise.all(
+          input.parts.slice(start, start + PART_READ_CONCURRENCY).map(async (part) => ({
+            part,
+            bytes: await this.partStore.read(part.objectKey),
+          })),
+        )
+        for (const { part, bytes } of prefetched) {
+          const partDigest = createHash("sha256").update(bytes).digest()
+          if (bytes.length !== part.byteCount || !sameBytes(partDigest, part.sha256)) {
+            throw new UploadIntegrityError()
+          }
+          await handle.write(bytes)
+          digest.update(bytes)
+          byteCount += BigInt(bytes.length)
         }
-        await handle.write(bytes)
-        digest.update(bytes)
-        byteCount += BigInt(bytes.length)
       }
       assemblyMs = Date.now() - assemblyStartedAt
       const syncStartedAt = Date.now()

@@ -46,9 +46,11 @@ export class R2UploadPartStore implements UploadPartStore {
   }
 
   async read(key: string): Promise<Uint8Array> {
-    const object = requireR2().file(key)
-    if (!await object.exists()) throw new UploadPartStorageUnavailableError()
-    return new Uint8Array(await object.arrayBuffer())
+    try {
+      return new Uint8Array(await requireR2().file(key).arrayBuffer())
+    } catch (cause) {
+      throw new UploadPartStorageUnavailableError({ cause })
+    }
   }
 
   async remove(key: string): Promise<void> {
@@ -57,8 +59,8 @@ export class R2UploadPartStore implements UploadPartStore {
 }
 
 export class UploadPartStorageUnavailableError extends Error {
-  constructor() {
-    super("Upload part storage is unavailable")
+  constructor(options?: ErrorOptions) {
+    super("Upload part storage is unavailable", options)
     this.name = "UploadPartStorageUnavailableError"
   }
 }
