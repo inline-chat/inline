@@ -17,4 +17,16 @@ public enum SidebarCollectionReorderPolicy: Equatable, Sendable {
       entersPinnedContainer || (sourceIsRoot && changesSection && changesParent == false)
     }
   }
+
+  public func allowsFolderMove(
+    changesSection: Bool,
+    reordersStableNormalLane: Bool
+  ) -> Bool {
+    switch self {
+    case .manual:
+      true
+    case .pinningOnly:
+      changesSection || reordersStableNormalLane
+    }
+  }
 }

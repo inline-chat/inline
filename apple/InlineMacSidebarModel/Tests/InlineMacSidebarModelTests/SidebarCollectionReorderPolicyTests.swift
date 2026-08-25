@@ -38,4 +38,25 @@ struct SidebarCollectionReorderPolicyTests {
       entersPinnedContainer: true
     ))
   }
+
+  @Test("folder policy permits lane transfer and only the stable normal-lane reorder")
+  func folderPolicy() {
+    let policy = SidebarCollectionReorderPolicy.pinningOnly
+    #expect(policy.allowsFolderMove(
+      changesSection: true,
+      reordersStableNormalLane: false
+    ))
+    #expect(policy.allowsFolderMove(
+      changesSection: false,
+      reordersStableNormalLane: true
+    ))
+    #expect(!policy.allowsFolderMove(
+      changesSection: false,
+      reordersStableNormalLane: false
+    ))
+    #expect(SidebarCollectionReorderPolicy.manual.allowsFolderMove(
+      changesSection: false,
+      reordersStableNormalLane: false
+    ))
+  }
 }

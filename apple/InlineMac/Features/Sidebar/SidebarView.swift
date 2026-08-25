@@ -2633,6 +2633,16 @@ struct SidebarView: View {
     _ move: SidebarCollectionFolderMove,
     completion: @escaping @MainActor @Sendable (Bool) -> Void
   ) {
+    if effectiveSidebarSort == .recentActivity,
+       !SidebarCollectionReorderPolicy.pinningOnly.allowsFolderMove(
+         changesSection: move.sourceLane != move.targetLane,
+         reordersStableNormalLane: move.sourceLane == .normal
+           && move.targetLane == .normal
+       ) {
+      sidebarInteractionLog.error("rejected unstable folder reorder in recent-activity mode")
+      completion(false)
+      return
+    }
     guard let dependencies,
           let order = safeSidebarInsertionOrder(
             hasPrevious: move.hasPreviousOrder,

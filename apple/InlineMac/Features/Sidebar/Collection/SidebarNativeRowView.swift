@@ -1746,7 +1746,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   }
 
   override func blocksReorder(at point: NSPoint) -> Bool {
-    interactionTarget(at: point) != .primary
+    interactionTarget(at: point) == .accessory(1)
   }
 
   override func performAccessoryAction(_ target: InteractionTarget) {
