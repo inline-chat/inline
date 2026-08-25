@@ -94,9 +94,9 @@ type NormalizedIdentifier = {
 
 const normalizeIdentifier = (request: AuthBeginRequest): NormalizedIdentifier => {
   if (request.identifier.oneofKind === "email" &&
-      boundedString(request.identifier.email, MAX_EMAIL_BYTES) !== undefined &&
-      isValidEmail(request.identifier.email)) {
-    return { value: normalizeEmail(request.identifier.email), delivery: "email" }
+      boundedString(request.identifier.email, MAX_EMAIL_BYTES) !== undefined) {
+    const email = normalizeEmail(request.identifier.email)
+    if (isValidEmail(email)) return { value: email, delivery: "email" }
   }
   if (request.identifier.oneofKind === "phoneNumber") {
     boundedString(request.identifier.phoneNumber, MAX_PHONE_BYTES)

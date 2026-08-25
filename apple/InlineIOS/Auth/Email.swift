@@ -98,16 +98,7 @@ struct Email: View {
     }
   }
 
-  private var isEmailValid: Bool {
-    EmailAddressValidator.isValid(email)
-  }
-
   func sendCode() {
-    guard isEmailValid else {
-      errorMsg = String(localized: "Enter a valid email address.")
-      return
-    }
-
     formState.startLoading()
 
     Task {

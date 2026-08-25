@@ -34,12 +34,11 @@ export const handler = async (
 ): Promise<Static<typeof Response>> => {
   try {
     const clientType = normalizeAuthClientType(input.clientType, "sendEmailCode")
+    const email = normalizeEmail(input.email)
 
-    if (isValidEmail(input.email) === false) {
+    if (isValidEmail(email) === false) {
       throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
     }
-
-    let email = normalizeEmail(input.email)
 
     let existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1)
     let user = existingUsers[0]

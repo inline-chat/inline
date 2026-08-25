@@ -80,18 +80,13 @@ struct OnboardingEnterEmail: View {
   }
 
   func sendCode() {
-    guard EmailAddressValidator.isValid(onboardingViewModel.email) else {
-      formState.failed(error: String(localized: "Enter a valid email address."))
-      return
-    }
-
     formState.startLoading()
 
     Task {
       do {
         onboardingViewModel.phoneNumber = ""
         onboardingViewModel.emailChallengeToken = nil
-        
+
         let data = try await ApiClient.shared.sendCode(email: onboardingViewModel.email)
 
         onboardingViewModel.existingUser = data.existingUser

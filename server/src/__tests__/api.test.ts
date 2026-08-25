@@ -639,6 +639,7 @@ describe("API Endpoints", () => {
 
     it("does not require an invite code for an existing user", async () => {
       const email = "invite-existing-user@example.com"
+      const submittedEmail = "  INVITE-EXISTING-USER@EXAMPLE.COM  "
       const code = "123456"
       const [existingUser] = await db
         .insert(users)
@@ -661,7 +662,7 @@ describe("API Endpoints", () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: submittedEmail }),
       })
       const sendResponse = await testServer.handle(sendRequest)
       expect(sendResponse.status).toBe(200)
@@ -691,7 +692,7 @@ describe("API Endpoints", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email,
+          email: submittedEmail,
           code,
           challengeToken: "lc_invite_existing_user",
         }),

@@ -20,8 +20,8 @@ export async function verifyEmailAccountProof(input: {
   inviteCode?: string
 }) {
   if (input.code.length < 6) throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
-  if (!isValidEmail(input.email)) throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
   const email = normalizeEmail(input.email)
+  if (!isValidEmail(email)) throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
   await new Promise((resolve) => setTimeout(resolve, Math.random() * 1_000))
   const demo = (email === DEMO_EMAIL && input.code === DEMO_CODE) ||
     (email === DEMO_EMAIL2 && input.code === DEMO_CODE2)

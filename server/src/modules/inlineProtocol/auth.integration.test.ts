@@ -110,6 +110,22 @@ describe("Inline Protocol native authentication lifecycle", () => {
     expect(result.state.oneofKind).toBe("authorized")
   })
 
+  test("normalizes a submitted email before validation and lookup", async () => {
+    const existing = await testUtils.createUser("v3-normalized-auth@example.com")
+    const begun = await operations.begin({
+      identifier: { oneofKind: "email", email: "  V3-NORMALIZED-AUTH@EXAMPLE.COM  " },
+    }, context)
+
+    const completed = await operations.complete({
+      challengeId: begun.challengeId,
+      code: deliveredCode!,
+    }, context)
+
+    expect(completed.state.oneofKind).toBe("authorized")
+    if (completed.state.oneofKind !== "authorized") throw new Error("Expected authorization")
+    expect(completed.state.authorized.user?.id).toBe(BigInt(existing.id))
+  })
+
   test("rejects oversized authentication strings before persistence or delivery", async () => {
     await expect(operations.begin({
       identifier: { oneofKind: "email", email: `${"a".repeat(321)}@example.com` },
