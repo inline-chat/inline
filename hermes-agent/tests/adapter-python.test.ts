@@ -1047,7 +1047,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.8-alpha.0",
+    "pluginVersion": "0.0.8",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1087,7 +1087,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.8-alpha.0"
+assert probe_payload["pluginVersion"] == "0.0.8"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
