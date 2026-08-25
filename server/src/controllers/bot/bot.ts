@@ -39,14 +39,14 @@ import type { InputPeer, Peer } from "@inline-chat/protocol/core"
 import { getChat as getChatFn } from "@in/server/functions/messages.getChat"
 import { getChatHistory as getChatHistoryFn } from "@in/server/functions/messages.getChatHistory"
 import { deleteMessage as deleteMessageFn } from "@in/server/functions/messages.deleteMessage"
-import { editMessage as editMessageFn } from "@in/server/functions/messages.editMessage"
 import { addReaction as addReactionFn } from "@in/server/functions/messages.addReaction"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ModelError } from "@in/server/db/models/_errors"
-import { encodeBotEntities, parseBotEntities, type BotUserJson } from "./entities"
+import { encodeBotEntities, type BotUserJson } from "./entities"
+import { encodeBotRichMessage, encodeBotRichMessageFromStored } from "./richContent"
 import { UsersModel } from "@in/server/db/models/users"
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
 import { botOperationHandlers } from "./operations"
@@ -293,6 +293,7 @@ const toBotChat = (chat: any): BotChat => {
     is_public: typeof chat.isPublic === "boolean" ? chat.isPublic : undefined,
     parent_chat_id: chat.parentChatId ? Number(chat.parentChatId) : undefined,
     last_message_id: chat.lastMsgId ? Number(chat.lastMsgId) : undefined,
+    number: chat.number ?? chat.threadNumber ?? undefined,
     emoji: chat.emoji ?? undefined,
   }
 }
@@ -301,13 +302,21 @@ const toBotChatLastMessageFromDb = (message: any, usersById?: Map<number, BotUse
   const dateSeconds =
     message.date instanceof Date ? Math.floor(message.date.getTime() / 1000) : Number(message.date ?? 0)
   const fromId = Number(message.fromId)
+  const richMessage = encodeBotRichMessageFromStored({
+    text: message.text,
+    blockContent: message.blockContent,
+    blockContentPhotos: message.blockContentPhotos,
+    entities: message.entities,
+    usersById,
+  })
   return {
     message_id: Number(message.messageId),
     from_id: fromId,
     from: usersById?.get(fromId) ?? minimalUnknownUser(fromId),
     date: dateSeconds,
     text: message.text ?? undefined,
-    entities: encodeBotEntities(message.entities, { usersById }),
+    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
+    rich_message: richMessage,
   }
 }
 
@@ -358,24 +367,6 @@ const parseMaybeJsonValue = (value: unknown): unknown => {
   }
 }
 
-const parseBotBoolean = (value: unknown): boolean | undefined => {
-  if (value === undefined || value === null || value === "") return undefined
-  if (typeof value === "boolean") return value
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "true" || normalized === "1") return true
-    if (normalized === "false" || normalized === "0") return false
-  }
-
-  throw new InlineError(InlineError.ApiError.BAD_REQUEST)
-}
-
-const parseBotParseMarkdown = (input: Record<string, unknown>): boolean | undefined => {
-  // TODO(effect-cutover): remove `parseMarkdown` after production telemetry
-  // shows no Bot client use for 30 days. Prefer `parse_markdown`.
-  return parseBotBoolean(input["parse_markdown"] ?? input["parseMarkdown"])
-}
-
 const mentionUserIdsFromEntities = (entities: any): number[] => {
   if (!entities?.entities) return []
   const ids: number[] = []
@@ -407,6 +398,12 @@ const toBotMessageLiteFromProto = (
   const messageId = typeof message.id === "bigint" ? Number(message.id) : Number(message.id)
   const chatId = typeof message.chatId === "bigint" ? Number(message.chatId) : Number(message.chatId)
   const fromId = typeof message.fromId === "bigint" ? Number(message.fromId) : Number(message.fromId)
+  const richMessage = encodeBotRichMessage({
+    text: message.message,
+    blockContent: message.blockContent,
+    entities: message.entities,
+    usersById,
+  })
 
   return {
     message_id: messageId,
@@ -418,7 +415,8 @@ const toBotMessageLiteFromProto = (
     date: Number(message.date),
     edit_date: message.editDate ? Number(message.editDate) : undefined,
     text: message.message ?? undefined,
-    entities: encodeBotEntities(message.entities, { usersById }),
+    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
+    rich_message: richMessage,
   }
 }
 
@@ -438,6 +436,13 @@ const toBotMessageLiteFromDb = (
         : undefined
 
   const fromId = Number(message.fromId)
+  const richMessage = encodeBotRichMessageFromStored({
+    text: message.text,
+    blockContent: message.blockContent,
+    blockContentPhotos: message.blockContentPhotos,
+    entities: message.entities,
+    usersById,
+  })
   return {
     message_id: Number(message.messageId),
     peer_id: toBotPeerId({ type: inputPeer.type }),
@@ -448,11 +453,13 @@ const toBotMessageLiteFromDb = (
     date: dateSeconds,
     edit_date: editDateSeconds,
     text: message.text ?? undefined,
-    entities: encodeBotEntities(message.entities, { usersById }),
+    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
+    rich_message: richMessage,
   }
 }
 
-const toBotMessageFromDb = (
+// Retained until the legacy Elysia Bot routes are fully removed.
+const _legacyToBotMessageFromDb = (
   message: any,
   inputPeer: InputPeer,
   botChat: BotChat,
@@ -769,55 +776,12 @@ const botMethods = (authPlugin: any): any => {
     "/editMessageText",
     async ({ body, query, store }: any) => {
       try {
-        const input = mergePostInput(body, query)
-        const peerId = await makeInputPeerFromBotTarget(input, store.currentUserId)
-        const entities = parseBotEntities(parseMaybeJsonValue(input["entities"]))
-        const parseMarkdown = parseBotParseMarkdown(input)
-
-        const messageId = normalizeInputId(input["message_id"] as any)
-        if (!messageId) {
-          throw new InlineError(InlineError.ApiError.MSG_ID_INVALID)
-        }
-
-        const text = input["text"]
-        if (typeof text !== "string") {
-          throw new InlineError(InlineError.ApiError.BAD_REQUEST)
-        }
-
-        const chat = await ChatModel.getChatFromInputPeer(peerId, { currentUserId: store.currentUserId })
-        await AccessGuards.ensureChatAccess(chat, store.currentUserId)
-        const botChat = toBotChat(chat)
-
-        await editMessageFn(
-          {
-            messageId: BigInt(messageId),
-            peer: peerId,
-            text,
-            entities,
-            parseMarkdown: parseMarkdown ?? true,
-          },
-          { ...ctxFromStore(store), isBot: true },
-        )
-
-        const updated = await MessageModel.getMessage(messageId, chat.id)
-        const reply =
-          updated.replyToMsgId && Number.isFinite(updated.replyToMsgId)
-            ? await MessageModel.getMessage(updated.replyToMsgId, chat.id).catch(() => null)
-            : null
-
-        const mentionIds = [
-          ...mentionUserIdsFromEntities(updated.entities),
-          ...mentionUserIdsFromEntities(reply?.entities),
-        ]
-        const fromIds = [
-          Number(updated.fromId),
-          reply ? Number(reply.fromId) : undefined,
-        ].filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
-        const usersById = await loadUsersByIds([...mentionIds, ...fromIds])
-
         return {
           ok: true,
-          result: { message: toBotMessageFromDb(updated, peerId, botChat, { usersById, replyMessage: reply }) },
+          result: await botOperationHandlers.editMessageText(
+            mergePostInput(body, query) as any,
+            ctxFromStore(store),
+          ),
         }
       } catch (error) {
         throwInlineFromUnknown(error)

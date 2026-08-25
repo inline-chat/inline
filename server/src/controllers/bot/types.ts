@@ -1,6 +1,6 @@
 import { t } from "elysia"
 import { MAX_FILE_SIZE } from "@in/server/config"
-import { TBotMessageEntitiesInput, TBotMessageEntitiesOutput } from "./entities"
+import { TBotMessageEntitiesOutput } from "./entities"
 
 const TTargetId = t.Union([t.Number(), t.String()])
 
@@ -17,9 +17,14 @@ export const TBotUser = t.Object({
   last_name: t.Optional(t.String()),
 })
 
-export const TBotPeer = t.Object({
-  user_id: t.Optional(t.Number()),
-})
+// Deprecated compatibility output. Keep it opaque in the legacy codec so the
+// canonical docs only teach the required `peer_id` shape.
+export const TBotPeer = t.Any()
+
+export const TBotPeerId = t.Union([
+  t.Object({ user_id: t.Number() }),
+  t.Object({ chat_id: t.Number() }),
+])
 
 export const TBotCommand = t.Object({
   command: t.String(),
@@ -89,6 +94,13 @@ export const TBotAttachment = t.Object({
   image: t.Optional(TBotFile),
 })
 
+// The canonical Effect schema owns validation and OpenAPI for the recursive
+// tree. This legacy Elysia response codec only needs to preserve it without
+// attempting to compile a second recursive serializer.
+export const TBotRichMessage = t.Object({
+  blocks: t.Array(t.Any()),
+})
+
 export const TBotChatLastMessage = t.Object({
   message_id: t.Number(),
   from_id: t.Number(),
@@ -96,32 +108,35 @@ export const TBotChatLastMessage = t.Object({
   date: t.Number(),
   text: t.Optional(t.String()),
   entities: t.Optional(TBotMessageEntitiesOutput),
+  rich_message: t.Optional(TBotRichMessage),
 })
 
 const TBotChatBase = t.Object({
   chat_id: t.Number(),
-  type: t.Optional(t.Union([t.Literal("user"), t.Literal("thread")])),
+  type: t.Union([t.Literal("user"), t.Literal("thread")]),
   title: t.Optional(t.String()),
   space_id: t.Optional(t.Number()),
   is_public: t.Optional(t.Boolean()),
   parent_chat_id: t.Optional(t.Number()),
+  number: t.Optional(t.Number()),
   participants: t.Optional(t.Object({ count: t.Number() })),
   last_message_id: t.Optional(t.Number()),
   last_message: t.Optional(TBotChatLastMessage),
   emoji: t.Optional(t.String()),
 })
 
-export const TBotMessageLite = t.Object({
+export const TBotMessageReference = t.Object({
   message_id: t.Number(),
-  chat_id: t.Number(),
-  chat: TBotChatBase,
-  peer: TBotPeer,
+  peer_id: TBotPeerId,
+  chat_id: t.Optional(t.Number()),
+  peer: t.Optional(TBotPeer),
   from_id: t.Number(),
   from: TBotUser,
   date: t.Number(),
   edit_date: t.Optional(t.Number()),
   text: t.Optional(t.String()),
   entities: t.Optional(TBotMessageEntitiesOutput),
+  rich_message: t.Optional(TBotRichMessage),
   media: t.Optional(TBotMedia),
   attachments: t.Optional(t.Array(TBotAttachment)),
   actions: t.Optional(t.Array(t.Array(TBotMessageAction))),
@@ -130,32 +145,19 @@ export const TBotMessageLite = t.Object({
 
 export const TBotChat = t.Object({
   ...TBotChatBase.properties,
-  parent_message: t.Optional(TBotMessageLite),
+  parent_message: t.Optional(TBotMessageReference),
 })
 
 export const TBotMessage = t.Object({
-  message_id: t.Number(),
-  chat_id: t.Number(),
-  chat: TBotChat,
-  peer: TBotPeer,
-  from_id: t.Number(),
-  from: TBotUser,
-  date: t.Number(),
-  edit_date: t.Optional(t.Number()),
-  text: t.Optional(t.String()),
-  entities: t.Optional(TBotMessageEntitiesOutput),
-  media: t.Optional(TBotMedia),
-  attachments: t.Optional(t.Array(TBotAttachment)),
-  actions: t.Optional(t.Array(t.Array(TBotMessageAction))),
-  reactions: t.Optional(t.Array(TBotMessageReaction)),
-  reply_to_message: t.Optional(TBotMessageLite),
+  ...TBotMessageReference.properties,
+  chat: t.Optional(TBotChat),
+  reply_to_message: t.Optional(TBotMessageReference),
 })
 
 export const TSendMessageInput = t.Object({
   ...TBotTargetFields,
   text: t.Optional(t.String()),
   reply_to_message_id: t.Optional(TTargetId),
-  entities: t.Optional(TBotMessageEntitiesInput),
   parse_markdown: t.Optional(t.Boolean()),
   media: t.Optional(t.Any()),
   actions: t.Optional(t.Array(t.Array(TBotMessageAction, { maxItems: 8 }), { maxItems: 8 })),
@@ -214,7 +216,6 @@ export const TEditMessageTextInput = t.Object({
   ...TBotTargetFields,
   message_id: TTargetId,
   text: t.String(),
-  entities: t.Optional(TBotMessageEntitiesInput),
   parse_markdown: t.Optional(t.Boolean()),
   actions: t.Optional(t.Array(t.Array(TBotMessageAction, { maxItems: 8 }), { maxItems: 8 })),
 })

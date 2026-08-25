@@ -4,6 +4,7 @@ import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema/users"
 import { generateToken, hashToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import { MessageModel } from "@in/server/db/models/messages"
 import { setupTestLifecycle } from "./setup"
 
 async function createBotSession(username: string) {
@@ -346,8 +347,7 @@ describe("Bot HTTP API", () => {
         },
         body: JSON.stringify({
           user_id: human!.id,
-          text: "hello",
-          entities: [{ type: "BOLD", offset: "0", length: "5" }],
+          text: "**hello**",
         }),
       }),
     )
@@ -355,7 +355,16 @@ describe("Bot HTTP API", () => {
     const sendJson = await sendRes.json()
     expect(sendJson.ok).toBe(true)
     const messageId = sendJson.result.message.message_id as number
-    expect(sendJson.result.message.entities).toBeDefined()
+    const storedMessage = await MessageModel.getMessage(messageId, chatId)
+    expect(storedMessage.entities).toBeTruthy()
+    expect(storedMessage.blockContent).toBeTruthy()
+    expect(sendJson.result.message.entities).toBeUndefined()
+    expect(sendJson.result.message.rich_message).toEqual({
+      blocks: [{
+        type: "paragraph",
+        text: { type: "bold", text: "hello" },
+      }],
+    })
     expect(sendJson.result.message.chat.peer).toBeUndefined()
     expect(sendJson.result.message.from.id).toBe(bot!.id)
 
@@ -373,6 +382,13 @@ describe("Bot HTTP API", () => {
     expect(chatAfterSendJson.result.chat.last_message.message_id).toBe(messageId)
     expect(chatAfterSendJson.result.chat.last_message.text).toBe("hello")
     expect(chatAfterSendJson.result.chat.last_message.from.id).toBe(bot!.id)
+    expect(chatAfterSendJson.result.chat.last_message.entities).toBeUndefined()
+    expect(chatAfterSendJson.result.chat.last_message.rich_message).toEqual({
+      blocks: [{
+        type: "paragraph",
+        text: { type: "bold", text: "hello" },
+      }],
+    })
 
     // Edit the message (chat_id target; DM chat_id should resolve to the user peer internally)
     const editRes = await app.handle(
@@ -385,8 +401,7 @@ describe("Bot HTTP API", () => {
         body: JSON.stringify({
           chat_id: chatId,
           message_id: messageId,
-          text: "edited",
-          entities: [{ type: "ITALIC", offset: "0", length: "6" }],
+          text: "*edited*",
         }),
       }),
     )
@@ -394,7 +409,16 @@ describe("Bot HTTP API", () => {
     const editJson = await editRes.json()
     expect(editJson.ok).toBe(true)
     expect(editJson.result.message.text).toBe("edited")
-    expect(editJson.result.message.entities).toBeDefined()
+    const storedEdit = await MessageModel.getMessage(messageId, chatId)
+    expect(storedEdit.entities).toBeTruthy()
+    expect(storedEdit.blockContent).toBeTruthy()
+    expect(editJson.result.message.entities).toBeUndefined()
+    expect(editJson.result.message.rich_message).toEqual({
+      blocks: [{
+        type: "paragraph",
+        text: { type: "italic", text: "edited" },
+      }],
+    })
 
     // React to the message (chat_id target)
     const reactRes = await app.handle(
@@ -439,6 +463,13 @@ describe("Bot HTTP API", () => {
     expect(histJson.ok).toBe(true)
     expect(Array.isArray(histJson.result.messages)).toBe(true)
     expect(histJson.result.messages[0].message_id).toBe(messageId)
+    expect(histJson.result.messages[0].entities).toBeUndefined()
+    expect(histJson.result.messages[0].rich_message).toEqual({
+      blocks: [{
+        type: "paragraph",
+        text: { type: "italic", text: "edited" },
+      }],
+    })
 
     const exactRes = await app.handle(
       new Request("http://localhost/bot/getMessages", {
@@ -454,7 +485,8 @@ describe("Bot HTTP API", () => {
     const exactJson = await exactRes.json()
     expect(exactJson.result.messages.map((message: any) => message.message_id)).toEqual([messageId])
     expect(exactJson.result.messages[0].edit_date).toBeUndefined()
-    expect(exactJson.result.messages[0].chat.type).toBe("user")
+    expect(exactJson.result.messages[0].peer_id).toEqual({ user_id: human!.id })
+    expect(exactJson.result.messages[0].chat).toBeUndefined()
 
     const searchRes = await app.handle(
       new Request("http://localhost/bot/searchMessages", {
@@ -490,8 +522,8 @@ describe("Bot HTTP API", () => {
       },
     })
     expect(replyThreadJson.result.chat).not.toHaveProperty("parent_message_id")
-    expect(replyThreadJson.result.chat.parent_message).toHaveProperty("chat")
-    expect(replyThreadJson.result.chat.parent_message.chat).not.toHaveProperty("parent_message")
+    expect(replyThreadJson.result.chat.parent_message).toHaveProperty("peer_id")
+    expect(replyThreadJson.result.chat.parent_message).not.toHaveProperty("chat")
     expect(replyThreadJson.result.chat.parent_message).not.toHaveProperty("reply_to_message")
 
     const threadRes = await app.handle(
@@ -528,9 +560,20 @@ describe("Bot HTTP API", () => {
     expect(firstThreadMessageRes.status).toBe(200)
     const firstThreadMessageJson = await firstThreadMessageRes.json()
     expect(firstThreadMessageJson.result.message.chat.chat_id).toBe(threadChatId)
-    expect(firstThreadMessageJson.result.message.entities).toEqual([
-      expect.objectContaining({ type: "mention", user: expect.objectContaining({ id: human!.id }) }),
-    ])
+    expect(firstThreadMessageJson.result.message.entities).toBeUndefined()
+    expect(firstThreadMessageJson.result.message.rich_message).toEqual({
+      blocks: [{
+        type: "paragraph",
+        text: [
+          "Hello ",
+          {
+            type: "text_mention",
+            text: "@Human",
+            user: expect.objectContaining({ id: human!.id }),
+          },
+        ],
+      }],
+    })
 
     const addParticipantRes = await app.handle(
       new Request("http://localhost/bot/addThreadParticipant", {
@@ -705,19 +748,25 @@ describe("Bot HTTP API", () => {
     const sendJson = await sendRes.json()
     expect(sendJson.ok).toBe(true)
     expect(sendJson.result.message.text).toBe("hi @Mentioned")
-    expect(sendJson.result.message.entities).toEqual([
-      {
-        type: "mention",
-        offset: 3,
-        length: 10,
-        user: {
-          id: human!.id,
-          is_bot: false,
-          username: "mentioned",
-          first_name: "Mentioned",
-        },
-      },
-    ])
+    expect(sendJson.result.message.entities).toBeUndefined()
+    expect(sendJson.result.message.rich_message).toEqual({
+      blocks: [{
+        type: "paragraph",
+        text: [
+          "hi ",
+          {
+            type: "text_mention",
+            text: "@Mentioned",
+            user: {
+              id: human!.id,
+              is_bot: false,
+              username: "mentioned",
+              first_name: "Mentioned",
+            },
+          },
+        ],
+      }],
+    })
 
     const editRes = await app.handle(
       new Request("http://localhost/bot/editMessageText", {
@@ -738,13 +787,16 @@ describe("Bot HTTP API", () => {
     const editJson = await editRes.json()
     expect(editJson.ok).toBe(true)
     expect(editJson.result.message.text).toBe("updated Markdown")
-    expect(editJson.result.message.entities).toEqual([
-      {
-        type: "bold",
-        offset: 8,
-        length: 8,
-      },
-    ])
+    expect(editJson.result.message.entities).toBeUndefined()
+    expect(editJson.result.message.rich_message).toEqual({
+      blocks: [{
+        type: "paragraph",
+        text: [
+          "updated ",
+          { type: "bold", text: "Markdown" },
+        ],
+      }],
+    })
   })
 
   it("prefers POST JSON body values over query values when both are provided", async () => {

@@ -69,6 +69,7 @@ export const TBotMessageEntityOutput = t.Object({
   chat_id: t.Optional(t.Number()), // thread only
   space_id: t.Optional(t.Number()), // thread_title only
   title: t.Optional(t.String()), // thread_title only
+  group_id: t.Optional(t.Number()), // group_mention only
 })
 
 export const TBotMessageEntitiesOutput = t.Array(TBotMessageEntityOutput)
