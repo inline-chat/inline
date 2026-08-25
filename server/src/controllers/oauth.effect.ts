@@ -34,6 +34,7 @@ import {
   WireNonNegativeInteger,
 } from "../core/schema/scalars"
 import {
+  identityApiErrorAt,
   LoginSessionResult,
   identitySuccess,
 } from "../modules/auth/identitySchemas.effect"
@@ -131,6 +132,56 @@ const ProviderRedeemPayload = Schema.Struct({
 const ProviderRedeemSuccess = identitySuccess(LoginSessionResult).annotate({
   identifier: "ProviderAuthRedeemSuccess",
 })
+
+const NativeAppleStartPayload = Schema.Struct({
+  callbackScheme: Schema.String,
+  codeChallenge: Schema.String,
+  clientType: Schema.String,
+  deviceId: OptionalString,
+  clientVersion: OptionalString,
+  osVersion: OptionalString,
+  deviceName: OptionalString,
+  timezone: OptionalString,
+}).annotate({ identifier: "NativeAppleAuthStartInput" })
+
+const NativeAppleStartSuccess = identitySuccess(Schema.Struct({
+  state: Schema.String,
+  nonce: Schema.String,
+})).annotate({ identifier: "NativeAppleAuthStartSuccess" })
+
+const NativeAppleCompletePayload = Schema.Struct({
+  state: Schema.String,
+  authorizationCode: Schema.String,
+  identityToken: Schema.String,
+  firstName: OptionalString,
+  lastName: OptionalString,
+}).annotate({ identifier: "NativeAppleAuthCompleteInput" })
+
+const NativeAppleCompleteSuccess = identitySuccess(Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("complete"), ticket: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("inviteRequired"),
+    attemptId: Schema.String,
+    continuation: Schema.String,
+  }),
+])).annotate({ identifier: "NativeAppleAuthCompleteSuccess" })
+
+const NativeAppleInvitePayload = Schema.Struct({
+  attemptId: Schema.String,
+  continuation: Schema.String,
+  inviteCode: Schema.String,
+}).annotate({ identifier: "NativeAppleAuthInviteInput" })
+
+const NativeAppleInviteSuccess = identitySuccess(Schema.Struct({
+  ticket: Schema.String,
+})).annotate({ identifier: "NativeAppleAuthInviteSuccess" })
+
+const nativeAppleErrors = [
+  identityApiErrorAt(400),
+  identityApiErrorAt(429),
+  identityApiErrorAt(500),
+  identityApiErrorAt(503),
+] as const
 
 const OAuthConsentPayload = Schema.Struct({
   csrf: OptionalString,
@@ -390,6 +441,27 @@ const OAuthEndpointGroup = HttpApiGroup.make("oauth")
       },
       success: OAuthRedirect,
       error: oauthHtmlErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerNativeAppleStart", "/v1/auth/provider/native/apple/start", {
+      payload: NativeAppleStartPayload,
+      success: NativeAppleStartSuccess,
+      error: nativeAppleErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerNativeAppleComplete", "/v1/auth/provider/native/apple/complete", {
+      payload: NativeAppleCompletePayload,
+      success: NativeAppleCompleteSuccess,
+      error: nativeAppleErrors,
+    }),
+  )
+  .add(
+    HttpApiEndpoint.post("providerNativeAppleContinueInvite", "/v1/auth/provider/native/apple/continue-invite", {
+      payload: NativeAppleInvitePayload,
+      success: NativeAppleInviteSuccess,
+      error: nativeAppleErrors,
     }),
   )
   .add(
@@ -830,6 +902,27 @@ const oauthResponseContracts: Readonly<
   providerStart: [
     { status: 302, mediaType: "none", requiredHeaders: ["location", "cache-control"] },
     ...oauthHtmlErrorVariants,
+  ],
+  providerNativeAppleStart: [
+    jsonVariant(200, NativeAppleStartSuccess, ["cache-control"]),
+    jsonVariant(400, identityApiErrorAt(400), ["cache-control"]),
+    jsonVariant(429, identityApiErrorAt(429), ["retry-after", "cache-control"]),
+    jsonVariant(500, identityApiErrorAt(500), ["cache-control"]),
+    jsonVariant(503, identityApiErrorAt(503), ["cache-control"]),
+  ],
+  providerNativeAppleComplete: [
+    jsonVariant(200, NativeAppleCompleteSuccess, ["cache-control"]),
+    jsonVariant(400, identityApiErrorAt(400), ["cache-control"]),
+    jsonVariant(429, identityApiErrorAt(429), ["retry-after", "cache-control"]),
+    jsonVariant(500, identityApiErrorAt(500), ["cache-control"]),
+    jsonVariant(503, identityApiErrorAt(503), ["cache-control"]),
+  ],
+  providerNativeAppleContinueInvite: [
+    jsonVariant(200, NativeAppleInviteSuccess, ["cache-control"]),
+    jsonVariant(400, identityApiErrorAt(400), ["cache-control"]),
+    jsonVariant(429, identityApiErrorAt(429), ["retry-after", "cache-control"]),
+    jsonVariant(500, identityApiErrorAt(500), ["cache-control"]),
+    jsonVariant(503, identityApiErrorAt(503), ["cache-control"]),
   ],
   providerCallbackGoogle: [
     htmlVariant(200, ["cache-control"]),

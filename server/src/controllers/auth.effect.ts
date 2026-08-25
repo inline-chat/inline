@@ -52,6 +52,9 @@ export const AuthApiGroup = HttpApiGroup.make("auth").add(
   IdentityEndpoints.getLogoutWithToken,
   IdentityEndpoints.postLogout,
   OAuthEndpoints.providerStart,
+  OAuthEndpoints.providerNativeAppleStart,
+  OAuthEndpoints.providerNativeAppleComplete,
+  OAuthEndpoints.providerNativeAppleContinueInvite,
   OAuthEndpoints.providerCallbackGoogle,
   OAuthEndpoints.providerCallbackApple,
   OAuthEndpoints.providerContinueInvite,
@@ -209,6 +212,15 @@ export const makeAuthRouteGroup = () => {
         )
         .handleRaw("providerStart", ({ request }) =>
           execute(executeOAuth("providerStart", request)),
+        )
+        .handleRaw("providerNativeAppleStart", ({ request }) =>
+          execute(executeOAuth("providerNativeAppleStart", request)),
+        )
+        .handleRaw("providerNativeAppleComplete", ({ request }) =>
+          execute(executeOAuth("providerNativeAppleComplete", request)),
+        )
+        .handleRaw("providerNativeAppleContinueInvite", ({ request }) =>
+          execute(executeOAuth("providerNativeAppleContinueInvite", request)),
         )
         .handleRaw("hostedLoginGet", ({ request }) =>
           execute(executeOAuth("hostedLoginGet", request)),

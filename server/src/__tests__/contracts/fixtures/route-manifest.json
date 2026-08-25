@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 244,
+  "count": 247,
   "methodCounts": {
     "ALL": 3,
     "GET": 97,
     "OPTIONS": 18,
-    "POST": 125,
+    "POST": 128,
     "WS": 1
   },
-  "sha256": "a68789f7f4dfa0c164ec577d8a7b0aaa1b6598af962500bc8d5593b856af016a",
+  "sha256": "72ca0ef46a01463db086b95d6b230621267cc9748143b8714bdd0a8c15a39f94",
   "routes": [
     {
       "method": "ALL",
@@ -785,6 +785,18 @@
     {
       "method": "POST",
       "path": "/v1/auth/provider/continue-invite"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/native/apple/complete"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/native/apple/continue-invite"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/native/apple/start"
     },
     {
       "method": "POST",

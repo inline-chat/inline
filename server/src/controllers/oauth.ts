@@ -8,6 +8,9 @@ import {
   handleAuthorizeVerifyEmailCode,
   handleAuthorizeVerifySmsCode,
   handleIntrospect,
+  handleNativeAppleComplete,
+  handleNativeAppleContinueInvite,
+  handleNativeAppleStart,
   handleProviderCallback,
   handleProviderContinueInvite,
   handleProviderRedeem,
@@ -70,6 +73,15 @@ export const oauth = new Elysia({ name: "oauth" })
     handleHostedLoginVerifySms(request, body, legacyOAuthClientIp(request)))
   .get("/v1/auth/provider/start", ({ request }) =>
     executeLegacyOAuth(() => handleProviderStart(request, legacyOAuthClientIp(request))),
+  )
+  .post("/v1/auth/provider/native/apple/start", ({ request, body }) =>
+    executeLegacyOAuth(() => handleNativeAppleStart(body, legacyOAuthClientIp(request))),
+  )
+  .post("/v1/auth/provider/native/apple/complete", ({ request, body }) =>
+    executeLegacyOAuth(() => handleNativeAppleComplete(body, legacyOAuthClientIp(request))),
+  )
+  .post("/v1/auth/provider/native/apple/continue-invite", ({ request, body }) =>
+    executeLegacyOAuth(() => handleNativeAppleContinueInvite(body, legacyOAuthClientIp(request))),
   )
   .get("/v1/auth/provider/callback/google", ({ request }) =>
     executeLegacyOAuth(() => handleProviderCallback("google", request, undefined, legacyOAuthClientIp(request))),

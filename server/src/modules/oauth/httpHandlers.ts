@@ -46,10 +46,12 @@ import { and, eq, isNull } from "drizzle-orm"
 import { ProviderAuthModel } from "@in/server/db/models/providerAuth"
 import {
   attachProviderAfterEmailProof,
+  beginNativeAppleAuth,
   beginProviderAuth,
   callbackFailureContext,
   claimProviderEmailAttempt,
   completeProviderCallback,
+  completeNativeAppleAuth,
   continueProviderWithInvite,
   issueAppTicket,
   hashProviderSecret,
@@ -90,6 +92,13 @@ const PROVIDER_CLIENT_METADATA_LIMITS = [
   ["client_version", 64],
   ["os_version", 64],
   ["device_name", 256],
+  ["timezone", 64],
+] as const
+const NATIVE_PROVIDER_CLIENT_METADATA_LIMITS = [
+  ["deviceId", 128],
+  ["clientVersion", 64],
+  ["osVersion", 64],
+  ["deviceName", 256],
   ["timezone", 64],
 ] as const
 let nextProviderCleanupAtMs = 0
@@ -352,15 +361,7 @@ async function providerBrowserError(input: {
       if (context.appCodeChallenge) callback.searchParams.set("code_challenge", context.appCodeChallenge)
       appUrl = callback.toString()
     }
-    await ProviderAuthModel.update(context.id, {
-      status: "used",
-      usedAt: new Date(),
-    }).catch((cause) => {
-      Log.shared.error("Failed to close provider attempt after callback error", {
-        provider: context?.provider,
-        cause,
-      })
-    })
+    await closeProviderAttemptAfterFailure(context)
   }
   return providerAppErrorResponse({
     appUrl,
@@ -377,6 +378,12 @@ function json(status: number, body: unknown, headers?: HeadersInit): Response {
       ...headers,
     },
   })
+}
+
+function nativeAuthJson(status: number, body: unknown, headers?: HeadersInit): Response {
+  const response = json(status, body, headers)
+  response.headers.set("cache-control", "no-store")
+  return response
 }
 
 function html(status: number, body: string, headers?: HeadersInit): Response {
@@ -1491,6 +1498,213 @@ export async function handleProviderStart(
   } catch (cause) {
     Log.shared.error("Failed to begin provider sign-in", { provider, purpose, cause })
     return html(503, renderPage("Sign-in unavailable", `<div class="error">This sign-in method is not available right now.</div>`))
+  }
+}
+
+export async function handleNativeAppleStart(
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-native-apple-start:${resolveClientIp(clientIpOverride)}`,
+    nowMs,
+    rule: config.endpointRateLimits.providerStart,
+  })
+  if (!endpointRate.allowed) {
+    return nativeAuthJson(429, {
+      ok: false,
+      error: "RATE_LIMITED",
+      description: "Too many sign-in attempts. Try again shortly.",
+    }, { "retry-after": String(endpointRate.retryAfterSeconds) })
+  }
+  for (const [name, limit] of NATIVE_PROVIDER_CLIENT_METADATA_LIMITS) {
+    if (readParam(body, name).length > limit) {
+      return nativeAuthJson(400, { ok: false, error: "INVALID_REQUEST", description: "Invalid client metadata." })
+    }
+  }
+  const callbackScheme = readParam(body, "callbackScheme")
+  const codeChallenge = readParam(body, "codeChallenge")
+  const clientType = readParam(body, "clientType")
+  if (
+    !supportedAppCallbackScheme(callbackScheme) ||
+    !isValidAppCodeChallenge(codeChallenge) ||
+    clientType !== "ios"
+  ) {
+    return nativeAuthJson(400, {
+      ok: false,
+      error: "INVALID_REQUEST",
+      description: "This native sign-in request is not securely bound to a supported Inline app.",
+    })
+  }
+  scheduleProviderCleanup(nowMs)
+
+  try {
+    const result = await beginNativeAppleAuth({
+      appCallbackScheme: callbackScheme,
+      appCodeChallenge: codeChallenge,
+      client: {
+        clientType,
+        deviceId: readParam(body, "deviceId") || undefined,
+        clientVersion: readParam(body, "clientVersion") || undefined,
+        osVersion: readParam(body, "osVersion") || undefined,
+        deviceName: readParam(body, "deviceName") || undefined,
+        timezone: readParam(body, "timezone") || undefined,
+      },
+    })
+    return nativeAuthJson(200, { ok: true, result })
+  } catch (cause) {
+    Log.shared.error("Failed to begin native Apple sign-in", { cause })
+    return nativeAuthJson(503, {
+      ok: false,
+      error: "PROVIDER_UNAVAILABLE",
+      description: "Apple Sign-In is not available right now.",
+    })
+  }
+}
+
+export async function handleNativeAppleComplete(
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const callbackRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-native-apple-complete:${resolveClientIp(clientIpOverride)}`,
+    nowMs: Date.now(),
+    rule: config.endpointRateLimits.providerCallback,
+  })
+  if (!callbackRate.allowed) {
+    return nativeAuthJson(429, {
+      ok: false,
+      error: "RATE_LIMITED",
+      description: "Too many sign-in completions. Try again shortly.",
+    }, { "retry-after": String(callbackRate.retryAfterSeconds) })
+  }
+  const state = readParam(body, "state")
+  const code = readParam(body, "authorizationCode")
+  const identityToken = readParam(body, "identityToken")
+  const firstName = readParam(body, "firstName") || undefined
+  const lastName = readParam(body, "lastName") || undefined
+  if (
+    !state || state.length > 256 ||
+    !code || code.length > 4_096 ||
+    !identityToken || identityToken.length > 32_768 ||
+    (firstName?.length ?? 0) > 256 ||
+    (lastName?.length ?? 0) > 256
+  ) {
+    return nativeAuthJson(400, { ok: false, error: "INVALID_REQUEST", description: "Invalid Apple credential." })
+  }
+
+  let completionContext: ProviderCallbackFailureContext | undefined
+  try {
+    const outcome = await completeNativeAppleAuth({ state, code, identityToken, firstName, lastName })
+    completionContext = callbackFailureContext(outcome.attempt)
+    if (outcome.kind === "login") {
+      const ticket = await issueAppTicket(outcome.attempt)
+      return nativeAuthJson(200, { ok: true, result: { kind: "complete", ticket } })
+    }
+    if (outcome.kind === "invite") {
+      return nativeAuthJson(200, {
+        ok: true,
+        result: {
+          kind: "inviteRequired",
+          attemptId: outcome.attempt.id,
+          continuation: outcome.continuation,
+        },
+      })
+    }
+    throw new Error("Apple did not provide an authoritative email address")
+  } catch (cause) {
+    const failureContext = cause instanceof ProviderCallbackCompletionError
+      ? cause.context
+      : completionContext
+    if (failureContext) {
+      await closeProviderAttemptAfterFailure(failureContext)
+    }
+    Log.shared.error("Native Apple sign-in completion failed", {
+      cause: cause instanceof ProviderCallbackCompletionError ? cause.cause : cause,
+    })
+    return nativeAuthJson(400, {
+      ok: false,
+      error: "APPLE_SIGN_IN_FAILED",
+      description: "Apple Sign-In could not be verified. Please try again.",
+    })
+  }
+}
+
+async function closeProviderAttemptAfterFailure(
+  context: ProviderCallbackFailureContext,
+): Promise<void> {
+  await ProviderAuthModel.update(context.id, {
+    status: "used",
+    usedAt: new Date(),
+  }).catch((cause) => {
+    Log.shared.error("Failed to close provider attempt after callback error", {
+      provider: context.provider,
+      cause,
+    })
+  })
+}
+
+export async function handleNativeAppleContinueInvite(
+  body: unknown,
+  clientIpOverride?: string,
+  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(clientIpOverride)
+  const endpointRate = rateLimiter.consume({
+    key: `oauth:endpoint:provider-native-apple-invite:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.providerContinueInvite,
+  })
+  if (!endpointRate.allowed) {
+    return nativeAuthJson(429, {
+      ok: false,
+      error: "RATE_LIMITED",
+      description: "Too many invite attempts. Try again shortly.",
+    }, { "retry-after": String(endpointRate.retryAfterSeconds) })
+  }
+  const attemptId = readParam(body, "attemptId")
+  const continuation = readParam(body, "continuation")
+  const inviteCode = readParam(body, "inviteCode")
+  if (
+    !attemptId || attemptId.length > 128 ||
+    !continuation || continuation.length > 256 ||
+    !inviteCode || inviteCode.length > 64
+  ) {
+    return nativeAuthJson(400, {
+      ok: false,
+      error: "INVALID_REQUEST",
+      description: "Invalid Apple invite continuation.",
+    })
+  }
+  const attemptRate = rateLimiter.consume({
+    key: `oauth:abuse:provider-native-apple-invite:attempt:${normalizeRateLimitKeyPart(attemptId)}`,
+    nowMs,
+    rule: PROVIDER_INVITE_ATTEMPT_LIMIT,
+  })
+  if (!attemptRate.allowed) {
+    return nativeAuthJson(429, {
+      ok: false,
+      error: "RATE_LIMITED",
+      description: "Too many invite attempts for this sign-in.",
+    }, { "retry-after": String(attemptRate.retryAfterSeconds) })
+  }
+  try {
+    const outcome = await continueProviderWithInvite({
+      attemptId,
+      continuation,
+      inviteCode,
+    })
+    const ticket = await issueAppTicket(outcome.attempt)
+    return nativeAuthJson(200, { ok: true, result: { ticket } })
+  } catch (cause) {
+    const description = cause instanceof InlineError
+      ? cause.description ?? "Invalid invite code."
+      : "The invite code could not be accepted."
+    return nativeAuthJson(400, { ok: false, error: "INVITE_CODE_INVALID", description })
   }
 }
 
