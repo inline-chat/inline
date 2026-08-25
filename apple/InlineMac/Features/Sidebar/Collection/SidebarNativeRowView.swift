@@ -187,6 +187,7 @@ struct SidebarNativeRowConfiguration {
     let emoji: String?
     let childCount: Int
     let unreadCount: Int
+    let prominentUnreadCount: Int
     let isPinned: Bool
 
     init(_ folder: SidebarProjectedFolder) {
@@ -194,6 +195,7 @@ struct SidebarNativeRowConfiguration {
       emoji = folder.folder.emoji
       childCount = folder.childCount
       unreadCount = folder.unreadCount
+      prominentUnreadCount = folder.prominentUnreadCount
       isPinned = folder.folder.isPinned
     }
   }
@@ -211,6 +213,7 @@ struct SidebarNativeRowConfiguration {
     let presentation: FolderPresentation
     let titleDimmed: Bool
     let size: SidebarItemSize
+    let unreadBadgeStyle: UnreadBadgeStyle
     let disclosureExpanded: Bool
     let isDropTargeted: Bool
     let forceHoverAppearance: Bool
@@ -1580,7 +1583,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   private let disclosureView = SidebarNativeHostedVisualView()
   private let folderIconView = SidebarNativeHostedVisualView()
   private let titleField = SidebarNativeTextField()
-  private let detailField = SidebarNativeTextField()
+  private let unreadBadge = SidebarNativeUnreadBadgeView()
   private var configuration: SidebarNativeRowConfiguration.Folder?
   private var displayedExpanded = true
   private var emojiPopover: NSPopover?
@@ -1593,10 +1596,8 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     addSubview(disclosureView)
     addSubview(folderIconView)
     addSubview(titleField)
-    addSubview(detailField)
+    addSubview(unreadBadge)
     titleField.font = .systemFont(ofSize: 13)
-    detailField.font = .systemFont(ofSize: 11)
-    detailField.textColor = .secondaryLabelColor
     setAccessibilityRole(.button)
   }
 
@@ -1611,7 +1612,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     primaryAction = { [weak self] in self?.performDisclosureToggle() }
     titleField.stringValue = configuration.presentation.title
     titleField.textColor = configuration.titleDimmed ? .secondaryLabelColor : .labelColor
-    detailField.stringValue = folderDetail(configuration.presentation)
+    configureUnreadBadge()
     configureFolderIcon()
     configureDisclosureVisual()
     updateBackground()
@@ -1639,34 +1640,23 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     )
     leading = folderIconView.frame.maxX + 8
 
-    let trailing = painted.maxX - Theme.sidebarItemOuterSpacing
-    let titleWidth = max(trailing - leading, 0)
-    if configuration.size == .compact {
-      titleField.frame = CGRect(
-        x: leading,
-        y: painted.midY - 9,
-        width: titleWidth,
-        height: 18
+    var trailing = painted.maxX - Theme.sidebarItemOuterSpacing
+    if unreadBadge.occupiesLayout {
+      let width = unreadBadge.fittingWidth
+      unreadBadge.frame = CGRect(
+        x: trailing - width,
+        y: painted.midY - 8,
+        width: width,
+        height: 16
       )
-      detailField.frame = .zero
-      detailField.isHidden = true
-    } else {
-      let lineHeight: CGFloat = 13
-      let top = painted.midY - (lineHeight * 2 + 2) / 2
-      titleField.frame = CGRect(
-        x: leading,
-        y: top,
-        width: titleWidth,
-        height: lineHeight + 2
-      )
-      detailField.frame = CGRect(
-        x: leading,
-        y: top + lineHeight + 2,
-        width: max(trailing - leading, 0),
-        height: lineHeight
-      )
-      detailField.isHidden = false
+      trailing = unreadBadge.frame.minX - 8
     }
+    titleField.frame = CGRect(
+      x: leading,
+      y: painted.midY - 9,
+      width: max(trailing - leading, 0),
+      height: 18
+    )
   }
 
   override func hoverDidChange() {
@@ -1745,6 +1735,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     emojiPopover = nil
     disclosureView.prepareForReuse()
     folderIconView.prepareForReuse()
+    unreadBadge.prepareForReuse()
     setAccessibilityCustomActions([])
   }
 
@@ -1775,7 +1766,9 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     displayedExpanded.toggle()
     configureFolderIcon()
     configureDisclosureVisual()
+    configureUnreadBadge()
     updateAccessibility()
+    needsLayout = true
     configuration.actions.toggleDisclosure()
   }
 
@@ -1801,6 +1794,21 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
           && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
       )
     }
+  }
+
+  private func configureUnreadBadge() {
+    guard let configuration else { return }
+    unreadBadge.configure(
+      unreadCount: configuration.presentation.unreadCount,
+      hasUnreadMark: false,
+      prominent: configuration.presentation.prominentUnreadCount > 0,
+      style: configuration.unreadBadgeStyle,
+      animatesChanges: allowsAnimations
+    )
+    unreadBadge.setPlacementVisible(
+      displayedExpanded == false,
+      animated: allowsAnimations
+    )
   }
 
   private func updateBackground() {

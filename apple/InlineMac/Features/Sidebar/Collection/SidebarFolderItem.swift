@@ -7,6 +7,8 @@ struct SidebarFolderItemView: View, Equatable {
   let emoji: String?
   let childCount: Int
   let unreadCount: Int
+  let prominentUnreadCount: Int
+  let unreadBadgeStyle: UnreadBadgeStyle
   let isPinned: Bool
   let isExpanded: Bool
   let isDropTargeted: Bool
@@ -27,6 +29,8 @@ struct SidebarFolderItemView: View, Equatable {
       && lhs.emoji == rhs.emoji
       && lhs.childCount == rhs.childCount
       && lhs.unreadCount == rhs.unreadCount
+      && lhs.prominentUnreadCount == rhs.prominentUnreadCount
+      && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.isPinned == rhs.isPinned
       && lhs.isExpanded == rhs.isExpanded
       && lhs.isDropTargeted == rhs.isDropTargeted
@@ -42,26 +46,20 @@ struct SidebarFolderItemView: View, Equatable {
             .frame(width: size.iconSize, height: size.iconSize)
             .padding(.trailing, 8)
 
-          VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-              .font(.system(size: 13))
-              .foregroundStyle(titleDimmed ? .secondary : .primary)
-              .lineLimit(1)
-            if size != .compact {
-              Text("\(childCount) chat\(childCount == 1 ? "" : "s")")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-          }
+          Text(title)
+            .font(.system(size: 13))
+            .foregroundStyle(titleDimmed ? .secondary : .primary)
+            .lineLimit(1)
 
           Spacer(minLength: 4)
 
-          if unreadCount > 0 {
-            Text("\(unreadCount)")
-              .font(.system(size: 10, weight: .semibold))
-              .foregroundStyle(.secondary)
-          }
+          UnreadBadge(
+            unreadCount: isExpanded ? 0 : unreadCount,
+            prominent: prominentUnreadCount > 0,
+            style: unreadBadgeStyle,
+            dotSize: Theme.sidebarItemUnreadDotSize
+          )
+          .fixedSize()
         }
         .padding(.leading, Theme.sidebarItemInnerSpacing)
         .padding(.trailing, Theme.sidebarItemOuterSpacing)
