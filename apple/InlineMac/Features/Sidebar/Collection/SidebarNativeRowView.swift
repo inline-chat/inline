@@ -1921,11 +1921,11 @@ private final class SidebarNativeFolderEmptyRowView: SidebarNativeContentView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     addSubview(titleField)
-    titleField.font = .systemFont(ofSize: 11)
+    titleField.font = .systemFont(ofSize: 13)
     titleField.textColor = .tertiaryLabelColor
     titleField.stringValue = String(
-      localized: "No chats",
-      comment: "Passive placeholder inside an expanded empty sidebar folder."
+      localized: "Drop a chat here",
+      comment: "Passive drop instruction inside an expanded empty sidebar folder."
     )
     setAccessibilityLabel(titleField.stringValue)
   }
@@ -1954,9 +1954,9 @@ private final class SidebarNativeFolderEmptyRowView: SidebarNativeContentView {
       + 8
     titleField.frame = CGRect(
       x: leading,
-      y: bounds.midY - 8,
+      y: bounds.midY - 9,
       width: max(bounds.maxX - Theme.sidebarItemOuterSpacing - leading, 0),
-      height: 16
+      height: 18
     )
   }
 }

@@ -4166,6 +4166,8 @@ final class SidebarCollectionBodyController: NSViewController {
         role = .pinnedHeader
       case .pinDropGuide:
         role = .emptyPinnedGuide
+      case .folderEmpty:
+        role = .emptyFolderGuide
       default:
         role = .ordinary
       }

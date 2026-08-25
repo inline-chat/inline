@@ -9,6 +9,7 @@ private enum DragRowID: Hashable, Sendable {
   case newThread
   case parent
   case reply
+  case folderPlaceholder
   case next
 }
 
@@ -116,6 +117,51 @@ struct SidebarCollectionDragLayoutTests {
 
     #expect(frame(result, .next)?.minY == 28)
     #expect(result.slotFrame == SidebarCollectionVerticalFrame(minY: 72, height: 88))
+    #expect(result.contentHeight == 160)
+  }
+
+  @Test("an empty folder placeholder owns its child destination instead of becoming a sibling")
+  func emptyFolderPlaceholderReusesDestinationSlot() {
+    let rows = [
+      DragRow(id: .contentHeader, height: 28),
+      DragRow(id: .parent, height: 44),
+      DragRow(id: .folderPlaceholder, height: 44, role: .emptyFolderGuide),
+      DragRow(id: .next, height: 44),
+    ]
+    let result = SidebarCollectionDragLayoutPlanner.plan(
+      rows: rows,
+      drag: DragState(
+        sourceIDs: [.next],
+        destinationIndex: 2,
+        slotHeight: 44
+      )
+    )
+
+    #expect(frame(result, .folderPlaceholder) == .init(minY: 72, height: 44))
+    #expect(result.slotFrame == frame(result, .folderPlaceholder))
+    #expect(result.contentHeight == 116)
+  }
+
+  @Test("an empty folder placeholder expands only when a grouped child needs more room")
+  func emptyFolderPlaceholderFitsGroupedDestination() {
+    let rows = [
+      DragRow(id: .contentHeader, height: 28),
+      DragRow(id: .parent, height: 44),
+      DragRow(id: .folderPlaceholder, height: 44, role: .emptyFolderGuide),
+      DragRow(id: .reply, height: 44),
+      DragRow(id: .next, height: 44),
+    ]
+    let result = SidebarCollectionDragLayoutPlanner.plan(
+      rows: rows,
+      drag: DragState(
+        sourceIDs: [.reply, .next],
+        destinationIndex: 2,
+        slotHeight: 88
+      )
+    )
+
+    #expect(frame(result, .folderPlaceholder) == .init(minY: 72, height: 88))
+    #expect(result.slotFrame == frame(result, .folderPlaceholder))
     #expect(result.contentHeight == 160)
   }
 

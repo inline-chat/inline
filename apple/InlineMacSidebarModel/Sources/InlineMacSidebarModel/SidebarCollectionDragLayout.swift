@@ -4,6 +4,7 @@ public enum SidebarCollectionDragLayoutRowRole: Hashable, Sendable {
   case ordinary
   case pinnedHeader
   case emptyPinnedGuide
+  case emptyFolderGuide
 }
 
 public struct SidebarCollectionDragLayoutRow<RowID: Hashable>: Hashable {
@@ -234,7 +235,7 @@ public enum SidebarCollectionDragLayoutPlanner {
         if let emptyPinned {
           y += max(emptyPinned.targetHeight, 0)
         }
-      case .ordinary:
+      case .ordinary, .emptyFolderGuide:
         y += max(row.height, 0)
       }
       reducedIndex += 1
@@ -298,6 +299,26 @@ public enum SidebarCollectionDragLayoutPlanner {
         visibleIDs.insert(row.id)
         y = frame.maxY
         if let drag, reducedIndex == drag.destinationIndex {
+          slotFrame = frame
+          insertedSlot = true
+        }
+        reducedIndex += 1
+        continue
+      }
+
+      if row.role == .emptyFolderGuide {
+        let isDestination = drag?.destinationIndex == reducedIndex
+        let height = max(
+          max(row.height, isDestination ? drag?.slotHeight ?? 0 : 0),
+          0
+        )
+        let frame = SidebarCollectionVerticalFrame(minY: y, height: height)
+        frames[row.id] = frame
+        if height > 0 {
+          visibleIDs.insert(row.id)
+          y = frame.maxY
+        }
+        if isDestination {
           slotFrame = frame
           insertedSlot = true
         }
