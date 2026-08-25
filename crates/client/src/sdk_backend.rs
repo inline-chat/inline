@@ -424,15 +424,10 @@ impl SdkBackend {
         match realtime.call(request).await {
             Ok(response) => Ok(response),
             Err(error) => {
-                let auth_invalidated = matches!(
-                    &error,
-                    RealtimeError::RpcError { error_name, .. }
-                        if error_name == "UNAUTHENTICATED"
-                );
                 if realtime_error_closes_session(&error) {
                     self.clear_realtime().await;
                 }
-                if auth_invalidated {
+                if realtime_error_invalidates_account_authority(&error) {
                     // Logout owns the marker and the final local purge. Do
                     // not let a rejected logout RPC clear that marker before
                     // the caller has completed its ordered cleanup.
@@ -4599,7 +4594,7 @@ fn temporary_authorization_needs_regeneration(
 }
 
 fn temporary_reconnect_can_regenerate(error: &InlineProtocolV3Error) -> bool {
-    error.is_unauthenticated()
+    error.is_authorization_invalidated()
 }
 
 fn inline_protocol_v3_error_to_backend(error: InlineProtocolV3Error) -> BackendError {
@@ -4613,8 +4608,13 @@ fn inline_protocol_v3_error_to_backend(error: InlineProtocolV3Error) -> BackendE
         {
             rate_limited_backend_error(rendered)
         }
-        error if error.is_unauthenticated() => {
+        error if error.is_authorization_invalidated() => {
             BackendError::new(ClientErrorCategory::AuthExpired, rendered)
+        }
+        InlineProtocolV3Error::Rpc { error_code, .. }
+            if error_code == proto::rpc_error::Code::Unauthenticated as i32 =>
+        {
+            BackendError::new(ClientErrorCategory::PermissionDenied, rendered)
         }
         InlineProtocolV3Error::Timeout => BackendError::new(ClientErrorCategory::Timeout, rendered),
         InlineProtocolV3Error::CommitOutcomeUnknown => {
@@ -4645,6 +4645,9 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
             BackendError::new(ClientErrorCategory::CommitOutcomeUnknown, error.to_string())
         }
         RealtimeError::ConnectionError { .. } => {
+            BackendError::new(ClientErrorCategory::AuthRequired, error.to_string())
+        }
+        RealtimeError::AuthenticationInvalidated => {
             BackendError::new(ClientErrorCategory::AuthExpired, error.to_string())
         }
         RealtimeError::RpcError {
@@ -4660,7 +4663,7 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
             friendly,
             ..
         } if error_name == "UNAUTHENTICATED" => {
-            BackendError::new(ClientErrorCategory::AuthExpired, friendly)
+            BackendError::new(ClientErrorCategory::PermissionDenied, friendly)
         }
         RealtimeError::RpcError {
             message, friendly, ..
@@ -4705,12 +4708,14 @@ fn realtime_error_closes_session(error: &RealtimeError) -> bool {
         error,
         RealtimeError::ConnectionClosed
             | RealtimeError::ConnectionError { .. }
+            | RealtimeError::AuthenticationInvalidated
             | RealtimeError::InlineProtocol { .. }
             | RealtimeError::WebSocket(_)
-    ) || matches!(
-        error,
-        RealtimeError::RpcError { error_name, .. } if error_name == "UNAUTHENTICATED"
     )
+}
+
+fn realtime_error_invalidates_account_authority(error: &RealtimeError) -> bool {
+    matches!(error, RealtimeError::AuthenticationInvalidated)
 }
 
 fn api_error_to_backend(error: ApiError) -> BackendError {
@@ -6154,6 +6159,54 @@ mod tests {
         let backend_error = realtime_error_to_backend(realtime_error);
         assert_eq!(backend_error.category, ClientErrorCategory::Internal);
         assert!(retryable_transaction_category(backend_error.category));
+    }
+
+    #[test]
+    fn application_unauthenticated_is_request_scoped() {
+        let realtime_error = RealtimeError::RpcError {
+            code: 401,
+            error_code: proto::rpc_error::Code::Unauthenticated as i32,
+            error_name: "UNAUTHENTICATED".to_string(),
+            message: "operation authorization failed".to_string(),
+            friendly: "operation authorization failed".to_string(),
+        };
+        assert!(!realtime_error_closes_session(&realtime_error));
+        assert!(!realtime_error_invalidates_account_authority(
+            &realtime_error
+        ));
+        assert_eq!(
+            realtime_error_to_backend(realtime_error).category,
+            ClientErrorCategory::PermissionDenied
+        );
+
+        let v3_error = InlineProtocolV3Error::Rpc {
+            status: 401,
+            error_code: proto::rpc_error::Code::Unauthenticated as i32,
+            message: "operation authorization failed".to_string(),
+        };
+        assert!(!v3_error.is_authorization_invalidated());
+        assert_eq!(
+            inline_protocol_v3_error_to_backend(v3_error).category,
+            ClientErrorCategory::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn authenticated_transport_revocation_is_terminal() {
+        let realtime_error = RealtimeError::AuthenticationInvalidated;
+        assert!(realtime_error_closes_session(&realtime_error));
+        assert!(realtime_error_invalidates_account_authority(
+            &realtime_error
+        ));
+        assert_eq!(
+            realtime_error_to_backend(realtime_error).category,
+            ClientErrorCategory::AuthExpired
+        );
+        assert_eq!(
+            inline_protocol_v3_error_to_backend(InlineProtocolV3Error::AuthorizationInvalidated)
+                .category,
+            ClientErrorCategory::AuthExpired
+        );
     }
 
     #[test]

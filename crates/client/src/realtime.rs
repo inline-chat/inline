@@ -213,8 +213,14 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         RealtimeError::CommitOutcomeUnknown => {
             BackendError::new(ClientErrorCategory::CommitOutcomeUnknown, error.to_string())
         }
-        RealtimeError::ConnectionError { .. } | RealtimeError::RpcError { .. } => {
+        RealtimeError::AuthenticationInvalidated => {
             BackendError::new(ClientErrorCategory::AuthExpired, error.to_string())
+        }
+        RealtimeError::ConnectionError { .. } => {
+            BackendError::new(ClientErrorCategory::AuthRequired, error.to_string())
+        }
+        RealtimeError::RpcError { .. } => {
+            BackendError::new(ClientErrorCategory::PermissionDenied, error.to_string())
         }
         RealtimeError::ConnectionClosed | RealtimeError::WebSocket(_) => {
             BackendError::new(ClientErrorCategory::Network, error.to_string())
@@ -247,6 +253,21 @@ pub(crate) fn redacted_url_for_debug(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connector_error_mapping_keeps_application_auth_failures_request_scoped() {
+        let application = realtime_error_to_backend(RealtimeError::RpcError {
+            code: 401,
+            error_code: 16,
+            error_name: "UNAUTHENTICATED".to_string(),
+            message: "request rejected".to_string(),
+            friendly: "request rejected".to_string(),
+        });
+        assert_eq!(application.category, ClientErrorCategory::PermissionDenied);
+
+        let revoked = realtime_error_to_backend(RealtimeError::AuthenticationInvalidated);
+        assert_eq!(revoked.category, ClientErrorCategory::AuthExpired);
+    }
 
     #[test]
     fn realtime_connect_request_debug_redacts_token_and_url_credentials() {

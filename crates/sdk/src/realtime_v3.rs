@@ -289,15 +289,10 @@ pub enum InlineProtocolV3Error {
 }
 
 impl InlineProtocolV3Error {
-    /// Returns whether the server rejected the active account authorization.
-    pub fn is_unauthenticated(&self) -> bool {
-        match self {
-            Self::AuthorizationInvalidated => true,
-            Self::Rpc { error_code, .. } => {
-                *error_code == proto::rpc_error::Code::Unauthenticated as i32
-            }
-            _ => false,
-        }
+    /// Returns whether authenticated transport evidence proves that the
+    /// active account authorization was revoked.
+    pub fn is_authorization_invalidated(&self) -> bool {
+        matches!(self, Self::AuthorizationInvalidated)
     }
 }
 
@@ -1174,7 +1169,7 @@ pub(crate) async fn run_inline_protocol_v3_session(
                 let fields = match received {
                     Ok(fields) => fields,
                     Err(error) => {
-                        if error.is_unauthenticated() {
+                        if error.is_authorization_invalidated() {
                             authentication_invalidated = true;
                             let _ = events.send(RealtimeEvent::AuthenticationInvalidated);
                         }
@@ -1474,7 +1469,7 @@ fn realtime_error_from_v3(error: InlineProtocolV3Error) -> crate::realtime::Real
         }
         InlineProtocolV3Error::Closed => crate::realtime::RealtimeError::ConnectionClosed,
         InlineProtocolV3Error::AuthorizationInvalidated => {
-            authentication_invalidated_realtime_error()
+            crate::realtime::RealtimeError::AuthenticationInvalidated
         }
         InlineProtocolV3Error::UpdateBufferOverflow => {
             crate::realtime::RealtimeError::EventLagged { skipped: 1 }
@@ -1486,15 +1481,11 @@ fn realtime_error_from_v3(error: InlineProtocolV3Error) -> crate::realtime::Real
 }
 
 fn authentication_invalidated_realtime_error() -> crate::realtime::RealtimeError {
-    realtime_rpc_error(proto::RpcError {
-        req_msg_id: 0,
-        error_code: proto::rpc_error::Code::Unauthenticated as i32,
-        message: "Inline Protocol session was revoked".into(),
-        code: 401,
-    })
+    crate::realtime::RealtimeError::AuthenticationInvalidated
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use inline_protocol::secure::auth_key_id;
@@ -1518,14 +1509,14 @@ mod tests {
     }
 
     #[test]
-    fn unauthenticated_rpc_failure_is_classified_for_global_invalidation() {
+    fn unauthenticated_application_rpc_is_request_scoped() {
         assert!(
-            InlineProtocolV3Error::Rpc {
+            !InlineProtocolV3Error::Rpc {
                 status: 16,
                 error_code: proto::rpc_error::Code::Unauthenticated as i32,
-                message: "revoked".into(),
+                message: "request rejected".into(),
             }
-            .is_unauthenticated()
+            .is_authorization_invalidated()
         );
     }
 
@@ -1652,8 +1643,8 @@ mod tests {
 
     #[test]
     fn explicit_session_revocation_is_terminal_authentication_failure() {
-        assert!(InlineProtocolV3Error::AuthorizationInvalidated.is_unauthenticated());
-        assert!(!InlineProtocolV3Error::Closed.is_unauthenticated());
+        assert!(InlineProtocolV3Error::AuthorizationInvalidated.is_authorization_invalidated());
+        assert!(!InlineProtocolV3Error::Closed.is_authorization_invalidated());
     }
 
     #[test]
@@ -1731,14 +1722,14 @@ mod tests {
     }
 
     #[test]
-    fn application_rpc_errors_do_not_poison_a_healthy_session() {
+    fn unauthenticated_application_rpc_does_not_poison_a_healthy_session() {
         let response = proto::RealtimeV3Response {
             body: Some(proto::realtime_v3_response::Body::RpcError(
                 proto::RpcError {
                     req_msg_id: 0,
-                    error_code: proto::rpc_error::Code::BadRequest as i32,
-                    message: "invalid input".into(),
-                    code: 400,
+                    error_code: proto::rpc_error::Code::Unauthenticated as i32,
+                    message: "request rejected".into(),
+                    code: 401,
                 },
             )),
         };
@@ -1747,7 +1738,7 @@ mod tests {
         assert!(matches!(
             decode_session_rpc_response(&encoded),
             Ok(Err(crate::realtime::RealtimeError::RpcError {
-                code: 400,
+                code: 401,
                 ..
             }))
         ));

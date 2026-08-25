@@ -92,7 +92,10 @@ use inline_sdk::{
 
 #[allow(clippy::large_enum_variant)]
 enum AuthenticatedRealtime {
-    V2(RealtimeClient),
+    V2 {
+        connection: RealtimeClient,
+        authority_owner: Option<AuthStore>,
+    },
     V3 {
         connection: InlineProtocolV3Connection,
         auth_store: AuthStore,
@@ -105,14 +108,26 @@ impl AuthenticatedRealtime {
         R: RpcRequest,
     {
         match self {
-            Self::V2(connection) => Ok(connection.call(request).await?),
+            Self::V2 {
+                connection,
+                authority_owner,
+            } => match connection.call(request).await {
+                Ok(response) => Ok(response),
+                Err(error) => {
+                    clear_owned_authority_if_invalidated(
+                        authority_owner.as_ref(),
+                        matches!(&error, inline_sdk::RealtimeError::AuthenticationInvalidated),
+                    )?;
+                    Err(error.into())
+                }
+            },
             Self::V3 {
                 connection,
                 auth_store,
             } => match connection.call(request).await {
                 Ok(response) => Ok(response),
                 Err(error) => {
-                    if error.is_unauthenticated() {
+                    if error.is_authorization_invalidated() {
                         auth_store.clear_account_authority()?;
                     }
                     Err(error.into())
@@ -126,7 +141,24 @@ impl AuthenticatedRealtime {
         input: NativeUploadInput,
     ) -> Result<proto::UploadComplete, Box<dyn std::error::Error>> {
         match self {
-            Self::V2(connection) => Ok(upload_file_v2(connection, input, |_| {}).await?),
+            Self::V2 {
+                connection,
+                authority_owner,
+            } => match upload_file_v2(connection, input, |_| {}).await {
+                Ok(upload) => Ok(upload),
+                Err(error) => {
+                    clear_owned_authority_if_invalidated(
+                        authority_owner.as_ref(),
+                        matches!(
+                            &error,
+                            NativeUploadError::V2(
+                                inline_sdk::RealtimeError::AuthenticationInvalidated
+                            )
+                        ),
+                    )?;
+                    Err(error.into())
+                }
+            },
             Self::V3 {
                 connection,
                 auth_store,
@@ -135,7 +167,7 @@ impl AuthenticatedRealtime {
                 Err(error) => {
                     if matches!(
                         &error,
-                        NativeUploadError::V3(error) if error.is_unauthenticated()
+                        NativeUploadError::V3(error) if error.is_authorization_invalidated()
                     ) {
                         auth_store.clear_account_authority()?;
                     }
@@ -144,6 +176,16 @@ impl AuthenticatedRealtime {
             },
         }
     }
+}
+
+fn clear_owned_authority_if_invalidated(
+    authority_owner: Option<&AuthStore>,
+    invalidated: bool,
+) -> Result<(), auth::AuthError> {
+    if invalidated && let Some(auth_store) = authority_owner {
+        auth_store.clear_account_authority()?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -4314,9 +4356,10 @@ async fn connect_authenticated_realtime(
 ) -> Result<AuthenticatedRealtime, Box<dyn std::error::Error>> {
     if auth::env_token_present() {
         let token = require_token(auth_store)?;
-        return Ok(AuthenticatedRealtime::V2(
-            connect_realtime(&config.realtime_url, &token).await?,
-        ));
+        return Ok(AuthenticatedRealtime::V2 {
+            connection: connect_realtime(&config.realtime_url, &token).await?,
+            authority_owner: None,
+        });
     }
 
     if let Some((permanent, temporary)) = auth_store.load_inline_protocol_authorizations()? {
@@ -4342,7 +4385,7 @@ async fn connect_authenticated_realtime(
                         drop(cached);
                     }
                     Err(error) => {
-                        if error.is_unauthenticated() {
+                        if error.is_authorization_invalidated() {
                             auth_store.clear_account_authority()?;
                         }
                         return Err(error.into());
@@ -4350,7 +4393,7 @@ async fn connect_authenticated_realtime(
                 },
                 Err(error) if owner_session::temporary_reconnect_can_regenerate(&error) => {}
                 Err(error) => {
-                    if error.is_unauthenticated() {
+                    if error.is_authorization_invalidated() {
                         auth_store.clear_account_authority()?;
                     }
                     return Err(error.into());
@@ -4361,13 +4404,13 @@ async fn connect_authenticated_realtime(
         let keys = identity::resolve_inline_protocol_public_ring()?;
         let mut regenerated = identity::connect_inline_protocol_fresh(&url, keys, true).await?;
         if let Err(error) = regenerated.bind_temporary(&permanent).await {
-            if error.is_unauthenticated() {
+            if error.is_authorization_invalidated() {
                 auth_store.clear_account_authority()?;
             }
             return Err(error.into());
         }
         if let Err(error) = regenerated.call(proto::GetMeInput {}).await {
-            if error.is_unauthenticated() {
+            if error.is_authorization_invalidated() {
                 auth_store.clear_account_authority()?;
             }
             return Err(error.into());
@@ -4381,9 +4424,10 @@ async fn connect_authenticated_realtime(
     }
 
     let token = require_token(auth_store)?;
-    Ok(AuthenticatedRealtime::V2(
-        connect_realtime(&config.realtime_url, &token).await?,
-    ))
+    Ok(AuthenticatedRealtime::V2 {
+        connection: connect_realtime(&config.realtime_url, &token).await?,
+        authority_owner: Some(auth_store.clone()),
+    })
 }
 
 #[derive(Serialize)]
@@ -5052,6 +5096,73 @@ fn current_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod cli_parsing_tests {
     use super::*;
+
+    fn authority_store() -> (tempfile::TempDir, AuthStore) {
+        let directory = tempfile::tempdir().expect("temporary auth directory");
+        let store = AuthStore::new(
+            directory.path().join("credentials.json"),
+            "https://api.inline.test/v1".into(),
+        );
+        (directory, store)
+    }
+
+    fn authorization(seed: u8, temporary: bool) -> inline_sdk::InlineProtocolAuthorization {
+        inline_sdk::InlineProtocolAuthorization {
+            key: [seed; 256],
+            key_id: [seed; 8],
+            server_salt: i64::from(seed),
+            temporary,
+            expires_at: temporary.then_some(2_000_000_000),
+        }
+    }
+
+    #[test]
+    fn request_scoped_auth_failure_preserves_saved_authority() {
+        let (_directory, store) = authority_store();
+        store
+            .store_inline_protocol_authorizations(&authorization(1, false), &authorization(2, true))
+            .expect("store V3 authority");
+
+        clear_owned_authority_if_invalidated(Some(&store), false)
+            .expect("preserve request-scoped authority");
+
+        assert!(
+            store
+                .load_inline_protocol_authorizations()
+                .expect("load V3 authority")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn invalidated_env_override_does_not_own_saved_authority() {
+        let (_directory, store) = authority_store();
+        store.store_token("saved-token").expect("store bearer");
+
+        clear_owned_authority_if_invalidated(None, true).expect("ignore unowned env invalidation");
+
+        assert_eq!(
+            store.load_saved_token().expect("load bearer").as_deref(),
+            Some("saved-token")
+        );
+    }
+
+    #[test]
+    fn authenticated_saved_authority_revocation_purges_credentials() {
+        let (_directory, store) = authority_store();
+        store
+            .store_inline_protocol_authorizations(&authorization(1, false), &authorization(2, true))
+            .expect("store V3 authority");
+
+        clear_owned_authority_if_invalidated(Some(&store), true).expect("purge revoked authority");
+
+        assert!(
+            store
+                .load_inline_protocol_authorizations()
+                .expect("load V3 authority")
+                .is_none()
+        );
+    }
 
     #[test]
     fn parses_whoami_and_me_shortcuts() {

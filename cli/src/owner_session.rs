@@ -193,5 +193,5 @@ pub(crate) fn resolve_owner_credential(
 }
 
 pub(crate) fn temporary_reconnect_can_regenerate(error: &InlineProtocolV3Error) -> bool {
-    error.is_unauthenticated()
+    error.is_authorization_invalidated()
 }

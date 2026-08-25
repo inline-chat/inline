@@ -99,6 +99,9 @@ pub enum RealtimeError {
     /// The realtime connection closed before the requested operation completed.
     #[error("realtime connection closed")]
     ConnectionClosed,
+    /// The authenticated transport proved that the account session was revoked.
+    #[error("realtime session authorization was revoked")]
+    AuthenticationInvalidated,
     /// The secure Inline Protocol carrier rejected an authenticated record or service message.
     #[error("Inline Protocol transport error: {message}")]
     InlineProtocol {
@@ -169,6 +172,9 @@ impl fmt::Debug for RealtimeError {
                 .field("friendly", friendly)
                 .finish(),
             RealtimeError::ConnectionClosed => f.debug_struct("ConnectionClosed").finish(),
+            RealtimeError::AuthenticationInvalidated => {
+                f.debug_struct("AuthenticationInvalidated").finish()
+            }
             RealtimeError::InlineProtocol { message } => f
                 .debug_struct("InlineProtocol")
                 .field("message", message)
@@ -1056,6 +1062,7 @@ async fn run_realtime_session(
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     heartbeat.tick().await;
     let mut pending_ping: Option<(u64, tokio::time::Instant)> = None;
+    let mut authentication_invalidated = false;
     let mut pending =
         HashMap::<u64, oneshot::Sender<Result<proto::rpc_result::Result, RealtimeError>>>::new();
 
@@ -1172,6 +1179,10 @@ async fn run_realtime_session(
                     }
                     Some(proto::server_protocol_message::Body::ConnectionError(error)) => {
                         let error = connection_error_from_proto(error);
+                        if matches!(error, RealtimeError::AuthenticationInvalidated) {
+                            authentication_invalidated = true;
+                            let _ = events.send(RealtimeEvent::AuthenticationInvalidated);
+                        }
                         log::warn!(
                             target: "inline_sdk::realtime",
                             "multiplexed realtime session rejected: {error}"
@@ -1185,7 +1196,12 @@ async fn run_realtime_session(
     }
 
     for (_, response) in pending {
-        let _ = response.send(Err(RealtimeError::ConnectionClosed));
+        let error = if authentication_invalidated {
+            RealtimeError::AuthenticationInvalidated
+        } else {
+            RealtimeError::ConnectionClosed
+        };
+        let _ = response.send(Err(error));
     }
     let _ = closed.send(true);
 }
@@ -1984,7 +2000,17 @@ fn format_rpc_error(error_code: i32, error_name: &str, message: &str, status_cod
 
 fn connection_error_from_proto(error: proto::ConnectionError) -> RealtimeError {
     let reason = error.reason;
-    let reason_name = proto::connection_error::Reason::try_from(reason)
+    let parsed_reason = proto::connection_error::Reason::try_from(reason).ok();
+    if matches!(
+        parsed_reason,
+        Some(
+            proto::connection_error::Reason::InvalidAuth
+                | proto::connection_error::Reason::SessionRevoked
+        )
+    ) {
+        return RealtimeError::AuthenticationInvalidated;
+    }
+    let reason_name = parsed_reason
         .map(|reason| reason.as_str_name())
         .unwrap_or("UNKNOWN")
         .to_string();
@@ -2240,23 +2266,30 @@ mod tests {
     }
 
     #[test]
-    fn connection_error_preserves_proto_reason() {
-        let err = connection_error_from_proto(proto::ConnectionError {
-            reason: proto::connection_error::Reason::InvalidAuth as i32,
-        });
-
-        match err {
-            RealtimeError::ConnectionError {
-                reason,
-                reason_name,
-                friendly,
-            } => {
-                assert_eq!(reason, 2);
-                assert_eq!(reason_name, "INVALID_AUTH");
-                assert_eq!(friendly, "Realtime auth token is invalid");
-            }
-            other => panic!("expected connection error, got {other:?}"),
+    fn authenticated_connection_revocation_has_a_distinct_terminal_error() {
+        for reason in [
+            proto::connection_error::Reason::InvalidAuth,
+            proto::connection_error::Reason::SessionRevoked,
+        ] {
+            assert!(matches!(
+                connection_error_from_proto(proto::ConnectionError {
+                    reason: reason as i32,
+                }),
+                RealtimeError::AuthenticationInvalidated
+            ));
         }
+    }
+
+    #[test]
+    fn unauthorized_connection_error_remains_non_destructive() {
+        let err = connection_error_from_proto(proto::ConnectionError {
+            reason: proto::connection_error::Reason::Unauthorized as i32,
+        });
+        assert!(matches!(
+            err,
+            RealtimeError::ConnectionError { ref reason_name, .. }
+                if reason_name == "UNAUTHORIZED"
+        ));
     }
 
     #[test]
@@ -2738,6 +2771,125 @@ mod tests {
 
         assert_eq!(first.unwrap().user.unwrap().id, 1);
         assert_eq!(second.unwrap().user.unwrap().id, 2);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_application_rpc_keeps_v2_session_usable() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let rejected = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 2,
+                    body: Some(proto::server_protocol_message::Body::RpcError(
+                        proto::RpcError {
+                            req_msg_id: rejected.id,
+                            error_code: proto::rpc_error::Code::Unauthenticated as i32,
+                            message: "request rejected".into(),
+                            code: 401,
+                        },
+                    )),
+                },
+            )
+            .await;
+
+            let recovered = read_test_client_message(&mut ws).await;
+            send_test_server_message(&mut ws, get_me_result_message(3, recovered.id, 42)).await;
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect_session()
+            .await
+            .unwrap();
+        let mut events = session.subscribe();
+        let error = session.call(proto::GetMeInput {}).await.unwrap_err();
+        assert!(matches!(
+            error,
+            RealtimeError::RpcError { ref error_name, .. }
+                if error_name == "UNAUTHENTICATED"
+        ));
+        assert!(matches!(events.try_recv(), Ok(None)));
+        assert_eq!(
+            session
+                .call(proto::GetMeInput {})
+                .await
+                .unwrap()
+                .user
+                .unwrap()
+                .id,
+            42
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn authenticated_v2_revocation_emits_terminal_event_and_rejects_pending_call() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+            let _pending = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 2,
+                    body: Some(proto::server_protocol_message::Body::ConnectionError(
+                        proto::ConnectionError {
+                            reason: proto::connection_error::Reason::SessionRevoked as i32,
+                        },
+                    )),
+                },
+            )
+            .await;
+        });
+
+        let session = RealtimeClient::builder(format!("ws://{addr}/realtime"), "token-1")
+            .without_connect_timeout()
+            .without_rpc_timeout()
+            .connect_session()
+            .await
+            .unwrap();
+        let mut events = session.subscribe();
+        let (result, event) = tokio::join!(session.call(proto::GetMeInput {}), events.recv());
+        assert!(matches!(
+            result,
+            Err(RealtimeError::AuthenticationInvalidated)
+        ));
+        assert!(matches!(
+            event,
+            Ok(RealtimeEvent::AuthenticationInvalidated)
+        ));
         server.await.unwrap();
     }
 

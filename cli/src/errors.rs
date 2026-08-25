@@ -642,6 +642,11 @@ fn json_cli_error_from_realtime_error(error: &RealtimeError) -> JsonCliError {
             payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());
             payload
         }
+        RealtimeError::AuthenticationInvalidated => {
+            let mut payload = JsonCliError::new("authentication_invalidated", error.to_string());
+            payload.hint = Some("Sign in again to refresh the revoked Inline session.".to_string());
+            payload
+        }
         RealtimeError::Timeout { .. } => {
             let mut payload = JsonCliError::new("realtime_timeout", error.to_string());
             payload.hint = Some("Check network connectivity and INLINE_REALTIME_URL.".to_string());
@@ -1032,24 +1037,36 @@ mod tests {
     }
 
     #[test]
-    fn realtime_connection_errors_map_reason_to_agent_json_fields() {
+    fn nonterminal_realtime_connection_errors_map_reason_to_agent_json_fields() {
         let err = RealtimeError::ConnectionError {
-            reason: 2,
-            reason_name: "INVALID_AUTH".to_string(),
-            friendly: "Realtime auth token is invalid".to_string(),
+            reason: 1,
+            reason_name: "UNAUTHORIZED".to_string(),
+            friendly: "Realtime connection unauthorized".to_string(),
         };
 
         let payload = json_cli_error_from_error(&err);
         assert_eq!(payload.code, "realtime_connection_error");
-        assert_eq!(payload.message, "Realtime auth token is invalid");
-        assert_eq!(payload.api_error.as_deref(), Some("INVALID_AUTH"));
-        assert_eq!(payload.api_error_code, Some(2));
+        assert_eq!(payload.message, "Realtime connection unauthorized");
+        assert_eq!(payload.api_error.as_deref(), Some("UNAUTHORIZED"));
+        assert_eq!(payload.api_error_code, Some(1));
         assert!(
             payload
                 .hint
                 .as_deref()
                 .unwrap_or("")
                 .contains("INLINE_TOKEN")
+        );
+    }
+
+    #[test]
+    fn authenticated_transport_revocation_has_a_distinct_agent_error() {
+        let payload = json_cli_error_from_realtime_error(&RealtimeError::AuthenticationInvalidated);
+        assert_eq!(payload.code, "authentication_invalidated");
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("Sign in again"))
         );
     }
 

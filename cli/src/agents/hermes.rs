@@ -11,8 +11,8 @@ use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const MACHINE_SETUP_PROTOCOL_VERSION: u64 = 1;
-const HERMES_PLUGIN_VERSION: &str = "0.0.8";
-const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter@0.0.8";
+const MINIMUM_HERMES_PLUGIN_VERSION: &str = "0.0.7";
+const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter";
 
 struct HermesProfile {
     home: Option<PathBuf>,
@@ -270,7 +270,7 @@ async fn ensure_plugin(
         )
         .into());
     }
-    let version = install_exact_plugin(hermes_home).await?;
+    let version = install_latest_plugin(hermes_home).await?;
     Ok(PluginSetup {
         action: if installer.is_some() {
             "repaired"
@@ -281,7 +281,7 @@ async fn ensure_plugin(
     })
 }
 
-async fn install_exact_plugin(
+async fn install_latest_plugin(
     hermes_home: Option<&Path>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let npm = find_executable("npm").ok_or_else(|| {
@@ -290,28 +290,26 @@ async fn install_exact_plugin(
             "npm is required to install the Inline Hermes plugin",
         )
     })?;
-    let install_args = exact_plugin_install_args(hermes_home);
+    let install_args = latest_plugin_install_args(hermes_home);
     let install_refs = install_args.iter().map(String::as_str).collect::<Vec<_>>();
     let output = require_success(&npm, &[], &install_refs, None, INSTALL_TIMEOUT).await?;
     let installed_version = plugin_package_version(&output).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "the exact Inline Hermes installer returned no package version",
+            "the latest Inline Hermes installer returned no package version",
         )
     })?;
-    if installed_version != HERMES_PLUGIN_VERSION {
+    if semver::Version::parse(&installed_version).is_err() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "the Inline Hermes installer returned {installed_version}, expected {HERMES_PLUGIN_VERSION}"
-            ),
+            format!("the Inline Hermes installer returned invalid version {installed_version}"),
         )
         .into());
     }
     Ok(installed_version)
 }
 
-fn exact_plugin_install_args(hermes_home: Option<&Path>) -> Vec<String> {
+fn latest_plugin_install_args(hermes_home: Option<&Path>) -> Vec<String> {
     let mut install_args = vec![
         "exec".to_string(),
         "--yes".to_string(),
@@ -361,9 +359,9 @@ fn plugin_status_healthy(success: bool, output: &str) -> bool {
         .get("packageVersion")
         .and_then(serde_json::Value::as_str)
         .and_then(|version| semver::Version::parse(version).ok());
-    let expected = semver::Version::parse(HERMES_PLUGIN_VERSION)
-        .expect("machine plugin version must be valid semver");
-    reported_ok && version == Some(expected)
+    let minimum = semver::Version::parse(MINIMUM_HERMES_PLUGIN_VERSION)
+        .expect("minimum Hermes plugin version must be valid semver");
+    reported_ok && version.is_some_and(|version| version >= minimum)
 }
 
 async fn plugin_has_configured_credential(
@@ -435,8 +433,8 @@ fn parse_machine_plugin_status(success: bool, output: &str) -> Option<MachinePlu
         .get("pluginVersion")
         .and_then(serde_json::Value::as_str)
         .and_then(|version| semver::Version::parse(version).ok())?;
-    let expected = semver::Version::parse(HERMES_PLUGIN_VERSION)
-        .expect("machine plugin version must be valid semver");
+    let minimum = semver::Version::parse(MINIMUM_HERMES_PLUGIN_VERSION)
+        .expect("minimum Hermes plugin version must be valid semver");
     let sidecar_bundled = value
         .get("sidecarBundled")
         .and_then(serde_json::Value::as_bool)
@@ -450,7 +448,7 @@ fn parse_machine_plugin_status(success: bool, output: &str) -> Option<MachinePlu
         .and_then(serde_json::Value::as_bool)
         == Some(true);
     if protocol < MACHINE_SETUP_PROTOCOL_VERSION
-        || version != expected
+        || version < minimum
         || !sidecar_bundled
         || !sidecar_usable
         || !node_usable
@@ -618,11 +616,11 @@ mod tests {
     fn plugin_health_requires_the_machine_setup_contract_version() {
         assert!(plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.8"}"#
+            r#"{"ok":true,"packageVersion":"0.0.7"}"#
         ));
         assert!(!plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.7"}"#
+            r#"{"ok":true,"packageVersion":"0.0.6"}"#
         ));
         assert!(!plugin_status_healthy(
             false,
@@ -631,17 +629,17 @@ mod tests {
     }
 
     #[test]
-    fn outdated_managed_plugin_is_repaired_with_the_exact_package_and_force() {
+    fn outdated_managed_plugin_is_repaired_with_the_latest_package_and_force() {
         assert!(!plugin_status_healthy(
             true,
-            r#"{"ok":true,"packageVersion":"0.0.7"}"#
+            r#"{"ok":true,"packageVersion":"0.0.6"}"#
         ));
         assert_eq!(
-            exact_plugin_install_args(Some(Path::new("/tmp/hermes-profile"))),
+            latest_plugin_install_args(Some(Path::new("/tmp/hermes-profile"))),
             vec![
                 "exec",
                 "--yes",
-                "--package=@inline-chat/hermes-agent-adapter@0.0.8",
+                "--package=@inline-chat/hermes-agent-adapter",
                 "--",
                 "inline-hermes",
                 "install",
@@ -683,7 +681,7 @@ mod tests {
         assert!(
             parse_machine_plugin_status(
                 true,
-                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.7","configured":true,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":true}}"#,
+                r#"{"ok":true,"setupProtocolVersion":1,"pluginVersion":"0.0.6","configured":true,"sidecarBundled":true,"sidecar":{"ok":true},"node":{"ok":true}}"#,
             )
             .is_none()
         );
