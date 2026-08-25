@@ -21,7 +21,8 @@ import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 type Input = {
   messageId: bigint
   peer: InputPeer
-  text: string
+  /** Omit to preserve text, entities, and structural block content. */
+  text?: string
   entities?: MessageEntities
   actions?: MessageActions
   parseMarkdown?: boolean
@@ -52,24 +53,32 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
       throw RealtimeRpcError.BadRequest()
     }
   }
-  const outgoingText = await processOutgoingText({
-    text: input.text,
-    entities: input.entities,
-    parseMarkdown: input.parseMarkdown,
-  })
-  let entities = await resolveThreadTitleLinks({
-    entities: outgoingText.entities,
-    context,
-  })
-  entities = await resolveBotCommandTargets({
-    text: outgoingText.text,
-    entities,
-    chat,
-    currentUserId,
-  })
+  const outgoingText = input.text === undefined
+    ? {
+        text: fullMessage.text ?? "",
+        entities: fullMessage.entities ?? undefined,
+        blockContent: undefined,
+        blockImageSources: undefined,
+      }
+    : await processOutgoingText({
+        text: input.text,
+        entities: input.entities,
+        parseMarkdown: input.parseMarkdown,
+      })
+  let entities = outgoingText.entities
+  if (input.text !== undefined) {
+    entities = await resolveThreadTitleLinks({ entities, context })
+    entities = await resolveBotCommandTargets({
+      text: outgoingText.text,
+      entities,
+      chat,
+      currentUserId,
+    })
+  }
 
-  let preparedBlockContent: PreparedBlockContent | null = null
-  if (outgoingText.blockContent) {
+  let preparedBlockContent: PreparedBlockContent | null | undefined =
+    input.text === undefined ? undefined : null
+  if (input.text !== undefined && outgoingText.blockContent) {
     try {
       preparedBlockContent = prepareBlockContent({
         text: outgoingText.text,
@@ -103,7 +112,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     throw new Error("Message not found")
   }
 
-  if (hasThreadEntity(fullMessage.entities) || hasThreadEntity(entities)) {
+  if (input.text !== undefined && (hasThreadEntity(fullMessage.entities) || hasThreadEntity(entities))) {
     queueMessageThreadLinkMaterialization({
       sourceChatId: chatId,
       sourceMessageGlobalId: message.globalId,
@@ -115,7 +124,10 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   const messageInfo: MessageInfo = {
-    message: message,
+    message: {
+      ...message,
+      blockContent: message.blockContent ?? fullMessage.blockContent,
+    },
     photo: fullMessage.photo ?? undefined,
     video: fullMessage.video ?? undefined,
     document: fullMessage.document ?? undefined,

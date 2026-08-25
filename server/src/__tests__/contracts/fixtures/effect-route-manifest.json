@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "count": 284,
+  "count": 292,
   "methodCounts": {
     "GET": 146,
-    "POST": 136,
+    "POST": 144,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "81bf517fc4d5c76df8e4baac304009af211a6ab49858990d3dee158ed3a3055a",
+  "sha256": "39f8840f1ec5b69c0db82db3b1c0993a311074d3b537b8ad070bb970b61e4308",
   "routes": [
     {
       "method": "GET",
@@ -691,6 +691,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/deleteMessages"
+    },
+    {
+      "method": "POST",
       "path": "/bot/deleteMyCommands"
     },
     {
@@ -703,6 +707,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/editMessageActions"
+    },
+    {
+      "method": "POST",
       "path": "/bot/editMessageText"
     },
     {
@@ -711,7 +719,15 @@
     },
     {
       "method": "POST",
+      "path": "/bot/forwardMessages"
+    },
+    {
+      "method": "POST",
       "path": "/bot/getMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/getSpace"
     },
     {
       "method": "POST",
@@ -779,6 +795,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot{token}/deleteMessages"
+    },
+    {
+      "method": "POST",
       "path": "/bot{token}/deleteMyCommands"
     },
     {
@@ -791,6 +811,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot{token}/editMessageActions"
+    },
+    {
+      "method": "POST",
       "path": "/bot{token}/editMessageText"
     },
     {
@@ -799,7 +823,15 @@
     },
     {
       "method": "POST",
+      "path": "/bot{token}/forwardMessages"
+    },
+    {
+      "method": "POST",
       "path": "/bot{token}/getMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/bot{token}/getSpace"
     },
     {
       "method": "POST",

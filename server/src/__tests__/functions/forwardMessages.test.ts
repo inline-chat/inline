@@ -4,6 +4,7 @@ import { db } from "@in/server/db"
 import { chatParticipants, chats, files, members, messages, voices } from "@in/server/db/schema"
 import type { DbUser } from "@in/server/db/schema"
 import { MessageModel } from "@in/server/db/models/messages"
+import { editMessage } from "@in/server/functions/messages.editMessage"
 import { forwardMessages } from "@in/server/functions/messages.forwardMessages"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
@@ -216,5 +217,32 @@ describe("forwardMessages DM -> private thread", () => {
     expect(forwarded.voice?.duration).toBe(9)
     expect(forwarded.voice?.waveform).toEqual(Buffer.from([8, 6, 7, 5]))
     expect(forwarded.fwdFromPeerUserId).toBe(scenario.dmPeerUser.id)
+  })
+
+  test("preserves structural rich content", async () => {
+    const scenario = await createScenario({ sourceFromCurrentUser: true })
+    const context = testUtils.functionContext({ userId: scenario.currentUser.id, sessionId: 1 })
+    await editMessage(
+      {
+        peer: scenario.fromPeerId,
+        messageId: scenario.sourceMessageId,
+        text: "# Forwarded heading",
+        parseMarkdown: true,
+      },
+      context,
+    )
+
+    await forwardMessages(
+      {
+        fromPeerId: scenario.fromPeerId,
+        toPeerId: scenario.toPeerId,
+        messageIds: [scenario.sourceMessageId],
+      },
+      context,
+    )
+
+    const forwarded = await forwardedMessageFromDestination(scenario.destinationThreadId)
+    expect(forwarded.text).toBe("# Forwarded heading")
+    expect(forwarded.blockContent?.blocks[0]?.kind.oneofKind).toBe("heading")
   })
 })

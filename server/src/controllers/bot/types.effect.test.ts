@@ -9,8 +9,8 @@ const chat = {
   parent_chat_id: 9,
   parent_message: {
     message_id: 40,
+    peer_id: { chat_id: 9 },
     chat_id: 9,
-    chat: { chat_id: 9, type: "thread" },
     peer: { thread_id: 9 },
     from_id: 7,
     from: { id: 7, is_bot: false, first_name: "Maya" },
@@ -21,6 +21,7 @@ const chat = {
 
 const message = {
   message_id: 41,
+  peer_id: { chat_id: chat.chat_id },
   chat_id: chat.chat_id,
   chat,
   peer: {},
@@ -146,8 +147,7 @@ describe("BotChatParticipant", () => {
     const serialized = JSON.stringify(decoded)
 
     expect(serialized).toContain('"parent_message"')
-    expect(decoded.parent_message).toHaveProperty("chat")
-    expect(decoded.parent_message?.chat).not.toHaveProperty("parent_message")
+    expect(decoded.parent_message).not.toHaveProperty("chat")
     expect(decoded.parent_message).not.toHaveProperty("reply_to_message")
     expect(serialized.length).toBeLessThan(1_000)
   })

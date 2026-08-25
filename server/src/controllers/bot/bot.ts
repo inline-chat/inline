@@ -54,8 +54,8 @@ import type {
   BotChat,
   BotChatLastMessage,
   BotMessage,
-  BotMessageLite,
   BotPeer,
+  BotPeerId,
   BotTargetInput,
   BotUser,
   CreateReplyThreadParams,
@@ -63,6 +63,8 @@ import type {
   GetMessagesParams,
   SearchMessagesParams,
 } from "@inline-chat/bot-api-types"
+
+type BotMessageReference = Omit<BotMessage, "chat" | "reply_to_message">
 
 const toBotUser = (user: any, options?: { isBot?: boolean }): BotUser => {
   const isBot = typeof user.bot === "boolean" ? user.bot : (options?.isBot ?? false)
@@ -176,6 +178,13 @@ const toBotPeer = (peer: any): BotPeer => {
   return {}
 }
 
+const toBotPeerId = (peer: any): BotPeerId => {
+  const type = (peer as Peer | undefined)?.type
+  if (type?.oneofKind === "user") return { user_id: Number(type.user.userId) }
+  if (type?.oneofKind === "chat") return { chat_id: Number(type.chat.chatId) }
+  throw new InlineError(InlineError.ApiError.INTERNAL)
+}
+
 function minimalUnknownUser(id: number): BotUser {
   return { id, is_bot: false }
 }
@@ -269,14 +278,16 @@ const makeInputPeerFromBotTarget = async (input: BotTargetInput, currentUserId: 
 
 const toBotChat = (chat: any): BotChat => {
   const chatId = typeof chat.id === "bigint" ? Number(chat.id) : Number(chat.id)
+  const type =
+    chat.type === "private" || chat.peerId?.type?.oneofKind === "user"
+      ? "user"
+      : chat.type === "thread" || chat.peerId?.type?.oneofKind === "chat"
+        ? "thread"
+        : undefined
+  if (!type) throw new InlineError(InlineError.ApiError.INTERNAL)
   return {
     chat_id: chatId,
-    type:
-      chat.type === "private" || chat.peerId?.type?.oneofKind === "user"
-        ? "user"
-        : chat.type === "thread" || chat.peerId?.type?.oneofKind === "chat"
-          ? "thread"
-          : undefined,
+    type,
     title: chat.title ? String(chat.title) : undefined,
     space_id: chat.spaceId ? Number(chat.spaceId) : undefined,
     is_public: typeof chat.isPublic === "boolean" ? chat.isPublic : undefined,
@@ -304,7 +315,7 @@ const loadBotMessageSummary = async (
   messageId: number,
   chatId: number,
   context: Parameters<typeof getChatFn>[1],
-): Promise<BotMessageLite | undefined> => {
+): Promise<BotMessageReference | undefined> => {
   const parentChat = await getChatFn(
     { peerId: makeInputPeer(undefined, chatId) },
     context,
@@ -392,15 +403,15 @@ const toBotMessageLiteFromProto = (
   message: any,
   botChat: BotChat,
   usersById?: Map<number, BotUserJson>,
-): BotMessageLite => {
+): BotMessageReference => {
   const messageId = typeof message.id === "bigint" ? Number(message.id) : Number(message.id)
   const chatId = typeof message.chatId === "bigint" ? Number(message.chatId) : Number(message.chatId)
   const fromId = typeof message.fromId === "bigint" ? Number(message.fromId) : Number(message.fromId)
 
   return {
     message_id: messageId,
+    peer_id: toBotPeerId(message.peerId),
     chat_id: chatId,
-    chat: botChat,
     peer: toBotPeer(message.peerId),
     from_id: fromId,
     from: usersById?.get(fromId) ?? minimalUnknownUser(fromId),
@@ -416,7 +427,7 @@ const toBotMessageLiteFromDb = (
   inputPeer: InputPeer,
   botChat: BotChat,
   usersById?: Map<number, BotUserJson>,
-): BotMessageLite => {
+): BotMessageReference => {
   const dateSeconds =
     message.date instanceof Date ? Math.floor(message.date.getTime() / 1000) : Number(message.date ?? 0)
   const editDateSeconds =
@@ -429,8 +440,8 @@ const toBotMessageLiteFromDb = (
   const fromId = Number(message.fromId)
   return {
     message_id: Number(message.messageId),
+    peer_id: toBotPeerId({ type: inputPeer.type }),
     chat_id: Number(message.chatId),
-    chat: botChat,
     peer: toBotPeer({ type: inputPeer.type }),
     from_id: fromId,
     from: usersById?.get(fromId) ?? minimalUnknownUser(fromId),
@@ -449,6 +460,7 @@ const toBotMessageFromDb = (
 ): BotMessage => {
   return {
     ...toBotMessageLiteFromDb(message, inputPeer, botChat, options?.usersById),
+    chat: botChat,
     reply_to_message: options?.replyMessage
       ? toBotMessageLiteFromDb(options.replyMessage, inputPeer, botChat, options?.usersById)
       : undefined,

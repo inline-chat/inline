@@ -71,11 +71,13 @@ const botUser = {
 
 const botChat = {
   chat_id: 99,
+  type: "thread",
   title: "Effect chat",
 } as const
 
 const botMessage: BotMessage = {
   message_id: 101,
+  peer_id: { user_id: 7 },
   chat_id: botChat.chat_id,
   chat: botChat,
   peer: { user_id: 7 },
@@ -101,6 +103,7 @@ const makeOperations = (
   overrides: Partial<BotOperationsShape> = {},
 ): BotOperationsShape => ({
   getMe: () => unused("getMe"),
+  getSpace: () => unused("getSpace"),
   sendMessage: () => unused("sendMessage"),
   getChat: () => unused("getChat"),
   getChatHistory: () => unused("getChatHistory"),
@@ -109,7 +112,9 @@ const makeOperations = (
   createThread: () => unused("createThread"),
   createReplyThread: () => unused("createReplyThread"),
   editMessageText: () => unused("editMessageText"),
+  editMessageActions: () => unused("editMessageActions"),
   deleteMessage: () => unused("deleteMessage"),
+  deleteMessages: () => unused("deleteMessages"),
   sendReaction: () => unused("sendReaction"),
   deleteReaction: () => unused("deleteReaction"),
   answerMessageAction: () => unused("answerMessageAction"),
@@ -123,6 +128,7 @@ const makeOperations = (
   setMyCommands: () => unused("setMyCommands"),
   deleteMyCommands: () => unused("deleteMyCommands"),
   forwardMessage: () => unused("forwardMessage"),
+  forwardMessages: () => unused("forwardMessages"),
   pinMessage: () => unused("pinMessage"),
   unpinMessage: () => unused("unpinMessage"),
   getChatParticipant: () => unused("getChatParticipant"),
@@ -252,6 +258,17 @@ describe("Effect Bot routes", () => {
     const operations = makeOperations({
       getMe: () =>
         invoked("getMe", { user: botUser }),
+      getSpace: () => invoked("getSpace", {
+        space: { id: 4, name: "Product" },
+        membership: {
+          id: 5,
+          space_id: 4,
+          user_id: botUser.id,
+          date: 1_784_332_800,
+          can_access_public_chats: true,
+        },
+        settings: { grid_enabled: false },
+      }),
       sendMessage: () =>
         invoked("sendMessage", { message: botMessage }),
       getChat: () =>
@@ -268,8 +285,12 @@ describe("Effect Bot routes", () => {
         invoked("editMessageText", {
           message: botMessage,
         }),
+      editMessageActions: () =>
+        invoked("editMessageActions", { message: botMessage }),
       deleteMessage: () =>
         invoked("deleteMessage", {}),
+      deleteMessages: () =>
+        invoked("deleteMessages", {}),
       sendReaction: () =>
         invoked("sendReaction", {}),
       getMyCommands: () =>
@@ -287,6 +308,7 @@ describe("Effect Bot routes", () => {
       deleteMyCommands: () =>
         invoked("deleteMyCommands", {}),
       forwardMessage: () => invoked("forwardMessage", { message: botMessage }),
+      forwardMessages: () => invoked("forwardMessages", { message_ids: [102] }),
       pinMessage: () => invoked("pinMessage", {}),
       unpinMessage: () => invoked("unpinMessage", {}),
       getChatParticipant: () => invoked("getChatParticipant", { participant: { user: botUser } }),
@@ -301,6 +323,11 @@ describe("Effect Bot routes", () => {
         name: "getMe",
         method: "GET",
         input: undefined,
+      },
+      {
+        name: "getSpace",
+        method: "POST",
+        input: { space_id: 4 },
       },
       {
         name: "sendMessage",
@@ -347,9 +374,19 @@ describe("Effect Bot routes", () => {
         },
       },
       {
+        name: "editMessageActions",
+        method: "POST",
+        input: { chat_id: 99, message_id: 101, actions: [] },
+      },
+      {
         name: "deleteMessage",
         method: "POST",
         input: { chat_id: 99, message_id: 101 },
+      },
+      {
+        name: "deleteMessages",
+        method: "POST",
+        input: { chat_id: 99, message_ids: [101] },
       },
       {
         name: "sendReaction",
@@ -383,6 +420,7 @@ describe("Effect Bot routes", () => {
         input: {},
       },
       { name: "forwardMessage", method: "POST", input: { chat_id: 99, from_chat_id: 98, message_id: 101 } },
+      { name: "forwardMessages", method: "POST", input: { chat_id: 99, from_chat_id: 98, message_ids: [101] } },
       { name: "pinMessage", method: "POST", input: { chat_id: 99, message_id: 101 } },
       { name: "unpinMessage", method: "POST", input: { chat_id: 99, message_id: 101 } },
       { name: "getChatParticipant", method: "GET", input: { chat_id: "99", user_id: "42" } },
@@ -443,7 +481,7 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(44)
+      expect(calls).toHaveLength(52)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
@@ -499,6 +537,7 @@ describe("Effect Bot routes", () => {
           Effect.succeed({
             chat: {
               chat_id: 99,
+              type: "thread",
               title: undefined,
               space_id: undefined,
               emoji: undefined,
@@ -525,6 +564,7 @@ describe("Effect Bot routes", () => {
         result: {
           chat: {
             chat_id: 99,
+            type: "thread",
           },
         },
       })
@@ -1071,20 +1111,24 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(62)
+    expect(Object.keys(spec.paths)).toHaveLength(70)
 
     const expectedMethods = [
       "getMe",
+      "getSpace",
       "sendMessage",
       "getChat",
       "getChatHistory",
       "editMessageText",
+      "editMessageActions",
       "deleteMessage",
+      "deleteMessages",
       "sendReaction",
       "getMyCommands",
       "setMyCommands",
       "deleteMyCommands",
       "forwardMessage",
+      "forwardMessages",
       "pinMessage",
       "unpinMessage",
       "getChatParticipant",
@@ -1407,24 +1451,10 @@ describe("Effect Bot routes", () => {
     })
     expect(
       spec.components.schemas["BotMessageEntityInput"],
-    ).toMatchObject({
-      properties: {
-        offset: {
-          allOf: expect.arrayContaining([
-            {
-              $ref: "#/components/schemas/WireNonNegativeInteger",
-            },
-          ]),
-        },
-        length: {
-          allOf: expect.arrayContaining([
-            {
-              $ref: "#/components/schemas/WireNonNegativeInteger",
-            },
-          ]),
-        },
-      },
-    })
+    ).toBeUndefined()
+    expect(spec.components.schemas["BotRichMessage"]).toBeDefined()
+    expect(spec.components.schemas["BotRichBlock"]).toBeDefined()
+    expect(spec.components.schemas["BotRichText"]).toBeDefined()
     expect(
       spec.components.schemas["BotEmptyResult"],
     ).toMatchObject({
@@ -1470,10 +1500,10 @@ describe("Effect Bot routes", () => {
       spec.components.schemas["BotChat"],
     ).toHaveProperty(
       "properties.parent_message.allOf.0.$ref",
-      "#/components/schemas/BotMessageLite",
+      "#/components/schemas/BotMessageReference",
     )
     expect(
-      spec.components.schemas["BotMessageLite"],
+      spec.components.schemas["BotMessageReference"],
     ).not.toHaveProperty("properties.chat.properties.parent_message")
     expect(
       spec.components.schemas["BotMessage"],
@@ -1551,9 +1581,23 @@ describe("Effect Bot routes", () => {
           ),
       )
 
-    expect(methodsByPath(effect.paths)).toEqual(
-      methodsByPath(legacy.paths),
-    )
+    const effectMethods = methodsByPath(effect.paths)
+    const legacyMethods = methodsByPath(legacy.paths)
+    for (const [path, methods] of Object.entries(legacyMethods)) {
+      expect(effectMethods[path]).toEqual(methods)
+    }
+    expect(
+      Object.keys(effectMethods).filter((path) => !(path in legacyMethods)),
+    ).toEqual([
+      "/bot:token/deleteMessages",
+      "/bot:token/editMessageActions",
+      "/bot:token/forwardMessages",
+      "/bot:token/getSpace",
+      "/bot/deleteMessages",
+      "/bot/editMessageActions",
+      "/bot/forwardMessages",
+      "/bot/getSpace",
+    ])
   })
 
   it("passes decoded GET query values to the operation boundary", async () => {

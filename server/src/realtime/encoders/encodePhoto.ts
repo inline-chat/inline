@@ -58,6 +58,14 @@ export const encodePhoto = ({ photo }: { photo: DbFullPhoto }) => {
   let proto: Photo = {
     id: BigInt(photo.id),
     date: encodeDateStrict(photo.date),
+    fileUniqueId: photo.photoSizes
+      ?.filter((size) => size.file?.fileUniqueId)
+      .reduce<DbFullPhotoSize | undefined>((best, size) => {
+        if (!best) return size
+        const area = (size.width ?? 0) * (size.height ?? 0)
+        const bestArea = (best.width ?? 0) * (best.height ?? 0)
+        return area >= bestArea ? size : best
+      }, undefined)?.file?.fileUniqueId,
     format: photo.format === "png" ? Photo_Format.PNG : Photo_Format.JPEG,
     sizes: strippedSize ? [strippedSize, ...fileSizes] : fileSizes,
   }

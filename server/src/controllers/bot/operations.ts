@@ -3,8 +3,8 @@ import type {
   BotChatLastMessage,
   BotCommand,
   BotMessage,
-  BotMessageLite,
   BotPeer,
+  BotPeerId,
   BotTargetInput,
   BotUser,
   CreateReplyThreadParams,
@@ -13,6 +13,8 @@ import type {
   DeleteReactionParams,
   DeleteWebhookParams,
   DeleteMessageParams,
+  DeleteMessagesParams,
+  EditMessageActionsParams,
   EditMessageTextParams,
   GetChatHistoryParams,
   GetChatParticipantCountParams,
@@ -24,6 +26,8 @@ import type {
   GetMessagesParams,
   GetUpdatesParams,
   ForwardMessageParams,
+  ForwardMessagesParams,
+  GetSpaceParams,
   PinMessageParams,
   SendChatActionParams,
   SendMessageParams,
@@ -46,6 +50,7 @@ import {
   MessageActionToast,
   MessageEntities,
   MessageSendMode,
+  Member_Role,
   Peer,
   SearchMessagesFilter,
   UpdateComposeAction_ComposeAction,
@@ -79,6 +84,7 @@ import { removeChatParticipant as removeChatParticipantFn } from "@in/server/fun
 import { updateChatInfo as updateChatInfoFn } from "@in/server/functions/messages.updateChatInfo"
 import { uploadFileOperation, type UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
 import { handler as getMeHandler } from "@in/server/methods/getMe"
+import { getSpace as getSpaceFn } from "@in/server/functions/space.getSpace"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { InlineError } from "@in/server/types/errors"
 import { chats, documents, photoSizes, videos, voices } from "@in/server/db/schema"
@@ -88,9 +94,12 @@ import { validateWebhookUrl } from "@in/server/modules/botUpdates/webhookSecurit
 import { BotUpdateProjector, encodeBotActions, encodeBotMedia } from "@in/server/modules/botUpdates/projector"
 import {
   encodeBotEntities,
-  parseBotEntities,
   type BotUserJson,
 } from "./entityCodec"
+import {
+  encodeBotRichMessage,
+  encodeBotRichMessageFromStored,
+} from "./richContent"
 import {
   type BotOperationContext,
   type BotOperationHandlers,
@@ -114,6 +123,8 @@ type BotChatSource = {
   readonly parentMessageId?: number | bigint | null | undefined
   readonly peerId?: { readonly type?: { readonly oneofKind?: string } } | null | undefined
   readonly lastMsgId?: number | bigint | null | undefined
+  readonly number?: number | null | undefined
+  readonly threadNumber?: number | null | undefined
   readonly emoji?: string | null | undefined
 }
 
@@ -125,8 +136,12 @@ type BotMessageSource = {
   readonly editDate?: number | Date | null | undefined
   readonly text?: string | null | undefined
   readonly entities?: MessageEntities | null | undefined
+  readonly blockContent?: DbFullMessage["blockContent"]
+  readonly blockContentPhotos?: DbFullMessage["blockContentPhotos"]
   readonly replyToMsgId?: number | bigint | null | undefined
 } & Partial<Pick<DbFullMessage, "photo" | "video" | "document" | "voice" | "mediaType" | "actions">>
+
+type BotMessageReference = Omit<BotMessage, "chat" | "reply_to_message">
 
 const toBotUser = (
   user: BotUserSource,
@@ -288,6 +303,26 @@ const toBotPeer = (peer: unknown): BotPeer => {
   return {}
 }
 
+const toBotPeerId = (peer: unknown): BotPeerId => {
+  if (isRecord(peer)) {
+    if (typeof peer["userId"] === "number") {
+      return { user_id: peer["userId"] }
+    }
+    if (typeof peer["chatId"] === "number") {
+      return { chat_id: peer["chatId"] }
+    }
+  }
+
+  const type = (peer as Peer | undefined)?.type
+  if (type?.oneofKind === "user") {
+    return { user_id: Number(type.user.userId) }
+  }
+  if (type?.oneofKind === "chat") {
+    return { chat_id: Number(type.chat.chatId) }
+  }
+  throw new InlineError(InlineError.ApiError.INTERNAL)
+}
+
 const minimalUnknownUser = (id: number): BotUser => ({
   id,
   is_bot: false,
@@ -405,9 +440,8 @@ const makeInputPeerFromBotTarget = async (
   return makeInputPeer(peerUserId, undefined)
 }
 
-const toBotChat = (chat: BotChatSource): BotChat => ({
-  chat_id: Number(chat.id),
-  type:
+const toBotChat = (chat: BotChatSource): BotChat => {
+  const type =
     chat.type === "private"
       ? "user"
       : chat.type === "thread"
@@ -416,23 +450,29 @@ const toBotChat = (chat: BotChatSource): BotChat => ({
           ? "user"
           : chat.peerId?.type?.oneofKind === "chat"
             ? "thread"
-            : undefined,
-  title: chat.title ? String(chat.title) : undefined,
-  space_id: chat.spaceId
-    ? Number(chat.spaceId)
-    : undefined,
-  is_public:
-    typeof chat.isPublic === "boolean"
-      ? chat.isPublic
+            : undefined
+  if (!type) throw new InlineError(InlineError.ApiError.INTERNAL)
+  return {
+    chat_id: Number(chat.id),
+    type,
+    title: chat.title ? String(chat.title) : undefined,
+    space_id: chat.spaceId
+      ? Number(chat.spaceId)
       : undefined,
-  parent_chat_id: chat.parentChatId
-    ? Number(chat.parentChatId)
-    : undefined,
-  last_message_id: chat.lastMsgId
-    ? Number(chat.lastMsgId)
-    : undefined,
-  emoji: chat.emoji ?? undefined,
-})
+    is_public:
+      typeof chat.isPublic === "boolean"
+        ? chat.isPublic
+        : undefined,
+    parent_chat_id: chat.parentChatId
+      ? Number(chat.parentChatId)
+      : undefined,
+    last_message_id: chat.lastMsgId
+      ? Number(chat.lastMsgId)
+      : undefined,
+    number: chat.number ?? chat.threadNumber ?? undefined,
+    emoji: chat.emoji ?? undefined,
+  }
+}
 
 const dateSeconds = (date: number | Date): number =>
   date instanceof Date
@@ -444,6 +484,13 @@ const toBotChatLastMessageFromDb = (
   usersById?: Map<number, BotUserJson>,
 ): BotChatLastMessage => {
   const fromId = Number(message.fromId)
+  const richMessage = encodeBotRichMessageFromStored({
+    text: message.text,
+    blockContent: message.blockContent,
+    blockContentPhotos: message.blockContentPhotos,
+    entities: message.entities,
+    usersById,
+  })
   return {
     message_id: Number(message.messageId),
     from_id: fromId,
@@ -452,9 +499,8 @@ const toBotChatLastMessageFromDb = (
       minimalUnknownUser(fromId),
     date: dateSeconds(message.date),
     text: message.text ?? undefined,
-    entities: encodeBotEntities(message.entities, {
-      usersById,
-    }),
+    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
+    rich_message: richMessage,
   }
 }
 
@@ -462,7 +508,7 @@ const loadBotMessageSummary = async (
   messageId: number,
   chatId: number,
   context: BotOperationContext,
-): Promise<BotMessageLite | undefined> => {
+): Promise<BotMessageReference | undefined> => {
   const parentChat = await getChatFn(
     { peerId: makeInputPeer(undefined, chatId) },
     context,
@@ -477,7 +523,6 @@ const loadBotMessageSummary = async (
   return toBotMessageLiteFromDb(
     message,
     makeInputPeer(undefined, chatId),
-    toBotChat(parentChat.chat),
     usersById,
   )
 }
@@ -554,17 +599,24 @@ const toBotMessageLiteFromProto = (
     readonly editDate?: number | bigint | undefined
     readonly message?: string | undefined
     readonly entities?: MessageEntities | undefined
+    readonly blockContent?: DbFullMessage["blockContent"] | undefined
     readonly peerId?: Peer | undefined
     readonly replyToMsgId?: number | bigint | undefined
   },
-  botChat: BotChat,
+  inputPeer: InputPeer,
   usersById?: Map<number, BotUserJson>,
-): BotMessageLite => {
+): BotMessageReference => {
   const fromId = Number(message.fromId)
+  const richMessage = encodeBotRichMessage({
+    text: message.message,
+    blockContent: message.blockContent,
+    entities: message.entities,
+    usersById,
+  })
   return {
     message_id: Number(message.id),
+    peer_id: toBotPeerId(message.peerId ?? { type: inputPeer.type }),
     chat_id: Number(message.chatId),
-    chat: botChat,
     peer: toBotPeer(message.peerId),
     from_id: fromId,
     from:
@@ -575,23 +627,28 @@ const toBotMessageLiteFromProto = (
       ? Number(message.editDate)
       : undefined,
     text: message.message ?? undefined,
-    entities: encodeBotEntities(message.entities, {
-      usersById,
-    }),
+    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
+    rich_message: richMessage,
   }
 }
 
 const toBotMessageLiteFromDb = (
   message: BotMessageSource,
   inputPeer: InputPeer,
-  botChat: BotChat,
   usersById?: Map<number, BotUserJson>,
-): BotMessageLite => {
+): BotMessageReference => {
   const fromId = Number(message.fromId)
+  const richMessage = encodeBotRichMessageFromStored({
+    text: message.text,
+    blockContent: message.blockContent,
+    blockContentPhotos: message.blockContentPhotos,
+    entities: message.entities,
+    usersById,
+  })
   return {
     message_id: Number(message.messageId),
+    peer_id: toBotPeerId({ type: inputPeer.type }),
     chat_id: Number(message.chatId),
-    chat: botChat,
     peer: toBotPeer({ type: inputPeer.type }),
     from_id: fromId,
     from:
@@ -602,9 +659,8 @@ const toBotMessageLiteFromDb = (
       ? dateSeconds(message.editDate)
       : undefined,
     text: message.text ?? undefined,
-    entities: encodeBotEntities(message.entities, {
-      usersById,
-    }),
+    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById }),
+    rich_message: richMessage,
     media:
       "mediaType" in message
         ? encodeBotMedia(message as DbFullMessage)
@@ -625,14 +681,13 @@ const toBotMessageFromDb = (
   ...toBotMessageLiteFromDb(
     message,
     inputPeer,
-    botChat,
     options?.usersById,
   ),
+  chat: botChat,
   reply_to_message: options?.replyMessage
     ? toBotMessageLiteFromDb(
         options.replyMessage,
         inputPeer,
-        botChat,
         options.usersById,
       )
     : undefined,
@@ -690,9 +745,9 @@ const encodeBotMessagesFromProto = async (
       : undefined
     const reply = replyId ? replyById.get(replyId) : undefined
     return {
-      ...toBotMessageLiteFromProto(message, botChat, usersById),
+      ...toBotMessageLiteFromProto(message, peerId, usersById),
       reply_to_message: reply
-        ? toBotMessageLiteFromDb(reply, peerId, botChat, usersById)
+        ? toBotMessageLiteFromDb(reply, peerId, usersById)
         : undefined,
     }
   })
@@ -710,7 +765,10 @@ const randomId64 = (): bigint => {
 }
 
 const toProtocolActions = (
-  actions: SendMessageParams["actions"] | EditMessageTextParams["actions"],
+  actions:
+    | SendMessageParams["actions"]
+    | EditMessageTextParams["actions"]
+    | EditMessageActionsParams["actions"],
 ): MessageActions | undefined => {
   if (actions === undefined) return undefined
   return MessageActions.create({
@@ -750,21 +808,31 @@ export const ensureBotFileAccess = async (
 ): Promise<void> => {
   if (file.userId === botUserId) return
   const candidates = await db.execute<{ chatId: number }>(sql`
-    select distinct message.chat_id as "chatId"
-    from messages message
-    left join photo_sizes direct_photo on direct_photo.photo_id = message.photo_id
-    left join documents document on document.id = message.document_id
-    left join photo_sizes document_thumbnail on document_thumbnail.photo_id = document.photo_id
-    left join videos video on video.id = message.video_id
-    left join photo_sizes video_thumbnail on video_thumbnail.photo_id = video.photo_id
-    left join voices voice on voice.id = message.voice_id
-    where message.file_id = ${file.id}
-      or direct_photo.file_id = ${file.id}
-      or document.file_id = ${file.id}
-      or document_thumbnail.file_id = ${file.id}
-      or video.file_id = ${file.id}
-      or video_thumbnail.file_id = ${file.id}
-      or voice.file_id = ${file.id}
+    select distinct candidate.chat_id as "chatId"
+    from (
+      select message.chat_id
+      from messages message
+      left join photo_sizes direct_photo on direct_photo.photo_id = message.photo_id
+      left join documents document on document.id = message.document_id
+      left join photo_sizes document_thumbnail on document_thumbnail.photo_id = document.photo_id
+      left join videos video on video.id = message.video_id
+      left join photo_sizes video_thumbnail on video_thumbnail.photo_id = video.photo_id
+      left join voices voice on voice.id = message.voice_id
+      where message.file_id = ${file.id}
+        or direct_photo.file_id = ${file.id}
+        or document.file_id = ${file.id}
+        or document_thumbnail.file_id = ${file.id}
+        or video.file_id = ${file.id}
+        or video_thumbnail.file_id = ${file.id}
+        or voice.file_id = ${file.id}
+      union
+      select message.chat_id
+      from messages message
+      join block_content_image_jobs block_image
+        on block_image.content_id = message.block_content_id
+      join photo_sizes block_photo on block_photo.photo_id = block_image.photo_id
+      where block_photo.file_id = ${file.id}
+    ) candidate
     limit 1000
   `)
   if (candidates.length > 0) {
@@ -848,6 +916,7 @@ const inputRecord = (
   input:
     | SendMessageParams
     | EditMessageTextParams
+    | EditMessageActionsParams
     | SetMyCommandsParams,
 ): Record<string, unknown> =>
   input as Record<string, unknown>
@@ -862,11 +931,55 @@ const getMe = async (context: BotOperationContext) => {
   }
 }
 
+const getSpace = async (
+  input: GetSpaceParams,
+  context: BotOperationContext,
+) => {
+  const spaceId = normalizeInputId(input.space_id)
+  if (!spaceId || spaceId <= 0) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const result = await getSpaceFn(
+    { spaceId: BigInt(spaceId) },
+    context,
+  )
+  if (!result.space || !result.membership) {
+    throw new InlineError(InlineError.ApiError.INTERNAL)
+  }
+  const role = result.membership.role === Member_Role.OWNER
+    ? "owner" as const
+    : result.membership.role === Member_Role.ADMIN
+      ? "admin" as const
+      : result.membership.role === Member_Role.MEMBER
+        ? "member" as const
+        : undefined
+  return {
+    space: {
+      id: Number(result.space.id),
+      name: result.space.name,
+      is_public: result.space.isPublic,
+      handle: result.space.handle,
+    },
+    membership: {
+      id: Number(result.membership.id),
+      space_id: Number(result.membership.spaceId),
+      user_id: Number(result.membership.userId),
+      role,
+      date: Number(result.membership.date),
+      can_access_public_chats: result.membership.canAccessPublicChats,
+    },
+    settings: { grid_enabled: result.settings?.gridEnabled ?? false },
+  }
+}
+
 const sendMessage = async (
   input: SendMessageParams,
   context: BotOperationContext,
 ) => {
   const raw = inputRecord(input)
+  if (raw["entities"] !== undefined) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
   if (raw["text"] !== undefined && typeof raw["text"] !== "string") {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
@@ -877,9 +990,6 @@ const sendMessage = async (
 
   const replyToMessageId = normalizeInputId(
     raw["reply_to_message_id"],
-  )
-  const entities = parseBotEntities(
-    parseMaybeJsonValue(raw["entities"]),
   )
   const parseMarkdown = parseBotParseMarkdown(raw)
   const inputPeer = await makeInputPeerFromBotTarget(
@@ -900,7 +1010,6 @@ const sendMessage = async (
     replyToMessageId: replyToMessageId
       ? BigInt(replyToMessageId)
       : undefined,
-    entities,
     parseMarkdown: parseMarkdown ?? true,
     randomId,
     ...media,
@@ -1014,13 +1123,16 @@ const getChatHistory = async (
   }
 }
 
-const normalizeInputIds = (values: ReadonlyArray<unknown>): number[] => {
+const normalizeOrderedInputIds = (values: ReadonlyArray<unknown>): number[] => {
   const ids = values.map(normalizeInputId)
   if (ids.some((id) => id === undefined)) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  return Array.from(new Set(ids as number[]))
+  return ids as number[]
 }
+
+const normalizeInputIds = (values: ReadonlyArray<unknown>): number[] =>
+  Array.from(new Set(normalizeOrderedInputIds(values)))
 
 const getMessages = async (
   input: GetMessagesParams,
@@ -1159,12 +1271,12 @@ const editMessageText = async (
   context: BotOperationContext,
 ) => {
   const raw = inputRecord(input)
+  if (raw["entities"] !== undefined) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
   const peerId = await makeInputPeerFromBotTarget(
     input,
     context.currentUserId,
-  )
-  const entities = parseBotEntities(
-    parseMaybeJsonValue(raw["entities"]),
   )
   const parseMarkdown = parseBotParseMarkdown(raw)
   const messageId = normalizeInputId(raw["message_id"])
@@ -1190,7 +1302,6 @@ const editMessageText = async (
       messageId: BigInt(messageId),
       peer: peerId,
       text: raw["text"],
-      entities,
       parseMarkdown: parseMarkdown ?? true,
       actions: toProtocolActions(input.actions),
     },
@@ -1225,6 +1336,37 @@ const editMessageText = async (
   }
 }
 
+const editMessageActions = async (
+  input: EditMessageActionsParams,
+  context: BotOperationContext,
+) => {
+  const peerId = await makeInputPeerFromBotTarget(input, context.currentUserId)
+  const messageId = normalizeInputId(input.message_id)
+  if (!messageId || !Array.isArray(input.actions)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const chat = await ChatModel.getChatFromInputPeer(peerId, {
+    currentUserId: context.currentUserId,
+  })
+  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  await editMessageFn(
+    {
+      messageId: BigInt(messageId),
+      peer: peerId,
+      actions: toProtocolActions(input.actions),
+    },
+    { ...context, isBot: true },
+  )
+  return {
+    message: await encodeStoredBotMessage({
+      messageId,
+      chatId: chat.id,
+      peerId,
+      botChat: toBotChat(chat),
+    }),
+  }
+}
+
 const deleteMessage = async (
   input: DeleteMessageParams,
   context: BotOperationContext,
@@ -1244,6 +1386,31 @@ const deleteMessage = async (
       messageIds: [BigInt(messageId)],
       peer: peerId,
     },
+    context,
+  )
+  return {}
+}
+
+const deleteMessages = async (
+  input: DeleteMessagesParams,
+  context: BotOperationContext,
+) => {
+  if (!Array.isArray(input.message_ids) || input.message_ids.length < 1 || input.message_ids.length > 100) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const peerId = await makeInputPeerFromBotTarget(input, context.currentUserId)
+  const messageIds = normalizeInputIds(input.message_ids)
+  const chat = await ChatModel.getChatFromInputPeer(peerId, context)
+  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  const existing = await MessageModel.getMessagesByIds(
+    chat.id,
+    messageIds.map(BigInt),
+  )
+  const existingIds = new Set(existing.map((message) => Number(message.messageId)))
+  const deletable = messageIds.filter((id) => existingIds.has(id))
+  if (deletable.length === 0) return {}
+  await deleteMessageFn(
+    { messageIds: deletable.map(BigInt), peer: peerId },
     context,
   )
   return {}
@@ -1279,6 +1446,42 @@ const forwardMessage = async (
       botChat: toBotChat(destination),
     }),
   }
+}
+
+const forwardMessages = async (
+  input: ForwardMessagesParams,
+  context: BotOperationContext,
+) => {
+  if (!Array.isArray(input.message_ids) || input.message_ids.length < 1 || input.message_ids.length > 100) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const destinationPeer = await makeInputPeerFromBotTarget(
+    { chat_id: input.chat_id },
+    context.currentUserId,
+  )
+  const sourcePeer = await makeInputPeerFromBotTarget(
+    { chat_id: input.from_chat_id },
+    context.currentUserId,
+  )
+  const messageIds = normalizeOrderedInputIds(input.message_ids)
+  const source = await ChatModel.getChatFromInputPeer(sourcePeer, context)
+  await AccessGuards.ensureChatAccess(source, context.currentUserId)
+  const existing = await MessageModel.getMessagesByIds(
+    source.id,
+    messageIds.map(BigInt),
+  )
+  const existingIds = new Set(existing.map((message) => Number(message.messageId)))
+  const forwardable = messageIds.filter((id) => existingIds.has(id))
+  if (forwardable.length === 0) return { message_ids: [] }
+  const result = await forwardMessagesFn(
+    {
+      fromPeerId: sourcePeer,
+      toPeerId: destinationPeer,
+      messageIds: forwardable.map(BigInt),
+    },
+    context,
+  )
+  return { message_ids: result.messageIds }
 }
 
 const setPinnedState = async (
@@ -1367,10 +1570,15 @@ const removeThreadParticipant = async (
 
 const setThreadTitle = async (input: SetThreadTitleParams, context: BotOperationContext) => {
   const chatId = normalizeInputId(input.chat_id)
-  if (!chatId || typeof input.title !== "string") {
+  if (
+    !chatId ||
+    (input.title === undefined && input.emoji === undefined) ||
+    (input.title !== undefined && typeof input.title !== "string") ||
+    (input.emoji !== undefined && typeof input.emoji !== "string")
+  ) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  await updateChatInfoFn({ chatId, title: input.title }, context)
+  await updateChatInfoFn({ chatId, title: input.title, emoji: input.emoji }, context)
   return {}
 }
 
@@ -1547,6 +1755,7 @@ const deleteMyCommands = async (
 
 export const botOperationHandlers: BotOperationHandlers = {
   getMe,
+  getSpace,
   sendMessage,
   getChat,
   getChatHistory,
@@ -1555,8 +1764,11 @@ export const botOperationHandlers: BotOperationHandlers = {
   createThread,
   createReplyThread,
   editMessageText,
+  editMessageActions,
   deleteMessage,
+  deleteMessages,
   forwardMessage,
+  forwardMessages,
   pinMessage,
   unpinMessage,
   getChatParticipant,

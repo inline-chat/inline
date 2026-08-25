@@ -5,6 +5,8 @@ import type {
   DeleteReactionParams,
   DeleteWebhookParams,
   DeleteMessageParams,
+  DeleteMessagesParams,
+  EditMessageActionsParams,
   EditMessageTextParams,
   GetChatHistoryParams,
   GetChatParticipantCountParams,
@@ -16,6 +18,8 @@ import type {
   GetMessagesParams,
   GetUpdatesParams,
   ForwardMessageParams,
+  ForwardMessagesParams,
+  GetSpaceParams,
   PinMessageParams,
   SendMessageParams,
   SendReactionParams,
@@ -85,6 +89,7 @@ import {
   BotGetChatHistorySuccess,
   BotGetChatHistoryRuntimeSuccess,
   BotGetChatSuccess,
+  BotGetSpaceSuccess,
   BotCreateThreadSuccess,
   BotGetMyCommandsSuccess,
   BotGetChatParticipantSuccess,
@@ -94,6 +99,7 @@ import {
   BotWebhookInfoSuccess,
   BotTrueSuccess,
   BotMessageSuccess,
+  BotForwardMessagesSuccess,
   BotMessageRuntimeSuccess,
   BotMessagesRuntimeSuccess,
   BotMessagesSuccess,
@@ -103,6 +109,8 @@ import {
   DeleteReactionInput,
   DeleteWebhookInput,
   DeleteMessageInput,
+  DeleteMessagesInput,
+  EditMessageActionsInput,
   EditMessageTextInput,
   GetChatHistoryInput,
   GetChatInput,
@@ -116,6 +124,8 @@ import {
   SetWebhookInput,
   SetMyCommandsInput,
   ForwardMessageInput,
+  ForwardMessagesInput,
+  GetSpaceInput,
   PinMessageInput,
   GetChatParticipantInput,
   GetChatParticipantCountInput,
@@ -208,6 +218,11 @@ const BotMethodDocumentation = {
     description:
       "A simple method for testing bot authentication. Returns basic information about the bot account associated with the supplied token.",
   },
+  getSpace: {
+    summary: "Get a space",
+    description:
+      "Returns one accessible space, the bot's own membership, and bot-relevant settings without exposing the member roster.",
+  },
   sendMessage: {
     summary: "Send a message",
     description:
@@ -244,10 +259,20 @@ const BotMethodDocumentation = {
     description:
       "Replaces the text and formatting of a message in a private conversation or chat. On success, returns the updated message.",
   },
+  editMessageActions: {
+    summary: "Edit message actions",
+    description:
+      "Replaces all actions on a bot-authored message without changing its text. Send an empty actions array to clear them.",
+  },
   deleteMessage: {
     summary: "Delete a message",
     description:
       "Deletes a message from a private conversation or chat. Returns an empty result when the message is deleted.",
+  },
+  deleteMessages: {
+    summary: "Delete messages",
+    description:
+      "Deletes up to 100 messages from one chat. Missing message IDs are skipped.",
   },
   sendReaction: {
     summary: "Send a reaction",
@@ -278,13 +303,14 @@ const BotMethodDocumentation = {
       "Deletes every command published by the authenticated bot. Returns an empty result when the command list is cleared.",
   },
   forwardMessage: { summary: "Forward a message", description: "Forwards one accessible message into another accessible chat." },
+  forwardMessages: { summary: "Forward messages", description: "Forwards up to 100 accessible messages and returns their new IDs. Missing source IDs are skipped." },
   pinMessage: { summary: "Pin a message", description: "Pins one message in a chat." },
   unpinMessage: { summary: "Unpin a message", description: "Unpins one message in a chat." },
   getChatParticipant: { summary: "Get a chat participant", description: "Returns one participant of an accessible chat, with space membership when applicable." },
   getChatParticipantCount: { summary: "Get chat participant count", description: "Returns the number of participants in an accessible chat." },
   addThreadParticipant: { summary: "Add a thread participant", description: "Adds one user to a thread. The authenticated bot must have permission to manage that thread's participants." },
   removeThreadParticipant: { summary: "Remove a thread participant", description: "Removes one user from a thread. The authenticated bot must have permission to manage that thread's participants and cannot remove itself." },
-  setThreadTitle: { summary: "Set thread title", description: "Changes the title of a thread. Direct-message chats are not threads and cannot be renamed." },
+  setThreadTitle: { summary: "Update thread title", description: "Changes a thread's title, emoji, or both. An empty emoji removes it." },
   uploadFile: { summary: "Upload a file", description: "Uploads bot media using multipart/form-data and returns a reusable bot file." },
 } satisfies Readonly<
   Record<BotOperation, BotEndpointDocumentation>
@@ -432,6 +458,12 @@ const HeaderBotEndpoints = {
       success: BotGetMeSuccess,
     },
   ),
+  getSpace: headerPost(
+    "headerGetSpace",
+    "/bot/getSpace",
+    BotMethodDocumentation.getSpace,
+    { payload: GetSpaceInput, success: BotGetSpaceSuccess },
+  ),
   sendMessage: headerPost(
     "headerSendMessage",
     "/bot/sendMessage",
@@ -495,6 +527,12 @@ const HeaderBotEndpoints = {
       success: BotMessageSuccess,
     },
   ),
+  editMessageActions: headerPost(
+    "headerEditMessageActions",
+    "/bot/editMessageActions",
+    BotMethodDocumentation.editMessageActions,
+    { payload: EditMessageActionsInput, success: BotMessageSuccess },
+  ),
   deleteMessage: headerPost(
     "headerDeleteMessage",
     "/bot/deleteMessage",
@@ -503,6 +541,12 @@ const HeaderBotEndpoints = {
       payload: DeleteMessageInput,
       success: BotEmptySuccess,
     },
+  ),
+  deleteMessages: headerPost(
+    "headerDeleteMessages",
+    "/bot/deleteMessages",
+    BotMethodDocumentation.deleteMessages,
+    { payload: DeleteMessagesInput, success: BotEmptySuccess },
   ),
   sendReaction: headerPost(
     "headerSendReaction",
@@ -546,6 +590,7 @@ const HeaderBotEndpoints = {
     { success: BotEmptySuccess },
   ),
   forwardMessage: headerPost("headerForwardMessage", "/bot/forwardMessage", BotMethodDocumentation.forwardMessage, { payload: ForwardMessageInput, success: BotMessageSuccess }),
+  forwardMessages: headerPost("headerForwardMessages", "/bot/forwardMessages", BotMethodDocumentation.forwardMessages, { payload: ForwardMessagesInput, success: BotForwardMessagesSuccess }),
   pinMessage: headerPost("headerPinMessage", "/bot/pinMessage", BotMethodDocumentation.pinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
   unpinMessage: headerPost("headerUnpinMessage", "/bot/unpinMessage", BotMethodDocumentation.unpinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
   getChatParticipant: headerGet("headerGetChatParticipant", "/bot/getChatParticipant", BotMethodDocumentation.getChatParticipant, { query: GetChatParticipantInput.fields, success: BotGetChatParticipantSuccess }),
@@ -565,6 +610,12 @@ const PathBotEndpoints = {
       query: {},
       success: BotGetMeSuccess,
     },
+  ),
+  getSpace: pathPost(
+    "pathGetSpace",
+    "/bot:token/getSpace",
+    BotMethodDocumentation.getSpace,
+    { payload: GetSpaceInput, success: BotGetSpaceSuccess },
   ),
   sendMessage: pathPost(
     "pathSendMessage",
@@ -629,6 +680,12 @@ const PathBotEndpoints = {
       success: BotMessageSuccess,
     },
   ),
+  editMessageActions: pathPost(
+    "pathEditMessageActions",
+    "/bot:token/editMessageActions",
+    BotMethodDocumentation.editMessageActions,
+    { payload: EditMessageActionsInput, success: BotMessageSuccess },
+  ),
   deleteMessage: pathPost(
     "pathDeleteMessage",
     "/bot:token/deleteMessage",
@@ -637,6 +694,12 @@ const PathBotEndpoints = {
       payload: DeleteMessageInput,
       success: BotEmptySuccess,
     },
+  ),
+  deleteMessages: pathPost(
+    "pathDeleteMessages",
+    "/bot:token/deleteMessages",
+    BotMethodDocumentation.deleteMessages,
+    { payload: DeleteMessagesInput, success: BotEmptySuccess },
   ),
   sendReaction: pathPost(
     "pathSendReaction",
@@ -680,6 +743,7 @@ const PathBotEndpoints = {
     { success: BotEmptySuccess },
   ),
   forwardMessage: pathPost("pathForwardMessage", "/bot:token/forwardMessage", BotMethodDocumentation.forwardMessage, { payload: ForwardMessageInput, success: BotMessageSuccess }),
+  forwardMessages: pathPost("pathForwardMessages", "/bot:token/forwardMessages", BotMethodDocumentation.forwardMessages, { payload: ForwardMessagesInput, success: BotForwardMessagesSuccess }),
   pinMessage: pathPost("pathPinMessage", "/bot:token/pinMessage", BotMethodDocumentation.pinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
   unpinMessage: pathPost("pathUnpinMessage", "/bot:token/unpinMessage", BotMethodDocumentation.unpinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
   getChatParticipant: pathGet("pathGetChatParticipant", "/bot:token/getChatParticipant", BotMethodDocumentation.getChatParticipant, { query: GetChatParticipantInput.fields, success: BotGetChatParticipantSuccess }),
@@ -852,6 +916,7 @@ const PathFallbackEndpoints = {
 export const BotApiGroup = HttpApiGroup.make("bot")
   .add(
     HeaderBotEndpoints.getMe,
+    HeaderBotEndpoints.getSpace,
     HeaderBotEndpoints.sendMessage,
     HeaderBotEndpoints.getChat,
     HeaderBotEndpoints.getChatHistory,
@@ -860,7 +925,9 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.createThread,
     HeaderBotEndpoints.createReplyThread,
     HeaderBotEndpoints.editMessageText,
+    HeaderBotEndpoints.editMessageActions,
     HeaderBotEndpoints.deleteMessage,
+    HeaderBotEndpoints.deleteMessages,
     HeaderBotEndpoints.sendReaction,
     HeaderBotEndpoints.deleteReaction,
     HeaderBotEndpoints.answerMessageAction,
@@ -874,6 +941,7 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.setMyCommands,
     HeaderBotEndpoints.deleteMyCommands,
     HeaderBotEndpoints.forwardMessage,
+    HeaderBotEndpoints.forwardMessages,
     HeaderBotEndpoints.pinMessage,
     HeaderBotEndpoints.unpinMessage,
     HeaderBotEndpoints.getChatParticipant,
@@ -883,6 +951,7 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.setThreadTitle,
     HeaderBotEndpoints.uploadFile,
     PathBotEndpoints.getMe,
+    PathBotEndpoints.getSpace,
     PathBotEndpoints.sendMessage,
     PathBotEndpoints.getChat,
     PathBotEndpoints.getChatHistory,
@@ -891,7 +960,9 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     PathBotEndpoints.createThread,
     PathBotEndpoints.createReplyThread,
     PathBotEndpoints.editMessageText,
+    PathBotEndpoints.editMessageActions,
     PathBotEndpoints.deleteMessage,
+    PathBotEndpoints.deleteMessages,
     PathBotEndpoints.sendReaction,
     PathBotEndpoints.deleteReaction,
     PathBotEndpoints.answerMessageAction,
@@ -905,6 +976,7 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     PathBotEndpoints.setMyCommands,
     PathBotEndpoints.deleteMyCommands,
     PathBotEndpoints.forwardMessage,
+    PathBotEndpoints.forwardMessages,
     PathBotEndpoints.pinMessage,
     PathBotEndpoints.unpinMessage,
     PathBotEndpoints.getChatParticipant,
@@ -1084,19 +1156,6 @@ const normalizeIntegerFields = (
   return normalized
 }
 
-const normalizeBotEntityForSchema = (
-  value: unknown,
-): unknown =>
-  isRecord(value)
-    ? normalizeIntegerFields(value, [
-        "offset",
-        "length",
-        "user_id",
-        "chat_id",
-        "space_id",
-      ])
-    : value
-
 const normalizeBotCommandForSchema = (
   value: unknown,
 ): unknown => {
@@ -1134,6 +1193,12 @@ const normalizeInputForSchema = (
   operation: BotOperation,
   input: Record<string, unknown>,
 ): Record<string, unknown> => {
+  if (
+    (operation === "sendMessage" || operation === "editMessageText") &&
+    Object.prototype.hasOwnProperty.call(input, "entities")
+  ) {
+    throw new Error("Bot entity input is not supported")
+  }
   // TODO(effect-cutover): remove decimal-string POST coercion after supported
   // Bot clients use canonical numeric IDs and compatibility telemetry is quiet.
   const usesQueryIdCodecs =
@@ -1151,19 +1216,12 @@ const normalizeInputForSchema = (
         "message_id",
         "reply_to_message_id",
         "interaction_id",
+        "space_id",
       ])
   if (
     operation === "sendMessage" ||
     operation === "editMessageText"
   ) {
-    if ("entities" in normalized) {
-      const entities = parseCompatibilityJson(
-        normalized["entities"],
-      )
-      normalized["entities"] = Array.isArray(entities)
-        ? entities.map(normalizeBotEntityForSchema)
-        : entities
-    }
     const parseMarkdown =
       normalized["parse_markdown"] ??
       normalized["parseMarkdown"]
@@ -1172,7 +1230,11 @@ const normalizeInputForSchema = (
         booleanForValidation(parseMarkdown)
     }
   }
-  if (operation === "getMessages") {
+  if (
+    operation === "getMessages" ||
+    operation === "deleteMessages" ||
+    operation === "forwardMessages"
+  ) {
     const ids = parseCompatibilityJson(normalized["message_ids"])
     normalized["message_ids"] = Array.isArray(ids)
       ? ids.map(integerForValidation)
@@ -1249,6 +1311,8 @@ const validateInput = (
       case "deleteMyCommands":
       case "getWebhookInfo":
         return Effect.succeed(value)
+      case "getSpace":
+        return Schema.decodeUnknownEffect(GetSpaceInput)(value)
       case "sendMessage":
         return Schema.decodeUnknownEffect(SendMessageInput)(value)
       case "getChat":
@@ -1269,10 +1333,14 @@ const validateInput = (
         return Schema.decodeUnknownEffect(
           EditMessageTextInput,
         )(value)
+      case "editMessageActions":
+        return Schema.decodeUnknownEffect(EditMessageActionsInput)(value)
       case "deleteMessage":
         return Schema.decodeUnknownEffect(
           DeleteMessageInput,
         )(value)
+      case "deleteMessages":
+        return Schema.decodeUnknownEffect(DeleteMessagesInput)(value)
       case "sendReaction":
         return Schema.decodeUnknownEffect(
           SendReactionInput,
@@ -1289,6 +1357,7 @@ const validateInput = (
           SetMyCommandsInput,
         )(value)
       case "forwardMessage": return Schema.decodeUnknownEffect(ForwardMessageInput)(value)
+      case "forwardMessages": return Schema.decodeUnknownEffect(ForwardMessagesInput)(value)
       case "pinMessage":
       case "unpinMessage": return Schema.decodeUnknownEffect(PinMessageInput)(value)
       case "getChatParticipant": return Schema.decodeUnknownEffect(GetChatParticipantInput)(value)
@@ -1357,6 +1426,8 @@ const runOperation = (
     switch (operation) {
       case "getMe":
         return operations.getMe(context)
+      case "getSpace":
+        return operations.getSpace(input as GetSpaceParams, context)
       case "sendMessage":
         return operations.sendMessage(
           input as SendMessageParams,
@@ -1385,11 +1456,15 @@ const runOperation = (
           input as EditMessageTextParams,
           context,
         )
+      case "editMessageActions":
+        return operations.editMessageActions(input as EditMessageActionsParams, context)
       case "deleteMessage":
         return operations.deleteMessage(
           input as DeleteMessageParams,
           context,
         )
+      case "deleteMessages":
+        return operations.deleteMessages(input as DeleteMessagesParams, context)
       case "sendReaction":
         return operations.sendReaction(
           input as SendReactionParams,
@@ -1413,6 +1488,7 @@ const runOperation = (
       case "deleteMyCommands":
         return operations.deleteMyCommands(context)
       case "forwardMessage": return operations.forwardMessage(input as ForwardMessageParams, context)
+      case "forwardMessages": return operations.forwardMessages(input as ForwardMessagesParams, context)
       case "pinMessage": return operations.pinMessage(input as PinMessageParams, context)
       case "unpinMessage": return operations.unpinMessage(input as UnpinMessageParams, context)
       case "getChatParticipant": return operations.getChatParticipant(input as GetChatParticipantParams, context)
@@ -1438,8 +1514,11 @@ const validateSuccessEnvelope = (
         return Schema.decodeUnknownEffect(
           BotGetMeSuccess,
         )(envelope)
+      case "getSpace":
+        return Schema.decodeUnknownEffect(BotGetSpaceSuccess)(envelope)
       case "sendMessage":
       case "editMessageText":
+      case "editMessageActions":
       case "forwardMessage":
         return Schema.decodeUnknownEffect(
           BotMessageRuntimeSuccess,
@@ -1455,6 +1534,8 @@ const validateSuccessEnvelope = (
       case "getMessages":
       case "searchMessages":
         return Schema.decodeUnknownEffect(BotMessagesRuntimeSuccess)(envelope)
+      case "forwardMessages":
+        return Schema.decodeUnknownEffect(BotForwardMessagesSuccess)(envelope)
       case "createThread":
       case "createReplyThread":
         return Schema.decodeUnknownEffect(BotCreateThreadSuccess)(envelope)
@@ -1471,6 +1552,7 @@ const validateSuccessEnvelope = (
       case "getChatParticipant": return Schema.decodeUnknownEffect(BotGetChatParticipantSuccess)(envelope)
       case "getChatParticipantCount": return Schema.decodeUnknownEffect(BotGetChatParticipantCountSuccess)(envelope)
       case "deleteMessage":
+      case "deleteMessages":
       case "sendReaction":
       case "deleteReaction":
       case "answerMessageAction":
@@ -1783,6 +1865,8 @@ export const makeBotRouteGroup = () => {
             ({ request }) =>
               execute("getMe", request, undefined),
           )
+          .handleRaw("headerGetSpace", ({ request }) =>
+            execute("getSpace", request, undefined))
           .handleRaw(
             "headerSendMessage",
             ({ request }) =>
@@ -1819,6 +1903,8 @@ export const makeBotRouteGroup = () => {
                 undefined,
               ),
           )
+          .handleRaw("headerEditMessageActions", ({ request }) =>
+            execute("editMessageActions", request, undefined))
           .handleRaw(
             "headerDeleteMessage",
             ({ request }) =>
@@ -1828,6 +1914,8 @@ export const makeBotRouteGroup = () => {
                 undefined,
               ),
           )
+          .handleRaw("headerDeleteMessages", ({ request }) =>
+            execute("deleteMessages", request, undefined))
           .handleRaw(
             "headerSendReaction",
             ({ request }) =>
@@ -1873,6 +1961,7 @@ export const makeBotRouteGroup = () => {
               ),
           )
           .handleRaw("headerForwardMessage", ({ request }) => execute("forwardMessage", request, undefined))
+          .handleRaw("headerForwardMessages", ({ request }) => execute("forwardMessages", request, undefined))
           .handleRaw("headerPinMessage", ({ request }) => execute("pinMessage", request, undefined))
           .handleRaw("headerUnpinMessage", ({ request }) => execute("unpinMessage", request, undefined))
           .handleRaw("headerGetChatParticipant", ({ request }) => execute("getChatParticipant", request, undefined))
@@ -1886,6 +1975,8 @@ export const makeBotRouteGroup = () => {
             ({ params, request }) =>
               execute("getMe", request, params.token),
           )
+          .handleRaw("pathGetSpace", ({ params, request }) =>
+            execute("getSpace", request, params.token))
           .handleRaw(
             "pathSendMessage",
             ({ params, request }) =>
@@ -1926,6 +2017,8 @@ export const makeBotRouteGroup = () => {
                 params.token,
               ),
           )
+          .handleRaw("pathEditMessageActions", ({ params, request }) =>
+            execute("editMessageActions", request, params.token))
           .handleRaw(
             "pathDeleteMessage",
             ({ params, request }) =>
@@ -1935,6 +2028,8 @@ export const makeBotRouteGroup = () => {
                 params.token,
               ),
           )
+          .handleRaw("pathDeleteMessages", ({ params, request }) =>
+            execute("deleteMessages", request, params.token))
           .handleRaw(
             "pathSendReaction",
             ({ params, request }) =>
@@ -1980,6 +2075,7 @@ export const makeBotRouteGroup = () => {
               ),
           )
           .handleRaw("pathForwardMessage", ({ params, request }) => execute("forwardMessage", request, params.token))
+          .handleRaw("pathForwardMessages", ({ params, request }) => execute("forwardMessages", request, params.token))
           .handleRaw("pathPinMessage", ({ params, request }) => execute("pinMessage", request, params.token))
           .handleRaw("pathUnpinMessage", ({ params, request }) => execute("unpinMessage", request, params.token))
           .handleRaw("pathGetChatParticipant", ({ params, request }) => execute("getChatParticipant", request, params.token))

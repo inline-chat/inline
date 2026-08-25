@@ -8,10 +8,15 @@ import type {
   DeleteWebhookParams,
   DeleteWebhookResult,
   DeleteMessageParams,
+  DeleteMessagesParams,
+  EditMessageActionsParams,
+  EditMessageActionsResult,
   EditMessageTextParams,
   EmptyResult,
   ForwardMessageParams,
   ForwardMessageResult,
+  ForwardMessagesParams,
+  ForwardMessagesResult,
   GetChatHistoryParams,
   GetChatHistoryResult,
   GetChatParams,
@@ -19,6 +24,8 @@ import type {
   GetFileParams,
   GetFileResult,
   GetMeResult,
+  GetSpaceParams,
+  GetSpaceResult,
   GetMessagesParams,
   GetMessagesResult,
   GetUpdatesParams,
@@ -58,6 +65,7 @@ import { InlineError } from "@in/server/types/errors"
 
 export type BotOperation =
   | "getMe"
+  | "getSpace"
   | "sendMessage"
   | "getChat"
   | "getChatHistory"
@@ -66,7 +74,9 @@ export type BotOperation =
   | "createThread"
   | "createReplyThread"
   | "editMessageText"
+  | "editMessageActions"
   | "deleteMessage"
+  | "deleteMessages"
   | "sendReaction"
   | "deleteReaction"
   | "answerMessageAction"
@@ -80,6 +90,7 @@ export type BotOperation =
   | "setMyCommands"
   | "deleteMyCommands"
   | "forwardMessage"
+  | "forwardMessages"
   | "pinMessage"
   | "unpinMessage"
   | "getChatParticipant"
@@ -121,6 +132,10 @@ export interface BotOperationsShape {
   readonly getMe: (
     context: BotOperationContext,
   ) => Effect.Effect<GetMeResult, BotOperationError>
+  readonly getSpace: (
+    input: GetSpaceParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<GetSpaceResult, BotOperationError>
   readonly sendMessage: (
     input: SendMessageParams,
     context: BotOperationContext,
@@ -153,8 +168,16 @@ export interface BotOperationsShape {
     input: EditMessageTextParams,
     context: BotOperationContext,
   ) => Effect.Effect<SendMessageResult, BotOperationError>
+  readonly editMessageActions: (
+    input: EditMessageActionsParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<EditMessageActionsResult, BotOperationError>
   readonly deleteMessage: (
     input: DeleteMessageParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly deleteMessages: (
+    input: DeleteMessagesParams,
     context: BotOperationContext,
   ) => Effect.Effect<EmptyResult, BotOperationError>
   readonly sendReaction: (
@@ -180,6 +203,7 @@ export interface BotOperationsShape {
     context: BotOperationContext,
   ) => Effect.Effect<EmptyResult, BotOperationError>
   readonly forwardMessage: (input: ForwardMessageParams, context: BotOperationContext) => Effect.Effect<ForwardMessageResult, BotOperationError>
+  readonly forwardMessages: (input: ForwardMessagesParams, context: BotOperationContext) => Effect.Effect<ForwardMessagesResult, BotOperationError>
   readonly pinMessage: (input: PinMessageParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Effect.Effect<GetChatParticipantResult, BotOperationError>
@@ -199,10 +223,18 @@ export interface BotOperationHandlers {
   readonly getMe: (
     context: BotOperationContext,
   ) => Promise<GetMeResult>
+  readonly getSpace: (
+    input: GetSpaceParams,
+    context: BotOperationContext,
+  ) => Promise<GetSpaceResult>
   readonly sendMessage: (
     input: SendMessageParams,
     context: BotOperationContext,
   ) => Promise<SendMessageResult>
+  readonly editMessageActions: (
+    input: EditMessageActionsParams,
+    context: BotOperationContext,
+  ) => Promise<EditMessageActionsResult>
   readonly getChat: (
     input: GetChatParams,
     context: BotOperationContext,
@@ -235,6 +267,10 @@ export interface BotOperationHandlers {
     input: DeleteMessageParams,
     context: BotOperationContext,
   ) => Promise<EmptyResult>
+  readonly deleteMessages: (
+    input: DeleteMessagesParams,
+    context: BotOperationContext,
+  ) => Promise<EmptyResult>
   readonly sendReaction: (
     input: SendReactionParams,
     context: BotOperationContext,
@@ -258,6 +294,7 @@ export interface BotOperationHandlers {
     context: BotOperationContext,
   ) => Promise<EmptyResult>
   readonly forwardMessage: (input: ForwardMessageParams, context: BotOperationContext) => Promise<ForwardMessageResult>
+  readonly forwardMessages: (input: ForwardMessagesParams, context: BotOperationContext) => Promise<ForwardMessagesResult>
   readonly pinMessage: (input: PinMessageParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Promise<GetChatParticipantResult>
@@ -361,6 +398,8 @@ export const makeBotOperations = (
 ): BotOperationsShape => ({
   getMe: (context) =>
     adapt("getMe", () => handlers.getMe(context)),
+  getSpace: (input, context) =>
+    adapt("getSpace", () => handlers.getSpace(input, context)),
   sendMessage: (input, context) =>
     adapt("sendMessage", () =>
       handlers.sendMessage(input, context),
@@ -385,10 +424,14 @@ export const makeBotOperations = (
     adapt("editMessageText", () =>
       handlers.editMessageText(input, context),
     ),
+  editMessageActions: (input, context) =>
+    adapt("editMessageActions", () => handlers.editMessageActions(input, context)),
   deleteMessage: (input, context) =>
     adapt("deleteMessage", () =>
       handlers.deleteMessage(input, context),
     ),
+  deleteMessages: (input, context) =>
+    adapt("deleteMessages", () => handlers.deleteMessages(input, context)),
   sendReaction: (input, context) =>
     adapt("sendReaction", () =>
       handlers.sendReaction(input, context),
@@ -414,6 +457,7 @@ export const makeBotOperations = (
       handlers.deleteMyCommands(context),
     ),
   forwardMessage: (input, context) => adapt("forwardMessage", () => handlers.forwardMessage(input, context)),
+  forwardMessages: (input, context) => adapt("forwardMessages", () => handlers.forwardMessages(input, context)),
   pinMessage: (input, context) => adapt("pinMessage", () => handlers.pinMessage(input, context)),
   unpinMessage: (input, context) => adapt("unpinMessage", () => handlers.unpinMessage(input, context)),
   getChatParticipant: (input, context) => adapt("getChatParticipant", () => handlers.getChatParticipant(input, context)),
