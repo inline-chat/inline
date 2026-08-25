@@ -54,9 +54,6 @@ enum LogoutPerformer {
       TabsManager.shared.reset()
       TabsManager.shared.clearActiveSpaceId()
       ChatState.shared.reset()
-      navigation.reset()
-      onboardingNavigation.reset()
-      router.reset()
     }
 
     do {
@@ -69,6 +66,9 @@ enum LogoutPerformer {
     await Auth.shared.logOut()
 
     await MainActor.run {
+      navigation.reset()
+      onboardingNavigation.reset()
+      router.reset()
       mainRouter.setRoute(route: .onboarding)
     }
   }

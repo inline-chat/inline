@@ -96,4 +96,19 @@ struct RealtimeDirectRpcErrorPresentationTests {
 
     #expect(error.localizedDescription == "That item is no longer available.")
   }
+
+  @Test("release diagnostics retain the exact application RPC code without its message")
+  func privacySafeDiagnosticCategory() {
+    let error = RealtimeDirectRpcError.rpcError(
+      errorCode: .unauthenticated,
+      message: "account-specific-message-sentinel",
+      code: 401
+    )
+
+    #expect(
+      error.privacySafeErrorCategory ==
+        "realtime_rpc:application:\(InlineProtocol.RpcError.Code.unauthenticated.rawValue):401"
+    )
+    #expect(!error.privacySafeErrorCategory.contains("sentinel"))
+  }
 }

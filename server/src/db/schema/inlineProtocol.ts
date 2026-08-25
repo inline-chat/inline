@@ -188,7 +188,6 @@ export const inlineUploads = pgTable(
     uploadId: bytea("upload_id").notNull(),
     clientUploadId: bytea("client_upload_id").notNull(),
     permanentAuthKeyId: bytea("permanent_auth_key_id")
-      .notNull()
       .references(() => inlineProtocolAuthKeys.authKeyId, { onDelete: "cascade" }),
     userId: integer("user_id")
       .notNull()

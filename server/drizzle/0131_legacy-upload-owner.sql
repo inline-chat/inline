@@ -1,0 +1,1 @@
+ALTER TABLE "inline_uploads" ALTER COLUMN "permanent_auth_key_id" DROP NOT NULL;

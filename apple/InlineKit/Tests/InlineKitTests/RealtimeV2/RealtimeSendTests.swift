@@ -1034,6 +1034,76 @@ final class RealtimeSendTests {
     #expect(received)
   }
 
+  @Test("application UNAUTHENTICATED stays request-scoped; authenticated invalidation remains terminal")
+  func testApplicationUnauthenticatedDoesNotInvalidateAccount() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = ApplicationUnauthenticatedTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+    let invalidated = SendTestFlag()
+    let observer = NotificationCenter.default.addObserver(
+      forName: .realtimeV2AuthInvalidated,
+      object: nil,
+      queue: nil
+    ) { _ in
+      Task { await invalidated.set() }
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      await transport.didOpen()
+    }
+    #expect(connected)
+
+    do {
+      _ = try await realtime.callRpcDirect(
+        method: .createUpload,
+        input: .createUpload(.init()),
+        timeout: .seconds(1)
+      )
+      Issue.record("Expected the upload RPC to fail")
+    } catch let error as RealtimeDirectRpcError {
+      guard case let .rpcError(errorCode, _, code) = error else {
+        Issue.record("Unexpected direct RPC error: \(error)")
+        return
+      }
+      #expect(errorCode == .unauthenticated)
+      #expect(code == 401)
+    }
+
+    do {
+      _ = try await realtime.send(
+        SendTestTransaction(
+          id: UUID(),
+          method: .createUpload,
+          type: .query()
+        )
+      )
+      Issue.record("Expected the transaction RPC to fail")
+    } catch let error as TransactionError {
+      guard case let .rpcError(rpcError) = error else {
+        Issue.record("Unexpected transaction error: \(error)")
+        return
+      }
+      #expect(rpcError.errorCode == .unauthenticated)
+      #expect(rpcError.code == 401)
+    }
+
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(await invalidated.get() == false)
+
+    await transport.emitAuthenticatedInvalidation()
+    let receivedInvalidation = await waitForCondition(timeout: .seconds(1)) {
+      await invalidated.get()
+    }
+    #expect(receivedInvalidation)
+    withExtendedLifetime(realtime) {}
+  }
+
   @Test("protocol session registers RPC ownership before transport write")
   func testProtocolSessionRegistersRPCOwnershipBeforeTransportWrite() async throws {
     let auth = Auth.mocked(authenticated: true)
@@ -1832,6 +1902,57 @@ private actor SendTestFlag {
 
   func get() -> Bool {
     value
+  }
+}
+
+private actor ApplicationUnauthenticatedTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private let channel = AsyncChannel<TransportEvent>()
+  private var started = false
+  private var opened = false
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    opened = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+    case .connectionInit:
+      opened = true
+      var response = ServerProtocolMessage()
+      response.id = message.id
+      response.body = .connectionOpen(.init())
+      await channel.send(.message(response))
+    case let .rpcCall(call) where call.method == .createUpload:
+      var response = ServerProtocolMessage()
+      response.id = message.id
+      response.body = .rpcError(.with {
+        $0.reqMsgID = message.id
+        $0.errorCode = .unauthenticated
+        $0.message = "Unauthenticated"
+        $0.code = 401
+      })
+      await channel.send(.message(response))
+    default:
+      break
+    }
+  }
+
+  func didOpen() -> Bool { opened }
+
+  func emitAuthenticatedInvalidation() async {
+    await channel.send(.message(connectionErrorMessage(reason: .invalidAuth)))
   }
 }
 

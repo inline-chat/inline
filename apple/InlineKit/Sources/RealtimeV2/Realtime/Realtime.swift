@@ -5,7 +5,7 @@ import Foundation
 import InlineProtocol
 import Logger
 
-public enum RealtimeDirectRpcError: Error {
+public enum RealtimeDirectRpcError: Error, PrivacySafeErrorCategoryProviding {
   case notAuthorized
   case notConnected
   case timeout
@@ -13,6 +13,25 @@ public enum RealtimeDirectRpcError: Error {
   case capacityExceeded
   case rpcError(errorCode: InlineProtocol.RpcError.Code, message: String?, code: Int)
   case unknown(Error)
+
+  public var privacySafeErrorCategory: String {
+    switch self {
+    case .notAuthorized:
+      "realtime_rpc:not_authorized"
+    case .notConnected:
+      "realtime_rpc:not_connected"
+    case .timeout:
+      "realtime_rpc:timeout"
+    case .commitOutcomeUnknown:
+      "realtime_rpc:commit_outcome_unknown"
+    case .capacityExceeded:
+      "realtime_rpc:capacity_exceeded"
+    case let .rpcError(errorCode, _, code):
+      "realtime_rpc:application:\(errorCode.rawValue):\(code)"
+    case .unknown:
+      "realtime_rpc:unknown"
+    }
+  }
 }
 
 private final class TransactionSendCancellationState: @unchecked Sendable {
@@ -378,9 +397,6 @@ public actor RealtimeV2 {
 
         case let .rpcError(msgId, rpcError):
           self.log.trace("Received RPC error for message \(msgId)")
-          if rpcError.errorCode == .unauthenticated {
-            await self.handleAuthInvalidated()
-          }
           await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError))
 
         case let .rpcCommitOutcomeUnknown(msgId):
@@ -1266,9 +1282,6 @@ public actor RealtimeV2 {
         case .capacityExceeded:
           throw RealtimeDirectRpcError.capacityExceeded
         case let .rpcError(errorCode, message, code):
-          if errorCode == .unauthenticated {
-            await handleAuthInvalidated()
-          }
           throw RealtimeDirectRpcError.rpcError(errorCode: errorCode, message: message, code: code)
         case .stopped:
           throw RealtimeDirectRpcError.notConnected

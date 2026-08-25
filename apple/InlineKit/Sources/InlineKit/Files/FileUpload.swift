@@ -1308,7 +1308,7 @@ public actor FileUploader {
   }
 }
 
-public enum FileUploadError: Error, LocalizedError {
+public enum FileUploadError: Error, LocalizedError, PrivacySafeErrorCategoryProviding {
   case failedToUpload
   case failedToSave
   case invalidPhoto
@@ -1351,6 +1351,26 @@ public enum FileUploadError: Error, LocalizedError {
         "The upload was cancelled."
       case .uploadTimeout:
         "The upload timed out."
+    }
+  }
+
+  public var privacySafeErrorCategory: String {
+    switch self {
+    case .failedToUpload: "file_upload:failed_to_upload"
+    case .failedToSave: "file_upload:failed_to_save"
+    case .invalidPhoto: "file_upload:invalid_photo"
+    case .invalidVideo: "file_upload:invalid_video"
+    case .invalidDocument: "file_upload:invalid_document"
+    case .invalidVoice: "file_upload:invalid_voice"
+    case .invalidPhotoId: "file_upload:invalid_photo_id"
+    case .invalidDocumentId: "file_upload:invalid_document_id"
+    case .invalidVideoId: "file_upload:invalid_video_id"
+    case .invalidVoiceId: "file_upload:invalid_voice_id"
+    case .invalidVideoMetadata: "file_upload:invalid_video_metadata"
+    case .uploadAlreadyInProgress: "file_upload:already_in_progress"
+    case .uploadAlreadyCompleted: "file_upload:already_completed"
+    case .uploadCancelled: "file_upload:cancelled"
+    case .uploadTimeout: "file_upload:timeout"
     }
   }
 }

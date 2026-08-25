@@ -11,7 +11,7 @@ import {
   inlineUploadFileUniqueId,
   inlineUploadPublicationPath,
 } from "@in/server/db/models/inlineUploads"
-import { inlineUploads } from "@in/server/db/schema"
+import { inlineUploads, sessions } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import type { HandlerContext } from "@in/server/realtime/types"
@@ -31,14 +31,14 @@ const authorizationKeys = () => new PermanentAuthorizationKeyRepository(
 const context = (
   userId: number,
   sessionId: number,
-  permanentAuthKeyId: Uint8Array,
+  permanentAuthKeyId?: Uint8Array,
 ): HandlerContext => ({
   userId,
   sessionId,
   connectionId: "native-upload-test",
   sendRaw: () => {},
   sendRpcReply: () => {},
-  inlineProtocol: { permanentAuthKeyId },
+  inlineProtocol: permanentAuthKeyId ? { permanentAuthKeyId } : undefined,
 })
 
 class MemoryPartStore implements UploadPartStore {
@@ -172,6 +172,72 @@ describe("native upload operations", () => {
     expect(store.objects.size).toBe(0)
     expect(await operations.finish({ uploadId: create.uploadId }, requestContext))
       .toEqual({ state: { oneofKind: "complete", complete: expectedComplete } })
+  })
+
+  test("supports the approved Realtime V2 upload fallback without a V3 authorization key", async () => {
+    const user = await testUtils.createUser("native-upload-legacy-owner@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(
+      new InlineUploadRepository(),
+      store,
+      finalizer,
+    )
+    const requestContext = context(user.id, account.session.id)
+    const body = new TextEncoder().encode("legacy bearer upload body")
+    const create = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(13),
+      fileName: "legacy-proof.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.length),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+
+    const [row] = await db.select({
+      permanentAuthKeyId: inlineUploads.permanentAuthKeyId,
+    }).from(inlineUploads).where(eq(inlineUploads.uploadId, Buffer.from(create.uploadId))).limit(1)
+    expect(row?.permanentAuthKeyId).toBeNull()
+
+    expect(await operations.savePart({
+      uploadId: create.uploadId,
+      partIndex: 0,
+      data: body,
+    }, requestContext)).toEqual({ alreadyPresent: false })
+    expect(await operations.finish({ uploadId: create.uploadId }, requestContext))
+      .toEqual({
+        state: {
+          oneofKind: "complete",
+          complete: complete(inlineUploadFileUniqueId({
+            uploadId: create.uploadId,
+            kind: "document",
+          })),
+        },
+      })
+  })
+
+  test("reports a revoked upload owner as an operation failure, not account authentication loss", async () => {
+    const user = await testUtils.createUser("native-upload-revoked-owner@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    await db.update(sessions).set({ revoked: new Date() }).where(eq(sessions.id, account.session.id))
+    const operations = new NativeUploadOperations(
+      new InlineUploadRepository(),
+      new MemoryPartStore(),
+      finalizer,
+    )
+
+    await expect(operations.create({
+      clientUploadId: new Uint8Array(16).fill(14),
+      fileName: "revoked.bin",
+      mimeType: "application/octet-stream",
+      byteCount: 1n,
+      sha256: new Uint8Array(32).fill(14),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, context(user.id, account.session.id))).rejects.toMatchObject({
+      code: RpcError_Code.INTERNAL_ERROR,
+    })
   })
 
   test("removes a part object when cancellation wins before manifest acceptance", async () => {

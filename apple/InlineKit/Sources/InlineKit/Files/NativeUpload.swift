@@ -137,7 +137,7 @@ extension RealtimeDirectSession: NativeUploadRPCTransport {
   }
 }
 
-public enum NativeMediaUploadError: Error, LocalizedError, Sendable {
+public enum NativeMediaUploadError: Error, LocalizedError, Sendable, PrivacySafeErrorCategoryProviding {
   case emptySource
   case invalidGeometry
   case unauthenticated
@@ -158,6 +158,20 @@ public enum NativeMediaUploadError: Error, LocalizedError, Sendable {
     case .sourceChanged: "The upload source changed while it was being read."
     case .canceled: "The upload was canceled."
     case .expired: "The upload expired before it completed."
+    }
+  }
+
+  public var privacySafeErrorCategory: String {
+    switch self {
+    case .emptySource: "native_upload:empty_source"
+    case .invalidGeometry: "native_upload:invalid_geometry"
+    case .unauthenticated: "native_upload:unauthenticated"
+    case .unexpectedResponse: "native_upload:unexpected_response"
+    case let .rejected(code, retryable):
+      "native_upload:rejected:\(code.rawValue):\(retryable ? "retryable" : "terminal")"
+    case .sourceChanged: "native_upload:source_changed"
+    case .canceled: "native_upload:canceled"
+    case .expired: "native_upload:expired"
     }
   }
 }

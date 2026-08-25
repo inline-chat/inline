@@ -3,6 +3,13 @@ import OSLog
 import Sentry
 import Darwin
 
+/// Supplies a bounded, non-sensitive error discriminator for release telemetry.
+/// Values must describe only static program state (for example, an enum case or
+/// protocol code) and must never contain request, account, or user data.
+public protocol PrivacySafeErrorCategoryProviding: Error {
+  var privacySafeErrorCategory: String { get }
+}
+
 public enum LogLevel: String, Codable, Sendable {
   case error = "❌ ERROR"
   case warning = "⚠️ WARNING"
@@ -464,7 +471,24 @@ public final class Log: @unchecked Sendable {
     if let urlError = error as? URLError {
       return "url:\(urlError.errorCode)"
     }
+    if let categorized = error as? any PrivacySafeErrorCategoryProviding,
+       let category = validatedErrorCategory(categorized.privacySafeErrorCategory) {
+      return category
+    }
     return "other"
+  }
+
+  private static func validatedErrorCategory(_ value: String) -> String? {
+    guard !value.isEmpty, value.utf8.count <= 96 else { return nil }
+    let isSafe = value.utf8.allSatisfy { byte in
+      switch byte {
+      case 45, 46, 48 ... 57, 58, 65 ... 90, 95, 97 ... 122:
+        true
+      default:
+        false
+      }
+    }
+    return isSafe ? value : nil
   }
 }
 

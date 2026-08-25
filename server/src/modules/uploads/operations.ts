@@ -69,6 +69,11 @@ const badRequest = (): never => {
   throw RealtimeRpcError.BadRequest()
 }
 
+const ownerUnavailable = (phase: "resolve" | "admission", carrier: "v2" | "v3"): never => {
+  log.warn("Native upload owner validation failed", { phase, carrier })
+  throw RealtimeRpcError.InternalError()
+}
+
 const requireValue = <T>(value: T | undefined): T => value ?? badRequest()
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
@@ -167,7 +172,9 @@ export class NativeUploadOperations {
     } catch (error) {
       if (error instanceof InlineUploadMetadataConflictError) badRequest()
       if (error instanceof InlineUploadAdmissionCapacityError) throw RealtimeRpcError.RateLimit()
-      if (error instanceof InlineUploadAdmissionOwnerInvalidError) throw RealtimeRpcError.Unauthenticated()
+      if (error instanceof InlineUploadAdmissionOwnerInvalidError) {
+        ownerUnavailable("admission", context.inlineProtocol ? "v3" : "v2")
+      }
       throw error
     }
     return {
@@ -465,8 +472,7 @@ export class NativeUploadOperations {
       accountSessionId: context.sessionId,
       permanentAuthKeyId: context.inlineProtocol?.permanentAuthKeyId,
     })
-    if (!owner) throw RealtimeRpcError.Unauthenticated()
-    return owner
+    return owner ?? ownerUnavailable("resolve", context.inlineProtocol ? "v3" : "v2")
   }
 
   async #removeParts(objectKeys: string[]): Promise<void> {

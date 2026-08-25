@@ -39,7 +39,7 @@ export type InlineUploadKind = "photo" | "video" | "document" | "voice"
 export type InlineUploadOwner = {
   userId: number
   accountSessionId: number
-  permanentAuthKeyId: Uint8Array
+  permanentAuthKeyId?: Uint8Array
 }
 
 export type InlineUploadMetadata = {
@@ -166,6 +166,10 @@ const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
 const sameOptionalBytes = (left: Uint8Array | null, right?: Uint8Array): boolean =>
   left === null ? right === undefined : right !== undefined && sameBytes(left, right)
 
+const ownerKeyMatches = (owner: InlineUploadOwner) => owner.permanentAuthKeyId
+  ? eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId))
+  : isNull(inlineUploads.permanentAuthKeyId)
+
 const sameMetadata = (row: DbInlineUpload, metadata: InlineUploadMetadata): boolean =>
   row.fileName === metadata.fileName &&
   row.mimeType === metadata.mimeType &&
@@ -234,7 +238,7 @@ export class InlineUploadRepository {
     const row = (await db.select({ id: inlineUploads.id }).from(inlineUploads).where(and(
       eq(inlineUploads.userId, owner.userId),
       eq(inlineUploads.accountSessionId, owner.accountSessionId),
-      eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId)),
+      ownerKeyMatches(owner),
       eq(inlineUploads.clientUploadId, Buffer.from(clientUploadId)),
     )).limit(1))[0]
     return row !== undefined
@@ -273,6 +277,18 @@ export class InlineUploadRepository {
     accountSessionId: number
     permanentAuthKeyId?: Uint8Array
   }): Promise<InlineUploadOwner | undefined> {
+    if (!input.permanentAuthKeyId) {
+      const activeSession = (await db.select({ id: sessions.id }).from(sessions).where(and(
+        eq(sessions.id, input.accountSessionId),
+        eq(sessions.userId, input.userId),
+        isNull(sessions.revoked),
+      )).limit(1))[0]
+      return activeSession ? {
+        userId: input.userId,
+        accountSessionId: input.accountSessionId,
+      } : undefined
+    }
+
     const now = new Date()
     const rows = await db.select({
       permanentAuthKeyId: inlineProtocolAuthKeys.authKeyId,
@@ -287,9 +303,7 @@ export class InlineUploadRepository {
         eq(inlineProtocolAuthKeys.accountSessionId, input.accountSessionId),
         isNull(inlineProtocolAuthKeys.revokedAt),
         or(isNull(inlineProtocolAuthKeys.expiresAt), gt(inlineProtocolAuthKeys.expiresAt, now)),
-        input.permanentAuthKeyId
-          ? eq(inlineProtocolAuthKeys.authKeyId, Buffer.from(input.permanentAuthKeyId))
-          : undefined,
+        eq(inlineProtocolAuthKeys.authKeyId, Buffer.from(input.permanentAuthKeyId)),
       ))
       .orderBy(desc(inlineProtocolAuthKeys.createdAt))
       .limit(1)
@@ -326,7 +340,7 @@ export class InlineUploadRepository {
       )).limit(1))[0]
       if (existing) {
         if (existing.userId !== owner.userId ||
-            !sameBytes(existing.permanentAuthKeyId, owner.permanentAuthKeyId) ||
+            !sameOptionalBytes(existing.permanentAuthKeyId, owner.permanentAuthKeyId) ||
             !sameMetadata(existing, metadata)) {
           throw new InlineUploadMetadataConflictError()
         }
@@ -361,7 +375,9 @@ export class InlineUploadRepository {
       const [inserted] = await tx.insert(inlineUploads).values({
         uploadId,
         clientUploadId: Buffer.from(metadata.clientUploadId),
-        permanentAuthKeyId: Buffer.from(owner.permanentAuthKeyId),
+        permanentAuthKeyId: owner.permanentAuthKeyId
+          ? Buffer.from(owner.permanentAuthKeyId)
+          : null,
         userId: owner.userId,
         accountSessionId: owner.accountSessionId,
         fileName: metadata.fileName,
@@ -389,7 +405,7 @@ export class InlineUploadRepository {
         eq(inlineUploads.clientUploadId, Buffer.from(metadata.clientUploadId)),
       )).limit(1))[0]
       if (!row || row.userId !== owner.userId ||
-          !sameBytes(row.permanentAuthKeyId, owner.permanentAuthKeyId) ||
+          !sameOptionalBytes(row.permanentAuthKeyId, owner.permanentAuthKeyId) ||
           !sameMetadata(row, metadata)) {
         throw new InlineUploadMetadataConflictError()
       }
@@ -410,7 +426,7 @@ export class InlineUploadRepository {
       eq(inlineUploads.uploadId, Buffer.from(uploadId)),
       eq(inlineUploads.userId, owner.userId),
       eq(inlineUploads.accountSessionId, owner.accountSessionId),
-      eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId)),
+      ownerKeyMatches(owner),
     )).limit(1))[0]
     return row ? { ...row, acceptedParts: await acceptedPartsFor(row.id) } : undefined
   }
@@ -432,7 +448,7 @@ export class InlineUploadRepository {
       eq(inlineUploads.uploadId, Buffer.from(uploadId)),
       eq(inlineUploads.userId, owner.userId),
       eq(inlineUploads.accountSessionId, owner.accountSessionId),
-      eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId)),
+      ownerKeyMatches(owner),
     )).limit(1))[0]
   }
 
@@ -451,7 +467,7 @@ export class InlineUploadRepository {
       eq(inlineUploads.status, "complete"),
       eq(inlineUploads.userId, owner.userId),
       eq(inlineUploads.accountSessionId, owner.accountSessionId),
-      eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId)),
+      ownerKeyMatches(owner),
     )).limit(1))[0]
     return row?.mediaId ?? undefined
   }
@@ -518,7 +534,7 @@ export class InlineUploadRepository {
         eq(inlineUploads.uploadId, Buffer.from(uploadId)),
         eq(inlineUploads.userId, owner.userId),
         eq(inlineUploads.accountSessionId, owner.accountSessionId),
-        eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId)),
+        ownerKeyMatches(owner),
       )).for("update").limit(1)
       if (!row || row.status === "canceled" || row.expiresAt <= now || row.hardExpiresAt <= now) {
         return { kind: "rejected" } as const
@@ -771,7 +787,7 @@ export class InlineUploadRepository {
         eq(inlineUploads.uploadId, Buffer.from(uploadId)),
         eq(inlineUploads.userId, owner.userId),
         eq(inlineUploads.accountSessionId, owner.accountSessionId),
-        eq(inlineUploads.permanentAuthKeyId, Buffer.from(owner.permanentAuthKeyId)),
+        ownerKeyMatches(owner),
       )).for("update").limit(1)
       if (!row) return undefined
       if (row.status === "complete" || row.status === "failed" || row.status === "canceled") {

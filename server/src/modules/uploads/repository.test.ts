@@ -110,6 +110,42 @@ const publicationFor = (upload: InlineUploadRecord): InlineUploadPublication => 
 describe("native upload repository", () => {
   setupTestLifecycle()
 
+  test("isolates legacy session ownership from V3 permanent-key ownership", async () => {
+    const user = await testUtils.createUser("native-upload-carrier-owners@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const permanentKey = new Uint8Array(256).fill(0x45)
+    const permanentKeyId = authKeyId(permanentKey)
+    const keys = authorizationKeys()
+    await keys.create({ key: permanentKey, keyId: permanentKeyId, serverSalt: 5n, temporary: false })
+    await keys.authorize(permanentKeyId, user.id, account.session.id)
+
+    const legacyOwner = {
+      userId: user.id,
+      accountSessionId: account.session.id,
+    }
+    const v3Owner = {
+      ...legacyOwner,
+      permanentAuthKeyId: permanentKeyId,
+    }
+    const repository = new InlineUploadRepository()
+    const metadata = (clientByte: number) => ({
+      clientUploadId: new Uint8Array(16).fill(clientByte),
+      fileName: `owner-${clientByte}.bin`,
+      mimeType: "application/octet-stream",
+      byteCount: 1n,
+      sha256: createHash("sha256").update(new Uint8Array([clientByte])).digest(),
+      kind: "document" as const,
+    })
+
+    const legacyUpload = await repository.create(legacyOwner, metadata(21))
+    const v3Upload = await repository.create(v3Owner, metadata(22))
+
+    expect(await repository.get(legacyUpload.upload.uploadId, legacyOwner)).toBeDefined()
+    expect(await repository.get(legacyUpload.upload.uploadId, v3Owner)).toBeUndefined()
+    expect(await repository.get(v3Upload.upload.uploadId, v3Owner)).toBeDefined()
+    expect(await repository.get(v3Upload.upload.uploadId, legacyOwner)).toBeUndefined()
+  })
+
   test("reconciles parts and deterministically publishes through the current fence", async () => {
     const user = await testUtils.createUser("native-upload@example.com")
     const account = await testUtils.createSessionForUser(user.id)

@@ -10,6 +10,10 @@ struct LoggerPrivacyProjectionTests {
     }
   }
 
+  private struct CategorizedError: PrivacySafeErrorCategoryProviding {
+    let privacySafeErrorCategory: String
+  }
+
   @Test("release projection contains only fixed metadata")
   func releaseProjectionRedactsRuntimeContent() throws {
     let entry = Log.makeEntry(
@@ -82,6 +86,40 @@ struct LoggerPrivacyProjectionTests {
     )
 
     #expect(entry.error == "url:\(URLError(.timedOut).errorCode)")
+  }
+
+  @Test("release projection retains only explicit bounded error categories")
+  func releaseProjectionRetainsExplicitErrorCategories() {
+    let source = LogSourceLocation(file: "Upload.swift", function: "upload()", line: 17)
+    let categorized = Log.makeEntry(
+      level: .error,
+      scope: "NativeUpload",
+      message: "runtime-message-sentinel",
+      error: CategorizedError(privacySafeErrorCategory: "realtime_rpc:application:2:401"),
+      source: source,
+      includeSensitiveDetails: false
+    )
+    #expect(categorized.error == "realtime_rpc:application:2:401")
+
+    let unsafe = Log.makeEntry(
+      level: .error,
+      scope: "NativeUpload",
+      message: "runtime-message-sentinel",
+      error: CategorizedError(privacySafeErrorCategory: "person@example.com"),
+      source: source,
+      includeSensitiveDetails: false
+    )
+    #expect(unsafe.error == "other")
+
+    let unbounded = Log.makeEntry(
+      level: .error,
+      scope: "NativeUpload",
+      message: "runtime-message-sentinel",
+      error: CategorizedError(privacySafeErrorCategory: String(repeating: "a", count: 97)),
+      source: source,
+      includeSensitiveDetails: false
+    )
+    #expect(unbounded.error == "other")
   }
 
   @Test("debug projection retains local diagnostics")
