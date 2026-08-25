@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 246,
+  "count": 244,
   "methodCounts": {
     "ALL": 3,
-    "GET": 101,
+    "GET": 97,
     "OPTIONS": 18,
-    "POST": 123,
+    "POST": 125,
     "WS": 1
   },
-  "sha256": "ec4b9222176ed5a0e9e02e4130942423e33ab520e6f9a906ff32b44b08820486",
+  "sha256": "a68789f7f4dfa0c164ec577d8a7b0aaa1b6598af962500bc8d5593b856af016a",
   "routes": [
     {
       "method": "ALL",
@@ -92,10 +92,6 @@
     },
     {
       "method": "GET",
-      "path": "/bot/getAgent"
-    },
-    {
-      "method": "GET",
       "path": "/bot/getChat"
     },
     {
@@ -120,10 +116,6 @@
     },
     {
       "method": "GET",
-      "path": "/bot/getMyAgents"
-    },
-    {
-      "method": "GET",
       "path": "/bot/getMyCommands"
     },
     {
@@ -133,10 +125,6 @@
     {
       "method": "GET",
       "path": "/bot/getWebhookInfo"
-    },
-    {
-      "method": "GET",
-      "path": "/bot:token/getAgent"
     },
     {
       "method": "GET",
@@ -161,10 +149,6 @@
     {
       "method": "GET",
       "path": "/bot:token/getMe"
-    },
-    {
-      "method": "GET",
-      "path": "/bot:token/getMyAgents"
     },
     {
       "method": "GET",
@@ -548,11 +532,11 @@
     },
     {
       "method": "POST",
-      "path": "/bot/answerMessageAction"
+      "path": "/bot/addThreadParticipant"
     },
     {
       "method": "POST",
-      "path": "/bot/createAgent"
+      "path": "/bot/answerMessageAction"
     },
     {
       "method": "POST",
@@ -596,6 +580,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/removeThreadParticipant"
+    },
+    {
+      "method": "POST",
       "path": "/bot/searchMessages"
     },
     {
@@ -632,11 +620,11 @@
     },
     {
       "method": "POST",
-      "path": "/bot:token/answerMessageAction"
+      "path": "/bot:token/addThreadParticipant"
     },
     {
       "method": "POST",
-      "path": "/bot:token/createAgent"
+      "path": "/bot:token/answerMessageAction"
     },
     {
       "method": "POST",
@@ -677,6 +665,10 @@
     {
       "method": "POST",
       "path": "/bot:token/pinMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/removeThreadParticipant"
     },
     {
       "method": "POST",
