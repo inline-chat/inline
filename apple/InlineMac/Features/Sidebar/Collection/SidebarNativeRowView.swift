@@ -1785,7 +1785,6 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     folderIconView.configure {
       SidebarFolderIcon(
         emoji: configuration.presentation.emoji,
-        isExpanded: displayedExpanded,
         size: configuration.size.iconSize
       )
     }

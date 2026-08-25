@@ -85,7 +85,7 @@ struct SidebarFolderItemView: View, Equatable {
       .accessibilityLabel(isExpanded ? "Collapse folder" : "Expand folder")
 
       Button(action: onToggle) {
-        SidebarFolderIcon(emoji: emoji, isExpanded: isExpanded, size: size.iconSize)
+        SidebarFolderIcon(emoji: emoji, size: size.iconSize)
       }
       .buttonStyle(.plain)
       .padding(.leading, Theme.sidebarItemInnerSpacing)
@@ -241,7 +241,6 @@ struct SidebarFolderEmptyRow: View {
 
 struct SidebarFolderIcon: View {
   let emoji: String?
-  let isExpanded: Bool
   let size: CGFloat
 
   var body: some View {
@@ -250,7 +249,7 @@ struct SidebarFolderIcon: View {
         Text(emoji)
           .font(.system(size: min(size, 18)))
       } else {
-        Image(systemName: isExpanded ? "folder.fill" : "folder")
+        Image(systemName: "folder.fill")
           .font(.system(size: 14, weight: .medium))
           .foregroundStyle(.secondary)
       }
