@@ -287,7 +287,8 @@ final class SidebarCollectionBodyController: NSViewController {
     func supports(_ policy: SidebarCollectionReorderPolicy) -> Bool {
       switch self {
       case .chat: true
-      case .folder: policy == .manual
+      case .folder:
+        policy.allowsFolderMove(changesSection: true, reordersStableNormalLane: false)
       }
     }
   }
@@ -3776,13 +3777,87 @@ final class SidebarCollectionBodyController: NSViewController {
     from proposals: [Proposal],
     session: ReorderSession
   ) -> [Proposal] {
+    if case .folder = session.source {
+      return folderPinningOnlyProposals(from: proposals, session: session)
+    }
     guard let sourceLane = session.source.orderLane else { return [] }
     let targetLane: SidebarOrderLane = sourceLane == .pinned ? .normal : .pinned
     let sourceProposal = proposals.first { proposal in
       proposal.targetLane == sourceLane
         && session.tree.snapshot.isNode(session.source.nodeID, at: proposal.slot)
     }
+    let targetProposal = activityOwnedLaneTransferProposal(
+      to: targetLane,
+      from: proposals,
+      session: session
+    )
 
+    return [sourceProposal, targetProposal].compactMap { $0 }
+  }
+
+  private func folderPinningOnlyProposals(
+    from proposals: [Proposal],
+    session: ReorderSession
+  ) -> [Proposal] {
+    guard let sourceLane = session.source.orderLane else { return [] }
+    let normalRoots = session.tree.snapshot.sections
+      .first(where: { $0.id == .normal })?
+      .rootIDs
+      .filter { $0 != session.source.nodeID } ?? []
+    let firstActivityRoot = normalRoots.first { nodeID in
+      if case .chat = nodeID { return true }
+      return false
+    }
+    var normalFolderProposals = proposals.filter { proposal in
+      guard proposal.targetLane == .normal,
+            proposal.slot.parentID == nil
+      else { return false }
+      switch proposal.slot.beforeSiblingID {
+      case .folder?:
+        return true
+      case let beforeSiblingID?:
+        return beforeSiblingID == firstActivityRoot
+      case nil:
+        return firstActivityRoot == nil
+      }
+    }
+    if normalFolderProposals.isEmpty,
+       let collapsedLaneProposal = proposals.first(where: { proposal in
+         // A collapsed Open section exposes one section-level guide. The
+         // folder projection will still place the transferred root before its
+         // activity-sorted chats when the section expands.
+         proposal.targetLane == .normal
+           && proposal.slot.parentID == nil
+           && proposal.slot.beforeSiblingID == nil
+       }) {
+      normalFolderProposals.append(collapsedLaneProposal)
+    }
+
+    var candidates = normalFolderProposals
+    if sourceLane == .pinned {
+      if let sourceProposal = proposals.first(where: { proposal in
+        proposal.targetLane == .pinned
+          && session.tree.snapshot.isNode(session.source.nodeID, at: proposal.slot)
+      }) {
+        candidates.append(sourceProposal)
+      }
+    } else if let pinnedProposal = activityOwnedLaneTransferProposal(
+      to: .pinned,
+      from: proposals,
+      session: session
+    ) {
+      candidates.append(pinnedProposal)
+    }
+
+    var seen = Set<ModelSlot>()
+    return candidates.filter { seen.insert($0.slot).inserted }
+  }
+
+  private func activityOwnedLaneTransferProposal(
+    to targetLane: SidebarOrderLane,
+    from proposals: [Proposal],
+    session: ReorderSession
+  ) -> Proposal? {
     let targetRoots = session.tree.snapshot.sections
       .first(where: { $0.id == targetLane })?
       .rootIDs
@@ -3794,7 +3869,7 @@ final class SidebarCollectionBodyController: NSViewController {
         tree: session.tree
       )
     }
-    let targetProposal = proposals.first { proposal in
+    return proposals.first { proposal in
       proposal.targetLane == targetLane
         && proposal.slot.parentID == nil
         && proposal.slot.beforeSiblingID == beforeSiblingID
@@ -3805,8 +3880,6 @@ final class SidebarCollectionBodyController: NSViewController {
         && proposal.slot.parentID == nil
         && proposal.slot.beforeSiblingID == nil
     }
-
-    return [sourceProposal, targetProposal].compactMap { $0 }
   }
 
   private func groupIsOrderedBefore(
@@ -4414,7 +4487,11 @@ final class SidebarCollectionBodyController: NSViewController {
 
     if case let .folder(folder) = session.source {
       guard proposal.slot.parentID == nil,
-            session.reorderPolicy == .manual
+            session.reorderPolicy.allowsFolderMove(
+              changesSection: sourceLane != proposal.targetLane,
+              reordersStableNormalLane: sourceLane == .normal
+                && proposal.targetLane == .normal
+            )
       else { return nil }
       return .folder(SidebarCollectionFolderMove(
         folder: folder.folder,

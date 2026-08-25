@@ -147,6 +147,7 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
   /// SwiftUI fallback rows still need a conservative edge exclusion because
   /// their hosted controls do not expose native semantic hit regions.
   private static let controlStripWidth: CGFloat = 32
+  private static let folderDisclosureStripWidth: CGFloat = 26
 
   private lazy var panRecognizer: NSPanGestureRecognizer = {
     let recognizer = NSPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -346,6 +347,9 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     if usesNativeContent, let nativeView {
       let nativePoint = nativeView.convert(point, from: view)
       return nativeView.blocksReorder(at: nativePoint) == false
+    }
+    if representedRow?.projectedFolder != nil {
+      return point.x >= Self.folderDisclosureStripWidth && view.bounds.contains(point)
     }
     let draggableBounds = view.bounds.insetBy(dx: Self.controlStripWidth, dy: 0)
     return draggableBounds.contains(point)
