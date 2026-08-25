@@ -102,7 +102,9 @@ export interface StartServerOptions {
 export const startServer = (
   options: StartServerOptions = {},
 ): Promise<CoreProductionServerHandle> => {
-  assertProviderAuthStartupConfiguration()
+  assertProviderAuthStartupConfiguration({
+    isProduction: NODE_ENV === "production",
+  })
   const clientIpMode =
     parseClientIpMode(
       process.env[
