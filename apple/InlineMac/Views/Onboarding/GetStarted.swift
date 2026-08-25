@@ -27,30 +27,22 @@ struct OnboardingGetStarted: View {
       InlineButton(size: .large, style: .secondary) {
         onboardingViewModel.navigate(to: .enterEmail)
       } label: {
-        HStack(spacing: 10) {
+        loginMethodLabel("Continue with Email") {
           Image(systemName: "envelope")
             .font(.system(size: 16))
             .foregroundColor(.secondary)
             .frame(width: 18, height: 18)
-
-          Text("Continue with Email")
-            .frame(width: 170, alignment: .leading)
         }
-        .frame(width: 220, alignment: .leading)
       }
       InlineButton(size: .large, style: .secondary) {
         onboardingViewModel.navigate(to: .enterPhone)
       } label: {
-        HStack(spacing: 10) {
+        loginMethodLabel("Continue with Phone") {
           Image(systemName: "checkmark.message")
             .font(.system(size: 16))
             .foregroundColor(.secondary)
             .frame(width: 18, height: 18)
-
-          Text("Continue with Phone")
-            .frame(width: 170, alignment: .leading)
         }
-        .frame(width: 220, alignment: .leading)
       }
 
       Spacer()
@@ -62,7 +54,7 @@ struct OnboardingGetStarted: View {
     InlineButton(size: .large, style: .secondary) {
       onboardingViewModel.navigate(to: .provider(provider))
     } label: {
-      HStack(spacing: 10) {
+      loginMethodLabel(provider == .google ? "Continue with Google" : "Continue with Apple") {
         if provider == .google {
           Image("google-g")
             .resizable()
@@ -73,17 +65,21 @@ struct OnboardingGetStarted: View {
             .font(.system(size: 18, weight: .medium))
             .frame(width: 18, height: 18)
         }
-        Group {
-          if provider == .google {
-            Text("Continue with Google")
-          } else {
-            Text("Continue with Apple")
-          }
-        }
-        .frame(width: 170, alignment: .leading)
       }
-      .frame(width: 220, alignment: .leading)
     }
+  }
+
+  private func loginMethodLabel<Icon: View>(
+    _ title: LocalizedStringKey,
+    @ViewBuilder icon: () -> Icon
+  ) -> some View {
+    ZStack(alignment: .leading) {
+      icon()
+
+      Text(title)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+    .frame(width: 220)
   }
 }
 
