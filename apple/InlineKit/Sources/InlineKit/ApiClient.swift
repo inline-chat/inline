@@ -82,6 +82,9 @@ public enum Path: String {
   case sendSmsCode
   case verifySmsCode
   case providerAuthRedeem = "auth/provider/redeem"
+  case nativeAppleAuthStart = "auth/provider/native/apple/start"
+  case nativeAppleAuthComplete = "auth/provider/native/apple/complete"
+  case nativeAppleAuthContinueInvite = "auth/provider/native/apple/continue-invite"
   case getNotionDatabases
   case saveNotionDatabaseId
   case getLinearTeams
@@ -547,6 +550,59 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await postRequest(
       .providerAuthRedeem,
       body: ["ticket": ticket, "code_verifier": codeVerifier],
+      includeToken: false
+    )
+  }
+
+  public func startNativeAppleAuth(codeChallenge: String) async throws -> NativeAppleAuthStartResult {
+    let sessionInfo = await SessionInfo.get()
+    let deviceId = try await DeviceIdentifier.shared.getIdentifier()
+    var body: [String: Any] = [
+      "callbackScheme": InlineDeepLink.configuredScheme,
+      "codeChallenge": codeChallenge,
+      "clientType": "ios",
+      "deviceId": deviceId,
+    ]
+    for (key, value) in [
+      "clientVersion": sessionInfo?.clientVersion,
+      "osVersion": sessionInfo?.osVersion,
+      "deviceName": sessionInfo?.deviceName,
+      "timezone": sessionInfo?.timezone,
+    ] {
+      if let value, !value.isEmpty { body[key] = value }
+    }
+    return try await postRequest(.nativeAppleAuthStart, body: body, includeToken: false)
+  }
+
+  public func completeNativeAppleAuth(
+    state: String,
+    authorizationCode: String,
+    identityToken: String,
+    firstName: String?,
+    lastName: String?
+  ) async throws -> NativeAppleAuthCompleteResult {
+    var body: [String: Any] = [
+      "state": state,
+      "authorizationCode": authorizationCode,
+      "identityToken": identityToken,
+    ]
+    if let firstName, !firstName.isEmpty { body["firstName"] = firstName }
+    if let lastName, !lastName.isEmpty { body["lastName"] = lastName }
+    return try await postRequest(.nativeAppleAuthComplete, body: body, includeToken: false)
+  }
+
+  public func continueNativeAppleAuth(
+    attemptId: String,
+    continuation: String,
+    inviteCode: String
+  ) async throws -> NativeAppleAuthInviteResult {
+    try await postRequest(
+      .nativeAppleAuthContinueInvite,
+      body: [
+        "attemptId": attemptId,
+        "continuation": continuation,
+        "inviteCode": inviteCode,
+      ],
       includeToken: false
     )
   }
@@ -1731,6 +1787,27 @@ public struct ProviderAuthRedeemResult: Codable, Sendable {
   public let userId: Int64
   public let token: String
   public let user: ApiUser
+}
+
+public struct NativeAppleAuthStartResult: Codable, Sendable {
+  public let state: String
+  public let nonce: String
+}
+
+public enum NativeAppleAuthCompleteKind: String, Codable, Sendable {
+  case complete
+  case inviteRequired
+}
+
+public struct NativeAppleAuthCompleteResult: Codable, Sendable {
+  public let kind: NativeAppleAuthCompleteKind
+  public let ticket: String?
+  public let attemptId: String?
+  public let continuation: String?
+}
+
+public struct NativeAppleAuthInviteResult: Codable, Sendable {
+  public let ticket: String
 }
 
 public struct SendCode: Codable, Sendable {

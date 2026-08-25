@@ -1,4 +1,5 @@
 import AppKit
+import AuthenticationServices
 import InlineKit
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct OnboardingProviderSignIn: View {
   @State private var attemptID = UUID()
   @State private var openingBrowser = false
   @State private var signInURL: URL?
+  @StateObject private var webAuthentication = MacProviderWebAuthentication()
 
   var body: some View {
     VStack(spacing: 16) {
@@ -62,6 +64,7 @@ struct OnboardingProviderSignIn: View {
       await start()
     }
     .onDisappear {
+      webAuthentication.cancel()
       coordinator.cancelPendingAttempt()
     }
   }
@@ -70,20 +73,22 @@ struct OnboardingProviderSignIn: View {
     openingBrowser || coordinator.isRedeeming || signInURL == nil
   }
 
-  private var statusDescription: String {
+  private var statusDescription: LocalizedStringResource {
     if coordinator.isRedeeming { return "Finishing sign-in…" }
-    if openingBrowser || signInURL == nil { return "Opening \(providerName) Sign-In…" }
-    return "Complete \(providerName) Sign-In in your browser."
+    if openingBrowser || signInURL == nil {
+      return provider == .google ? "Opening Google Sign-In…" : "Opening Apple Sign-In…"
+    }
+    return provider == .google
+      ? "Complete Google Sign-In in your browser."
+      : "Complete Apple Sign-In in your browser."
   }
 
-  private var buttonTitle: String {
+  private var buttonTitle: LocalizedStringResource {
     if coordinator.isRedeeming { return "Finishing sign-in" }
-    if openingBrowser || signInURL == nil { return "Opening \(providerName) Sign-In" }
-    return "Open \(providerName) Sign-In"
-  }
-
-  private var providerName: String {
-    provider == .google ? "Google" : "Apple"
+    if openingBrowser || signInURL == nil {
+      return provider == .google ? "Opening Google Sign-In" : "Opening Apple Sign-In"
+    }
+    return provider == .google ? "Open Google Sign-In" : "Open Apple Sign-In"
   }
 
   private func start() async {
@@ -93,10 +98,7 @@ struct OnboardingProviderSignIn: View {
     do {
       let url = try await coordinator.startURL(for: provider)
       signInURL = url
-      guard NSWorkspace.shared.open(url) else {
-        coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: url)
-        return
-      }
+      open(url)
     } catch {
       // startURL records failures only when this is still the active attempt.
     }
@@ -106,9 +108,83 @@ struct OnboardingProviderSignIn: View {
     guard let signInURL, !openingBrowser, !coordinator.isRedeeming else { return }
     openingBrowser = true
     defer { openingBrowser = false }
-    guard NSWorkspace.shared.open(signInURL) else {
-      coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: signInURL)
+    open(signInURL)
+  }
+
+  private func open(_ url: URL) {
+    if provider == .google {
+      guard NSWorkspace.shared.open(url) else {
+        coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: url)
+        return
+      }
       return
     }
+
+    let started = webAuthentication.start(
+      url: url,
+      callbackScheme: InlineDeepLink.configuredScheme,
+      onCallback: { callback in
+        Task { await coordinator.handleCallback(callback) }
+      },
+      onUnableToPresent: { _ in
+        guard NSWorkspace.shared.open(url) else {
+          coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: url)
+          return
+        }
+      }
+    )
+    if !started, !NSWorkspace.shared.open(url) {
+      coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: url)
+    }
+  }
+}
+
+@MainActor
+private final class MacProviderWebAuthentication: NSObject, ObservableObject,
+  ASWebAuthenticationPresentationContextProviding
+{
+  private var session: ASWebAuthenticationSession?
+
+  func start(
+    url: URL,
+    callbackScheme: String,
+    onCallback: @escaping @MainActor (URL) -> Void,
+    onUnableToPresent: @escaping @MainActor (Error) -> Void
+  ) -> Bool {
+    session?.cancel()
+    let session = ASWebAuthenticationSession(
+      url: url,
+      callbackURLScheme: callbackScheme
+    ) { [weak self] callback, error in
+      Task { @MainActor in
+        self?.session = nil
+        if let callback {
+          onCallback(callback)
+          return
+        }
+        let nsError = error as NSError?
+        if nsError?.domain == ASWebAuthenticationSessionError.errorDomain,
+           nsError?.code == ASWebAuthenticationSessionError.canceledLogin.rawValue
+        {
+          return
+        }
+        if let error { onUnableToPresent(error) }
+      }
+    }
+    session.presentationContextProvider = self
+    session.prefersEphemeralWebBrowserSession = false
+    self.session = session
+    if session.start() { return true }
+    self.session = nil
+    return false
+  }
+
+  func cancel() {
+    session?.cancel()
+    session = nil
+  }
+
+  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    NSApp.keyWindow ?? NSApp.windows.first ?? NSWindow()
   }
 }
