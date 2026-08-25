@@ -29,6 +29,10 @@ import { Log } from "@in/server/utils/log"
 import { createAppCodeChallenge, isValidAppCodeVerifier } from "./appHandoff"
 import { applyAppleAuthorizationParameters } from "./authorizationUrl"
 import { finishSessionRevocation } from "@in/server/modules/sessions/revokeSession"
+import {
+  verifyNativeAppleAuthorization,
+  type NativeAppleConfig,
+} from "./nativeApple"
 
 const log = new Log("providerAuth")
 let cachedConfig: ProviderAuthConfig | undefined
@@ -61,7 +65,7 @@ export function supportedAppCallbackScheme(value: string | null): value is strin
   return value !== null && ["in", "inline", "inline-dev", "inline-debug", "inline-debug-2"].includes(value)
 }
 
-export async function beginProviderAuth(input: {
+type BeginProviderAttemptInput = {
   provider: AccountProvider
   purpose: ProviderAuthPurpose
   appCallbackScheme?: string
@@ -69,11 +73,14 @@ export async function beginProviderAuth(input: {
   oauthAuthRequestId?: string
   loginTransactionId?: string
   client: ProviderAuthClient
-}): Promise<URL> {
+}
+
+async function createProviderAttempt(input: BeginProviderAttemptInput): Promise<{
+  state: string
+  nonce: string
+  verifier?: string
+}> {
   const config = getProviderAuthConfig()
-  if (input.purpose === "app" && (!input.appCallbackScheme || !input.appCodeChallenge)) {
-    throw new Error("App provider sign-in requires a callback scheme and code challenge")
-  }
   if (input.provider === "google" && !config.google) throw new ProviderUnavailableError("google")
   if (input.provider === "apple" && !config.apple) throw new ProviderUnavailableError("apple")
   const state = randomSecret()
@@ -96,6 +103,16 @@ export async function beginProviderAuth(input: {
     client: input.client,
     expiresAt: new Date(Date.now() + config.attemptTtlMs),
   })
+
+  return { state, nonce, verifier }
+}
+
+export async function beginProviderAuth(input: BeginProviderAttemptInput): Promise<URL> {
+  const config = getProviderAuthConfig()
+  if (input.purpose === "app" && (!input.appCallbackScheme || !input.appCodeChallenge)) {
+    throw new Error("App provider sign-in requires a callback scheme and code challenge")
+  }
+  const { state, nonce, verifier } = await createProviderAttempt(input)
 
   const redirectUri = callbackUrl(input.provider)
   if (input.provider === "google") {
@@ -120,6 +137,22 @@ export async function beginProviderAuth(input: {
   return url
 }
 
+export async function beginNativeAppleAuth(input: {
+  appCallbackScheme: string
+  appCodeChallenge: string
+  client: ProviderAuthClient
+}): Promise<{ state: string; nonce: string }> {
+  if (input.client.clientType !== "ios") {
+    throw new Error("Native Apple sign-in requires an iOS client")
+  }
+  const { state, nonce } = await createProviderAttempt({
+    provider: "apple",
+    purpose: "app",
+    ...input,
+  })
+  return { state, nonce }
+}
+
 export async function completeProviderCallback(input: {
   provider: AccountProvider
   state: string
@@ -139,26 +172,50 @@ export async function completeProviderCallback(input: {
   try {
     const nonce = recoverNonce(attempt)
     const claims = await exchangeAndVerify(input, attempt, nonce)
-    const subjectHash = hashProviderSecret(`${claims.provider}\0${claims.subject}`)
-    const existingUserId = await ProviderAuthModel.findIdentity(claims.provider, subjectHash)
-    if (existingUserId) {
-      const result = await createProviderResult(attempt, existingUserId)
-      const updated = await storeCompletedAttempt(attempt, result)
-      return { kind: "login", attempt: updated, result }
-    }
+    return await completeProviderClaims(attempt, claims)
+  } catch (cause) {
+    throw new ProviderCallbackCompletionError(callbackFailureContext(attempt), { cause })
+  }
+}
 
-    if (!claims.authoritativeEmail || !claims.email) {
-      const continuation = randomSecret()
-      const updated = await ProviderAuthModel.transition(attempt.id, "pending_provider", {
-        status: "pending_email",
-        continuationHash: hashProviderSecret(continuation),
-        subjectHash,
-        pendingProfileEncrypted: encryptClaims({ ...claims, email: undefined }),
-      })
-      return { kind: "email", attempt: updated, continuation }
-    }
+export async function completeNativeAppleAuth(input: {
+  state: string
+  code: string
+  identityToken: string
+  firstName?: string
+  lastName?: string
+}, dependencies: {
+  config?: NativeAppleConfig
+  verifyAuthorization?: typeof verifyNativeAppleAuthorization
+} = {}): Promise<ProviderCallbackOutcome> {
+  const attempt = await ProviderAuthModel.claimActiveByStateHash(
+    hashProviderSecret(input.state),
+    "apple",
+    hashProviderSecret(randomSecret()),
+  )
+  if (
+    !attempt ||
+    attempt.provider !== "apple" ||
+    attempt.purpose !== "app" ||
+    attempt.client.clientType !== "ios" ||
+    attempt.status !== "pending_provider"
+  ) {
+    throw new Error("Native Apple sign-in attempt is invalid or expired")
+  }
 
-    return await resolveTrustedClaims(attempt, claims, subjectHash)
+  try {
+    const config = dependencies.config ?? getProviderAuthConfig().apple
+    if (!config) throw new ProviderUnavailableError("apple")
+    const nonce = recoverNonce(attempt)
+    const authorizationClaims = await (dependencies.verifyAuthorization ?? verifyNativeAppleAuthorization)({
+      code: input.code,
+      identityToken: input.identityToken,
+      nonce,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      config,
+    })
+    return await completeProviderClaims(attempt, authorizationClaims)
   } catch (cause) {
     throw new ProviderCallbackCompletionError(callbackFailureContext(attempt), { cause })
   }
@@ -338,6 +395,35 @@ async function exchangeAndVerify(
     firstName: appleUser?.name?.firstName,
     lastName: appleUser?.name?.lastName,
   })
+}
+
+async function completeProviderClaims(
+  attempt: DbProviderAuthAttempt,
+  claims: ProviderClaims,
+): Promise<ProviderCallbackOutcome> {
+  const subjectHash = hashProviderSecret(`${claims.provider}\0${claims.subject}`)
+  const existingUserId = await ProviderAuthModel.findIdentity(claims.provider, subjectHash)
+  if (existingUserId) {
+    if (claims.provider === "apple") {
+      await applyProviderProfile(existingUserId, claims)
+    }
+    const result = await createProviderResult(attempt, existingUserId)
+    const updated = await storeCompletedAttempt(attempt, result)
+    return { kind: "login", attempt: updated, result }
+  }
+
+  if (!claims.authoritativeEmail || !claims.email) {
+    const continuation = randomSecret()
+    const updated = await ProviderAuthModel.transition(attempt.id, "pending_provider", {
+      status: "pending_email",
+      continuationHash: hashProviderSecret(continuation),
+      subjectHash,
+      pendingProfileEncrypted: encryptClaims({ ...claims, email: undefined }),
+    })
+    return { kind: "email", attempt: updated, continuation }
+  }
+
+  return resolveTrustedClaims(attempt, claims, subjectHash)
 }
 
 async function resolveTrustedClaims(

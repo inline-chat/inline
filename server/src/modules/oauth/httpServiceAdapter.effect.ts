@@ -55,6 +55,9 @@ export interface OAuthHttpHandlers {
     body: unknown,
   ) => Promise<Response>
   readonly providerStart: (request: Request, clientIp?: string) => Promise<Response>
+  readonly providerNativeAppleStart: (body: unknown, clientIp?: string) => Promise<Response>
+  readonly providerNativeAppleComplete: (body: unknown, clientIp?: string) => Promise<Response>
+  readonly providerNativeAppleContinueInvite: (body: unknown, clientIp?: string) => Promise<Response>
   readonly providerCallbackGoogle: (request: Request, clientIp?: string) => Promise<Response>
   readonly providerCallbackApple: (request: Request, body: unknown, clientIp?: string) => Promise<Response>
   readonly providerContinueInvite: (body: unknown, clientIp?: string) => Promise<Response>
@@ -134,6 +137,12 @@ const execute = async (
       return handlers.introspect(request, body)
     case "providerCallbackApple":
       return handlers.providerCallbackApple(request, body, clientIp)
+    case "providerNativeAppleStart":
+      return handlers.providerNativeAppleStart(body, clientIp)
+    case "providerNativeAppleComplete":
+      return handlers.providerNativeAppleComplete(body, clientIp)
+    case "providerNativeAppleContinueInvite":
+      return handlers.providerNativeAppleContinueInvite(body, clientIp)
     case "providerContinueInvite":
       return handlers.providerContinueInvite(body, clientIp)
     case "providerSendEmailCode":

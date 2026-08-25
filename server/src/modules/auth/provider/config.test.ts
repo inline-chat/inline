@@ -42,6 +42,7 @@ describe("required provider authentication configuration", () => {
     google: { clientId: "google-client", clientSecret: "google-secret" },
     apple: {
       clientId: "apple-client",
+      nativeClientIds: ["chat.inline.InlineIOS", "chat.inline.InlineIOS.debug"],
       teamId: "apple-team",
       keyId: "apple-key",
       privateKey: new Uint8Array([1, 2, 3]),
@@ -62,6 +63,7 @@ describe("required provider authentication configuration", () => {
     const config = requireProviderAuthConfig(configured())
     expect(config.google.clientId).toBe("google-client")
     expect(config.apple.keyId).toBe("apple-key")
+    expect(config.apple.nativeClientIds).toContain("chat.inline.InlineIOS")
   })
 
   test("treats whitespace-only provider credentials as missing", () => {

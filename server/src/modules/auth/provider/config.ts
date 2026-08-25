@@ -5,7 +5,13 @@ export type ProviderAuthConfig = {
   baseUrl: string
   attemptTtlMs: number
   google: { clientId: string; clientSecret: string } | null
-  apple: { clientId: string; teamId: string; keyId: string; privateKey: Uint8Array } | null
+  apple: {
+    clientId: string
+    nativeClientIds: readonly string[]
+    teamId: string
+    keyId: string
+    privateKey: Uint8Array
+  } | null
 }
 
 export type RequiredProviderAuthConfig = Omit<ProviderAuthConfig, "google" | "apple"> & {
@@ -15,6 +21,11 @@ export type RequiredProviderAuthConfig = Omit<ProviderAuthConfig, "google" | "ap
 
 const requiredPair = (first: string | undefined, second: string | undefined) =>
   Boolean(first) === Boolean(second)
+
+export const INLINE_IOS_APPLE_CLIENT_IDS = [
+  "chat.inline.InlineIOS",
+  "chat.inline.InlineIOS.debug",
+] as const
 
 const providerCredential = (name: string): string | undefined => {
   const value = process.env[name]?.trim()
@@ -79,6 +90,7 @@ export function providerAuthConfig(): ProviderAuthConfig {
     apple: appleClientId && appleTeamId && appleKeyId && applePrivateKey
       ? {
           clientId: appleClientId,
+          nativeClientIds: INLINE_IOS_APPLE_CLIENT_IDS,
           teamId: appleTeamId,
           keyId: appleKeyId,
           privateKey: decodeApplePrivateKey(applePrivateKey),

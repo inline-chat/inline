@@ -11,6 +11,9 @@ import {
   handleAuthorizeVerifyEmailCode,
   handleAuthorizeVerifySmsCode,
   handleIntrospect,
+  handleNativeAppleComplete,
+  handleNativeAppleContinueInvite,
+  handleNativeAppleStart,
   handleRegister,
   handleRevoke,
   handleToken,
@@ -95,6 +98,12 @@ export const OAuthHttpServiceLive = Layer.effect(
         introspect: handleIntrospect,
         providerStart: (request, clientIp) =>
           handleProviderStart(request, clientIp, rateLimiter),
+        providerNativeAppleStart: (body, clientIp) =>
+          handleNativeAppleStart(body, clientIp, rateLimiter),
+        providerNativeAppleComplete: (body, clientIp) =>
+          handleNativeAppleComplete(body, clientIp, rateLimiter),
+        providerNativeAppleContinueInvite: (body, clientIp) =>
+          handleNativeAppleContinueInvite(body, clientIp, rateLimiter),
         providerCallbackGoogle: (request, clientIp) =>
           handleProviderCallback("google", request, undefined, clientIp, rateLimiter),
         providerCallbackApple: (request, body, clientIp) =>

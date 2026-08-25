@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose"
+import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose"
 import type { AccountProvider } from "@in/server/db/schema"
 
 const googleKeys = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"))
@@ -76,8 +76,9 @@ export async function verifyAppleIdToken(input: {
   nonce: string
   firstName?: string
   lastName?: string
+  keyResolver?: JWTVerifyGetKey
 }): Promise<ProviderClaims> {
-  const { payload } = await jwtVerify<ApplePayload>(input.idToken, appleKeys, {
+  const { payload } = await jwtVerify<ApplePayload>(input.idToken, input.keyResolver ?? appleKeys, {
     audience: input.clientId,
     issuer: "https://appleid.apple.com",
     algorithms: ["RS256"],
