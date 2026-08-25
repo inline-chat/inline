@@ -4,12 +4,6 @@ import Logger
 
 @MainActor
 final class AppUndoHistory {
-  enum TargetedUndoResult {
-    case completed
-    case unavailable
-    case failed
-  }
-
   struct Intent {
     fileprivate let sequence: UInt64
     fileprivate let epoch: Int
@@ -115,22 +109,6 @@ final class AppUndoHistory {
   func undo(using dependencies: AppDependencies) async {
     guard transitionID == nil, let entry = undoEntries.popLast() else { return }
     _ = await performUndo(entry, using: dependencies)
-  }
-
-  /// Undo a toast-owned action only while it is still the latest semantic
-  /// action. This prevents an old toast from undoing unrelated newer work.
-  func undo(
-    _ intent: Intent,
-    using dependencies: AppDependencies
-  ) async -> TargetedUndoResult {
-    guard transitionID == nil,
-          intent.epoch == epoch,
-          intent.sequence == nextSequence,
-          undoEntries.last?.sequence == intent.sequence,
-          let entry = undoEntries.popLast()
-    else { return .unavailable }
-
-    return await performUndo(entry, using: dependencies) ? .completed : .failed
   }
 
   private func performUndo(_ entry: Entry, using dependencies: AppDependencies) async -> Bool {

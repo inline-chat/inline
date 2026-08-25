@@ -2384,15 +2384,15 @@ struct SidebarView: View {
       itemsToClose,
       dependencies: dependencies,
       undoIntent: dependencies.appUndo.beginIntent(),
-      showsUndoToast: false
+      showsCompletionToast: false
     )
   }
 
   private func closeSidebarItems(
     _ itemsToClose: [SidebarViewModel.Item],
     dependencies: AppDependencies,
-    undoIntent: AppUndoHistory.Intent,
-    showsUndoToast: Bool
+    undoIntent: AppUndoHistory.Intent?,
+    showsCompletionToast: Bool
   ) {
     let itemIDsToClose = Set(itemsToClose.map(\.id))
     guard itemIDsToClose.isEmpty == false else { return }
@@ -2435,11 +2435,10 @@ struct SidebarView: View {
           Log.shared.error("Failed to close chat in sidebar", error: error)
         }
       }
-      let recordedUndo = dependencies.appUndo.recordClosedChats(
-        closedChats,
-        intent: undoIntent
-      )
-      if showsUndoToast, recordedUndo {
+      if let undoIntent {
+        dependencies.appUndo.recordClosedChats(closedChats, intent: undoIntent)
+      }
+      if showsCompletionToast {
         let closedCount = closedChats.count
         let failedCount = failedItemIDs.count
         let message = if failedCount == 0 {
@@ -2447,27 +2446,16 @@ struct SidebarView: View {
         } else {
           "Closed \(closedCount); \(failedCount) couldn’t be closed"
         }
-        ToastCenter.shared.showUndoCountdown(message) {
-          Task {
-            let result = await dependencies.appUndo.undo(
-              undoIntent,
-              using: dependencies
-            )
-            switch result {
-            case .completed:
-              pendingClosedSidebarItemIDs.subtract(itemIDsToClose)
-            case .unavailable:
-              ToastCenter.shared.showInfo("Undo is no longer available from this toast")
-            case .failed:
-              break
-            }
-          }
+        if failedCount == 0 {
+          ToastCenter.shared.showSuccess(message)
+        } else {
+          ToastCenter.shared.showError(message)
         }
       }
       guard failedItemIDs.isEmpty == false else { return }
       await MainActor.run {
         pendingClosedSidebarItemIDs.subtract(failedItemIDs)
-        if recordedUndo == false || showsUndoToast == false {
+        if showsCompletionToast == false {
           ToastCenter.shared.showError(
             failedItemIDs.count == 1
               ? "Couldn’t close that chat"
@@ -2512,8 +2500,8 @@ struct SidebarView: View {
     }
 
     // Preserve the existing temporary-row behavior. These rows are a local
-    // navigation projection rather than dialog-open state, so the semantic
-    // undo batch contains only persisted dialogs.
+    // navigation projection rather than dialog-open state, so Close All
+    // operates only on persisted dialogs.
     let persistedOpenItems = openItems.filter { isTemporaryItem($0) == false }
     if persistedOpenItems.count != openItems.count {
       viewModel.setTemporaryPeer(nil)
@@ -2522,8 +2510,8 @@ struct SidebarView: View {
     closeSidebarItems(
       persistedOpenItems,
       dependencies: dependencies,
-      undoIntent: dependencies.appUndo.beginIntent(),
-      showsUndoToast: true
+      undoIntent: nil,
+      showsCompletionToast: true
     )
   }
 
