@@ -102,6 +102,13 @@ private struct SidebarCollectionUnreadButtonHost: View {
         )
       }
     }
+    // NSHostingView follows this view's intrinsic size. Without a stable frame,
+    // removing the only child collapses the host while its transition is still
+    // rendering, shifting the departing button diagonally toward the constraint.
+    .frame(
+      width: SidebarUnreadBelowButton.hostLayoutSize.width,
+      height: SidebarUnreadBelowButton.hostLayoutSize.height
+    )
     .animation(
       accessibilityReduceMotion
         ? .easeOut(duration: 0.12)

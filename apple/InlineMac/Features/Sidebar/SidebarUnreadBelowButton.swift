@@ -29,6 +29,11 @@ struct SidebarUnreadBelowButton: View {
   }
 
   static let bottomBarTopOffset: CGFloat = -38
+  static let hostLayoutSize = CGSize(
+    width: maximumBadgeWidth,
+    height: badgeTopInset + buttonSize
+  )
+
   static func transition(for direction: Direction) -> AnyTransition {
     .modifier(
       active: SidebarUnreadBelowTransition(
@@ -53,6 +58,7 @@ struct SidebarUnreadBelowButton: View {
   private static let buttonSize: CGFloat = 28
   private static let badgeHeight: CGFloat = 15
   private static let badgeTopInset: CGFloat = 8
+  private static let maximumBadgeWidth: CGFloat = 32
 
   private var countText: String {
     count > 99 ? "99+" : "\(count)"
