@@ -2152,7 +2152,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     if configuration.unreadBadgeStyle == .dot {
       let unreadDotLeadingSpacing = SidebarChatRowLayout.unreadDotLeadingSpacing(
         contentLeadingSpacing: Theme.sidebarItemInnerSpacing + indentation,
-        isNestedThread: configuration.indentationLevel > 0 && !configuration.showsIcon
+        isNested: configuration.indentationLevel > 0
       )
       leadingUnreadBadge.frame = CGRect(
         x: painted.minX + unreadDotLeadingSpacing,
@@ -2170,29 +2170,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       availableTrailing = closeVisualLeading(in: painted)
         - SidebarNativeChatRowMetrics.closeTextSpacing
     }
-    var trailing = availableTrailing
-
     let showsPreview = configuration.size != .compact
     let badgeBelongsToPreview = configuration.unreadBadgeStyle == .numbered
       && presentation.unread
       && showsPreview
-    if trailingUnreadBadge.occupiesLayout, !badgeBelongsToPreview {
-      let width = trailingUnreadBadge.fittingWidth
-      trailingUnreadBadge.frame = CGRect(
-        x: trailing - width,
-        y: painted.midY - 8,
-        width: width,
-        height: 16
-      )
-      trailing = trailingUnreadBadge.frame.minX - 8
-    }
-
-    if !showsPreview, titleActivityView.isActivityVisible {
-      titleActivityView.frame = CGRect(x: trailing - 16, y: painted.midY - 6, width: 16, height: 12)
-      trailing = titleActivityView.frame.minX - 8
-    } else {
-      titleActivityView.frame = .zero
-    }
+    let keepsNumberedUnreadNearContent = configuration.indentationLevel > 0
+      && trailingUnreadBadge.occupiesLayout
 
     if showsPreview {
       let lineHeight: CGFloat = 13
@@ -2201,14 +2184,25 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       titleField.frame = CGRect(
         x: leading,
         y: top,
-        width: max(trailing - leading, 0),
+        width: max(availableTrailing - leading, 0),
         height: lineHeight + 2
       )
       var previewTrailing = availableTrailing
       if badgeBelongsToPreview, trailingUnreadBadge.occupiesLayout {
         let width = trailingUnreadBadge.fittingWidth
+        let badgeLeading = if keepsNumberedUnreadNearContent {
+          SidebarChatRowLayout.inlineAccessoryLeading(
+            contentLeading: leading,
+            preferredContentWidth: previewView.fittingWidth,
+            accessoryWidth: width,
+            availableTrailing: availableTrailing,
+            spacing: 5
+          )
+        } else {
+          availableTrailing - width
+        }
         trailingUnreadBadge.frame = CGRect(
-          x: previewTrailing - width,
+          x: badgeLeading,
           y: top + lineHeight + 1,
           width: width,
           height: 16
@@ -2222,11 +2216,68 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         height: lineHeight
       )
       previewView.isHidden = false
+      titleActivityView.frame = .zero
     } else {
+      var titleTrailing = availableTrailing
+      var nestedTitleWidth: CGFloat?
+      if trailingUnreadBadge.occupiesLayout {
+        let badgeWidth = trailingUnreadBadge.fittingWidth
+        if keepsNumberedUnreadNearContent {
+          let activityWidth: CGFloat = titleActivityView.isActivityVisible ? 16 : 0
+          let activitySpacing: CGFloat = activityWidth > 0 ? 8 : 0
+          let badgeSpacing: CGFloat = 8
+          let accessoryWidth = activitySpacing + activityWidth + badgeSpacing + badgeWidth
+          let preferredTitleWidth = ceil(titleField.intrinsicContentSize.width)
+          let titleWidth = min(
+            preferredTitleWidth,
+            max(availableTrailing - leading - accessoryWidth, 0)
+          )
+          nestedTitleWidth = titleWidth
+          var accessoryLeading = leading + titleWidth
+          if activityWidth > 0 {
+            accessoryLeading += activitySpacing
+            titleActivityView.frame = CGRect(
+              x: accessoryLeading,
+              y: painted.midY - 6,
+              width: activityWidth,
+              height: 12
+            )
+            accessoryLeading = titleActivityView.frame.maxX
+          } else {
+            titleActivityView.frame = .zero
+          }
+          accessoryLeading += badgeSpacing
+          trailingUnreadBadge.frame = CGRect(
+            x: accessoryLeading,
+            y: painted.midY - 8,
+            width: badgeWidth,
+            height: 16
+          )
+        } else {
+          trailingUnreadBadge.frame = CGRect(
+            x: titleTrailing - badgeWidth,
+            y: painted.midY - 8,
+            width: badgeWidth,
+            height: 16
+          )
+          titleTrailing = trailingUnreadBadge.frame.minX - 8
+        }
+      }
+      if !keepsNumberedUnreadNearContent, titleActivityView.isActivityVisible {
+        titleActivityView.frame = CGRect(
+          x: titleTrailing - 16,
+          y: painted.midY - 6,
+          width: 16,
+          height: 12
+        )
+        titleTrailing = titleActivityView.frame.minX - 8
+      } else if !keepsNumberedUnreadNearContent {
+        titleActivityView.frame = .zero
+      }
       titleField.frame = CGRect(
         x: leading,
         y: painted.midY - 9,
-        width: max(trailing - leading, 0),
+        width: nestedTitleWidth ?? max(titleTrailing - leading, 0),
         height: 18
       )
       previewView.frame = .zero
@@ -2968,6 +3019,13 @@ private final class SidebarNativeComposeActivityView: NSView {
   private var lastPresentation: ComposeActionPresentation?
   private var hasAppliedPresentation = false
   private(set) var isActivityVisible = false
+
+  var fittingWidth: CGFloat {
+    layoutSubtreeIfNeeded()
+    let indicatorWidth: CGFloat = isActivityVisible ? 16 : 0
+    let indicatorSpacing: CGFloat = indicatorWidth > 0 ? 5 : 0
+    return indicatorWidth + indicatorSpacing + ceil(label.intrinsicContentSize.width)
+  }
 
   override var isFlipped: Bool { true }
 
