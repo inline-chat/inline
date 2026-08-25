@@ -321,7 +321,7 @@ struct ExperimentalHomeView: View {
           timelineSections: [],
           daySections: [],
           mode: .inbox,
-          emptyStyle: .inbox,
+          emptyStyle: .inlineLogo,
           emptyTitle: "No open chats",
           emptySubtitle: "Open a chat from All Chats to keep it here.",
           chatItemRenderMode: chatItemRenderMode,
@@ -409,7 +409,6 @@ private struct ExperimentalChatListView: View {
   enum EmptyStyle {
     case text
     case inlineLogo
-    case inbox
     case unreadFilter
   }
 
@@ -560,8 +559,6 @@ private struct ExperimentalChatListView: View {
       ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
     case .inlineLogo:
       ExperimentalInlineLogoEmptyStateView()
-    case .inbox:
-      ExperimentalInboxEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
     case .unreadFilter:
       ContentUnavailableView(
         emptyTitle,
@@ -1369,35 +1366,10 @@ private struct ExperimentalLoadingStateView: View {
   }
 }
 
-private struct ExperimentalInboxEmptyStateView: View {
-  let title: String
-  let subtitle: String
-
-  var body: some View {
-    VStack(spacing: 8) {
-      Image(systemName: "tray")
-        .font(.title)
-        .symbolRenderingMode(.hierarchical)
-        .foregroundStyle(.tertiary)
-        .accessibilityHidden(true)
-
-      Text(title)
-        .font(.callout.weight(.semibold))
-
-      Text(subtitle)
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
-        .frame(maxWidth: 240)
-    }
-    .padding(.horizontal, 24)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-  }
-}
-
 private struct ExperimentalInlineLogoEmptyStateView: View {
   var body: some View {
-    Image("inlineIcon")
+    // Target-local copy of the macOS empty-page symbol; keep the asset sets synchronized.
+    Image("InlineLogoSymbol")
       .resizable()
       .scaledToFit()
       .frame(width: 64, height: 64)
