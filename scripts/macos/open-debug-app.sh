@@ -115,7 +115,6 @@ done
 if [[ "${second_debug}" == "1" ]]; then
   SCHEME=${SCHEME:-"2nd Inline (macOS)"}
   CONFIGURATION=${CONFIGURATION:-"Debug #2"}
-  launch_args=(--user-profile=2)
 else
   SCHEME=${SCHEME:-"Inline (macOS)"}
   CONFIGURATION=${CONFIGURATION:-Debug}
