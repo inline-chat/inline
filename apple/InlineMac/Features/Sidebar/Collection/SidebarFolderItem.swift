@@ -221,8 +221,11 @@ struct SidebarFolderEmptyRow: View {
   let size: SidebarItemSize
 
   var body: some View {
-    Text("No chats", comment: "Passive placeholder inside an expanded empty sidebar folder.")
-      .font(.system(size: 11))
+    Text(
+      "Drop a chat here",
+      comment: "Passive drop instruction inside an expanded empty sidebar folder."
+    )
+      .font(.system(size: 13))
       .foregroundStyle(.tertiary)
       .frame(maxWidth: .infinity, minHeight: size.rowHeight, alignment: .leading)
       .padding(.leading, leadingInset)
