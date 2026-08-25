@@ -95,6 +95,15 @@ while IFS= read -r path; do
   fi
 done <<< "$performance_trace_files"
 
+onboarding_preview_path="apple/InlineMac/Views/Onboarding/OnboardingMessageStylePreview.swift"
+onboarding_preview_source="$(read_source "$onboarding_preview_path" 2>/dev/null || true)"
+if [[ -n "$onboarding_preview_source" ]] &&
+   printf '%s\n' "$onboarding_preview_source" |
+     grep -E '(^import InlineKit$|FullMessage|MessageTableCell|MessageSizeCalculator|MessageViewProps|EmbeddedMessageView|MessageBubbleBackground|MessageBubbleTail|MessageTimeAndState|NSViewRepresentable)' >/dev/null; then
+  printf 'error: %s must remain independent of production message rendering\n' "$onboarding_preview_path" >&2
+  failures=1
+fi
+
 if [[ "$failures" -ne 0 ]]; then
   exit 1
 fi

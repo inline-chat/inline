@@ -1,7 +1,24 @@
 import AppKit
-import InlineKit
-import MacTheme
 import SwiftUI
+
+struct OnboardingPreviewIdentity {
+  let displayName: String
+  let initials: String
+  let avatarImage: NSImage?
+
+  init(displayName: String, avatarImage: NSImage?) {
+    let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    self.displayName = trimmedName
+    initials = trimmedName
+      .split(whereSeparator: \Character.isWhitespace)
+      .prefix(2)
+      .compactMap(\.first)
+      .map(String.init)
+      .joined()
+      .uppercased()
+    self.avatarImage = avatarImage
+  }
+}
 
 struct OnboardingMessageStylePreview: View {
   static let size = CGSize(width: 500, height: 230)
@@ -9,417 +26,216 @@ struct OnboardingMessageStylePreview: View {
   @Environment(\.colorScheme) private var colorScheme
 
   let style: MessageRenderStyle
-  let currentUserInfo: UserInfo
+  let identity: OnboardingPreviewIdentity
 
   var body: some View {
-    let conversation = OnboardingMessagePreviewFactory.make(currentUserInfo: currentUserInfo)
-
-    VStack(spacing: 0) {
-      ForEach(conversation.rows) { row in
-        OnboardingProductionMessageRow(
-          message: row.message,
-          width: Self.size.width,
-          style: style,
-          isDarkMode: colorScheme == .dark,
-          isFirstMessage: row.isFirstMessage,
-          isLastMessage: row.isLastMessage
-        )
-      }
-    }
-    .fixedSize(horizontal: false, vertical: true)
-    .padding(.vertical, 10)
+    OnboardingPreviewConversation(
+      style: style,
+      currentUser: identity,
+      palette: OnboardingPreviewPalette(isDark: colorScheme == .dark)
+    )
+    .padding(.horizontal, 18)
+    .padding(.vertical, 14)
     .frame(width: Self.size.width, height: Self.size.height)
-    .background(Color(nsColor: Theme.windowContentBackgroundColor).opacity(0.5))
+    .background(Color(nsColor: .windowBackgroundColor).opacity(0.55))
     .clipped()
   }
 }
 
-private struct OnboardingMessagePreviewConversation {
-  let rows: [OnboardingMessagePreviewRow]
-}
+private struct OnboardingPreviewConversation: View {
+  private static let mo = OnboardingPreviewIdentity(displayName: "Mo", avatarImage: nil)
 
-private struct OnboardingMessagePreviewRow: Identifiable {
-  let message: FullMessage
-  let isFirstMessage: Bool
-  let isLastMessage: Bool
-
-  var id: Int64 { message.id }
-}
-
-private enum OnboardingMessagePreviewFactory {
-  private static let chatID: Int64 = -9_100
-  private static let fixtureDate = Date(timeIntervalSince1970: 1_755_000_000)
-  private static let incomingUserInfo = UserInfo(user: User(
-    id: -9_001,
-    email: "mo@example.com",
-    firstName: "Mo",
-    username: "mo"
-  ))
-
-  static func make(currentUserInfo: UserInfo) -> OnboardingMessagePreviewConversation {
-    let welcome = makeMessage(
-      id: -9_101,
-      senderInfo: incomingUserInfo,
-      text: "Want to review the launch notes together?",
-      date: fixtureDate,
-      outgoing: false
-    )
-    let choice = makeMessage(
-      id: -9_102,
-      senderInfo: currentUserInfo,
-      text: "Yes — give me a minute to finish this.",
-      date: fixtureDate.addingTimeInterval(60),
-      outgoing: true
-    )
-    let reply = makeMessage(
-      id: -9_103,
-      senderInfo: incomingUserInfo,
-      text: "Perfect, I'll send them over.",
-      date: fixtureDate.addingTimeInterval(120),
-      outgoing: false,
-      repliedTo: choice
-    )
-
-    return OnboardingMessagePreviewConversation(
-      rows: [
-        OnboardingMessagePreviewRow(
-          message: welcome,
-          isFirstMessage: true,
-          isLastMessage: false
-        ),
-        OnboardingMessagePreviewRow(
-          message: choice,
-          isFirstMessage: false,
-          isLastMessage: false
-        ),
-        OnboardingMessagePreviewRow(
-          message: reply,
-          isFirstMessage: false,
-          isLastMessage: true
-        ),
-      ]
-    )
-  }
-
-  private static func makeMessage(
-    id: Int64,
-    senderInfo: UserInfo,
-    text: String,
-    date: Date,
-    outgoing: Bool,
-    repliedTo: FullMessage? = nil
-  ) -> FullMessage {
-    var message = Message(
-      messageId: id,
-      fromId: senderInfo.user.id,
-      date: date,
-      text: text,
-      peerUserId: nil,
-      peerThreadId: chatID,
-      chatId: chatID,
-      out: outgoing,
-      status: outgoing ? .sent : nil,
-      repliedToMessageId: repliedTo?.message.messageId
-    )
-    message.globalId = id
-
-    return FullMessage(
-      senderInfo: senderInfo,
-      message: message,
-      reactions: [],
-      repliedToMessage: repliedTo.map {
-        EmbeddedMessage(
-          message: $0.message,
-          senderInfo: $0.senderInfo
-        )
-      },
-      attachments: []
-    )
-  }
-}
-
-private struct OnboardingProductionMessageRow: NSViewRepresentable {
-  let message: FullMessage
-  let width: CGFloat
   let style: MessageRenderStyle
-  let isDarkMode: Bool
-  let isFirstMessage: Bool
-  let isLastMessage: Bool
+  let currentUser: OnboardingPreviewIdentity
+  let palette: OnboardingPreviewPalette
 
-  func makeNSView(context _: Context) -> MessageTableCell {
-    let cell = OnboardingMessagePreviewCell(frame: .zero)
-    configure(cell, width: width)
-    return cell
-  }
-
-  func updateNSView(_ cell: MessageTableCell, context _: Context) {
-    configure(cell, width: width)
-  }
-
-  func sizeThatFits(
-    _ proposal: ProposedViewSize,
-    nsView _: MessageTableCell,
-    context _: Context
-  ) -> CGSize? {
-    let resolvedWidth = proposal.width ?? width
-    return CGSize(width: resolvedWidth, height: makeProps(width: resolvedWidth).layout.totalHeight)
-  }
-
-  private func configure(_ cell: MessageTableCell, width: CGFloat) {
-    let props = makeProps(width: width)
-    cell.setScrollState(.idle)
-    cell.configure(with: message, props: props, animate: false)
-
-    if let previewCell = cell as? OnboardingMessagePreviewCell {
-      previewCell.configurePreviewInlineTime(message: message, props: props)
-      previewCell.configurePreviewReplyAppearance(style: style)
-      previewCell.configurePreviewBubbleAppearance(
+  var body: some View {
+    VStack(spacing: style == .bubble ? 8 : 10) {
+      OnboardingPreviewMessageRow(
         style: style,
-        outgoing: message.message.out == true,
-        isDarkMode: isDarkMode
+        identity: Self.mo,
+        text: "Want to review the launch notes together?",
+        isOutgoing: false,
+        reply: nil,
+        palette: palette
       )
-      previewCell.configurePreviewTimeAppearance(
+      OnboardingPreviewMessageRow(
         style: style,
-        outgoing: message.message.out == true,
-        isDarkMode: isDarkMode
+        identity: currentUser,
+        text: "Yes — give me a minute to finish this.",
+        isOutgoing: true,
+        reply: OnboardingPreviewReplyContent(
+          author: Self.mo.displayName,
+          text: "Want to review the launch notes together?"
+        ),
+        palette: palette
+      )
+      OnboardingPreviewMessageRow(
+        style: style,
+        identity: Self.mo,
+        text: "Perfect, I'll send them over.",
+        isOutgoing: false,
+        reply: nil,
+        palette: palette
       )
     }
-  }
-
-  private func makeProps(width: CGFloat) -> MessageViewProps {
-    let inputProps = MessageViewInputProps(
-      firstInGroup: true,
-      lastInGroup: true,
-      startsAfterDaySeparator: false,
-      isLastMessage: isLastMessage,
-      isFirstMessage: isFirstMessage,
-      isDM: false,
-      isRtl: false,
-      translated: false,
-      renderStyle: style
-    )
-    var layout = MessageSizeCalculator.shared.calculateSize(
-      for: message,
-      with: inputProps,
-      tableWidth: width
-    ).3
-
-    if style == .minimal, var avatar = layout.avatar {
-      avatar.spacing.left = Theme.messageSidePadding
-      layout.avatar = avatar
-    }
-
-    return MessageViewProps(
-      firstInGroup: inputProps.firstInGroup,
-      lastInGroup: inputProps.lastInGroup,
-      startsAfterDaySeparator: inputProps.startsAfterDaySeparator,
-      isLastMessage: inputProps.isLastMessage,
-      isFirstMessage: inputProps.isFirstMessage,
-      isRtl: inputProps.isRtl,
-      isDM: inputProps.isDM,
-      renderStyle: style,
-      index: nil,
-      translated: false,
-      usesAvatarOverlay: false,
-      layout: layout
-    )
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
-private final class OnboardingMessagePreviewCell: MessageTableCell {
-  private var previewInlineTimeView: MessageTimeAndState?
-  private var previewInlineTimeConstraints: [NSLayoutConstraint] = []
-  private weak var previewReplyBarView: NSView?
-  private var previewReplyBarOriginalConstraints: [NSLayoutConstraint] = []
-  private var previewReplyBarTextConstraints: [NSLayoutConstraint] = []
+private struct OnboardingPreviewMessageRow: View {
+  let style: MessageRenderStyle
+  let identity: OnboardingPreviewIdentity
+  let text: LocalizedStringResource
+  let isOutgoing: Bool
+  let reply: OnboardingPreviewReplyContent?
+  let palette: OnboardingPreviewPalette
 
-  override func hitTest(_: NSPoint) -> NSView? {
-    nil
-  }
-
-  func configurePreviewInlineTime(message: FullMessage, props: MessageViewProps) {
-    clearPreviewInlineTime()
-
-    guard props.renderStyle == .minimal,
-          props.layout.singleLine,
-          let text = props.layout.text,
-          let time = props.layout.time
-    else { return }
-
-    let timeView = MessageTimeAndState(
-      fullMessage: message,
-      overlay: false,
-      contentAlignment: .left
-    )
-    timeView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(timeView)
-
-    let layout = props.layout
-    let reservedAvatarSlotWidth =
-      MessageSizeCalculator.minimalContentLeadingInset + MessageSizeCalculator.minimalAvatarSize +
-      Theme.messageHorizontalStackSpacing
-    let contentLeading = if let avatar = layout.avatar {
-      avatar.spacing.left + avatar.size.width + avatar.spacing.right
-    } else {
-      reservedAvatarSlotWidth
-    }
-    let nameHeight = layout.name.map { $0.size.height + $0.spacing.bottom } ?? 0
-    let textTop = layout.wrapper.spacing.top + nameHeight + layout.textContentViewTop
-    let timeTop = textTop + max(0, (text.size.height - time.size.height) / 2)
-
-    previewInlineTimeConstraints = [
-      timeView.leadingAnchor.constraint(
-        equalTo: leadingAnchor,
-        constant: contentLeading + text.spacing.left + text.size.width + time.spacing.left
-      ),
-      timeView.topAnchor.constraint(equalTo: topAnchor, constant: timeTop),
-      timeView.widthAnchor.constraint(equalToConstant: time.size.width),
-      timeView.heightAnchor.constraint(equalToConstant: time.size.height),
-    ]
-    NSLayoutConstraint.activate(previewInlineTimeConstraints)
-    previewInlineTimeView = timeView
-  }
-
-  func configurePreviewReplyAppearance(style: MessageRenderStyle) {
-    restorePreviewReplyBarConstraints()
-
-    guard let replyView = firstDescendant(of: EmbeddedMessageView.self) else { return }
-
+  var body: some View {
     switch style {
-      case .minimal:
-        replyView.layer?.cornerRadius = 0
-        replyView.layer?.backgroundColor = NSColor.clear.cgColor
-        configureMinimalPreviewReplyBar(in: replyView)
-      case .bubble:
-        guard let barColor = replyView.subviews.compactMap({ $0.layer?.backgroundColor }).first,
-              let senderColor = NSColor(cgColor: barColor)
-        else { return }
-        replyView.layer?.backgroundColor = senderColor.withAlphaComponent(0.1).cgColor
-    }
-  }
+    case .minimal:
+      HStack(alignment: .top, spacing: 8) {
+        OnboardingPreviewAvatar(identity: identity, palette: palette)
 
-  private func configureMinimalPreviewReplyBar(in replyView: EmbeddedMessageView) {
-    guard let barView = replyView.subviews.first(where: { $0.layer?.backgroundColor != nil }),
-          let nameLabel = replyView.subviews.compactMap({ $0 as? NSTextField }).first,
-          let messageLabel = replyView.subviews.compactMap({ $0 as? NSTextField }).last
-    else { return }
+        VStack(alignment: .leading, spacing: 3) {
+          Text(identity.displayName)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(palette.name)
+            .lineLimit(1)
 
-    let originalConstraints = replyView.constraints.filter { constraint in
-      guard (constraint.firstItem as? NSView) === barView else { return false }
-      return constraint.firstAttribute == .top || constraint.firstAttribute == .bottom
-    }
-    guard !originalConstraints.isEmpty else { return }
+          if let reply {
+            OnboardingPreviewReply(
+              content: reply,
+              isInsideBubble: false,
+              isOutgoing: isOutgoing,
+              palette: palette
+            )
+          }
 
-    NSLayoutConstraint.deactivate(originalConstraints)
-    let textConstraints = [
-      barView.topAnchor.constraint(equalTo: nameLabel.topAnchor),
-      barView.bottomAnchor.constraint(equalTo: messageLabel.bottomAnchor),
-    ]
-    NSLayoutConstraint.activate(textConstraints)
+          Text(text)
+            .font(.body)
+            .foregroundStyle(.primary)
+            .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
 
-    previewReplyBarView = barView
-    previewReplyBarOriginalConstraints = originalConstraints
-    previewReplyBarTextConstraints = textConstraints
-  }
+    case .bubble:
+      HStack(alignment: .bottom, spacing: 7) {
+        if !isOutgoing {
+          OnboardingPreviewAvatar(identity: identity, palette: palette)
+        }
 
-  private func restorePreviewReplyBarConstraints() {
-    NSLayoutConstraint.deactivate(previewReplyBarTextConstraints)
-    if previewReplyBarView?.superview != nil {
-      NSLayoutConstraint.activate(previewReplyBarOriginalConstraints)
-    }
-    previewReplyBarView = nil
-    previewReplyBarOriginalConstraints.removeAll()
-    previewReplyBarTextConstraints.removeAll()
-  }
+        VStack(alignment: .leading, spacing: 4) {
+          Text(identity.displayName)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(isOutgoing ? palette.outgoingText.opacity(0.82) : palette.name)
+            .lineLimit(1)
 
-  fileprivate func configurePreviewBubbleAppearance(
-    style: MessageRenderStyle,
-    outgoing: Bool,
-    isDarkMode: Bool
-  ) {
-    guard style == .bubble, !outgoing,
-          let bubbleView = firstDescendant(of: MessageBubbleBackgroundView.self)
-    else { return }
+          if let reply {
+            OnboardingPreviewReply(
+              content: reply,
+              isInsideBubble: true,
+              isOutgoing: isOutgoing,
+              palette: palette
+            )
+          }
 
-    let gray = NSColor(calibratedWhite: isDarkMode ? 0.18 : 0.86, alpha: 1)
-    bubbleView.backgroundColor = gray
-    firstDescendant(of: MessageBubbleTailView.self)?.configure(side: .leading, color: gray)
-  }
+          Text(text)
+            .font(.body)
+            .foregroundStyle(isOutgoing ? palette.outgoingText : palette.incomingText)
+            .lineLimit(2)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+          isOutgoing ? palette.outgoingBubble : palette.incomingBubble,
+          in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
 
-  fileprivate func configurePreviewTimeAppearance(
-    style: MessageRenderStyle,
-    outgoing: Bool,
-    isDarkMode: Bool
-  ) {
-    let color: NSColor = if isDarkMode {
-      .white.withAlphaComponent(0.88)
-    } else if style == .bubble, outgoing {
-      .white.withAlphaComponent(0.7)
-    } else {
-      .tertiaryLabelColor
-    }
-
-    for timeView in descendants(of: MessageTimeAndState.self) {
-      for textLayer in timeView.layer?.sublayers?.compactMap({ $0 as? CATextLayer }) ?? [] {
-        textLayer.foregroundColor = color.cgColor
-        if let attributedString = textLayer.string as? NSAttributedString {
-          let recoloredString = NSMutableAttributedString(attributedString: attributedString)
-          recoloredString.addAttribute(
-            .foregroundColor,
-            value: color,
-            range: NSRange(location: 0, length: recoloredString.length)
-          )
-          textLayer.string = recoloredString
+        if isOutgoing {
+          OnboardingPreviewAvatar(identity: identity, palette: palette)
         }
       }
+      .frame(maxWidth: .infinity, alignment: isOutgoing ? .trailing : .leading)
     }
   }
+}
 
-  private func clearPreviewInlineTime() {
-    NSLayoutConstraint.deactivate(previewInlineTimeConstraints)
-    previewInlineTimeConstraints.removeAll()
-    previewInlineTimeView?.removeFromSuperview()
-    previewInlineTimeView = nil
-  }
+private struct OnboardingPreviewReplyContent {
+  let author: String
+  let text: LocalizedStringResource
+}
 
-  private func firstDescendant<ViewType: NSView>(of type: ViewType.Type) -> ViewType? {
-    for subview in subviews {
-      if let match = subview as? ViewType {
-        return match
+private struct OnboardingPreviewReply: View {
+  let content: OnboardingPreviewReplyContent
+  let isInsideBubble: Bool
+  let isOutgoing: Bool
+  let palette: OnboardingPreviewPalette
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Capsule()
+        .fill(isOutgoing ? palette.outgoingText.opacity(0.8) : palette.name)
+        .frame(width: 2)
+
+      VStack(alignment: .leading, spacing: 1) {
+        Text(content.author)
+          .font(.caption2.weight(.semibold))
+        Text(content.text)
+          .font(.caption2)
+          .lineLimit(1)
       }
-      if let match = firstDescendant(of: type, in: subview) {
-        return match
-      }
+      .foregroundStyle(isOutgoing ? palette.outgoingText.opacity(0.86) : palette.incomingText.opacity(0.8))
     }
-    return nil
+    .padding(.horizontal, isInsideBubble ? 6 : 0)
+    .padding(.vertical, isInsideBubble ? 4 : 1)
+    .background(
+      isInsideBubble ? palette.replyBackground(isOutgoing: isOutgoing) : .clear,
+      in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+    )
   }
+}
 
-  private func descendants<ViewType: NSView>(of type: ViewType.Type) -> [ViewType] {
-    descendants(of: type, in: self)
-  }
+private struct OnboardingPreviewAvatar: View {
+  let identity: OnboardingPreviewIdentity
+  let palette: OnboardingPreviewPalette
 
-  private func descendants<ViewType: NSView>(
-    of type: ViewType.Type,
-    in root: NSView
-  ) -> [ViewType] {
-    root.subviews.flatMap { subview in
-      let match = (subview as? ViewType).map { [$0] } ?? []
-      return match + descendants(of: type, in: subview)
+  var body: some View {
+    if let avatarImage = identity.avatarImage {
+      Image(nsImage: avatarImage)
+        .resizable()
+        .scaledToFill()
+        .frame(width: 28, height: 28)
+        .clipShape(Circle())
+    } else {
+      Text(identity.initials.isEmpty ? "?" : identity.initials)
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.white)
+        .frame(width: 28, height: 28)
+        .background(palette.avatar, in: Circle())
     }
   }
+}
 
-  private func firstDescendant<ViewType: NSView>(
-    of type: ViewType.Type,
-    in root: NSView
-  ) -> ViewType? {
-    for subview in root.subviews {
-      if let match = subview as? ViewType {
-        return match
-      }
-      if let match = firstDescendant(of: type, in: subview) {
-        return match
-      }
-    }
-    return nil
+private struct OnboardingPreviewPalette {
+  let name: Color
+  let avatar: Color
+  let outgoingBubble: Color
+  let incomingBubble: Color
+  let outgoingText: Color
+  let incomingText: Color
+
+  init(isDark: Bool) {
+    name = Color(nsColor: .controlAccentColor)
+    avatar = Color(nsColor: .controlAccentColor)
+    outgoingBubble = Color(nsColor: .controlAccentColor)
+    incomingBubble = Color(white: isDark ? 0.22 : 0.91)
+    outgoingText = .white
+    incomingText = .primary
+  }
+
+  func replyBackground(isOutgoing: Bool) -> Color {
+    isOutgoing ? outgoingText.opacity(0.12) : incomingText.opacity(0.06)
   }
 }

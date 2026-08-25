@@ -237,29 +237,17 @@ final class OnboardingProfileSetupModel {
     }
   }
 
-  var messagePreviewUserInfo: UserInfo {
-    if var savedUserInfo {
-      let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-      if trimmedName.isEmpty == false {
-        let components = Self.nameComponents(trimmedName)
-        savedUserInfo.user.firstName = components.firstName
-        savedUserInfo.user.lastName = components.lastName
-      }
-
-      let cleanedUsername = cleanUsername(username)
-      if cleanedUsername.isEmpty == false {
-        savedUserInfo.user.username = cleanedUsername
-      }
-      return savedUserInfo
+  var messagePreviewIdentity: OnboardingPreviewIdentity {
+    let enteredName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let savedName = savedUserInfo?.user.fullName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let displayName = if !enteredName.isEmpty {
+      enteredName
+    } else if !savedName.isEmpty {
+      savedName
+    } else {
+      String(localized: "You")
     }
-
-    let fallbackName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    return UserInfo(user: User(
-      id: -9_002,
-      email: nil,
-      firstName: fallbackName.isEmpty ? "You" : fallbackName,
-      username: username.trimmingCharacters(in: .whitespacesAndNewlines)
-    ))
+    return OnboardingPreviewIdentity(displayName: displayName, avatarImage: previewImage)
   }
 
   private func cleanUsername(_ value: String) -> String {

@@ -11,7 +11,7 @@ struct OnboardingAppearance: View {
   @State private var selectedStyle = AppSettings.shared.messageRenderStyle
 
   var body: some View {
-    let currentUserInfo = profile.messagePreviewUserInfo
+    let previewIdentity = profile.messagePreviewIdentity
 
     VStack(spacing: 0) {
       Spacer()
@@ -20,7 +20,7 @@ struct OnboardingAppearance: View {
 
       OnboardingMessageStylePreview(
         style: selectedStyle,
-        currentUserInfo: currentUserInfo
+        identity: previewIdentity
       )
       .id(selectedStyle)
       .transition(.opacity)
@@ -94,8 +94,8 @@ private struct OnboardingAppearanceStyleChoice: View {
 
   private var title: LocalizedStringResource {
     switch style {
-      case .minimal: "Minimal"
-      case .bubble: "Bubble"
+    case .minimal: "Minimal"
+    case .bubble: "Bubble"
     }
   }
 
@@ -148,14 +148,14 @@ private struct OnboardingAppearanceStyleChoice: View {
 // Preserved as a dormant reference to the superseded two-preview layout.
 private struct LegacyOnboardingAppearanceOption: View {
   let style: MessageRenderStyle
-  let currentUserInfo: UserInfo
+  let identity: OnboardingPreviewIdentity
   let isSelected: Bool
   let action: () -> Void
 
   private var title: LocalizedStringResource {
     switch style {
-      case .minimal: "Minimal"
-      case .bubble: "Bubble"
+    case .minimal: "Minimal"
+    case .bubble: "Bubble"
     }
   }
 
@@ -168,7 +168,7 @@ private struct LegacyOnboardingAppearanceOption: View {
       VStack(spacing: 12) {
         OnboardingMessageStylePreview(
           style: style,
-          currentUserInfo: currentUserInfo
+          identity: identity
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
