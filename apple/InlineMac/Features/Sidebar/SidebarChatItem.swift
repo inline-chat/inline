@@ -69,10 +69,22 @@ enum SidebarChatRowLayout {
 
   static func unreadDotLeadingSpacing(
     contentLeadingSpacing: CGFloat,
-    isNestedThread: Bool
+    isNested: Bool
   ) -> CGFloat {
-    guard isNestedThread else { return Theme.sidebarItemUnreadDotLeadingSpacing }
+    guard isNested else { return Theme.sidebarItemUnreadDotLeadingSpacing }
     return contentLeadingSpacing - Theme.sidebarItemUnreadDotSize - unreadDotTextSpacing
+  }
+
+  static func inlineAccessoryLeading(
+    contentLeading: CGFloat,
+    preferredContentWidth: CGFloat,
+    accessoryWidth: CGFloat,
+    availableTrailing: CGFloat,
+    spacing: CGFloat
+  ) -> CGFloat {
+    let latestLeading = max(availableTrailing - accessoryWidth, contentLeading)
+    let preferredLeading = contentLeading + max(preferredContentWidth, 0) + spacing
+    return min(preferredLeading, latestLeading)
   }
 }
 
@@ -181,8 +193,16 @@ struct SidebarChatItemView: Equatable, View {
   private var unreadDotLeadingSpacing: CGFloat {
     SidebarChatRowLayout.unreadDotLeadingSpacing(
       contentLeadingSpacing: contentLeadingSpacing,
-      isNestedThread: indentationLevel > 0 && !showsIcon
+      isNested: indentationLevel > 0
     )
+  }
+
+  private var keepsTitleAccessoryNearContent: Bool {
+    indentationLevel > 0 && titleAccessory != nil && !showsCloseControl
+  }
+
+  private var keepsPreviewAccessoryNearContent: Bool {
+    indentationLevel > 0 && previewAccessory != nil
   }
 
   static func == (lhs: SidebarChatItemView, rhs: SidebarChatItemView) -> Bool {
@@ -227,7 +247,8 @@ struct SidebarChatItemView: Equatable, View {
               SidebarComposeActivityPreview(
                 peer: peerId,
                 preview: item.preview,
-                font: Self.subtitleFont
+                font: Self.subtitleFont,
+                fillsAvailableWidth: !keepsPreviewAccessoryNearContent
               )
               .id(peerId)
 
@@ -407,7 +428,10 @@ struct SidebarChatItemView: Equatable, View {
       .font(rowTitleFont)
       .foregroundStyle(titleColor)
       .lineLimit(1)
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .frame(
+        maxWidth: keepsTitleAccessoryNearContent ? nil : .infinity,
+        alignment: .leading
+      )
 
     if isTemporary {
       title.italic()
@@ -425,7 +449,11 @@ struct SidebarChatItemView: Equatable, View {
 
         titleView
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .frame(
+        maxWidth: keepsTitleAccessoryNearContent ? nil : .infinity,
+        alignment: .leading
+      )
+      .layoutPriority(1)
 
       if showsCloseControl {
         closeButton
@@ -702,13 +730,15 @@ private struct SidebarComposeActivityPreview: View {
   let peer: Peer
   let preview: String
   let font: Font
+  let fillsAvailableWidth: Bool
 
   @State private var activityState: ComposeActionActivityState
 
-  init(peer: Peer, preview: String, font: Font) {
+  init(peer: Peer, preview: String, font: Font, fillsAvailableWidth: Bool) {
     self.peer = peer
     self.preview = preview
     self.font = font
+    self.fillsAvailableWidth = fillsAvailableWidth
     _activityState = State(initialValue: ComposeActions.shared.activityState(for: peer))
   }
 
@@ -737,7 +767,8 @@ private struct SidebarComposeActivityPreview: View {
           .transition(Self.swapTransition)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
+    .layoutPriority(1)
     .frame(height: 13, alignment: .center)
     .clipped()
     .animation(.easeInOut(duration: 0.18), value: activityState.presentation)
