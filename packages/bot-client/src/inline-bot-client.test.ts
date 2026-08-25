@@ -194,7 +194,7 @@ describe("InlineBotClient", () => {
     expect(seenUrl).toContain("user_id=7")
   })
 
-  it("exposes forwarding, pinning, participant, and thread title methods", async () => {
+  it("exposes batch, space, participant, and thread update methods", async () => {
     const calls: Array<{ url: string; method: string; body?: unknown }> = []
     const client = new InlineBotClient({
       token: "t",
@@ -212,16 +212,24 @@ describe("InlineBotClient", () => {
     })
 
     await client.forwardMessage({ chat_id: 9, from_chat_id: 8, message_id: 7 })
+    await client.forwardMessages({ chat_id: 9, from_chat_id: 8, message_ids: [7, 8] })
+    await client.deleteMessages({ chat_id: 9, message_ids: [7, 8] })
+    await client.editMessageActions({ chat_id: 9, message_id: 7, actions: [] })
+    await client.getSpace({ space_id: 4 })
     await client.pinMessage({ chat_id: 9, message_id: 7 })
     await client.unpinMessage({ chat_id: 9, message_id: 7 })
     await client.getChatParticipant({ chat_id: 9, user_id: 6 })
     await client.getChatParticipantCount({ chat_id: 9 })
     await client.addThreadParticipant({ chat_id: 9, user_id: 5 })
     await client.removeThreadParticipant({ chat_id: 9, user_id: 5 })
-    await client.setThreadTitle({ chat_id: 9, title: "Triage" })
+    await client.setThreadTitle({ chat_id: 9, title: "Triage", emoji: "🚨" })
 
     expect(calls.map(({ url, method }) => ({ url, method }))).toEqual([
       { url: "https://api.inline.chat/bot/forwardMessage", method: "POST" },
+      { url: "https://api.inline.chat/bot/forwardMessages", method: "POST" },
+      { url: "https://api.inline.chat/bot/deleteMessages", method: "POST" },
+      { url: "https://api.inline.chat/bot/editMessageActions", method: "POST" },
+      { url: "https://api.inline.chat/bot/getSpace", method: "POST" },
       { url: "https://api.inline.chat/bot/pinMessage", method: "POST" },
       { url: "https://api.inline.chat/bot/unpinMessage", method: "POST" },
       { url: "https://api.inline.chat/bot/getChatParticipant?chat_id=9&user_id=6", method: "GET" },
@@ -445,7 +453,7 @@ describe("InlineBotClient", () => {
     ])
   })
 
-  it("uploads bot files through the Bot multipart endpoint", async () => {
+  it("uploads bot files through the convenience and generic typed methods", async () => {
     let seenBody: FormData | undefined
     let seenAuth: string | null = null
     let seenUrl = ""
@@ -483,10 +491,13 @@ describe("InlineBotClient", () => {
       ok: true,
       result: { file: { file_id: "INP_example", file_size: 5, mime_type: "image/jpeg" } },
     })
-    await client.uploadFile({
+    const rawResult = await client.methodRaw("uploadFile", {
       type: "document",
       file: new Blob(["doc"], { type: "application/octet-stream" }),
     })
+    expect(rawResult.status).toBe(200)
+    expect(rawResult.data.ok).toBe(true)
+    expect(seenBody?.get("type")).toBe("document")
   })
 
   it("uses global fetch when no fetch implementation is provided", async () => {

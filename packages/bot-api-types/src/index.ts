@@ -42,18 +42,19 @@ export type BotActivationReason =
 
 export type BotMessageEntityType =
   | "mention"
+  | "text_mention"
   | "url"
   | "text_link"
   | "email"
   | "bold"
   | "italic"
-  | "username_mention"
   | "code"
   | "pre"
   | "phone_number"
   | "thread"
   | "thread_title"
   | "bot_command"
+  | "group_mention"
 
 export type BotTargetInput = {
   chat_id?: BotInputId
@@ -76,28 +77,14 @@ export type BotUser = {
 
 export type BotChatType = "user" | "thread"
 
+export type BotPeerId =
+  | { user_id: number; chat_id?: never }
+  | { user_id?: never; chat_id: number }
+
+/** @deprecated Use `BotMessage.peer_id`. */
 export type BotPeer = {
   user_id?: number
-  // 2026-06-03: Deprecated output shape kept for production bot clients.
-  // Prefer `message.chat_id`; remove after confirming no production use in the previous month.
   thread_id?: number
-}
-
-export type BotMessageEntityInput = {
-  // 2026-06-03: Deprecated compatibility accepts legacy strings and enum numbers for existing entity types.
-  // New thread-link entities should use canonical names only. Remove after production usage audit.
-  type: BotMessageEntityType | string | number
-  offset: BotInputId
-  length: BotInputId
-  user_id?: BotInputId
-  url?: string
-  language?: string
-  chat_id?: BotInputId
-  space_id?: BotInputId
-  title?: string
-  // 2026-06-03: Deprecated compatibility for production bot clients; prefer `user_id`.
-  // Remove after confirming no production use in the previous month.
-  user?: { id: BotInputId }
 }
 
 export type BotMessageEntityOutput = {
@@ -110,6 +97,121 @@ export type BotMessageEntityOutput = {
   chat_id?: number
   space_id?: number
   title?: string
+  group_id?: number
+}
+
+export type BotRichText =
+  | string
+  | BotRichText[]
+  | {
+      type: "bold" | "italic" | "code"
+      text: BotRichText
+    }
+  | { type: "url"; text: BotRichText; url: string }
+  | {
+      type: "email_address"
+      text: BotRichText
+      email_address: string
+    }
+  | {
+      type: "phone_number"
+      text: BotRichText
+      phone_number: string
+    }
+  | {
+      type: "mention"
+      text: BotRichText
+      username: string
+    }
+  | {
+      type: "text_mention"
+      text: BotRichText
+      user: BotUser
+    }
+  | {
+      type: "bot_command"
+      text: BotRichText
+      bot_command: string
+    }
+  | {
+      type: "chat_link"
+      text: BotRichText
+      chat_id: number
+    }
+  | {
+      type: "thread_title"
+      text: BotRichText
+      title: string
+      space_id?: number
+    }
+  | {
+      type: "group_mention"
+      text: BotRichText
+      group_id: number
+    }
+
+export type BotRichBlock =
+  | { type: "paragraph"; text: BotRichText; is_rtl?: true }
+  | {
+      type: "heading"
+      text: BotRichText
+      size: number
+      is_rtl?: true
+    }
+  | {
+      type: "pre"
+      text: BotRichText
+      language?: string
+    }
+  | { type: "footer"; text: BotRichText; is_rtl?: true }
+  | { type: "divider" }
+  | {
+      type: "list"
+      items: Array<{
+        label: string
+        blocks: BotRichBlock[]
+        has_checkbox?: true
+        is_checked?: true
+        value?: number
+      }>
+      is_rtl?: true
+    }
+  | {
+      type: "blockquote"
+      blocks: BotRichBlock[]
+      is_rtl?: true
+    }
+  | { type: "collage"; blocks: BotRichBlock[] }
+  | {
+      type: "details"
+      summary: BotRichText
+      blocks: BotRichBlock[]
+      is_open?: true
+      kind?: "progress"
+      is_rtl?: true
+    }
+  | {
+      type: "table"
+      cells: Array<
+        Array<{
+          text: BotRichText
+          align: "left" | "center" | "right"
+          is_header?: true
+        }>
+      >
+      is_bordered?: true
+      is_rtl?: true
+    }
+  | {
+      type: "photo"
+      alt?: BotRichText
+      file?: BotFile
+      width?: number
+      height?: number
+    }
+
+export type BotRichMessage = {
+  blocks: BotRichBlock[]
 }
 
 export type BotChatLastMessage = {
@@ -119,24 +221,27 @@ export type BotChatLastMessage = {
   date: number
   text?: string
   entities?: BotMessageEntityOutput[]
+  rich_message?: BotRichMessage
 }
 
 export type BotChat = {
   chat_id: number
-  type?: BotChatType
+  type: BotChatType
   title?: string
   space_id?: number
   is_public?: boolean
   parent_chat_id?: number
+  /** Human-facing thread number scoped to its space or home. */
+  number?: number
   /** Parent anchor encoded once; its chat omits parent_message and it has no reply_to_message. */
-  parent_message?: BotMessageLite
+  parent_message?: BotMessageReference
   participants?: { count: number }
   last_message_id?: number
   last_message?: BotChatLastMessage
   emoji?: string
 }
 
-export type BotEventChat = BotChat & { type: BotChatType }
+export type BotEventChat = BotChat
 
 export type BotFile = {
   file_id: string
@@ -206,26 +311,32 @@ export type BotAttachment = {
   image?: BotFile
 }
 
-export type BotMessageLite = {
+export type BotMessage = {
   message_id: number
-  chat_id: number
-  chat: BotChat
-  peer: BotPeer
+  peer_id: BotPeerId
+  chat?: BotChat
+  /** @deprecated Use `peer_id.chat_id` for a thread peer. */
+  chat_id?: number
+  /** @deprecated Use `peer_id`. */
+  peer?: BotPeer
   from_id: number
   from: BotUser
   date: number
   edit_date?: number
   text?: string
   entities?: BotMessageEntityOutput[]
+  rich_message?: BotRichMessage
   media?: BotMedia
   attachments?: BotAttachment[]
   actions?: BotMessageAction[][]
   reactions?: BotMessageReaction[]
+  reply_to_message?: BotMessageReference
 }
 
-export type BotMessage = BotMessageLite & {
-  reply_to_message?: BotMessageLite
-}
+type BotMessageReference = Omit<
+  BotMessage,
+  "chat" | "reply_to_message"
+>
 
 export type BotEventMessage = Omit<BotMessage, "chat"> & {
   chat: BotEventChat
@@ -306,6 +417,17 @@ export type BotCommand = {
 }
 
 export type GetMeResult = { user: BotUser }
+export type BotSpace = {
+  id: number
+  name: string
+  is_public?: boolean
+  handle?: string
+}
+export type GetSpaceResult = {
+  space: BotSpace
+  membership: BotSpaceMember
+  settings: { grid_enabled: boolean }
+}
 export type GetChatResult = { chat: BotChat }
 export type GetChatHistoryResult = { messages: BotMessage[] }
 export type GetMessagesResult = { messages: BotMessage[] }
@@ -314,10 +436,12 @@ export type CreateThreadResult = { chat: BotChat }
 export type CreateReplyThreadResult = { chat: BotChat }
 export type SendMessageResult = { message: BotMessage }
 export type ForwardMessageResult = { message: BotMessage }
+export type ForwardMessagesResult = { message_ids: number[] }
 export type GetChatParticipantResult = { participant: BotChatParticipant }
 export type GetChatParticipantCountResult = { count: number }
 export type GetMyCommandsResult = { commands: BotCommand[] }
 export type EditMessageTextResult = { message: BotMessage }
+export type EditMessageActionsResult = { message: BotMessage }
 export type EmptyResult = Record<string, never>
 
 export type GetUpdatesResult = BotUpdate[]
@@ -328,7 +452,6 @@ export type GetWebhookInfoResult = WebhookInfo
 export type SendMessageParams = BotTargetInput & {
   text?: string
   reply_to_message_id?: BotInputId
-  entities?: BotMessageEntityInput[]
   parse_markdown?: boolean
   media?:
     | { type: "photo" | "video" | "document" | "voice"; file_id: string }
@@ -343,7 +466,6 @@ export type SendMessageParams = BotTargetInput & {
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
   text: string
-  entities?: BotMessageEntityInput[]
   parse_markdown?: boolean
   actions?: BotMessageAction[][]
   // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
@@ -351,14 +473,30 @@ export type EditMessageTextParams = BotTargetInput & {
   parseMarkdown?: boolean
 }
 
+export type EditMessageActionsParams = BotTargetInput & {
+  message_id: BotInputId
+  /** Replaces all actions. An empty array clears them. */
+  actions: BotMessageAction[][]
+}
+
 export type DeleteMessageParams = BotTargetInput & {
   message_id: BotInputId
+}
+
+export type DeleteMessagesParams = BotTargetInput & {
+  message_ids: BotInputId[]
 }
 
 export type ForwardMessageParams = {
   chat_id: BotInputId
   from_chat_id: BotInputId
   message_id: BotInputId
+}
+
+export type ForwardMessagesParams = {
+  chat_id: BotInputId
+  from_chat_id: BotInputId
+  message_ids: BotInputId[]
 }
 
 export type PinMessageParams = {
@@ -386,7 +524,9 @@ export type RemoveThreadParticipantParams = AddThreadParticipantParams
 
 export type SetThreadTitleParams = {
   chat_id: BotInputId
-  title: string
+  title?: string
+  /** Empty string removes the emoji. */
+  emoji?: string
 }
 
 export type SendReactionParams = BotTargetInput & {
@@ -448,6 +588,8 @@ export type DeleteWebhookParams = { drop_pending_updates?: boolean }
 
 export type GetChatParams = BotTargetInput
 
+export type GetSpaceParams = { space_id: BotInputId }
+
 export type GetChatHistoryParams = BotTargetInput & {
   limit?: number
   offset_message_id?: BotInputId
@@ -494,6 +636,7 @@ export type SetMyCommandsParams = {
 
 export type BotMethodName =
   | "getMe"
+  | "getSpace"
   | "getChat"
   | "getChatHistory"
   | "getMessages"
@@ -505,8 +648,11 @@ export type BotMethodName =
   | "deleteMyCommands"
   | "sendMessage"
   | "editMessageText"
+  | "editMessageActions"
   | "deleteMessage"
+  | "deleteMessages"
   | "forwardMessage"
+  | "forwardMessages"
   | "pinMessage"
   | "unpinMessage"
   | "getChatParticipant"
@@ -527,6 +673,7 @@ export type BotMethodName =
 
 export type BotMethodParamsByName = {
   getMe: undefined
+  getSpace: GetSpaceParams
   getChat: GetChatParams
   getChatHistory: GetChatHistoryParams
   getMessages: GetMessagesParams
@@ -538,8 +685,11 @@ export type BotMethodParamsByName = {
   deleteMyCommands: undefined
   sendMessage: SendMessageParams
   editMessageText: EditMessageTextParams
+  editMessageActions: EditMessageActionsParams
   deleteMessage: DeleteMessageParams
+  deleteMessages: DeleteMessagesParams
   forwardMessage: ForwardMessageParams
+  forwardMessages: ForwardMessagesParams
   pinMessage: PinMessageParams
   unpinMessage: UnpinMessageParams
   getChatParticipant: GetChatParticipantParams
@@ -561,6 +711,7 @@ export type BotMethodParamsByName = {
 
 export type BotMethodResultByName = {
   getMe: GetMeResult
+  getSpace: GetSpaceResult
   getChat: GetChatResult
   getChatHistory: GetChatHistoryResult
   getMessages: GetMessagesResult
@@ -572,8 +723,11 @@ export type BotMethodResultByName = {
   deleteMyCommands: EmptyResult
   sendMessage: SendMessageResult
   editMessageText: EditMessageTextResult
+  editMessageActions: EditMessageActionsResult
   deleteMessage: EmptyResult
+  deleteMessages: EmptyResult
   forwardMessage: ForwardMessageResult
+  forwardMessages: ForwardMessagesResult
   pinMessage: EmptyResult
   unpinMessage: EmptyResult
   getChatParticipant: GetChatParticipantResult

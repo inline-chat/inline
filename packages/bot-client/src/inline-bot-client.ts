@@ -1,5 +1,6 @@
 import type {
   BotApiEnvelope,
+  BotMethodEnvelope,
   BotMethodName,
   BotMethodParamsByName,
   BotMethodResultByName,
@@ -9,7 +10,10 @@ import type {
   DeleteReactionParams,
   DeleteWebhookParams,
   DeleteMessageParams,
+  DeleteMessagesParams,
+  EditMessageActionsParams,
   ForwardMessageParams,
+  ForwardMessagesParams,
   EditMessageTextParams,
   GetChatHistoryParams,
   GetChatParams,
@@ -19,6 +23,7 @@ import type {
   RemoveThreadParticipantParams,
   GetFileParams,
   GetMessagesParams,
+  GetSpaceParams,
   GetUpdatesParams,
   InlineBotClientOptions,
   InlineBotClientMethodOptions,
@@ -39,22 +44,53 @@ import type {
 
 const defaultBaseUrl = "https://api.inline.chat"
 
-const getMethodNames = new Set<BotMethodName>([
-  "getMe",
-  "getChat",
-  "getChatHistory",
-  "getChatParticipant",
-  "getChatParticipantCount",
-  "getMyCommands",
-  "getFile",
-  "getUpdates",
-  "getWebhookInfo",
-])
+type BotMethodTransport = "get" | "json" | "multipart"
 
-function isGetMethod(
-  method: string,
-): method is "getMe" | "getChat" | "getChatHistory" | "getChatParticipant" | "getChatParticipantCount" | "getMyCommands" | "getFile" | "getUpdates" | "getWebhookInfo" {
-  return getMethodNames.has(method as BotMethodName)
+const botMethodTransports = {
+  getMe: "get",
+  getSpace: "json",
+  getChat: "get",
+  getChatHistory: "get",
+  getMessages: "json",
+  searchMessages: "json",
+  createThread: "json",
+  createReplyThread: "json",
+  getMyCommands: "get",
+  setMyCommands: "json",
+  deleteMyCommands: "json",
+  sendMessage: "json",
+  editMessageText: "json",
+  editMessageActions: "json",
+  deleteMessage: "json",
+  deleteMessages: "json",
+  forwardMessage: "json",
+  forwardMessages: "json",
+  pinMessage: "json",
+  unpinMessage: "json",
+  getChatParticipant: "get",
+  getChatParticipantCount: "get",
+  addThreadParticipant: "json",
+  removeThreadParticipant: "json",
+  setThreadTitle: "json",
+  sendReaction: "json",
+  deleteReaction: "json",
+  answerMessageAction: "json",
+  sendChatAction: "json",
+  getFile: "get",
+  uploadFile: "multipart",
+  getUpdates: "get",
+  setWebhook: "json",
+  deleteWebhook: "json",
+  getWebhookInfo: "get",
+} as const satisfies Record<BotMethodName, BotMethodTransport>
+
+type BotClientMethodSurface = {
+  [M in BotMethodName]: BotMethodParamsByName[M] extends undefined
+    ? (options?: InlineBotClientMethodOptions) => Promise<BotMethodEnvelope<M>>
+    : (
+        params: BotMethodParamsByName[M],
+        options?: InlineBotClientMethodOptions,
+      ) => Promise<BotMethodEnvelope<M>>
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -81,7 +117,21 @@ function setQueryParams(url: URL, query: Record<string, unknown>) {
   }
 }
 
-export class InlineBotClient {
+function makeUploadFileForm(params: UploadFileParams): FormData {
+  const form = new FormData()
+  form.set("type", params.type)
+  form.set("file", params.file, params.file_name ?? `upload.${params.type === "photo" ? "jpg" : "bin"}`)
+  if (params.thumbnail) form.set("thumbnail", params.thumbnail, params.thumbnail_file_name ?? "thumbnail.jpg")
+  if (params.width !== undefined) form.set("width", String(params.width))
+  if (params.height !== undefined) form.set("height", String(params.height))
+  if (params.duration !== undefined) form.set("duration", String(params.duration))
+  if (params.is_animated !== undefined) form.set("is_animated", String(params.is_animated))
+  if (params.has_audio !== undefined) form.set("has_audio", String(params.has_audio))
+  if (params.waveform_base64 !== undefined) form.set("waveform_base64", params.waveform_base64)
+  return form
+}
+
+export class InlineBotClient implements BotClientMethodSurface {
   private readonly baseUrl: string
   private readonly token: string
   private readonly authMode: "header" | "path"
@@ -107,6 +157,15 @@ export class InlineBotClient {
     }
   }
 
+  private async fetchResponse<T>(url: URL, init: RequestInit): Promise<InlineBotClientResponse<T>> {
+    const res = await this.fetchImpl(url, init)
+    const contentType = res.headers.get("content-type") ?? ""
+    const data =
+      contentType.includes("application/json") ? ((await res.json()) as T) : ((await res.text()) as unknown as T)
+
+    return { status: res.status, headers: res.headers, data }
+  }
+
   // Low-level escape hatch with auth attached.
   async requestRaw<T = unknown>(path: string, options?: InlineBotClientRequestOptions): Promise<InlineBotClientResponse<T>> {
     const normalizedPath = path.startsWith("/") ? path : `/${path}`
@@ -125,18 +184,12 @@ export class InlineBotClient {
       body = JSON.stringify(options.body)
     }
 
-    const res = await this.fetchImpl(url, {
+    return this.fetchResponse<T>(url, {
       method,
       headers,
       body,
       signal: options?.signal,
     })
-
-    const contentType = res.headers.get("content-type") ?? ""
-    const data =
-      contentType.includes("application/json") ? ((await res.json()) as T) : ((await res.text()) as unknown as T)
-
-    return { status: res.status, headers: res.headers, data }
   }
 
   async methodRaw<M extends BotMethodName>(
@@ -150,17 +203,27 @@ export class InlineBotClient {
     options?: InlineBotClientMethodOptions,
   ): Promise<InlineBotClientResponse<BotApiEnvelope<T>>> {
     const methodPath = this.methodPath(method)
-    const isGet = isGetMethod(method)
-    const httpMethod = isGet ? "GET" : "POST"
+    const transport = botMethodTransports[method as BotMethodName]
     const postAs = options?.postAs ?? "json"
 
+    if (transport === "multipart") {
+      const headers = new Headers(options?.headers)
+      this.applyAuth(headers)
+      return this.fetchResponse<BotApiEnvelope<T>>(new URL(methodPath, this.baseUrl + "/"), {
+        method: "POST",
+        headers,
+        body: makeUploadFileForm(params as UploadFileParams),
+        signal: options?.signal,
+      })
+    }
+
     const requestOptions: InlineBotClientRequestOptions = {
-      method: httpMethod,
+      method: transport === "get" ? "GET" : "POST",
       headers: options?.headers,
       signal: options?.signal,
     }
 
-    if (isGet) {
+    if (transport === "get") {
       requestOptions.query = params
     } else if (postAs === "query") {
       requestOptions.query = params
@@ -221,6 +284,10 @@ export class InlineBotClient {
     return this.method("getMyCommands", undefined, options)
   }
 
+  getSpace(params: GetSpaceParams, options?: InlineBotClientMethodOptions) {
+    return this.method("getSpace", params, options)
+  }
+
   setMyCommands(params: SetMyCommandsParams, options?: InlineBotClientMethodOptions) {
     return this.method("setMyCommands", params, options)
   }
@@ -237,12 +304,24 @@ export class InlineBotClient {
     return this.method("editMessageText", params, options)
   }
 
+  editMessageActions(params: EditMessageActionsParams, options?: InlineBotClientMethodOptions) {
+    return this.method("editMessageActions", params, options)
+  }
+
   deleteMessage(params: DeleteMessageParams, options?: InlineBotClientMethodOptions) {
     return this.method("deleteMessage", params, options)
   }
 
+  deleteMessages(params: DeleteMessagesParams, options?: InlineBotClientMethodOptions) {
+    return this.method("deleteMessages", params, options)
+  }
+
   forwardMessage(params: ForwardMessageParams, options?: InlineBotClientMethodOptions) {
     return this.method("forwardMessage", params, options)
+  }
+
+  forwardMessages(params: ForwardMessagesParams, options?: InlineBotClientMethodOptions) {
+    return this.method("forwardMessages", params, options)
   }
 
   pinMessage(params: PinMessageParams, options?: InlineBotClientMethodOptions) {
@@ -294,25 +373,7 @@ export class InlineBotClient {
   }
 
   async uploadFile(params: UploadFileParams, options?: InlineBotClientMethodOptions): Promise<BotApiEnvelope<UploadFileResult>> {
-    const form = new FormData()
-    form.set("type", params.type)
-    form.set("file", params.file, params.file_name ?? `upload.${params.type === "photo" ? "jpg" : "bin"}`)
-    if (params.thumbnail) form.set("thumbnail", params.thumbnail, params.thumbnail_file_name ?? "thumbnail.jpg")
-    if (params.width !== undefined) form.set("width", String(params.width))
-    if (params.height !== undefined) form.set("height", String(params.height))
-    if (params.duration !== undefined) form.set("duration", String(params.duration))
-    if (params.is_animated !== undefined) form.set("is_animated", String(params.is_animated))
-    if (params.has_audio !== undefined) form.set("has_audio", String(params.has_audio))
-    if (params.waveform_base64 !== undefined) form.set("waveform_base64", params.waveform_base64)
-    const headers = new Headers(options?.headers)
-    this.applyAuth(headers)
-    const response = await this.fetchImpl(new URL(this.methodPath("uploadFile"), this.baseUrl + "/"), {
-      method: "POST",
-      headers,
-      body: form,
-      signal: options?.signal,
-    })
-    return await response.json() as BotApiEnvelope<UploadFileResult>
+    return this.method("uploadFile", params, options)
   }
 
   getUpdates(params: GetUpdatesParams = {}, options?: InlineBotClientMethodOptions) {
