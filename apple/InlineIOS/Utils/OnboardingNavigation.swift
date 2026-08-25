@@ -9,6 +9,7 @@ enum OnboardingStep: Identifiable, Hashable {
   case inviteCodeForEmail(email: String, challengeToken: String? = nil)
   case inviteCodeForPhone(phoneNumber: String)
   case profile(userId: Int64)
+  case username(userId: Int64)
   case main
   case phoneNumber(prevPhoneNumber: String? = nil)
   case phoneNumberCode(phoneNumber: String, inviteCode: String? = nil)
@@ -23,6 +24,7 @@ enum OnboardingStep: Identifiable, Hashable {
       case let .inviteCodeForEmail(email, challengeToken): "inviteCodeForEmail-\(email)-\(challengeToken ?? "")"
       case let .inviteCodeForPhone(phoneNumber): "inviteCodeForPhone-\(phoneNumber)"
       case let .profile(userId): "profile-\(userId)"
+      case let .username(userId): "username-\(userId)"
       case .main: "main"
       case let .phoneNumber(prevPhoneNumber): "phoneNumber-\(prevPhoneNumber ?? "")"
       case let .phoneNumberCode(phoneNumber, inviteCode): "phoneNumberCode-\(phoneNumber)-\(inviteCode ?? "")"
@@ -37,6 +39,9 @@ class OnboardingNavigation: ObservableObject {
   @Published var email: String = ""
   @Published var existingUser: Bool? = nil
   @Published var goingBack = false
+  @Published var profileName = ""
+  @Published var profileUsername = ""
+  private var profileDraftUserId: Int64?
 
   var canGoBack: Bool {
     path.count > 1
@@ -62,10 +67,20 @@ class OnboardingNavigation: ObservableObject {
     }
   }
 
+  func prepareProfileDraft(for userId: Int64) {
+    guard profileDraftUserId != userId else { return }
+    profileDraftUserId = userId
+    profileName = ""
+    profileUsername = ""
+  }
+
   func reset() {
     path = [.welcome]
     email = ""
     existingUser = nil
     goingBack = false
+    profileDraftUserId = nil
+    profileName = ""
+    profileUsername = ""
   }
 }

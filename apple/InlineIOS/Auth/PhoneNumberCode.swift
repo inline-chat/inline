@@ -37,13 +37,13 @@ struct PhoneNumberCode: View {
 
       // Icon and title section
       VStack(spacing: 12) {
-        Image(systemName: "key.fill")
+        Image(systemName: "numbers.rectangle.fill")
           .resizable()
           .scaledToFit()
           .frame(width: 34, height: 34)
           .foregroundColor(.primary)
 
-        Text(NSLocalizedString("Enter the code", comment: "Code input title"))
+        Text(NSLocalizedString("Enter confirmation code", comment: "Code input title"))
           .font(.onboardingIOSTitle.weight(.medium))
           .foregroundStyle(.primary)
       }

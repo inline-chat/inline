@@ -629,7 +629,7 @@
     "Enter the 8-character access invite code." : {
       "comment" : "Access invite code validation error"
     },
-    "Enter the code" : {
+    "Enter confirmation code" : {
       "comment" : "Code input title",
       "localizations" : {
         "fa" : {
@@ -1147,7 +1147,7 @@
     "Settings" : {
 
     },
-    "Setup your profile" : {
+    "Set up your profile" : {
       "comment" : "Profile setup title"
     },
     "Share" : {
@@ -1162,7 +1162,7 @@
     "Sign in with email" : {
       "comment" : "Email sign in title"
     },
-    "Sign in with phone" : {
+    "Continue with phone" : {
       "comment" : "Phone sign in title"
     },
     "Space" : {

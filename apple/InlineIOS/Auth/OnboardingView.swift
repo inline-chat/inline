@@ -22,7 +22,10 @@ struct OnboardingView: View {
             case let .inviteCodeForPhone(phoneNumber):
               InviteCode(destination: .phone(phoneNumber: phoneNumber))
             case let .profile(userId):
-              Profile()
+              Profile(userId: userId)
+                .id(userId)
+            case let .username(userId):
+              OnboardingUsername(userId: userId)
                 .id(userId)
             case .welcome:
               Welcome()

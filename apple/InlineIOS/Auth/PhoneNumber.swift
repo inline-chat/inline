@@ -26,13 +26,13 @@ struct PhoneNumber: View {
 
       // Icon and title section
       VStack(spacing: 12) {
-        Image(systemName: "phone.fill")
+        Image(systemName: "checkmark.message.fill")
           .resizable()
           .scaledToFit()
           .frame(width: 34, height: 34)
           .foregroundColor(.primary)
 
-        Text(NSLocalizedString("Sign in with phone", comment: "Phone sign in title"))
+        Text(NSLocalizedString("Continue with phone", comment: "Phone sign in title"))
           .font(.onboardingIOSTitle.weight(.medium))
           .foregroundStyle(.primary)
       }
