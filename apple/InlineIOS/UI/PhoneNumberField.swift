@@ -142,13 +142,9 @@ struct PhoneNumberField: View {
         .fill(.ultraThinMaterial)
         .overlay(
           RoundedRectangle(cornerRadius: cornerRadius)
-            .stroke(
-              isFocused ? Color.accentColor : Color.onboardingSystemGray4,
-              lineWidth: isFocused ? 2 : 0.5
-            )
+            .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
         )
     )
-    .animation(.easeInOut(duration: 0.2), value: isFocused)
   }
 }
 

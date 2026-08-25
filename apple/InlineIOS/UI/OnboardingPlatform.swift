@@ -59,6 +59,7 @@ extension View {
     keyboardType(.emailAddress)
       .textInputAutocapitalization(.never)
       .textContentType(.emailAddress)
+      .multilineTextAlignment(.center)
     #else
     self
     #endif
