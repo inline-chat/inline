@@ -5,6 +5,7 @@ struct InviteCode: View {
   enum Destination: Hashable {
     case email(email: String, challengeToken: String?)
     case phone(phoneNumber: String)
+    case nativeApple
   }
 
   let destination: Destination
@@ -15,6 +16,7 @@ struct InviteCode: View {
   @FocusState private var isFocused: Bool
   @EnvironmentObject var nav: OnboardingNavigation
   @EnvironmentObject var api: ApiClient
+  @ObservedObject private var providerSignIn = ProviderSignInCoordinator.shared
 
   private var normalizedCode: String {
     code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -39,10 +41,7 @@ struct InviteCode: View {
           .font(.onboardingIOSTitle.weight(.medium))
           .foregroundStyle(.primary)
 
-        Text(
-          "Your access invite code is separate from the verification code sent to your email or phone.",
-          comment: "Distinguishes an access invite from contact verification"
-        )
+        Text(inviteDescription)
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
@@ -126,6 +125,12 @@ struct InviteCode: View {
 
     Task {
       do {
+        if case .nativeApple = destination {
+          await providerSignIn.continueNativeAppleAuthorization(inviteCode: normalizedCode)
+          isChecking = false
+          if let error = providerSignIn.errorMessage { errorMsg = error }
+          return
+        }
         _ = try await api.checkInviteCode(normalizedCode)
         isChecking = false
         switch destination {
@@ -133,6 +138,8 @@ struct InviteCode: View {
           nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: normalizedCode))
         case let .phone(phoneNumber):
           nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: normalizedCode))
+        case .nativeApple:
+          break
         }
       } catch let error as APIError {
         isChecking = false
@@ -141,6 +148,15 @@ struct InviteCode: View {
         isChecking = false
         errorMsg = error.localizedDescription
       }
+    }
+  }
+
+  private var inviteDescription: LocalizedStringKey {
+    switch destination {
+      case .nativeApple:
+        "Your Apple Account is verified. Enter an Inline invite code to create your account."
+      case .email, .phone:
+        "Your access invite code is separate from the verification code sent to your email or phone."
     }
   }
 }

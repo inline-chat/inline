@@ -34,6 +34,10 @@ struct OnboardingView: View {
               PhoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode)
             case let .provider(provider):
               ProviderSignInProgress(provider: provider)
+            case .nativeAppleProgress:
+              NativeAppleSignInProgress()
+            case .nativeAppleInvite:
+              InviteCode(destination: .nativeApple)
           }
         }
     }
@@ -48,6 +52,12 @@ struct OnboardingView: View {
         navigation.reset()
         mainViewRouter.setRoute(route: .main)
       }
+    }
+    .onChange(of: providerSignIn.nativeAppleInviteRequest?.id, initial: true) { _, requestID in
+      guard let requestID,
+        providerSignIn.consumeNativeAppleInviteRequest(id: requestID) != nil
+      else { return }
+      navigation.push(.nativeAppleInvite)
     }
     .onDisappear {
       Task { await InlineProtocolNativeLogin.shared.cancel() }

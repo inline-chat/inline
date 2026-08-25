@@ -35,8 +35,19 @@ private struct SignInMethods: View {
 
   var body: some View {
     VStack(spacing: 8) {
-      providerButton(.google)
-      providerButton(.apple)
+      Button {
+        nav.push(.provider(.google))
+      } label: {
+        loginMethodLabel("Continue with Google") {
+          Image("google-g")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 18, height: 18)
+        }
+      }
+      .buttonStyle(SimpleWhiteButtonStyle())
+
+      NativeAppleSignInButton()
 
       Button {
         nav.push(.email())
@@ -62,27 +73,6 @@ private struct SignInMethods: View {
       }
       .buttonStyle(SimpleWhiteButtonStyle())
     }
-  }
-
-  @ViewBuilder
-  private func providerButton(_ provider: ProviderSignInProvider) -> some View {
-    Button {
-      nav.push(.provider(provider))
-    } label: {
-      loginMethodLabel(provider == .google ? "Continue with Google" : "Continue with Apple") {
-        if provider == .google {
-          Image("google-g")
-            .resizable()
-            .scaledToFit()
-            .frame(width: 18, height: 18)
-        } else {
-          Image(systemName: "apple.logo")
-            .font(.system(size: 18, weight: .medium))
-            .frame(width: 18, height: 18)
-        }
-      }
-    }
-    .buttonStyle(SimpleWhiteButtonStyle())
   }
 
   private func loginMethodLabel<Icon: View>(
