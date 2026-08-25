@@ -5,6 +5,7 @@ import type {
   BotFile,
   BotMedia,
   BotMessageAction,
+  BotPeerId,
   BotReaction,
   BotUser,
 } from "@inline-chat/bot-api-types"
@@ -14,6 +15,7 @@ import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import { encodeBotEntities, type BotUserJson } from "@in/server/controllers/bot/entityCodec"
+import { encodeBotRichMessageFromStored } from "@in/server/controllers/bot/richContent"
 import type { UpdateGroup } from "@in/server/modules/updates"
 import { Log } from "@in/server/utils/log"
 
@@ -37,6 +39,7 @@ const toEventChat = (chat: DbChat): BotEventChat => ({
   space_id: chat.spaceId ?? undefined,
   is_public: chat.publicThread ?? undefined,
   parent_chat_id: chat.parentChatId ?? undefined,
+  number: chat.threadNumber ?? undefined,
   emoji: chat.emoji ?? undefined,
 })
 
@@ -121,38 +124,68 @@ async function loadUsers(ids: number[]): Promise<Map<number, BotUserJson>> {
   }]))
 }
 
-const messageLite = (
+const messageReference = (
   message: DbFullMessage,
+  chatRow: DbChat,
   chat: BotEventChat,
   users: Map<number, BotUserJson>,
-) => ({
-  message_id: message.messageId,
-  chat_id: message.chatId,
-  chat,
-  peer: chat.type === "user" ? {} : { thread_id: chat.chat_id },
-  from_id: message.fromId,
-  from: toUser(users.get(message.fromId) ?? message.from),
-  date: unixSeconds(message.date),
-  edit_date: message.editDate ? unixSeconds(message.editDate) : undefined,
-  text: message.text ?? undefined,
-  entities: encodeBotEntities(message.entities, { usersById: users }),
-  media: encodeBotMedia(message),
-  actions: encodeBotActions(message.actions),
-})
+  botUserId: number,
+) => {
+  const peerId: BotPeerId = chat.type === "user"
+    ? { user_id: privateChatPeerUserId(chatRow, botUserId) }
+    : { chat_id: chat.chat_id }
+  const richMessage = encodeBotRichMessageFromStored({
+    text: message.text,
+    blockContent: message.blockContent,
+    blockContentPhotos: message.blockContentPhotos,
+    entities: message.entities,
+    usersById: users,
+  })
+  return {
+    message_id: message.messageId,
+    peer_id: peerId,
+    chat_id: message.chatId,
+    peer: chat.type === "user"
+      ? { user_id: privateChatPeerUserId(chatRow, botUserId) }
+      : { thread_id: chat.chat_id },
+    from_id: message.fromId,
+    from: toUser(users.get(message.fromId) ?? message.from),
+    date: unixSeconds(message.date),
+    edit_date: message.editDate ? unixSeconds(message.editDate) : undefined,
+    text: message.text ?? undefined,
+    entities: richMessage ? undefined : encodeBotEntities(message.entities, { usersById: users }),
+    rich_message: richMessage,
+    media: encodeBotMedia(message),
+    actions: encodeBotActions(message.actions),
+  }
+}
 
-async function eventMessage(chatRow: DbChat, message: DbFullMessage): Promise<BotEventMessage> {
-  const reply = message.replyToMsgId
-    ? await MessageModel.getMessage(message.replyToMsgId, chatRow.id).catch(() => null)
-    : null
-  const users = await loadUsers([
+const privateChatPeerUserId = (chat: DbChat, botUserId: number): number => {
+  if (chat.minUserId === botUserId) return chat.maxUserId ?? botUserId
+  if (chat.maxUserId === botUserId) return chat.minUserId ?? botUserId
+  return botUserId
+}
+
+async function loadEventMessageUsers(message: DbFullMessage, reply: DbFullMessage | null) {
+  return loadUsers([
     message.fromId,
     ...mentionTargets(message.entities),
     ...(reply ? [reply.fromId, ...mentionTargets(reply.entities)] : []),
   ])
+}
+
+function eventMessage(
+  chatRow: DbChat,
+  message: DbFullMessage,
+  reply: DbFullMessage | null,
+  users: Map<number, BotUserJson>,
+  botUserId: number,
+): BotEventMessage {
   const chat = toEventChat(chatRow)
   return {
-    ...messageLite(message, chat, users),
-    reply_to_message: reply ? messageLite(reply, chat, users) : undefined,
+    ...messageReference(message, chatRow, chat, users, botUserId),
+    chat,
+    reply_to_message: reply ? messageReference(reply, chatRow, chat, users, botUserId) : undefined,
   }
 }
 
@@ -185,10 +218,11 @@ async function messageCreated(input: {
   const reply = message.replyToMsgId
     ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
     : null
-  const encoded = await eventMessage(input.chat, message)
+  const users = await loadEventMessageUsers(message, reply)
   for (const stream of streams) {
     const reason = activationReason({ stream, chat: input.chat, message, reply })
     if (!reason) continue
+    const encoded = eventMessage(input.chat, message, reply, users, stream.botUserId)
     await BotUpdatesModel.recordMessageRoute({
       botUserId: stream.botUserId,
       chatId: input.chat.id,
@@ -208,8 +242,12 @@ async function messageEdited(input: { chat: DbChat; messageId: number }): Promis
   const routes = await BotUpdatesModel.getMessageRoutes(input.chat.id, [input.messageId])
   if (routes.length === 0) return
   const message = await MessageModel.getMessage(input.messageId, input.chat.id)
-  const encoded = await eventMessage(input.chat, message)
+  const reply = message.replyToMsgId
+    ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
+    : null
+  const users = await loadEventMessageUsers(message, reply)
   for (const route of routes) {
+    const encoded = eventMessage(input.chat, message, reply, users, route.botUserId)
     await BotUpdatesModel.queue({
       botUserId: route.botUserId,
       updateType: "edited_message",

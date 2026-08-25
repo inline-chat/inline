@@ -101,6 +101,9 @@ type Input = {
   }
   messageAttachments?: { externalTaskId?: bigint; urlPreviewId?: bigint }[]
 
+  /** Canonical structural projection supplied by trusted internal callers such as forwarding. */
+  blockContent?: BlockContent
+
   /** whether to process markdown string */
   parseMarkdown?: boolean
 
@@ -194,15 +197,20 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   ])
 
   let preparedBlockContent: PreparedBlockContent | undefined
-  if (text && outgoingText?.blockContent) {
+  const parsedBlockContent = input.blockContent
+    ? { blockContent: input.blockContent, imageSources: [] }
+    : outgoingText?.blockContent
+      ? {
+          blockContent: outgoingText.blockContent,
+          imageSources: outgoingText.blockImageSources ?? [],
+        }
+      : undefined
+  if (text && parsedBlockContent) {
     try {
       preparedBlockContent = prepareBlockContent({
         text,
         entities,
-        parsed: {
-          blockContent: outgoingText.blockContent,
-          imageSources: outgoingText.blockImageSources ?? [],
-        },
+        parsed: parsedBlockContent,
       })
     } catch (error) {
       log.error("rich content preparation failed; sending the plain projection", {

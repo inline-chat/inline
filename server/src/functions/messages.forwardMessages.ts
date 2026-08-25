@@ -1,4 +1,11 @@
-import { InputPeer, Update } from "@inline-chat/protocol/core"
+import {
+  BlockContent,
+  InputPeer,
+  Update,
+  type Block,
+  type BlockImage,
+  type Photo,
+} from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -9,6 +16,8 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { collectReadyBlockPhotoIds, projectReadyBlockPhotos } from "@in/server/modules/message/blockContent"
+import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
 import { eq } from "drizzle-orm"
 
 const log = new Log("functions.forwardMessages")
@@ -103,6 +112,47 @@ const cloneUrlPreviewById = async (previewId: bigint): Promise<number | null> =>
     .returning()
 
   return cloned?.id ?? null
+}
+
+const cloneForwardedBlockContent = async (
+  blockContent: BlockContent | null | undefined,
+  currentUserId: number,
+): Promise<BlockContent | undefined> => {
+  if (!blockContent) return undefined
+  const clonedPhotos = new Map<bigint, Photo>()
+  for (const sourcePhotoId of collectReadyBlockPhotoIds(blockContent)) {
+    const clonedPhotoId = await FileModel.clonePhotoById(Number(sourcePhotoId), currentUserId)
+    const clonedPhoto = await FileModel.getPhotoById(BigInt(clonedPhotoId))
+    if (!clonedPhoto) throw RealtimeRpcError.InternalError()
+    clonedPhotos.set(sourcePhotoId, encodePhoto({ photo: clonedPhoto }))
+  }
+  return snapshotForwardedBlockContent(
+    projectReadyBlockPhotos(blockContent, clonedPhotos),
+  )
+}
+
+export const snapshotForwardedBlockContent = (content: BlockContent): BlockContent => {
+  const snapshot = BlockContent.fromBinary(BlockContent.toBinary(content))
+  const image = (value: BlockImage): void => {
+    if (value.state.oneofKind !== "pending") return
+    value.state = {
+      oneofKind: "unavailable",
+      unavailable: { dimensions: value.state.pending.dimensions },
+    }
+  }
+  const blocks = (values: Block[]): void => {
+    for (const block of values) {
+      switch (block.kind.oneofKind) {
+        case "image": image(block.kind.image); break
+        case "album": block.kind.album.images.forEach(image); break
+        case "disclosure": blocks(block.kind.disclosure.children); break
+        case "quote": blocks(block.kind.quote.children); break
+        case "list": block.kind.list.items.forEach((item) => blocks(item.children)); break
+      }
+    }
+  }
+  blocks(snapshot.blocks)
+  return snapshot
 }
 
 export const forwardMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
@@ -220,6 +270,11 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
       voiceId = BigInt(clonedVoiceId)
     }
 
+    const blockContent = await cloneForwardedBlockContent(
+      sourceMessage.blockContent,
+      currentUserId,
+    )
+
     const result = await sendMessage(
       {
         peerId: input.toPeerId,
@@ -232,6 +287,7 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
         isSticker: sourceMessage.isSticker ?? false,
         forwardHeader: forwardHeader,
         messageAttachments: attachments,
+        blockContent,
         skipLinkProcessing: true,
       },
       context,

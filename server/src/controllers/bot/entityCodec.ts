@@ -143,7 +143,7 @@ const typeToString = (
 ): BotMessageEntityOutput["type"] => {
   switch (type) {
     case MessageEntity_Type.MENTION:
-      return "mention"
+      return "text_mention"
     case MessageEntity_Type.URL:
       return "url"
     case MessageEntity_Type.TEXT_URL:
@@ -155,7 +155,7 @@ const typeToString = (
     case MessageEntity_Type.ITALIC:
       return "italic"
     case MessageEntity_Type.USERNAME_MENTION:
-      return "username_mention"
+      return "mention"
     case MessageEntity_Type.CODE:
       return "code"
     case MessageEntity_Type.PRE:
@@ -168,6 +168,8 @@ const typeToString = (
       return "thread"
     case MessageEntity_Type.THREAD_TITLE:
       return "thread_title"
+    case MessageEntity_Type.GROUP_MENTION:
+      return "group_mention"
     default:
       return "unknown"
   }
@@ -356,6 +358,10 @@ export const encodeBotEntities = (
         )
       }
       out.title = entity.entity.threadTitle.title
+    } else if (
+      entity.entity.oneofKind === "groupMention"
+    ) {
+      out.group_id = Number(entity.entity.groupMention.groupId)
     }
 
     return out

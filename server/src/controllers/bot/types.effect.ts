@@ -7,9 +7,12 @@ import type {
   BotMessage as NeutralBotMessage,
   BotMessageAction as NeutralBotMessageAction,
   BotMessageEntityOutput as NeutralBotMessageEntityOutput,
-  BotMessageLite as NeutralBotMessageLite,
   BotMessageReaction as NeutralBotMessageReaction,
   BotPeer as NeutralBotPeer,
+  BotPeerId as NeutralBotPeerId,
+  BotRichBlock as NeutralBotRichBlock,
+  BotRichMessage as NeutralBotRichMessage,
+  BotRichText as NeutralBotRichText,
 } from "@inline-chat/bot-api-types"
 import { Schema } from "effect"
 import { Multipart } from "effect/unstable/http"
@@ -80,92 +83,52 @@ const BotTargetQueryFields = {
 
 export const BotMessageEntityType = Schema.Literals([
   "mention",
+  "text_mention",
   "url",
   "text_link",
   "email",
   "bold",
   "italic",
-  "username_mention",
   "code",
   "pre",
   "phone_number",
   "thread",
   "thread_title",
   "bot_command",
+  "group_mention",
 ]).annotate({
   identifier: "BotMessageEntityType",
   description:
     "Formatting, link, mention, and command metadata attached to a range of message text.",
 })
 
-export const BotMessageEntityInput = Schema.Struct({
-  type: BotMessageEntityType.annotateKey({
-    description: "Kind of formatting or semantic entity.",
-  }),
-  offset: WireNonNegativeInteger.annotateKey({
-    description:
-      "Zero-based offset where the entity begins in the message text.",
-  }),
-  length: WireNonNegativeInteger.annotateKey({
-    description:
-      "Number of text units covered by the entity.",
-  }),
-  user_id: OptionalUserId.annotateKey({
-    description:
-      "Referenced user for mention entities.",
-  }),
-  url: OptionalString.annotateKey({
-    description:
-      "Destination URL for a text_link entity.",
-  }),
-  language: OptionalString.annotateKey({
-    description:
-      "Programming language hint for a preformatted code block.",
-  }),
-  chat_id: OptionalChatId.annotateKey({
-    description:
-      "Referenced chat for thread link entities.",
-  }),
-  space_id: OptionalSpaceId.annotateKey({
-    description:
-      "Referenced space for thread-title link entities.",
-  }),
-  title: OptionalString.annotateKey({
-    description:
-      "Display title for a linked thread or space.",
-  }),
-}).annotate({
-  identifier: "BotMessageEntityInput",
-  description:
-    "Formatting or semantic metadata to apply to part of outgoing message text.",
-})
-
 export const BotMessageEntityOutput = Schema.Struct({
   type: Schema.Literals([
     "mention",
+    "text_mention",
     "url",
     "text_link",
     "email",
     "bold",
     "italic",
-    "username_mention",
     "code",
     "pre",
     "phone_number",
     "thread",
     "thread_title",
     "bot_command",
+    "group_mention",
     "unknown",
   ]).annotateKey({
     description: "Kind of formatting or semantic entity.",
   }),
   offset: WireNonNegativeInteger.annotateKey({
     description:
-      "Zero-based offset where the entity begins in the message text.",
+      "Zero-based UTF-16 code-unit offset where the entity begins in text.",
   }),
   length: WireNonNegativeInteger.annotateKey({
     description:
-      "Number of text units covered by the entity.",
+      "Number of UTF-16 code units covered by the entity.",
   }),
   user: Schema.optionalKey(BotUser).annotateKey({
     description:
@@ -191,6 +154,9 @@ export const BotMessageEntityOutput = Schema.Struct({
     description:
       "Display title for a linked thread or space.",
   }),
+  group_id: Schema.optionalKey(WirePositiveInteger).annotateKey({
+    description: "Referenced group for a group_mention entity.",
+  }),
 }).annotate({
   identifier: "BotMessageEntityOutput",
   description:
@@ -206,6 +172,21 @@ export const BotPeer = Schema.Struct({
   identifier: "BotPeer",
   description:
     "Additional peer information retained for user-chat compatibility. Prefer message.chat_id as the conversation identifier.",
+})
+
+export const BotPeerId = Schema.Union([
+  Schema.Struct({
+    user_id: UserId,
+    chat_id: Schema.optionalKey(Schema.Never),
+  }),
+  Schema.Struct({
+    user_id: Schema.optionalKey(Schema.Never),
+    chat_id: ChatId,
+  }),
+], { mode: "oneOf" }).annotate({
+  identifier: "BotPeerId",
+  description:
+    "Stable conversation identity: a user ID for a private chat or a chat ID for a thread.",
 })
 
 // TODO(effect-cutover): remove `thread_id` after production telemetry shows no
@@ -249,6 +230,122 @@ export const BotChatType = Schema.Literals([
   description: "Public conversation kind.",
 })
 
+export const BotRichText: Schema.Codec<NeutralBotRichText> = Schema.suspend(
+  (): Schema.Codec<NeutralBotRichText> => Schema.Union([
+    Schema.String,
+    Schema.mutable(Schema.Array(BotRichText)),
+    Schema.Struct({ type: Schema.Literals(["bold", "italic", "code"]), text: BotRichText }),
+    Schema.Struct({ type: Schema.Literal("url"), text: BotRichText, url: Schema.String }),
+    Schema.Struct({
+      type: Schema.Literal("email_address"),
+      text: BotRichText,
+      email_address: Schema.String,
+    }),
+    Schema.Struct({
+      type: Schema.Literal("phone_number"),
+      text: BotRichText,
+      phone_number: Schema.String,
+    }),
+    Schema.Struct({ type: Schema.Literal("mention"), text: BotRichText, username: Schema.String }),
+    Schema.Struct({ type: Schema.Literal("text_mention"), text: BotRichText, user: BotUser }),
+    Schema.Struct({
+      type: Schema.Literal("bot_command"),
+      text: BotRichText,
+      bot_command: Schema.String,
+    }),
+    Schema.Struct({ type: Schema.Literal("chat_link"), text: BotRichText, chat_id: ChatId }),
+    Schema.Struct({
+      type: Schema.Literal("thread_title"),
+      text: BotRichText,
+      title: Schema.String,
+      space_id: OptionalSpaceId,
+    }),
+    Schema.Struct({
+      type: Schema.Literal("group_mention"),
+      text: BotRichText,
+      group_id: WirePositiveInteger,
+    }),
+  ], { mode: "oneOf" }),
+).annotate({
+  identifier: "BotRichText",
+  description: "Recursive rich text following Telegram's text-tree model.",
+})
+
+export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
+  (): Schema.Codec<NeutralBotRichBlock> => Schema.Union([
+    Schema.Struct({
+      type: Schema.Literal("paragraph"),
+      text: BotRichText,
+      is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({
+      type: Schema.Literal("heading"),
+      text: BotRichText,
+      size: WirePositiveInteger,
+      is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({ type: Schema.Literal("pre"), text: BotRichText, language: OptionalString }),
+    Schema.Struct({
+      type: Schema.Literal("footer"),
+      text: BotRichText,
+      is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({ type: Schema.Literal("divider") }),
+    Schema.Struct({
+      type: Schema.Literal("list"),
+      items: Schema.mutable(Schema.Array(Schema.Struct({
+        label: Schema.String,
+        blocks: Schema.mutable(Schema.Array(BotRichBlock)),
+        has_checkbox: Schema.optionalKey(Schema.Literal(true)),
+        is_checked: Schema.optionalKey(Schema.Literal(true)),
+        value: OptionalWireInteger,
+      }))),
+      is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({
+      type: Schema.Literal("blockquote"),
+      blocks: Schema.mutable(Schema.Array(BotRichBlock)),
+      is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({ type: Schema.Literal("collage"), blocks: Schema.mutable(Schema.Array(BotRichBlock)) }),
+    Schema.Struct({
+      type: Schema.Literal("details"),
+      summary: BotRichText,
+      blocks: Schema.mutable(Schema.Array(BotRichBlock)),
+      is_open: Schema.optionalKey(Schema.Literal(true)),
+      kind: Schema.optionalKey(Schema.Literal("progress")),
+      is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({
+      type: Schema.Literal("table"),
+      cells: Schema.mutable(Schema.Array(Schema.mutable(Schema.Array(Schema.Struct({
+        text: BotRichText,
+        align: Schema.Literals(["left", "center", "right"]),
+        is_header: Schema.optionalKey(Schema.Literal(true)),
+      }))))),
+      is_bordered: Schema.optionalKey(Schema.Literal(true)),
+      is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({
+      type: Schema.Literal("photo"),
+      alt: Schema.optionalKey(BotRichText),
+      file: Schema.optionalKey(Schema.suspend(() => BotFile)),
+      width: Schema.optionalKey(WireNonNegativeInteger),
+      height: Schema.optionalKey(WireNonNegativeInteger),
+    }),
+  ], { mode: "oneOf" }),
+).annotate({
+  identifier: "BotRichBlock",
+  description: "A structural content block containing recursive rich text or child blocks.",
+})
+
+export const BotRichMessage: Schema.Codec<NeutralBotRichMessage> = Schema.Struct({
+  blocks: Schema.mutable(Schema.Array(BotRichBlock)),
+}).annotate({
+  identifier: "BotRichMessage",
+  description: "Structural rich content for a message.",
+})
+
 export const BotChatLastMessage = Schema.Struct({
   message_id: MessageId.annotateKey({
     description: "Unique identifier for this message within the chat.",
@@ -272,6 +369,9 @@ export const BotChatLastMessage = Schema.Struct({
     description:
       "Formatting and semantic entities found in the message text.",
   }),
+  rich_message: Schema.optionalKey(BotRichMessage).annotateKey({
+    description: "Recursive rich content, when the message has structural blocks.",
+  }),
 }).annotate({
   identifier: "BotChatLastMessage",
   description:
@@ -282,8 +382,8 @@ const BotChatBase = Schema.Struct({
   chat_id: ChatId.annotateKey({
     description: "Unique identifier for this chat.",
   }),
-  type: Schema.optionalKey(BotChatType).annotateKey({
-    description: "Conversation kind. Required in update payloads.",
+  type: BotChatType.annotateKey({
+    description: "Conversation kind.",
   }),
   title: OptionalString.annotateKey({
     description: "Display title of the chat.",
@@ -298,6 +398,9 @@ const BotChatBase = Schema.Struct({
   }),
   parent_chat_id: OptionalChatId.annotateKey({
     description: "Structural parent for a nested or reply thread.",
+  }),
+  number: Schema.optionalKey(WirePositiveInteger).annotateKey({
+    description: "Human-facing thread number within its space or home scope.",
   }),
   participants: Schema.optionalKey(
     Schema.Struct({
@@ -420,19 +523,19 @@ export const BotAttachment = Schema.Struct({
   description: "Structured attachment shown with a message.",
 })
 
-export const BotMessageLite = Schema.Struct({
+export const BotMessageReference = Schema.Struct({
   message_id: MessageId.annotateKey({
     description: "Unique identifier for this message within the chat.",
   }),
-  chat_id: ChatId.annotateKey({
-    description: "Identifier of the chat containing the message.",
+  peer_id: BotPeerId.annotateKey({
+    description: "Required peer identity used to address this conversation.",
   }),
-  chat: BotChatBase.annotateKey({
-    description: "Information about the containing chat.",
+  chat_id: OptionalChatId.annotateKey({
+    description: "Deprecated compatibility alias. Prefer peer_id.chat_id.",
   }),
-  peer: BotPeer.annotateKey({
+  peer: Schema.optionalKey(BotPeer).annotateKey({
     description:
-      "Additional private-chat peer information. Prefer chat_id for addressing the conversation.",
+      "Deprecated compatibility peer. Prefer peer_id.",
   }),
   from_id: UserId.annotateKey({
     description: "Unique identifier of the message sender.",
@@ -456,6 +559,10 @@ export const BotMessageLite = Schema.Struct({
     description:
       "Formatting and semantic entities found in the message text.",
   }),
+  rich_message: Schema.optionalKey(BotRichMessage).annotateKey({
+    description:
+      "Recursive structural content. When present, this is the semantic rich-content source instead of entities.",
+  }),
   media: Schema.optionalKey(BotMedia).annotateKey({
     description: "Media attached to the message.",
   }),
@@ -477,7 +584,7 @@ export const BotMessageLite = Schema.Struct({
     description: "Aggregated reactions on the message.",
   }),
 }).annotate({
-  identifier: "BotMessageLite",
+  identifier: "BotMessageReference",
   description:
     "A message without its replied-to message attached.",
 })
@@ -485,7 +592,7 @@ export const BotMessageLite = Schema.Struct({
 export const BotChat = Schema.Struct({
   ...BotChatBase.fields,
   parent_message: Schema.optionalKey(
-    BotMessageLite,
+    BotMessageReference,
   ).annotateKey({
     description:
       "Message anchoring this reply thread. Its chat omits parent_message and it has no reply_to_message.",
@@ -505,9 +612,13 @@ export const BotEventChat = Schema.Struct({
 })
 
 export const BotMessage = Schema.Struct({
-  ...BotMessageLite.fields,
+  ...BotMessageReference.fields,
+  chat: Schema.optionalKey(BotChat).annotateKey({
+    description:
+      "Expanded containing chat when useful in this response. Repeated history and nested messages may omit it.",
+  }),
   reply_to_message: Schema.optionalKey(
-    BotMessageLite,
+    BotMessageReference,
   ).annotateKey({
     description:
       "Original message when this message is a reply.",
@@ -611,15 +722,16 @@ export const BotUpdate = Schema.Union([
   description: "One durable event from the authenticated bot's update stream.",
 })
 
-export const BotMessageLiteCompatibility = Schema.Struct({
-  ...BotMessageLite.fields,
-  peer: BotPeerCompatibility,
+export const BotMessageReferenceCompatibility = Schema.Struct({
+  ...BotMessageReference.fields,
+  peer: Schema.optionalKey(BotPeerCompatibility),
 })
 
 export const BotMessageCompatibility = Schema.Struct({
-  ...BotMessageLiteCompatibility.fields,
+  ...BotMessage.fields,
+  peer: Schema.optionalKey(BotPeerCompatibility),
   reply_to_message: Schema.optionalKey(
-    BotMessageLiteCompatibility,
+    BotMessageReferenceCompatibility,
   ),
 })
 
@@ -633,12 +745,6 @@ export const SendMessageInput = Schema.Struct({
   ).annotateKey({
     description:
       "Message to reply to in the target chat.",
-  }),
-  entities: Schema.optionalKey(
-    Schema.Array(BotMessageEntityInput),
-  ).annotateKey({
-    description:
-      "Explicit formatting and semantic entities in text.",
   }),
   parse_markdown: Schema.optionalKey(
     Schema.Boolean,
@@ -757,12 +863,6 @@ export const EditMessageTextInput = Schema.Struct({
   text: Schema.String.annotateKey({
     description: "New text for the message.",
   }),
-  entities: Schema.optionalKey(
-    Schema.Array(BotMessageEntityInput),
-  ).annotateKey({
-    description:
-      "Explicit formatting and semantic entities in the new text.",
-  }),
   parse_markdown: Schema.optionalKey(
     Schema.Boolean,
   ).annotateKey({
@@ -778,6 +878,18 @@ export const EditMessageTextInput = Schema.Struct({
     "Parameters for editing a text message. Exactly one target field is required.",
 })
 
+export const EditMessageActionsInput = Schema.Struct({
+  ...BotTargetFields,
+  message_id: MessageId,
+  actions: Schema.Array(
+    Schema.Array(BotMessageAction).check(Schema.isMaxLength(8)),
+  ).check(Schema.isMaxLength(8)),
+}).annotate({
+  identifier: "EditMessageActionsInput",
+  description:
+    "Replaces all actions on a bot-authored message. An empty array clears them without changing text.",
+})
+
 export const DeleteMessageInput = Schema.Struct({
   ...BotTargetFields,
   message_id: MessageId.annotateKey({
@@ -787,6 +899,18 @@ export const DeleteMessageInput = Schema.Struct({
   identifier: "DeleteMessageInput",
   description:
     "Parameters for deleting a message. Exactly one target field is required.",
+})
+
+export const DeleteMessagesInput = Schema.Struct({
+  ...BotTargetFields,
+  message_ids: Schema.Array(MessageId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(100),
+  ),
+}).annotate({
+  identifier: "DeleteMessagesInput",
+  description:
+    "Deletes up to 100 messages. Missing message IDs are skipped, matching Telegram's batch behavior.",
 })
 
 export const SendReactionInput = Schema.Struct({
@@ -871,6 +995,19 @@ export const ForwardMessageInput = Schema.Struct({
   message_id: MessageId,
 }).annotate({ identifier: "ForwardMessageInput" })
 
+export const ForwardMessagesInput = Schema.Struct({
+  chat_id: ChatId,
+  from_chat_id: ChatId,
+  message_ids: Schema.Array(MessageId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(100),
+  ),
+}).annotate({
+  identifier: "ForwardMessagesInput",
+  description:
+    "Forwards up to 100 messages and returns the new IDs. Missing source IDs are skipped.",
+})
+
 export const PinMessageInput = Schema.Struct({
   chat_id: ChatId,
   message_id: MessageId,
@@ -892,8 +1029,16 @@ export const ThreadParticipantMutationInput = Schema.Struct({
 
 export const SetThreadTitleInput = Schema.Struct({
   chat_id: ChatId,
-  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  title: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
+  emoji: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20))),
 }).annotate({ identifier: "SetThreadTitleInput" })
+
+export const GetSpaceInput = Schema.Struct({
+  space_id: SpaceId,
+}).annotate({
+  identifier: "GetSpaceInput",
+  description: "Returns one accessible space and only the bot's own membership.",
+})
 
 export const BotSpaceMember = Schema.Struct({
   id: WirePositiveInteger,
@@ -903,6 +1048,13 @@ export const BotSpaceMember = Schema.Struct({
   date: WireNonNegativeInteger,
   can_access_public_chats: Schema.Boolean,
 }).annotate({ identifier: "BotSpaceMember" })
+
+export const BotSpace = Schema.Struct({
+  id: SpaceId,
+  name: Schema.String,
+  is_public: Schema.optionalKey(Schema.Boolean),
+  handle: OptionalString,
+}).annotate({ identifier: "BotSpace" })
 
 export const BotChatParticipant = Schema.Struct({
   user: BotUser,
@@ -939,6 +1091,14 @@ export const BotGetChatResult = Schema.Struct({
 }).annotate({
   identifier: "BotGetChatResult",
   description: "Information about the requested chat.",
+})
+export const BotGetSpaceResult = Schema.Struct({
+  space: BotSpace,
+  membership: BotSpaceMember,
+  settings: Schema.Struct({ grid_enabled: Schema.Boolean }),
+}).annotate({
+  identifier: "BotGetSpaceResult",
+  description: "An accessible space, the bot's membership, and bot-relevant settings.",
 })
 export const BotGetChatHistoryResult = Schema.Struct({
   messages: Schema.mutable(
@@ -997,6 +1157,12 @@ export const BotMessageResult = Schema.Struct({
 export const BotMessageRuntimeResult = Schema.Struct({
   message: BotMessageCompatibility,
 })
+export const BotForwardMessagesResult = Schema.Struct({
+  message_ids: Schema.mutable(Schema.Array(MessageId)),
+}).annotate({
+  identifier: "BotForwardMessagesResult",
+  description: "New message IDs, in the same order as the source messages that were forwarded.",
+})
 export const BotGetMyCommandsResult = Schema.Struct({
   commands: Schema.mutable(
     Schema.Array(BotCommand),
@@ -1050,9 +1216,11 @@ const exampleMember: typeof BotUser.Type = {
 
 const exampleChat: typeof BotChat.Type = {
   chat_id: exampleChatId,
+  type: "thread",
   title: "Product",
   space_id: exampleSpaceId,
   is_public: false,
+  number: 42,
   last_message_id: examplePreviousMessageId,
   last_message: {
     message_id: examplePreviousMessageId,
@@ -1066,6 +1234,7 @@ const exampleChat: typeof BotChat.Type = {
 
 const examplePrivateChat: typeof BotChat.Type = {
   chat_id: examplePrivateChatId,
+  type: "user",
   title: "Maya Chen",
   is_public: false,
   last_message_id: exampleMessageId,
@@ -1081,6 +1250,7 @@ const examplePrivateChat: typeof BotChat.Type = {
 
 const exampleMessage: typeof BotMessage.Type = {
   message_id: exampleMessageId,
+  peer_id: { user_id: exampleMember.id },
   chat_id: examplePrivateChat.chat_id,
   chat: examplePrivateChat,
   peer: {
@@ -1091,6 +1261,18 @@ const exampleMessage: typeof BotMessage.Type = {
   date: exampleMessageDate,
   text: exampleMessageText,
   entities: exampleMessageEntities,
+}
+
+const exampleHistoryMessage: typeof BotMessage.Type = {
+  message_id: exampleMessage.message_id,
+  peer_id: exampleMessage.peer_id,
+  chat_id: exampleMessage.chat_id,
+  peer: exampleMessage.peer,
+  from_id: exampleMessage.from_id,
+  from: exampleMessage.from,
+  date: exampleMessage.date,
+  text: exampleMessage.text,
+  entities: exampleMessage.entities,
 }
 
 export const BotGetChatSuccess = botApiSuccess(
@@ -1107,6 +1289,10 @@ export const BotGetChatSuccess = botApiSuccess(
     },
   ],
 })
+export const BotGetSpaceSuccess = botApiSuccess(BotGetSpaceResult).annotate({
+  identifier: "BotGetSpaceSuccess",
+  description: "Successful getSpace response.",
+})
 export const BotGetChatHistorySuccess = botApiSuccess(
   BotGetChatHistoryResult,
 ).annotate({
@@ -1116,7 +1302,7 @@ export const BotGetChatHistorySuccess = botApiSuccess(
     {
       ok: true,
       result: {
-        messages: [exampleMessage],
+        messages: [exampleHistoryMessage],
       },
     },
   ],
@@ -1126,7 +1312,7 @@ export const BotMessageSuccess = botApiSuccess(
 ).annotate({
   identifier: "BotMessageSuccess",
   description:
-    "Successful sendMessage or editMessageText response.",
+    "Successful sendMessage, editMessageText, or editMessageActions response.",
   examples: [
     {
       ok: true,
@@ -1147,6 +1333,9 @@ export const BotMessagesSuccess = botApiSuccess(BotMessagesResult).annotate({
   description: "Successful exact-message read or search response.",
 })
 export const BotMessagesRuntimeSuccess = botApiSuccess(BotMessagesRuntimeResult)
+export const BotForwardMessagesSuccess = botApiSuccess(BotForwardMessagesResult).annotate({
+  identifier: "BotForwardMessagesSuccess",
+})
 export const BotCreateThreadSuccess = botApiSuccess(BotCreateThreadResult).annotate({
   identifier: "BotCreateThreadSuccess",
   description: "Successful normal or reply-thread creation response.",
@@ -1292,6 +1481,18 @@ type Extends<Left, Right> = [Left] extends [Right]
 type _BotPeerMatchesNeutral = Assert<
   Extends<typeof BotPeer.Type, NeutralBotPeer>
 >
+type _BotPeerIdMatchesNeutral = Assert<
+  Extends<typeof BotPeerId.Type, NeutralBotPeerId>
+>
+type _BotRichTextMatchesNeutral = Assert<
+  Extends<typeof BotRichText.Type, NeutralBotRichText>
+>
+type _BotRichBlockMatchesNeutral = Assert<
+  Extends<typeof BotRichBlock.Type, NeutralBotRichBlock>
+>
+type _BotRichMessageMatchesNeutral = Assert<
+  Extends<typeof BotRichMessage.Type, NeutralBotRichMessage>
+>
 type _BotCommandMatchesNeutral = Assert<
   Extends<typeof BotCommand.Type, NeutralBotCommand>
 >
@@ -1319,8 +1520,11 @@ type _BotAttachmentMatchesNeutral = Assert<
 type _BotChatMatchesNeutral = Assert<
   Extends<typeof BotChat.Type, NeutralBotChat>
 >
-type _BotMessageLiteMatchesNeutral = Assert<
-  Extends<typeof BotMessageLite.Type, NeutralBotMessageLite>
+type _BotMessageReferenceMatchesNeutral = Assert<
+  Extends<
+    typeof BotMessageReference.Type,
+    Omit<NeutralBotMessage, "chat" | "reply_to_message">
+  >
 >
 type _BotMessageMatchesNeutral = Assert<
   Extends<typeof BotMessage.Type, NeutralBotMessage>
