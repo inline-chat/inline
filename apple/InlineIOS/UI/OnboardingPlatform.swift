@@ -51,3 +51,26 @@ extension Color {
     #endif
   }
 }
+
+extension View {
+  @ViewBuilder
+  func onboardingEmailInput() -> some View {
+    #if os(iOS)
+    keyboardType(.emailAddress)
+      .textInputAutocapitalization(.never)
+      .textContentType(.emailAddress)
+    #else
+    self
+    #endif
+  }
+
+  @ViewBuilder
+  func onboardingNumberInput() -> some View {
+    #if os(iOS)
+    keyboardType(.numberPad)
+      .textInputAutocapitalization(.never)
+    #else
+    self
+    #endif
+  }
+}

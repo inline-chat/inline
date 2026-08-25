@@ -3,6 +3,7 @@ import Foundation
 import GRDB
 import InlineKit
 import InlineUI
+import Logger
 import SwiftUI
 import Translation
 

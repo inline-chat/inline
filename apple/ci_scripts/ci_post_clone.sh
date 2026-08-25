@@ -3,13 +3,22 @@ set -euo pipefail
 
 readonly package_checks_workflow="Apple Package Tests"
 
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="${CI_PRIMARY_REPOSITORY_PATH:-$(CDPATH= cd -- "$script_dir/../.." && pwd)}"
+source_contracts_script="$repo_root/scripts/apple/check-source-contracts.sh"
+
+if [[ ! -x "$source_contracts_script" ]]; then
+  echo "error: missing executable Apple source-contract check at $source_contracts_script" >&2
+  exit 1
+fi
+
+"$source_contracts_script"
+
 if [[ "${CI_XCODE_CLOUD:-FALSE}" != "TRUE" || "${CI_WORKFLOW:-}" != "$package_checks_workflow" ]]; then
   echo "Skipping Apple package checks for workflow '${CI_WORKFLOW:-local}'."
   exit 0
 fi
 
-script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-repo_root="${CI_PRIMARY_REPOSITORY_PATH:-$(CDPATH= cd -- "$script_dir/../.." && pwd)}"
 checks_script="$script_dir/run-ci-checks.sh"
 
 if [[ ! -x "$checks_script" ]]; then

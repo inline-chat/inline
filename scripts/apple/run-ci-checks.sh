@@ -9,6 +9,7 @@ sw_vers
 xcodebuild -version
 xcrun swift --version
 
+"$script_dir/check-source-contracts.sh"
 "$script_dir/swiftlint.sh" --quiet --reporter summary
 
 if [[ "${1:-}" == "--lint-only" ]]; then
