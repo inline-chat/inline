@@ -47,6 +47,7 @@ impl fmt::Debug for AuthToken {
 /// Credential supplied during client connect.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum AuthCredential {
     /// Existing Inline access token.
     AccessToken {

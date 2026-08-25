@@ -90,6 +90,7 @@ use inline_sdk::{
     upload_file_v2, upload_file_v3,
 };
 
+#[allow(clippy::large_enum_variant)]
 enum AuthenticatedRealtime {
     V2(RealtimeClient),
     V3 {
@@ -1906,9 +1907,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                     json_format,
                                 )
                                 .await?;
-                                owner_session::resolve_owner_credential(&auth_store)?.ok_or_else(
-                                    || CliError::not_authenticated(),
-                                )?
+                                owner_session::resolve_owner_credential(&auth_store)?
+                                    .ok_or_else(CliError::not_authenticated)?
                             }
                         };
                         bridge::setup_provider(
@@ -3734,7 +3734,7 @@ async fn send_message(
         actions: None,
     };
 
-    Ok(realtime.call(input).await?)
+    realtime.call(input).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4240,7 +4240,7 @@ async fn run_agents_setup_command(
             )
             .await?;
             owner_session::resolve_owner_credential(auth_store)?
-                .ok_or_else(|| CliError::not_authenticated())?
+                .ok_or_else(CliError::not_authenticated)?
         }
     };
     agents::setup(config, Some(owner_auth), resolved, json, json_format).await

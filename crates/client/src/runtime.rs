@@ -1618,6 +1618,7 @@ impl std::fmt::Debug for ClientCommand {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum ClientRequest {
     AuthStart(AuthStartRequest),
     AuthVerify(AuthVerifyRequest),

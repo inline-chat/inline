@@ -445,7 +445,7 @@ pub fn aes_ige_encrypt(
     key: &[u8; 32],
     iv: &[u8; 32],
 ) -> Result<Vec<u8>, InvalidEncryptedRecord> {
-    if plaintext.len() % 16 != 0 || 24 + plaintext.len() > MAX_PACKET_BYTES {
+    if !plaintext.len().is_multiple_of(16) || 24 + plaintext.len() > MAX_PACKET_BYTES {
         return Err(InvalidEncryptedRecord);
     }
     let cipher = Aes256::new_from_slice(key).map_err(|_| InvalidEncryptedRecord)?;
@@ -469,7 +469,7 @@ pub fn aes_ige_decrypt(
     key: &[u8; 32],
     iv: &[u8; 32],
 ) -> Result<Vec<u8>, InvalidEncryptedRecord> {
-    if ciphertext.len() % 16 != 0 {
+    if !ciphertext.len().is_multiple_of(16) {
         return Err(InvalidEncryptedRecord);
     }
     let cipher = Aes256::new_from_slice(key).map_err(|_| InvalidEncryptedRecord)?;
@@ -496,7 +496,7 @@ pub fn encrypt_record(
     padding: &[u8],
 ) -> Result<Vec<u8>, InvalidEncryptedRecord> {
     if fields.body.len() > MAX_PACKET_BYTES
-        || fields.body.len() % 4 != 0
+        || !fields.body.len().is_multiple_of(4)
         || !(12..=1024).contains(&padding.len())
     {
         return Err(InvalidEncryptedRecord);
@@ -535,7 +535,10 @@ pub fn decrypt_record(
     valid_server_salts: &BTreeSet<i64>,
     now_seconds: i64,
 ) -> Result<RecordFields, InvalidEncryptedRecord> {
-    if record.len() < 72 || record.len() > MAX_PACKET_BYTES || (record.len() - 24) % 16 != 0 {
+    if record.len() < 72
+        || record.len() > MAX_PACKET_BYTES
+        || !(record.len() - 24).is_multiple_of(16)
+    {
         return Err(InvalidEncryptedRecord);
     }
     let msg_key = &record[8..24];
@@ -561,7 +564,7 @@ pub fn decrypt_record(
         .checked_sub(32 + body_length)
         .ok_or(InvalidEncryptedRecord)?;
     if body_length > MAX_PACKET_BYTES
-        || body_length % 4 != 0
+        || !body_length.is_multiple_of(4)
         || !(12..=1024).contains(&padding_length)
     {
         return Err(InvalidEncryptedRecord);
@@ -619,7 +622,7 @@ pub fn encode_abridged_packet_with_quick_ack(
     payload: &[u8],
     quick_ack_requested: bool,
 ) -> Result<Vec<u8>, InvalidEncryptedRecord> {
-    if payload.is_empty() || payload.len() > MAX_PACKET_BYTES || payload.len() % 4 != 0 {
+    if payload.is_empty() || payload.len() > MAX_PACKET_BYTES || !payload.len().is_multiple_of(4) {
         return Err(InvalidEncryptedRecord);
     }
     let words = payload.len() / 4;

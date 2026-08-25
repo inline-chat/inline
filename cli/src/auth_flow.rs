@@ -366,10 +366,10 @@ async fn handle_browser_login(
             login.verification_code
         );
     }
-    if !args.no_open {
-        if let Err(error) = open_system_browser(&login.browser_url) {
-            eprintln!("Could not open the browser automatically: {error}");
-        }
+    if !args.no_open
+        && let Err(error) = open_system_browser(&login.browser_url)
+    {
+        eprintln!("Could not open the browser automatically: {error}");
     }
 
     loop {
@@ -1032,7 +1032,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     #[tokio::test]
-    async fn non_interactive_email_login_sends_then_verifies_without_printing_token() {
+    async fn legacy_email_api_helpers_send_then_verify_without_printing_token() {
         let root = tempfile::tempdir().unwrap();
         let secrets_path = root.path().join("secrets.json");
         let state_path = root.path().join("state.json");
@@ -1042,29 +1042,17 @@ mod tests {
         )
         .await;
         let auth_store = AuthStore::new(secrets_path.clone(), api_url.clone());
-        let local_db = LocalDb::new(state_path.clone(), api_url.clone());
-        handle_login(
-            AuthLoginArgs {
-                browser: false,
-                no_open: false,
-                email: Some("agent@example.com".to_string()),
-                phone: None,
-                send_code: true,
-                code: None,
-                code_stdin: false,
-                challenge_token: None,
-                mac_app_bootstrap: false,
-                expected_user_id: None,
-            },
+        let contact = Contact::Email("agent@example.com".to_string());
+        let device_id = auth_store.device_id().unwrap();
+        let auth_metadata = client_info::auth_metadata(&device_id, None);
+        let sent = send_code(
             &ApiClient::try_new(api_url).unwrap(),
-            &auth_store,
-            "ws://127.0.0.1:9/realtime",
-            &local_db,
-            true,
-            JsonFormat::Compact,
+            &contact,
+            &auth_metadata,
         )
         .await
         .unwrap();
+        assert_eq!(sent.challenge_token.as_deref(), Some("challenge-123"));
         let send_request = send_request.await.unwrap();
         assert!(send_request.starts_with("POST /v1/sendEmailCode "));
         assert!(send_request.contains("agent@example.com"));
@@ -1073,20 +1061,17 @@ mod tests {
             serve_json(r#"{"ok":true,"result":{"userId":42,"token":"test-bearer-token"}}"#).await;
         let auth_store = AuthStore::new(secrets_path.clone(), api_url.clone());
         let local_db = LocalDb::new(state_path.clone(), api_url.clone());
-        handle_login(
-            AuthLoginArgs {
-                browser: false,
-                no_open: false,
-                email: Some("agent@example.com".to_string()),
-                phone: None,
-                send_code: false,
-                code: Some("123456".to_string()),
-                code_stdin: false,
-                challenge_token: Some("challenge-123".to_string()),
-                mac_app_bootstrap: false,
-                expected_user_id: None,
-            },
+        let verified = verify_code(
             &ApiClient::try_new(api_url).unwrap(),
+            &contact,
+            "123456",
+            Some("challenge-123"),
+            &auth_metadata,
+        )
+        .await
+        .unwrap();
+        finish_login(
+            verified,
             &auth_store,
             "ws://127.0.0.1:9/realtime",
             &local_db,

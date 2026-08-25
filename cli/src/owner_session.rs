@@ -16,6 +16,7 @@ use crate::auth::{
 use crate::config::Config;
 use crate::identity;
 
+#[allow(clippy::large_enum_variant)]
 enum OwnerConnection {
     V2(RealtimeClient),
     V3(InlineProtocolV3Connection),

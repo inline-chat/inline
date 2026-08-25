@@ -5070,7 +5070,7 @@ async fn upload_native_media(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| match request.kind {
+        .unwrap_or(match request.kind {
             MediaKind::Photo => "image/jpeg",
             MediaKind::Video => "video/mp4",
             MediaKind::Voice => "audio/ogg",

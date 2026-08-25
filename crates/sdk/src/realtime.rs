@@ -601,6 +601,11 @@ impl RealtimeEventReceiver {
         self.events.len()
     }
 
+    /// Returns whether this receiver has no pushed events queued now.
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
     /// Returns one already-queued pushed event without waiting for a future
     /// event. This is used by callers that need a bounded wire-order drain at
     /// an RPC response boundary.

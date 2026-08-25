@@ -366,6 +366,7 @@ fn lock_credentials_file(path: &Path) -> Result<File, io::Error> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(lock_path)?;
     set_file_permissions_handle(&lock, 0o600)?;
     lock_file_exclusive(&lock)?;

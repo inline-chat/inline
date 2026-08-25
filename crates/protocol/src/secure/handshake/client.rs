@@ -40,6 +40,7 @@ pub struct EstablishedAuthorizationKey {
 }
 
 /// Output from one handshake response.
+#[allow(clippy::large_enum_variant)]
 pub enum ClientHandshakeResult {
     /// Send this next unencrypted TL body.
     Request(Vec<u8>),
@@ -54,6 +55,7 @@ pub enum ClientHandshakeResult {
 
 type RandomBytes = Box<dyn FnMut(&mut [u8]) -> Result<(), InvalidEncryptedRecord> + Send>;
 
+#[allow(clippy::large_enum_variant)]
 enum Phase {
     Idle,
     Pq {
@@ -175,7 +177,7 @@ impl InlineHandshakeClient {
             return Err(InvalidEncryptedRecord);
         }
         let count = reader.i32()?;
-        if count < 0 || count > 64 {
+        if !(0..=64).contains(&count) {
             return Err(InvalidEncryptedRecord);
         }
         let mut fingerprints = Vec::with_capacity(count as usize);
@@ -412,6 +414,7 @@ impl InlineHandshakeClient {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_pq_inner(
     temporary: bool,
     pq: &[u8],

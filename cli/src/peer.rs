@@ -1,6 +1,7 @@
 use crate::errors::CliError;
 use crate::validation::validate_positive_id_arg;
 use inline_protocol::proto;
+#[cfg(test)]
 use inline_sdk::api::PeerId;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -43,6 +44,7 @@ pub(crate) fn input_peer_from_args(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn api_peer_from_args(
     chat_id: Option<i64>,
     user_id: Option<i64>,

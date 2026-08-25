@@ -93,19 +93,6 @@ fn parse_inline_protocol_public_key_ring(
     Ok(ring.rsa_public_key_ring)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bundled_production_ring_is_valid_and_contains_rotation_overlap() {
-        let ring = inline_protocol_production_public_key_ring().unwrap();
-        assert_eq!(ring.len(), 2);
-        assert_eq!(ring[0].fingerprint, "-8339382514522710386");
-        assert_eq!(ring[1].fingerprint, "-3957383261870667958");
-    }
-}
-
 pub async fn connect_inline_protocol_fresh(
     url: &str,
     keys: Vec<RsaPublicKey>,
@@ -122,4 +109,17 @@ pub async fn reconnect_inline_protocol(
 ) -> Result<InlineProtocolV3Connection, inline_sdk::InlineProtocolV3Error> {
     InlineProtocolV3Connection::connect(InlineProtocolV3Options::reconnect(url, authorization))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_production_ring_is_valid_and_contains_rotation_overlap() {
+        let ring = inline_protocol_production_public_key_ring().unwrap();
+        assert_eq!(ring.len(), 2);
+        assert_eq!(ring[0].fingerprint, "-8339382514522710386");
+        assert_eq!(ring[1].fingerprint, "-3957383261870667958");
+    }
 }
