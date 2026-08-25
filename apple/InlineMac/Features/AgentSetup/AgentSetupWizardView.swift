@@ -216,7 +216,7 @@ struct AgentSetupWizardView: View {
       .frame(minHeight: 150)
 
       if !model.missingTargets.isEmpty {
-        Text("Not installed: \(model.missingTargets.map(\.displayName).joined(separator: ", "))")
+        Text("Not installed: \(model.missingTargets.map(\.displayName).formatted())")
           .font(.caption)
           .foregroundStyle(.tertiary)
       }
@@ -267,7 +267,7 @@ struct AgentSetupWizardView: View {
     }
   }
 
-  private var completionTitle: String {
+  private var completionTitle: LocalizedStringResource {
     guard model.result != nil else { return "Setup Complete" }
     if model.isReady { return "Agent Ready" }
     if model.result?.service.ready == true {
@@ -289,13 +289,15 @@ struct AgentSetupWizardView: View {
     return "Configuration Saved"
   }
 
-  private func completionSummary(for result: AgentSetupResult) -> String {
+  private func completionSummary(for result: AgentSetupResult) -> LocalizedStringResource {
     let readinessCode = result.readiness?.code
     let adapterUnavailable = readinessCode == "inline_adapter_not_ready"
       || readinessCode == "inline_adapter_status_unsupported"
       || readinessCode == "inline_adapter_readiness_unknown"
-    let state = result.service.ready && !adapterUnavailable ? "connected through" : "configured for"
-    return "\(result.bot.name) is \(state) \(result.target) as @\(result.bot.username)."
+    if result.service.ready && !adapterUnavailable {
+      return "\(result.bot.name) is connected through \(result.target) as @\(result.bot.username)."
+    }
+    return "\(result.bot.name) is configured for \(result.target) as @\(result.bot.username)."
   }
 
   private var completionSystemImage: String {
