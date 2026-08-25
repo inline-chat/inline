@@ -71,17 +71,9 @@ struct OnboardingAppearance: View {
 
 private struct OnboardingAppearanceHeader: View {
   var body: some View {
-    VStack(spacing: 4) {
-      Image(systemName: "bubble.left.and.bubble.right.fill")
-        .resizable()
-        .scaledToFit()
-        .frame(width: 34, height: 34)
-        .foregroundStyle(.primary)
-
-      Text("Pick your style")
-        .font(.title2.weight(.semibold))
-        .foregroundStyle(.primary)
-    }
+    Text("Pick your message style")
+      .font(.title2.weight(.semibold))
+      .foregroundStyle(.primary)
   }
 }
 
