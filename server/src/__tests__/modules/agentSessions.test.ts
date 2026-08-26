@@ -10,6 +10,7 @@ import {
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import {
   agentSessionMessages,
   botMessageRoutes,
@@ -203,6 +204,191 @@ describe("agent session continuity", () => {
     expect(refs).toHaveLength(1)
   })
 
+  test("links the owner's live prompt in the bound thread without a delivery route", async () => {
+    const connected = await connect()
+    await db.insert(messages).values({
+      chatId,
+      messageId: 1,
+      fromId: ownerId,
+      text: "Continue my connected session",
+    })
+    await db.update(chats).set({ lastMsgId: 1, messageIdCounter: 1 }).where(eq(chats.id, chatId))
+
+    const linked = await syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.LIVE,
+      messages: [{
+        role: AgentSessionMessageRole.USER,
+        correlationRef: "owner-live-correlation",
+        complete: false,
+        operation: { oneofKind: "link", link: { messageId: 1n } },
+      }],
+    }, botId)
+
+    expect(linked.messages[0]?.state).toBe(AgentSessionMessageSyncState.LINKED)
+    const storedPrompt = await MessageModel.getMessage(1, chatId)
+    expect(storedPrompt.fromId).toBe(ownerId)
+    expect(storedPrompt.text).toBe("Continue my connected session")
+    expect(storedPrompt.agentSession).toMatchObject({
+      relation: AgentSessionMessageRelation.LINKED,
+      role: AgentSessionMessageRole.USER,
+    })
+  })
+
+  test("owner-authorized history adopts a past teammate prompt without a durable route", async () => {
+    const connected = await connect()
+    const [prompt] = await db.insert(messages).values({
+      chatId,
+      messageId: 1,
+      fromId: teammateId,
+      text: "Continue this older request",
+    }).returning()
+    if (!prompt) throw new Error("prompt not created")
+    await db.update(chats).set({ lastMsgId: 1, messageIdCounter: 1 }).where(eq(chats.id, chatId))
+    const linked = await syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.HISTORY,
+      messages: [{
+        role: AgentSessionMessageRole.USER,
+        itemRef: "older-provider-item",
+        correlationRef: "older-inline-correlation",
+        complete: true,
+        operation: { oneofKind: "link", link: { messageId: 1n } },
+      }],
+    }, botId)
+
+    expect(linked.messages[0]?.state).toBe(AgentSessionMessageSyncState.LINKED)
+    const storedPrompt = await MessageModel.getMessage(1, chatId)
+    expect(storedPrompt.fromId).toBe(teammateId)
+    expect(storedPrompt.text).toBe("Continue this older request")
+    expect(storedPrompt.agentSession).toMatchObject({
+      relation: AgentSessionMessageRelation.LINKED,
+      role: AgentSessionMessageRole.USER,
+    })
+  })
+
+  test("history may adopt another bot prompt but rejects the session bot's own row", async () => {
+    const connected = await connect()
+    const otherBot = await testUtils.createUser(`agent-history-bot-${crypto.randomUUID()}@example.com`)
+    await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, otherBot.id))
+    await testUtils.addParticipant(chatId, otherBot.id)
+    await db.insert(messages).values([
+      {
+        chatId,
+        messageId: 1,
+        fromId: otherBot.id,
+        text: "A different agent's prompt",
+      },
+      {
+        chatId,
+        messageId: 2,
+        fromId: botId,
+        text: "The connected agent's own row",
+      },
+    ])
+    await db.update(chats).set({ lastMsgId: 2, messageIdCounter: 2 }).where(eq(chats.id, chatId))
+
+    const adopted = await syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.HISTORY,
+      messages: [{
+        role: AgentSessionMessageRole.USER,
+        itemRef: "other-agent-user-item",
+        correlationRef: "other-agent-user-correlation",
+        complete: true,
+        operation: { oneofKind: "link", link: { messageId: 1n } },
+      }],
+    }, botId)
+
+    expect(adopted.messages[0]?.state).toBe(AgentSessionMessageSyncState.LINKED)
+    expect((await MessageModel.getMessage(1, chatId)).fromId).toBe(otherBot.id)
+    await expect(syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.HISTORY,
+      messages: [{
+        role: AgentSessionMessageRole.USER,
+        itemRef: "self-authored-user-item",
+        correlationRef: "self-authored-user-correlation",
+        complete: true,
+        operation: { oneofKind: "link", link: { messageId: 2n } },
+      }],
+    }, botId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.MESSAGE_ID_INVALID })
+  })
+
+  test("live linking still rejects an expired routed prompt", async () => {
+    const connected = await connect()
+    await db.insert(messages).values({
+      chatId,
+      messageId: 1,
+      fromId: teammateId,
+      text: "Expired live request",
+    })
+    await db.update(chats).set({ lastMsgId: 1, messageIdCounter: 1 }).where(eq(chats.id, chatId))
+    await db.insert(botMessageRoutes).values({
+      botUserId: botId,
+      chatId,
+      messageId: 1,
+      activationReason: "mention",
+      expiresAt: new Date(Date.now() - 60_000),
+    })
+
+    await expect(syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.LIVE,
+      messages: [{
+        role: AgentSessionMessageRole.USER,
+        correlationRef: "expired-inline-correlation",
+        complete: false,
+        operation: { oneofKind: "link", link: { messageId: 1n } },
+      }],
+    }, botId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.MESSAGE_ID_INVALID })
+  })
+
+  test("live linking rejects an unrouted bot and the session bot even with a route", async () => {
+    const connected = await connect()
+    const otherBot = await testUtils.createUser(`agent-live-bot-${crypto.randomUUID()}@example.com`)
+    await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, otherBot.id))
+    await testUtils.addParticipant(chatId, otherBot.id)
+    await db.insert(messages).values([
+      {
+        chatId,
+        messageId: 1,
+        fromId: otherBot.id,
+        text: "Unrouted other agent prompt",
+      },
+      {
+        chatId,
+        messageId: 2,
+        fromId: botId,
+        text: "The connected agent's own routed row",
+      },
+    ])
+    await db.update(chats).set({ lastMsgId: 2, messageIdCounter: 2 }).where(eq(chats.id, chatId))
+    await db.insert(botMessageRoutes).values({
+      botUserId: botId,
+      chatId,
+      messageId: 2,
+      activationReason: "mention",
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    for (const [messageId, correlationRef] of [
+      [1n, "unrouted-other-agent"],
+      [2n, "routed-session-agent"],
+    ] as const) {
+      await expect(syncAgentSessionMessages({
+        agentSessionId: connected.agentSession!.id,
+        mode: AgentSessionSyncMode.LIVE,
+        messages: [{
+          role: AgentSessionMessageRole.USER,
+          correlationRef,
+          complete: false,
+          operation: { oneofKind: "link", link: { messageId } },
+        }],
+      }, botId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.MESSAGE_ID_INVALID })
+    }
+  })
+
   test("lets two agent bots retain independent references to the same prompt", async () => {
     const first = await connect()
     const secondBot = await testUtils.createUser(`agent-bot-two-${crypto.randomUUID()}@example.com`)
@@ -309,11 +495,12 @@ describe("agent session continuity", () => {
 
   test("recovers an already-sent assistant row by its durable bot random ID", async () => {
     const connected = await connect()
+    const assistantRandomId = 8_000_000_000_000_000_001n
     const [response] = await db.insert(messages).values({
       chatId,
       messageId: 1,
       fromId: botId,
-      randomId: 777n,
+      randomId: assistantRandomId,
       text: "Already delivered",
     }).returning()
     if (!response) throw new Error("response not created")
@@ -331,7 +518,7 @@ describe("agent session continuity", () => {
         complete: true,
         operation: {
           oneofKind: "upsert",
-          upsert: { text: "Already delivered", assistantRandomId: 777n },
+          upsert: { text: "Already delivered", assistantRandomId },
         },
       }],
     }, botId)
