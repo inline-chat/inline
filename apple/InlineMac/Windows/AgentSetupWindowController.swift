@@ -4,9 +4,13 @@ import SwiftUI
 @MainActor
 final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
   private static var shared: AgentSetupWindowController?
+  private static let contentSize = NSSize(width: 560, height: 460)
+  private static let minimumContentSize = NSSize(width: 540, height: 420)
 
   private let model: AgentSetupWizardModel
   private let appBridge: AppBridge
+  private var isPresentingCancellationAlert = false
+  private var closesAfterCancellation = false
 
   static func show(using dependencies: AppDependencies, sender: Any? = nil) {
     if shared == nil {
@@ -26,8 +30,8 @@ final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
     model = AgentSetupWizardModel(dependencies: dependencies)
 
     let window = NSWindow(
-      contentRect: NSRect(origin: .zero, size: CGSize(width: 620, height: 520)),
-      styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
+      contentRect: NSRect(origin: .zero, size: Self.contentSize),
+      styleMask: [.titled, .closable, .resizable, .miniaturizable],
       backing: .buffered,
       defer: false
     )
@@ -36,13 +40,17 @@ final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
 
     window.title = "Set Up an Inline Agent"
     window.toolbarStyle = .unified
-    window.minSize = NSSize(width: 560, height: 460)
-    window.center()
+    window.contentMinSize = Self.minimumContentSize
     window.delegate = self
-    window.contentViewController = NSHostingController(
+    let hostingController = NSHostingController(
       rootView: AgentSetupWizardView(model: model)
         .environment(dependencies: dependencies.with(appBridge: appBridge))
     )
+    hostingController.sizingOptions = [.preferredContentSize]
+    hostingController.preferredContentSize = Self.contentSize
+    window.contentViewController = hostingController
+    window.setContentSize(Self.contentSize)
+    window.center()
   }
 
   @available(*, unavailable)
@@ -57,8 +65,11 @@ final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {
+    if closesAfterCancellation {
+      return true
+    }
     if model.isBusy {
-      NSSound.beep()
+      presentCancellationAlert(for: sender)
       return false
     }
     return true
@@ -68,5 +79,26 @@ final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
     model.cancel()
     appBridge.unregisterWindow()
     Self.shared = nil
+  }
+
+  private func presentCancellationAlert(for window: NSWindow) {
+    guard !isPresentingCancellationAlert else { return }
+    isPresentingCancellationAlert = true
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Cancel Agent Setup?"
+    alert.informativeText = "Inline will stop the current setup command. Work that already completed may remain configured."
+    alert.addButton(withTitle: "Keep Setting Up")
+    let cancelButton = alert.addButton(withTitle: "Cancel Setup")
+    cancelButton.hasDestructiveAction = true
+    alert.beginSheetModal(for: window) { [weak self] response in
+      guard let self else { return }
+      isPresentingCancellationAlert = false
+      if response == .alertSecondButtonReturn {
+        closesAfterCancellation = true
+        model.cancelOperation()
+        window.performClose(nil)
+      }
+    }
   }
 }

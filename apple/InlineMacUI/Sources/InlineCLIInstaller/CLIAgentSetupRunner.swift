@@ -35,6 +35,12 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     }
   }
 
+  private struct ResultEnvelope: Decodable {
+    let protocolVersion: Int
+    let event: String
+    let result: AgentSetupResult
+  }
+
   private static let protocolVersion = 1
   static let maximumOutputBytes = 512 * 1_024
   private static let discoveryTimeout: TimeInterval = 20
@@ -71,7 +77,8 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
   public func setup(
     target: AgentHarnessTarget,
     installation: CLIInstallation,
-    replaceExisting: Bool = false
+    replaceExisting: Bool = false,
+    progress: @escaping @Sendable (AgentSetupProgressEvent) -> Void
   ) async throws -> AgentSetupResult {
     guard target.installed, Self.isValidTargetID(target.id) else {
       throw AgentSetupFailure(
@@ -85,15 +92,47 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     defer { finishOperation(operationID) }
     return try await withTaskCancellationHandler {
       let output = try await Task.detached(priority: .userInitiated) { [self] in
-        return try run(
+        var output = try run(
           operationID: operationID,
           installation: installation,
           arguments: Self.setupArguments(
             targetID: target.id,
-            replaceExisting: replaceExisting
+            replaceExisting: replaceExisting,
+            appProtocol: true
           ),
-          timeout: Self.setupTimeout
+          timeout: Self.setupTimeout,
+          onStandardOutputLine: { line in
+            if let event = Self.parseProgressEvent(line) {
+              progress(event)
+            }
+          }
         )
+        if Self.isUnsupportedAppProtocol(output) {
+          progress(AgentSetupProgressEvent(
+            protocolVersion: Self.protocolVersion,
+            event: .phaseStarted,
+            phase: .configuration
+          ))
+          output = try run(
+            operationID: operationID,
+            installation: installation,
+            arguments: Self.setupArguments(
+              targetID: target.id,
+              replaceExisting: replaceExisting,
+              appProtocol: false
+            ),
+            timeout: Self.setupTimeout
+          )
+          if output.status == 0 {
+            progress(AgentSetupProgressEvent(
+              protocolVersion: Self.protocolVersion,
+              event: .phaseCompleted,
+              phase: .configuration,
+              outcome: "completed"
+            ))
+          }
+        }
+        return output
       }.value
       try Task.checkCancellation()
       guard output.status == 0 else { throw failure(from: output, targetID: target.id) }
@@ -127,7 +166,11 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
 
   static let discoveryArguments = ["--json", "--compact", "agents", "discover"]
 
-  static func setupArguments(targetID: String, replaceExisting: Bool) -> [String] {
+  static func setupArguments(
+    targetID: String,
+    replaceExisting: Bool,
+    appProtocol: Bool = true
+  ) -> [String] {
     var arguments = [
       "--json",
       "--compact",
@@ -137,6 +180,9 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
       targetID,
       "--non-interactive",
     ]
+    if appProtocol {
+      arguments.append(contentsOf: ["--app-protocol", "1"])
+    }
     if replaceExisting {
       arguments.append("--replace")
     }
@@ -158,10 +204,8 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
   }
 
   static func parseSetup(_ data: Data) throws -> AgentSetupResult {
-    let result: AgentSetupResult
-    do {
-      result = try JSONDecoder().decode(AgentSetupResult.self, from: data)
-    } catch {
+    let result = directSetupResult(from: data) ?? envelopedSetupResult(from: data)
+    guard let result else {
       throw invalidResponse("Inline CLI returned an unreadable agent setup result.")
     }
     guard result.protocolVersion == protocolVersion,
@@ -172,6 +216,30 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
       throw invalidResponse("Inline CLI returned an invalid agent setup result.")
     }
     return result
+  }
+
+  static func parseProgressEvent(_ data: Data) -> AgentSetupProgressEvent? {
+    guard let event = try? JSONDecoder().decode(AgentSetupProgressEvent.self, from: data),
+          event.protocolVersion == protocolVersion else { return nil }
+    if let outcome = event.outcome,
+       outcome.isEmpty || outcome.utf8.count > 64 || !outcome.utf8.allSatisfy(Self.isSafeCodeByte) {
+      return nil
+    }
+    return event
+  }
+
+  private static func directSetupResult(from data: Data) -> AgentSetupResult? {
+    try? JSONDecoder().decode(AgentSetupResult.self, from: data)
+  }
+
+  private static func envelopedSetupResult(from data: Data) -> AgentSetupResult? {
+    for line in data.split(separator: 0x0A).reversed() {
+      guard let envelope = try? JSONDecoder().decode(ResultEnvelope.self, from: Data(line)),
+            envelope.protocolVersion == protocolVersion,
+            envelope.event == "result" else { continue }
+      return envelope.result
+    }
+    return nil
   }
 
   private static func validOpenURL(_ url: URL, botID: Int64) -> Bool {
@@ -189,7 +257,8 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     operationID: UUID,
     installation: CLIInstallation,
     arguments: [String],
-    timeout: TimeInterval
+    timeout: TimeInterval,
+    onStandardOutputLine: (@Sendable (Data) -> Void)? = nil
   ) throws -> CommandOutput {
     try CLIExecutableVerifier.verify(
       installation.executableURL,
@@ -248,9 +317,15 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     }
     outputGroup.enter()
     DispatchQueue.global(qos: .userInitiated).async {
+      let lineAccumulator = OutputLineAccumulator(onLine: onStandardOutputLine)
       stdoutCapture.store(
-        Self.boundedDrain(standardOutput.fileHandleForReading, onOverflow: stopOnOverflow)
+        Self.boundedDrain(
+          standardOutput.fileHandleForReading,
+          onOverflow: stopOnOverflow,
+          onChunk: { lineAccumulator.consume($0) }
+        )
       )
+      lineAccumulator.finish()
       outputGroup.leave()
     }
     outputGroup.enter()
@@ -318,6 +393,19 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
       recoveryURL: Self.documentationURL,
       retryCommand: targetID.map { "inline agents setup --target \($0) --non-interactive" }
     )
+  }
+
+  private static func isUnsupportedAppProtocol(_ output: CommandOutput) -> Bool {
+    isUnsupportedAppProtocol(
+      status: output.status,
+      standardError: output.standardError
+    )
+  }
+
+  static func isUnsupportedAppProtocol(status: Int32, standardError: Data) -> Bool {
+    guard status == 2 else { return false }
+    guard let message = String(data: standardError, encoding: .utf8) else { return false }
+    return message.contains("--app-protocol")
   }
 
   private func beginOperation() throws -> UUID {
@@ -394,12 +482,13 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
   }
 
   static func boundedDrain(_ handle: FileHandle) -> Data {
-    boundedDrain(handle, onOverflow: nil)
+    boundedDrain(handle, onOverflow: nil, onChunk: nil)
   }
 
   private static func boundedDrain(
     _ handle: FileHandle,
-    onOverflow: (@Sendable () -> Void)?
+    onOverflow: (@Sendable () -> Void)?,
+    onChunk: (@Sendable (Data) -> Void)? = nil
   ) -> Data {
     var retained = Data()
     var reportedOverflow = false
@@ -408,6 +497,7 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
         let remaining = maximumOutputBytes - retained.count
         if remaining > 0 {
           retained.append(contentsOf: chunk.prefix(remaining))
+          onChunk?(Data(chunk.prefix(remaining)))
         }
         if chunk.count > remaining, !reportedOverflow {
           reportedOverflow = true
@@ -448,6 +538,10 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     }
     let code = String(bytes: filtered.prefix(80), encoding: .utf8) ?? ""
     return code.isEmpty ? "agent_setup_failed" : code
+  }
+
+  private static func isSafeCodeByte(_ byte: UInt8) -> Bool {
+    (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 95
   }
 
   static func parseFailure(_ data: Data, targetID: String? = nil) -> AgentSetupFailure? {
@@ -589,6 +683,31 @@ private final class OutputCapture: @unchecked Sendable {
 
   func store(_ data: Data) {
     lock.withLock { self.data = data }
+  }
+}
+
+private final class OutputLineAccumulator: @unchecked Sendable {
+  private let onLine: (@Sendable (Data) -> Void)?
+  private var buffer = Data()
+
+  init(onLine: (@Sendable (Data) -> Void)?) {
+    self.onLine = onLine
+  }
+
+  func consume(_ chunk: Data) {
+    guard onLine != nil else { return }
+    buffer.append(chunk)
+    while let newline = buffer.firstIndex(of: 0x0A) {
+      let line = Data(buffer[..<newline])
+      buffer.removeSubrange(...newline)
+      if !line.isEmpty { onLine?(line) }
+    }
+  }
+
+  func finish() {
+    guard !buffer.isEmpty else { return }
+    onLine?(buffer)
+    buffer.removeAll(keepingCapacity: false)
   }
 }
 

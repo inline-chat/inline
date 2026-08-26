@@ -11,10 +11,35 @@ struct CLIAgentSetupRunnerTests {
     ])
     #expect(CLIAgentSetupRunner.setupArguments(targetID: "codex", replaceExisting: false) == [
       "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
+      "--app-protocol", "1",
     ])
     #expect(CLIAgentSetupRunner.setupArguments(targetID: "hermes", replaceExisting: true) == [
-      "--json", "--compact", "agents", "setup", "--target", "hermes", "--non-interactive", "--replace",
+      "--json", "--compact", "agents", "setup", "--target", "hermes", "--non-interactive",
+      "--app-protocol", "1", "--replace",
     ])
+    #expect(CLIAgentSetupRunner.setupArguments(
+      targetID: "codex",
+      replaceExisting: false,
+      appProtocol: false
+    ) == [
+      "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
+    ])
+  }
+
+  @Test("falls back only for an older CLI that rejects the app protocol flag")
+  func identifiesUnsupportedAppProtocol() {
+    #expect(CLIAgentSetupRunner.isUnsupportedAppProtocol(
+      status: 2,
+      standardError: Data("error: unexpected argument '--app-protocol'".utf8)
+    ))
+    #expect(!CLIAgentSetupRunner.isUnsupportedAppProtocol(
+      status: 1,
+      standardError: Data("setup failed after accepting --app-protocol".utf8)
+    ))
+    #expect(!CLIAgentSetupRunner.isUnsupportedAppProtocol(
+      status: 2,
+      standardError: Data("error: missing required argument '--target'".utf8)
+    ))
   }
 
   @Test("decodes installed harness discovery")
@@ -42,6 +67,35 @@ struct CLIAgentSetupRunnerTests {
     #expect(result.bot.id == 42)
     #expect(result.service.ready)
     #expect(result.readiness == nil)
+  }
+
+  @Test("decodes progress events and the final streamed result")
+  func decodesStreamedSetup() throws {
+    let event = Data(
+      #"{"protocolVersion":1,"event":"phase.completed","phase":"bot","outcome":"reused"}"#.utf8
+    )
+    let output = Data(
+      (#"{"protocolVersion":1,"event":"phase.started","phase":"bot"}"# + "\n"
+        + #"{"protocolVersion":1,"event":"result","result":{"protocolVersion":1,"ok":true,"action":"agents.setup","status":"ready","documentationUrl":"https://inline.chat/docs/agents","openUrl":"in://user/42","target":"codex","family":"bridge","instance":"codex-example","bot":{"id":42,"username":"codex_bot","name":"Codex"},"service":{"kind":"inline_bridge","action":"started","ready":true,"status":"running"}}}"#
+        + "\n").data(using: .utf8)!
+    )
+
+    let progress = try #require(CLIAgentSetupRunner.parseProgressEvent(event))
+    let result = try CLIAgentSetupRunner.parseSetup(output)
+
+    #expect(progress.event == .phaseCompleted)
+    #expect(progress.phase == .bot)
+    #expect(progress.outcome == "reused")
+    #expect(result.bot.id == 42)
+  }
+
+  @Test("rejects progress outcomes outside the fixed code alphabet")
+  func rejectsUnsafeProgressOutcome() {
+    let event = Data(
+      #"{"protocolVersion":1,"event":"phase.completed","phase":"bot","outcome":"bot 42 at /tmp/example"}"#.utf8
+    )
+
+    #expect(CLIAgentSetupRunner.parseProgressEvent(event) == nil)
   }
 
   @Test("decodes a configured result that still needs a model provider")
