@@ -39,6 +39,7 @@ import {
   EventEmitter,
 } from "node:events"
 import { assertProviderAuthStartupConfiguration } from "@in/server/modules/auth/provider/startup"
+import type { InlineProtocolConfiguration } from "@in/server/modules/inlineProtocol/config"
 
 const sentryRelease =
   buildServerSentryRelease(
@@ -85,6 +86,9 @@ if (NODE_ENV !== "development") {
 }
 
 export interface StartServerOptions {
+  readonly inlineProtocolConfiguration?:
+    | InlineProtocolConfiguration
+    | undefined
   readonly installSignalHandlers?:
     | boolean
     | undefined
@@ -133,6 +137,8 @@ export const startServer = (
   return startCoreProductionServer({
     application,
     clientIpHeader,
+    inlineProtocolConfiguration:
+      options.inlineProtocolConfiguration,
     installSignalHandlers:
       options.installSignalHandlers ??
       true,
@@ -166,7 +172,10 @@ if (import.meta.main) {
     await runServer()
   } catch (error) {
     const details =
-      NODE_ENV === "development"
+      NODE_ENV === "development" ||
+        process.env[
+          "INLINE_SERVER_SMOKE"
+        ] === "1"
         ? coreProductionStartupErrorDetails(error) ?? error
         : { errorType: "CoreProductionStartupError" }
     Log.shared.fatal(

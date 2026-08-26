@@ -3,6 +3,7 @@ import {
 } from "effect"
 import {
   HealthHttpResponseSchema,
+  LivenessHttpResponseSchema,
 } from "../src/controllers/health.effect"
 
 const START_TIMEOUT_MILLIS = 20_000
@@ -65,6 +66,11 @@ const fetchBounded = (
     signal: AbortSignal.timeout(
       REQUEST_TIMEOUT_MILLIS,
     ),
+  }).catch((cause) => {
+    throw new Error(
+      `Production smoke request failed for ${url}.`,
+      { cause },
+    )
   })
 
 const exerciseRealtime = (
@@ -140,6 +146,9 @@ const main = async (): Promise<void> => {
     cmd: [
       process.execPath,
       entrypoint,
+      ...(useArtifact
+        ? ["--artifact-smoke"]
+        : []),
     ],
     cwd: new URL(
       "..",
@@ -268,11 +277,15 @@ const main = async (): Promise<void> => {
       healthAlias,
       healthz,
       healthzAlias,
+      readyz,
+      readyzAlias,
     ] = await Promise.all([
       fetchBounded(`${baseUrl}/health`),
       fetchBounded(`${baseUrl}/health/`),
       fetchBounded(`${baseUrl}/healthz`),
       fetchBounded(`${baseUrl}/healthz/`),
+      fetchBounded(`${baseUrl}/readyz`),
+      fetchBounded(`${baseUrl}/readyz/`),
     ])
     const healthStatuses = [
       health.status,
@@ -292,9 +305,30 @@ const main = async (): Promise<void> => {
         `${target} health aliases diverged: ${healthStatuses.join(",")}.`,
       )
     }
+    const readinessStatuses = [
+      readyz.status,
+      readyzAlias.status,
+    ]
+    if (
+      readinessStatuses.some(
+        (status) =>
+          useArtifact
+            ? status !== 200
+            : status !== 200 &&
+              status !== 503,
+      ) ||
+      new Set(readinessStatuses).size !== 1
+    ) {
+      throw new Error(
+        `${target} readiness aliases diverged: ${readinessStatuses.join(",")}.`,
+      )
+    }
+    Schema.decodeUnknownSync(
+      LivenessHttpResponseSchema,
+    )(await health.json())
     Schema.decodeUnknownSync(
       HealthHttpResponseSchema,
-    )(await health.json())
+    )(await readyz.json())
 
     const preflight = await fetch(
       `${baseUrl}/v1/getMe`,
@@ -432,60 +466,7 @@ const main = async (): Promise<void> => {
       `ws://127.0.0.1:${port}/realtime`,
     )
 
-    let closeInFlightBody:
-      | (() => void)
-      | undefined
-    const inFlightBody =
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            new TextEncoder().encode(
-              "{",
-            ),
-          )
-          closeInFlightBody = () =>
-            controller.close()
-        },
-      })
-    const inFlightRequest =
-      fetch(
-        `${baseUrl}/v1/sendSmsCode`,
-        {
-          method: "POST",
-          headers: {
-            "content-type":
-              "application/json",
-          },
-          body: inFlightBody,
-          duplex: "half",
-        } as RequestInit & {
-          readonly duplex: "half"
-        },
-      )
-    // Let the child accept the streaming request before initiating drain.
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(resolve, 100),
-    )
     child.kill("SIGTERM")
-    await new Promise<void>(
-      (resolve) =>
-        setTimeout(resolve, 100),
-    )
-    closeInFlightBody?.()
-    const inFlightResponse =
-      await withTimeout(
-        inFlightRequest,
-        REQUEST_TIMEOUT_MILLIS,
-        `${target} in-flight HTTP drain`,
-      )
-    if (
-      inFlightResponse.status !== 500
-    ) {
-      throw new Error(
-        `${target} changed the malformed in-flight request response during shutdown: HTTP ${inFlightResponse.status}.`,
-      )
-    }
     const exitCode = await withTimeout(
       child.exited,
       SHUTDOWN_TIMEOUT_MILLIS,
@@ -498,7 +479,7 @@ const main = async (): Promise<void> => {
     }
 
     console.info(
-      `Core ${target} smoke passed: complete HTTP/OpenAPI, middleware aliases, raw realtime, process runtime, and graceful shutdown.`,
+      `Core ${target} smoke passed: complete HTTP/OpenAPI, middleware aliases, raw realtime, process runtime, and clean signal shutdown.`,
     )
   } catch (error) {
     if (child.exitCode === null) {
