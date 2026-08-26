@@ -5989,6 +5989,7 @@ mod tests {
             }],
             attachments: Vec::new(),
             actions: Vec::new(),
+            agent_session: None,
         };
         store.record_message(message.clone()).await.unwrap();
         assert_eq!(

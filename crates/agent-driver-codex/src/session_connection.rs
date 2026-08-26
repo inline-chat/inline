@@ -1408,7 +1408,11 @@ mod tests {
         let provider = provider();
         let workspace = WorkspaceId::new("real-workspace").unwrap();
         let mut attached_one = false;
+        let mut attempted_sessions = std::collections::HashSet::new();
         for stored in any_page.data {
+            if !attempted_sessions.insert(stored.id.clone()) {
+                continue;
+            }
             let session = ProviderSessionRef::new(
                 provider.clone(),
                 ProviderSessionId::new(stored.id).expect("session id"),

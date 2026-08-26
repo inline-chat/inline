@@ -217,6 +217,10 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
     settings: &SettingsRuntime<'_, D>,
     deferred_by_capacity: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if is_agent_session_projection_event(delivery.event()) {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_session_browser_action(bot, delivery.event(), route, settings).await? {
         delivery.ack().await?;
         return Ok(());
@@ -333,6 +337,9 @@ pub(super) async fn inbound_from_delivery(
     let ClientEvent::MessageStored { message } = delivery.event() else {
         return Ok(None);
     };
+    if is_agent_session_projection(message) {
+        return Ok(None);
+    }
     let response_not_before = tokio::time::Instant::now() + INITIAL_RESPONSE_DELAY;
     if message.timestamp < route.accept_messages_after {
         return Ok(None);
@@ -563,6 +570,17 @@ pub(super) async fn inbound_from_delivery(
             Some(record)
         }
     }))
+}
+
+pub(super) fn is_agent_session_projection(message: &inline_client::MessageRecord) -> bool {
+    message.metadata.agent_session.is_some()
+}
+
+pub(super) fn is_agent_session_projection_event(event: &ClientEvent) -> bool {
+    matches!(
+        event,
+        ClientEvent::MessageStored { message } if is_agent_session_projection(message)
+    )
 }
 
 fn is_voice_message(message: &inline_client::MessageRecord) -> bool {
@@ -1887,6 +1905,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
     typing: &mut TypingIndicator<'_, InlineClient>,
     stop_confirmed: &mut bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if is_agent_session_projection_event(delivery.event()) {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_session_browser_action(
         bot,
         delivery.event(),

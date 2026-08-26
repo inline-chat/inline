@@ -1141,6 +1141,19 @@ pub struct MessageActionRecord {
     pub kind: String,
 }
 
+/// Durable agent-session provenance attached only to synchronized session rows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSessionMessageMetadata {
+    /// Stable Inline session identity; provider session IDs remain server-private.
+    pub agent_session_id: i64,
+    /// Numeric `AgentSessionProvider` protobuf value.
+    pub provider: i32,
+    /// Numeric `AgentSessionMessageRole` protobuf value.
+    pub role: i32,
+    /// Numeric `AgentSessionMessageRelation` protobuf value.
+    pub relation: i32,
+}
+
 /// Addressing and presentation metadata retained alongside message content.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageMetadata {
@@ -1165,6 +1178,9 @@ pub struct MessageMetadata {
     /// Visible action metadata without opaque callback bytes.
     #[serde(default)]
     pub actions: Vec<MessageActionRecord>,
+    /// Present when this row was imported from or linked to an agent session.
+    #[serde(default)]
+    pub agent_session: Option<AgentSessionMessageMetadata>,
 }
 
 /// Message record returned by history/detail commands.

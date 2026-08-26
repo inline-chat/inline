@@ -100,11 +100,12 @@ adapters. Claude currently requires Node.js 22 or newer.
 Choose the current project in Agent Settings or with `/projects` (`/folder`
 remains an alias), then run `/sessions` or `/open` in the owner bot DM. The
 picker contains only that verified project and keeps provider IDs and host paths
-out of callback payloads and messages. Opening a choice pre-fills a reply-thread
-title from the Codex title or preview, hydrates a bounded recent provider
-snapshot, and durably pins that Inline thread to the same Codex session and
-project. Browsing is read-only; sending the first message acquires the exclusive
-Codex writer.
+out of callback payloads and messages. It shows at most 50 recent sessions in
+stable six-session pages, with one compact navigation row. Opening a choice
+pre-fills a reply-thread title from the Codex title or preview, hydrates a
+bounded recent provider snapshot, and durably pins that Inline thread to the
+same Codex session and project. Browsing is read-only; sending the first message
+acquires the exclusive Codex writer.
 
 A pinned session thread cannot use `/new`, `/clear`, or a project setting to
 silently become a different session. Bridge tool-contract updates also preserve

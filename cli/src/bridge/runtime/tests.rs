@@ -52,6 +52,22 @@ fn only_an_unedited_blank_voice_message_waits_for_transcription() {
 }
 
 #[test]
+fn projected_agent_session_history_is_rejected_before_idle_or_active_handling() {
+    let mut message = voice_message(None, None);
+    message.metadata.agent_session = Some(inline_client::AgentSessionMessageMetadata {
+        agent_session_id: 42,
+        provider: proto::AgentSessionProvider::Codex as i32,
+        role: proto::AgentSessionMessageRole::User as i32,
+        relation: proto::AgentSessionMessageRelation::Imported as i32,
+    });
+
+    assert!(is_agent_session_projection(&message));
+    assert!(is_agent_session_projection_event(
+        &ClientEvent::MessageStored { message }
+    ));
+}
+
+#[test]
 fn pending_voice_registry_deduplicates_replacements_and_cancels_per_chat() {
     let route = InboundRoute {
         store: Arc::new(BridgeStore::open_in_memory().expect("bridge store")),

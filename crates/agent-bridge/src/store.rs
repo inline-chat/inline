@@ -96,6 +96,8 @@ pub enum StoreError {
     InvalidInboundFinalText,
     #[error("bridge terminal output attachments exceed the durable size limit")]
     InvalidInboundOutputAttachments,
+    #[error("provider turn has conflicting terminal Inline message identities")]
+    AmbiguousInboundTerminalIdentity,
     #[error("bridge progress ledger exceeds the durable size limit")]
     InvalidProgressLedger,
     #[error("bridge state contains an unknown approval state: {0}")]
@@ -541,6 +543,77 @@ impl BridgeStore {
             .map(|event_id| self.get_inbound(event_id))
             .transpose()
             .map(Option::flatten)
+    }
+
+    /// Returns one unambiguous completed Inline direction whose provider turn,
+    /// binding, delivery thread, and normalized input text all match history.
+    /// Legacy session-history adoption deliberately fails closed when more
+    /// than one local direction could own the provider item.
+    pub fn completed_inbound_for_provider_turn_input(
+        &self,
+        turn_id: &TurnId,
+        binding: &BindingKey,
+        direction_text: &str,
+    ) -> StoreResult<Option<InboundRecord>> {
+        let event_ids = {
+            let connection = self.connection.lock().expect("bridge store poisoned");
+            let mut statement = connection.prepare(
+                "SELECT event_id FROM inbound_directions
+                 WHERE provider_turn_id = ?1 AND state = 'completed'
+                   AND installation_id = ?2 AND chat_id = ?3 AND workspace_id = ?4
+                   AND delivery_chat_id = ?3 AND direction_text = ?5
+                 ORDER BY ingest_order ASC LIMIT 2",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        turn_id.as_str(),
+                        binding.installation_id.as_str(),
+                        binding.chat_id,
+                        binding.workspace_id.as_str(),
+                        direction_text,
+                    ],
+                    |row| row.get::<_, String>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let [event_id] = event_ids.as_slice() else {
+            return Ok(None);
+        };
+        self.get_inbound(event_id)
+    }
+
+    /// Returns the one stable terminal Inline identity for a completed provider
+    /// turn and binding, even when later steering directions share that turn.
+    pub fn completed_terminal_random_id_for_provider_turn(
+        &self,
+        turn_id: &TurnId,
+        binding: &BindingKey,
+    ) -> StoreResult<Option<i64>> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let mut statement = connection.prepare(
+            "SELECT DISTINCT terminal_random_id FROM inbound_directions
+             WHERE provider_turn_id = ?1 AND state = 'completed'
+               AND installation_id = ?2 AND chat_id = ?3 AND workspace_id = ?4
+               AND delivery_chat_id = ?3 AND terminal_random_id IS NOT NULL
+             LIMIT 2",
+        )?;
+        let random_ids = statement
+            .query_map(
+                params![
+                    turn_id.as_str(),
+                    binding.installation_id.as_str(),
+                    binding.chat_id,
+                    binding.workspace_id.as_str(),
+                ],
+                |row| row.get::<_, i64>(0),
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        match random_ids.as_slice() {
+            [] => Ok(None),
+            [random_id] => Ok(Some(*random_id)),
+            _ => Err(StoreError::AmbiguousInboundTerminalIdentity),
+        }
     }
 
     /// Claims the oldest accepted direction for one binding under a lease.

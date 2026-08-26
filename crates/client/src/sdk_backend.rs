@@ -5551,6 +5551,14 @@ fn message_metadata_from_proto(message: &proto::Message) -> crate::MessageMetada
                     .collect()
             })
             .unwrap_or_default(),
+        agent_session: message.agent_session.as_ref().map(|agent_session| {
+            crate::AgentSessionMessageMetadata {
+                agent_session_id: agent_session.agent_session_id,
+                provider: agent_session.provider,
+                role: agent_session.role,
+                relation: agent_session.relation,
+            }
+        }),
     }
 }
 
@@ -5952,6 +5960,29 @@ mod tests {
         assert_eq!(
             proto_send_mode(SendNotificationMode::Silent),
             Some(proto::MessageSendMode::ModeSilent as i32)
+        );
+    }
+
+    #[test]
+    fn message_projection_retains_agent_session_provenance() {
+        let message = proto::Message {
+            agent_session: Some(proto::AgentSessionMessageInfo {
+                agent_session_id: 42,
+                provider: proto::AgentSessionProvider::Codex as i32,
+                role: proto::AgentSessionMessageRole::User as i32,
+                relation: proto::AgentSessionMessageRelation::Imported as i32,
+            }),
+            ..proto::Message::default()
+        };
+
+        assert_eq!(
+            message_metadata_from_proto(&message).agent_session,
+            Some(crate::AgentSessionMessageMetadata {
+                agent_session_id: 42,
+                provider: proto::AgentSessionProvider::Codex as i32,
+                role: proto::AgentSessionMessageRole::User as i32,
+                relation: proto::AgentSessionMessageRelation::Imported as i32,
+            })
         );
     }
 

@@ -5093,6 +5093,47 @@ fn current_epoch_seconds() -> u64 {
         .as_secs()
 }
 
+#[cfg(all(test, target_os = "macos"))]
+mod installed_message_action_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "invokes one real action using the authenticated local Inline account"]
+    async fn installed_user_invokes_a_real_message_action() {
+        let chat_id = std::env::var("INLINE_LIVE_ACTION_CHAT_ID")
+            .expect("INLINE_LIVE_ACTION_CHAT_ID")
+            .parse::<i64>()
+            .expect("valid chat id");
+        let message_id = std::env::var("INLINE_LIVE_ACTION_MESSAGE_ID")
+            .expect("INLINE_LIVE_ACTION_MESSAGE_ID")
+            .parse::<i64>()
+            .expect("valid message id");
+        let action_id = std::env::var("INLINE_LIVE_ACTION_ID").expect("INLINE_LIVE_ACTION_ID");
+        assert!(chat_id > 0);
+        assert!(message_id > 0);
+        assert!(!action_id.trim().is_empty());
+
+        let config = Config::load();
+        let auth_store = AuthStore::new(config.secrets_path.clone(), config.api_base_url.clone());
+        let mut realtime = connect_authenticated_realtime(&config, &auth_store)
+            .await
+            .expect("connect authenticated local Inline account");
+        let result = realtime
+            .call(proto::InvokeMessageActionInput {
+                peer_id: Some(proto::InputPeer {
+                    r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+                        chat_id,
+                    })),
+                }),
+                message_id,
+                action_id,
+            })
+            .await
+            .expect("invoke real message action");
+        assert!(result.interaction_id > 0);
+    }
+}
+
 #[cfg(test)]
 mod cli_parsing_tests {
     use super::*;

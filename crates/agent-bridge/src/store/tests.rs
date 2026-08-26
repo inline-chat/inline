@@ -72,13 +72,128 @@ fn completed_provider_turns_become_snapshot_hydration_dedupe_keys() {
             .expect("pending turns")
             .is_empty()
     );
-    assert!(store.complete_inbound(&record.event_id).expect("complete"));
+    assert!(
+        store
+            .stage_inbound_final_send(&record.event_id, InboundState::Completed, "done", None,)
+            .expect("stage final")
+    );
+    assert_eq!(
+        store
+            .ensure_inbound_final_send_random_id(&record.event_id, 777)
+            .expect("terminal random id"),
+        Some(777)
+    );
+    assert!(
+        store
+            .commit_inbound_final_send(&record.event_id)
+            .expect("complete")
+    );
     assert_eq!(
         store
             .completed_provider_turn_ids(&record.binding)
             .expect("completed turns"),
         std::collections::HashSet::from([turn_id.to_string()])
     );
+    assert_eq!(
+        store
+            .completed_inbound_for_provider_turn_input(
+                &turn_id,
+                &record.binding,
+                &record.direction.text,
+            )
+            .expect("completed inbound")
+            .map(|record| record.event_id),
+        Some("event-1".to_string())
+    );
+    assert!(
+        store
+            .completed_inbound_for_provider_turn_input(
+                &turn_id,
+                &record.binding,
+                "a different provider item",
+            )
+            .expect("non-matching input")
+            .is_none()
+    );
+
+    let mut steer = inbound("event-steer", 12);
+    steer.message_id = 101;
+    steer.direction.text = "steer the active turn".to_string();
+    assert!(store.accept_inbound(&steer).expect("accept steer"));
+    assert!(
+        store
+            .start_inbound(&steer.event_id, 13)
+            .expect("start steer")
+    );
+    assert!(
+        store
+            .attach_inbound_turn(&steer.event_id, &turn_id, None)
+            .expect("attach steer")
+    );
+    assert!(
+        store
+            .complete_inbound(&steer.event_id)
+            .expect("complete steer")
+    );
+    assert_eq!(
+        store
+            .completed_terminal_random_id_for_provider_turn(&turn_id, &record.binding)
+            .expect("stored final identity"),
+        Some(777)
+    );
+}
+
+#[test]
+fn ambiguous_legacy_turn_identity_fails_closed() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let turn_id = TurnId::new("provider-turn-ambiguous").expect("turn");
+    for (index, random_id) in [(0_i64, 701_i64), (1, 702)] {
+        let mut record = inbound(&format!("event-ambiguous-{index}"), 10 + index);
+        record.message_id = 100 + index;
+        record.direction.text = "same historical prompt".to_string();
+        assert!(store.accept_inbound(&record).expect("accept"));
+        assert!(
+            store
+                .start_inbound(&record.event_id, 20 + index)
+                .expect("start")
+        );
+        assert!(
+            store
+                .attach_inbound_turn(&record.event_id, &turn_id, None)
+                .expect("attach turn")
+        );
+        assert!(
+            store
+                .stage_inbound_final_send(&record.event_id, InboundState::Completed, "done", None,)
+                .expect("stage final")
+        );
+        assert_eq!(
+            store
+                .ensure_inbound_final_send_random_id(&record.event_id, random_id)
+                .expect("terminal random id"),
+            Some(random_id)
+        );
+        assert!(
+            store
+                .commit_inbound_final_send(&record.event_id)
+                .expect("commit final")
+        );
+    }
+
+    assert!(
+        store
+            .completed_inbound_for_provider_turn_input(
+                &turn_id,
+                &binding(),
+                "same historical prompt",
+            )
+            .expect("ambiguous user identity")
+            .is_none()
+    );
+    assert!(matches!(
+        store.completed_terminal_random_id_for_provider_turn(&turn_id, &binding()),
+        Err(StoreError::AmbiguousInboundTerminalIdentity)
+    ));
 }
 
 #[test]

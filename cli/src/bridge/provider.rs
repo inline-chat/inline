@@ -14,9 +14,9 @@ use super::{
     AccountBridgeConfig, BridgePaths, adapter::prepare_pinned_adapter, read_optional_json,
 };
 use inline_agent_bridge::{
-    AgentDriver, ApprovalDecision, DriverCapabilities, DriverFuture, DriverResult,
+    AgentDriver, ApprovalDecision, DirectionId, DriverCapabilities, DriverFuture, DriverResult,
     DriverSettingsCatalog, ProcessHostConfig, ProviderSessionId, QuestionAnswer, ResumeSessionSpec,
-    SessionSpec, StartedTurn, TurnId, TurnInput, TurnOptions,
+    SessionInputCorrelation, SessionSpec, StartedTurn, TurnId, TurnInput, TurnOptions,
 };
 use inline_agent_driver_acp::{
     AcpDistribution, AcpDriver, AcpLaunchDescriptor, AcpProcessStatus, VersionDiscovery,
@@ -849,6 +849,16 @@ impl AgentDriver for ProviderDriver {
         }
     }
 
+    fn session_input_correlation(
+        &self,
+        direction_id: &DirectionId,
+    ) -> Option<SessionInputCorrelation> {
+        match self {
+            Self::Codex(driver) => driver.session_input_correlation(direction_id),
+            Self::Acp(driver) => driver.session_input_correlation(direction_id),
+        }
+    }
+
     fn configure_host_tools(
         &self,
         configuration: inline_agent_bridge::HostToolConfiguration,
@@ -971,6 +981,49 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use inline_agent_driver_codex::CodexPeer;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    #[tokio::test]
+    async fn codex_wrapper_preserves_provider_history_correlation() {
+        let (client, mut server) = tokio::io::duplex(16 * 1024);
+        let (reader, writer) = tokio::io::split(client);
+        let peer = CodexPeer::new(reader, Box::new(writer) as CodexDriverWriter, 16);
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(&mut server);
+            let mut lines = BufReader::new(reader).lines();
+            let initialize = lines
+                .next_line()
+                .await
+                .expect("read initialize")
+                .expect("initialize frame");
+            assert!(initialize.contains("\"method\":\"initialize\""));
+            writer
+                .write_all(b"{\"id\":1,\"result\":{\"userAgent\":\"codex\"}}\n")
+                .await
+                .expect("initialize response");
+            let initialized = lines
+                .next_line()
+                .await
+                .expect("read initialized")
+                .expect("initialized frame");
+            assert!(initialized.contains("\"method\":\"initialized\""));
+        });
+        let driver = ProviderDriver::Codex(
+            CodexAppServerDriver::initialize(peer, "0.7.4")
+                .await
+                .expect("initialize driver"),
+        );
+        let direction_id = DirectionId::new("inline-message-881-7").expect("direction");
+
+        assert_eq!(
+            driver
+                .session_input_correlation(&direction_id)
+                .map(|correlation| correlation.as_str().to_owned()),
+            Some("inline-agent-bridge:v1:inline-message-881-7".to_string())
+        );
+        server_task.await.expect("server task");
+    }
 
     #[test]
     fn probe_output_is_bounded_and_marks_omission() {

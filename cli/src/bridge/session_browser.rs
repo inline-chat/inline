@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use inline_agent_bridge::{
-    AgentSessionCatalog, DriverResult, HistoryWindow, MAX_HISTORY_MESSAGE_LIMIT,
+    AgentSessionCatalog, DriverError, DriverResult, HistoryWindow, MAX_HISTORY_MESSAGE_LIMIT,
     MAX_HISTORY_TEXT_BYTES, ProviderInstanceRef, ProviderSessionId, ProviderSessionRef,
     SessionAvailability, SessionCapabilities, SessionItem, SessionItemPayload, SessionMessageRole,
     SessionPageSize, SessionQuery, SessionReadRequest, SessionSnapshot, SessionSummary,
@@ -24,10 +24,11 @@ const ACTION_PREFIX: &str = "bridge_agent_sessions_";
 const PICKER_TTL_SECONDS: i64 = 10 * 60;
 const MAX_PICKERS: usize = 32;
 const PICKER_PAGE_SIZE: usize = 6;
-const MAX_SESSION_RESULTS: usize = 100;
+const MAX_SESSION_RESULTS: usize = 50;
 const MAX_INLINE_TEXT_UTF16: usize = 12_000;
 const MAX_INLINE_TEXT_BYTES: usize = 20_000;
 const MAX_BUTTON_TEXT_UTF16: usize = 64;
+const AGENT_SESSION_SYNC_BATCH_SIZE: usize = 25;
 const FRESH_THREAD_MESSAGE_LIMIT: u32 = 15;
 
 pub(super) trait SessionCatalogSource: AgentDriver {
@@ -353,29 +354,39 @@ where
                 .await?;
                 return Ok(true);
             };
-            if !catalog
-                .provider_health(&workspace.workspace_id)
-                .await?
-                .is_ready()
-            {
-                answer_session_action(
-                    bot,
-                    *interaction_id,
-                    &format!(
-                        "{} needs setup or sign-in repair.",
-                        session_provider_label(&route.provider_id)
-                    ),
-                )
-                .await?;
+            let provider_health = match classify_session_open_catalog_result(
+                &route.provider_id,
+                catalog.provider_health(&workspace.workspace_id).await,
+            )? {
+                Ok(health) => health,
+                Err(toast) => {
+                    answer_session_action(bot, *interaction_id, &toast).await?;
+                    return Ok(true);
+                }
+            };
+            if let Some(toast) = session_open_health_toast(&route.provider_id, provider_health) {
+                answer_session_action(bot, *interaction_id, &toast).await?;
                 return Ok(true);
             }
-            let snapshot = catalog
-                .read_session(SessionReadRequest {
-                    session: open.session.session().clone(),
-                    workspace_id: open.workspace_id.clone(),
-                    window: HistoryWindow::new(MAX_HISTORY_MESSAGE_LIMIT, MAX_HISTORY_TEXT_BYTES),
-                })
-                .await?;
+            let snapshot = match classify_session_open_catalog_result(
+                &route.provider_id,
+                catalog
+                    .read_session(SessionReadRequest {
+                        session: open.session.session().clone(),
+                        workspace_id: open.workspace_id.clone(),
+                        window: HistoryWindow::new(
+                            MAX_HISTORY_MESSAGE_LIMIT,
+                            MAX_HISTORY_TEXT_BYTES,
+                        ),
+                    })
+                    .await,
+            )? {
+                Ok(snapshot) => snapshot,
+                Err(toast) => {
+                    answer_session_action(bot, *interaction_id, &toast).await?;
+                    return Ok(true);
+                }
+            };
             let reverse_binding = route.store.session_thread_binding(open.session.session())?;
             if reverse_binding.is_none()
                 && !route
@@ -523,7 +534,26 @@ where
                 thread_id,
                 &open.workspace_id,
             )?;
-            sync_agent_session_snapshot(bot, agent_session.id, &snapshot).await?;
+            let correlation_for_direction = |direction_id: &DirectionId| {
+                settings
+                    .sessions
+                    .driver()
+                    .session_input_correlation(direction_id)
+                    .map(|correlation| correlation.as_str().to_owned())
+            };
+            sync_agent_session_snapshot(
+                bot,
+                agent_session.id,
+                &snapshot,
+                &AgentSessionHistoryContext {
+                    store: &route.store,
+                    installation_id: &route.installation_id,
+                    workspace_id: &open.workspace_id,
+                    thread_id,
+                    correlation_for_direction: &correlation_for_direction,
+                },
+            )
+            .await?;
             let status_message_id = match agent_session.status_message_id {
                 Some(message_id) => message_id,
                 None => {
@@ -682,7 +712,20 @@ where
         )
         .await;
     };
-    match catalog.provider_health(&workspace.workspace_id).await? {
+    let provider_health = match catalog.provider_health(&workspace.workspace_id).await {
+        Ok(health) => health,
+        Err(DriverError::Transient(_)) => {
+            return send_session_reply(
+                bot,
+                record,
+                &session_catalog_timeout_message(&route.provider_id),
+                "catalog-timeout",
+            )
+            .await;
+        }
+        Err(error) => return Err(error.into()),
+    };
+    match provider_health {
         inline_agent_bridge::ProviderHealth::Ready => {}
         inline_agent_bridge::ProviderHealth::Unauthenticated => {
             return send_session_reply(
@@ -726,7 +769,19 @@ where
         cursor: None,
         page_size: SessionPageSize::new(MAX_SESSION_RESULTS),
     };
-    let page = catalog.list_sessions(query).await?;
+    let page = match catalog.list_sessions(query).await {
+        Ok(page) => page,
+        Err(DriverError::Transient(_)) => {
+            return send_session_reply(
+                bot,
+                record,
+                &session_catalog_timeout_message(&route.provider_id),
+                "catalog-timeout",
+            )
+            .await;
+        }
+        Err(error) => return Err(error.into()),
+    };
     let sessions = page
         .sessions()
         .iter()
@@ -933,8 +988,8 @@ fn session_picker_card(
             let index = start + offset;
             Ok(MessageActionRow {
                 actions: vec![MessageActionButton {
-                    action_id: format!("{ACTION_PREFIX}open"),
-                    text: session_button_text(session),
+                    action_id: session_open_action_id(index),
+                    text: session_button_text(session, index + 1),
                     kind: MessageActionKind::Callback {
                         data: session_browser_callback_data(
                             token,
@@ -1033,11 +1088,17 @@ fn picker_page(sessions: &[SessionSummary], page: usize) -> Option<(usize, usize
     Some((start, end, page_count))
 }
 
-fn session_button_text(session: &SessionSummary) -> String {
+fn session_button_text(session: &SessionSummary, ordinal: usize) -> String {
     let label = session
         .title()
         .or_else(|| session.preview())
-        .unwrap_or("Untitled session");
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "{} session {ordinal}",
+                session_provider_label(session.session().provider().provider_id())
+            )
+        });
     let suffix = match session.availability() {
         SessionAvailability::Active => " · Active",
         SessionAvailability::ActiveElsewhere => " · Active elsewhere",
@@ -1045,7 +1106,7 @@ fn session_button_text(session: &SessionSummary) -> String {
         SessionAvailability::Unknown | SessionAvailability::Available => "",
     };
     truncate_utf16(
-        label,
+        &label,
         MAX_BUTTON_TEXT_UTF16.saturating_sub(suffix.encode_utf16().count()),
     ) + suffix
 }
@@ -1078,6 +1139,47 @@ fn provider_sign_in_message(provider_id: &ProviderId) -> String {
     }
 }
 
+fn session_catalog_timeout_message(provider_id: &ProviderId) -> String {
+    format!(
+        "{} took too long to load sessions. The agent is still connected; try /sessions again.",
+        session_provider_label(provider_id)
+    )
+}
+
+fn classify_session_open_catalog_result<T>(
+    provider_id: &ProviderId,
+    result: DriverResult<T>,
+) -> DriverResult<Result<T, String>> {
+    match result {
+        Ok(value) => Ok(Ok(value)),
+        Err(DriverError::Transient(_)) => Ok(Err(format!(
+            "{} took too long to open this session. Try Open again.",
+            session_provider_label(provider_id)
+        ))),
+        Err(error) => Err(error),
+    }
+}
+
+fn session_open_health_toast(
+    provider_id: &ProviderId,
+    health: inline_agent_bridge::ProviderHealth,
+) -> Option<String> {
+    match health {
+        inline_agent_bridge::ProviderHealth::Ready => None,
+        inline_agent_bridge::ProviderHealth::Unauthenticated => {
+            Some(provider_sign_in_message(provider_id))
+        }
+        inline_agent_bridge::ProviderHealth::UnsupportedVersion => Some(format!(
+            "{} needs an update before Inline can open this session.",
+            session_provider_label(provider_id)
+        )),
+        _ => Some(format!(
+            "{} sessions are temporarily unavailable. Try Open again after the provider reconnects.",
+            session_provider_label(provider_id)
+        )),
+    }
+}
+
 fn session_browser_callback_data(
     token: &str,
     action: SessionBrowserCallbackAction,
@@ -1089,12 +1191,16 @@ fn session_browser_callback_data(
     })
 }
 
+fn session_open_action_id(index: usize) -> String {
+    format!("{ACTION_PREFIX}open_{index}")
+}
+
 fn parse_session_browser_callback(action_id: &str, data: &[u8]) -> Option<SessionBrowserCallback> {
     let callback = serde_json::from_slice::<SessionBrowserCallback>(data)
         .ok()
         .filter(|callback| callback.version == CALLBACK_VERSION)?;
     let matching_action = match callback.action {
-        SessionBrowserCallbackAction::Open { .. } => action_id == format!("{ACTION_PREFIX}open"),
+        SessionBrowserCallbackAction::Open { index } => action_id == session_open_action_id(index),
         SessionBrowserCallbackAction::Confirm { .. } => {
             action_id == format!("{ACTION_PREFIX}confirm")
         }
@@ -1408,10 +1514,19 @@ fn bounded_agent_message_text(text: &str) -> String {
     format!("{prefix}{TRUNCATED}")
 }
 
+struct AgentSessionHistoryContext<'a> {
+    store: &'a BridgeStore,
+    installation_id: &'a InstallationId,
+    workspace_id: &'a WorkspaceId,
+    thread_id: i64,
+    correlation_for_direction: &'a dyn Fn(&DirectionId) -> Option<String>,
+}
+
 async fn sync_agent_session_snapshot(
     bot: &InlineClient,
     agent_session_id: i64,
     snapshot: &SessionSnapshot,
+    context: &AgentSessionHistoryContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if agent_session_id <= 0 {
         return Err(io::Error::new(
@@ -1434,6 +1549,25 @@ async fn sync_agent_session_snapshot(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
+    let mut legacy_user_item_counts = HashMap::<(&str, &str), usize>::new();
+    for item in snapshot.items() {
+        let (
+            Some(turn_id),
+            SessionItemPayload::Message {
+                role: SessionMessageRole::User,
+                text,
+                ..
+            },
+        ) = (&item.run_id, &item.payload)
+        else {
+            continue;
+        };
+        if item.confirmed_inline_echo().is_none() {
+            *legacy_user_item_counts
+                .entry((turn_id.as_str(), text.as_str()))
+                .or_default() += 1;
+        }
+    }
     let mut messages = Vec::new();
     for item in snapshot.items() {
         let SessionItemPayload::Message {
@@ -1458,34 +1592,79 @@ async fn sync_agent_session_snapshot(
             }
             SessionMessageRole::System => continue,
         };
-        let text = bounded_agent_message_text(text);
-        let correlation_ref = match role {
-            proto::AgentSessionMessageRole::User => item
-                .confirmed_inline_correlation()
-                .map(|correlation| correlation.as_str().to_owned()),
-            proto::AgentSessionMessageRole::Assistant => {
-                item.run_id.as_ref().map(agent_output_correlation)
-            }
-            proto::AgentSessionMessageRole::Unspecified => None,
+        let known_inline_history = match role {
+            proto::AgentSessionMessageRole::User => known_inline_user_history(
+                item,
+                item.run_id.as_ref().is_some_and(|turn_id| {
+                    legacy_user_item_counts
+                        .get(&(turn_id.as_str(), text.as_str()))
+                        .copied()
+                        == Some(1)
+                }),
+                context,
+            )?,
+            proto::AgentSessionMessageRole::Assistant
+            | proto::AgentSessionMessageRole::Unspecified => None,
         };
+        let text = bounded_agent_message_text(
+            known_inline_history
+                .as_ref()
+                .map_or(text.as_str(), |history| history.text.as_str()),
+        );
         let assistant_random_id = match (&item.run_id, role) {
             (Some(turn_id), proto::AgentSessionMessageRole::Assistant) => {
-                Some(assistant_final_random_id(turn_id).get())
+                known_inline_assistant_random_id(context, turn_id)?
+                    .or_else(|| Some(assistant_final_random_id(turn_id).get()))
             }
             _ => None,
         };
-        if created_at.is_none() && assistant_random_id.is_none() {
-            continue;
-        }
-        let source_date = *created_at;
-        let revision_ref = Some(agent_item_revision(item, &text));
-        let operation = proto::agent_session_message_sync::Operation::Upsert(
-            proto::AgentSessionMessageUpsert {
-                text,
-                entities: None,
-                assistant_random_id,
-            },
-        );
+        let linked_user_message = known_inline_history
+            .as_ref()
+            .and_then(|history| history.linked_message_id);
+        let (correlation_ref, source_date, revision_ref, operation) =
+            if let Some(message_id) = linked_user_message {
+                let Some(correlation_ref) = known_inline_history
+                    .as_ref()
+                    .and_then(|history| history.correlation_ref.clone())
+                else {
+                    // This row already exists in the adopted Inline thread. If
+                    // the driver cannot provide its provider-visible identity,
+                    // leaving it unprojected is safer than duplicating it.
+                    continue;
+                };
+                (
+                    Some(correlation_ref),
+                    None,
+                    None,
+                    proto::agent_session_message_sync::Operation::Link(
+                        proto::AgentSessionMessageLink { message_id },
+                    ),
+                )
+            } else {
+                if created_at.is_none() && assistant_random_id.is_none() {
+                    continue;
+                }
+                (
+                    match role {
+                        proto::AgentSessionMessageRole::User => known_inline_history
+                            .as_ref()
+                            .and_then(|history| history.correlation_ref.clone()),
+                        proto::AgentSessionMessageRole::Assistant => {
+                            item.run_id.as_ref().map(agent_output_correlation)
+                        }
+                        proto::AgentSessionMessageRole::Unspecified => None,
+                    },
+                    *created_at,
+                    Some(agent_item_revision(item, &text)),
+                    proto::agent_session_message_sync::Operation::Upsert(
+                        proto::AgentSessionMessageUpsert {
+                            text,
+                            entities: None,
+                            assistant_random_id,
+                        },
+                    ),
+                )
+            };
         messages.push(proto::AgentSessionMessageSync {
             role: role as i32,
             item_ref: Some(item.key.as_str().to_owned()),
@@ -1501,6 +1680,87 @@ async fn sync_agent_session_snapshot(
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct KnownInlineUserHistory {
+    text: String,
+    correlation_ref: Option<String>,
+    linked_message_id: Option<i64>,
+}
+
+fn known_inline_user_history(
+    item: &SessionItem,
+    allow_legacy_turn_match: bool,
+    context: &AgentSessionHistoryContext<'_>,
+) -> Result<Option<KnownInlineUserHistory>, StoreError> {
+    let record = if let Some(direction_id) = item.confirmed_inline_echo() {
+        context
+            .store
+            .get_inbound(direction_id.as_str())?
+            .filter(|record| record.direction.id == *direction_id)
+    } else if allow_legacy_turn_match {
+        let (
+            Some(turn_id),
+            SessionItemPayload::Message {
+                role: SessionMessageRole::User,
+                text,
+                ..
+            },
+        ) = (&item.run_id, &item.payload)
+        else {
+            return Ok(None);
+        };
+        context.store.completed_inbound_for_provider_turn_input(
+            turn_id,
+            &BindingKey {
+                installation_id: context.installation_id.clone(),
+                chat_id: context.thread_id,
+                workspace_id: context.workspace_id.clone(),
+            },
+            text,
+        )?
+    } else {
+        None
+    };
+    let Some(record) = record else {
+        return Ok(None);
+    };
+    if record.binding.installation_id != *context.installation_id
+        || record.binding.workspace_id != *context.workspace_id
+    {
+        return Ok(None);
+    }
+    let same_thread =
+        record.binding.chat_id == context.thread_id && record.delivery_chat_id == context.thread_id;
+    let correlation_ref = same_thread
+        .then(|| {
+            item.confirmed_inline_correlation()
+                .map(|correlation| correlation.as_str().to_owned())
+                .or_else(|| (context.correlation_for_direction)(&record.direction.id))
+        })
+        .flatten();
+    Ok(Some(KnownInlineUserHistory {
+        text: record.direction.text,
+        correlation_ref,
+        linked_message_id: same_thread.then_some(record.message_id),
+    }))
+}
+
+fn known_inline_assistant_random_id(
+    context: &AgentSessionHistoryContext<'_>,
+    turn_id: &TurnId,
+) -> Result<Option<i64>, StoreError> {
+    context
+        .store
+        .completed_terminal_random_id_for_provider_turn(
+            turn_id,
+            &BindingKey {
+                installation_id: context.installation_id.clone(),
+                chat_id: context.thread_id,
+                workspace_id: context.workspace_id.clone(),
+            },
+        )
+}
+
 async fn sync_agent_session_items(
     bot: &InlineClient,
     agent_session_id: i64,
@@ -1509,36 +1769,38 @@ async fn sync_agent_session_items(
     if messages.is_empty() {
         return Ok(());
     }
-    let result = bot
-        .sync_agent_session_messages(proto::SyncAgentSessionMessagesInput {
-            agent_session_id,
-            mode: proto::AgentSessionSyncMode::History as i32,
-            messages: messages.clone(),
-        })
-        .await?;
-    if result.messages.len() != messages.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Inline returned an incomplete agent history result",
-        )
-        .into());
-    }
-    for outcome in result.messages {
-        match proto::AgentSessionMessageSyncState::try_from(outcome.state) {
-            Ok(proto::AgentSessionMessageSyncState::Created)
-            | Ok(proto::AgentSessionMessageSyncState::Edited)
-            | Ok(proto::AgentSessionMessageSyncState::Linked)
-            | Ok(proto::AgentSessionMessageSyncState::Unchanged)
-            | Ok(proto::AgentSessionMessageSyncState::Stale)
-            | Ok(proto::AgentSessionMessageSyncState::Tombstoned) => {}
-            Ok(proto::AgentSessionMessageSyncState::Conflict)
-            | Ok(proto::AgentSessionMessageSyncState::Unspecified)
-            | Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "agent history conflicted with its existing Inline ledger; the stored row was preserved",
-                )
-                .into());
+    for batch in messages.chunks(AGENT_SESSION_SYNC_BATCH_SIZE) {
+        let result = bot
+            .sync_agent_session_messages(proto::SyncAgentSessionMessagesInput {
+                agent_session_id,
+                mode: proto::AgentSessionSyncMode::History as i32,
+                messages: batch.to_vec(),
+            })
+            .await?;
+        if result.messages.len() != batch.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Inline returned an incomplete agent history result",
+            )
+            .into());
+        }
+        for outcome in result.messages {
+            match proto::AgentSessionMessageSyncState::try_from(outcome.state) {
+                Ok(proto::AgentSessionMessageSyncState::Created)
+                | Ok(proto::AgentSessionMessageSyncState::Edited)
+                | Ok(proto::AgentSessionMessageSyncState::Linked)
+                | Ok(proto::AgentSessionMessageSyncState::Unchanged)
+                | Ok(proto::AgentSessionMessageSyncState::Stale)
+                | Ok(proto::AgentSessionMessageSyncState::Tombstoned) => {}
+                Ok(proto::AgentSessionMessageSyncState::Conflict)
+                | Ok(proto::AgentSessionMessageSyncState::Unspecified)
+                | Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "agent history conflicted with its existing Inline ledger; the stored row was preserved",
+                    )
+                    .into());
+                }
             }
         }
     }
@@ -1735,7 +1997,9 @@ mod tests {
     use super::*;
     use inline_agent_bridge::{
         CatalogCapabilities, DriverCapabilities, InstallationId, ProviderId, ProviderSessionId,
-        SessionAttachmentSupport, SessionReplaySupport, SessionStreamFidelity, SteeringSupport,
+        ProviderSurface, SessionAttachmentSupport, SessionEventOrigin, SessionInputCorrelation,
+        SessionItemKey, SessionItemVersion, SessionReplaySupport, SessionStreamFidelity,
+        SteeringSupport,
     };
 
     fn provider_session(value: &str) -> ProviderSessionRef {
@@ -1786,6 +2050,248 @@ mod tests {
         )
     }
 
+    fn inline_user_history_item(event_id: &str) -> SessionItem {
+        SessionItem {
+            key: SessionItemKey::new("provider-user-item").expect("item key"),
+            revision: SessionItemVersion::snapshot_baseline(),
+            run_id: None,
+            origin: SessionEventOrigin::confirmed_inline_echo(
+                DirectionId::new(event_id).expect("direction"),
+                SessionInputCorrelation::new(format!("inline-agent-bridge:v1:{event_id}"))
+                    .expect("correlation"),
+            ),
+            payload: SessionItemPayload::Message {
+                role: SessionMessageRole::User,
+                text: "bridge-authored delivery envelope".to_string(),
+                created_at: Some(1),
+            },
+        }
+    }
+
+    fn provider_user_history_item(turn_id: &str, text: &str) -> SessionItem {
+        SessionItem {
+            key: SessionItemKey::new("legacy-provider-user-item").expect("item key"),
+            revision: SessionItemVersion::snapshot_baseline(),
+            run_id: Some(TurnId::new(turn_id).expect("turn")),
+            origin: SessionEventOrigin::provider(ProviderSurface::Unknown),
+            payload: SessionItemPayload::Message {
+                role: SessionMessageRole::User,
+                text: text.to_string(),
+                created_at: Some(1),
+            },
+        }
+    }
+
+    fn accept_inline_history(
+        store: &BridgeStore,
+        installation_id: &InstallationId,
+        workspace_id: &WorkspaceId,
+        chat_id: i64,
+        event_id: &str,
+    ) {
+        assert!(
+            store
+                .accept_inbound(&InboundRecord {
+                    event_id: event_id.to_string(),
+                    binding: BindingKey {
+                        installation_id: installation_id.clone(),
+                        chat_id,
+                        workspace_id: workspace_id.clone(),
+                    },
+                    message_id: 11,
+                    delivery_chat_id: chat_id,
+                    sender_user_id: 7,
+                    direction: Direction::new(
+                        DirectionId::new(event_id).expect("direction"),
+                        "clean Inline prompt",
+                    ),
+                    state: InboundState::Completed,
+                    accepted_at: 1,
+                    started_at: Some(1),
+                    lease_expires_at: None,
+                    attempt_count: 1,
+                    provider_turn_id: None,
+                    stream_message_id: None,
+                    failure: None,
+                })
+                .expect("accept history")
+        );
+    }
+
+    fn test_history_correlation(direction_id: &DirectionId) -> Option<String> {
+        Some(format!("inline-agent-bridge:v1:{direction_id}"))
+    }
+
+    fn history_context<'a>(
+        store: &'a BridgeStore,
+        installation_id: &'a InstallationId,
+        workspace_id: &'a WorkspaceId,
+        thread_id: i64,
+    ) -> AgentSessionHistoryContext<'a> {
+        AgentSessionHistoryContext {
+            store,
+            installation_id,
+            workspace_id,
+            thread_id,
+            correlation_for_direction: &test_history_correlation,
+        }
+    }
+
+    #[test]
+    fn known_inline_history_uses_clean_text_and_scopes_correlation_to_the_same_thread() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        let installation_id = InstallationId::new("installation-1").expect("installation");
+        let workspace_id = WorkspaceId::new("workspace-1").expect("workspace");
+        let event_id = "inline-message-10-11";
+        accept_inline_history(&store, &installation_id, &workspace_id, 10, event_id);
+        let item = inline_user_history_item(event_id);
+
+        assert_eq!(
+            known_inline_user_history(
+                &item,
+                false,
+                &history_context(&store, &installation_id, &workspace_id, 10),
+            )
+            .expect("same thread"),
+            Some(KnownInlineUserHistory {
+                text: "clean Inline prompt".to_string(),
+                correlation_ref: Some(format!("inline-agent-bridge:v1:{event_id}")),
+                linked_message_id: Some(11),
+            })
+        );
+        assert_eq!(
+            known_inline_user_history(
+                &item,
+                false,
+                &history_context(&store, &installation_id, &workspace_id, 20),
+            )
+            .expect("different thread"),
+            Some(KnownInlineUserHistory {
+                text: "clean Inline prompt".to_string(),
+                correlation_ref: None,
+                linked_message_id: None,
+            })
+        );
+    }
+
+    #[test]
+    fn provider_correlation_cannot_claim_another_installations_inline_history() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        let installation_id = InstallationId::new("installation-1").expect("installation");
+        let other_installation = InstallationId::new("installation-2").expect("installation");
+        let workspace_id = WorkspaceId::new("workspace-1").expect("workspace");
+        let event_id = "inline-message-10-11";
+        accept_inline_history(&store, &other_installation, &workspace_id, 10, event_id);
+
+        assert_eq!(
+            known_inline_user_history(
+                &inline_user_history_item(event_id),
+                false,
+                &history_context(&store, &installation_id, &workspace_id, 10),
+            )
+            .expect("untrusted correlation"),
+            None
+        );
+    }
+
+    #[test]
+    fn legacy_same_thread_turn_adopts_its_existing_prompt_and_terminal_answer() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        let installation_id = InstallationId::new("installation-1").expect("installation");
+        let workspace_id = WorkspaceId::new("workspace-1").expect("workspace");
+        let event_id = "inline-message-10-11";
+        let turn_id = TurnId::new("provider-turn-1").expect("turn");
+        assert!(
+            store
+                .accept_inbound(&InboundRecord {
+                    event_id: event_id.to_string(),
+                    binding: BindingKey {
+                        installation_id: installation_id.clone(),
+                        chat_id: 10,
+                        workspace_id: workspace_id.clone(),
+                    },
+                    message_id: 11,
+                    delivery_chat_id: 10,
+                    sender_user_id: 7,
+                    direction: Direction::new(
+                        DirectionId::new(event_id).expect("direction"),
+                        "clean legacy prompt",
+                    ),
+                    state: InboundState::Accepted,
+                    accepted_at: 1,
+                    started_at: None,
+                    lease_expires_at: None,
+                    attempt_count: 0,
+                    provider_turn_id: None,
+                    stream_message_id: None,
+                    failure: None,
+                })
+                .expect("accept")
+        );
+        assert!(store.start_inbound(event_id, 2).expect("start"));
+        assert!(
+            store
+                .attach_inbound_turn(event_id, &turn_id, Some(12))
+                .expect("attach turn")
+        );
+        assert!(
+            store
+                .stage_inbound_final_send(event_id, InboundState::Completed, "done", None)
+                .expect("stage final")
+        );
+        assert_eq!(
+            store
+                .ensure_inbound_final_send_random_id(event_id, 8_000_000_000_000_001)
+                .expect("terminal identity"),
+            Some(8_000_000_000_000_001)
+        );
+        assert!(
+            store
+                .commit_inbound_final_send(event_id)
+                .expect("commit final")
+        );
+
+        assert_eq!(
+            known_inline_user_history(
+                &provider_user_history_item(turn_id.as_str(), "clean legacy prompt"),
+                true,
+                &history_context(&store, &installation_id, &workspace_id, 10),
+            )
+            .expect("legacy prompt"),
+            Some(KnownInlineUserHistory {
+                text: "clean legacy prompt".to_string(),
+                correlation_ref: Some(format!("inline-agent-bridge:v1:{event_id}")),
+                linked_message_id: Some(11),
+            })
+        );
+        assert_eq!(
+            known_inline_user_history(
+                &provider_user_history_item(turn_id.as_str(), "another client's prompt"),
+                true,
+                &history_context(&store, &installation_id, &workspace_id, 10),
+            )
+            .expect("foreign provider item"),
+            None
+        );
+        assert_eq!(
+            known_inline_user_history(
+                &provider_user_history_item(turn_id.as_str(), "clean legacy prompt"),
+                false,
+                &history_context(&store, &installation_id, &workspace_id, 10),
+            )
+            .expect("ambiguous provider item"),
+            None
+        );
+        assert_eq!(
+            known_inline_assistant_random_id(
+                &history_context(&store, &installation_id, &workspace_id, 10),
+                &turn_id,
+            )
+            .expect("legacy answer"),
+            Some(8_000_000_000_000_001)
+        );
+    }
+
     #[test]
     fn browser_gate_accepts_exclusive_codex_continuation() {
         let (session, turn) = enabled_capabilities();
@@ -1796,6 +2302,51 @@ mod tests {
         let mut missing_turn = turn;
         missing_turn.steering = SteeringSupport::Unsupported;
         assert!(!session_browser_enabled(&session, &missing_turn));
+    }
+
+    #[test]
+    fn transient_open_catalog_work_returns_a_truthful_action_retry() {
+        let provider_id = ProviderId::new("codex").expect("provider");
+        assert_eq!(
+            classify_session_open_catalog_result::<u8>(
+                &provider_id,
+                Err(DriverError::Transient("session read".to_string())),
+            )
+            .expect("transient result is handled"),
+            Err("Codex took too long to open this session. Try Open again.".to_string())
+        );
+        assert!(matches!(
+            classify_session_open_catalog_result::<u8>(
+                &provider_id,
+                Err(DriverError::Protocol("bad catalog".to_string())),
+            ),
+            Err(DriverError::Protocol(_))
+        ));
+    }
+
+    #[test]
+    fn open_health_copy_distinguishes_sign_in_from_temporary_provider_loss() {
+        let provider_id = ProviderId::new("codex").expect("provider");
+        assert!(
+            session_open_health_toast(&provider_id, inline_agent_bridge::ProviderHealth::Ready,)
+                .is_none()
+        );
+        assert!(
+            session_open_health_toast(
+                &provider_id,
+                inline_agent_bridge::ProviderHealth::Unauthenticated,
+            )
+            .expect("sign-in copy")
+            .contains("Sign in")
+        );
+        let unavailable = session_open_health_toast(
+            &provider_id,
+            inline_agent_bridge::ProviderHealth::DaemonUnavailable,
+        )
+        .expect("temporary provider copy");
+        assert!(unavailable.contains("temporarily unavailable"));
+        assert!(unavailable.contains("reconnects"));
+        assert!(!unavailable.contains("sign in"));
     }
 
     #[test]
@@ -1839,13 +2390,14 @@ mod tests {
         .expect("callback");
         let text = String::from_utf8(data.clone()).expect("utf8 callback");
         assert!(!text.contains("private-provider-session"));
-        let callback = parse_session_browser_callback(&format!("{ACTION_PREFIX}open"), &data)
-            .expect("callback");
+        let callback =
+            parse_session_browser_callback(&session_open_action_id(3), &data).expect("callback");
         assert!(matches!(
             callback.action,
             SessionBrowserCallbackAction::Open { index: 3 }
         ));
         assert!(parse_session_browser_callback(&format!("{ACTION_PREFIX}more"), &data).is_none());
+        assert!(parse_session_browser_callback(&session_open_action_id(2), &data).is_none());
     }
 
     #[test]
@@ -1866,6 +2418,80 @@ mod tests {
         assert!(!text.contains("private-provider-session"));
         assert!(!actions.contains("private-provider-session"));
         assert!(text.starts_with("Recent Codex sessions"));
+    }
+
+    #[test]
+    fn untitled_picker_rows_remain_distinguishable() {
+        let untitled = SessionSummary::new(
+            provider_session("private-provider-session"),
+            WorkspaceId::new("workspace-1").expect("workspace"),
+            None,
+            None,
+            Some(1),
+            SessionAvailability::Available,
+        )
+        .expect("summary");
+
+        assert_eq!(session_button_text(&untitled, 2), "Codex session 2");
+    }
+
+    #[test]
+    fn picker_pages_are_bounded_and_every_action_id_is_unique() {
+        let sessions = (0..MAX_SESSION_RESULTS)
+            .map(|index| {
+                summary(
+                    &format!("private-session-{index}"),
+                    &format!("Session {index}"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let picker = SessionBrowserPicker {
+            installation_id: InstallationId::new("installation-1").expect("installation"),
+            provider_id: ProviderId::new("codex").expect("provider"),
+            owner_user_id: 7,
+            chat_id: 10,
+            message_id: None,
+            workspace_id: WorkspaceId::new("workspace-1").expect("workspace"),
+            workspace_label: "Project".to_string(),
+            sessions,
+            expires_at: 100,
+        };
+
+        let (_, first_page) = session_picker_card("opaque-token", &picker, 0).expect("first page");
+        assert_eq!(first_page.rows.len(), PICKER_PAGE_SIZE + 1);
+        assert_eq!(
+            first_page.rows[..PICKER_PAGE_SIZE]
+                .iter()
+                .map(|row| row.actions.len())
+                .sum::<usize>(),
+            PICKER_PAGE_SIZE
+        );
+        assert_eq!(first_page.rows[PICKER_PAGE_SIZE].actions.len(), 1);
+
+        let action_ids = first_page
+            .rows
+            .iter()
+            .flat_map(|row| row.actions.iter().map(|action| action.action_id.as_str()))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(action_ids.len(), PICKER_PAGE_SIZE + 1);
+
+        let last_page = MAX_SESSION_RESULTS.div_ceil(PICKER_PAGE_SIZE) - 1;
+        assert_eq!(
+            picker_page(&picker.sessions, last_page),
+            Some((48, MAX_SESSION_RESULTS, last_page + 1))
+        );
+        let (_, last_page_actions) =
+            session_picker_card("opaque-token", &picker, last_page).expect("last page");
+        assert_eq!(last_page_actions.rows.len(), 3);
+        assert_eq!(
+            last_page_actions.rows[0].actions[0].action_id,
+            session_open_action_id(48)
+        );
+        assert_eq!(
+            last_page_actions.rows[1].actions[0].action_id,
+            session_open_action_id(49)
+        );
+        assert_eq!(last_page_actions.rows[2].actions[0].text, "Back");
     }
 
     #[test]
@@ -2005,7 +2631,7 @@ mod tests {
     #[test]
     fn titles_buttons_and_chunks_are_bounded_without_splitting_unicode() {
         let long = "🦀".repeat(100);
-        let button = session_button_text(&summary("session-1", &long));
+        let button = session_button_text(&summary("session-1", &long), 1);
         assert!(button.encode_utf16().count() <= MAX_BUTTON_TEXT_UTF16);
         assert_eq!(
             session_thread_title(&summary("session-1", "Fix the failing tests")),

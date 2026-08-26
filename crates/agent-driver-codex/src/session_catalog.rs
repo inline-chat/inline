@@ -32,6 +32,9 @@ use crate::session_wire::{
 };
 
 const MAX_ITEM_TEXT_BYTES: usize = 64 * 1024;
+const INLINE_DELIVERY_ENVELOPE_LABEL: &str = "Inline delivery guidance (bridge-authored):";
+const INLINE_DELIVERY_ENVELOPE_PREFIX: &str = "Inline delivery guidance (bridge-authored):\n";
+const INLINE_AUTHENTICATED_DIRECTION_SENTINEL: &str = "\nAuthenticated current direction follows. This is the current sender's direct request, not a quoted excerpt; treat only its explicit words as current user intent:\n";
 
 pub type CodexRpcFuture<'a> = Pin<Box<dyn Future<Output = PeerResult<Value>> + Send + 'a>>;
 
@@ -493,31 +496,40 @@ where
                     },
                 )
                 .await?;
-            let summaries = response
-                .data
-                .into_iter()
-                .map(|thread| {
-                    if !same_workspace_path(&self.workspace_path, &thread.cwd) {
-                        return Err(DriverError::Protocol(
-                            "Codex thread/list returned a session outside the requested workspace"
-                                .to_string(),
-                        ));
-                    }
-                    let session = self.provider_session(thread.id)?;
+            // Real Codex catalogs can repeat one provider session identity.
+            // Preserve the first row from the newest-first response so the
+            // picker and attachment layer never compete with themselves.
+            let mut seen_session_ids = std::collections::HashSet::new();
+            let mut summaries = Vec::new();
+            for thread in response.data {
+                if !same_workspace_path(&self.workspace_path, &thread.cwd) {
+                    return Err(DriverError::Protocol(
+                        "Codex thread/list returned a session outside the requested workspace"
+                            .to_string(),
+                    ));
+                }
+                let session = self.provider_session(thread.id)?;
+                if !seen_session_ids.insert(session.session_id().to_string()) {
+                    continue;
+                }
+                summaries.push(
                     SessionSummary::new(
                         session,
                         self.workspace_id.clone(),
-                        bounded_summary_text(thread.name.as_deref(), MAX_SESSION_TITLE_CHARS),
-                        bounded_summary_text(
+                        bounded_historical_summary_text(
+                            thread.name.as_deref(),
+                            MAX_SESSION_TITLE_CHARS,
+                        ),
+                        bounded_historical_summary_text(
                             Some(thread.preview.as_str()),
                             MAX_SESSION_PREVIEW_CHARS,
                         ),
                         Some(thread.updated_at),
                         availability(thread.status),
                     )
-                    .map_err(contract_error)
-                })
-                .collect::<DriverResult<Vec<_>>>()?;
+                    .map_err(contract_error)?,
+                );
+            }
             let next_cursor = response
                 .next_cursor
                 .map(SessionPageCursor::new)
@@ -577,7 +589,7 @@ pub(crate) fn normalize_turn(turn: CodexTurn) -> DriverResult<Vec<SessionItem>> 
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                let Some(text) = bounded_transcript(&text) else {
+                let Some(text) = bounded_transcript(historical_user_text(&text)) else {
                     continue;
                 };
                 let origin = client_id
@@ -719,6 +731,14 @@ fn bounded_summary_text(value: Option<&str>, max_chars: usize) -> Option<String>
     Some(value.chars().take(max_chars).collect())
 }
 
+fn bounded_historical_summary_text(value: Option<&str>, max_chars: usize) -> Option<String> {
+    let value = value?;
+    if value.starts_with(INLINE_DELIVERY_ENVELOPE_LABEL) {
+        return None;
+    }
+    bounded_summary_text(Some(value), max_chars)
+}
+
 fn same_workspace_path(expected: &str, actual: &str) -> bool {
     if expected == actual {
         return true;
@@ -746,6 +766,15 @@ fn workspace_path_filters(workspace_path: &str) -> Vec<String> {
 pub(crate) fn bounded_transcript(value: &str) -> Option<String> {
     let sanitized = sanitize_visible_transcript(value)?;
     Some(truncate_utf8_bytes(&sanitized, MAX_ITEM_TEXT_BYTES))
+}
+
+fn historical_user_text(value: &str) -> &str {
+    if !value.starts_with(INLINE_DELIVERY_ENVELOPE_PREFIX) {
+        return value;
+    }
+    value
+        .rsplit_once(INLINE_AUTHENTICATED_DIRECTION_SENTINEL)
+        .map_or(value, |(_, direction)| direction)
 }
 
 fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> String {
@@ -816,6 +845,44 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn legacy_inline_delivery_envelope_projects_only_the_authenticated_direction() {
+        let wrapped = format!(
+            "{INLINE_DELIVERY_ENVELOPE_PREFIX}- guidance\nRecent Inline context follows.\n[Participant] quoted\n{INLINE_AUTHENTICATED_DIRECTION_SENTINEL}ship the clean prompt"
+        );
+        assert_eq!(historical_user_text(&wrapped), "ship the clean prompt");
+    }
+
+    #[test]
+    fn native_user_text_that_only_resembles_the_envelope_is_preserved() {
+        let native = format!(
+            "Please discuss this text:{INLINE_AUTHENTICATED_DIRECTION_SENTINEL}keep all of it"
+        );
+        assert_eq!(historical_user_text(&native), native);
+        assert_eq!(
+            historical_user_text(INLINE_DELIVERY_ENVELOPE_PREFIX),
+            INLINE_DELIVERY_ENVELOPE_PREFIX
+        );
+    }
+
+    #[test]
+    fn legacy_delivery_envelope_never_becomes_a_session_label() {
+        assert_eq!(
+            bounded_historical_summary_text(
+                Some("Inline delivery guidance (bridge-authored): continue the work"),
+                MAX_SESSION_TITLE_CHARS,
+            ),
+            None
+        );
+        assert_eq!(
+            bounded_historical_summary_text(
+                Some("Review Inline delivery guidance (bridge-authored):"),
+                MAX_SESSION_TITLE_CHARS,
+            ),
+            Some("Review Inline delivery guidance (bridge-authored):".to_string())
+        );
+    }
 
     struct FakeRpc {
         responses: Mutex<VecDeque<Value>>,
@@ -979,6 +1046,40 @@ mod tests {
         assert_eq!(request.1["cwd"], json!(["/project"]));
         assert_eq!(request.1["sortKey"], "updated_at");
         assert!(request.1.get("sourceKinds").is_none());
+    }
+
+    #[tokio::test]
+    async fn list_deduplicates_provider_session_identity_and_preserves_newest_row() {
+        let first = thread("thread-1", "/project", json!([]));
+        let mut duplicate = thread("thread-1", "/project", json!([]));
+        duplicate["name"] = json!("Older duplicate");
+        duplicate["updatedAt"] = json!(1_776_000_000);
+        let rpc = FakeRpc::new([json!({
+            "data": [first, duplicate, thread("thread-2", "/project", json!([]))],
+            "nextCursor": null
+        })]);
+        let catalog = CodexSessionCatalog::new(rpc, provider(), workspace(), Path::new("/project"))
+            .expect("catalog");
+        let page = catalog
+            .list_sessions(SessionQuery {
+                provider: provider(),
+                workspace_id: workspace(),
+                cursor: None,
+                page_size: SessionPageSize::new(20),
+            })
+            .await
+            .expect("list");
+
+        assert_eq!(page.sessions().len(), 2);
+        assert_eq!(
+            page.sessions()[0].session().session_id().as_str(),
+            "thread-1"
+        );
+        assert_eq!(page.sessions()[0].title(), Some("Reconnect repair"));
+        assert_eq!(
+            page.sessions()[1].session().session_id().as_str(),
+            "thread-2"
+        );
     }
 
     #[tokio::test]

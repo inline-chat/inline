@@ -284,7 +284,9 @@ fn inline_thread_config() -> BTreeMap<String, Value> {
 }
 
 const CONTROL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const SESSION_CATALOG_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MUTATING_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const CONNECTION_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(7);
 #[cfg(not(test))]
 const INTERRUPT_COMPLETION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 #[cfg(test)]
@@ -415,7 +417,9 @@ where
         method: &'static str,
         params: Value,
     ) -> PeerResult<Value> {
-        self.peer.request(method, params).await
+        self.peer
+            .request_with_timeout(method, params, SESSION_CATALOG_REQUEST_TIMEOUT)
+            .await
     }
 
     pub(crate) async fn session_request_with_wire_sequence(
@@ -1209,7 +1213,7 @@ where
                 .expect("Codex question map poisoned")
                 .clear();
             match &self.shutdown_hook {
-                Some(hook) => tokio::time::timeout(AMBIGUOUS_EPOCH_SHUTDOWN_TIMEOUT, hook())
+                Some(hook) => tokio::time::timeout(CONNECTION_SHUTDOWN_TIMEOUT, hook())
                     .await
                     .map_err(|_| {
                         DriverError::ProcessExited(
@@ -2258,6 +2262,22 @@ mod tests {
         .await
         .expect("ambiguous shutdown must remain bounded");
         assert!(matches!(result, Err(DriverError::EpochEnded(_))));
+    }
+
+    #[tokio::test]
+    async fn explicit_shutdown_allows_the_real_process_grace_period_in_tests() {
+        let (mut driver, _server) = initialized_driver().await;
+        driver.shutdown_hook = Some(Arc::new(|| {
+            Box::pin(async {
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                Ok(())
+            })
+        }));
+
+        driver
+            .shutdown()
+            .await
+            .expect("explicit shutdown should not use the shortened ambiguous-outcome budget");
     }
 
     #[test]
