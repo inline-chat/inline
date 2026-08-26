@@ -113,6 +113,10 @@ export const inlineProtocolRpcExecutionLane = (rpc: RpcCall): string | undefined
     case "updateDialogOrder": return peerLane(rpc.input.updateDialogOrder.peerId)
     case "updateDialogArchived": return peerLane(rpc.input.updateDialogArchived.peerId)
     case "collapseHistory": return peerLane(rpc.input.collapseHistory.peerId)
+    case "connectAgentSession": return peerLane(rpc.input.connectAgentSession.peerId)
+    case "syncAgentSessionMessages": {
+      return `agent-session:${rpc.input.syncAgentSessionMessages.agentSessionId}`
+    }
     case "clearChatHistory": {
       const target = rpc.input.clearChatHistory.target
       if (target.oneofKind === "peerId") return peerLane(target.peerId)

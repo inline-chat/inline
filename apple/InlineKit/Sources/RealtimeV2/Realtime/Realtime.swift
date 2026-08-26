@@ -1743,7 +1743,8 @@ public actor RealtimeV2 {
          .usernameInvalid,
          .usernameTaken,
          .firstNameInvalid,
-         .urlPreviewUnavailable:
+         .urlPreviewUnavailable,
+         .agentSessionMessageImmutable:
       return true
     case .unknown,
          .unauthenticated,

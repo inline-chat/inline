@@ -20,6 +20,7 @@ import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
@@ -1164,6 +1165,33 @@ async function sendNotifications(input: SendPushForMsgInput) {
         }
       }),
   )
+}
+
+/**
+ * Reuse the ordinary notification policy for a newly committed live agent
+ * projection without reusing the ordinary send path (which would activate
+ * bots, title work, previews, and dialog mutations).
+ */
+export async function sendProjectedMessageNotification(input: {
+  chat: DbChat
+  message: DbMessage
+  text: string | undefined
+  entities: MessageEntities | undefined
+}): Promise<void> {
+  const inputPeer = encodePeerFromChat(input.chat, { currentUserId: input.message.fromId })
+  const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, {
+    currentUserId: input.message.fromId,
+  })
+  await sendNotifications({
+    updateGroup,
+    messageInfo: { message: input.message },
+    currentUserId: input.message.fromId,
+    chat: input.chat,
+    unencryptedText: input.text,
+    unencryptedEntities: input.entities,
+    mentionedUserIds: new Set(getMentionedUserIds(input.entities)),
+    inputPeer,
+  })
 }
 
 /** Send push notifications for this message */

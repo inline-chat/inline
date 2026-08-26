@@ -62,6 +62,7 @@ const baseMessage: DbMessage = {
   pinnedAt: null,
   hasLink: false,
   blockContentId: null,
+  countsAsUnread: true,
 }
 
 describe("system message insertion updates", () => {

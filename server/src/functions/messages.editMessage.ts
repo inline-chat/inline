@@ -17,6 +17,7 @@ import { queueMessageThreadLinkMaterialization } from "@in/server/modules/thread
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
+import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
 
 type Input = {
   messageId: bigint
@@ -37,6 +38,9 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const chatId = chat.id
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
+  if (await isImportedAgentMessage(chatId, Number(input.messageId))) {
+    throw RealtimeRpcError.AgentSessionMessageImmutable()
+  }
   if (!fullMessage || fullMessage.fromId !== currentUserId) {
     Log.shared.warn("editMessage blocked: message author mismatch", {
       chatId,

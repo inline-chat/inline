@@ -138,6 +138,11 @@ import {
   updateDialogArchivedV3,
   updateSessionV3,
 } from "@in/server/realtime/handlers/v3Migration"
+import {
+  connectAgentSessionHandler,
+  getAgentSessionHandler,
+  syncAgentSessionMessagesHandler,
+} from "@in/server/realtime/handlers/agentSessions"
 
 const log = new Log("Realtime.RPC")
 
@@ -146,6 +151,24 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
   log.trace("rpc call", Method[call.method])
 
   switch (call.method) {
+    case Method.CONNECT_AGENT_SESSION: {
+      if (call.input.oneofKind !== "connectAgentSession") throw RealtimeRpcError.BadRequest()
+      const result = await connectAgentSessionHandler(call.input.connectAgentSession, handlerContext)
+      return { oneofKind: "connectAgentSession", connectAgentSession: result }
+    }
+
+    case Method.SYNC_AGENT_SESSION_MESSAGES: {
+      if (call.input.oneofKind !== "syncAgentSessionMessages") throw RealtimeRpcError.BadRequest()
+      const result = await syncAgentSessionMessagesHandler(call.input.syncAgentSessionMessages, handlerContext)
+      return { oneofKind: "syncAgentSessionMessages", syncAgentSessionMessages: result }
+    }
+
+    case Method.GET_AGENT_SESSION: {
+      if (call.input.oneofKind !== "getAgentSession") throw RealtimeRpcError.BadRequest()
+      const result = await getAgentSessionHandler(call.input.getAgentSession, handlerContext)
+      return { oneofKind: "getAgentSession", getAgentSession: result }
+    }
+
     case Method.GET_ME: {
       if (call.input.oneofKind !== "getMe") {
         throw RealtimeRpcError.BadRequest()

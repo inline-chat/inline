@@ -62,6 +62,7 @@ const baseMessage: DbMessage = {
   pinnedAt: null,
   hasLink: null,
   blockContentId: null,
+  countsAsUnread: true,
 }
 
 const baseUser: DbUser = {
@@ -119,6 +120,7 @@ const baseFullMessage: DbFullMessage = {
   pinnedAt: null,
   hasLink: null,
   blockContentId: null,
+  countsAsUnread: true,
   entities: null,
   actions: null,
   systemMessage: null,

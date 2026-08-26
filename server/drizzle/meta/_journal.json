@@ -932,6 +932,13 @@
       "when": 1787745733246,
       "tag": "0132_repair-space-thread-number-counters",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1787753854200,
+      "tag": "0133_agent-sessions",
+      "breakpoints": true
     }
   ]
 }
