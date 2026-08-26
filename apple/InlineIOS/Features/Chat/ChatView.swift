@@ -9,6 +9,38 @@ import SwiftUI
 import Translation
 import UIKit
 
+/// A complete dependency boundary for a `ChatView` hosted by a context-menu preview.
+/// UIKit presents the preview in a separate tree, so inherited app dependencies are
+/// not reliable unless the preview root explicitly receives and installs them.
+struct ChatContextMenuPreview: View {
+  let peer: Peer
+  let contextSpaceID: Int64?
+  let router: Router
+  let data: DataManager
+  let themeManager: ThemeManager
+  let notificationSettings: NotificationSettingsManager
+  let realtimeState: RealtimeState
+  let realtimeV2: RealtimeV2
+  let appDatabase: AppDatabase
+
+  var body: some View {
+    ChatView(
+      peer: peer,
+      contextSpaceId: contextSpaceID,
+      onOpenSpace: { _ in },
+      preview: true
+    )
+    .environment(router)
+    .environmentObject(data)
+    .environmentObject(themeManager)
+    .environmentObject(notificationSettings)
+    .environmentObject(realtimeState)
+    .environment(\.realtimeV2, realtimeV2)
+    .appDatabase(appDatabase)
+    .frame(idealWidth: 340, idealHeight: 480)
+  }
+}
+
 struct ChatView: View {
   var peerId: Peer
   var contextSpaceId: Int64?

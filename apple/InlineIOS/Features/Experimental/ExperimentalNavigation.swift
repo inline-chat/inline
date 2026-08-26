@@ -428,6 +428,8 @@ private struct ExperimentalChatListView: View {
   @Binding var pinnedExpanded: Bool
 
   @EnvironmentObject private var data: DataManager
+  @EnvironmentObject private var themeManager: ThemeManager
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
   @EnvironmentObject private var realtimeState: RealtimeState
   @Environment(Router.self) private var router
   @Environment(\.appDatabase) private var appDatabase
@@ -633,20 +635,17 @@ private struct ExperimentalChatListView: View {
     .contextMenu {
       contextMenuActions(for: item)
     } preview: {
-      ChatView(
+      ChatContextMenuPreview(
         peer: item.peer,
-        contextSpaceId: item.spaceID,
-        onOpenSpace: { _ in },
-        preview: true
+        contextSpaceID: item.spaceID,
+        router: router,
+        data: data,
+        themeManager: themeManager,
+        notificationSettings: notificationSettings,
+        realtimeState: realtimeState,
+        realtimeV2: realtimeV2,
+        appDatabase: appDatabase
       )
-      // SwiftUI presents context-menu previews in a separate hosting tree.
-      // Re-inject every non-default dependency ChatView resolves before body.
-      .environment(router)
-      .environmentObject(data)
-      .environmentObject(realtimeState)
-      .environment(\.realtimeV2, realtimeV2)
-      .appDatabase(appDatabase)
-      .frame(idealWidth: 340, idealHeight: 480)
     }
   }
 
