@@ -33,6 +33,11 @@ const defaultTargets = [
   "x86_64-unknown-linux-musl",
 ] as const;
 const supportedTargets = [...defaultTargets] as const;
+const homebrewTargets = {
+  macosArm: "aarch64-apple-darwin",
+  linuxArm: "aarch64-unknown-linux-gnu",
+  linuxIntel: "x86_64-unknown-linux-gnu",
+} as const;
 
 async function main() {
   const command = process.argv[2] ?? "release";
@@ -45,9 +50,12 @@ async function main() {
   } else if (command === "publish") {
     const { r2, publicBaseUrl, prefix } = getR2Context();
     await runPublish(r2, publicBaseUrl, prefix);
+  } else if (command === "validate-homebrew") {
+    await readValidatedHomebrewCask();
+    console.log("Homebrew cask platform contract is valid.");
   } else {
     throw new Error(
-      `Unknown command: ${command}. Supported commands: release, build, publish.`,
+      `Unknown command: ${command}. Supported commands: release, build, publish, validate-homebrew.`,
     );
   }
 }
@@ -193,8 +201,8 @@ type ReleaseContext = {
   releaseDir: string;
 };
 
-type HomebrewHashes = {
-  arm: string;
+export type HomebrewHashes = {
+  macosArm: string;
   linuxArm: string;
   linuxIntel: string;
 };
@@ -207,6 +215,7 @@ type GitHubReleaseAsset = {
 async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
   await assertNoDuplicateVersion(context);
+  await preflightHomebrewCask(context);
   await runBuild(context);
   await signAndNotarize(context);
   await publishArtifacts(r2, publicBaseUrl, prefix, context);
@@ -223,6 +232,7 @@ async function runBuildArtifacts() {
 
 async function runPublish(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
+  await preflightHomebrewCask(context);
   if (resumeRelease && (await resumePublishedRelease(context))) {
     console.log(`Resumed Inline CLI v${context.version}`);
     logPublishedRelease(publicBaseUrl, prefix, context);
@@ -581,28 +591,100 @@ async function createBundle(context: ReleaseContext) {
   console.log(`Bundle created: ${bundlePath}`);
 }
 
-async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHashes) {
-  if (process.env.INLINE_SKIP_HOMEBREW === "1") {
-    console.log("Skipping Homebrew cask update (INLINE_SKIP_HOMEBREW=1).");
-    return;
+type HomebrewCaskState = HomebrewHashes & {
+  version: string;
+};
+
+function hasHomebrewReleaseTargets(context: ReleaseContext): boolean {
+  return Object.values(homebrewTargets).every((target) => context.targets.includes(target));
+}
+
+function parseHomebrewCaskContents(contents: string): HomebrewCaskState {
+  const version = contents.match(/^  version "([^"]+)"$/m)?.[1];
+  if (!version) {
+    throw new Error("Homebrew cask must declare a top-level version.");
   }
 
-  const armTarget = "aarch64-apple-darwin";
-  const linuxArmTarget = "aarch64-unknown-linux-gnu";
-  const linuxIntelTarget = "x86_64-unknown-linux-gnu";
+  const macosBlock = contents.match(/^  on_macos do\n([\s\S]*?)^  end$/m)?.[1];
   if (
-    !context.targets.includes(armTarget) ||
-    !context.targets.includes(linuxArmTarget) ||
-    !context.targets.includes(linuxIntelTarget)
+    !macosBlock ||
+    !/^    depends_on arch: :arm64$/m.test(macosBlock) ||
+    !macosBlock.includes("aarch64-apple-darwin")
   ) {
-    console.log(
-      "Skipping Homebrew cask update (required targets not present: macOS arm + Linux gnu arm/intel).",
-    );
-    return;
+    throw new Error("Homebrew cask must keep the macOS download restricted to Apple silicon.");
+  }
+  const macosArm = macosBlock.match(/^    sha256 "([a-f0-9]{64})"$/m)?.[1];
+  if (!macosArm) {
+    throw new Error("Homebrew cask must define the Apple-silicon checksum inside on_macos.");
   }
 
+  const linuxBlock = contents.match(/^  on_linux do\n([\s\S]*?)^  end$/m)?.[1];
+  if (
+    !linuxBlock ||
+    !/^    arch arm: "aarch64", intel: "x86_64"$/m.test(linuxBlock) ||
+    !linuxBlock.includes("#{arch}-unknown-linux-gnu")
+  ) {
+    throw new Error("Homebrew cask must define ARM64 and x86_64 Linux downloads.");
+  }
+  const linuxHashes = linuxBlock.match(
+    /^    sha256 arm64_linux:\s+"([a-f0-9]{64})",\n\s+x86_64_linux:\s+"([a-f0-9]{64})"$/m,
+  );
+  if (!linuxHashes) {
+    // Homebrew does not reinterpret arm/intel checksum keys inside on_linux.
+    throw new Error(
+      "Homebrew cask Linux checksums must use arm64_linux and x86_64_linux keys.",
+    );
+  }
+
+  return {
+    version,
+    macosArm,
+    linuxArm: linuxHashes[1],
+    linuxIntel: linuxHashes[2],
+  };
+}
+
+export function validateHomebrewCaskContents(contents: string): void {
+  parseHomebrewCaskContents(contents);
+}
+
+export function updateHomebrewCaskContents(
+  contents: string,
+  version: string,
+  hashes: HomebrewHashes,
+): string {
+  parseHomebrewCaskContents(contents);
+  for (const [platform, sha256] of Object.entries(hashes)) {
+    if (!/^[a-f0-9]{64}$/.test(sha256)) {
+      throw new Error(`Invalid Homebrew sha256 for ${platform}: expected 64 lowercase hex digits.`);
+    }
+  }
+
+  const updated = contents
+    .replace(/^  version "[^"]+"$/m, `  version "${version}"`)
+    .replace(
+      /(^  on_macos do\n[\s\S]*?^    sha256 )"[a-f0-9]{64}"$/m,
+      `$1"${hashes.macosArm}"`,
+    )
+    .replace(
+      /(^  on_linux do\n[\s\S]*?^    sha256 arm64_linux:\s+)"[a-f0-9]{64}",\n(\s+x86_64_linux:\s+)"[a-f0-9]{64}"$/m,
+      `$1"${hashes.linuxArm}",\n$2"${hashes.linuxIntel}"`,
+    );
+
+  const result = parseHomebrewCaskContents(updated);
+  if (
+    result.version !== version ||
+    result.macosArm !== hashes.macosArm ||
+    result.linuxArm !== hashes.linuxArm ||
+    result.linuxIntel !== hashes.linuxIntel
+  ) {
+    throw new Error("Failed to update every version/checksum field in the Homebrew cask.");
+  }
+  return updated;
+}
+
+async function readValidatedHomebrewCask() {
   const caskPath = join(homebrewTapPath, "Casks", "inline.rb");
-  const caskRelativePath = join("Casks", "inline.rb");
   await stat(caskPath).catch(() => {
     throw new Error(
       `Homebrew tap not found at ${caskPath}. Set INLINE_HOMEBREW_TAP_PATH if needed.`,
@@ -619,34 +701,47 @@ async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHash
     throw new Error("Homebrew tap has uncommitted changes. Commit/stash before release.");
   }
 
-  const artifact = (target: string) =>
-    join(context.releaseDir, `inline-cli-${context.version}-${target}.tar.gz`);
-  const armSha = hashes?.arm ?? (await sha256File(artifact(armTarget)));
-  const linuxArmSha = hashes?.linuxArm ?? (await sha256File(artifact(linuxArmTarget)));
-  const linuxIntelSha = hashes?.linuxIntel ?? (await sha256File(artifact(linuxIntelTarget)));
-
   const contents = await readFile(caskPath, "utf8");
-  const versionPattern = /version\s+"[^"]+"/;
-  const macShaPattern = /(on_macos do[\s\S]*?sha256 )"[^"]+"/m;
-  const linuxShaPattern = /sha256 arm:[\s\S]*?\n    url /m;
+  validateHomebrewCaskContents(contents);
+  return { caskPath, contents };
+}
 
+async function preflightHomebrewCask(context: ReleaseContext) {
   if (
-    !versionPattern.test(contents) ||
-    !macShaPattern.test(contents) ||
-    !linuxShaPattern.test(contents)
+    isPrereleaseVersion(context.version) ||
+    process.env.INLINE_SKIP_HOMEBREW === "1" ||
+    !hasHomebrewReleaseTargets(context)
   ) {
-    throw new Error(`Failed to locate version/sha256 entries in ${caskPath}`);
+    return;
+  }
+  await readValidatedHomebrewCask();
+}
+
+async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHashes) {
+  if (process.env.INLINE_SKIP_HOMEBREW === "1") {
+    console.log("Skipping Homebrew cask update (INLINE_SKIP_HOMEBREW=1).");
+    return;
   }
 
-  const linuxShaBlock = [
-    `sha256 arm:   "${linuxArmSha}",`,
-    `       intel: "${linuxIntelSha}"`,
-  ].join("\n");
+  if (!hasHomebrewReleaseTargets(context)) {
+    console.log(
+      "Skipping Homebrew cask update (required targets not present: macOS arm + Linux gnu arm/intel).",
+    );
+    return;
+  }
 
-  const updated = contents
-    .replace(versionPattern, `version "${context.version}"`)
-    .replace(macShaPattern, `$1"${armSha}"`)
-    .replace(linuxShaPattern, `${linuxShaBlock}\n    url `);
+  const { caskPath, contents } = await readValidatedHomebrewCask();
+  const caskRelativePath = join("Casks", "inline.rb");
+  const artifact = (target: string) =>
+    join(context.releaseDir, `inline-cli-${context.version}-${target}.tar.gz`);
+  const nextHashes =
+    hashes ??
+    ({
+      macosArm: await sha256File(artifact(homebrewTargets.macosArm)),
+      linuxArm: await sha256File(artifact(homebrewTargets.linuxArm)),
+      linuxIntel: await sha256File(artifact(homebrewTargets.linuxIntel)),
+    } satisfies HomebrewHashes);
+  const updated = updateHomebrewCaskContents(contents, context.version, nextHashes);
 
   if (updated === contents) {
     console.log("Homebrew cask already up to date.");
@@ -802,9 +897,9 @@ function homebrewHashesFromReleaseAssets(
   };
 
   return {
-    arm: digestFor("aarch64-apple-darwin"),
-    linuxArm: digestFor("aarch64-unknown-linux-gnu"),
-    linuxIntel: digestFor("x86_64-unknown-linux-gnu"),
+    macosArm: digestFor(homebrewTargets.macosArm),
+    linuxArm: digestFor(homebrewTargets.linuxArm),
+    linuxIntel: digestFor(homebrewTargets.linuxIntel),
   };
 }
 

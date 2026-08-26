@@ -188,9 +188,16 @@ jobs:
       - name: Install Dependencies
         run: bun install --frozen-lockfile
 
+      - name: Clone Homebrew Tap for Validation
+        run: git clone --depth 1 https://github.com/inline-chat/homebrew-inline.git homebrew-inline
+
       - name: Validate Agent Setup Release Group
+        env:
+          INLINE_HOMEBREW_TAP_PATH: ${{ github.workspace }}/homebrew-inline
         run: |
           set -euo pipefail
+          bun test scripts/release-cli.test.ts
+          bun run scripts/release-cli.ts validate-homebrew
           node scripts/check-agent-release-group.mjs --source-only
           bun run --cwd packages/protocol build
           bun run --cwd sdk build
