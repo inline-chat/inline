@@ -14,6 +14,7 @@ mod policy;
 mod presentation;
 mod process_host;
 mod session;
+mod session_continuity;
 mod store;
 mod turn;
 
@@ -45,7 +46,29 @@ pub use presentation::{
     sanitize_visible_command, sanitize_visible_transcript, semantic_activity_title,
 };
 pub use process_host::{ProcessHostConfig, reap_stale_process_host, run_process_host};
-pub use session::{ProviderSessionManager, SessionManagerError, SessionOpenOutcome};
+pub use session::{
+    PreparedSessionThread, ProviderSessionManager, ProviderWorkLease, SessionManagerError,
+    SessionOpenOutcome,
+};
+pub use session_continuity::{
+    AgentSessionCatalog, AgentSessionConnection, AttachSessionRequest, AttachedSession,
+    CatalogCapabilities, DEFAULT_HISTORY_MESSAGE_LIMIT, DEFAULT_HISTORY_TEXT_BYTES,
+    DEFAULT_SESSION_PAGE_SIZE, DetachSessionRequest, HistoryWindow, MAX_HISTORY_MESSAGE_LIMIT,
+    MAX_HISTORY_TEXT_BYTES, MAX_SESSION_PAGE_SIZE, MAX_SESSION_PREVIEW_CHARS,
+    MAX_SESSION_TITLE_CHARS, ProviderHealth, ProviderInstanceRef, ProviderSessionRef,
+    ProviderSurface, RenameSessionRequest, SessionAckError, SessionActivityKind,
+    SessionActivityStatus, SessionAttachmentId, SessionAttachmentSupport, SessionAvailability,
+    SessionCapabilities, SessionCheckpoint, SessionContractError, SessionControlCapabilities,
+    SessionControlContext, SessionControlId, SessionControlOption, SessionControlRequest,
+    SessionControllerEpoch, SessionEchoCorrelator, SessionEchoError, SessionEvent,
+    SessionEventOrigin, SessionEventPayload, SessionEventStream, SessionInputCorrelation,
+    SessionItem, SessionItemKey, SessionItemPayload, SessionItemVersion, SessionMessageRole,
+    SessionPage, SessionPageCursor, SessionPageSize, SessionPhase, SessionProjectionAck,
+    SessionProjectionAckTracker, SessionQuery, SessionQuestion, SessionReadRequest,
+    SessionReduceAction, SessionReduceError, SessionRepairReason, SessionReplaySupport,
+    SessionRevisionReducer, SessionRuntimeState, SessionSnapshot, SessionStreamFidelity,
+    SessionStreamPosition, SessionSummary, SnapshotMerge,
+};
 pub use store::{
     ApprovalClaim, ApprovalClaimContext, ApprovalClaimOutcome, ApprovalRecord, ApprovalState,
     BridgeStore, ChatSettingsRecord, CommandChoiceAction, CommandChoiceClaimContext,
@@ -57,8 +80,9 @@ pub use store::{
     PendingFinalSend, PendingOperatorAllowlistRequest, PendingQuestion, QuestionClaimContext,
     QuestionClaimLocator, QuestionClaimOutcome, QuestionRecord, QuestionResolution, QuestionState,
     QueueRecord, QueueState, ReplyThreadMode, ReplyThreadOverride,
-    ReplyThreadOverrideUpdateOutcome, SettingsUpdateOutcome, StoreError, StoreResult,
-    WorkspaceChoice, WorkspaceFilesystemIdentity, WorkspaceRecord,
+    ReplyThreadOverrideUpdateOutcome, SessionThreadBindOutcome, SessionThreadBinding,
+    SessionThreadOpening, SessionThreadPrepareOutcome, SettingsUpdateOutcome, StoreError,
+    StoreResult, WorkspaceChoice, WorkspaceFilesystemIdentity, WorkspaceRecord,
 };
 pub use turn::{
     Acknowledgement, CoordinatorEffect, DirectionDisposition, RunState, TurnCoordinator,

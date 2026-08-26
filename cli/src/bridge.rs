@@ -105,6 +105,8 @@ mod commands;
 use commands::*;
 mod claude_history;
 use claude_history::*;
+mod session_browser;
+use session_browser::*;
 mod settings;
 use settings::*;
 mod owner_control;
@@ -314,6 +316,7 @@ where
         options.quiet_adapter_install,
         options.allow_adapter_install,
     )
+    .await
     .map_err(io::Error::other)?;
     progress(ProviderSetupProgress::Completed("integration", "ready"));
 
@@ -1318,6 +1321,7 @@ async fn run_provider_installation(
         deferred_inbound_tx,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history,
+        session_browser: SessionBrowserRuntime::default(),
     };
     let inline_tools = inline_tool_configuration(Arc::new(InlineToolHost::new(
         bot.clone(),
@@ -1466,6 +1470,12 @@ async fn run_provider_installation(
                 else {
                     break;
                 };
+                // Do not claim durable work while an epoch-wide `/close` owns
+                // the provider. Admission must be nonblocking here because
+                // the close future is polled by this same supervisor loop.
+                let Some(provider_admission_lease) = sessions.try_begin_provider_work()? else {
+                    break;
+                };
                 let Some(record) =
                     bridge_store.take_next_inbound(&pending_binding, now_seconds())?
                 else {
@@ -1493,6 +1503,17 @@ async fn run_provider_installation(
                     )
                     .await?;
                     continue;
+                };
+                let provider_epoch_release = record.sender_user_id == inbound_route.owner_user_id
+                    && is_provider_epoch_release_command(
+                        &record.direction.text,
+                        &inbound_route.bot_username,
+                    );
+                let provider_work_lease = if provider_epoch_release {
+                    drop(provider_admission_lease);
+                    None
+                } else {
+                    Some(provider_admission_lease)
                 };
                 let conversation = conversations
                     .entry(pending_binding.chat_id)
@@ -1525,6 +1546,7 @@ async fn run_provider_installation(
                         &conversation,
                         &task_identity,
                         record,
+                        provider_work_lease,
                         event_tx,
                         task_lane_promotions,
                     )
@@ -1532,6 +1554,12 @@ async fn run_provider_installation(
                     let final_chat_id = conversation.snapshot().binding.chat_id;
                     (task_chat_id, final_chat_id, result)
                 }));
+                // Give an owner `/close` the first chance to acquire the
+                // epoch-wide writer. Continuing this batch could reserve a
+                // later lane and make an otherwise-idle release report busy.
+                if provider_epoch_release {
+                    break;
+                }
             }
 
             tokio::select! {

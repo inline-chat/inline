@@ -752,8 +752,9 @@ fn agent_command_catalog_is_stable_and_within_server_limits() {
         .into_iter()
         .map(|command| command.command)
         .collect::<Vec<_>>();
-    assert!(!codex_names.iter().any(|name| name == "sessions"));
-    assert!(!codex_names.iter().any(|name| name == "open"));
+    for required in ["projects", "sessions", "open", "close"] {
+        assert!(codex_names.iter().any(|name| name == required));
+    }
 }
 
 #[test]

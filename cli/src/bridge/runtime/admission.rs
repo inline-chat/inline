@@ -81,8 +81,8 @@ async fn handle_provider_unavailable_command(
         "queue" => return Ok(false),
         "follow" | "unfollow" | "allowlist" => return Ok(false),
         "help" | "status" | "stop" => format!("/{} doesn’t take arguments. Try /help.", command.name),
-        "new" | "clear" | "compact" | "folder" | "model" | "reasoning" | "permissions"
-        | "verbose" | "threads" => {
+        "new" | "clear" | "compact" | "folder" | "projects" | "sessions" | "open"
+        | "close" | "model" | "reasoning" | "permissions" | "verbose" | "threads" => {
             "That control is temporarily unavailable while the local provider restarts. Try again shortly."
                 .to_string()
         }

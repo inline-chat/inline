@@ -1,8 +1,11 @@
-use std::fs;
+use std::collections::HashSet;
+use std::ffi::OsString;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, MAIN_DB, OpenFlags, OptionalExtension, params};
 use thiserror::Error;
 
 use crate::{
@@ -23,6 +26,7 @@ mod question;
 #[path = "store/rejection.rs"]
 mod rejection;
 mod reply_threads;
+mod session_thread;
 mod settings;
 mod workspace;
 
@@ -48,13 +52,17 @@ pub use question::{
     QuestionRecord, QuestionResolution, QuestionState,
 };
 pub use reply_threads::{ReplyThreadMode, ReplyThreadOverride, ReplyThreadOverrideUpdateOutcome};
+pub use session_thread::{
+    SessionThreadBindOutcome, SessionThreadBinding, SessionThreadOpening,
+    SessionThreadPrepareOutcome,
+};
 pub use settings::{ChatSettingsRecord, SettingsUpdateOutcome};
 pub use workspace::{
     InstallationRecord, MAX_RECENT_WORKSPACES, WorkspaceChoice, WorkspaceFilesystemIdentity,
     WorkspaceRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: i64 = 23;
+const CURRENT_SCHEMA_VERSION: i64 = 25;
 const DEFAULT_QUEUE_LEASE_SECONDS: i64 = 300;
 const DEFAULT_INBOUND_LEASE_SECONDS: i64 = 300;
 
@@ -66,6 +74,14 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("bridge state database error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("bridge state migration backup {path} has schema {found}, expected schema {expected}")]
+    InvalidMigrationBackup {
+        path: String,
+        found: i64,
+        expected: i64,
+    },
+    #[error("bridge state migration backup {path} failed integrity check: {result}")]
+    InvalidMigrationBackupIntegrity { path: String, result: String },
     #[error("bridge state serialization error: {0}")]
     Json(#[from] serde_json::Error),
     #[error("bridge state contains an invalid {kind}: {value}")]
@@ -98,6 +114,14 @@ pub enum StoreError {
     UnknownReplyThreadMode(String),
     #[error("reply-thread settings require a positive chat ID")]
     InvalidReplyThreadScope,
+    #[error("provider session reply-thread binding is invalid")]
+    InvalidSessionThreadBinding,
+    #[error("provider session reply-thread opening conflicts with existing durable state")]
+    SessionThreadOpeningConflict,
+    #[error("provider session reply-thread opening is no longer available")]
+    SessionThreadOpeningUnavailable,
+    #[error("Inline reply thread {thread_chat_id} is already bound to another provider session")]
+    SessionThreadBindingConflict { thread_chat_id: i64 },
     #[error("invalid workspace path {path}: {reason}")]
     InvalidWorkspacePath { path: String, reason: &'static str },
     #[error("workspace path {path} is already registered with another opaque ID")]
@@ -238,7 +262,9 @@ impl BridgeStore {
     pub fn open(path: impl AsRef<Path>) -> StoreResult<Self> {
         let path = path.as_ref();
         prepare_private_file(path)?;
+        let _migration_lock = acquire_migration_lock(path)?;
         let connection = Connection::open(path)?;
+        prepare_migration_backup(path, &connection)?;
         Self::from_connection(connection)
     }
 
@@ -469,6 +495,31 @@ impl BridgeStore {
         }))
     }
 
+    /// Confirms that one provider-returned client direction originated from
+    /// this exact Inline conversation. Provider client IDs are not globally
+    /// trustworthy across reinstalls or other bridge instances.
+    pub fn inbound_direction_belongs_to_binding(
+        &self,
+        binding: &BindingKey,
+        direction_id: &DirectionId,
+    ) -> StoreResult<bool> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        Ok(connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM inbound_directions
+                WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
+                  AND direction_id = ?4
+             )",
+            params![
+                binding.installation_id.as_str(),
+                binding.chat_id,
+                binding.workspace_id.as_str(),
+                direction_id.as_str(),
+            ],
+            |row| row.get::<_, bool>(0),
+        )?)
+    }
+
     pub fn inbound_for_provider_turn(
         &self,
         turn_id: &TurnId,
@@ -638,6 +689,33 @@ impl BridgeStore {
         Ok(changed == 1)
     }
 
+    /// Provider turns whose Inline final projection completed for this exact
+    /// conversation. Session snapshot hydration uses this to avoid rendering
+    /// the same user/assistant turn again after a provider-session reopen.
+    pub fn completed_provider_turn_ids(
+        &self,
+        binding: &BindingKey,
+    ) -> StoreResult<HashSet<String>> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let mut statement = connection.prepare(
+            "SELECT DISTINCT provider_turn_id
+             FROM inbound_directions
+             WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
+               AND state = 'completed' AND provider_turn_id IS NOT NULL",
+        )?;
+        let values = statement
+            .query_map(
+                params![
+                    binding.installation_id.as_str(),
+                    binding.chat_id,
+                    binding.workspace_id.as_str(),
+                ],
+                |row| row.get::<_, String>(0),
+            )?
+            .collect::<Result<HashSet<_>, _>>()?;
+        Ok(values)
+    }
+
     /// Persists the one mutable Inline progress message for a started turn.
     /// Reattaching the same server-recognized send after recovery is harmless.
     pub fn attach_inbound_stream_message(
@@ -805,8 +883,21 @@ impl BridgeStore {
         session_configuration_fingerprint: Option<&str>,
         updated_at: i64,
     ) -> StoreResult<()> {
-        let connection = self.connection.lock().expect("bridge store poisoned");
-        connection.execute(
+        let mut connection = self.connection.lock().expect("bridge store poisoned");
+        let transaction = connection.transaction()?;
+        match session_thread::read_by_chat(&transaction, &key.installation_id, key.chat_id)? {
+            Some(owner)
+                if owner.workspace_id() != &key.workspace_id
+                    || owner.session().provider().provider_id() != provider_id
+                    || owner.session().session_id() != provider_session_id =>
+            {
+                return Err(StoreError::SessionThreadBindingConflict {
+                    thread_chat_id: key.chat_id,
+                });
+            }
+            Some(_) | None => {}
+        }
+        transaction.execute(
             "INSERT INTO session_bindings (
                 installation_id, chat_id, workspace_id, provider_id, provider_session_id,
                 updated_at, session_configuration_fingerprint
@@ -826,6 +917,7 @@ impl BridgeStore {
                 session_configuration_fingerprint,
             ],
         )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -1243,6 +1335,14 @@ fn migrate(connection: &Connection) -> StoreResult<()> {
     if version == 22 {
         history_import::migrate_v23(connection)?;
     }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 23 {
+        session_thread::migrate_v24(connection)?;
+    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 24 {
+        session_thread::migrate_v25(connection)?;
+    }
     Ok(())
 }
 
@@ -1277,6 +1377,127 @@ fn prepare_private_file(path: &Path) -> StoreResult<()> {
         fs::File::create(path)?;
     }
     set_file_permissions(path, 0o600)?;
+    Ok(())
+}
+
+fn acquire_migration_lock(path: &Path) -> StoreResult<fs::File> {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_else(|| "bridge.sqlite".into());
+    let mut lock_name = OsString::from(".");
+    lock_name.push(file_name);
+    lock_name.push(".migration.lock");
+    let lock_path = path.with_file_name(lock_name);
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let lock = options.open(&lock_path)?;
+    set_file_permissions(&lock_path, 0o600)?;
+    lock.lock().map_err(|error| {
+        std::io::Error::other(format!(
+            "could not lock bridge state migration {}: {error}",
+            lock_path.display()
+        ))
+    })?;
+    Ok(lock)
+}
+
+/// Creates one consistent, private copy before an on-disk schema upgrade.
+/// Older beta binaries reject newer schema versions, so this artifact is the
+/// recoverable rollback point for the user's pre-upgrade bridge state.
+fn prepare_migration_backup(path: &Path, connection: &Connection) -> StoreResult<Option<PathBuf>> {
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 0 || version >= CURRENT_SCHEMA_VERSION {
+        return Ok(None);
+    }
+
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_else(|| "bridge.sqlite".into());
+    let mut backup_name = file_name;
+    backup_name.push(format!(
+        ".pre-schema-{CURRENT_SCHEMA_VERSION}-from-{version}.backup"
+    ));
+    let backup_path = path.with_file_name(backup_name);
+
+    if backup_path.exists() {
+        let metadata = fs::symlink_metadata(&backup_path)?;
+        if !metadata.file_type().is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "bridge state migration backup is not a regular file: {}",
+                    backup_path.display()
+                ),
+            )
+            .into());
+        }
+        set_file_permissions(&backup_path, 0o600)?;
+        validate_migration_backup(&backup_path, version)?;
+        return Ok(Some(backup_path));
+    }
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let backup_file_name = backup_path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_else(|| "bridge.sqlite.backup".into());
+    let mut temporary_name = OsString::from(".");
+    temporary_name.push(backup_file_name);
+    temporary_name.push(format!(".{}.{}.pending", std::process::id(), nonce));
+    let temporary_path = backup_path.with_file_name(temporary_name);
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary_path)?;
+    set_file_permissions(&temporary_path, 0o600)?;
+    connection.backup(MAIN_DB, &temporary_path, None)?;
+    validate_migration_backup(&temporary_path, version)?;
+    fs::File::open(&temporary_path)?.sync_all()?;
+    fs::rename(&temporary_path, &backup_path)?;
+    set_file_permissions(&backup_path, 0o600)?;
+    sync_parent_directory(&backup_path)?;
+    validate_migration_backup(&backup_path, version)?;
+    Ok(Some(backup_path))
+}
+
+fn validate_migration_backup(path: &Path, expected: i64) -> StoreResult<()> {
+    let backup = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let found: i64 = backup.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if found != expected {
+        return Err(StoreError::InvalidMigrationBackup {
+            path: path.display().to_string(),
+            found,
+            expected,
+        });
+    }
+    let quick_check: String = backup.query_row("PRAGMA quick_check(1)", [], |row| row.get(0))?;
+    if quick_check != "ok" {
+        return Err(StoreError::InvalidMigrationBackupIntegrity {
+            path: path.display().to_string(),
+            result: quick_check,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 

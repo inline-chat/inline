@@ -36,9 +36,35 @@ use a narrower project directory.
 
 Current beta provider paths:
 
-- **Codex beta:** exactly Codex 0.146.0 uses native `codex app-server`. This is
-  the only provider/version target with compatibility evidence; newer versions
-  fail closed until their protocol compatibility is separately certified.
+- **Codex beta:** fixture-certified Codex 0.146.0 and the signed ChatGPT.app
+  bundled Codex 0.150.0-alpha.8 use the native app-server protocol. Setup checks
+  a configured executable, `PATH`, then the signed ChatGPT application, while
+  leaving provider authentication to Codex/ChatGPT. `/sessions` and `/open`
+  list sessions for the conversation's verified project, read a bounded recent
+  snapshot (including the current paginated `thread/turns/list` form), and
+  create or reuse one titled Inline reply thread for that provider session.
+  Opening history does not claim the provider writer. The first message in the
+  opened thread resumes the exact Codex session in Inline's private app-server
+  epoch and carries a stable client message ID; the existing
+  semantic turn stream, activity disclosures, approvals, questions, final-send
+  recovery, and rich Markdown projection remain the sole live path. Reopening
+  idempotently hydrates only provider turns that Inline has not already
+  completed and projected.
+
+  Codex currently gives one app-server process the rollout writer. Inline
+  therefore advertises truthful **exclusive** continuity, not simultaneous
+  multi-client control: if Codex, ChatGPT, VS Code, or another CLI owns the
+  session, Inline still opens its history and the first send reports that it is
+  active elsewhere; close it there and resend in Inline. A rejected resume
+  unsubscribes only that thread without interrupting other Inline turns. If
+  that cleanup cannot be confirmed, Inline deliberately ends and restarts the
+  whole provider epoch before accepting more work.
+  `/close` is provider-wide-idle gated and stops Inline's private
+  provider epoch without removing its durable session/thread binding or Codex
+  history, releasing the session for another Codex surface. Sending in the
+  Inline thread later resumes it again. The internal shared-socket observer
+  remains a dark foundation and is not part of this beta claim. Other Codex
+  versions fail closed until separately certified.
 - **OpenCode experimental:** uses native Agent Client Protocol v1 through
   `opencode acp`.
 - **Claude experimental:** uses the curated
@@ -68,6 +94,28 @@ withheld from setup. The background service never downloads or updates
 adapters. Claude currently requires Node.js 22 or newer.
 
 ## Using the bot
+
+### Codex projects and existing sessions
+
+Choose the current project in Agent Settings or with `/projects` (`/folder`
+remains an alias), then run `/sessions` or `/open` in the owner bot DM. The
+picker contains only that verified project and keeps provider IDs and host paths
+out of callback payloads and messages. Opening a choice pre-fills a reply-thread
+title from the Codex title or preview, hydrates a bounded recent provider
+snapshot, and durably pins that Inline thread to the same Codex session and
+project. Browsing is read-only; sending the first message acquires the exclusive
+Codex writer.
+
+A pinned session thread cannot use `/new`, `/clear`, or a project setting to
+silently become a different session. Bridge tool-contract updates also preserve
+the exact pinned Codex identity; newly created sessions receive the updated
+contract. Open another session from the bot DM instead. `/close` releases only
+when every other Inline Codex lane in the provider epoch is idle, including
+turn preparation and session mutation; it does not interrupt running work or
+delete history. Codex can briefly report that the session is still closing
+after release; retry there in a moment. Historical Codex user input is visibly
+bot-projected as **User input · Codex**, while an Inline-origin user-message
+echo is suppressed using Codex's returned `clientId`.
 
 Each provider has a distinct bot and session namespace. A thread is a session
 for the selected project by default. After a 100 ms ordering gate, the bot
@@ -179,7 +227,8 @@ seconds, Inline shuts down that provider epoch and restarts it instead of
 leaving the turn visibly or durably active. For Codex, cancellation also starts
 thread-wide managed-terminal cleanup immediately, repeats it after interruption
 settles to catch late registration, and verifies that Codex's terminal registry
-is empty. Codex 0.146 does not provide an OS-process-reaped acknowledgement, so
+is empty. The certified Codex app-server contract does not provide an
+OS-process-reaped acknowledgement, so
 independently daemonized processes remain a provider limitation rather than an
 absolute cancellation guarantee.
 
@@ -284,7 +333,8 @@ second explicit public-chat intent. There is no reply-thread creation tool,
 arbitrary HTTP, raw RPC, CLI, general filesystem access, owner-token, or general
 send-message capability.
 
-Codex 0.146 receives these as native `inline.*` dynamic tools. OpenCode and
+Certified Codex app-server versions receive these as native `inline.*` dynamic
+tools. OpenCode and
 Claude receive the same catalog through stable ACP v1's required stdio MCP
 transport. For each provider session, ACP launches the current Inline binary in
 a hidden MCP-only mode with an ephemeral capability and loopback port. That
@@ -376,6 +426,14 @@ enables linger or requires headless pre-login operation.
 One account service supervises all configured providers. A provider restart
 does not stop its siblings, and at most four independent agent turns run across
 the whole account at once.
+
+Before upgrading an existing on-disk bridge database, Inline creates a
+consistent mode-`0600` sibling backup named like
+`bridge.sqlite.pre-schema-25-from-23.backup`. This is the pre-upgrade rollback
+point. Stop every bridge process—especially the newer binary—before restoring
+that backup, then start the older binary. A newer-schema live database must
+never be opened concurrently by the older binary. Local bindings and other
+bridge state created after the migration are not present in the rollback copy.
 
 ```bash
 inline bridge status

@@ -20,6 +20,7 @@ pub(super) enum BridgeNotice {
     MissingWorkspace,
     SessionCompactionUnsupported,
     SessionReplaced,
+    SessionActiveElsewhere,
     InlineReconnecting,
     BridgeUpdateRequired,
 }
@@ -56,6 +57,9 @@ impl BridgeNotice {
             }
             Self::SessionReplaced => {
                 "The previous agent session was unavailable, so I started a new one."
+            }
+            Self::SessionActiveElsewhere => {
+                "This Codex session is active in another app or CLI. Close it there, then resend here."
             }
             Self::InlineReconnecting => {
                 "Inline is reconnecting. Accepted work will resume automatically."
@@ -140,6 +144,7 @@ mod tests {
             BridgeNotice::MissingWorkspace,
             BridgeNotice::SessionCompactionUnsupported,
             BridgeNotice::SessionReplaced,
+            BridgeNotice::SessionActiveElsewhere,
             BridgeNotice::InlineReconnecting,
             BridgeNotice::BridgeUpdateRequired,
         ];

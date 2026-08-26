@@ -1353,6 +1353,15 @@ pub trait AgentDriver: Send + Sync {
     /// Returns the driver's current, conservative capability declaration.
     fn capabilities(&self) -> DriverCapabilities;
 
+    /// Returns the exact provider-visible correlation used for one Inline
+    /// input, when the provider preserves it in later session history.
+    fn session_input_correlation(
+        &self,
+        _direction_id: &crate::DirectionId,
+    ) -> Option<crate::SessionInputCorrelation> {
+        None
+    }
+
     /// Installs a bridge-owned host-tool catalog for this driver epoch.
     /// Drivers must fail closed unless their advertised transport can carry it.
     fn configure_host_tools(&self, _configuration: HostToolConfiguration) -> DriverResult<()> {
@@ -1467,9 +1476,19 @@ pub enum DriverError {
     /// The provider process exited while serving a request or turn.
     #[error("driver process exited: {0}")]
     ProcessExited(String),
+    /// The caller must discard this provider epoch even when process
+    /// termination could not be confirmed. Reusing it could repeat or
+    /// misroute a mutation with an ambiguous provider outcome.
+    #[error("driver connection epoch ended: {0}")]
+    EpochEnded(String),
     /// The provider understood and rejected the request.
     #[error("driver request was rejected: {0}")]
     Rejected(String),
+    /// The durable provider session is valid but another provider client owns
+    /// its exclusive execution lease. Callers must preserve the binding and
+    /// let the user release that other client before retrying.
+    #[error("driver session is active elsewhere: {0}")]
+    SessionBusy(String),
     /// The local provider authoritatively requires user authentication.
     #[error("driver authentication is required: {}", .0.message)]
     AuthenticationRequired(AuthenticationRequired),
@@ -1484,6 +1503,13 @@ pub enum DriverError {
     /// A retryable provider failure that does not invalidate durable state.
     #[error("driver operation failed transiently: {0}")]
     Transient(String),
+}
+
+impl DriverError {
+    /// Whether this error seals the current provider connection epoch.
+    pub const fn ends_epoch(&self) -> bool {
+        matches!(self, Self::ProcessExited(_) | Self::EpochEnded(_))
+    }
 }
 
 #[cfg(test)]

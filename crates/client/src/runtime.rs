@@ -13,6 +13,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use inline_sdk::proto;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
@@ -27,9 +28,9 @@ use crate::{
     CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogsPage,
     DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
     InMemoryBackend, InlineId, InvokeBotChatSettingsItemRequest, MessageMutation, OperationOutcome,
-    ReactRequest, ReadRequest, RemoveChatParticipantRequest, RequestBotChatSettingsRequest,
-    SendInteractiveTextRequest, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
-    TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
+    PinMessageRequest, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
+    RequestBotChatSettingsRequest, SendInteractiveTextRequest, SendTextOutcome, SendTextRequest,
+    SetMarkedUnreadRequest, TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
     UpdateDialogNotificationsRequest, UploadRequest, UploadThumbnail,
 };
 
@@ -674,6 +675,14 @@ impl InlineClient {
         }
     }
 
+    /// Pins or unpins one message for everyone in a chat.
+    pub async fn pin_message(&self, request: PinMessageRequest) -> Result<(), ClientRequestError> {
+        match self.request(ClientRequest::PinMessage(request)).await? {
+            ClientResponse::Empty => Ok(()),
+            other => unreachable!("pin_message returned {other:?}"),
+        }
+    }
+
     /// Sets the explicit marked-unread state for a chat.
     pub async fn set_marked_unread(
         &self,
@@ -799,6 +808,48 @@ impl InlineClient {
         {
             ClientResponse::Empty => Ok(()),
             other => unreachable!("answer_bot_chat_settings returned {other:?}"),
+        }
+    }
+
+    /// Connects one provider session to an Inline thread.
+    pub async fn connect_agent_session(
+        &self,
+        request: proto::ConnectAgentSessionInput,
+    ) -> Result<proto::ConnectAgentSessionResult, ClientRequestError> {
+        match self
+            .request(ClientRequest::ConnectAgentSession(request))
+            .await?
+        {
+            ClientResponse::AgentSessionConnected(response) => Ok(response),
+            other => unreachable!("connect_agent_session returned {other:?}"),
+        }
+    }
+
+    /// Recovers the durable agent session connected to one conversation.
+    pub async fn get_agent_session(
+        &self,
+        request: proto::GetAgentSessionInput,
+    ) -> Result<proto::GetAgentSessionResult, ClientRequestError> {
+        match self
+            .request(ClientRequest::GetAgentSession(request))
+            .await?
+        {
+            ClientResponse::AgentSession(response) => Ok(response),
+            other => unreachable!("get_agent_session returned {other:?}"),
+        }
+    }
+
+    /// Creates, links, or revises a bounded batch of provider session messages.
+    pub async fn sync_agent_session_messages(
+        &self,
+        request: proto::SyncAgentSessionMessagesInput,
+    ) -> Result<proto::SyncAgentSessionMessagesResult, ClientRequestError> {
+        match self
+            .request(ClientRequest::SyncAgentSessionMessages(request))
+            .await?
+        {
+            ClientResponse::AgentSessionMessagesSynced(response) => Ok(response),
+            other => unreachable!("sync_agent_session_messages returned {other:?}"),
         }
     }
 
@@ -1216,6 +1267,11 @@ impl ClientRunner {
                 self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
+            ClientRequest::PinMessage(request) => {
+                let outcome = self.backend.pin_message(request).await?;
+                self.event_emitter.emit_operation_events(outcome).await?;
+                Ok(ClientResponse::Empty)
+            }
             ClientRequest::SetMarkedUnread(request) => {
                 let outcome = self.backend.set_marked_unread(request).await?;
                 self.event_emitter.emit_operation_events(outcome).await?;
@@ -1266,6 +1322,21 @@ impl ClientRunner {
                 self.event_emitter.emit_operation_events(outcome).await?;
                 Ok(ClientResponse::Empty)
             }
+            ClientRequest::ConnectAgentSession(request) => self
+                .backend
+                .connect_agent_session(request)
+                .await
+                .map(ClientResponse::AgentSessionConnected),
+            ClientRequest::GetAgentSession(request) => self
+                .backend
+                .get_agent_session(request)
+                .await
+                .map(ClientResponse::AgentSession),
+            ClientRequest::SyncAgentSessionMessages(request) => self
+                .backend
+                .sync_agent_session_messages(request)
+                .await
+                .map(ClientResponse::AgentSessionMessagesSynced),
         }
     }
 
@@ -1480,6 +1551,12 @@ async fn handle_concurrent_request(
                 .await?;
             Ok(ClientResponse::Empty)
         }
+        ClientRequest::PinMessage(request) => {
+            events
+                .emit_operation_events(backend.pin_message(request).await?)
+                .await?;
+            Ok(ClientResponse::Empty)
+        }
         ClientRequest::SetMarkedUnread(request) => {
             events
                 .emit_operation_events(backend.set_marked_unread(request).await?)
@@ -1532,6 +1609,18 @@ async fn handle_concurrent_request(
                 .await?;
             Ok(ClientResponse::Empty)
         }
+        ClientRequest::ConnectAgentSession(request) => backend
+            .connect_agent_session(request)
+            .await
+            .map(ClientResponse::AgentSessionConnected),
+        ClientRequest::GetAgentSession(request) => backend
+            .get_agent_session(request)
+            .await
+            .map(ClientResponse::AgentSession),
+        ClientRequest::SyncAgentSessionMessages(request) => backend
+            .sync_agent_session_messages(request)
+            .await
+            .map(ClientResponse::AgentSessionMessagesSynced),
         ClientRequest::AuthStart(_)
         | ClientRequest::AuthVerify(_)
         | ClientRequest::Resume
@@ -1651,6 +1740,7 @@ enum ClientRequest {
     DeleteMessage(DeleteMessageRequest),
     React(ReactRequest),
     Read(ReadRequest),
+    PinMessage(PinMessageRequest),
     SetMarkedUnread(SetMarkedUnreadRequest),
     UpdateDialogNotifications(UpdateDialogNotificationsRequest),
     UpdateDialogFollowMode(UpdateDialogFollowModeRequest),
@@ -1661,6 +1751,9 @@ enum ClientRequest {
     RequestBotChatSettings(RequestBotChatSettingsRequest),
     InvokeBotChatSettingsItem(InvokeBotChatSettingsItemRequest),
     AnswerBotChatSettings(AnswerBotChatSettingsRequest),
+    ConnectAgentSession(proto::ConnectAgentSessionInput),
+    GetAgentSession(proto::GetAgentSessionInput),
+    SyncAgentSessionMessages(proto::SyncAgentSessionMessagesInput),
 }
 
 impl ClientRequest {
@@ -1704,6 +1797,7 @@ impl ClientRequest {
             Self::DeleteMessage(_) => "delete_message",
             Self::React(_) => "react",
             Self::Read(_) => "read",
+            Self::PinMessage(_) => "pin_message",
             Self::SetMarkedUnread(_) => "set_marked_unread",
             Self::UpdateDialogNotifications(_) => "update_dialog_notifications",
             Self::UpdateDialogFollowMode(_) => "update_dialog_follow_mode",
@@ -1714,6 +1808,9 @@ impl ClientRequest {
             Self::RequestBotChatSettings(_) => "request_bot_chat_settings",
             Self::InvokeBotChatSettingsItem(_) => "invoke_bot_chat_settings_item",
             Self::AnswerBotChatSettings(_) => "answer_bot_chat_settings",
+            Self::ConnectAgentSession(_) => "connect_agent_session",
+            Self::GetAgentSession(_) => "get_agent_session",
+            Self::SyncAgentSessionMessages(_) => "sync_agent_session_messages",
         }
     }
 }
@@ -1785,6 +1882,9 @@ enum ClientResponse {
     Message(MessageMutation),
     BotCapabilities(Vec<BotCapability>),
     BotChatSettings(BotChatSettingsResponse),
+    AgentSessionConnected(proto::ConnectAgentSessionResult),
+    AgentSession(proto::GetAgentSessionResult),
+    AgentSessionMessagesSynced(proto::SyncAgentSessionMessagesResult),
 }
 
 #[cfg(test)]

@@ -1,23 +1,31 @@
 use std::collections::VecDeque;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use inline_agent_bridge::{DriverError, ProcessHostConfig, reap_stale_process_host};
+use futures_util::{SinkExt, StreamExt};
+use inline_agent_bridge::{AgentDriver, DriverError, ProcessHostConfig, reap_stale_process_host};
 use semver::Version;
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
-use tokio::process::{Child, ChildStderr, ChildStdin, Command};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
+use tokio_tungstenite::client_async_with_config;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use crate::{CodexAppServerDriver, CodexPeer};
 
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const SHARED_HOST_START_TIMEOUT: Duration = Duration::from_secs(15);
+const SHARED_HOST_RETRY_DELAY: Duration = Duration::from_millis(100);
 const DEFAULT_INCOMING_CAPACITY: usize = 256;
+const SOCKET_ADAPTER_BUFFER_BYTES: usize = 256 * 1024;
+const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 const STDERR_TAIL_LINES: usize = 40;
 const STDERR_LINE_BYTES: usize = 512;
 
@@ -44,32 +52,80 @@ const SENSITIVE_ENVIRONMENT_NAMES: &[&str] = &[
 ];
 
 pub fn minimum_codex_version() -> Version {
-    // This is an exact certification pin, despite the legacy function name.
-    // 0.146 adds the background-terminal list API required to verify that
-    // `/stop` cleanup has drained Codex-managed tool processes, and newer
-    // protocol shapes must be certified before they are accepted.
+    // The oldest fixture-certified protocol retained by this bridge.
     Version::new(0, 146, 0)
+}
+
+pub fn latest_certified_codex_version() -> Version {
+    Version::parse("0.150.0-alpha.8").expect("static certified Codex version")
+}
+
+pub fn is_certified_codex_version(version: &Version) -> bool {
+    version == &minimum_codex_version() || version == &latest_certified_codex_version()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CodexVersionPolicy {
+    Certified,
+    Exact(Version),
+    Any,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CodexAppServerTransport {
+    /// One app-server process and one Inline connection over stdio.
+    #[default]
+    PrivateStdio,
+    /// Attach to the user's default multi-client control socket. If no host is
+    /// listening, launch one from the selected signed/certified executable and
+    /// supervise it for the lifetime of this bridge connection. This transport
+    /// remains catalog/connection-foundation only until the live session hub
+    /// demultiplexes external traffic and reconciles ambiguous mutations; the
+    /// ordinary turn driver must continue using `PrivateStdio` until then.
+    SharedLocal,
+}
+
+impl CodexAppServerTransport {
+    fn stdio_arguments(&self) -> Option<Vec<OsString>> {
+        match self {
+            Self::PrivateStdio => Some(vec![OsString::from("app-server")]),
+            Self::SharedLocal => None,
+        }
+    }
+
+    fn host_arguments(&self) -> Option<Vec<OsString>> {
+        match self {
+            Self::PrivateStdio => None,
+            Self::SharedLocal => Some(vec![
+                OsString::from("app-server"),
+                OsString::from("--listen"),
+                OsString::from("unix://"),
+            ]),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CodexLaunchConfig {
     pub executable: PathBuf,
-    pub app_server_args: Vec<OsString>,
-    pub required_version: Option<Version>,
+    pub transport: CodexAppServerTransport,
+    pub version_policy: CodexVersionPolicy,
     pub incoming_capacity: usize,
     /// Additional host-specific environment variables removed before launching
     /// Codex. The standard Inline/app-secret policy is always applied too.
     pub environment_remove: Vec<OsString>,
     /// Optional crash-surviving process host supplied by the bundled CLI.
     pub process_host: Option<ProcessHostConfig>,
+    #[cfg(test)]
+    pub(crate) app_server_args_override: Option<Vec<OsString>>,
 }
 
 impl Default for CodexLaunchConfig {
     fn default() -> Self {
         Self {
             executable: PathBuf::from("codex"),
-            app_server_args: vec![OsString::from("app-server")],
-            required_version: Some(minimum_codex_version()),
+            transport: CodexAppServerTransport::default(),
+            version_policy: CodexVersionPolicy::Certified,
             incoming_capacity: DEFAULT_INCOMING_CAPACITY,
             environment_remove: vec![
                 OsString::from("INLINE_TOKEN"),
@@ -77,6 +133,8 @@ impl Default for CodexLaunchConfig {
                 OsString::from("INLINE_DEVICE_ID"),
             ],
             process_host: None,
+            #[cfg(test)]
+            app_server_args_override: None,
         }
     }
 }
@@ -104,8 +162,8 @@ pub enum CodexLaunchError {
     },
     #[error("could not parse a Codex version from: {0}")]
     InvalidVersionOutput(String),
-    #[error("Codex {found} is unsupported; this Inline build is certified only with {required}")]
-    UnsupportedVersion { found: Version, required: Version },
+    #[error("Codex {found} is unsupported; this Inline build requires {required}")]
+    UnsupportedVersion { found: Version, required: String },
     #[error("failed to start Codex app-server: {0}")]
     Spawn(#[source] std::io::Error),
     #[error("Codex app-server did not expose {0}")]
@@ -114,6 +172,10 @@ pub enum CodexLaunchError {
     Initialize(#[from] DriverError),
     #[error("Codex process host recovery failed: {0}")]
     ProcessHost(#[source] std::io::Error),
+    #[error("Codex shared app-server did not become available: {0}")]
+    SharedHostUnavailable(String),
+    #[error("Codex shared app-server is incompatible: {0}")]
+    SharedHostIncompatible(String),
 }
 
 #[derive(Clone, Debug)]
@@ -148,11 +210,15 @@ impl RedactedStderrTail {
 
 #[derive(Debug)]
 pub struct SpawnedCodexDriver {
-    pub driver: CodexAppServerDriver<ChildStdin>,
+    pub driver: CodexAppServerDriver<CodexDriverWriter>,
     pub version: CodexVersionProbe,
+    pub app_server_version: Version,
+    pub transport: CodexAppServerTransport,
     pub stderr_tail: RedactedStderrTail,
     pub process_status: CodexProcessStatus,
 }
+
+pub type CodexDriverWriter = Box<dyn AsyncWrite + Send + Unpin>;
 
 #[derive(Clone, Debug)]
 pub struct CodexProcessStatus {
@@ -259,9 +325,7 @@ pub async fn probe_codex_version(
         });
     }
     let version = parse_codex_version(diagnostic)?;
-    if let Some(required) = config.required_version.as_ref() {
-        ensure_supported_version(&version, required)?;
-    }
+    ensure_supported_version(&version, &config.version_policy)?;
     Ok(CodexVersionProbe {
         executable: config.executable.clone(),
         version,
@@ -286,22 +350,393 @@ pub async fn spawn_codex_driver(
     bridge_version: &str,
 ) -> Result<SpawnedCodexDriver, CodexLaunchError> {
     let version = probe_codex_version(&config).await?;
+    #[cfg(test)]
+    if let Some(arguments) = config.app_server_args_override.clone() {
+        return spawn_codex_stdio_client(&config, arguments, bridge_version, version).await;
+    }
+
+    if let Some(arguments) = config.transport.stdio_arguments() {
+        return spawn_codex_stdio_client(&config, arguments, bridge_version, version).await;
+    }
+
+    let socket_path = default_control_socket_path()?;
+    match connect_shared_codex(
+        &config,
+        &socket_path,
+        bridge_version,
+        version.clone(),
+        None,
+        RedactedStderrTail::new(),
+    )
+    .await
+    {
+        Ok(spawned) => return Ok(spawned),
+        Err(CodexLaunchError::SharedHostUnavailable(_)) => {}
+        Err(error) => return Err(error),
+    }
+
+    let host_arguments = config
+        .transport
+        .host_arguments()
+        .expect("shared transport has host arguments");
+    let host = spawn_shared_host(&config, host_arguments).await?;
+    let deadline = tokio::time::Instant::now() + SHARED_HOST_START_TIMEOUT;
+    loop {
+        match connect_shared_codex(
+            &config,
+            &socket_path,
+            bridge_version,
+            version.clone(),
+            Some(host.control.clone()),
+            host.stderr_tail.clone(),
+        )
+        .await
+        {
+            Ok(spawned) => return Ok(spawned),
+            Err(CodexLaunchError::SharedHostUnavailable(_))
+                if tokio::time::Instant::now() < deadline && !host.control.is_finished() =>
+            {
+                tokio::time::sleep(SHARED_HOST_RETRY_DELAY).await;
+            }
+            Err(CodexLaunchError::SharedHostUnavailable(_))
+                if tokio::time::Instant::now() < deadline =>
+            {
+                // Another process can win Codex's startup lock while this
+                // launch exits with AddrInUse. Keep probing the shared socket.
+                tokio::time::sleep(SHARED_HOST_RETRY_DELAY).await;
+            }
+            Err(CodexLaunchError::SharedHostUnavailable(_)) => {
+                let _ = host.control.shutdown().await;
+                return Err(CodexLaunchError::SharedHostUnavailable(
+                    host.status
+                        .exit_description()
+                        .unwrap_or_else(|| "startup timed out".to_string()),
+                ));
+            }
+            Err(error) => {
+                let _ = host.control.shutdown().await;
+                return Err(error);
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ProcessControl {
+    shutdown: mpsc::Sender<()>,
+    completion: watch::Receiver<Option<Result<(), DriverError>>>,
+}
+
+impl ProcessControl {
+    fn is_finished(&self) -> bool {
+        self.completion.borrow().is_some()
+    }
+
+    async fn shutdown(&self) -> Result<(), DriverError> {
+        let _ = self.shutdown.send(()).await;
+        let mut completion = self.completion.clone();
+        loop {
+            if let Some(result) = completion.borrow().clone() {
+                return result;
+            }
+            completion.changed().await.map_err(|_| {
+                DriverError::ProcessExited("Codex app-server supervisor exited".to_string())
+            })?;
+        }
+    }
+}
+
+struct SharedHostProcess {
+    control: ProcessControl,
+    status: CodexProcessStatus,
+    stderr_tail: RedactedStderrTail,
+}
+
+async fn spawn_shared_host(
+    config: &CodexLaunchConfig,
+    arguments: Vec<OsString>,
+) -> Result<SharedHostProcess, CodexLaunchError> {
+    let process_host = config.process_host.as_ref().map(|host| ProcessHostConfig {
+        executable: host.executable.clone(),
+        lock_file: shared_host_lock_file(&host.lock_file),
+    });
+    if let Some(host) = process_host.as_ref() {
+        reap_stale_process_host(&host.lock_file)
+            .await
+            .map_err(CodexLaunchError::ProcessHost)?;
+    }
+    let mut command = hosted_codex_command(config, process_host.as_ref(), arguments);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    apply_child_environment(&mut command, config);
+    configure_process_group(&mut command);
+    let mut child = command.spawn().map_err(CodexLaunchError::Spawn)?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or(CodexLaunchError::MissingPipe("shared host stderr"))?;
+    let stderr_tail = RedactedStderrTail::new();
+    tokio::spawn(capture_stderr(stderr, stderr_tail.clone()));
+    let process_id = child.id();
+    let status = CodexProcessStatus::new();
+    let control = supervise_child(child, process_id, status.clone());
+    Ok(SharedHostProcess {
+        control,
+        status,
+        stderr_tail,
+    })
+}
+
+fn shared_host_lock_file(proxy_lock_file: &Path) -> PathBuf {
+    let mut file_name = proxy_lock_file
+        .file_name()
+        .unwrap_or_default()
+        .to_os_string();
+    file_name.push(".shared-host");
+    proxy_lock_file.with_file_name(file_name)
+}
+
+fn default_control_socket_path() -> Result<PathBuf, CodexLaunchError> {
+    let codex_home = match std::env::var_os("CODEX_HOME") {
+        Some(path) if !path.is_empty() => PathBuf::from(path),
+        _ => std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".codex"))
+            .ok_or_else(|| {
+                CodexLaunchError::SharedHostUnavailable(
+                    "Codex home directory is unavailable".to_string(),
+                )
+            })?,
+    };
+    if !codex_home.is_absolute() {
+        return Err(CodexLaunchError::SharedHostUnavailable(
+            "Codex home directory must be absolute".to_string(),
+        ));
+    }
+    Ok(codex_home
+        .join("app-server-control")
+        .join("app-server-control.sock"))
+}
+
+async fn connect_shared_codex(
+    config: &CodexLaunchConfig,
+    socket_path: &Path,
+    bridge_version: &str,
+    version: CodexVersionProbe,
+    shared_host: Option<ProcessControl>,
+    stderr_tail: RedactedStderrTail,
+) -> Result<SpawnedCodexDriver, CodexLaunchError> {
+    let stream = timeout(
+        Duration::from_secs(2),
+        tokio::net::UnixStream::connect(socket_path),
+    )
+    .await
+    .map_err(|_| {
+        CodexLaunchError::SharedHostUnavailable("control socket connection timed out".to_string())
+    })?
+    .map_err(|_| {
+        CodexLaunchError::SharedHostUnavailable(
+            "control socket is not accepting connections".to_string(),
+        )
+    })?;
+    let websocket_config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES))
+        .max_frame_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES));
+    let (websocket, _) = timeout(
+        Duration::from_secs(2),
+        client_async_with_config("ws://localhost/rpc", stream, Some(websocket_config)),
+    )
+    .await
+    .map_err(|_| {
+        CodexLaunchError::SharedHostIncompatible(
+            "control socket WebSocket upgrade timed out".to_string(),
+        )
+    })?
+    .map_err(|_| {
+        CodexLaunchError::SharedHostIncompatible(
+            "control socket rejected the WebSocket upgrade".to_string(),
+        )
+    })?;
+
+    let (peer_io, adapter_io) = tokio::io::duplex(SOCKET_ADAPTER_BUFFER_BYTES);
+    let (peer_reader, peer_writer) = tokio::io::split(peer_io);
+    let process_status = CodexProcessStatus::new();
+    let control = supervise_socket_adapter(websocket, adapter_io, process_status.clone());
+    let hook_control = control.clone();
+    let hook_shared_host = shared_host.clone();
+    let shutdown_hook = Arc::new(move || {
+        let control = hook_control.clone();
+        let shared_host = hook_shared_host.clone();
+        Box::pin(async move {
+            let client_result = control.shutdown().await;
+            if let Some(shared_host) = shared_host {
+                let host_result = shared_host.shutdown().await;
+                client_result.and(host_result)
+            } else {
+                client_result
+            }
+        }) as super::driver::ShutdownFuture
+    });
+    let peer = CodexPeer::new(
+        peer_reader,
+        Box::new(peer_writer) as CodexDriverWriter,
+        config.incoming_capacity,
+    );
+    let driver = match CodexAppServerDriver::initialize_with_shutdown(
+        peer,
+        bridge_version,
+        Some(shutdown_hook),
+    )
+    .await
+    {
+        Ok(driver) => driver,
+        Err(error) => {
+            let _ = control.shutdown().await;
+            return Err(CodexLaunchError::Initialize(error));
+        }
+    };
+    let app_server_version = match verified_app_server_version(&driver, &config.version_policy) {
+        Ok(version) => version,
+        Err(error) => {
+            let _ = driver.shutdown().await;
+            return Err(error);
+        }
+    };
+    Ok(SpawnedCodexDriver {
+        driver,
+        version,
+        app_server_version,
+        transport: CodexAppServerTransport::SharedLocal,
+        stderr_tail,
+        process_status,
+    })
+}
+
+fn supervise_socket_adapter(
+    websocket: tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+    adapter_io: tokio::io::DuplexStream,
+    process_status: CodexProcessStatus,
+) -> ProcessControl {
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+    let (completion_tx, completion_rx) = watch::channel(None);
+    tokio::spawn(async move {
+        let result = run_socket_adapter(websocket, adapter_io, &mut shutdown_rx).await;
+        process_status.record(match &result {
+            Ok(()) => "shared app-server connection closed".to_string(),
+            Err(error) => error.to_string(),
+        });
+        let _ = completion_tx.send(Some(result));
+    });
+    ProcessControl {
+        shutdown: shutdown_tx,
+        completion: completion_rx,
+    }
+}
+
+async fn run_socket_adapter(
+    mut websocket: tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+    adapter_io: tokio::io::DuplexStream,
+    shutdown: &mut mpsc::Receiver<()>,
+) -> Result<(), DriverError> {
+    let (adapter_reader, mut adapter_writer) = tokio::io::split(adapter_io);
+    let mut adapter_reader = BufReader::new(adapter_reader);
+    loop {
+        tokio::select! {
+            biased;
+            outgoing = crate::peer::read_bounded_frame(&mut adapter_reader) => {
+                let Some(outgoing) = outgoing.map_err(socket_adapter_io_error)? else {
+                    return Ok(());
+                };
+                let outgoing = String::from_utf8(outgoing).map_err(|_| {
+                    DriverError::Protocol("Codex JSON-RPC output was not valid UTF-8".to_string())
+                })?;
+                websocket
+                    .send(Message::Text(outgoing.into()))
+                    .await
+                    .map_err(socket_adapter_error)?;
+            }
+            _ = shutdown.recv() => {
+                // Drain already-buffered JSON-RPC first, including the
+                // post-initialize notification, then drop the local Unix
+                // stream. Waiting for the peer's WebSocket close handshake can
+                // delay shutdown even though the shared host has no connection
+                // state left for this client.
+                return Ok(());
+            }
+            incoming = websocket.next() => {
+                match incoming {
+                    Some(Ok(Message::Text(payload))) => {
+                        if payload.len() > MAX_WEBSOCKET_MESSAGE_BYTES {
+                            return Err(DriverError::Protocol(
+                                "Codex app-server WebSocket frame exceeded the input limit".to_string(),
+                            ));
+                        }
+                        adapter_writer
+                            .write_all(payload.as_bytes())
+                            .await
+                            .map_err(socket_adapter_io_error)?;
+                        adapter_writer
+                            .write_all(b"\n")
+                            .await
+                            .map_err(socket_adapter_io_error)?;
+                        adapter_writer.flush().await.map_err(socket_adapter_io_error)?;
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        websocket
+                            .send(Message::Pong(payload))
+                            .await
+                            .map_err(socket_adapter_error)?;
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Close(_))) | None => {
+                        return Err(DriverError::ProcessExited(
+                            "Codex shared app-server connection closed".to_string(),
+                        ));
+                    }
+                    Some(Ok(Message::Binary(_))) => {
+                        return Err(DriverError::Protocol(
+                            "Codex shared app-server sent an unexpected binary frame".to_string(),
+                        ));
+                    }
+                    Some(Ok(Message::Frame(_))) => {}
+                    Some(Err(error)) => return Err(socket_adapter_error(error)),
+                }
+            }
+        }
+    }
+}
+
+fn socket_adapter_error(error: tokio_tungstenite::tungstenite::Error) -> DriverError {
+    DriverError::Unavailable(format!(
+        "Codex shared app-server connection failed: {error}"
+    ))
+}
+
+fn socket_adapter_io_error(error: std::io::Error) -> DriverError {
+    DriverError::Unavailable(format!("Codex shared app-server adapter failed: {error}"))
+}
+
+async fn spawn_codex_stdio_client(
+    config: &CodexLaunchConfig,
+    arguments: Vec<OsString>,
+    bridge_version: &str,
+    version: CodexVersionProbe,
+) -> Result<SpawnedCodexDriver, CodexLaunchError> {
     if let Some(host) = config.process_host.as_ref() {
         reap_stale_process_host(&host.lock_file)
             .await
             .map_err(CodexLaunchError::ProcessHost)?;
     }
-    let mut command = hosted_codex_command(
-        &config,
-        config.process_host.as_ref(),
-        config.app_server_args.iter().cloned(),
-    );
+    let mut command = hosted_codex_command(config, config.process_host.as_ref(), arguments);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    apply_child_environment(&mut command, &config);
+    apply_child_environment(&mut command, config);
     configure_process_group(&mut command);
     let mut child = command.spawn().map_err(CodexLaunchError::Spawn)?;
     let stdin = child
@@ -322,33 +757,17 @@ pub async fn spawn_codex_driver(
     tokio::spawn(capture_stderr(stderr, stderr_sink));
 
     let process_status = CodexProcessStatus::new();
-    let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
-    let (completion_tx, completion_rx) = watch::channel(None);
-    tokio::spawn(supervise_process(
-        child,
-        process_id,
-        shutdown_rx,
-        process_status.clone(),
-        completion_tx,
-    ));
-    let hook_sender = shutdown_tx.clone();
-    let hook_completion = completion_rx.clone();
+    let control = supervise_child(child, process_id, process_status.clone());
+    let hook_control = control.clone();
     let shutdown_hook = Arc::new(move || {
-        let shutdown = hook_sender.clone();
-        let mut completion = hook_completion.clone();
-        Box::pin(async move {
-            let _ = shutdown.send(()).await;
-            loop {
-                if let Some(result) = completion.borrow().clone() {
-                    return result;
-                }
-                completion.changed().await.map_err(|_| {
-                    DriverError::ProcessExited("Codex app-server supervisor exited".to_string())
-                })?;
-            }
-        }) as super::driver::ShutdownFuture
+        let control = hook_control.clone();
+        Box::pin(async move { control.shutdown().await }) as super::driver::ShutdownFuture
     });
-    let peer = CodexPeer::new(stdout, stdin, config.incoming_capacity);
+    let peer = CodexPeer::new(
+        stdout,
+        Box::new(stdin) as CodexDriverWriter,
+        config.incoming_capacity,
+    );
     let driver = match CodexAppServerDriver::initialize_with_shutdown(
         peer,
         bridge_version,
@@ -358,18 +777,45 @@ pub async fn spawn_codex_driver(
     {
         Ok(driver) => driver,
         Err(error) => {
-            let _ = shutdown_tx.send(()).await;
-            let mut completion = completion_rx;
-            while completion.borrow().is_none() && completion.changed().await.is_ok() {}
+            let _ = control.shutdown().await;
             return Err(CodexLaunchError::Initialize(error));
+        }
+    };
+    let app_server_version = match verified_app_server_version(&driver, &config.version_policy) {
+        Ok(version) => version,
+        Err(error) => {
+            let _ = driver.shutdown().await;
+            return Err(error);
         }
     };
     Ok(SpawnedCodexDriver {
         driver,
         version,
+        app_server_version,
+        transport: config.transport.clone(),
         stderr_tail,
         process_status,
     })
+}
+
+fn supervise_child(
+    child: Child,
+    process_id: Option<u32>,
+    process_status: CodexProcessStatus,
+) -> ProcessControl {
+    let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+    let (completion_tx, completion_rx) = watch::channel(None);
+    tokio::spawn(supervise_process(
+        child,
+        process_id,
+        shutdown_rx,
+        process_status,
+        completion_tx,
+    ));
+    ProcessControl {
+        shutdown: shutdown_tx,
+        completion: completion_rx,
+    }
 }
 
 fn hosted_codex_command(
@@ -414,14 +860,47 @@ pub fn parse_codex_version(output: &str) -> Result<Version, CodexLaunchError> {
         .ok_or_else(|| CodexLaunchError::InvalidVersionOutput(redact_stderr_line(output)))
 }
 
-fn ensure_supported_version(found: &Version, required: &Version) -> Result<(), CodexLaunchError> {
-    if found != required {
-        return Err(CodexLaunchError::UnsupportedVersion {
-            found: found.clone(),
-            required: required.clone(),
-        });
+fn verified_app_server_version(
+    driver: &CodexAppServerDriver<CodexDriverWriter>,
+    policy: &CodexVersionPolicy,
+) -> Result<Version, CodexLaunchError> {
+    let user_agent = driver.server_user_agent();
+    let version = user_agent
+        .split_whitespace()
+        .find_map(|component| {
+            let (_, raw_version) = component.split_once('/')?;
+            Version::parse(raw_version.trim_end_matches([';', ')'])).ok()
+        })
+        .ok_or_else(|| CodexLaunchError::InvalidVersionOutput(redact_stderr_line(user_agent)))?;
+    ensure_supported_version(&version, policy)?;
+    Ok(version)
+}
+
+fn ensure_supported_version(
+    found: &Version,
+    policy: &CodexVersionPolicy,
+) -> Result<(), CodexLaunchError> {
+    let supported = match policy {
+        CodexVersionPolicy::Certified => is_certified_codex_version(found),
+        CodexVersionPolicy::Exact(required) => found == required,
+        CodexVersionPolicy::Any => true,
+    };
+    if supported {
+        return Ok(());
     }
-    Ok(())
+    let required = match policy {
+        CodexVersionPolicy::Certified => format!(
+            "one of the fixture-certified versions {} or {}",
+            minimum_codex_version(),
+            latest_certified_codex_version()
+        ),
+        CodexVersionPolicy::Exact(required) => required.to_string(),
+        CodexVersionPolicy::Any => unreachable!("any Codex version is accepted"),
+    };
+    Err(CodexLaunchError::UnsupportedVersion {
+        found: found.clone(),
+        required,
+    })
 }
 
 /// Removes credentials that belong to Inline or to the host application while
@@ -654,18 +1133,165 @@ mod tests {
     }
 
     #[test]
-    fn accepts_only_the_certified_codex_version() {
+    fn accepts_only_fixture_certified_codex_versions() {
         assert!(
-            ensure_supported_version(&minimum_codex_version(), &minimum_codex_version()).is_ok()
+            ensure_supported_version(&minimum_codex_version(), &CodexVersionPolicy::Certified)
+                .is_ok()
+        );
+        assert!(
+            ensure_supported_version(
+                &latest_certified_codex_version(),
+                &CodexVersionPolicy::Certified,
+            )
+            .is_ok()
         );
         assert!(matches!(
-            ensure_supported_version(&Version::new(0, 144, 9), &minimum_codex_version()),
+            ensure_supported_version(&Version::new(0, 144, 9), &CodexVersionPolicy::Certified,),
             Err(CodexLaunchError::UnsupportedVersion { .. })
         ));
         assert!(matches!(
-            ensure_supported_version(&Version::new(0, 147, 0), &minimum_codex_version()),
+            ensure_supported_version(&Version::new(0, 149, 1), &CodexVersionPolicy::Certified,),
             Err(CodexLaunchError::UnsupportedVersion { .. })
         ));
+    }
+
+    #[test]
+    fn transport_arguments_preserve_the_private_turn_default() {
+        assert_eq!(
+            CodexLaunchConfig::default().transport,
+            CodexAppServerTransport::PrivateStdio
+        );
+        assert_eq!(
+            CodexAppServerTransport::SharedLocal.host_arguments(),
+            Some(vec![
+                OsString::from("app-server"),
+                OsString::from("--listen"),
+                OsString::from("unix://"),
+            ])
+        );
+        assert_eq!(CodexAppServerTransport::SharedLocal.stdio_arguments(), None);
+        assert_eq!(
+            CodexAppServerTransport::PrivateStdio.stdio_arguments(),
+            Some(vec![OsString::from("app-server")])
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shared_socket_adapter_initializes_and_shuts_down_cleanly() {
+        use tokio_tungstenite::accept_async;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let socket_path = directory.path().join("codex.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind Unix socket");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept Unix client");
+            let mut websocket = accept_async(stream).await.expect("upgrade WebSocket");
+            let initialize = websocket
+                .next()
+                .await
+                .expect("initialize frame")
+                .expect("initialize message");
+            let Message::Text(initialize) = initialize else {
+                panic!("initialize was not text");
+            };
+            let initialize: serde_json::Value =
+                serde_json::from_str(&initialize).expect("initialize JSON");
+            assert_eq!(initialize["method"], "initialize");
+            assert_eq!(
+                initialize["params"]["clientInfo"]["name"],
+                "inline_agent_bridge"
+            );
+            websocket
+                .send(Message::Text(
+                    serde_json::json!({
+                        "id": initialize["id"],
+                        "result": {
+                            "userAgent": "codex_app_server/0.150.0-alpha.8"
+                        }
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .expect("initialize response");
+            let initialized = websocket
+                .next()
+                .await
+                .expect("initialized frame")
+                .expect("initialized message");
+            let Message::Text(initialized) = initialized else {
+                panic!("initialized was not text");
+            };
+            let initialized: serde_json::Value =
+                serde_json::from_str(&initialized).expect("initialized JSON");
+            assert_eq!(initialized["method"], "initialized");
+            while let Some(message) = websocket.next().await {
+                if matches!(message, Ok(Message::Close(_))) {
+                    break;
+                }
+            }
+        });
+        let version = latest_certified_codex_version();
+        let config = CodexLaunchConfig {
+            transport: CodexAppServerTransport::SharedLocal,
+            version_policy: CodexVersionPolicy::Certified,
+            ..CodexLaunchConfig::default()
+        };
+        let spawned = connect_shared_codex(
+            &config,
+            &socket_path,
+            "0.7.4",
+            CodexVersionProbe {
+                executable: PathBuf::from("/signed/codex"),
+                version: version.clone(),
+            },
+            None,
+            RedactedStderrTail::new(),
+        )
+        .await
+        .expect("shared Codex connection");
+        assert_eq!(spawned.transport, CodexAppServerTransport::SharedLocal);
+        assert_eq!(spawned.app_server_version, version);
+        spawned
+            .driver
+            .shutdown()
+            .await
+            .expect("shutdown connection");
+        server.await.expect("server task");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn existing_incompatible_control_socket_does_not_look_unavailable() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let socket_path = directory.path().join("codex.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind Unix socket");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept Unix client");
+            stream
+                .write_all(
+                    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .expect("reject WebSocket upgrade");
+        });
+        let version = latest_certified_codex_version();
+        let error = connect_shared_codex(
+            &CodexLaunchConfig::default(),
+            &socket_path,
+            "0.7.4",
+            CodexVersionProbe {
+                executable: PathBuf::from("/signed/codex"),
+                version,
+            },
+            None,
+            RedactedStderrTail::new(),
+        )
+        .await
+        .expect_err("incompatible shared host");
+        assert!(matches!(error, CodexLaunchError::SharedHostIncompatible(_)));
+        server.await.expect("server task");
     }
 
     #[test]
@@ -684,13 +1310,14 @@ mod tests {
     async fn spawns_initializes_and_stops_a_supervised_process_group() {
         let config = CodexLaunchConfig {
             executable: PathBuf::from("/bin/bash"),
-            app_server_args: vec![
+            transport: CodexAppServerTransport::PrivateStdio,
+            app_server_args_override: Some(vec![
                 OsString::from("-c"),
                 OsString::from(
-                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"fake-codex\"}}'; IFS= read -r initialized; sleep 30",
+                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"codex_app_server/0.146.0\"}}'; IFS= read -r initialized; sleep 30",
                 ),
-            ],
-            required_version: None,
+            ]),
+            version_policy: CodexVersionPolicy::Any,
             incoming_capacity: 8,
             environment_remove: CodexLaunchConfig::default().environment_remove,
             process_host: None,
@@ -711,13 +1338,14 @@ mod tests {
     async fn dropping_the_driver_stops_the_supervised_process_group() {
         let config = CodexLaunchConfig {
             executable: PathBuf::from("/bin/bash"),
-            app_server_args: vec![
+            transport: CodexAppServerTransport::PrivateStdio,
+            app_server_args_override: Some(vec![
                 OsString::from("-c"),
                 OsString::from(
-                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"fake-codex\"}}'; IFS= read -r initialized; sleep 30",
+                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"codex_app_server/0.146.0\"}}'; IFS= read -r initialized; sleep 30",
                 ),
-            ],
-            required_version: None,
+            ]),
+            version_policy: CodexVersionPolicy::Any,
             incoming_capacity: 8,
             environment_remove: CodexLaunchConfig::default().environment_remove,
             process_host: None,
@@ -741,13 +1369,14 @@ mod tests {
     async fn fatal_peer_input_stops_the_supervised_process_group() {
         let config = CodexLaunchConfig {
             executable: PathBuf::from("/bin/bash"),
-            app_server_args: vec![
+            transport: CodexAppServerTransport::PrivateStdio,
+            app_server_args_override: Some(vec![
                 OsString::from("-c"),
                 OsString::from(
-                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"fake-codex\"}}'; IFS= read -r initialized; printf '%s\\n' 'not-json'; sleep 30",
+                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"codex_app_server/0.146.0\"}}'; IFS= read -r initialized; printf '%s\\n' 'not-json'; sleep 30",
                 ),
-            ],
-            required_version: None,
+            ]),
+            version_policy: CodexVersionPolicy::Any,
             incoming_capacity: 8,
             environment_remove: CodexLaunchConfig::default().environment_remove,
             process_host: None,
@@ -773,15 +1402,16 @@ mod tests {
         let descendant_pid_file = directory.path().join("descendant.pid");
         let config = CodexLaunchConfig {
             executable: PathBuf::from("/bin/bash"),
-            app_server_args: vec![
+            transport: CodexAppServerTransport::PrivateStdio,
+            app_server_args_override: Some(vec![
                 OsString::from("-c"),
                 OsString::from(
-                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"fake-codex\"}}'; IFS= read -r initialized; sleep 30 & printf '%s\\n' \"$!\" > \"$1\"",
+                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"codex_app_server/0.146.0\"}}'; IFS= read -r initialized; sleep 30 & printf '%s\\n' \"$!\" > \"$1\"",
                 ),
                 OsString::from("inline-codex-process-test"),
                 descendant_pid_file.as_os_str().to_owned(),
-            ],
-            required_version: None,
+            ]),
+            version_policy: CodexVersionPolicy::Any,
             incoming_capacity: 8,
             environment_remove: CodexLaunchConfig::default().environment_remove,
             process_host: None,
@@ -903,14 +1533,18 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires an installed Codex CLI binary"]
     async fn installed_codex_app_server_initializes_and_stops() {
-        let mut config = CodexLaunchConfig::default();
+        let mut config = CodexLaunchConfig {
+            transport: CodexAppServerTransport::SharedLocal,
+            ..CodexLaunchConfig::default()
+        };
         if let Some(executable) = std::env::var_os("INLINE_CODEX_SMOKE_EXECUTABLE") {
             config.executable = executable.into();
         }
         let spawned = spawn_codex_driver(config, "0.6.2")
             .await
             .expect("initialize installed Codex app-server");
-        assert_eq!(spawned.version.version, minimum_codex_version());
+        assert!(is_certified_codex_version(&spawned.version.version));
+        assert!(is_certified_codex_version(&spawned.app_server_version));
         let catalog = spawned
             .driver
             .settings_catalog(&std::env::current_dir().expect("current directory"))

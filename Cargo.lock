@@ -1363,6 +1363,8 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]

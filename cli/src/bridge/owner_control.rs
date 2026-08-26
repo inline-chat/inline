@@ -112,6 +112,20 @@ impl OwnerControl {
         Ok(())
     }
 
+    pub(super) async fn connect_agent_session(
+        &self,
+        request: proto::ConnectAgentSessionInput,
+    ) -> Result<proto::ConnectAgentSessionResult, Box<dyn std::error::Error>> {
+        Ok(self.client.connect_agent_session(request).await?)
+    }
+
+    pub(super) async fn get_agent_session(
+        &self,
+        request: proto::GetAgentSessionInput,
+    ) -> Result<proto::GetAgentSessionResult, Box<dyn std::error::Error>> {
+        Ok(self.client.get_agent_session(request).await?)
+    }
+
     pub(super) async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.client.shutdown().await?;
         let Some(drain) = self.drain.lock().await.take() else {

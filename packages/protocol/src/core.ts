@@ -1614,6 +1614,36 @@ export interface Message {
      * @generated from protobuf field: optional BlockContent block_content = 23;
      */
     blockContent?: BlockContent;
+    /**
+     * Present only when this row is durably associated with an external agent
+     * session. Raw provider identifiers remain server-private.
+     *
+     * @generated from protobuf field: optional AgentSessionMessageInfo agent_session = 24;
+     */
+    agentSession?: AgentSessionMessageInfo;
+}
+/**
+ * @generated from protobuf message AgentSessionMessageInfo
+ */
+export interface AgentSessionMessageInfo {
+    /**
+     * Stable Inline database identity, not the provider's session identifier.
+     *
+     * @generated from protobuf field: int64 agent_session_id = 1;
+     */
+    agentSessionId: bigint;
+    /**
+     * @generated from protobuf field: AgentSessionProvider provider = 2;
+     */
+    provider: AgentSessionProvider;
+    /**
+     * @generated from protobuf field: AgentSessionMessageRole role = 3;
+     */
+    role: AgentSessionMessageRole;
+    /**
+     * @generated from protobuf field: AgentSessionMessageRelation relation = 4;
+     */
+    relation: AgentSessionMessageRelation;
 }
 /**
  * @generated from protobuf message MessageFwdHeader
@@ -2020,6 +2050,302 @@ export interface GetSpaceResult {
      * @generated from protobuf field: SpaceSettings settings = 3;
      */
     settings?: SpaceSettings;
+}
+/**
+ * Durable Inline association between one bridge bot, one existing Inline
+ * thread, and one external agent session. Provider identifiers are not exposed.
+ *
+ * @generated from protobuf message AgentSession
+ */
+export interface AgentSession {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * @generated from protobuf field: Peer peer_id = 2;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 3;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: AgentSessionProvider provider = 4;
+     */
+    provider: AgentSessionProvider;
+    /**
+     * @generated from protobuf field: optional int64 status_message_id = 5;
+     */
+    statusMessageId?: bigint;
+}
+/**
+ * @generated from protobuf message ConnectAgentSessionInput
+ */
+export interface ConnectAgentSessionInput {
+    /**
+     * Existing Inline thread to adopt. The server never creates or moves it.
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Bridge bot that will synchronize this session. The caller must own it.
+     *
+     * @generated from protobuf field: int64 bot_user_id = 2;
+     */
+    botUserId: bigint;
+    /**
+     * Agent provider; future providers extend the enum without changing the RPC.
+     *
+     * @generated from protobuf field: AgentSessionProvider provider = 3;
+     */
+    provider: AgentSessionProvider;
+    /**
+     * Stable provider installation or account namespace. Opaque to Inline.
+     *
+     * @generated from protobuf field: string instance_ref = 4;
+     */
+    instanceRef: string;
+    /**
+     * Stable provider task, thread, or session identifier. Opaque to Inline.
+     *
+     * @generated from protobuf field: string session_ref = 5;
+     */
+    sessionRef: string;
+    /**
+     * Optional stable workspace, repository, or environment identity. It is
+     * descriptive metadata and does not participate in session identity.
+     *
+     * @generated from protobuf field: optional string project_ref = 6;
+     */
+    projectRef?: string;
+    /**
+     * Optional bot-authored message in peer_id used as the pinned connection card.
+     *
+     * @generated from protobuf field: optional int64 status_message_id = 7;
+     */
+    statusMessageId?: bigint;
+}
+/**
+ * @generated from protobuf message ConnectAgentSessionResult
+ */
+export interface ConnectAgentSessionResult {
+    /**
+     * @generated from protobuf field: AgentSession agent_session = 1;
+     */
+    agentSession?: AgentSession;
+    /**
+     * @generated from protobuf field: ConnectAgentSessionState state = 2;
+     */
+    state: ConnectAgentSessionState;
+}
+/**
+ * @generated from protobuf message AgentSessionConnection
+ */
+export interface AgentSessionConnection {
+    /**
+     * @generated from protobuf field: AgentSession agent_session = 1;
+     */
+    agentSession?: AgentSession;
+    /**
+     * Exact opaque provider namespace originally supplied at connection time.
+     *
+     * @generated from protobuf field: string instance_ref = 2;
+     */
+    instanceRef: string;
+    /**
+     * Exact opaque provider task, thread, or session identity.
+     *
+     * @generated from protobuf field: string session_ref = 3;
+     */
+    sessionRef: string;
+    /**
+     * Stable workspace/repository/environment identity, when one was supplied.
+     *
+     * @generated from protobuf field: optional string project_ref = 4;
+     */
+    projectRef?: string;
+}
+/**
+ * @generated from protobuf message GetAgentSessionInput
+ */
+export interface GetAgentSessionInput {
+    /**
+     * Inline conversation whose durable agent connection should be recovered.
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Bridge bot connection to look up. The authenticated caller must own it.
+     *
+     * @generated from protobuf field: int64 bot_user_id = 2;
+     */
+    botUserId: bigint;
+}
+/**
+ * @generated from protobuf message GetAgentSessionResult
+ */
+export interface GetAgentSessionResult {
+    /**
+     * Absent when this bot has no agent session connected to the conversation.
+     *
+     * @generated from protobuf field: optional AgentSessionConnection connection = 1;
+     */
+    connection?: AgentSessionConnection;
+}
+/**
+ * @generated from protobuf message AgentSessionMessageUpsert
+ */
+export interface AgentSessionMessageUpsert {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
+    /**
+     * @generated from protobuf field: optional MessageEntities entities = 2;
+     */
+    entities?: MessageEntities;
+    /**
+     * Optional idempotent bot-send identity. For assistant history, the server
+     * links the existing bot row when this random ID exists; otherwise it
+     * imports a new row. This closes the send-before-ledger crash boundary.
+     *
+     * @generated from protobuf field: optional int64 assistant_random_id = 3;
+     */
+    assistantRandomId?: bigint;
+}
+/**
+ * @generated from protobuf message AgentSessionMessageLink
+ */
+export interface AgentSessionMessageLink {
+    /**
+     * Existing Inline-local message ID whose provider dispatch route is verified.
+     *
+     * @generated from protobuf field: int64 message_id = 1;
+     */
+    messageId: bigint;
+}
+/**
+ * @generated from protobuf message AgentSessionMessageSync
+ */
+export interface AgentSessionMessageSync {
+    /**
+     * @generated from protobuf field: AgentSessionMessageRole role = 1;
+     */
+    role: AgentSessionMessageRole;
+    /**
+     * Stable provider item identity. Required for uncorrelated provider history.
+     *
+     * @generated from protobuf field: optional string item_ref = 2;
+     */
+    itemRef?: string;
+    /**
+     * Stable Inline-to-provider input identity. It is canonical when present.
+     *
+     * @generated from protobuf field: optional string correlation_ref = 3;
+     */
+    correlationRef?: string;
+    /**
+     * Provider event time in Unix seconds. Required when creating an imported row.
+     *
+     * @generated from protobuf field: optional int64 source_date = 4;
+     */
+    sourceDate?: bigint;
+    /**
+     * Opaque stable content/provider revision used for idempotency.
+     *
+     * @generated from protobuf field: optional string revision_ref = 5;
+     */
+    revisionRef?: string;
+    /**
+     * Expected stored revision when changing an imported row.
+     *
+     * @generated from protobuf field: optional string base_revision_ref = 6;
+     */
+    baseRevisionRef?: string;
+    /**
+     * True once the provider considers this item's content final.
+     *
+     * @generated from protobuf field: bool complete = 7;
+     */
+    complete: boolean;
+    /**
+     * @generated from protobuf oneof: operation
+     */
+    operation: {
+        oneofKind: "upsert";
+        /**
+         * @generated from protobuf field: AgentSessionMessageUpsert upsert = 8;
+         */
+        upsert: AgentSessionMessageUpsert;
+    } | {
+        oneofKind: "link";
+        /**
+         * @generated from protobuf field: AgentSessionMessageLink link = 9;
+         */
+        link: AgentSessionMessageLink;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * @generated from protobuf message SyncAgentSessionMessagesInput
+ */
+export interface SyncAgentSessionMessagesInput {
+    /**
+     * Durable Inline session ID returned by connectAgentSession.
+     *
+     * @generated from protobuf field: int64 agent_session_id = 1;
+     */
+    agentSessionId: bigint;
+    /**
+     * Selects history versus current-message side effects; it is not persisted.
+     *
+     * @generated from protobuf field: AgentSessionSyncMode mode = 2;
+     */
+    mode: AgentSessionSyncMode;
+    /**
+     * Ordered, atomic batch. The server currently accepts at most 100 operations.
+     *
+     * @generated from protobuf field: repeated AgentSessionMessageSync messages = 3;
+     */
+    messages: AgentSessionMessageSync[];
+}
+/**
+ * @generated from protobuf message AgentSessionMessageSyncResult
+ */
+export interface AgentSessionMessageSyncResult {
+    /**
+     * Zero-based position in the request batch.
+     *
+     * @generated from protobuf field: int32 index = 1;
+     */
+    index: number;
+    /**
+     * @generated from protobuf field: AgentSessionMessageSyncState state = 2;
+     */
+    state: AgentSessionMessageSyncState;
+    /**
+     * @generated from protobuf field: optional int64 message_id = 3;
+     */
+    messageId?: bigint;
+    /**
+     * Returned on compare-and-swap conflict so the bridge may repair explicitly.
+     *
+     * @generated from protobuf field: optional string current_revision_ref = 4;
+     */
+    currentRevisionRef?: string;
+}
+/**
+ * @generated from protobuf message SyncAgentSessionMessagesResult
+ */
+export interface SyncAgentSessionMessagesResult {
+    /**
+     * @generated from protobuf field: repeated AgentSessionMessageSyncResult messages = 1;
+     */
+    messages: AgentSessionMessageSyncResult[];
 }
 /**
  * @generated from protobuf message JoinPublicSpaceInput
@@ -3006,7 +3332,11 @@ export enum RpcError_Code {
     /**
      * @generated from protobuf enum value: URL_PREVIEW_UNAVAILABLE = 18;
      */
-    URL_PREVIEW_UNAVAILABLE = 18
+    URL_PREVIEW_UNAVAILABLE = 18,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_IMMUTABLE = 19;
+     */
+    AGENT_SESSION_MESSAGE_IMMUTABLE = 19
 }
 /**
  * @generated from protobuf message RpcCall
@@ -3775,6 +4105,24 @@ export interface RpcCall {
          * @generated from protobuf field: GetSpaceInput getSpace = 128;
          */
         getSpace: GetSpaceInput;
+    } | {
+        oneofKind: "connectAgentSession";
+        /**
+         * @generated from protobuf field: ConnectAgentSessionInput connectAgentSession = 129;
+         */
+        connectAgentSession: ConnectAgentSessionInput;
+    } | {
+        oneofKind: "syncAgentSessionMessages";
+        /**
+         * @generated from protobuf field: SyncAgentSessionMessagesInput syncAgentSessionMessages = 130;
+         */
+        syncAgentSessionMessages: SyncAgentSessionMessagesInput;
+    } | {
+        oneofKind: "getAgentSession";
+        /**
+         * @generated from protobuf field: GetAgentSessionInput getAgentSession = 131;
+         */
+        getAgentSession: GetAgentSessionInput;
     } | {
         oneofKind: undefined;
     };
@@ -4546,6 +4894,24 @@ export interface RpcResult {
          * @generated from protobuf field: GetSpaceResult getSpace = 128;
          */
         getSpace: GetSpaceResult;
+    } | {
+        oneofKind: "connectAgentSession";
+        /**
+         * @generated from protobuf field: ConnectAgentSessionResult connectAgentSession = 129;
+         */
+        connectAgentSession: ConnectAgentSessionResult;
+    } | {
+        oneofKind: "syncAgentSessionMessages";
+        /**
+         * @generated from protobuf field: SyncAgentSessionMessagesResult syncAgentSessionMessages = 130;
+         */
+        syncAgentSessionMessages: SyncAgentSessionMessagesResult;
+    } | {
+        oneofKind: "getAgentSession";
+        /**
+         * @generated from protobuf field: GetAgentSessionResult getAgentSession = 131;
+         */
+        getAgentSession: GetAgentSessionResult;
     } | {
         oneofKind: undefined;
     };
@@ -11696,6 +12062,76 @@ export enum DialogFollowMode {
     UNFOLLOWED = 2
 }
 /**
+ * Agent providers that implement Inline's session continuity contract. The
+ * numeric values are stored by the server; additions must be append-only.
+ *
+ * @generated from protobuf enum AgentSessionProvider
+ */
+export enum AgentSessionProvider {
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_PROVIDER_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_PROVIDER_CODEX = 1;
+     */
+    CODEX = 1,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_PROVIDER_CODEX_CLOUD = 2;
+     */
+    CODEX_CLOUD = 2,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_PROVIDER_CLAUDE = 3;
+     */
+    CLAUDE = 3,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_PROVIDER_OPEN_CODE = 4;
+     */
+    OPEN_CODE = 4,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_PROVIDER_AMP = 5;
+     */
+    AMP = 5
+}
+/**
+ * @generated from protobuf enum AgentSessionMessageRole
+ */
+export enum AgentSessionMessageRole {
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_ROLE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_ROLE_USER = 1;
+     */
+    USER = 1,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_ROLE_ASSISTANT = 2;
+     */
+    ASSISTANT = 2
+}
+/**
+ * @generated from protobuf enum AgentSessionMessageRelation
+ */
+export enum AgentSessionMessageRelation {
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_RELATION_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * The provider owns this projected Inline row.
+     *
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_RELATION_IMPORTED = 1;
+     */
+    IMPORTED = 1,
+    /**
+     * An existing Inline-authored row is linked to its provider echo.
+     *
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_RELATION_LINKED = 2;
+     */
+    LINKED = 2
+}
+/**
  * @generated from protobuf enum MessageSendMode
  */
 export enum MessageSendMode {
@@ -11707,6 +12143,85 @@ export enum MessageSendMode {
      * @generated from protobuf enum value: MODE_SILENT = 1;
      */
     MODE_SILENT = 1
+}
+/**
+ * @generated from protobuf enum ConnectAgentSessionState
+ */
+export enum ConnectAgentSessionState {
+    /**
+     * @generated from protobuf enum value: CONNECT_AGENT_SESSION_STATE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: CONNECT_AGENT_SESSION_STATE_CREATED = 1;
+     */
+    CREATED = 1,
+    /**
+     * @generated from protobuf enum value: CONNECT_AGENT_SESSION_STATE_ALREADY_CONNECTED = 2;
+     */
+    ALREADY_CONNECTED = 2,
+    /**
+     * @generated from protobuf enum value: CONNECT_AGENT_SESSION_STATE_CONNECTED_ELSEWHERE = 3;
+     */
+    CONNECTED_ELSEWHERE = 3
+}
+/**
+ * @generated from protobuf enum AgentSessionSyncMode
+ */
+export enum AgentSessionSyncMode {
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_SYNC_MODE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * Historical repair: visible in realtime but not counted as unread or pushed.
+     *
+     * @generated from protobuf enum value: AGENT_SESSION_SYNC_MODE_HISTORY = 1;
+     */
+    HISTORY = 1,
+    /**
+     * Current provider output: normal realtime visibility and unread semantics.
+     *
+     * @generated from protobuf enum value: AGENT_SESSION_SYNC_MODE_LIVE = 2;
+     */
+    LIVE = 2
+}
+/**
+ * @generated from protobuf enum AgentSessionMessageSyncState
+ */
+export enum AgentSessionMessageSyncState {
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_CREATED = 1;
+     */
+    CREATED = 1,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_EDITED = 2;
+     */
+    EDITED = 2,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_LINKED = 3;
+     */
+    LINKED = 3,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_UNCHANGED = 4;
+     */
+    UNCHANGED = 4,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_STALE = 5;
+     */
+    STALE = 5,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_TOMBSTONED = 6;
+     */
+    TOMBSTONED = 6,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_SYNC_STATE_CONFLICT = 7;
+     */
+    CONFLICT = 7
 }
 /**
  * @generated from protobuf enum Method
@@ -12219,7 +12734,19 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_SPACE = 127;
      */
-    GET_SPACE = 127
+    GET_SPACE = 127,
+    /**
+     * @generated from protobuf enum value: CONNECT_AGENT_SESSION = 128;
+     */
+    CONNECT_AGENT_SESSION = 128,
+    /**
+     * @generated from protobuf enum value: SYNC_AGENT_SESSION_MESSAGES = 129;
+     */
+    SYNC_AGENT_SESSION_MESSAGES = 129,
+    /**
+     * @generated from protobuf enum value: GET_AGENT_SESSION = 130;
+     */
+    GET_AGENT_SESSION = 130
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -16368,7 +16895,8 @@ class Message$Type extends MessageType<Message> {
             { no: 20, name: "actions", kind: "message", T: () => MessageActions },
             { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 22, name: "service_message", kind: "message", T: () => MessageService },
-            { no: 23, name: "block_content", kind: "message", T: () => BlockContent }
+            { no: 23, name: "block_content", kind: "message", T: () => BlockContent },
+            { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -16459,6 +16987,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional BlockContent block_content */ 23:
                     message.blockContent = BlockContent.internalBinaryRead(reader, reader.uint32(), options, message.blockContent);
                     break;
+                case /* optional AgentSessionMessageInfo agent_session */ 24:
+                    message.agentSession = AgentSessionMessageInfo.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16543,6 +17074,9 @@ class Message$Type extends MessageType<Message> {
         /* optional BlockContent block_content = 23; */
         if (message.blockContent)
             BlockContent.internalBinaryWrite(message.blockContent, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        /* optional AgentSessionMessageInfo agent_session = 24; */
+        if (message.agentSession)
+            AgentSessionMessageInfo.internalBinaryWrite(message.agentSession, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -16553,6 +17087,77 @@ class Message$Type extends MessageType<Message> {
  * @generated MessageType for protobuf message Message
  */
 export const Message = new Message$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentSessionMessageInfo$Type extends MessageType<AgentSessionMessageInfo> {
+    constructor() {
+        super("AgentSessionMessageInfo", [
+            { no: 1, name: "agent_session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "provider", kind: "enum", T: () => ["AgentSessionProvider", AgentSessionProvider, "AGENT_SESSION_PROVIDER_"] },
+            { no: 3, name: "role", kind: "enum", T: () => ["AgentSessionMessageRole", AgentSessionMessageRole, "AGENT_SESSION_MESSAGE_ROLE_"] },
+            { no: 4, name: "relation", kind: "enum", T: () => ["AgentSessionMessageRelation", AgentSessionMessageRelation, "AGENT_SESSION_MESSAGE_RELATION_"] }
+        ]);
+    }
+    create(value?: PartialMessage<AgentSessionMessageInfo>): AgentSessionMessageInfo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.agentSessionId = 0n;
+        message.provider = 0;
+        message.role = 0;
+        message.relation = 0;
+        if (value !== undefined)
+            reflectionMergePartial<AgentSessionMessageInfo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentSessionMessageInfo): AgentSessionMessageInfo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 agent_session_id */ 1:
+                    message.agentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionProvider provider */ 2:
+                    message.provider = reader.int32();
+                    break;
+                case /* AgentSessionMessageRole role */ 3:
+                    message.role = reader.int32();
+                    break;
+                case /* AgentSessionMessageRelation relation */ 4:
+                    message.relation = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentSessionMessageInfo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 agent_session_id = 1; */
+        if (message.agentSessionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.agentSessionId);
+        /* AgentSessionProvider provider = 2; */
+        if (message.provider !== 0)
+            writer.tag(2, WireType.Varint).int32(message.provider);
+        /* AgentSessionMessageRole role = 3; */
+        if (message.role !== 0)
+            writer.tag(3, WireType.Varint).int32(message.role);
+        /* AgentSessionMessageRelation relation = 4; */
+        if (message.relation !== 0)
+            writer.tag(4, WireType.Varint).int32(message.relation);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentSessionMessageInfo
+ */
+export const AgentSessionMessageInfo = new AgentSessionMessageInfo$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageFwdHeader$Type extends MessageType<MessageFwdHeader> {
     constructor() {
@@ -17551,6 +18156,796 @@ class GetSpaceResult$Type extends MessageType<GetSpaceResult> {
  * @generated MessageType for protobuf message GetSpaceResult
  */
 export const GetSpaceResult = new GetSpaceResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentSession$Type extends MessageType<AgentSession> {
+    constructor() {
+        super("AgentSession", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 3, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "provider", kind: "enum", T: () => ["AgentSessionProvider", AgentSessionProvider, "AGENT_SESSION_PROVIDER_"] },
+            { no: 5, name: "status_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentSession>): AgentSession {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.botUserId = 0n;
+        message.provider = 0;
+        if (value !== undefined)
+            reflectionMergePartial<AgentSession>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentSession): AgentSession {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* Peer peer_id */ 2:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 bot_user_id */ 3:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionProvider provider */ 4:
+                    message.provider = reader.int32();
+                    break;
+                case /* optional int64 status_message_id */ 5:
+                    message.statusMessageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentSession, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* Peer peer_id = 2; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* int64 bot_user_id = 3; */
+        if (message.botUserId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.botUserId);
+        /* AgentSessionProvider provider = 4; */
+        if (message.provider !== 0)
+            writer.tag(4, WireType.Varint).int32(message.provider);
+        /* optional int64 status_message_id = 5; */
+        if (message.statusMessageId !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.statusMessageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentSession
+ */
+export const AgentSession = new AgentSession$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectAgentSessionInput$Type extends MessageType<ConnectAgentSessionInput> {
+    constructor() {
+        super("ConnectAgentSessionInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "provider", kind: "enum", T: () => ["AgentSessionProvider", AgentSessionProvider, "AGENT_SESSION_PROVIDER_"] },
+            { no: 4, name: "instance_ref", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "session_ref", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "project_ref", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "status_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectAgentSessionInput>): ConnectAgentSessionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        message.provider = 0;
+        message.instanceRef = "";
+        message.sessionRef = "";
+        if (value !== undefined)
+            reflectionMergePartial<ConnectAgentSessionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectAgentSessionInput): ConnectAgentSessionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 bot_user_id */ 2:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionProvider provider */ 3:
+                    message.provider = reader.int32();
+                    break;
+                case /* string instance_ref */ 4:
+                    message.instanceRef = reader.string();
+                    break;
+                case /* string session_ref */ 5:
+                    message.sessionRef = reader.string();
+                    break;
+                case /* optional string project_ref */ 6:
+                    message.projectRef = reader.string();
+                    break;
+                case /* optional int64 status_message_id */ 7:
+                    message.statusMessageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectAgentSessionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 bot_user_id = 2; */
+        if (message.botUserId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.botUserId);
+        /* AgentSessionProvider provider = 3; */
+        if (message.provider !== 0)
+            writer.tag(3, WireType.Varint).int32(message.provider);
+        /* string instance_ref = 4; */
+        if (message.instanceRef !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.instanceRef);
+        /* string session_ref = 5; */
+        if (message.sessionRef !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.sessionRef);
+        /* optional string project_ref = 6; */
+        if (message.projectRef !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.projectRef);
+        /* optional int64 status_message_id = 7; */
+        if (message.statusMessageId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.statusMessageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectAgentSessionInput
+ */
+export const ConnectAgentSessionInput = new ConnectAgentSessionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectAgentSessionResult$Type extends MessageType<ConnectAgentSessionResult> {
+    constructor() {
+        super("ConnectAgentSessionResult", [
+            { no: 1, name: "agent_session", kind: "message", T: () => AgentSession },
+            { no: 2, name: "state", kind: "enum", T: () => ["ConnectAgentSessionState", ConnectAgentSessionState, "CONNECT_AGENT_SESSION_STATE_"] }
+        ]);
+    }
+    create(value?: PartialMessage<ConnectAgentSessionResult>): ConnectAgentSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = 0;
+        if (value !== undefined)
+            reflectionMergePartial<ConnectAgentSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectAgentSessionResult): ConnectAgentSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AgentSession agent_session */ 1:
+                    message.agentSession = AgentSession.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
+                    break;
+                case /* ConnectAgentSessionState state */ 2:
+                    message.state = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ConnectAgentSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AgentSession agent_session = 1; */
+        if (message.agentSession)
+            AgentSession.internalBinaryWrite(message.agentSession, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectAgentSessionState state = 2; */
+        if (message.state !== 0)
+            writer.tag(2, WireType.Varint).int32(message.state);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectAgentSessionResult
+ */
+export const ConnectAgentSessionResult = new ConnectAgentSessionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentSessionConnection$Type extends MessageType<AgentSessionConnection> {
+    constructor() {
+        super("AgentSessionConnection", [
+            { no: 1, name: "agent_session", kind: "message", T: () => AgentSession },
+            { no: 2, name: "instance_ref", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "session_ref", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "project_ref", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentSessionConnection>): AgentSessionConnection {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.instanceRef = "";
+        message.sessionRef = "";
+        if (value !== undefined)
+            reflectionMergePartial<AgentSessionConnection>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentSessionConnection): AgentSessionConnection {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AgentSession agent_session */ 1:
+                    message.agentSession = AgentSession.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
+                    break;
+                case /* string instance_ref */ 2:
+                    message.instanceRef = reader.string();
+                    break;
+                case /* string session_ref */ 3:
+                    message.sessionRef = reader.string();
+                    break;
+                case /* optional string project_ref */ 4:
+                    message.projectRef = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentSessionConnection, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AgentSession agent_session = 1; */
+        if (message.agentSession)
+            AgentSession.internalBinaryWrite(message.agentSession, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* string instance_ref = 2; */
+        if (message.instanceRef !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.instanceRef);
+        /* string session_ref = 3; */
+        if (message.sessionRef !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.sessionRef);
+        /* optional string project_ref = 4; */
+        if (message.projectRef !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.projectRef);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentSessionConnection
+ */
+export const AgentSessionConnection = new AgentSessionConnection$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetAgentSessionInput$Type extends MessageType<GetAgentSessionInput> {
+    constructor() {
+        super("GetAgentSessionInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetAgentSessionInput>): GetAgentSessionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetAgentSessionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetAgentSessionInput): GetAgentSessionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 bot_user_id */ 2:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetAgentSessionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 bot_user_id = 2; */
+        if (message.botUserId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.botUserId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetAgentSessionInput
+ */
+export const GetAgentSessionInput = new GetAgentSessionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetAgentSessionResult$Type extends MessageType<GetAgentSessionResult> {
+    constructor() {
+        super("GetAgentSessionResult", [
+            { no: 1, name: "connection", kind: "message", T: () => AgentSessionConnection }
+        ]);
+    }
+    create(value?: PartialMessage<GetAgentSessionResult>): GetAgentSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetAgentSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetAgentSessionResult): GetAgentSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional AgentSessionConnection connection */ 1:
+                    message.connection = AgentSessionConnection.internalBinaryRead(reader, reader.uint32(), options, message.connection);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetAgentSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional AgentSessionConnection connection = 1; */
+        if (message.connection)
+            AgentSessionConnection.internalBinaryWrite(message.connection, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetAgentSessionResult
+ */
+export const GetAgentSessionResult = new GetAgentSessionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentSessionMessageUpsert$Type extends MessageType<AgentSessionMessageUpsert> {
+    constructor() {
+        super("AgentSessionMessageUpsert", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "entities", kind: "message", T: () => MessageEntities },
+            { no: 3, name: "assistant_random_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentSessionMessageUpsert>): AgentSessionMessageUpsert {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<AgentSessionMessageUpsert>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentSessionMessageUpsert): AgentSessionMessageUpsert {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                case /* optional MessageEntities entities */ 2:
+                    message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
+                    break;
+                case /* optional int64 assistant_random_id */ 3:
+                    message.assistantRandomId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentSessionMessageUpsert, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        /* optional MessageEntities entities = 2; */
+        if (message.entities)
+            MessageEntities.internalBinaryWrite(message.entities, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 assistant_random_id = 3; */
+        if (message.assistantRandomId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.assistantRandomId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentSessionMessageUpsert
+ */
+export const AgentSessionMessageUpsert = new AgentSessionMessageUpsert$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentSessionMessageLink$Type extends MessageType<AgentSessionMessageLink> {
+    constructor() {
+        super("AgentSessionMessageLink", [
+            { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentSessionMessageLink>): AgentSessionMessageLink {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AgentSessionMessageLink>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentSessionMessageLink): AgentSessionMessageLink {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 message_id */ 1:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentSessionMessageLink, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 message_id = 1; */
+        if (message.messageId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.messageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentSessionMessageLink
+ */
+export const AgentSessionMessageLink = new AgentSessionMessageLink$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentSessionMessageSync$Type extends MessageType<AgentSessionMessageSync> {
+    constructor() {
+        super("AgentSessionMessageSync", [
+            { no: 1, name: "role", kind: "enum", T: () => ["AgentSessionMessageRole", AgentSessionMessageRole, "AGENT_SESSION_MESSAGE_ROLE_"] },
+            { no: 2, name: "item_ref", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "correlation_ref", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "source_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "revision_ref", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "base_revision_ref", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "complete", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 8, name: "upsert", kind: "message", oneof: "operation", T: () => AgentSessionMessageUpsert },
+            { no: 9, name: "link", kind: "message", oneof: "operation", T: () => AgentSessionMessageLink }
+        ]);
+    }
+    create(value?: PartialMessage<AgentSessionMessageSync>): AgentSessionMessageSync {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.role = 0;
+        message.complete = false;
+        message.operation = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<AgentSessionMessageSync>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentSessionMessageSync): AgentSessionMessageSync {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AgentSessionMessageRole role */ 1:
+                    message.role = reader.int32();
+                    break;
+                case /* optional string item_ref */ 2:
+                    message.itemRef = reader.string();
+                    break;
+                case /* optional string correlation_ref */ 3:
+                    message.correlationRef = reader.string();
+                    break;
+                case /* optional int64 source_date */ 4:
+                    message.sourceDate = reader.int64().toBigInt();
+                    break;
+                case /* optional string revision_ref */ 5:
+                    message.revisionRef = reader.string();
+                    break;
+                case /* optional string base_revision_ref */ 6:
+                    message.baseRevisionRef = reader.string();
+                    break;
+                case /* bool complete */ 7:
+                    message.complete = reader.bool();
+                    break;
+                case /* AgentSessionMessageUpsert upsert */ 8:
+                    message.operation = {
+                        oneofKind: "upsert",
+                        upsert: AgentSessionMessageUpsert.internalBinaryRead(reader, reader.uint32(), options, (message.operation as any).upsert)
+                    };
+                    break;
+                case /* AgentSessionMessageLink link */ 9:
+                    message.operation = {
+                        oneofKind: "link",
+                        link: AgentSessionMessageLink.internalBinaryRead(reader, reader.uint32(), options, (message.operation as any).link)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentSessionMessageSync, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AgentSessionMessageRole role = 1; */
+        if (message.role !== 0)
+            writer.tag(1, WireType.Varint).int32(message.role);
+        /* optional string item_ref = 2; */
+        if (message.itemRef !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.itemRef);
+        /* optional string correlation_ref = 3; */
+        if (message.correlationRef !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.correlationRef);
+        /* optional int64 source_date = 4; */
+        if (message.sourceDate !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.sourceDate);
+        /* optional string revision_ref = 5; */
+        if (message.revisionRef !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.revisionRef);
+        /* optional string base_revision_ref = 6; */
+        if (message.baseRevisionRef !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.baseRevisionRef);
+        /* bool complete = 7; */
+        if (message.complete !== false)
+            writer.tag(7, WireType.Varint).bool(message.complete);
+        /* AgentSessionMessageUpsert upsert = 8; */
+        if (message.operation.oneofKind === "upsert")
+            AgentSessionMessageUpsert.internalBinaryWrite(message.operation.upsert, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* AgentSessionMessageLink link = 9; */
+        if (message.operation.oneofKind === "link")
+            AgentSessionMessageLink.internalBinaryWrite(message.operation.link, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentSessionMessageSync
+ */
+export const AgentSessionMessageSync = new AgentSessionMessageSync$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SyncAgentSessionMessagesInput$Type extends MessageType<SyncAgentSessionMessagesInput> {
+    constructor() {
+        super("SyncAgentSessionMessagesInput", [
+            { no: 1, name: "agent_session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "mode", kind: "enum", T: () => ["AgentSessionSyncMode", AgentSessionSyncMode, "AGENT_SESSION_SYNC_MODE_"] },
+            { no: 3, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentSessionMessageSync }
+        ]);
+    }
+    create(value?: PartialMessage<SyncAgentSessionMessagesInput>): SyncAgentSessionMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.agentSessionId = 0n;
+        message.mode = 0;
+        message.messages = [];
+        if (value !== undefined)
+            reflectionMergePartial<SyncAgentSessionMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SyncAgentSessionMessagesInput): SyncAgentSessionMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 agent_session_id */ 1:
+                    message.agentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionSyncMode mode */ 2:
+                    message.mode = reader.int32();
+                    break;
+                case /* repeated AgentSessionMessageSync messages */ 3:
+                    message.messages.push(AgentSessionMessageSync.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SyncAgentSessionMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 agent_session_id = 1; */
+        if (message.agentSessionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.agentSessionId);
+        /* AgentSessionSyncMode mode = 2; */
+        if (message.mode !== 0)
+            writer.tag(2, WireType.Varint).int32(message.mode);
+        /* repeated AgentSessionMessageSync messages = 3; */
+        for (let i = 0; i < message.messages.length; i++)
+            AgentSessionMessageSync.internalBinaryWrite(message.messages[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SyncAgentSessionMessagesInput
+ */
+export const SyncAgentSessionMessagesInput = new SyncAgentSessionMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentSessionMessageSyncResult$Type extends MessageType<AgentSessionMessageSyncResult> {
+    constructor() {
+        super("AgentSessionMessageSyncResult", [
+            { no: 1, name: "index", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 2, name: "state", kind: "enum", T: () => ["AgentSessionMessageSyncState", AgentSessionMessageSyncState, "AGENT_SESSION_MESSAGE_SYNC_STATE_"] },
+            { no: 3, name: "message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "current_revision_ref", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentSessionMessageSyncResult>): AgentSessionMessageSyncResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.index = 0;
+        message.state = 0;
+        if (value !== undefined)
+            reflectionMergePartial<AgentSessionMessageSyncResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentSessionMessageSyncResult): AgentSessionMessageSyncResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int32 index */ 1:
+                    message.index = reader.int32();
+                    break;
+                case /* AgentSessionMessageSyncState state */ 2:
+                    message.state = reader.int32();
+                    break;
+                case /* optional int64 message_id */ 3:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* optional string current_revision_ref */ 4:
+                    message.currentRevisionRef = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentSessionMessageSyncResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int32 index = 1; */
+        if (message.index !== 0)
+            writer.tag(1, WireType.Varint).int32(message.index);
+        /* AgentSessionMessageSyncState state = 2; */
+        if (message.state !== 0)
+            writer.tag(2, WireType.Varint).int32(message.state);
+        /* optional int64 message_id = 3; */
+        if (message.messageId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.messageId);
+        /* optional string current_revision_ref = 4; */
+        if (message.currentRevisionRef !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.currentRevisionRef);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentSessionMessageSyncResult
+ */
+export const AgentSessionMessageSyncResult = new AgentSessionMessageSyncResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SyncAgentSessionMessagesResult$Type extends MessageType<SyncAgentSessionMessagesResult> {
+    constructor() {
+        super("SyncAgentSessionMessagesResult", [
+            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentSessionMessageSyncResult }
+        ]);
+    }
+    create(value?: PartialMessage<SyncAgentSessionMessagesResult>): SyncAgentSessionMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messages = [];
+        if (value !== undefined)
+            reflectionMergePartial<SyncAgentSessionMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SyncAgentSessionMessagesResult): SyncAgentSessionMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated AgentSessionMessageSyncResult messages */ 1:
+                    message.messages.push(AgentSessionMessageSyncResult.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SyncAgentSessionMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated AgentSessionMessageSyncResult messages = 1; */
+        for (let i = 0; i < message.messages.length; i++)
+            AgentSessionMessageSyncResult.internalBinaryWrite(message.messages[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SyncAgentSessionMessagesResult
+ */
+export const SyncAgentSessionMessagesResult = new SyncAgentSessionMessagesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class JoinPublicSpaceInput$Type extends MessageType<JoinPublicSpaceInput> {
     constructor() {
@@ -19618,7 +21013,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 125, name: "createDialogFolder", kind: "message", oneof: "input", T: () => CreateDialogFolderInput },
             { no: 126, name: "updateDialogFolder", kind: "message", oneof: "input", T: () => UpdateDialogFolderInput },
             { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "input", T: () => DeleteDialogFolderInput },
-            { no: 128, name: "getSpace", kind: "message", oneof: "input", T: () => GetSpaceInput }
+            { no: 128, name: "getSpace", kind: "message", oneof: "input", T: () => GetSpaceInput },
+            { no: 129, name: "connectAgentSession", kind: "message", oneof: "input", T: () => ConnectAgentSessionInput },
+            { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "input", T: () => SyncAgentSessionMessagesInput },
+            { no: 131, name: "getAgentSession", kind: "message", oneof: "input", T: () => GetAgentSessionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -20393,6 +21791,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getSpace: GetSpaceInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpace)
                     };
                     break;
+                case /* ConnectAgentSessionInput connectAgentSession */ 129:
+                    message.input = {
+                        oneofKind: "connectAgentSession",
+                        connectAgentSession: ConnectAgentSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).connectAgentSession)
+                    };
+                    break;
+                case /* SyncAgentSessionMessagesInput syncAgentSessionMessages */ 130:
+                    message.input = {
+                        oneofKind: "syncAgentSessionMessages",
+                        syncAgentSessionMessages: SyncAgentSessionMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).syncAgentSessionMessages)
+                    };
+                    break;
+                case /* GetAgentSessionInput getAgentSession */ 131:
+                    message.input = {
+                        oneofKind: "getAgentSession",
+                        getAgentSession: GetAgentSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getAgentSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -20786,6 +22202,15 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetSpaceInput getSpace = 128; */
         if (message.input.oneofKind === "getSpace")
             GetSpaceInput.internalBinaryWrite(message.input.getSpace, writer.tag(128, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectAgentSessionInput connectAgentSession = 129; */
+        if (message.input.oneofKind === "connectAgentSession")
+            ConnectAgentSessionInput.internalBinaryWrite(message.input.connectAgentSession, writer.tag(129, WireType.LengthDelimited).fork(), options).join();
+        /* SyncAgentSessionMessagesInput syncAgentSessionMessages = 130; */
+        if (message.input.oneofKind === "syncAgentSessionMessages")
+            SyncAgentSessionMessagesInput.internalBinaryWrite(message.input.syncAgentSessionMessages, writer.tag(130, WireType.LengthDelimited).fork(), options).join();
+        /* GetAgentSessionInput getAgentSession = 131; */
+        if (message.input.oneofKind === "getAgentSession")
+            GetAgentSessionInput.internalBinaryWrite(message.input.getAgentSession, writer.tag(131, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20926,7 +22351,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 125, name: "createDialogFolder", kind: "message", oneof: "result", T: () => CreateDialogFolderResult },
             { no: 126, name: "updateDialogFolder", kind: "message", oneof: "result", T: () => UpdateDialogFolderResult },
             { no: 127, name: "deleteDialogFolder", kind: "message", oneof: "result", T: () => DeleteDialogFolderResult },
-            { no: 128, name: "getSpace", kind: "message", oneof: "result", T: () => GetSpaceResult }
+            { no: 128, name: "getSpace", kind: "message", oneof: "result", T: () => GetSpaceResult },
+            { no: 129, name: "connectAgentSession", kind: "message", oneof: "result", T: () => ConnectAgentSessionResult },
+            { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "result", T: () => SyncAgentSessionMessagesResult },
+            { no: 131, name: "getAgentSession", kind: "message", oneof: "result", T: () => GetAgentSessionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -21701,6 +23129,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getSpace: GetSpaceResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpace)
                     };
                     break;
+                case /* ConnectAgentSessionResult connectAgentSession */ 129:
+                    message.result = {
+                        oneofKind: "connectAgentSession",
+                        connectAgentSession: ConnectAgentSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).connectAgentSession)
+                    };
+                    break;
+                case /* SyncAgentSessionMessagesResult syncAgentSessionMessages */ 130:
+                    message.result = {
+                        oneofKind: "syncAgentSessionMessages",
+                        syncAgentSessionMessages: SyncAgentSessionMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).syncAgentSessionMessages)
+                    };
+                    break;
+                case /* GetAgentSessionResult getAgentSession */ 131:
+                    message.result = {
+                        oneofKind: "getAgentSession",
+                        getAgentSession: GetAgentSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getAgentSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22094,6 +23540,15 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetSpaceResult getSpace = 128; */
         if (message.result.oneofKind === "getSpace")
             GetSpaceResult.internalBinaryWrite(message.result.getSpace, writer.tag(128, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectAgentSessionResult connectAgentSession = 129; */
+        if (message.result.oneofKind === "connectAgentSession")
+            ConnectAgentSessionResult.internalBinaryWrite(message.result.connectAgentSession, writer.tag(129, WireType.LengthDelimited).fork(), options).join();
+        /* SyncAgentSessionMessagesResult syncAgentSessionMessages = 130; */
+        if (message.result.oneofKind === "syncAgentSessionMessages")
+            SyncAgentSessionMessagesResult.internalBinaryWrite(message.result.syncAgentSessionMessages, writer.tag(130, WireType.LengthDelimited).fork(), options).join();
+        /* GetAgentSessionResult getAgentSession = 131; */
+        if (message.result.oneofKind === "getAgentSession")
+            GetAgentSessionResult.internalBinaryWrite(message.result.getAgentSession, writer.tag(131, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

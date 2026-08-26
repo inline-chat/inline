@@ -14,7 +14,7 @@ pub(crate) fn installed_targets() -> Vec<InstalledTarget> {
     TARGETS
         .iter()
         .filter_map(|descriptor| {
-            find_executable(descriptor.executable).map(|executable| InstalledTarget {
+            find_target_executable(descriptor).map(|executable| InstalledTarget {
                 descriptor,
                 executable,
             })
@@ -24,9 +24,17 @@ pub(crate) fn installed_targets() -> Vec<InstalledTarget> {
 
 pub(crate) fn installed_target(target: AgentTarget) -> Option<InstalledTarget> {
     let descriptor = target.descriptor();
-    find_executable(descriptor.executable).map(|executable| InstalledTarget {
+    find_target_executable(descriptor).map(|executable| InstalledTarget {
         descriptor,
         executable,
+    })
+}
+
+fn find_target_executable(descriptor: &'static TargetDescriptor) -> Option<PathBuf> {
+    find_executable(descriptor.executable).or_else(|| {
+        (descriptor.target == AgentTarget::Codex)
+            .then(find_chatgpt_codex_executable)
+            .flatten()
     })
 }
 
@@ -42,6 +50,30 @@ fn find_executable_in(
         .into_iter()
         .map(|directory| directory.join(name))
         .find(|candidate| is_executable(candidate))
+}
+
+fn find_executable_candidate(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates
+        .into_iter()
+        .find(|candidate| is_executable(candidate))
+}
+
+#[cfg(target_os = "macos")]
+fn find_chatgpt_codex_executable() -> Option<PathBuf> {
+    let relative = Path::new("ChatGPT.app/Contents/Resources/codex");
+    let mut candidates = vec![PathBuf::from("/Applications").join(relative)];
+    if let Some(home) = home_directory() {
+        candidates.push(home.join("Applications").join(relative));
+    }
+    // Runtime preparation performs the authoritative OpenAI signature and
+    // protocol checks. Discovery only makes ChatGPT-app-only installs
+    // selectable instead of rejecting setup before those checks can run.
+    find_executable_candidate(candidates)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn find_chatgpt_codex_executable() -> Option<PathBuf> {
+    None
 }
 
 fn search_directories() -> Vec<PathBuf> {
@@ -197,6 +229,23 @@ mod tests {
         assert_eq!(
             find_executable_in("openclaw", [first.path().to_path_buf()]),
             None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bundled_codex_fallback_accepts_an_executable_candidate() {
+        let application = tempfile::tempdir().expect("application fixture");
+        let bundled = application
+            .path()
+            .join("ChatGPT.app/Contents/Resources/codex");
+        fs::create_dir_all(bundled.parent().expect("resource directory"))
+            .expect("create resource directory");
+        make_executable(&bundled);
+
+        assert_eq!(
+            find_executable_candidate([application.path().join("missing"), bundled.clone()]),
+            Some(bundled)
         );
     }
 

@@ -69,12 +69,12 @@ pub use types::{
     EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
     InitialEventPolicy, MediaKind, MessageActionButton, MessageActionKind, MessageActionRecord,
     MessageActionRow, MessageActions, MessageAttachmentRecord, MessageContent, MessageEntityRecord,
-    MessageMetadata, MessageMutation, MessageRecord, NotificationMode, PeerRef, ReactRequest,
-    ReadRequest, RemoveChatParticipantRequest, SendInteractiveTextRequest, SendNotificationMode,
-    SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole, SpaceRecord,
-    TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
-    UpdateDialogNotificationsRequest, UploadHandle, UploadRequest, UploadThumbnail, UserRecord,
-    UserSettingsRecord,
+    MessageMetadata, MessageMutation, MessageRecord, NotificationMode, PeerRef, PinMessageRequest,
+    ReactRequest, ReadRequest, RemoveChatParticipantRequest, SendInteractiveTextRequest,
+    SendNotificationMode, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord,
+    SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
+    UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadHandle, UploadRequest,
+    UploadThumbnail, UserRecord, UserSettingsRecord,
 };
 
 /// Published package version.

@@ -132,6 +132,7 @@ pub(super) struct InboundRoute {
     pub deferred_inbound_tx: tokio::sync::mpsc::Sender<InboundRecord>,
     pub pending_voice_messages: Arc<std::sync::Mutex<HashSet<(i64, i64)>>>,
     pub claude_history: Option<ClaudeHistoryRuntime>,
+    pub session_browser: SessionBrowserRuntime,
 }
 
 impl InboundRoute {
@@ -209,13 +210,17 @@ pub(super) fn actionable_event_chat_id(event: &ClientEvent) -> Option<i64> {
     }
 }
 
-pub(super) async fn accept_idle_delivery<D: AgentDriver + 'static>(
+pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource + 'static>(
     bot: &InlineClient,
     delivery: LosslessEventDelivery,
     route: &InboundRoute,
     settings: &SettingsRuntime<'_, D>,
     deferred_by_capacity: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if handle_session_browser_action(bot, delivery.event(), route, settings).await? {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_claude_history_action(bot, delivery.event(), route).await? {
         delivery.ack().await?;
         return Ok(());
@@ -289,6 +294,10 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + 'static>(
             delivery.ack().await?;
             return Ok(());
         }
+        if handle_session_browser_command(bot, &record, route, settings).await? {
+            delivery.ack().await?;
+            return Ok(());
+        }
         if handle_claude_history_command(bot, &record, route).await? {
             delivery.ack().await?;
             return Ok(());
@@ -329,13 +338,14 @@ pub(super) async fn inbound_from_delivery(
         return Ok(None);
     }
     let sender_is_bot = message_sender_is_bot(&route.bot_store, message).await?;
-    if !sender_is_bot && !route.allows(message.sender_id.get()) {
+    if !route.allows(message.sender_id.get()) {
         tokio::time::sleep_until(response_not_before).await;
-        let is_direct_message = route
-            .bot_store
-            .dialog(message.chat_id)
-            .await?
-            .is_some_and(|dialog| dialog.peer_user_id == Some(message.sender_id));
+        let is_direct_message = !sender_is_bot
+            && route
+                .bot_store
+                .dialog(message.chat_id)
+                .await?
+                .is_some_and(|dialog| dialog.peer_user_id == Some(message.sender_id));
         let now = now_seconds();
         if is_direct_message
             && route.store.claim_unauthorized_dm_notice(
@@ -689,7 +699,7 @@ async fn handle_terminal_question_reply(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
+pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'static>(
     bot: &InlineClient,
     inline_events: &mut tokio::sync::mpsc::Receiver<LosslessEventDelivery>,
     sessions: &ProviderSessionManager<D>,
@@ -700,6 +710,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
     active: &ActiveConversation,
     settings_identity: &SettingsIdentity,
     mut record: InboundRecord,
+    _provider_work_lease: Option<inline_agent_bridge::ProviderWorkLease>,
     lane_sender: tokio::sync::mpsc::Sender<LosslessEventDelivery>,
     lane_promotions: tokio::sync::mpsc::Sender<TurnLanePromotion>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -712,7 +723,20 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
         record.message_id,
         record.sender_user_id
     );
-    if handle_claude_history_command(bot, &record, route).await?
+    if handle_session_browser_command(
+        bot,
+        &record,
+        route,
+        &SettingsRuntime {
+            sessions,
+            store,
+            active,
+            identity: settings_identity,
+            turn_active: false,
+        },
+    )
+    .await?
+        || handle_claude_history_command(bot, &record, route).await?
         || handle_allowlist_command(bot, &record, route).await?
     {
         return Ok(());
@@ -842,6 +866,29 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
     }
     let workspace = source_workspace;
     let binding = &binding;
+    let agent_session_id = match link_agent_session_input(
+        bot, sessions, store, route, binding, &record,
+    )
+    .await
+    {
+        Ok(agent_session_id) => agent_session_id,
+        Err(error) => {
+            let diagnostic = safe_diagnostic(&error.to_string());
+            publish_inbound_final_send(
+                bot,
+                store,
+                &record.event_id,
+                binding.chat_id,
+                None,
+                "Failed.",
+                "I couldn’t connect this message to the selected agent session. Nothing was sent to the provider; try again.",
+                InboundState::Failed,
+                Some(&diagnostic),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
     let acknowledgement_text =
         command_acknowledgement.unwrap_or_else(|| WORKING_STATUS.to_string());
     let acknowledgement = send_silent_text(
@@ -918,19 +965,20 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
             },
         )
         .await;
-    let (session_open, mut turn) = match started {
+    let (session_open, mut turn, _provider_turn_lease) = match started {
         Ok(started) => started,
         Err(error) => {
-            let connection_epoch_ended = matches!(
-                &error,
-                SessionManagerError::Driver(DriverError::ProcessExited(_))
-            );
+            let connection_epoch_ended =
+                matches!(&error, SessionManagerError::Driver(error) if error.ends_epoch());
             let diagnostic = safe_diagnostic(&error.to_string());
             eprintln!("Agent turn start failed: {}", diagnostic);
             typing.stop().await;
             let message = match &error {
                 SessionManagerError::Driver(DriverError::AuthenticationRequired(required)) => {
                     required.message.as_str()
+                }
+                SessionManagerError::Driver(DriverError::SessionBusy(_)) => {
+                    BridgeNotice::SessionActiveElsewhere.message()
                 }
                 _ => BridgeNotice::AgentStartFailed.message(),
             };
@@ -1363,7 +1411,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
                     }
                     Some(Ok(AgentEvent::TurnStarted { .. })) => {}
                     Some(Err(error)) => {
-                        let outcome = if matches!(error, DriverError::ProcessExited(_)) {
+                        let outcome = if error.ends_epoch() {
                             TurnOutcome::ConnectionLost
                         } else {
                             TurnOutcome::Failed
@@ -1683,10 +1731,25 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + 'static>(
         &progress_status,
         &final_text,
         &output_attachments,
+        agent_session_id.map(|_| assistant_final_random_id(&turn.turn_id)),
         final_state,
         terminal_failure.as_deref(),
     )
     .await?;
+    if let (Some(agent_session_id), Some(message_id)) = (agent_session_id, final_message_id)
+        && let Err(error) = link_agent_session_assistant_output(
+            bot,
+            agent_session_id,
+            &turn.turn_id,
+            message_id.get(),
+        )
+        .await
+    {
+        eprintln!(
+            "Agent session response linkage needs repair: {}",
+            safe_diagnostic(&error.to_string())
+        );
+    }
     if let Some(message_id) = final_message_id {
         attach_changed_file_actions(
             bot,
@@ -1807,7 +1870,7 @@ async fn expire_active_interactions<D: AgentDriver + 'static>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
+pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource + 'static>(
     bot: &InlineClient,
     delivery: LosslessEventDelivery,
     sessions: &ProviderSessionManager<D>,
@@ -1824,6 +1887,23 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
     typing: &mut TypingIndicator<'_, InlineClient>,
     stop_confirmed: &mut bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if handle_session_browser_action(
+        bot,
+        delivery.event(),
+        route,
+        &SettingsRuntime {
+            sessions,
+            store,
+            active,
+            identity: settings_identity,
+            turn_active: true,
+        },
+    )
+    .await?
+    {
+        delivery.ack().await?;
+        return Ok(());
+    }
     if handle_active_claude_history_action(bot, delivery.event(), route).await? {
         delivery.ack().await?;
         return Ok(());
@@ -2077,6 +2157,23 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
             };
             if let Some(mut record) = inbound_from_delivery(bot, &delivery, route).await? {
                 if handle_terminal_question_reply(bot, delivery.event(), &record, route).await? {
+                    delivery.ack().await?;
+                    return Ok(());
+                }
+                if handle_session_browser_command(
+                    bot,
+                    &record,
+                    route,
+                    &SettingsRuntime {
+                        sessions,
+                        store,
+                        active,
+                        identity: settings_identity,
+                        turn_active: true,
+                    },
+                )
+                .await?
+                {
                     delivery.ack().await?;
                     return Ok(());
                 }
@@ -2351,8 +2448,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                                 )
                             }
                         };
-                        let connection_epoch_ended =
-                            matches!(&error, DriverError::ProcessExited(_));
+                        let connection_epoch_ended = error.ends_epoch();
                         eprintln!(
                             "Agent turn cancellation failed: {}",
                             safe_diagnostic(&error.to_string())
@@ -2589,6 +2685,25 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                         let accepted = store.accept_inbound(&record)?;
                         if accepted && store.start_inbound(&record.event_id, now_seconds())? {
                             store.attach_inbound_turn(&record.event_id, turn_id, None)?;
+                            if let Err(error) = link_agent_session_input(
+                                bot, sessions, store, route, binding, &record,
+                            )
+                            .await
+                            {
+                                let diagnostic = safe_diagnostic(&error.to_string());
+                                store.fail_inbound(&record.event_id, &diagnostic)?;
+                                send_text_reply(
+                                    bot,
+                                    binding.chat_id,
+                                    record.message_id,
+                                    "I couldn’t connect this message to the selected agent session. Nothing was sent to the provider; try again.",
+                                    &format!("{}-session-link-failed", record.event_id),
+                                    BridgeNotificationClass::ImportantFailure,
+                                )
+                                .await?;
+                                delivery.ack().await?;
+                                return Ok(());
+                            }
                             let steered = sessions
                                 .driver()
                                 .steer_turn(
@@ -2608,7 +2723,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + 'static>(
                                     store.complete_inbound(&record.event_id)?;
                                 }
                                 Err(error) => {
-                                    if matches!(&error, DriverError::ProcessExited(_)) {
+                                    if error.ends_epoch() {
                                         let diagnostic = safe_diagnostic(&error.to_string());
                                         store.fail_inbound(&record.event_id, &diagnostic)?;
                                         send_text_reply(

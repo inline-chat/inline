@@ -21,10 +21,12 @@ pub type PeerResult<T> = Result<T, PeerError>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum IncomingMessage {
     Notification {
+        wire_sequence: u64,
         method: String,
         params: Value,
     },
     ServerRequest {
+        wire_sequence: u64,
         id: Value,
         method: String,
         params: Value,
@@ -64,7 +66,13 @@ impl std::fmt::Display for RemoteError {
     }
 }
 
-type Pending = Arc<StdMutex<HashMap<u64, oneshot::Sender<PeerResult<Value>>>>>;
+#[derive(Debug)]
+struct SequencedResponse {
+    value: Value,
+    wire_sequence: u64,
+}
+
+type Pending = Arc<StdMutex<HashMap<u64, oneshot::Sender<PeerResult<SequencedResponse>>>>>;
 
 pub struct CodexPeer<W> {
     writer: Arc<Mutex<W>>,
@@ -135,6 +143,27 @@ where
         params: Value,
         request_timeout: Duration,
     ) -> PeerResult<Value> {
+        self.request_with_wire_sequence_and_timeout(method, params, request_timeout)
+            .await
+            .map(|response| response.value)
+    }
+
+    pub(crate) async fn request_with_wire_sequence(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> PeerResult<(Value, u64)> {
+        self.request_with_wire_sequence_and_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
+            .await
+            .map(|response| (response.value, response.wire_sequence))
+    }
+
+    async fn request_with_wire_sequence_and_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        request_timeout: Duration,
+    ) -> PeerResult<SequencedResponse> {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let started_at = Instant::now();
         log::trace!(
@@ -218,6 +247,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
 {
     let mut reader = BufReader::new(reader);
+    let mut wire_sequence = 0u64;
     loop {
         let frame = match read_bounded_frame(&mut reader).await {
             Ok(Some(frame)) => frame,
@@ -243,7 +273,14 @@ where
                 break;
             }
         };
-        if route_response(&pending, &value) {
+        let Some(next_wire_sequence) = wire_sequence.checked_add(1) else {
+            close_pending(&pending, || {
+                PeerError::InvalidMessage("provider frame sequence exhausted".to_string())
+            });
+            break;
+        };
+        wire_sequence = next_wire_sequence;
+        if route_response(&pending, &value, wire_sequence) {
             continue;
         }
         let Some(method) = value.get("method").and_then(Value::as_str) else {
@@ -255,11 +292,13 @@ where
         let params = value.get("params").cloned().unwrap_or(Value::Null);
         let incoming = match value.get("id") {
             Some(id) => IncomingMessage::ServerRequest {
+                wire_sequence,
                 id: id.clone(),
                 method: method.to_string(),
                 params,
             },
             None => IncomingMessage::Notification {
+                wire_sequence,
                 method: method.to_string(),
                 params,
             },
@@ -315,7 +354,7 @@ fn trace_protocol_method(method: &str) -> String {
         .collect()
 }
 
-async fn read_bounded_frame<R>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>>
+pub(crate) async fn read_bounded_frame<R>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>>
 where
     R: AsyncBufRead + Unpin,
 {
@@ -351,7 +390,7 @@ where
     }
 }
 
-fn route_response(pending: &Pending, value: &Value) -> bool {
+fn route_response(pending: &Pending, value: &Value, wire_sequence: u64) -> bool {
     let Some(id) = value.get("id").and_then(Value::as_u64) else {
         return false;
     };
@@ -366,7 +405,10 @@ fn route_response(pending: &Pending, value: &Value) -> bool {
         return true;
     };
     let response = if let Some(result) = value.get("result") {
-        Ok(result.clone())
+        Ok(SequencedResponse {
+            value: result.clone(),
+            wire_sequence,
+        })
     } else if let Some(error) = value.get("error") {
         Err(PeerError::Remote(remote_error(error)))
     } else {
@@ -489,12 +531,12 @@ mod tests {
 
         assert!(matches!(
             incoming.recv().await,
-            Some(IncomingMessage::Notification { method, params })
+            Some(IncomingMessage::Notification { method, params, .. })
                 if method == "first" && params["value"] == 1
         ));
         assert!(matches!(
             incoming.recv().await,
-            Some(IncomingMessage::Notification { method, params })
+            Some(IncomingMessage::Notification { method, params, .. })
                 if method == "second" && params["value"] == 2
         ));
     }

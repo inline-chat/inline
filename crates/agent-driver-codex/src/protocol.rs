@@ -1114,8 +1114,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const VERIFIED_COMPATIBILITY_FIXTURE: &str =
+    const FIRST_VERIFIED_COMPATIBILITY_FIXTURE: &str =
         include_str!("../tests/fixtures/app-server-0.146.0.json");
+    const LATEST_VERIFIED_COMPATIBILITY_FIXTURE: &str =
+        include_str!("../tests/fixtures/app-server-0.150.0-alpha.8.json");
 
     #[test]
     fn initialize_identifies_inline() {
@@ -1127,16 +1129,30 @@ mod tests {
     }
 
     #[test]
-    fn verified_app_server_fixture_matches_supported_normalizers() {
-        let fixture: Value =
-            serde_json::from_str(VERIFIED_COMPATIBILITY_FIXTURE).expect("compatibility fixture");
-        assert_eq!(fixture["codexVersion"], "0.146.0");
+    fn verified_app_server_fixtures_match_supported_normalizers() {
+        for (contents, expected_version) in [
+            (
+                FIRST_VERIFIED_COMPATIBILITY_FIXTURE,
+                crate::minimum_codex_version(),
+            ),
+            (
+                LATEST_VERIFIED_COMPATIBILITY_FIXTURE,
+                crate::latest_certified_codex_version(),
+            ),
+        ] {
+            verify_compatibility_fixture(contents, expected_version);
+        }
+    }
+
+    fn verify_compatibility_fixture(contents: &str, expected_version: semver::Version) {
+        let fixture: Value = serde_json::from_str(contents).expect("compatibility fixture");
         assert_eq!(
             fixture["codexVersion"]
                 .as_str()
                 .and_then(|version| semver::Version::parse(version).ok()),
-            Some(crate::minimum_codex_version())
+            Some(expected_version.clone())
         );
+        assert!(crate::is_certified_codex_version(&expected_version));
         let schema_hashes = fixture["schemaSha256"]
             .as_object()
             .expect("schema hash manifest");

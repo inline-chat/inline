@@ -988,16 +988,16 @@ pub(super) async fn handle_claude_history_import_thread_message(
     let owner = message.sender_id.get() == route.owner_user_id;
     let text = match (state, owner) {
         (ClaudeHistoryThreadState::Importing, true) => {
-            "The Claude history import is still running. Wait for the end-of-transcript message before replying here. If it does not finish or the session picker is gone, run /sessions again; replies are disabled in this partial import."
+            "The Claude history import is still running. Wait for the end-of-transcript message before replying here. If it does not finish or the history picker is gone, run /history again; replies are disabled in this partial import."
         }
         (ClaudeHistoryThreadState::Incomplete, true) => {
-            "This Claude history import is incomplete. Use Retry Import from the session picker within ten minutes. If the picker is gone, run /sessions again; replies are disabled in this partial import."
+            "This Claude history import is incomplete. Use Retry Import from the history picker within ten minutes. If the picker is gone, run /history again; replies are disabled in this partial import."
         }
         (ClaudeHistoryThreadState::Importing, false) => {
-            "The Claude history import is still running, so replies are disabled here. Ask the bot owner to wait for completion or run /sessions again."
+            "The Claude history import is still running, so replies are disabled here. Ask the bot owner to wait for completion or run /history again."
         }
         (ClaudeHistoryThreadState::Incomplete, false) => {
-            "This Claude history import is incomplete, so replies are disabled here. Ask the bot owner to retry it or run /sessions again."
+            "This Claude history import is incomplete, so replies are disabled here. Ask the bot owner to retry it or run /history again."
         }
     };
     let event_id = format!(
@@ -1060,7 +1060,7 @@ async fn handle_claude_history_command_inner(
         return send_history_reply(
             bot,
             record,
-            "Open this bot’s private DM and use /sessions there. Local Claude history can’t be listed in shared chats or reply threads.",
+            "Open this bot’s private DM and use /history there. Local Claude history can’t be listed in shared chats or reply threads.",
             "private-dm-only",
         )
         .await;
@@ -1330,7 +1330,7 @@ pub(super) async fn handle_claude_history_action(
                     let _ = send_import_text(
                         &bot,
                         thread_id,
-                        "Import stopped before the transcript was complete. Retry Import is available from the session picker for ten minutes. If the picker is gone, run /sessions again; replies are disabled in this partial import.",
+                        "Import stopped before the transcript was complete. Retry Import is available from the history picker for ten minutes. If the picker is gone, run /history again; replies are disabled in this partial import.",
                         &import.token,
                         "failure",
                     )
@@ -1844,7 +1844,7 @@ pub(super) fn claude_history_command(
     if command.explicit_target && !command.targets_this_bot {
         return None;
     }
-    matches!(command.name.as_str(), "sessions" | "open").then_some(ClaudeHistoryCommand::Sessions)
+    (command.name == "history").then_some(ClaudeHistoryCommand::Sessions)
 }
 
 fn claude_history_command_for_provider(
@@ -2320,31 +2320,33 @@ export async function getSessionMessages(_sessionId, options) {
     }
 
     #[test]
-    fn aliases_are_target_aware_and_leave_argument_validation_to_the_handler() {
+    fn history_command_is_target_aware_and_leaves_argument_validation_to_the_handler() {
         assert_eq!(
-            claude_history_command("/sessions", "claude_bot"),
+            claude_history_command("/history", "claude_bot"),
             Some(ClaudeHistoryCommand::Sessions)
         );
         assert_eq!(
-            claude_history_command("/open@claude_bot", "claude_bot"),
+            claude_history_command("/history@claude_bot", "claude_bot"),
             Some(ClaudeHistoryCommand::Sessions)
         );
         assert_eq!(
-            claude_history_command("/sessions 2", "claude_bot"),
+            claude_history_command("/history 2", "claude_bot"),
             Some(ClaudeHistoryCommand::Sessions)
         );
         assert_eq!(
-            claude_history_command("/sessions@other_bot", "claude_bot"),
+            claude_history_command("/history@other_bot", "claude_bot"),
             None
         );
+        assert_eq!(claude_history_command("/sessions", "claude_bot"), None);
+        assert_eq!(claude_history_command("/open", "claude_bot"), None);
         assert_eq!(
             claude_history_command_for_provider(
                 &ProviderId::new("codex").expect("provider"),
-                "/open",
+                "/history",
                 "codex_bot",
             ),
             None,
-            "history aliases must not shadow another provider's command surface"
+            "history command must not shadow another provider's command surface"
         );
     }
 

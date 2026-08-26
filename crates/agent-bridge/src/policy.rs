@@ -190,7 +190,7 @@ impl TriggerResolver {
                 reason: IgnoreReason::BotAuthored,
             };
         }
-        if !envelope.bot_authored && !policy.allows(envelope.sender_user_id) {
+        if !policy.allows(envelope.sender_user_id) {
             return TriggerDecision::Ignore {
                 reason: IgnoreReason::Unauthorized,
             };
@@ -322,6 +322,7 @@ mod tests {
             );
         }
 
+        let policy = OperatorPolicy::from_allowed(7, [8]).expect("allow bot operator");
         let mut envelope = message(8, Addressing::Mention);
         envelope.bot_authored = true;
         assert!(matches!(
@@ -590,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_check_precedes_an_explicit_bot_mention() {
+    fn duplicate_and_allowlist_checks_precede_an_explicit_bot_mention() {
         let policy = OperatorPolicy::owner_only(7);
         let mut envelope = message(7, Addressing::Mention);
         envelope.duplicate = true;
@@ -607,6 +608,22 @@ mod tests {
             }
         );
 
+        let mut envelope = message(8, Addressing::Mention);
+        envelope.bot_authored = true;
+        envelope.command = Some(CommandInvocation {
+            name: "status".to_string(),
+            arguments: String::new(),
+            explicit_target: true,
+            targets_this_bot: true,
+        });
+        assert!(matches!(
+            TriggerResolver.resolve(&policy, envelope),
+            TriggerDecision::Ignore {
+                reason: IgnoreReason::Unauthorized
+            }
+        ));
+
+        let policy = OperatorPolicy::from_allowed(7, [8]).expect("allow bot operator");
         let mut envelope = message(8, Addressing::Mention);
         envelope.bot_authored = true;
         envelope.command = Some(CommandInvocation {

@@ -598,6 +598,43 @@ message Message {
   // Optional structural projection of message/entities. Older clients ignore
   // this field and keep rendering the unchanged flat projection.
   optional BlockContent block_content = 23;
+
+  // Present only when this row is durably associated with an external agent
+  // session. Raw provider identifiers remain server-private.
+  optional AgentSessionMessageInfo agent_session = 24;
+}
+
+// Agent providers that implement Inline's session continuity contract. The
+// numeric values are stored by the server; additions must be append-only.
+enum AgentSessionProvider {
+  AGENT_SESSION_PROVIDER_UNSPECIFIED = 0;
+  AGENT_SESSION_PROVIDER_CODEX = 1;
+  AGENT_SESSION_PROVIDER_CODEX_CLOUD = 2;
+  AGENT_SESSION_PROVIDER_CLAUDE = 3;
+  AGENT_SESSION_PROVIDER_OPEN_CODE = 4;
+  AGENT_SESSION_PROVIDER_AMP = 5;
+}
+
+enum AgentSessionMessageRole {
+  AGENT_SESSION_MESSAGE_ROLE_UNSPECIFIED = 0;
+  AGENT_SESSION_MESSAGE_ROLE_USER = 1;
+  AGENT_SESSION_MESSAGE_ROLE_ASSISTANT = 2;
+}
+
+enum AgentSessionMessageRelation {
+  AGENT_SESSION_MESSAGE_RELATION_UNSPECIFIED = 0;
+  // The provider owns this projected Inline row.
+  AGENT_SESSION_MESSAGE_RELATION_IMPORTED = 1;
+  // An existing Inline-authored row is linked to its provider echo.
+  AGENT_SESSION_MESSAGE_RELATION_LINKED = 2;
+}
+
+message AgentSessionMessageInfo {
+  // Stable Inline database identity, not the provider's session identifier.
+  int64 agent_session_id = 1;
+  AgentSessionProvider provider = 2;
+  AgentSessionMessageRole role = 3;
+  AgentSessionMessageRelation relation = 4;
 }
 
 enum MessageSendMode {
@@ -740,6 +777,143 @@ message GetSpaceResult {
   Member membership = 2;
 
   SpaceSettings settings = 3;
+}
+
+// Durable Inline association between one bridge bot, one existing Inline
+// thread, and one external agent session. Provider identifiers are not exposed.
+message AgentSession {
+  int64 id = 1;
+  Peer peer_id = 2;
+  int64 bot_user_id = 3;
+  AgentSessionProvider provider = 4;
+  optional int64 status_message_id = 5;
+}
+
+enum ConnectAgentSessionState {
+  CONNECT_AGENT_SESSION_STATE_UNSPECIFIED = 0;
+  CONNECT_AGENT_SESSION_STATE_CREATED = 1;
+  CONNECT_AGENT_SESSION_STATE_ALREADY_CONNECTED = 2;
+  CONNECT_AGENT_SESSION_STATE_CONNECTED_ELSEWHERE = 3;
+}
+
+message ConnectAgentSessionInput {
+  // Existing Inline thread to adopt. The server never creates or moves it.
+  InputPeer peer_id = 1;
+  // Bridge bot that will synchronize this session. The caller must own it.
+  int64 bot_user_id = 2;
+  // Agent provider; future providers extend the enum without changing the RPC.
+  AgentSessionProvider provider = 3;
+  // Stable provider installation or account namespace. Opaque to Inline.
+  string instance_ref = 4;
+  // Stable provider task, thread, or session identifier. Opaque to Inline.
+  string session_ref = 5;
+  // Optional stable workspace, repository, or environment identity. It is
+  // descriptive metadata and does not participate in session identity.
+  optional string project_ref = 6;
+  // Optional bot-authored message in peer_id used as the pinned connection card.
+  optional int64 status_message_id = 7;
+}
+
+message ConnectAgentSessionResult {
+  AgentSession agent_session = 1;
+  ConnectAgentSessionState state = 2;
+}
+
+message AgentSessionConnection {
+  AgentSession agent_session = 1;
+  // Exact opaque provider namespace originally supplied at connection time.
+  string instance_ref = 2;
+  // Exact opaque provider task, thread, or session identity.
+  string session_ref = 3;
+  // Stable workspace/repository/environment identity, when one was supplied.
+  optional string project_ref = 4;
+}
+
+message GetAgentSessionInput {
+  // Inline conversation whose durable agent connection should be recovered.
+  InputPeer peer_id = 1;
+  // Bridge bot connection to look up. The authenticated caller must own it.
+  int64 bot_user_id = 2;
+}
+
+message GetAgentSessionResult {
+  // Absent when this bot has no agent session connected to the conversation.
+  optional AgentSessionConnection connection = 1;
+}
+
+enum AgentSessionSyncMode {
+  AGENT_SESSION_SYNC_MODE_UNSPECIFIED = 0;
+  // Historical repair: visible in realtime but not counted as unread or pushed.
+  AGENT_SESSION_SYNC_MODE_HISTORY = 1;
+  // Current provider output: normal realtime visibility and unread semantics.
+  AGENT_SESSION_SYNC_MODE_LIVE = 2;
+}
+
+message AgentSessionMessageUpsert {
+  string text = 1;
+  optional MessageEntities entities = 2;
+  // Optional idempotent bot-send identity. For assistant history, the server
+  // links the existing bot row when this random ID exists; otherwise it
+  // imports a new row. This closes the send-before-ledger crash boundary.
+  optional int64 assistant_random_id = 3;
+}
+
+message AgentSessionMessageLink {
+  // Existing Inline-local message ID whose provider dispatch route is verified.
+  int64 message_id = 1;
+}
+
+message AgentSessionMessageSync {
+  AgentSessionMessageRole role = 1;
+  // Stable provider item identity. Required for uncorrelated provider history.
+  optional string item_ref = 2;
+  // Stable Inline-to-provider input identity. It is canonical when present.
+  optional string correlation_ref = 3;
+  // Provider event time in Unix seconds. Required when creating an imported row.
+  optional int64 source_date = 4;
+  // Opaque stable content/provider revision used for idempotency.
+  optional string revision_ref = 5;
+  // Expected stored revision when changing an imported row.
+  optional string base_revision_ref = 6;
+  // True once the provider considers this item's content final.
+  bool complete = 7;
+  oneof operation {
+    AgentSessionMessageUpsert upsert = 8;
+    AgentSessionMessageLink link = 9;
+  }
+}
+
+message SyncAgentSessionMessagesInput {
+  // Durable Inline session ID returned by connectAgentSession.
+  int64 agent_session_id = 1;
+  // Selects history versus current-message side effects; it is not persisted.
+  AgentSessionSyncMode mode = 2;
+  // Ordered, atomic batch. The server currently accepts at most 100 operations.
+  repeated AgentSessionMessageSync messages = 3;
+}
+
+enum AgentSessionMessageSyncState {
+  AGENT_SESSION_MESSAGE_SYNC_STATE_UNSPECIFIED = 0;
+  AGENT_SESSION_MESSAGE_SYNC_STATE_CREATED = 1;
+  AGENT_SESSION_MESSAGE_SYNC_STATE_EDITED = 2;
+  AGENT_SESSION_MESSAGE_SYNC_STATE_LINKED = 3;
+  AGENT_SESSION_MESSAGE_SYNC_STATE_UNCHANGED = 4;
+  AGENT_SESSION_MESSAGE_SYNC_STATE_STALE = 5;
+  AGENT_SESSION_MESSAGE_SYNC_STATE_TOMBSTONED = 6;
+  AGENT_SESSION_MESSAGE_SYNC_STATE_CONFLICT = 7;
+}
+
+message AgentSessionMessageSyncResult {
+  // Zero-based position in the request batch.
+  int32 index = 1;
+  AgentSessionMessageSyncState state = 2;
+  optional int64 message_id = 3;
+  // Returned on compare-and-swap conflict so the bridge may repair explicitly.
+  optional string current_revision_ref = 4;
+}
+
+message SyncAgentSessionMessagesResult {
+  repeated AgentSessionMessageSyncResult messages = 1;
 }
 
 message JoinPublicSpaceInput {
@@ -1156,6 +1330,7 @@ message RpcError {
     USERNAME_TAKEN = 16;
     FIRST_NAME_INVALID = 17;
     URL_PREVIEW_UNAVAILABLE = 18;
+    AGENT_SESSION_MESSAGE_IMMUTABLE = 19;
   }
 }
 
@@ -1288,6 +1463,9 @@ enum Method {
   UPDATE_DIALOG_FOLDER = 125;
   DELETE_DIALOG_FOLDER = 126;
   GET_SPACE = 127;
+  CONNECT_AGENT_SESSION = 128;
+  SYNC_AGENT_SESSION_MESSAGES = 129;
+  GET_AGENT_SESSION = 130;
 }
 
 message RpcCall {
@@ -1420,6 +1598,9 @@ message RpcCall {
     UpdateDialogFolderInput updateDialogFolder = 126;
     DeleteDialogFolderInput deleteDialogFolder = 127;
     GetSpaceInput getSpace = 128;
+    ConnectAgentSessionInput connectAgentSession = 129;
+    SyncAgentSessionMessagesInput syncAgentSessionMessages = 130;
+    GetAgentSessionInput getAgentSession = 131;
   }
 }
 
@@ -1554,6 +1735,9 @@ message RpcResult {
     UpdateDialogFolderResult updateDialogFolder = 126;
     DeleteDialogFolderResult deleteDialogFolder = 127;
     GetSpaceResult getSpace = 128;
+    ConnectAgentSessionResult connectAgentSession = 129;
+    SyncAgentSessionMessagesResult syncAgentSessionMessages = 130;
+    GetAgentSessionResult getAgentSession = 131;
   }
 }
 

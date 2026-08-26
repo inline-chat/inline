@@ -13,11 +13,13 @@ use inline_agent_bridge::{
     ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, SteeringSupport, TurnId, TurnInput,
     TurnOptions,
 };
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;
 
-use crate::peer::{CodexPeer, IncomingMessage, PeerError, RemoteError};
+use crate::INLINE_CLIENT_MESSAGE_ID_PREFIX;
+use crate::peer::{CodexPeer, IncomingMessage, PeerError, PeerResult, RemoteError};
 use crate::protocol::{
     CodexNotification, CompactThreadParams, DynamicToolSpec, InterruptTurnParams, ModelListParams,
     ModelListResponse, PermissionProfileListParams, PermissionProfileListResponse,
@@ -25,6 +27,10 @@ use crate::protocol::{
     approval_result, normalize_notification, normalize_question_request, normalize_server_request,
     provider_session_id_from_response, question_result, turn_id_from_response,
     unsupported_notification_diagnostic,
+};
+use crate::session_connection::SharedSessionObservers;
+use crate::session_wire::{
+    ThreadListResponse, ThreadLoadedListResponse, ThreadReadResponse, ThreadUnsubscribeResponse,
 };
 
 const DEFAULT_MODE_REQUEST_USER_INPUT: &str = "features.default_mode_request_user_input";
@@ -352,18 +358,43 @@ struct PendingQuestion {
 
 type PendingQuestions = Arc<StdMutex<HashMap<String, PendingQuestion>>>;
 type HostTools = Arc<StdMutex<Option<HostToolConfiguration>>>;
-pub(crate) type ShutdownFuture = Pin<Box<dyn Future<Output = DriverResult<()>> + Send>>;
-pub(crate) type ShutdownHook = Arc<dyn Fn() -> ShutdownFuture + Send + Sync>;
-type WeakShutdownHook = Weak<dyn Fn() -> ShutdownFuture + Send + Sync>;
 
-#[derive(Clone)]
-pub struct CodexAppServerDriver<W> {
-    peer: CodexPeer<W>,
+struct IncomingDispatchState {
     routing: SharedEventRouting,
     approvals: PendingApprovals,
     questions: PendingQuestions,
     host_tools: HostTools,
+    session_observers: SharedSessionObservers,
+}
+
+pub(crate) type ShutdownFuture = Pin<Box<dyn Future<Output = DriverResult<()>> + Send>>;
+pub(crate) type ShutdownHook = Arc<dyn Fn() -> ShutdownFuture + Send + Sync>;
+type WeakShutdownHook = Weak<dyn Fn() -> ShutdownFuture + Send + Sync>;
+
+pub struct CodexAppServerDriver<W> {
+    peer: CodexPeer<W>,
+    server_user_agent: String,
+    routing: SharedEventRouting,
+    approvals: PendingApprovals,
+    questions: PendingQuestions,
+    host_tools: HostTools,
+    session_observers: SharedSessionObservers,
     shutdown_hook: Option<ShutdownHook>,
+}
+
+impl<W> Clone for CodexAppServerDriver<W> {
+    fn clone(&self) -> Self {
+        Self {
+            peer: self.peer.clone(),
+            server_user_agent: self.server_user_agent.clone(),
+            routing: self.routing.clone(),
+            approvals: self.approvals.clone(),
+            questions: self.questions.clone(),
+            host_tools: self.host_tools.clone(),
+            session_observers: self.session_observers.clone(),
+            shutdown_hook: self.shutdown_hook.clone(),
+        }
+    }
 }
 
 impl<W> std::fmt::Debug for CodexAppServerDriver<W> {
@@ -379,6 +410,30 @@ impl<W> CodexAppServerDriver<W>
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    pub(crate) async fn session_catalog_request(
+        &self,
+        method: &'static str,
+        params: Value,
+    ) -> PeerResult<Value> {
+        self.peer.request(method, params).await
+    }
+
+    pub(crate) async fn session_request_with_wire_sequence(
+        &self,
+        method: &'static str,
+        params: Value,
+    ) -> PeerResult<(Value, u64)> {
+        self.peer.request_with_wire_sequence(method, params).await
+    }
+
+    pub(crate) fn session_observers(&self) -> SharedSessionObservers {
+        self.session_observers.clone()
+    }
+
+    pub fn server_user_agent(&self) -> &str {
+        &self.server_user_agent
+    }
+
     pub async fn initialize(peer: CodexPeer<W>, version: &str) -> DriverResult<Self> {
         Self::initialize_with_shutdown(peer, version, None).await
     }
@@ -391,9 +446,20 @@ where
         let incoming = peer.take_incoming().map_err(driver_error)?;
         let params = serde_json::to_value(crate::InitializeParams::inline(version))
             .map_err(protocol_serialization_error)?;
-        peer.request("initialize", params)
+        let initialize = peer
+            .request("initialize", params)
             .await
             .map_err(driver_error)?;
+        let server_user_agent = initialize
+            .get("userAgent")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                DriverError::Protocol(
+                    "Codex initialize response omitted its server user agent".to_string(),
+                )
+            })?
+            .to_string();
         peer.notify("initialized", json!({}))
             .await
             .map_err(driver_error)?;
@@ -402,23 +468,111 @@ where
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
         let questions = Arc::new(StdMutex::new(HashMap::new()));
         let host_tools = Arc::new(StdMutex::new(None));
+        let session_observers = SharedSessionObservers::default();
         tokio::spawn(dispatch_incoming(
             peer.clone(),
             incoming,
-            routing.clone(),
-            approvals.clone(),
-            questions.clone(),
-            host_tools.clone(),
+            IncomingDispatchState {
+                routing: routing.clone(),
+                approvals: approvals.clone(),
+                questions: questions.clone(),
+                host_tools: host_tools.clone(),
+                session_observers: session_observers.clone(),
+            },
             shutdown_hook.as_ref().map(Arc::downgrade),
         ));
         Ok(Self {
             peer,
+            server_user_agent,
             routing,
             approvals,
             questions,
             host_tools,
+            session_observers,
             shutdown_hook,
         })
+    }
+
+    /// Bounded compatibility probe used before the runtime advertises the
+    /// stable session catalog. Reads are decoded against the consumed schema;
+    /// mutating method presence is checked only with the reserved nil UUID, so
+    /// no user session can be changed by discovery.
+    pub(crate) async fn verify_session_catalog_contract(&self) -> DriverResult<()> {
+        self.verify_catalog_read::<ThreadListResponse>(
+            "thread/list",
+            json!({
+                "limit": 1,
+                "sortKey": "updated_at",
+                "sortDirection": "desc",
+                "archived": false
+            }),
+        )
+        .await?;
+        self.verify_catalog_read::<ThreadLoadedListResponse>(
+            "thread/loaded/list",
+            json!({ "limit": 1 }),
+        )
+        .await?;
+
+        const NIL_THREAD_ID: &str = "00000000-0000-0000-0000-000000000000";
+        self.verify_catalog_method::<ThreadReadResponse>(
+            "thread/read",
+            json!({ "threadId": NIL_THREAD_ID, "includeTurns": false }),
+        )
+        .await?;
+        self.verify_catalog_method::<Value>(
+            "thread/name/set",
+            json!({ "threadId": NIL_THREAD_ID, "name": "Inline capability probe" }),
+        )
+        .await?;
+        self.verify_catalog_method::<ThreadUnsubscribeResponse>(
+            "thread/unsubscribe",
+            json!({ "threadId": NIL_THREAD_ID }),
+        )
+        .await
+    }
+
+    async fn verify_catalog_read<R>(&self, method: &'static str, params: Value) -> DriverResult<()>
+    where
+        R: DeserializeOwned,
+    {
+        let response = self
+            .peer
+            .request_with_timeout(method, params, std::time::Duration::from_secs(5))
+            .await
+            .map_err(driver_error)?;
+        serde_json::from_value::<R>(response)
+            .map(|_| ())
+            .map_err(|error| incompatible_catalog_response(method, error))
+    }
+
+    async fn verify_catalog_method<R>(
+        &self,
+        method: &'static str,
+        params: Value,
+    ) -> DriverResult<()>
+    where
+        R: DeserializeOwned,
+    {
+        match self
+            .peer
+            .request_with_timeout(method, params, std::time::Duration::from_secs(5))
+            .await
+        {
+            Ok(response) => serde_json::from_value::<R>(response)
+                .map(|_| ())
+                .map_err(|error| incompatible_catalog_response(method, error)),
+            Err(PeerError::Remote(error)) if error.code == Some(-32601) => {
+                Err(DriverError::Protocol(format!(
+                    "Codex stable session method is unavailable: {method}"
+                )))
+            }
+            // A reserved non-existent thread is expected to be rejected. Any
+            // remote application error other than method-not-found proves the
+            // stable method is installed without changing provider state.
+            Err(PeerError::Remote(_)) => Ok(()),
+            Err(error) => Err(driver_error(error)),
+        }
     }
 
     async fn stop_ambiguous_epoch(&self, operation: &str) -> DriverError {
@@ -434,7 +588,7 @@ where
         };
         match tokio::time::timeout(AMBIGUOUS_EPOCH_SHUTDOWN_TIMEOUT, shutdown()).await {
             Ok(Ok(())) => DriverError::ProcessExited(ended),
-            _ => DriverError::Unavailable(unconfirmed),
+            _ => DriverError::EpochEnded(unconfirmed),
         }
     }
 
@@ -720,6 +874,17 @@ where
         }
     }
 
+    fn session_input_correlation(
+        &self,
+        direction_id: &inline_agent_bridge::DirectionId,
+    ) -> Option<inline_agent_bridge::SessionInputCorrelation> {
+        inline_agent_bridge::SessionInputCorrelation::new(format!(
+            "{INLINE_CLIENT_MESSAGE_ID_PREFIX}{}",
+            direction_id.as_str()
+        ))
+        .ok()
+    }
+
     fn configure_host_tools(&self, configuration: HostToolConfiguration) -> DriverResult<()> {
         if configuration.specs.is_empty() {
             return Err(DriverError::Protocol(
@@ -793,7 +958,33 @@ where
                 Err(PeerError::Timeout(_)) => {
                     return Err(self.stop_ambiguous_epoch("thread/resume").await);
                 }
-                Err(error) => return Err(resume_driver_error(error)),
+                Err(error) => {
+                    let error = resume_driver_error(error);
+                    if matches!(&error, DriverError::SessionBusy(_)) {
+                        // A rejected private resume can still leave Codex with
+                        // a subscription in this app-server epoch. Release
+                        // only that thread: ending the whole epoch here could
+                        // interrupt an unrelated Inline turn on another
+                        // session owned by the same provider process.
+                        let cleanup = self
+                            .peer
+                            .request_with_timeout(
+                                "thread/unsubscribe",
+                                json!({ "threadId": spec.session_id.to_string() }),
+                                CONTROL_REQUEST_TIMEOUT,
+                            )
+                            .await
+                            .and_then(|response| {
+                                serde_json::from_value::<ThreadUnsubscribeResponse>(response)
+                                    .map_err(PeerError::Json)
+                            });
+                        if cleanup.is_err() {
+                            log::warn!("Codex busy-session subscription cleanup failed");
+                            return Err(self.stop_ambiguous_epoch("thread/unsubscribe").await);
+                        }
+                    }
+                    return Err(error);
+                }
             }
             Ok(())
         })
@@ -810,7 +1001,9 @@ where
             params
                 .input
                 .extend(codex_attachment_inputs(input.attachments).await?);
-            params.client_user_message_id = input.client_message_id;
+            params.client_user_message_id = input
+                .client_message_id
+                .map(|id| format!("{INLINE_CLIENT_MESSAGE_ID_PREFIX}{id}"));
             params.cwd = options.cwd;
             params.model = options.model;
             params.effort = options.reasoning;
@@ -836,7 +1029,9 @@ where
                 "turn/steer",
                 serialize(SteerTurnParams {
                     thread_id: session_id.to_string(),
-                    client_user_message_id: input.client_message_id,
+                    client_user_message_id: input
+                        .client_message_id
+                        .map(|id| format!("{INLINE_CLIENT_MESSAGE_ID_PREFIX}{id}")),
                     input: std::iter::once(UserInput::Text { text: input.text })
                         .chain(codex_attachment_inputs(input.attachments).await?)
                         .collect(),
@@ -1030,17 +1225,28 @@ where
 async fn dispatch_incoming<W>(
     peer: CodexPeer<W>,
     mut incoming: mpsc::Receiver<IncomingMessage>,
-    routing: SharedEventRouting,
-    approvals: PendingApprovals,
-    questions: PendingQuestions,
-    host_tools: HostTools,
+    state: IncomingDispatchState,
     shutdown_hook: Option<WeakShutdownHook>,
 ) where
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    let IncomingDispatchState {
+        routing,
+        approvals,
+        questions,
+        host_tools,
+        session_observers,
+    } = state;
     while let Some(message) = incoming.recv().await {
         match message {
-            IncomingMessage::Notification { method, params } => {
+            IncomingMessage::Notification {
+                wire_sequence,
+                method,
+                params,
+            } => {
+                if session_observers.route_notification(wire_sequence, &method, &params) {
+                    continue;
+                }
                 let unsupported = unsupported_notification_diagnostic(&method, &params);
                 match normalize_notification(CodexNotification { method, params }) {
                     Ok(events) => {
@@ -1054,7 +1260,16 @@ async fn dispatch_incoming<W>(
                     Err(error) => log::warn!("ignoring invalid Codex notification: {error}"),
                 }
             }
-            IncomingMessage::ServerRequest { id, method, params } => {
+            IncomingMessage::ServerRequest {
+                id, method, params, ..
+            } => {
+                if session_observers.claims_thread_traffic(&params) {
+                    // Codex broadcasts thread-scoped requests to every
+                    // subscriber. This connection is observation-only: an
+                    // existing controller remains the sole responder until
+                    // shared control ownership is implemented.
+                    continue;
+                }
                 if method == "item/tool/call" {
                     let configuration = host_tools
                         .lock()
@@ -1197,6 +1412,9 @@ async fn dispatch_incoming<W>(
         &routing,
         DriverError::ProcessExited("Codex app-server disconnected".to_string()),
     );
+    session_observers.fail_all(DriverError::ProcessExited(
+        "Codex app-server disconnected".to_string(),
+    ));
     if let Some(shutdown_hook) = shutdown_hook.and_then(|hook| hook.upgrade()) {
         let _ = shutdown_hook().await;
     }
@@ -1453,6 +1671,12 @@ fn protocol_serialization_error(error: serde_json::Error) -> DriverError {
     DriverError::Protocol(format!("failed to encode Codex request: {error}"))
 }
 
+fn incompatible_catalog_response(method: &'static str, error: serde_json::Error) -> DriverError {
+    DriverError::Protocol(format!(
+        "Codex {method} returned an incompatible stable response: {error}"
+    ))
+}
+
 fn driver_error(error: PeerError) -> DriverError {
     match error {
         PeerError::Io(error) => DriverError::Unavailable(error.to_string()),
@@ -1478,6 +1702,16 @@ fn resume_driver_error(error: PeerError) -> DriverError {
                 || error.message.starts_with("thread not found: ") =>
         {
             DriverError::InvalidSession(error.to_string())
+        }
+        PeerError::Remote(error)
+            if error.message.contains("already has an active writer")
+                || error
+                    .message
+                    .contains("is closing; retry thread/resume after the thread is closed") =>
+        {
+            DriverError::SessionBusy(
+                "Close this session in the other Codex app or CLI, then try again.".to_string(),
+            )
         }
         error => driver_error(error),
     }
@@ -1617,12 +1851,149 @@ mod tests {
                 code: Some(-32600),
                 message: "thread 00000000-0000-4000-8000-000000000001 is closing; retry thread/resume after the thread is closed".to_string(),
             })),
-            DriverError::Rejected(_)
+            DriverError::SessionBusy(_)
+        ));
+        assert!(matches!(
+            resume_driver_error(PeerError::Remote(RemoteError {
+                code: Some(-32600),
+                message: "thread private-id already has an active writer".to_string(),
+            })),
+            DriverError::SessionBusy(message)
+                if message == "Close this session in the other Codex app or CLI, then try again."
         ));
         assert!(matches!(
             resume_driver_error(PeerError::Timeout("thread/resume".to_string())),
             DriverError::Transient(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn busy_resume_unsubscribes_only_the_rejected_thread() {
+        let (driver, mut server) = initialized_driver().await;
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(&mut server);
+            let mut lines = BufReader::new(reader).lines();
+            let resume: Value = serde_json::from_str(
+                &lines
+                    .next_line()
+                    .await
+                    .expect("resume read")
+                    .expect("resume line"),
+            )
+            .expect("resume json");
+            assert_eq!(resume["method"], "thread/resume");
+            writer
+                .write_all(
+                    format!(
+                        "{{\"id\":{},\"error\":{{\"code\":-32600,\"message\":\"thread thread-busy already has an active writer\"}}}}\n",
+                        resume["id"]
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("busy response");
+
+            let unsubscribe: Value = serde_json::from_str(
+                &lines
+                    .next_line()
+                    .await
+                    .expect("unsubscribe read")
+                    .expect("unsubscribe line"),
+            )
+            .expect("unsubscribe json");
+            assert_eq!(unsubscribe["method"], "thread/unsubscribe");
+            assert_eq!(unsubscribe["params"]["threadId"], "thread-busy");
+            writer
+                .write_all(
+                    format!(
+                        "{{\"id\":{},\"result\":{{\"status\":\"notSubscribed\"}}}}\n",
+                        unsubscribe["id"]
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("unsubscribe response");
+        });
+
+        assert!(matches!(
+            driver
+                .resume_session(ResumeSessionSpec {
+                    session_id: ProviderSessionId::new("thread-busy").expect("session"),
+                    cwd: "/repo".into(),
+                    replay: SessionReplay::None,
+                })
+                .await,
+            Err(DriverError::SessionBusy(_))
+        ));
+        server_task.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn busy_resume_ends_epoch_when_subscription_cleanup_is_unconfirmed() {
+        let (mut driver, mut server) = initialized_driver().await;
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook_stopped = stopped.clone();
+        driver.shutdown_hook = Some(Arc::new(move || {
+            let hook_stopped = hook_stopped.clone();
+            Box::pin(async move {
+                hook_stopped.store(true, std::sync::atomic::Ordering::Release);
+                Ok(())
+            })
+        }));
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(&mut server);
+            let mut lines = BufReader::new(reader).lines();
+            let resume: Value = serde_json::from_str(
+                &lines
+                    .next_line()
+                    .await
+                    .expect("resume read")
+                    .expect("resume line"),
+            )
+            .expect("resume json");
+            writer
+                .write_all(
+                    format!(
+                        "{{\"id\":{},\"error\":{{\"code\":-32600,\"message\":\"thread thread-busy already has an active writer\"}}}}\n",
+                        resume["id"]
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("busy response");
+            let unsubscribe: Value = serde_json::from_str(
+                &lines
+                    .next_line()
+                    .await
+                    .expect("unsubscribe read")
+                    .expect("unsubscribe line"),
+            )
+            .expect("unsubscribe json");
+            assert_eq!(unsubscribe["method"], "thread/unsubscribe");
+            writer
+                .write_all(
+                    format!(
+                        "{{\"id\":{},\"error\":{{\"code\":-32000,\"message\":\"cleanup failed\"}}}}\n",
+                        unsubscribe["id"]
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("cleanup failure");
+        });
+
+        assert!(matches!(
+            driver
+                .resume_session(ResumeSessionSpec {
+                    session_id: ProviderSessionId::new("thread-busy").expect("session"),
+                    cwd: "/repo".into(),
+                    replay: SessionReplay::None,
+                })
+                .await,
+            Err(DriverError::ProcessExited(_))
+        ));
+        assert!(stopped.load(std::sync::atomic::Ordering::Acquire));
+        server_task.await.expect("server task");
     }
 
     #[tokio::test]
@@ -1886,7 +2257,7 @@ mod tests {
         )
         .await
         .expect("ambiguous shutdown must remain bounded");
-        assert!(matches!(result, Err(DriverError::Unavailable(_))));
+        assert!(matches!(result, Err(DriverError::EpochEnded(_))));
     }
 
     #[test]
@@ -2038,6 +2409,10 @@ mod tests {
                 serde_json::from_str(&lines.next_line().await.unwrap().expect("turn request"))
                     .expect("turn json");
             assert_eq!(request["method"], "turn/start");
+            assert_eq!(
+                request["params"]["clientUserMessageId"],
+                "inline-agent-bridge:v1:message-1"
+            );
             writer
                 .write_all(
                     b"{\"method\":\"turn/started\",\"params\":{\"turn\":{\"id\":\"turn-1\"}}}\n",

@@ -44,8 +44,8 @@ use crate::{
     DialogRecord, DialogsOrder, DialogsPage, DialogsRequest, EditInteractiveMessageRequest,
     EditMessageRequest, HistoryPage, HistoryRequest, InMemoryStore, InitialEventPolicy, InlineId,
     InvokeBotChatSettingsItemRequest, MediaKind, MessageActionKind, MessageActions, MessageContent,
-    MessageMutation, MessageRecord, NotificationMode, OperationOutcome, PeerRef, RandomId,
-    ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnector,
+    MessageMutation, MessageRecord, NotificationMode, OperationOutcome, PeerRef, PinMessageRequest,
+    RandomId, ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnector,
     RemoveChatParticipantRequest, RequestBotChatSettingsRequest, SendInteractiveTextRequest,
     SendNotificationMode, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
     SpaceMemberRecord, SpaceMemberRole, SpaceRecord, StoreError, StoredReaction, StoredReadState,
@@ -2089,6 +2089,30 @@ impl ClientBackend for SdkBackend {
         })
     }
 
+    fn pin_message(
+        &self,
+        request: PinMessageRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            let result = backend
+                .call_realtime(
+                    &session,
+                    proto::PinMessageInput {
+                        peer_id: Some(input_peer_for_chat(request.chat_id)),
+                        message_id: request.message_id.get(),
+                        unpin: request.unpin,
+                    },
+                )
+                .await?;
+            let events = backend
+                .apply_updates(result.updates, Some(request.chat_id), None)
+                .await?;
+            Ok(OperationOutcome::with_events(events))
+        })
+    }
+
     fn set_marked_unread(
         &self,
         request: SetMarkedUnreadRequest,
@@ -2390,6 +2414,39 @@ impl ClientBackend for SdkBackend {
                 )
                 .await?;
             Ok(OperationOutcome::empty())
+        })
+    }
+
+    fn connect_agent_session(
+        &self,
+        request: proto::ConnectAgentSessionInput,
+    ) -> BoxFuture<'static, BackendResult<proto::ConnectAgentSessionResult>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend.call_realtime(&session, request).await
+        })
+    }
+
+    fn get_agent_session(
+        &self,
+        request: proto::GetAgentSessionInput,
+    ) -> BoxFuture<'static, BackendResult<proto::GetAgentSessionResult>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend.call_realtime(&session, request).await
+        })
+    }
+
+    fn sync_agent_session_messages(
+        &self,
+        request: proto::SyncAgentSessionMessagesInput,
+    ) -> BoxFuture<'static, BackendResult<proto::SyncAgentSessionMessagesResult>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend.call_realtime(&session, request).await
         })
     }
 
@@ -8799,6 +8856,7 @@ mod tests {
                         rev: None,
                         service_message: None,
                         block_content: None,
+                        agent_session: None,
                     }),
                 })),
             }],

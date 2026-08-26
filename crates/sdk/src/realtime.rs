@@ -1926,6 +1926,27 @@ rpc_requests!(
         CancelUpload
     ),
     (GetSpaceInput, GetSpace, GetSpace, GetSpaceResult, GetSpace),
+    (
+        ConnectAgentSessionInput,
+        ConnectAgentSession,
+        ConnectAgentSession,
+        ConnectAgentSessionResult,
+        ConnectAgentSession
+    ),
+    (
+        SyncAgentSessionMessagesInput,
+        SyncAgentSessionMessages,
+        SyncAgentSessionMessages,
+        SyncAgentSessionMessagesResult,
+        SyncAgentSessionMessages
+    ),
+    (
+        GetAgentSessionInput,
+        GetAgentSession,
+        GetAgentSession,
+        GetAgentSessionResult,
+        GetAgentSession
+    ),
 );
 
 fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::ConnectionInit {

@@ -70,7 +70,7 @@ where
                         "provider probe coordinator closed",
                     )
                 })?;
-                probe_configured_provider_async(
+                probe_service_provider_async(
                     &launch.installation.provider_id,
                     &launch.installation.executable,
                 )

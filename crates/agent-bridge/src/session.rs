@@ -1,14 +1,79 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMutexGuard, OwnedRwLockReadGuard, RwLock};
 
 use crate::{
     AgentDriver, BindingKey, BridgeStore, DriverError, ProviderId, ProviderSessionId,
-    ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, StoreError, TurnInput, TurnOptions,
+    ResumeSessionSpec, SessionReplay, SessionSpec, SessionThreadBindOutcome, SessionThreadBinding,
+    SessionThreadOpening, SessionThreadPrepareOutcome, StartedTurn, StoreError, TurnInput,
+    TurnOptions,
 };
+
+type SessionSlot = Arc<Mutex<Option<ProviderSessionId>>>;
+type ThreadTransitionKey = (crate::InstallationId, i64);
+type ThreadTransitionSlot = Arc<Mutex<()>>;
+type ProviderSessionClaimSlot = Arc<Mutex<()>>;
+
+struct SessionThreadClaimGuard {
+    _guard: OwnedMutexGuard<()>,
+}
+
+/// Keeps the provider epoch globally non-idle for the lifetime of one turn.
+/// This is process-local coordination for epoch-wide actions such as `/close`;
+/// the provider remains the authoritative owner of its session writer.
+pub struct ProviderWorkLease {
+    _guard: OwnedRwLockReadGuard<()>,
+}
+
+impl std::fmt::Debug for ProviderWorkLease {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ProviderWorkLease(<active>)")
+    }
+}
+
+impl std::fmt::Debug for SessionThreadClaimGuard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SessionThreadClaimGuard(<locked>)")
+    }
+}
+
+/// Holds the provider-session claim across Inline's create-or-return reply
+/// thread request and the atomic local completion. Dropping it is safe: the
+/// durable opening retains the original anchor for the next bridge process.
+pub struct PreparedSessionThread {
+    _claim: SessionThreadClaimGuard,
+    outcome: SessionThreadPrepareOutcome,
+}
+
+impl PreparedSessionThread {
+    pub fn binding(&self) -> Option<&SessionThreadBinding> {
+        self.outcome.binding()
+    }
+
+    pub fn opening(&self) -> Option<&SessionThreadOpening> {
+        self.outcome.opening()
+    }
+}
+
+impl std::fmt::Debug for PreparedSessionThread {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedSessionThread")
+            .field(
+                "state",
+                &if self.binding().is_some() {
+                    "bound"
+                } else {
+                    "opening"
+                },
+            )
+            .finish()
+    }
+}
 
 /// Describes how a provider session became available to a bridge binding.
 ///
@@ -60,7 +125,11 @@ pub struct ProviderSessionManager<D> {
     store: Arc<BridgeStore>,
     provider_id: ProviderId,
     session_configuration_fingerprint: Option<String>,
-    slots: Mutex<HashMap<BindingKey, Arc<Mutex<Option<ProviderSessionId>>>>>,
+    slots: Mutex<HashMap<BindingKey, SessionSlot>>,
+    transition_slots: Mutex<HashMap<ThreadTransitionKey, ThreadTransitionSlot>>,
+    session_claim_slots: Mutex<HashMap<crate::ProviderSessionRef, ProviderSessionClaimSlot>>,
+    epoch_gate: Arc<RwLock<()>>,
+    epoch_ended: AtomicBool,
 }
 
 impl<D> std::fmt::Debug for ProviderSessionManager<D> {
@@ -85,6 +154,10 @@ where
             provider_id,
             session_configuration_fingerprint: None,
             slots: Mutex::new(HashMap::new()),
+            transition_slots: Mutex::new(HashMap::new()),
+            session_claim_slots: Mutex::new(HashMap::new()),
+            epoch_gate: Arc::new(RwLock::new(())),
+            epoch_ended: AtomicBool::new(false),
         }
     }
 
@@ -170,7 +243,13 @@ where
                         found: stored_provider,
                     });
                 }
-                if stored_fingerprint != self.session_configuration_fingerprint
+                let configuration_changed =
+                    stored_fingerprint != self.session_configuration_fingerprint;
+                let session_thread_pinned = self
+                    .store
+                    .session_thread_binding_for_chat(&binding.installation_id, binding.chat_id)?
+                    .is_some();
+                if (configuration_changed && !session_thread_pinned)
                     || !self.driver.capabilities().resume_session
                 {
                     log::trace!(
@@ -178,7 +257,7 @@ where
                         "phase=session_rotate provider_id={:?} chat_id={} reason={} stored_configuration={} required_configuration={}",
                         self.provider_id.as_str(),
                         binding.chat_id,
-                        if stored_fingerprint != self.session_configuration_fingerprint {
+                        if configuration_changed {
                             "configuration_changed"
                         } else {
                             "resume_unsupported"
@@ -188,6 +267,14 @@ where
                     );
                     SessionOpenOutcome::Replaced(self.replace_session(binding, now).await?)
                 } else {
+                    if configuration_changed {
+                        log::trace!(
+                            target: "inline_agent_bridge::session",
+                            "phase=session_configuration_preserved provider_id={:?} chat_id={} reason=session_thread_pinned",
+                            self.provider_id.as_str(),
+                            binding.chat_id,
+                        );
+                    }
                     log::trace!(
                         target: "inline_agent_bridge::session",
                         "phase=session_resume_started provider_id={:?} chat_id={} session_id={:?}",
@@ -220,7 +307,10 @@ where
                         Err(DriverError::InvalidSession(_)) => {
                             SessionOpenOutcome::Replaced(self.replace_session(binding, now).await?)
                         }
-                        Err(error) => return Err(error.into()),
+                        Err(error) => {
+                            self.seal_epoch_if_needed(&error);
+                            return Err(error.into());
+                        }
                     }
                 }
             }
@@ -238,12 +328,142 @@ where
         Ok(outcome)
     }
 
-    async fn session_slot(&self, binding: &BindingKey) -> Arc<Mutex<Option<ProviderSessionId>>> {
+    async fn session_slot(&self, binding: &BindingKey) -> SessionSlot {
         let mut slots = self.slots.lock().await;
         slots
             .entry(binding.clone())
             .or_insert_with(|| Arc::new(Mutex::new(None)))
             .clone()
+    }
+
+    /// Whether this provider epoch has actually resumed or created the
+    /// binding's session. A durable binding alone can be read-only history and
+    /// must not be presented as current writer ownership.
+    pub async fn session_is_active(&self, binding: &BindingKey) -> bool {
+        let slot = self.session_slot(binding).await;
+        slot.lock().await.is_some()
+    }
+
+    async fn transition_slot(
+        &self,
+        installation_id: &crate::InstallationId,
+        chat_id: i64,
+    ) -> ThreadTransitionSlot {
+        let mut slots = self.transition_slots.lock().await;
+        slots
+            .entry((installation_id.clone(), chat_id))
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    /// Serializes the check/create/bind sequence for one provider session so
+    /// two picker cards cannot create different Inline reply threads before
+    /// either one commits the durable reverse owner.
+    async fn claim_session_thread(
+        &self,
+        session: &crate::ProviderSessionRef,
+    ) -> Result<SessionThreadClaimGuard, SessionManagerError> {
+        let found_provider = session.provider().provider_id();
+        if found_provider != &self.provider_id {
+            return Err(SessionManagerError::ProviderMismatch {
+                expected: self.provider_id.clone(),
+                found: found_provider.clone(),
+            });
+        }
+        let slot = {
+            let mut slots = self.session_claim_slots.lock().await;
+            slots
+                .entry(session.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        Ok(SessionThreadClaimGuard {
+            _guard: slot.lock_owned().await,
+        })
+    }
+
+    /// Durably records the reply-thread anchor before any remote create call
+    /// and retains the per-provider-session claim until completion.
+    pub async fn prepare_session_thread(
+        &self,
+        proposed: &SessionThreadOpening,
+        now: i64,
+    ) -> Result<PreparedSessionThread, SessionManagerError> {
+        let claim = self.claim_session_thread(proposed.session()).await?;
+        let outcome = self.store.prepare_session_thread_opening(proposed, now)?;
+        Ok(PreparedSessionThread {
+            _claim: claim,
+            outcome,
+        })
+    }
+
+    /// Completes the durable opening only after Inline returns the stable
+    /// reply-thread chat ID. The opening and both binding directions commit in
+    /// one local transaction.
+    pub async fn complete_prepared_session_thread(
+        &self,
+        prepared: PreparedSessionThread,
+        thread_chat_id: i64,
+        now: i64,
+    ) -> Result<SessionThreadBindOutcome, SessionManagerError> {
+        let Some(opening) = prepared.opening() else {
+            let binding = prepared
+                .binding()
+                .expect("prepared session thread has one state")
+                .clone();
+            return Ok(SessionThreadBindOutcome::Existing(binding));
+        };
+        let found_provider = opening.session().provider().provider_id();
+        if found_provider != &self.provider_id {
+            return Err(SessionManagerError::ProviderMismatch {
+                expected: self.provider_id.clone(),
+                found: found_provider.clone(),
+            });
+        }
+        let transition = self
+            .transition_slot(
+                opening.session().provider().installation_id(),
+                thread_chat_id,
+            )
+            .await;
+        let _transition = transition.lock().await;
+        Ok(self.store.complete_session_thread_opening(
+            opening,
+            thread_chat_id,
+            self.session_configuration_fingerprint.as_deref(),
+            now,
+        )?)
+    }
+
+    /// Binds an already-created Inline reply thread. Runtime browser flows use
+    /// `prepare_session_thread` instead so remote creation is crash-recoverable.
+    /// This path still
+    /// serialize against provider session creation and rotation for the same
+    /// Inline thread, including across workspace-scoped forward bindings.
+    pub async fn bind_session_thread(
+        &self,
+        proposed: &SessionThreadBinding,
+        now: i64,
+    ) -> Result<SessionThreadBindOutcome, SessionManagerError> {
+        let found_provider = proposed.session().provider().provider_id();
+        if found_provider != &self.provider_id {
+            return Err(SessionManagerError::ProviderMismatch {
+                expected: self.provider_id.clone(),
+                found: found_provider.clone(),
+            });
+        }
+        let transition = self
+            .transition_slot(
+                proposed.session().provider().installation_id(),
+                proposed.thread_chat_id(),
+            )
+            .await;
+        let _transition = transition.lock().await;
+        Ok(self.store.bind_session_thread(
+            proposed,
+            self.session_configuration_fingerprint.as_deref(),
+            now,
+        )?)
     }
 
     /// Starts a fresh provider session and persists it only after the provider
@@ -254,8 +474,27 @@ where
         binding: &BindingKey,
         now: i64,
     ) -> Result<ProviderSessionId, SessionManagerError> {
+        let transition = self
+            .transition_slot(&binding.installation_id, binding.chat_id)
+            .await;
+        let _transition = transition.lock().await;
+        if self
+            .store
+            .session_thread_binding_for_chat(&binding.installation_id, binding.chat_id)?
+            .is_some()
+        {
+            return Err(SessionManagerError::SessionThreadPinned {
+                chat_id: binding.chat_id,
+            });
+        }
         let cwd = self.workspace_path(binding, now)?;
-        let session_id = self.driver.start_session(SessionSpec { cwd }).await?;
+        let session_id = match self.driver.start_session(SessionSpec { cwd }).await {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                self.seal_epoch_if_needed(&error);
+                return Err(error.into());
+            }
+        };
         self.store.put_binding_with_configuration(
             binding,
             &self.provider_id,
@@ -272,15 +511,74 @@ where
         now: i64,
         input: TurnInput,
         mut options: TurnOptions,
-    ) -> Result<(SessionOpenOutcome, StartedTurn), SessionManagerError> {
+    ) -> Result<(SessionOpenOutcome, StartedTurn, ProviderWorkLease), SessionManagerError> {
+        let lease = self.begin_provider_work().await?;
         let session = self.ensure_session(binding, now).await?;
         let cwd = self.workspace_path(binding, now)?;
         options.cwd.get_or_insert(cwd);
-        let turn = self
+        let turn = match self
             .driver
             .start_turn(session.session_id(), input, options)
-            .await?;
-        Ok((session, turn))
+            .await
+        {
+            Ok(turn) => turn,
+            Err(error) => {
+                self.seal_epoch_if_needed(&error);
+                return Err(error.into());
+            }
+        };
+        Ok((session, turn, lease))
+    }
+
+    fn seal_epoch_if_needed(&self, error: &DriverError) {
+        if error.ends_epoch() {
+            self.epoch_ended.store(true, Ordering::Release);
+        }
+    }
+
+    /// Marks one Inline lane as provider work before it begins preparation,
+    /// settings, session mutation, or turn execution. `/close` skips its own
+    /// lease and can therefore acquire the epoch-wide write side only when no
+    /// other lane is in flight.
+    pub async fn begin_provider_work(&self) -> Result<ProviderWorkLease, SessionManagerError> {
+        let lease = ProviderWorkLease {
+            _guard: self.epoch_gate.clone().read_owned().await,
+        };
+        if self.epoch_ended.load(Ordering::Acquire) {
+            return Err(
+                DriverError::EpochEnded("provider connection epoch has ended".to_string()).into(),
+            );
+        }
+        Ok(lease)
+    }
+
+    /// Attempts to reserve provider work without waiting for an epoch-wide
+    /// action such as `/close`. Supervisors use this before claiming durable
+    /// inbox work so a pending shutdown can keep making progress.
+    pub fn try_begin_provider_work(
+        &self,
+    ) -> Result<Option<ProviderWorkLease>, SessionManagerError> {
+        let Ok(guard) = self.epoch_gate.clone().try_read_owned() else {
+            return Ok(None);
+        };
+        if self.epoch_ended.load(Ordering::Acquire) {
+            return Err(
+                DriverError::EpochEnded("provider connection epoch has ended".to_string()).into(),
+            );
+        }
+        Ok(Some(ProviderWorkLease { _guard: guard }))
+    }
+
+    /// Ends the whole private provider epoch only when no turn is active in
+    /// any Inline conversation. Once accepted, this manager stays sealed so a
+    /// queued lane cannot race onto the driver after shutdown.
+    pub async fn shutdown_epoch_if_idle(&self) -> Result<bool, SessionManagerError> {
+        let Ok(_exclusive) = self.epoch_gate.clone().try_write_owned() else {
+            return Ok(false);
+        };
+        self.epoch_ended.store(true, Ordering::Release);
+        self.driver.shutdown().await?;
+        Ok(true)
     }
 
     /// Rotates one binding to a fresh provider session without touching files
@@ -309,6 +607,8 @@ pub enum SessionManagerError {
         expected: ProviderId,
         found: ProviderId,
     },
+    #[error("provider session reply thread {chat_id} cannot rotate to a different session")]
+    SessionThreadPinned { chat_id: i64 },
 }
 
 #[cfg(test)]
@@ -318,7 +618,8 @@ mod tests {
     use super::*;
     use crate::{
         AgentEventReceiver, ApprovalDecision, DirectionId, DriverCapabilities, DriverFuture,
-        DriverSettingsCatalog, InstallationId, SteeringSupport, TurnId, WorkspaceId,
+        DriverSettingsCatalog, InstallationId, ProviderInstanceRef, ProviderSessionRef,
+        SessionThreadBinding, SteeringSupport, TurnId, WorkspaceId,
     };
 
     #[derive(Debug)]
@@ -328,9 +629,12 @@ mod tests {
         settings_catalogs: StdMutex<Vec<PathBuf>>,
         resumes: StdMutex<Vec<ResumeSessionSpec>>,
         resume_error: StdMutex<Option<DriverError>>,
+        start_gate: Option<Arc<tokio::sync::Barrier>>,
         yield_on_resume: bool,
         resume_gate: Option<Arc<tokio::sync::Barrier>>,
         turns: StdMutex<Vec<(ProviderSessionId, TurnInput, TurnOptions)>>,
+        shutdowns: StdMutex<usize>,
+        shutdown_gate: Option<Arc<tokio::sync::Barrier>>,
     }
 
     impl Default for FakeDriver {
@@ -345,9 +649,12 @@ mod tests {
                 settings_catalogs: StdMutex::default(),
                 resumes: StdMutex::default(),
                 resume_error: StdMutex::default(),
+                start_gate: None,
                 yield_on_resume: false,
                 resume_gate: None,
                 turns: StdMutex::default(),
+                shutdowns: StdMutex::default(),
+                shutdown_gate: None,
             }
         }
     }
@@ -360,6 +667,9 @@ mod tests {
         fn start_session<'a>(&'a self, spec: SessionSpec) -> DriverFuture<'a, ProviderSessionId> {
             Box::pin(async move {
                 self.starts.lock().expect("starts").push(spec.cwd);
+                if let Some(gate) = self.start_gate.as_ref() {
+                    gate.wait().await;
+                }
                 ProviderSessionId::new("session-new")
                     .map_err(|error| DriverError::Protocol(error.to_string()))
             })
@@ -448,7 +758,13 @@ mod tests {
         }
 
         fn shutdown<'a>(&'a self) -> DriverFuture<'a, ()> {
-            Box::pin(async { Ok(()) })
+            Box::pin(async move {
+                *self.shutdowns.lock().expect("shutdowns") += 1;
+                if let Some(gate) = self.shutdown_gate.as_ref() {
+                    gate.wait().await;
+                }
+                Ok(())
+            })
         }
     }
 
@@ -586,6 +902,221 @@ mod tests {
                 .expect("binding")
                 .and_then(|(_, _, fingerprint)| fingerprint),
             Some("sha256:new".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn session_reply_thread_preserves_identity_across_configuration_updates() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let old_session = ProviderSessionId::new("session-old").expect("session");
+        store
+            .put_binding_with_configuration(
+                &binding(),
+                &provider,
+                &old_session,
+                Some("sha256:old"),
+                10,
+            )
+            .expect("forward binding");
+        let provider_instance =
+            ProviderInstanceRef::new(binding().installation_id, provider.clone())
+                .expect("provider instance");
+        let provider_session =
+            ProviderSessionRef::new(provider_instance, old_session.clone()).expect("session ref");
+        let thread_binding = SessionThreadBinding::new(
+            provider_session,
+            binding().workspace_id,
+            7,
+            binding().chat_id,
+        )
+        .expect("session thread");
+        store
+            .bind_session_thread(&thread_binding, Some("sha256:old"), 11)
+            .expect("bind session thread");
+        let driver = Arc::new(FakeDriver::default());
+        let manager = ProviderSessionManager::new(driver.clone(), store.clone(), provider.clone())
+            .with_session_configuration_fingerprint(Some("sha256:new".to_string()));
+
+        assert!(matches!(
+            manager.ensure_session(&binding(), 20).await,
+            Ok(SessionOpenOutcome::Resumed(session)) if session == old_session
+        ));
+        assert!(driver.starts.lock().expect("starts").is_empty());
+        assert_eq!(driver.resumes.lock().expect("resumes").len(), 1);
+        assert_eq!(
+            store.get_binding(&binding()).expect("forward binding"),
+            Some((provider, old_session))
+        );
+        assert_eq!(
+            store
+                .session_thread_binding(thread_binding.session())
+                .expect("reverse binding"),
+            Some(thread_binding)
+        );
+        assert_eq!(
+            store
+                .get_binding_with_configuration(&binding())
+                .expect("configured binding")
+                .and_then(|(_, _, fingerprint)| fingerprint),
+            Some("sha256:old".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn session_thread_claim_serializes_with_provider_session_creation() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let start_gate = Arc::new(tokio::sync::Barrier::new(2));
+        let driver = Arc::new(FakeDriver {
+            start_gate: Some(start_gate.clone()),
+            ..FakeDriver::default()
+        });
+        let manager = Arc::new(ProviderSessionManager::new(
+            driver.clone(),
+            store.clone(),
+            provider.clone(),
+        ));
+        let creation = {
+            let manager = manager.clone();
+            tokio::spawn(async move { manager.ensure_session(&binding(), 20).await })
+        };
+        for _ in 0..100 {
+            if !driver.starts.lock().expect("starts").is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(driver.starts.lock().expect("starts").len(), 1);
+
+        let selected_session = ProviderSessionRef::new(
+            ProviderInstanceRef::new(binding().installation_id, provider.clone())
+                .expect("provider instance"),
+            ProviderSessionId::new("session-selected").expect("selected session"),
+        )
+        .expect("session ref");
+        let proposed = SessionThreadBinding::new(
+            selected_session,
+            binding().workspace_id,
+            6,
+            binding().chat_id,
+        )
+        .expect("thread binding");
+        let claim = {
+            let manager = manager.clone();
+            let proposed = proposed.clone();
+            tokio::spawn(async move { manager.bind_session_thread(&proposed, 21).await })
+        };
+        tokio::task::yield_now().await;
+        start_gate.wait().await;
+
+        let created = creation
+            .await
+            .expect("creation task")
+            .expect("created session");
+        assert!(matches!(
+            created,
+            SessionOpenOutcome::Created(session) if session.as_str() == "session-new"
+        ));
+        assert!(matches!(
+            claim.await.expect("claim task"),
+            Err(SessionManagerError::Store(
+                StoreError::SessionThreadBindingConflict { thread_chat_id: 7 }
+            ))
+        ));
+        assert_eq!(
+            store.get_binding(&binding()).expect("persisted session"),
+            Some((
+                provider,
+                ProviderSessionId::new("session-new").expect("created session"),
+            ))
+        );
+        assert_eq!(
+            store
+                .session_thread_binding(proposed.session())
+                .expect("reverse owner"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_session_claims_serialize_without_exposing_session_identity() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let manager = Arc::new(ProviderSessionManager::new(
+            Arc::new(FakeDriver::default()),
+            store,
+            provider.clone(),
+        ));
+        let session = ProviderSessionRef::new(
+            ProviderInstanceRef::new(binding().installation_id, provider)
+                .expect("provider instance"),
+            ProviderSessionId::new("private-session-id").expect("session"),
+        )
+        .expect("session ref");
+        let first = manager
+            .claim_session_thread(&session)
+            .await
+            .expect("first claim");
+        assert!(!format!("{first:?}").contains("private-session-id"));
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let second = {
+            let manager = manager.clone();
+            let session = session.clone();
+            tokio::spawn(async move {
+                let _ = started_tx.send(());
+                manager.claim_session_thread(&session).await
+            })
+        };
+        started_rx.await.expect("second claim started");
+        tokio::task::yield_now().await;
+        assert!(!second.is_finished());
+
+        drop(first);
+        let second = second.await.expect("second task").expect("second claim");
+        assert!(!format!("{second:?}").contains("private-session-id"));
+    }
+
+    #[tokio::test]
+    async fn prepared_session_thread_holds_the_claim_through_durable_completion() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let manager = Arc::new(ProviderSessionManager::new(
+            Arc::new(FakeDriver::default()),
+            store,
+            provider.clone(),
+        ));
+        let session = ProviderSessionRef::new(
+            ProviderInstanceRef::new(binding().installation_id, provider)
+                .expect("provider instance"),
+            ProviderSessionId::new("private-session-id").expect("session"),
+        )
+        .expect("session ref");
+        let opening =
+            SessionThreadOpening::new(session, binding().workspace_id, 7, 11).expect("opening");
+        let prepared = manager
+            .prepare_session_thread(&opening, 20)
+            .await
+            .expect("prepare");
+        assert!(!format!("{prepared:?}").contains("private-session-id"));
+
+        let second = {
+            let manager = manager.clone();
+            let opening = opening.clone();
+            tokio::spawn(async move { manager.prepare_session_thread(&opening, 21).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!second.is_finished());
+
+        let completed = manager
+            .complete_prepared_session_thread(prepared, 20, 22)
+            .await
+            .expect("complete");
+        assert!(matches!(completed, SessionThreadBindOutcome::Created(_)));
+        let second = second.await.expect("second task").expect("second prepare");
+        assert_eq!(
+            second.binding().map(SessionThreadBinding::thread_chat_id),
+            Some(20)
         );
     }
 
@@ -755,6 +1286,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fatal_resume_failure_seals_the_manager_epoch() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let old_session = ProviderSessionId::new("session-old").expect("session");
+        store
+            .put_binding(&binding(), &provider, &old_session, 10)
+            .expect("binding");
+        let driver = Arc::new(FakeDriver::default());
+        *driver.resume_error.lock().expect("resume error") = Some(DriverError::EpochEnded(
+            "provider shutdown was not confirmed".to_string(),
+        ));
+        let manager = ProviderSessionManager::new(driver, store.clone(), provider.clone());
+
+        assert!(matches!(
+            manager.ensure_session(&binding(), 20).await,
+            Err(SessionManagerError::Driver(DriverError::EpochEnded(_)))
+        ));
+        assert!(matches!(
+            manager.try_begin_provider_work(),
+            Err(SessionManagerError::Driver(DriverError::EpochEnded(_)))
+        ));
+        assert_eq!(
+            store.get_binding(&binding()).expect("binding"),
+            Some((provider, old_session))
+        );
+    }
+
+    #[tokio::test]
     async fn replaces_a_saved_binding_when_the_driver_cannot_resume_sessions() {
         let provider = ProviderId::new("opencode").expect("provider");
         let (_workspace, store, _cwd) = registered_store(&provider);
@@ -892,7 +1451,7 @@ mod tests {
         let manager = ProviderSessionManager::new(driver.clone(), store, provider);
         let direction_id = DirectionId::new("event-1").expect("direction");
 
-        let (session, _) = manager
+        let (session, _, _lease) = manager
             .start_turn(
                 &binding(),
                 10,
@@ -910,5 +1469,77 @@ mod tests {
         let turns = driver.turns.lock().expect("turns");
         assert_eq!(turns.len(), 1);
         assert_eq!(turns[0].2.cwd.as_ref(), Some(&cwd));
+    }
+
+    #[tokio::test]
+    async fn epoch_shutdown_waits_for_provider_work_before_turn_start() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let driver = Arc::new(FakeDriver::default());
+        let manager = ProviderSessionManager::new(driver.clone(), store, provider);
+
+        let lease = manager.begin_provider_work().await.expect("provider work");
+
+        assert!(!manager.shutdown_epoch_if_idle().await.expect("busy check"));
+        assert_eq!(*driver.shutdowns.lock().expect("shutdowns"), 0);
+
+        drop(lease);
+        assert!(
+            manager
+                .shutdown_epoch_if_idle()
+                .await
+                .expect("idle shutdown")
+        );
+        assert_eq!(*driver.shutdowns.lock().expect("shutdowns"), 1);
+        assert!(matches!(
+            manager
+                .start_turn(
+                    &binding(),
+                    11,
+                    TurnInput {
+                        text: "too late".to_string(),
+                        attachments: Vec::new(),
+                        client_message_id: None,
+                    },
+                    TurnOptions::default(),
+                )
+                .await,
+            Err(SessionManagerError::Driver(error)) if error.ends_epoch()
+        ));
+    }
+
+    #[tokio::test]
+    async fn provider_admission_does_not_wait_behind_pending_shutdown() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let shutdown_gate = Arc::new(tokio::sync::Barrier::new(2));
+        let driver = Arc::new(FakeDriver {
+            shutdown_gate: Some(shutdown_gate.clone()),
+            ..FakeDriver::default()
+        });
+        let manager = Arc::new(ProviderSessionManager::new(driver.clone(), store, provider));
+        let task_manager = manager.clone();
+        let shutdown = tokio::spawn(async move { task_manager.shutdown_epoch_if_idle().await });
+
+        for _ in 0..100 {
+            if *driver.shutdowns.lock().expect("shutdowns") == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(*driver.shutdowns.lock().expect("shutdowns"), 1);
+        assert!(
+            manager
+                .try_begin_provider_work()
+                .expect("nonblocking admission")
+                .is_none()
+        );
+
+        shutdown_gate.wait().await;
+        assert!(shutdown.await.expect("shutdown task").expect("shutdown"));
+        assert!(matches!(
+            manager.try_begin_provider_work(),
+            Err(SessionManagerError::Driver(error)) if error.ends_epoch()
+        ));
     }
 }

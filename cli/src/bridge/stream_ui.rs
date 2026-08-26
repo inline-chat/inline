@@ -502,6 +502,7 @@ pub(super) async fn publish_inbound_final_send(
         progress_status,
         final_text,
         &[],
+        None,
         state,
         failure,
     )
@@ -518,6 +519,7 @@ pub(super) async fn publish_inbound_final_send_with_attachments(
     progress_status: &str,
     final_text: &str,
     output_attachments: &[OutputAttachment],
+    preferred_random_id: Option<RandomId>,
     state: InboundState,
     failure: Option<&str>,
 ) -> Result<Option<InlineId>, Box<dyn std::error::Error>> {
@@ -534,8 +536,9 @@ pub(super) async fn publish_inbound_final_send_with_attachments(
         )
         .into());
     }
+    let preferred_random_id = preferred_random_id.unwrap_or_else(new_terminal_random_id);
     let random_id = store
-        .ensure_inbound_final_send_random_id(event_id, new_terminal_random_id().get())?
+        .ensure_inbound_final_send_random_id(event_id, preferred_random_id.get())?
         .map(RandomId::new)
         .ok_or_else(|| io::Error::other("staged final send is missing its random identity"))?;
     let mutation = deliver_pending_final_send_with_attachments(

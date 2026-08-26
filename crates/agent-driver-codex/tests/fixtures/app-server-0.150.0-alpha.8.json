@@ -1,0 +1,124 @@
+{
+  "codexVersion": "0.150.0-alpha.8",
+  "generatedWith": "codex app-server generate-json-schema --experimental",
+  "schemaSha256": {
+    "v2/ThreadStartParams.json": "25f490368ec6df52a2a3b82a5469d2413307eb93439121b309f415b5648eee7a",
+    "v2/ThreadStartResponse.json": "2c5fcada6de5d745ef29715a807b323ef703a7e43bce42b5176efc58444f696f",
+    "v2/ThreadResumeParams.json": "81bab42560542197a71950b695db57c8d8c338c13b4b69a90e2bdf2632146190",
+    "v2/TurnStartParams.json": "95f35a9f01beea390cc4e478b4030e46ef37e5d769438d50f40b7aeabbf1ad74",
+    "v2/TurnStartResponse.json": "f9135743455be09b45285538b65757bee6a14862960385ee4fb452c40fbf476a",
+    "v2/TurnSteerParams.json": "2e0cdcea6a90d6c8bc584fdc2ff838e824754b1eef0d2d16aa71bec4276fef44",
+    "v2/TurnInterruptParams.json": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
+    "v2/ThreadCompactStartParams.json": "684b20adf20213a9fcbca31b59108feadcd5a8b693c16431c20d701049df3737",
+    "v2/ModelListResponse.json": "c7b58b332f6cf18fd64235409a6daf27bb9e6c09d12dcd0daa2f3dc628b55f6f",
+    "v2/PermissionProfileListResponse.json": "4a290b5b9d47c2fc671033e22754671161bc563027ba387e861bd935398f0def",
+    "v2/ThreadBackgroundTerminalsCleanParams.json": "e07820971c6e4ef8ee1ca5565a6eb78b04a96e001a5828e136b8aca927096a51",
+    "v2/ThreadBackgroundTerminalsListParams.json": "7ac232410d59afd308dca04f8c0b08f20fa6e87f00bd0d3b5892b7ce8b31d2ee",
+    "v2/ThreadBackgroundTerminalsListResponse.json": "b56b1cbcb1d60079ee9f9caaeef29cad869a25b4a6d356566f7c9f672faa7bf4",
+    "CommandExecutionRequestApprovalParams.json": "94dc336210d981ab4df0d998068f059fa6f409ea9b4e3e217046c7aa69b77edf",
+    "FileChangeRequestApprovalParams.json": "13848b26814c286ad6425a20d01c1691c86790e1f9e2529399677a8a22fe0d18",
+    "ToolRequestUserInputParams.json": "fda15b62e7446105b59c8ed85c908abed2a47db70653e57c92c47a2f204fa77a",
+    "ToolRequestUserInputResponse.json": "5073b245f741fa8ce62ec52e4dd1809b7831f9c4284c279a78abc9b171f8e3f2"
+  },
+  "startResponses": {
+    "thread": { "thread": { "id": "thread-fixture" } },
+    "turn": { "turn": { "id": "turn-fixture" } }
+  },
+  "serverRequests": [
+    {
+      "id": 31,
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+        "threadId": "thread-fixture",
+        "turnId": "turn-fixture",
+        "itemId": "command-fixture",
+        "command": "cargo test",
+        "cwd": "/workspace",
+        "reason": "Run focused tests",
+        "availableDecisions": ["accept", "acceptForSession", "decline", "cancel"]
+      }
+    },
+    {
+      "id": "file-fixture",
+      "method": "item/fileChange/requestApproval",
+      "params": {
+        "threadId": "thread-fixture",
+        "turnId": "turn-fixture",
+        "itemId": "file-fixture",
+        "reason": "Apply the edit",
+        "availableDecisions": ["accept", "decline"]
+      }
+    },
+    {
+      "id": "question-fixture",
+      "method": "item/tool/requestUserInput",
+      "params": {
+        "threadId": "thread-fixture",
+        "turnId": "turn-fixture",
+        "itemId": "question-fixture",
+        "questions": [
+          {
+            "id": "target",
+            "header": "Target",
+            "question": "Which target?",
+            "isOther": true,
+            "isSecret": false,
+            "options": [
+              { "label": "Core", "description": "Inspect core" },
+              { "label": "TUI", "description": "Inspect TUI" }
+            ]
+          }
+        ],
+        "isBlocking": true,
+        "autoResolutionMs": 60000
+      }
+    }
+  ],
+  "notifications": [
+    {
+      "method": "turn/started",
+      "params": { "threadId": "thread-fixture", "turn": { "id": "turn-fixture" } }
+    },
+    {
+      "method": "item/agentMessage/delta",
+      "params": {
+        "threadId": "thread-fixture",
+        "turnId": "turn-fixture",
+        "itemId": "message-fixture",
+        "delta": "Done"
+      }
+    },
+    {
+      "method": "turn/plan/updated",
+      "params": {
+        "threadId": "thread-fixture",
+        "turnId": "turn-fixture",
+        "explanation": "Implement and verify",
+        "plan": [
+          { "step": "Implement", "status": "completed" },
+          { "step": "Verify", "status": "inProgress" }
+        ]
+      }
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "threadId": "thread-fixture",
+        "turnId": "turn-fixture",
+        "item": {
+          "id": "file-fixture",
+          "type": "fileChange",
+          "status": "completed",
+          "changes": [{ "path": "/workspace/src/lib.rs", "kind": "update" }]
+        }
+      }
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "thread-fixture",
+        "turn": { "id": "turn-fixture", "status": "completed", "error": null }
+      }
+    }
+  ]
+}

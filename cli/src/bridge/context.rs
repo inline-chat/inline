@@ -358,6 +358,7 @@ mod tests {
             deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
             pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
             claude_history: None,
+            session_browser: SessionBrowserRuntime::default(),
         };
 
         let prompt = build_turn_instruction(&route, &record, &record.direction.text)

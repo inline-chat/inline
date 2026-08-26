@@ -617,7 +617,17 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
         ("threads", "Configure Inline reply-thread routing"),
         ("allowlist", "Allow another user to drive this agent"),
     ];
-    if provider_id == "claude" {
+    if provider_id == "codex" {
+        commands.splice(
+            2..2,
+            [
+                ("sessions", "Browse recent Codex sessions"),
+                ("open", "Browse recent Codex sessions"),
+                ("close", "Release Codex from Inline"),
+                ("projects", "Show or choose a project"),
+            ],
+        );
+    } else if provider_id == "claude" {
         commands.splice(
             2..2,
             [
@@ -657,4 +667,20 @@ async fn sync_agent_command_catalog(
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_command_catalog_exposes_session_continuity() {
+        let commands = agent_command_catalog("codex")
+            .into_iter()
+            .map(|command| command.command)
+            .collect::<Vec<_>>();
+        for required in ["projects", "sessions", "open", "close"] {
+            assert!(commands.iter().any(|command| command == required));
+        }
+    }
 }

@@ -14,6 +14,7 @@ use std::{
 };
 
 use futures_util::future::BoxFuture;
+use inline_sdk::proto;
 
 use crate::store::select_history_window;
 use crate::{
@@ -26,8 +27,8 @@ use crate::{
     CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogRecord,
     DialogsOrder, DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest,
     HistoryPage, HistoryRequest, InlineId, InvokeBotChatSettingsItemRequest, MessageActionKind,
-    MessageActions, MessageContent, MessageMutation, MessageRecord, RandomId, ReactRequest,
-    ReadRequest, RemoveChatParticipantRequest, RequestBotChatSettingsRequest,
+    MessageActions, MessageContent, MessageMutation, MessageRecord, PinMessageRequest, RandomId,
+    ReactRequest, ReadRequest, RemoveChatParticipantRequest, RequestBotChatSettingsRequest,
     SendInteractiveTextRequest, SendTextRequest, SetMarkedUnreadRequest, TransactionEvent,
     TransactionId, TransactionIdentity, TransactionState, TypingRequest, UpdateChatInfoRequest,
     UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadRequest,
@@ -315,6 +316,12 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
     /// Marks messages read.
     fn read(&self, request: ReadRequest) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
 
+    /// Pins or unpins one message for everyone in a chat.
+    fn pin_message(
+        &self,
+        request: PinMessageRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
     /// Sets the explicit marked-unread state for a chat.
     fn set_marked_unread(
         &self,
@@ -369,6 +376,24 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
         &self,
         request: AnswerBotChatSettingsRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>>;
+
+    /// Connects one provider session to an Inline thread.
+    fn connect_agent_session(
+        &self,
+        request: proto::ConnectAgentSessionInput,
+    ) -> BoxFuture<'static, BackendResult<proto::ConnectAgentSessionResult>>;
+
+    /// Recovers the durable agent session connected to one conversation.
+    fn get_agent_session(
+        &self,
+        request: proto::GetAgentSessionInput,
+    ) -> BoxFuture<'static, BackendResult<proto::GetAgentSessionResult>>;
+
+    /// Creates, links, or revises a bounded batch of provider session messages.
+    fn sync_agent_session_messages(
+        &self,
+        request: proto::SyncAgentSessionMessagesInput,
+    ) -> BoxFuture<'static, BackendResult<proto::SyncAgentSessionMessagesResult>>;
 
     /// Receives the next batch of server-pushed client events.
     fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>>;
@@ -1306,6 +1331,34 @@ impl ClientBackend for InMemoryBackend {
         })
     }
 
+    fn pin_message(
+        &self,
+        request: PinMessageRequest,
+    ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            backend.require_connected()?;
+            let mut state = backend.state.lock().expect("in-memory backend poisoned");
+            if let Some(dialog) = state
+                .dialogs
+                .iter_mut()
+                .find(|dialog| dialog.chat_id == request.chat_id)
+            {
+                dialog
+                    .pinned_message_ids
+                    .retain(|message_id| *message_id != request.message_id);
+                if !request.unpin {
+                    dialog.pinned_message_ids.insert(0, request.message_id);
+                }
+            }
+            Ok(OperationOutcome::with_events(vec![
+                ClientEvent::ChatUpserted {
+                    chat_id: request.chat_id,
+                },
+            ]))
+        })
+    }
+
     fn set_marked_unread(
         &self,
         request: SetMarkedUnreadRequest,
@@ -1474,6 +1527,42 @@ impl ClientBackend for InMemoryBackend {
                 ));
             }
             Ok(OperationOutcome::empty())
+        })
+    }
+
+    fn connect_agent_session(
+        &self,
+        _request: proto::ConnectAgentSessionInput,
+    ) -> BoxFuture<'static, BackendResult<proto::ConnectAgentSessionResult>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "agent sessions are unavailable in the in-memory backend",
+            ))
+        })
+    }
+
+    fn get_agent_session(
+        &self,
+        _request: proto::GetAgentSessionInput,
+    ) -> BoxFuture<'static, BackendResult<proto::GetAgentSessionResult>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "agent sessions are unavailable in the in-memory backend",
+            ))
+        })
+    }
+
+    fn sync_agent_session_messages(
+        &self,
+        _request: proto::SyncAgentSessionMessagesInput,
+    ) -> BoxFuture<'static, BackendResult<proto::SyncAgentSessionMessagesResult>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "agent session message sync is unavailable in the in-memory backend",
+            ))
         })
     }
 

@@ -70,6 +70,7 @@ fn pending_voice_registry_deduplicates_replacements_and_cancels_per_chat() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
+        session_browser: SessionBrowserRuntime::default(),
     };
 
     assert_eq!(
@@ -108,6 +109,7 @@ fn pending_voice_registry_is_bounded() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
+        session_browser: SessionBrowserRuntime::default(),
     };
 
     for message_id in 1..=MAX_PENDING_VOICE_TRANSCRIPTS as i64 {
@@ -202,6 +204,7 @@ fn unbound_chat_without_a_default_workspace_binds_the_user_home() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
+        session_browser: SessionBrowserRuntime::default(),
     };
 
     let conversation = conversation_for_chat(&route, 706).expect("home workspace");
@@ -258,6 +261,7 @@ fn unbound_chat_with_a_replaced_default_workspace_binds_the_user_home() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
+        session_browser: SessionBrowserRuntime::default(),
     };
 
     let conversation = conversation_for_chat(&route, 707).expect("home fallback");
@@ -302,6 +306,7 @@ fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
+        session_browser: SessionBrowserRuntime::default(),
     };
 
     let conversation = conversation_for_chat(&route, 998).expect("unbound chat should resolve");
@@ -454,6 +459,7 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
+        session_browser: SessionBrowserRuntime::default(),
     };
 
     let error = conversation_for_chat(&route, 706).expect_err("workspace should be unavailable");

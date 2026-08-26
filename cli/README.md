@@ -138,7 +138,10 @@ inline setup amp --folder /path/to/project
 inline bridge status
 ```
 
-Exactly Codex 0.146.0 on macOS is the intended invite-beta target. Agent
+Fixture-certified Codex 0.146.0 and the signed ChatGPT.app bundled Codex
+0.150.0-alpha.8 on macOS are the intended invite-beta targets. Setup can use
+the signed ChatGPT runtime without a standalone Codex CLI and leaves sign-in to
+Codex/ChatGPT. Agent
 directions work in the bot DM, direct mentions, replies, and followed threads,
 but only for the owner by default. Other stable Inline user IDs must be added
 locally with `inline bridge operators add USER_ID`; provider-specific overrides

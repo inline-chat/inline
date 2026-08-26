@@ -397,6 +397,32 @@ pub(super) async fn handle_settings_command_action<D: AgentDriver + 'static>(
         )
         .await;
     }
+    let _provider_work_lease = match runtime.sessions.try_begin_provider_work() {
+        Ok(Some(lease)) => lease,
+        Ok(None) => {
+            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                interaction_id: *interaction_id,
+                toast: Some(
+                    "Inline is releasing the agent connection. Try again in a moment.".to_string(),
+                ),
+            })
+            .await?;
+            return Ok(SettingsCommandActionOutcome::Handled {
+                provider_epoch_ended: false,
+            });
+        }
+        Err(error) => {
+            let provider_epoch_ended = session_error_ends_provider_epoch(&error);
+            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                interaction_id: *interaction_id,
+                toast: Some("The agent connection restarted. Try again.".to_string()),
+            })
+            .await?;
+            return Ok(SettingsCommandActionOutcome::Handled {
+                provider_epoch_ended,
+            });
+        }
+    };
     let catalog = match load_catalog(runtime, &snapshot).await {
         Ok(catalog) => catalog,
         Err(result) => {
@@ -647,6 +673,32 @@ async fn handle_provider_command_choice_action<D: AgentDriver + 'static>(
         .item_id
         .strip_prefix(PROVIDER_COMMAND_ITEM_PREFIX)
         .unwrap_or_default();
+    let _provider_work_lease = match runtime.sessions.try_begin_provider_work() {
+        Ok(Some(lease)) => lease,
+        Ok(None) => {
+            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                interaction_id,
+                toast: Some(
+                    "Inline is releasing the agent connection. Try again in a moment.".to_string(),
+                ),
+            })
+            .await?;
+            return Ok(SettingsCommandActionOutcome::Handled {
+                provider_epoch_ended: false,
+            });
+        }
+        Err(error) => {
+            let provider_epoch_ended = session_error_ends_provider_epoch(&error);
+            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                interaction_id,
+                toast: Some("The agent connection restarted. Try again.".to_string()),
+            })
+            .await?;
+            return Ok(SettingsCommandActionOutcome::Handled {
+                provider_epoch_ended,
+            });
+        }
+    };
     let commands = match provider_commands(runtime.sessions, &snapshot.binding).await {
         Ok(commands) => commands,
         Err(error) => {
@@ -1428,6 +1480,21 @@ pub(super) async fn resolve_settings_command<D: AgentDriver + 'static>(
     arguments: &str,
 ) -> SettingsCommandResult {
     let snapshot = runtime.active.snapshot();
+    if name == "folder" {
+        match runtime.store.session_thread_binding_for_chat(
+            &snapshot.binding.installation_id,
+            snapshot.binding.chat_id,
+        ) {
+            Ok(Some(_)) => {
+                return command_message(format!(
+                    "This thread is pinned to {}. Open the bot’s private DM to choose a project with /projects, then open another Codex session.",
+                    workspace_label(&snapshot.workspace)
+                ));
+            }
+            Ok(None) => {}
+            Err(error) => return command_failed("I couldn’t read this session thread.", error),
+        }
+    }
     let catalog = match load_catalog(runtime, &snapshot).await {
         Ok(catalog) => catalog,
         Err(result) => return result,
@@ -1974,6 +2041,30 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
     snapshot: ConversationSnapshot,
     deadline: Duration,
 ) -> SettingsInteractionResolution {
+    let _provider_work_lease = match runtime.sessions.try_begin_provider_work() {
+        Ok(Some(lease)) => lease,
+        Ok(None) => {
+            return SettingsInteractionResolution::normal(problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "Inline is releasing the agent connection. Try Settings again in a moment.",
+                None,
+            ));
+        }
+        Err(error) => {
+            eprintln!(
+                "Agent settings provider admission failed: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            return SettingsInteractionResolution {
+                response: problem(
+                    BotChatSettingsProblemCode::Unavailable,
+                    BridgeNotice::AgentConnectionLost.message(),
+                    None,
+                ),
+                provider_epoch_ended: true,
+            };
+        }
+    };
     let catalog = match tokio::time::timeout(
         deadline,
         runtime
@@ -2234,6 +2325,24 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                     None,
                 )));
             }
+            if runtime
+                .store
+                .session_thread_binding_for_chat(
+                    &snapshot.binding.installation_id,
+                    snapshot.binding.chat_id,
+                )
+                .map_err(|error| {
+                    operation_failed("Couldn’t read this session thread.", error, false)
+                })?
+                .is_some()
+            {
+                return Err(SettingsInvocationFailure::normal(problem(
+                    BotChatSettingsProblemCode::Failed,
+                    "This thread is pinned to its Codex session. Open another session from the bot DM.",
+                    None,
+                )));
+            }
+            let _provider_work_lease = reserve_provider_mutation(runtime)?;
             runtime
                 .sessions
                 .rotate_session(&snapshot.binding, now_seconds())
@@ -2256,6 +2365,7 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                     None,
                 )));
             }
+            let _provider_work_lease = reserve_provider_mutation(runtime)?;
             if !runtime.sessions.driver().capabilities().compact_session {
                 return Err(SettingsInvocationFailure::normal(problem(
                     BotChatSettingsProblemCode::InvalidValue,
@@ -2288,7 +2398,7 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                 .compact_session(session.session_id())
                 .await
                 .map_err(|error| {
-                    let provider_epoch_ended = matches!(&error, DriverError::ProcessExited(_));
+                    let provider_epoch_ended = error.ends_epoch();
                     operation_failed(
                         "Couldn’t compact the current session.",
                         error,
@@ -2302,6 +2412,23 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                 return Err(SettingsInvocationFailure::normal(problem(
                     BotChatSettingsProblemCode::Failed,
                     "Wait for the current turn to finish, or stop it first.",
+                    None,
+                )));
+            }
+            if runtime
+                .store
+                .session_thread_binding_for_chat(
+                    &snapshot.binding.installation_id,
+                    snapshot.binding.chat_id,
+                )
+                .map_err(|error| {
+                    operation_failed("Couldn’t read this session thread.", error, false)
+                })?
+                .is_some()
+            {
+                return Err(SettingsInvocationFailure::normal(problem(
+                    BotChatSettingsProblemCode::Failed,
+                    "This session thread is pinned to its Codex project. Choose a project in the bot DM, then open another session.",
                     None,
                 )));
             }
@@ -2363,6 +2490,27 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                 Some(document),
             )
             .into())
+        }
+    }
+}
+
+fn reserve_provider_mutation<D: AgentDriver + 'static>(
+    runtime: &SettingsRuntime<'_, D>,
+) -> Result<inline_agent_bridge::ProviderWorkLease, SettingsInvocationFailure> {
+    match runtime.sessions.try_begin_provider_work() {
+        Ok(Some(lease)) => Ok(lease),
+        Ok(None) => Err(SettingsInvocationFailure::normal(problem(
+            BotChatSettingsProblemCode::Unavailable,
+            "Inline is releasing the agent connection. Try again in a moment.",
+            None,
+        ))),
+        Err(error) => {
+            let provider_epoch_ended = session_error_ends_provider_epoch(&error);
+            Err(operation_failed(
+                "The agent connection restarted. Try again.",
+                error,
+                provider_epoch_ended,
+            ))
         }
     }
 }
@@ -2452,6 +2600,20 @@ async fn build_settings_document<D: AgentDriver + 'static>(
     let active_reason = runtime
         .turn_active
         .then(|| "Available after the current turn finishes.".to_string());
+    let session_thread_pinned = runtime
+        .store
+        .session_thread_binding_for_chat(
+            &snapshot.binding.installation_id,
+            snapshot.binding.chat_id,
+        )?
+        .is_some();
+    let session_rotation_reason = active_reason.clone().or_else(|| {
+        session_thread_pinned.then(|| "This thread is pinned to its Codex session.".to_string())
+    });
+    let project_reason = active_reason.clone().or_else(|| {
+        session_thread_pinned
+            .then(|| "This session thread is pinned to its Codex project.".to_string())
+    });
     let compact_supported = runtime.sessions.driver().capabilities().compact_session;
     Ok(BotChatSettingsDocument {
         version: SETTINGS_VERSION,
@@ -2560,8 +2722,8 @@ async fn build_settings_document<D: AgentDriver + 'static>(
                 title: Some("Session".to_string()),
                 description: None,
                 items: vec![
-                    button_item(ITEM_NEW, "New Session", active_reason.clone()),
-                    button_item(ITEM_CLEAR, "Clear", active_reason.clone()),
+                    button_item(ITEM_NEW, "New Session", session_rotation_reason.clone()),
+                    button_item(ITEM_CLEAR, "Clear", session_rotation_reason),
                     button_item(
                         ITEM_COMPACT,
                         "Compact",
@@ -2580,8 +2742,8 @@ async fn build_settings_document<D: AgentDriver + 'static>(
                     id: ITEM_FOLDER.to_string(),
                     label: Some("Folder".to_string()),
                     description: Some("Recent folders on the bridge host.".to_string()),
-                    disabled: runtime.turn_active,
-                    disabled_reason: active_reason,
+                    disabled: project_reason.is_some(),
+                    disabled_reason: project_reason,
                     control: BotChatSettingsControl::Folder(BotChatSettingsFolder {
                         value: snapshot.binding.workspace_id.to_string(),
                         recent_folders: folder_options(choices),
@@ -2750,10 +2912,7 @@ fn operation_failed(
 }
 
 fn session_error_ends_provider_epoch(error: &SessionManagerError) -> bool {
-    matches!(
-        error,
-        SessionManagerError::Driver(DriverError::ProcessExited(_))
-    )
+    matches!(error, SessionManagerError::Driver(error) if error.ends_epoch())
 }
 
 fn problem(

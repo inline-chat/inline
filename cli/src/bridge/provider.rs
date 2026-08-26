@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+use super::ProviderInstallationConfig;
+use super::{
+    AccountBridgeConfig, BridgePaths, adapter::prepare_pinned_adapter, read_optional_json,
+};
 use inline_agent_bridge::{
     AgentDriver, ApprovalDecision, DriverCapabilities, DriverFuture, DriverResult,
     DriverSettingsCatalog, ProcessHostConfig, ProviderSessionId, QuestionAnswer, ResumeSessionSpec,
@@ -19,15 +23,15 @@ use inline_agent_driver_acp::{
     provider_support, provider_support_catalog, should_scrub_acp_environment_name,
     spawn_acp_driver,
 };
+#[cfg(test)]
+use inline_agent_driver_codex::CodexVersionPolicy;
 use inline_agent_driver_codex::{
-    CodexAppServerDriver, CodexLaunchConfig, CodexProcessStatus,
-    should_scrub_codex_environment_name, spawn_codex_driver,
+    CodexAppServerDriver, CodexAppServerTransport, CodexDriverWriter, CodexLaunchConfig,
+    CodexProcessStatus, CodexRuntimeDiscoveryConfig, discover_codex_turn_runtime,
+    is_certified_codex_version, parse_codex_version, should_scrub_codex_environment_name,
+    spawn_codex_driver,
 };
 use sha2::{Digest, Sha256};
-use tokio::process::ChildStdin;
-
-use super::ProviderInstallationConfig;
-use super::{BridgePaths, adapter::prepare_pinned_adapter};
 
 const PROVIDER_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const PROVIDER_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
@@ -177,12 +181,30 @@ pub(super) fn probe_provider(provider_id: &str) -> Result<ProviderProbe, String>
     }))
 }
 
-pub(super) fn prepare_setup_provider(
+pub(super) async fn prepare_setup_provider(
     paths: &BridgePaths,
     provider_id: &str,
     json: bool,
     allow_install: bool,
 ) -> Result<ProviderProbe, String> {
+    if provider_id == "codex" {
+        let runtime = discover_codex_turn_runtime(&CodexRuntimeDiscoveryConfig {
+            configured_executable: configured_provider_executable(paths, provider_id)?,
+            ..CodexRuntimeDiscoveryConfig::default()
+        })
+            .await
+            .map_err(|_| {
+                "could not find a compatible Codex runtime on PATH or in the signed ChatGPT application; install or update Codex/ChatGPT, sign in there, then retry"
+                    .to_string()
+            })?;
+        if !runtime.capabilities().existing_turn_driver {
+            return Err(format!(
+                "Codex {} is not certified for this Inline bridge; update Inline or Codex/ChatGPT, then retry",
+                runtime.version()
+            ));
+        }
+        return probe_configured_provider_async(provider_id, runtime.executable()).await;
+    }
     let Some(support) = provider_support(provider_id) else {
         return probe_provider(provider_id);
     };
@@ -196,6 +218,22 @@ pub(super) fn prepare_setup_provider(
         );
     }
     probe_configured_provider(provider_id, &adapter.executable)
+}
+
+fn configured_provider_executable(
+    paths: &BridgePaths,
+    provider_id: &str,
+) -> Result<Option<std::path::PathBuf>, String> {
+    let account = read_optional_json::<AccountBridgeConfig>(&paths.config)
+        .map_err(|error| format!("could not read the existing bridge configuration: {error}"))?;
+    Ok(account.and_then(|account| {
+        account
+            .providers
+            .into_iter()
+            .find(|provider| provider.provider_id == provider_id)
+            .map(|provider| provider.executable)
+            .filter(|executable| !executable.as_os_str().is_empty())
+    }))
 }
 
 pub(super) fn probe_configured_provider(
@@ -216,6 +254,13 @@ fn probe_configured_provider_with_runtime(
             return Err(format!(
                 "the executable at {} did not identify itself as Codex",
                 executable.display()
+            ));
+        }
+        let parsed_version = parse_codex_version(&version)
+            .map_err(|error| format!("Codex version is invalid: {error}"))?;
+        if !is_certified_codex_version(&parsed_version) {
+            return Err(format!(
+                "Codex {parsed_version} is not certified for this Inline bridge; update Inline or Codex/ChatGPT, then retry"
             ));
         }
         let auth = probe_command(
@@ -356,6 +401,29 @@ pub(super) async fn probe_configured_provider_async(
     executable: &std::path::Path,
 ) -> Result<ProviderProbe, String> {
     probe_configured_provider_async_with_runtime(provider_id, executable, None).await
+}
+
+/// Revalidates the exact persisted runtime immediately before the background
+/// service launches it. Codex discovery includes exact-version protocol
+/// certification and, for a ChatGPT-bundled executable, OpenAI signature
+/// verification; it must not silently fall through to another installation.
+pub(super) async fn probe_service_provider_async(
+    provider_id: &str,
+    executable: &std::path::Path,
+) -> Result<ProviderProbe, String> {
+    if provider_id == "codex" {
+        discover_codex_turn_runtime(&CodexRuntimeDiscoveryConfig {
+            configured_executable: Some(executable.to_path_buf()),
+            search_path: false,
+            search_chatgpt_app: false,
+        })
+        .await
+        .map_err(|_| {
+            "the configured Codex runtime is no longer signed and compatible; rerun Inline agent setup"
+                .to_string()
+        })?;
+    }
+    probe_configured_provider_async(provider_id, executable).await
 }
 
 pub(super) async fn probe_configured_provider_async_with_runtime(
@@ -650,7 +718,15 @@ impl ProviderLaunch {
         };
         match installation.provider_id.as_str() {
             "codex" => {
-                let mut config = CodexLaunchConfig::default();
+                // Codex continuity deliberately uses one private provider
+                // epoch as the exclusive session writer. Its ambiguous-send
+                // safety and `/close` handoff both depend on shutdown ending
+                // that epoch. SharedLocal remains dark until simultaneous
+                // observation/control can reconcile all external traffic.
+                let mut config = CodexLaunchConfig {
+                    transport: CodexAppServerTransport::PrivateStdio,
+                    ..CodexLaunchConfig::default()
+                };
                 if installation.executable.as_os_str().is_empty() {
                     config.executable = super::resolve_executable(&config.executable)
                         .map_err(|error| error.to_string())?;
@@ -761,7 +837,7 @@ pub(super) struct SpawnedProvider {
 
 #[derive(Debug)]
 pub(super) enum ProviderDriver {
-    Codex(CodexAppServerDriver<ChildStdin>),
+    Codex(CodexAppServerDriver<CodexDriverWriter>),
     Acp(Box<AcpDriver>),
 }
 
@@ -945,16 +1021,56 @@ mod tests {
     }
 
     #[test]
-    fn codex_keeps_native_app_server_launch() {
+    fn codex_exclusive_continuity_uses_a_private_turn_epoch() {
         let launch = ProviderLaunch::from_installation(&installation("codex", "/opt/codex"))
             .expect("codex launch");
         let ProviderLaunch::Codex(config) = launch else {
             panic!("expected Codex launch");
         };
         assert_eq!(config.executable, PathBuf::from("/opt/codex"));
+        assert_eq!(config.transport, CodexAppServerTransport::PrivateStdio);
+        assert_eq!(config.version_policy, CodexVersionPolicy::Certified);
         assert_eq!(
             config.process_host.expect("process host").lock_file,
             PathBuf::from("/tmp/providers/codex/provider.process.lock")
+        );
+    }
+
+    #[test]
+    fn codex_setup_reuses_the_existing_configured_runtime_before_discovery() {
+        let directory = tempfile::tempdir().expect("temporary bridge directory");
+        let paths = BridgePaths::from_root(
+            directory.path().to_path_buf(),
+            directory.path().join("bin/inline"),
+        );
+        let account = AccountBridgeConfig {
+            version: 5,
+            owner_user_id: 42,
+            host_installation_id: "host".to_string(),
+            host_label: "Mac".to_string(),
+            api_base_url: "https://api.inline.chat".to_string(),
+            realtime_url: "wss://api.inline.chat/realtime".to_string(),
+            service_label: "chat.inline.bridge".to_string(),
+            service_binary: paths.installed_binary.clone(),
+            provider_path: String::new(),
+            superseded_service_labels: Vec::new(),
+            operator_user_ids: Vec::new(),
+            owner_control_cursor_seeded: true,
+            providers: vec![installation("codex", "/Applications/ChatGPT.app/codex")],
+        };
+        std::fs::write(
+            &paths.config,
+            serde_json::to_vec(&account).expect("serialize account"),
+        )
+        .expect("write account");
+
+        assert_eq!(
+            configured_provider_executable(&paths, "codex").expect("configured executable"),
+            Some(PathBuf::from("/Applications/ChatGPT.app/codex"))
+        );
+        assert_eq!(
+            configured_provider_executable(&paths, "claude").expect("missing provider"),
+            None
         );
     }
 

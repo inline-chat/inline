@@ -55,6 +55,62 @@ fn event_claim_is_idempotent() {
 }
 
 #[test]
+fn completed_provider_turns_become_snapshot_hydration_dedupe_keys() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let record = inbound("event-1", 10);
+    let turn_id = TurnId::new("provider-turn-1").expect("turn");
+    assert!(store.accept_inbound(&record).expect("accept"));
+    assert!(store.start_inbound(&record.event_id, 11).expect("start"));
+    assert!(
+        store
+            .attach_inbound_turn(&record.event_id, &turn_id, Some(55))
+            .expect("attach turn")
+    );
+    assert!(
+        store
+            .completed_provider_turn_ids(&record.binding)
+            .expect("pending turns")
+            .is_empty()
+    );
+    assert!(store.complete_inbound(&record.event_id).expect("complete"));
+    assert_eq!(
+        store
+            .completed_provider_turn_ids(&record.binding)
+            .expect("completed turns"),
+        std::collections::HashSet::from([turn_id.to_string()])
+    );
+}
+
+#[test]
+fn provider_echo_suppression_requires_the_exact_local_binding() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let record = inbound("event-echo", 10);
+    let direction_id = record.direction.id.clone();
+    assert!(store.accept_inbound(&record).expect("accept"));
+    assert!(
+        store
+            .inbound_direction_belongs_to_binding(&record.binding, &direction_id)
+            .expect("local direction")
+    );
+
+    let mut foreign_binding = record.binding.clone();
+    foreign_binding.chat_id += 1;
+    assert!(
+        !store
+            .inbound_direction_belongs_to_binding(&foreign_binding, &direction_id)
+            .expect("foreign direction")
+    );
+    assert!(
+        !store
+            .inbound_direction_belongs_to_binding(
+                &record.binding,
+                &DirectionId::new("direction-missing").expect("missing direction"),
+            )
+            .expect("missing direction")
+    );
+}
+
+#[test]
 fn binding_round_trips() {
     let store = BridgeStore::open_in_memory().expect("store");
     let provider = ProviderId::new("codex").expect("provider id");
@@ -604,6 +660,86 @@ fn migration_records_schema_version() {
 }
 
 #[test]
+fn on_disk_migration_preserves_a_private_pre_upgrade_backup() {
+    let directory = tempfile::tempdir().expect("directory");
+    let database = directory.path().join("bridge.sqlite");
+    let connection = Connection::open(&database).expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;")
+        .expect("wal mode");
+    connection
+        .execute_batch(
+            "BEGIN IMMEDIATE;
+             DROP TABLE session_thread_openings;
+             DROP TABLE session_thread_bindings;
+             INSERT INTO processed_events (event_id, accepted_at)
+                 VALUES ('before-upgrade', 7);
+             PRAGMA user_version = 23;
+             COMMIT;",
+        )
+        .expect("simulate shipped schema");
+    assert!(
+        fs::metadata(database.with_extension("sqlite-wal"))
+            .expect("uncheckpointed WAL")
+            .len()
+            > 32
+    );
+
+    let store = BridgeStore::open(&database).expect("migrated store");
+    assert!(
+        store
+            .event_processed("before-upgrade")
+            .expect("migrated state")
+    );
+    drop(store);
+
+    let backup = directory
+        .path()
+        .join("bridge.sqlite.pre-schema-25-from-23.backup");
+    let backup_connection = Connection::open_with_flags(&backup, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .expect("migration backup");
+    let version: i64 = backup_connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("backup schema");
+    let event: String = backup_connection
+        .query_row(
+            "SELECT event_id FROM processed_events WHERE event_id = 'before-upgrade'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("backup contents");
+    assert_eq!(version, 23);
+    assert_eq!(event, "before-upgrade");
+    let quick_check: String = backup_connection
+        .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
+        .expect("backup integrity");
+    assert_eq!(quick_check, "ok");
+    drop(backup_connection);
+
+    let original_backup = fs::read(&backup).expect("original backup");
+    drop(BridgeStore::open(&database).expect("reopen migrated store"));
+    assert_eq!(
+        fs::read(&backup).expect("preserved backup"),
+        original_backup
+    );
+    drop(connection);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&backup)
+                .expect("backup metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
 fn version_ten_database_adds_durable_questions_forward() {
     let connection = Connection::open_in_memory().expect("connection");
     migrate(&connection).expect("initial migration");
@@ -618,6 +754,8 @@ fn version_ten_database_adds_durable_questions_forward() {
              DROP TABLE command_choice_requests;
              DROP TABLE reply_thread_overrides;
              DROP TABLE history_import_threads;
+             DROP TABLE session_thread_openings;
+             DROP TABLE session_thread_bindings;
              ALTER TABLE inbound_directions DROP COLUMN terminal_output_attachments_json;
              ALTER TABLE inbound_directions DROP COLUMN delivery_chat_id;
              ALTER TABLE session_bindings DROP COLUMN session_configuration_fingerprint;
@@ -648,12 +786,12 @@ fn version_ten_database_adds_durable_questions_forward() {
 fn newer_schema_version_is_rejected() {
     let connection = Connection::open_in_memory().expect("connection");
     connection
-        .execute_batch("PRAGMA user_version = 24;")
+        .execute_batch("PRAGMA user_version = 26;")
         .expect("set schema version");
     assert!(matches!(
         migrate(&connection),
         Err(StoreError::UnsupportedSchemaVersion {
-            found: 24,
+            found: 26,
             supported: CURRENT_SCHEMA_VERSION
         })
     ));
@@ -665,7 +803,9 @@ fn version_twenty_two_database_adds_history_import_guards_forward() {
     migrate(&connection).expect("initial migration");
     connection
         .execute_batch(
-            "DROP TABLE history_import_threads;
+            "DROP TABLE session_thread_openings;
+             DROP TABLE session_thread_bindings;
+             DROP TABLE history_import_threads;
              PRAGMA user_version = 22;",
         )
         .expect("simulate version twenty two");
@@ -680,6 +820,63 @@ fn version_twenty_two_database_adds_history_import_guards_forward() {
             |row| row.get(0),
         )
         .expect("history import table");
+    assert_eq!(table, 1);
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, CURRENT_SCHEMA_VERSION);
+}
+
+#[test]
+fn version_twenty_three_database_adds_session_thread_bindings_forward() {
+    let connection = Connection::open_in_memory().expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch(
+            "DROP TABLE session_thread_openings;
+             DROP TABLE session_thread_bindings;
+             PRAGMA user_version = 23;",
+        )
+        .expect("simulate version twenty three");
+
+    migrate(&connection).expect("forward migration");
+
+    let table: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'session_thread_bindings'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("session thread table");
+    assert_eq!(table, 1);
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, CURRENT_SCHEMA_VERSION);
+}
+
+#[test]
+fn version_twenty_four_database_adds_session_thread_openings_forward() {
+    let connection = Connection::open_in_memory().expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch(
+            "DROP TABLE session_thread_openings;
+             PRAGMA user_version = 24;",
+        )
+        .expect("simulate version twenty four");
+
+    migrate(&connection).expect("forward migration");
+
+    let table: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'session_thread_openings'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("session thread opening table");
     assert_eq!(table, 1);
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))

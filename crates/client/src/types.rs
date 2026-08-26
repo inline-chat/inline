@@ -624,6 +624,18 @@ pub struct ReadRequest {
     pub max_message_id: Option<InlineId>,
 }
 
+/// Pins or unpins one message for everyone in a chat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinMessageRequest {
+    /// Inline chat ID.
+    pub chat_id: InlineId,
+    /// Inline-local message ID.
+    pub message_id: InlineId,
+    /// Whether to remove the pin instead of adding it.
+    #[serde(default)]
+    pub unpin: bool,
+}
+
 /// Request to set the explicit marked-unread state for a chat.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetMarkedUnreadRequest {

@@ -370,9 +370,10 @@ mod tests {
             .expect("route");
         assert!(route.bot_authored);
         assert_eq!(route.addressing, Addressing::Mention);
+        let policy = OperatorPolicy::from_allowed(7, [77]).expect("allow bot operator");
         assert!(matches!(
             TriggerResolver.resolve(
-                &OperatorPolicy::owner_only(7),
+                &policy,
                 InboundEnvelope {
                     event_id: "bot-mention".to_string(),
                     chat_id: 11,
