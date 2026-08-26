@@ -1321,6 +1321,14 @@ public extension AppDatabase {
     }
   }
 
+  /// Logout cleanup can scan and clear every local table and rekey SQLCipher.
+  /// Keep that synchronous database work off UI actors while preserving one
+  /// awaited, fail-closed completion point for callers.
+  @concurrent
+  static func loggedOutAsync() async throws {
+    try loggedOut()
+  }
+
   internal static func changePassphrase(_ passphrase: String) throws {
     do {
       if let dbPool = AppDatabase.shared.dbWriter as? DatabasePool {

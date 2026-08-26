@@ -41,7 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor private var isLoggingOut = false
 
   private let installLocationPrompt = AppInstallLocationPrompt()
-  private let launchAtLoginController = LaunchAtLoginController()
+  @MainActor private let launchAtLoginController = LaunchAtLoginController()
 
   // --
   let notifications = NotificationsManager()
@@ -884,7 +884,7 @@ extension AppDelegate {
     dependencies.session.reset()
 
     do {
-      try AppDatabase.loggedOut()
+      try await AppDatabase.loggedOutAsync()
     } catch {
       log.error(
         "Logout stopped because local database cleanup failed profile=\(ProjectConfig.userProfile ?? "default") reason=\(error.localizedDescription)",
