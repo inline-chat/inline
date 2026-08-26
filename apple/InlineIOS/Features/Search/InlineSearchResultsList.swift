@@ -12,6 +12,8 @@ struct InlineSearchResultsList: View {
   let openGlobalUser: (InlineSearchGlobalUserResult) -> Void
 
   @EnvironmentObject private var dataManager: DataManager
+  @EnvironmentObject private var themeManager: ThemeManager
+  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
   @EnvironmentObject private var realtimeState: RealtimeState
   @Environment(Router.self) private var router
   @Environment(\.appDatabase) private var appDatabase
@@ -158,19 +160,17 @@ struct InlineSearchResultsList: View {
   }
 
   private func chatPreview(for result: InlineSearchChatResult) -> some View {
-    ChatView(
+    ChatContextMenuPreview(
       peer: result.peer,
-      contextSpaceId: result.spaceId,
-      onOpenSpace: { _ in },
-      preview: true
+      contextSpaceID: result.spaceId,
+      router: router,
+      data: dataManager,
+      themeManager: themeManager,
+      notificationSettings: notificationSettings,
+      realtimeState: realtimeState,
+      realtimeV2: realtimeV2,
+      appDatabase: appDatabase
     )
-    // Context-menu previews are hosted in a separate SwiftUI tree.
-    .environment(router)
-    .environmentObject(dataManager)
-    .environmentObject(realtimeState)
-    .environment(\.realtimeV2, realtimeV2)
-    .appDatabase(appDatabase)
-    .frame(idealWidth: 340, idealHeight: 480)
   }
 
   private func isOpen(_ result: InlineSearchChatResult) -> Bool {
