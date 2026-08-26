@@ -165,8 +165,19 @@ struct SidebarOpenChatsCleanupMenu: View {
   var body: some View {
     Menu {
       Button(action: onCleanUp) {
-        Label("Cleanup…", systemImage: "eraser.line.dashed")
+        Label {
+          VStack(alignment: .leading, spacing: 1) {
+            Text("Cleanup…")
+            Text("Closes inactive chats; deletes empty folders")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        } icon: {
+          Image(systemName: "eraser.line.dashed")
+        }
       }
+
+      Divider()
 
       Button(role: .destructive, action: onCloseAll) {
         Label("Close All", systemImage: "xmark.circle")

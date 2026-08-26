@@ -1339,9 +1339,11 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
     let menu = NSMenu(title: "Open Chats Cleanup")
     menu.addItem(SidebarNativeMenuItem(
       title: "Cleanup…",
+      subtitle: "Closes inactive chats; deletes empty folders",
       systemImage: "eraser.line.dashed",
       action: onCleanUp
     ))
+    menu.addItem(.separator())
     menu.addItem(SidebarNativeMenuItem(
       title: "Close All",
       systemImage: "xmark.circle",
@@ -1512,10 +1514,18 @@ private final class SidebarNativeImageView: NSImageView {
 private final class SidebarNativeMenuItem: NSMenuItem {
   private let actionHandler: () -> Void
 
-  init(title: String, systemImage: String, action: @escaping () -> Void) {
+  init(
+    title: String,
+    subtitle: String? = nil,
+    systemImage: String,
+    action: @escaping () -> Void
+  ) {
     actionHandler = action
     super.init(title: title, action: #selector(performAction), keyEquivalent: "")
     target = self
+    if let subtitle {
+      self.subtitle = subtitle
+    }
     image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
   }
 

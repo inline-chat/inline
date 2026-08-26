@@ -125,6 +125,7 @@ private struct ExperimentalAuthedRootView: View {
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
+  @State private var isCleaningOpenChats = false
   @State private var isNotificationSettingsPresented = false
   @State private var didRestoreSceneHomeState = false
   @SceneStorage("ios.home.activeSpaceID.v1")
@@ -842,6 +843,91 @@ private struct ExperimentalAuthedRootView: View {
     }
   }
 
+  private func cleanUpOpenChats() {
+    guard !isCleaningOpenChats else { return }
+    guard let currentUserID = auth.currentUserId else {
+      ToastManager.shared.showToast(
+        "You're signed out. Please log in again.",
+        type: .error,
+        systemImage: "exclamationmark.triangle"
+      )
+      return
+    }
+    guard case .connected = realtimeState.connectionState else {
+      ToastManager.shared.showToast(
+        "Cleanup isn’t available right now.",
+        type: .info,
+        systemImage: "wifi.exclamationmark"
+      )
+      return
+    }
+
+    isCleaningOpenChats = true
+    Task { @MainActor in
+      defer { isCleaningOpenChats = false }
+
+      do {
+        // Reconcile first so deleting a locally empty folder starts from the
+        // current server snapshot rather than an old folder projection.
+        _ = try await realtimeV2.send(.getChats())
+
+        let now = Date()
+        let candidates = try await OpenChatsCleanup.candidates(
+          policy: .manual,
+          now: now,
+          currentUserID: currentUserID
+        )
+        let commit = try await OpenChatsCleanup.commit(
+          policy: .manual,
+          now: now,
+          currentUserID: currentUserID,
+          dialogIDs: candidates.map(\.dialogID)
+        )
+
+        for peer in commit.closedPeers {
+          _ = await realtimeV2.sendQueued(.updateDialogOpen(peerId: peer, open: false))
+        }
+        for folderID in commit.emptyFolderIDs {
+          _ = await realtimeV2.sendQueued(.deleteDialogFolder(
+            folderId: folderID,
+            disposition: .keepDialogs
+          ))
+        }
+
+        ToastManager.shared.showToast(
+          openChatsCleanupResultMessage(
+            chats: commit.closedPeers.count,
+            folders: commit.emptyFolderIDs.count
+          ),
+          type: .success,
+          systemImage: "eraser.line.dashed"
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to clean up Open Chats", error: error)
+        ToastManager.shared.showToast(
+          "Couldn’t clean up chats and folders.",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
+  }
+
+  private func openChatsCleanupResultMessage(chats: Int, folders: Int) -> String {
+    switch (chats, folders) {
+    case (0, 0):
+      "No chats or folders to clean up."
+    case (let chats, 0):
+      "Cleaned up \(chats) \(chats == 1 ? "chat" : "chats")."
+    case (0, let folders):
+      "Deleted \(folders) empty \(folders == 1 ? "folder" : "folders")."
+    case let (chats, folders):
+      "Cleaned up \(chats) \(chats == 1 ? "chat" : "chats") and deleted \(folders) empty \(folders == 1 ? "folder" : "folders")."
+    }
+  }
+
   @ToolbarContentBuilder
   private func experimentalToolbarContent() -> some ToolbarContent {
     if #available(iOS 26.0, *) {
@@ -918,6 +1004,10 @@ private struct ExperimentalAuthedRootView: View {
     RootTab(appTab: router.selectedTab) == .allChats && router.selectedTabPath.isEmpty
   }
 
+  private var showsOpenChatsCleanup: Bool {
+    RootTab(appTab: router.selectedTab) == .inbox && router.selectedTabPath.isEmpty
+  }
+
   private func connectionProgressIndicator(
     _ connectionState: RealtimeConnectionState
   ) -> some View {
@@ -963,6 +1053,7 @@ private struct ExperimentalAuthedRootView: View {
       onSelectAllChatsFilter: { filter in
         allChatsFilterRaw = filter.rawValue
       },
+      onCleanup: showsOpenChatsCleanup ? cleanUpOpenChats : nil,
       onInvite: {
         if let activeSpace {
           router.presentSheet(.addMember(spaceId: activeSpace.id))
@@ -1133,6 +1224,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let onSelectItemSize: (ExperimentalHomeChatItemRenderMode) -> Void
   let onSelectSortMode: (ExperimentalHomeSortMode) -> Void
   let onSelectAllChatsFilter: (ChatListFilter) -> Void
+  let onCleanup: (() -> Void)?
   let onInvite: () -> Void
   let onMembers: (() -> Void)?
   let onManage: (() -> Void)?
@@ -1223,6 +1315,21 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       children: [notifications] + (filterMenu.map { [$0] } ?? []) + [viewOptions, archivedChats]
     )
 
+    let cleanupSection = onCleanup.map { onCleanup in
+      UIMenu(
+        options: .displayInline,
+        children: [
+          UIAction(
+            title: "Cleanup…",
+            subtitle: "Closes inactive chats; deletes empty folders",
+            image: UIImage(systemName: "eraser.line.dashed")
+          ) { _ in
+            onCleanup()
+          },
+        ]
+      )
+    }
+
     let spaceSection: UIMenu
     if let activeSpaceName, let onMembers, let onManage {
       spaceSection = UIMenu(
@@ -1238,7 +1345,9 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
       spaceSection = UIMenu(options: .displayInline, children: [invite])
     }
 
-    return UIMenu(children: [viewSection, spaceSection])
+    return UIMenu(
+      children: [viewSection] + (cleanupSection.map { [$0] } ?? []) + [spaceSection]
+    )
   }
 }
 
