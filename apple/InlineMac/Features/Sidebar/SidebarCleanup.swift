@@ -2,7 +2,6 @@ import Auth
 import Foundation
 import GRDB
 import InlineKit
-import InlineMacSidebarModel
 import Logger
 import RealtimeV2
 
@@ -24,7 +23,7 @@ final class SidebarCleanup {
   private init() {}
 
   enum ManualResult {
-    case cleaned(Int)
+    case cleaned(chats: Int, folders: Int)
     case unavailable
     case failed
   }
@@ -123,7 +122,7 @@ final class SidebarCleanup {
 
   private func startRun(
     realtimeV2: RealtimeV2,
-    policy: SidebarCleanupPolicy,
+    policy: OpenChatsCleanupPolicy,
     completion: ((ManualResult) -> Void)? = nil
   ) {
     guard runTask == nil else {
@@ -163,7 +162,7 @@ final class SidebarCleanup {
 
   private func cleanup(
     realtimeV2: RealtimeV2,
-    policy: SidebarCleanupPolicy
+    policy: OpenChatsCleanupPolicy
   ) async -> ManualResult {
     guard AppSettings.shared.sidebarAsInbox,
           allowsCleanup,
@@ -175,47 +174,40 @@ final class SidebarCleanup {
     let now = Date()
 
     do {
-      try await Self.stampMissingOpenedDates(date: now)
-      let candidates = try await Self.staleOpenCandidates(
+      let candidates = try await OpenChatsCleanup.candidates(
         policy: policy,
         now: now,
-        currentUserId: currentUserId
+        currentUserID: currentUserId
       )
       let activeCandidates = candidates
-        .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
-      guard activeCandidates.isEmpty == false else { return .cleaned(0) }
+        .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peer) == false }
 
       let closeReadyIDs = activeCandidates
-        .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
-        .map(\.id)
-      guard closeReadyIDs.isEmpty == false else { return .cleaned(0) }
-
-      let confirmedCandidates = try await Self.staleOpenCandidates(
-        policy: policy,
-        now: now,
-        currentUserId: currentUserId,
-        dialogIDs: closeReadyIDs
-      )
-      let stillCloseReadyIDs = confirmedCandidates
-        .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
-        .map(\.id)
-      guard stillCloseReadyIDs.isEmpty == false else { return .cleaned(0) }
+        .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peer) == false }
+        .map(\.dialogID)
       guard allowsCleanup else { return .unavailable }
 
-      let closedCandidates = try await Self.closeStaleCandidates(
+      let commit = try await OpenChatsCleanup.commit(
         policy: policy,
         now: now,
-        currentUserId: currentUserId,
-        dialogIDs: stillCloseReadyIDs
+        currentUserID: currentUserId,
+        dialogIDs: closeReadyIDs
       )
-      let peers = closedCandidates
-        .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0.peerId) == false }
-        .map(\.peerId)
-      guard peers.isEmpty == false else { return .cleaned(0) }
+      let peers = commit.closedPeers
+        .filter { MainWindowOpenCoordinator.shared.hasActivePeer($0) == false }
+      let emptyFolderIDs: [Int64] = switch policy {
+      case .manual:
+        commit.emptyFolderIDs
+      case .automatic:
+        []
+      }
 
-      log.info("Closing \(peers.count) stale sidebar chats")
+      log.info(
+        "Cleaning up \(peers.count) stale sidebar chats and \(emptyFolderIDs.count) empty folders"
+      )
       await queueCloseRequests(peers, realtimeV2: realtimeV2)
-      return .cleaned(peers.count)
+      await queueFolderDeletions(emptyFolderIDs, realtimeV2: realtimeV2)
+      return .cleaned(chats: peers.count, folders: emptyFolderIDs.count)
     } catch is CancellationError {
       return .unavailable
     } catch {
@@ -244,6 +236,23 @@ final class SidebarCleanup {
     log.trace("Queued \(peers.count) stale sidebar close transactions")
   }
 
+  private func queueFolderDeletions(_ folderIDs: [Int64], realtimeV2: RealtimeV2) async {
+    await withTaskGroup(of: Void.self) { group in
+      for folderID in folderIDs {
+        group.addTask {
+          _ = await realtimeV2.sendQueued(.deleteDialogFolder(
+            folderId: folderID,
+            disposition: .keepDialogs
+          ))
+        }
+      }
+
+      await group.waitForAll()
+    }
+
+    log.trace("Queued \(folderIDs.count) empty sidebar folder deletions")
+  }
+
   nonisolated private static func markOpened(_ peer: Peer, date: Date) async throws {
     try await AppDatabase.shared.dbWriter.write { db in
       var arguments = StatementArguments([date])
@@ -260,207 +269,4 @@ final class SidebarCleanup {
     }
   }
 
-  nonisolated private static func stampMissingOpenedDates(date: Date) async throws {
-    try await AppDatabase.shared.dbWriter.write { db in
-      try db.execute(
-        sql: """
-        UPDATE "dialog"
-        SET "openedDate" = ?
-        WHERE \(cleanupBaseSQL)
-        AND "dialog"."openedDate" IS NULL
-        """,
-        arguments: StatementArguments([date])
-      )
-    }
-  }
-
-  nonisolated private static func staleOpenCandidates(
-    policy: SidebarCleanupPolicy,
-    now: Date,
-    currentUserId: Int64
-  ) async throws -> [SidebarCleanupCandidate] {
-    try await AppDatabase.shared.reader.read { db in
-      try staleOpenCandidates(
-        db,
-        policy: policy,
-        now: now,
-        currentUserId: currentUserId,
-        dialogIDs: nil
-      )
-    }
-  }
-
-  nonisolated private static func staleOpenCandidates(
-    policy: SidebarCleanupPolicy,
-    now: Date,
-    currentUserId: Int64,
-    dialogIDs: [Int64]
-  ) async throws -> [SidebarCleanupCandidate] {
-    guard dialogIDs.isEmpty == false else { return [] }
-
-    return try await AppDatabase.shared.reader.read { db in
-      try staleOpenCandidates(
-        db,
-        policy: policy,
-        now: now,
-        currentUserId: currentUserId,
-        dialogIDs: dialogIDs
-      )
-    }
-  }
-
-  nonisolated private static func closeStaleCandidates(
-    policy: SidebarCleanupPolicy,
-    now: Date,
-    currentUserId: Int64,
-    dialogIDs: [Int64]
-  ) async throws -> [SidebarCleanupCandidate] {
-    guard dialogIDs.isEmpty == false else { return [] }
-
-    return try await AppDatabase.shared.dbWriter.write { db in
-      let candidates = try staleOpenCandidates(
-        db,
-        policy: policy,
-        now: now,
-        currentUserId: currentUserId,
-        dialogIDs: dialogIDs
-      )
-      let ids = candidates.map(\.id)
-      guard ids.isEmpty == false else { return [] }
-
-      try db.execute(
-        sql: """
-        UPDATE "dialog"
-        SET "open" = 0,
-            "openedDate" = NULL,
-            "order" = NULL
-        WHERE "id" IN (\(placeholders(count: ids.count)))
-        """,
-        arguments: StatementArguments(ids)
-      )
-
-      return candidates
-    }
-  }
-
-  nonisolated private static func staleOpenCandidates(
-    _ db: Database,
-    policy: SidebarCleanupPolicy,
-    now: Date,
-    currentUserId: Int64,
-    dialogIDs: [Int64]?
-  ) throws -> [SidebarCleanupCandidate] {
-    if let dialogIDs, dialogIDs.isEmpty {
-      return []
-    }
-
-    let dialogFilter = dialogIDs.map { ids in
-      #"AND "dialog"."id" IN (\#(placeholders(count: ids.count)))"#
-    } ?? ""
-
-    var arguments = StatementArguments([currentUserId])
-    arguments += StatementArguments([MessageSendingStatus.sent.rawValue])
-    if let dialogIDs {
-      arguments += StatementArguments(dialogIDs)
-    }
-
-    let request = SQLRequest<SidebarCleanupCandidate>(
-      sql: """
-      WITH "latestOwnMessage" AS (
-        SELECT "message"."chatId", MAX("message"."date") AS "latestOwnMessageDate"
-        FROM "message"
-        WHERE "message"."fromId" = ?
-        AND ("message"."status" IS NULL OR "message"."status" = ?)
-        GROUP BY "message"."chatId"
-      )
-      SELECT
-        "dialog"."id",
-        "dialog"."peerUserId",
-        "dialog"."peerThreadId",
-        "dialog"."openedDate",
-        "lastMessage"."date" AS "lastActivityAt",
-        "latestOwnMessage"."latestOwnMessageDate",
-        CASE WHEN
-          "dialog"."peerThreadId" IS NOT NULL
-          AND (
-            COALESCE("chat"."isUntitled" = 1, 0)
-            OR TRIM(COALESCE("chat"."title", '')) = ''
-          )
-          AND "chat"."lastMsgId" IS NULL
-        THEN 1 ELSE 0 END AS "isEmptyUntitled"
-      FROM "dialog"
-      LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
-      LEFT JOIN "latestOwnMessage" ON "latestOwnMessage"."chatId" = "dialog"."chatId"
-      LEFT JOIN "message" AS "lastMessage"
-        ON "lastMessage"."chatId" = "chat"."id"
-        AND "lastMessage"."messageId" = "chat"."lastMsgId"
-      LEFT JOIN "draft2" ON "draft2"."peerKey" = CASE
-        WHEN "dialog"."peerUserId" IS NOT NULL
-          THEN 'user_' || CAST("dialog"."peerUserId" AS TEXT)
-        ELSE 'thread_' || CAST("dialog"."peerThreadId" AS TEXT)
-      END
-      WHERE \(cleanupBaseSQL)
-      AND "dialog"."openedDate" IS NOT NULL
-      AND ("chat"."lastMsgId" IS NULL OR "lastMessage"."date" IS NOT NULL)
-      AND NOT (\(Dialog.unreadSQL))
-      AND (
-        "draft2"."peerKey" IS NULL
-        OR (TRIM("draft2"."text") = '' AND "draft2"."attachments" IS NULL)
-      )
-      AND "dialog"."draftMessage" IS NULL
-      \(dialogFilter)
-      ORDER BY "dialog"."openedDate" ASC
-      """,
-      arguments: arguments
-    )
-
-    return try request.fetchAll(db).filter { candidate in
-      policy.shouldClose(
-        now: now,
-        openedAt: candidate.openedDate,
-        lastActivityAt: candidate.lastActivityAt,
-        latestOwnMessageAt: candidate.latestOwnMessageDate,
-        isEmptyUntitled: candidate.isEmptyUntitled
-      )
-    }
-  }
-
-  nonisolated private static func placeholders(count: Int) -> String {
-    Array(repeating: "?", count: count).joined(separator: ", ")
-  }
-
-  nonisolated private static var cleanupBaseSQL: String {
-    """
-    \(Dialog.chatListVisibilitySQL)
-    AND "dialog"."open" = 1
-    AND ("dialog"."pinned" IS NULL OR "dialog"."pinned" = 0)
-    AND NOT EXISTS (
-      SELECT 1
-      FROM "dialogFolder"
-      WHERE "dialogFolder"."id" = "dialog"."folderId"
-        AND "dialogFolder"."pinnedOrder" IS NOT NULL
-    )
-    """
-  }
-
-}
-
-private struct SidebarCleanupCandidate: FetchableRecord, Decodable, Sendable {
-  let id: Int64
-  let peerUserId: Int64?
-  let peerThreadId: Int64?
-  let openedDate: Date
-  let lastActivityAt: Date?
-  let latestOwnMessageDate: Date?
-  let isEmptyUntitled: Bool
-
-  var peerId: Peer {
-    if let peerUserId {
-      return .user(id: peerUserId)
-    }
-    if let peerThreadId {
-      return .thread(id: peerThreadId)
-    }
-    return .thread(id: id)
-  }
 }

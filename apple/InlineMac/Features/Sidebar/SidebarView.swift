@@ -2479,16 +2479,22 @@ struct SidebarView: View {
     guard let dependencies else { return }
     SidebarCleanup.shared.cleanNow(realtimeV2: dependencies.realtimeV2) { result in
       switch result {
-      case let .cleaned(count):
-        if count == 0 {
-          ToastCenter.shared.showSuccess("No chats to clean up")
-        } else {
-          ToastCenter.shared.showSuccess("Cleaned up \(count) \(count == 1 ? "chat" : "chats")")
+      case let .cleaned(chats, folders):
+        let message = switch (chats, folders) {
+        case (0, 0):
+          "No chats or folders to clean up"
+        case (let chats, 0):
+          "Cleaned up \(chats) \(chats == 1 ? "chat" : "chats")"
+        case (0, let folders):
+          "Deleted \(folders) empty \(folders == 1 ? "folder" : "folders")"
+        case let (chats, folders):
+          "Cleaned up \(chats) \(chats == 1 ? "chat" : "chats") and deleted \(folders) empty \(folders == 1 ? "folder" : "folders")"
         }
+        ToastCenter.shared.showSuccess(message)
       case .unavailable:
         ToastCenter.shared.showInfo("Cleanup isn’t available right now")
       case .failed:
-        ToastCenter.shared.showError("Couldn’t clean up chats")
+        ToastCenter.shared.showError("Couldn’t clean up chats and folders")
       }
     }
   }
