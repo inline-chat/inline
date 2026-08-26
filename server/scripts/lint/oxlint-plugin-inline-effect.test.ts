@@ -39,6 +39,17 @@ describe("inline-effect Oxlint plugin", () => {
     expect(result.output).toContain("inline-effect(no-effect-escape-hatch)")
   })
 
+  test("rejects escape hatches through the Effect module namespace", () => {
+    const result = lintFixture(
+      "invalid-effect-module-namespace.ts",
+    )
+
+    expect(result.status).toBe(1)
+    expect(result.output).toContain(
+      "inline-effect(no-effect-escape-hatch)",
+    )
+  })
+
   test("rejects suppressions without a categorized reason", () => {
     const result = lintFixture("invalid-suppression-reason.ts")
 
