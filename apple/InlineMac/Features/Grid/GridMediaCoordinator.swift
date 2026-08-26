@@ -8,6 +8,12 @@ enum GridMediaCoordinatorEvent: Sendable {
   case screenShareContextChanged
 }
 
+struct GridAutomaticMicrophoneChange: Equatable, Sendable {
+  let revision: Int
+  let previousEnabled: Bool
+  let appliedEnabled: Bool
+}
+
 /// Main-actor bridge between room product state and the process-wide media
 /// engine. This owns media intent, preference persistence, credentials, and
 /// snapshot projection; `GridRoomService` never reaches into audio or RTC.
@@ -21,6 +27,10 @@ final class GridMediaCoordinator {
   private let outputPreferences: AudioOutputPreferenceStore
   private let defaults: UserDefaults
   private var microphoneEnabled: Bool
+  private var microphoneIntentRevision = 0
+  private var activeAutomaticMicrophoneChange: GridAutomaticMicrophoneChange?
+  private var autoUnmuteOnJoin: Bool
+  private var autoMuteWhenAlone: Bool
   private var inputSelection: AudioInputSelection
   private var outputSelection: AudioOutputSelection
   private var outputVolume: Float = 1
@@ -35,6 +45,8 @@ final class GridMediaCoordinator {
   private var subscribers: [UUID: AsyncStream<GridMediaCoordinatorEvent>.Continuation] = [:]
 
   private static let microphoneEnabledKey = "grid.microphoneEnabled"
+  private static let autoUnmuteOnJoinKey = "grid.autoUnmuteOnJoin"
+  private static let autoMuteWhenAloneKey = "grid.autoMuteWhenAlone"
 
   init(
     engine: InlineRTCSession,
@@ -49,8 +61,12 @@ final class GridMediaCoordinator {
     inputSelection = inputPreferences.selection
     outputSelection = outputPreferences.selection
     microphoneEnabled = defaults.bool(forKey: Self.microphoneEnabledKey)
+    autoUnmuteOnJoin = defaults.bool(forKey: Self.autoUnmuteOnJoinKey)
+    autoMuteWhenAlone = defaults.bool(forKey: Self.autoMuteWhenAloneKey)
     let controller = GridMediaPresentationController(
       microphoneEnabled: microphoneEnabled,
+      autoUnmuteOnJoin: autoUnmuteOnJoin,
+      autoMuteWhenAlone: autoMuteWhenAlone,
       inputSelection: inputSelection,
       outputSelection: outputSelection
     )
@@ -137,15 +153,70 @@ final class GridMediaCoordinator {
   }
 
   func toggleMicrophone() -> Bool {
-    let enabled = !microphoneEnabled
+    setMicrophoneEnabled(!microphoneEnabled)
+  }
+
+  @discardableResult
+  func setMicrophoneEnabled(_ enabled: Bool) -> Bool {
+    guard microphoneEnabled != enabled else { return enabled }
     if enabled, presentation.microphonePermission != .authorized {
       engine.requestMicrophonePermission()
     }
+    activeAutomaticMicrophoneChange = nil
+    microphoneIntentRevision &+= 1
     microphoneEnabled = enabled
     presentationController.setMicrophoneEnabled(enabled)
     defaults.set(enabled, forKey: Self.microphoneEnabledKey)
     submitDemand()
     return enabled
+  }
+
+  func applyAutoUnmuteOnJoin() -> GridAutomaticMicrophoneChange? {
+    guard autoUnmuteOnJoin else { return nil }
+    if microphoneEnabled {
+      return activeAutomaticMicrophoneChange
+    }
+    let previousEnabled = microphoneEnabled
+    setMicrophoneEnabled(true)
+    let change = GridAutomaticMicrophoneChange(
+      revision: microphoneIntentRevision,
+      previousEnabled: previousEnabled,
+      appliedEnabled: true
+    )
+    activeAutomaticMicrophoneChange = change
+    return change
+  }
+
+  @discardableResult
+  func restoreAutomaticMicrophoneChangeIfCurrent(
+    _ change: GridAutomaticMicrophoneChange?
+  ) -> Bool {
+    guard let change,
+          activeAutomaticMicrophoneChange == change,
+          microphoneIntentRevision == change.revision,
+          microphoneEnabled == change.appliedEnabled
+    else { return false }
+    setMicrophoneEnabled(change.previousEnabled)
+    return true
+  }
+
+  func commitAutomaticMicrophoneChange(_ change: GridAutomaticMicrophoneChange?) {
+    guard activeAutomaticMicrophoneChange == change else { return }
+    activeAutomaticMicrophoneChange = nil
+  }
+
+  func setAutoUnmuteOnJoin(_ enabled: Bool) {
+    guard autoUnmuteOnJoin != enabled else { return }
+    autoUnmuteOnJoin = enabled
+    defaults.set(enabled, forKey: Self.autoUnmuteOnJoinKey)
+    presentationController.setAutoUnmuteOnJoin(enabled)
+  }
+
+  func setAutoMuteWhenAlone(_ enabled: Bool) {
+    guard autoMuteWhenAlone != enabled else { return }
+    autoMuteWhenAlone = enabled
+    defaults.set(enabled, forKey: Self.autoMuteWhenAloneKey)
+    presentationController.setAutoMuteWhenAlone(enabled)
   }
 
   func requestMicrophonePermission() {
@@ -280,6 +351,7 @@ final class GridMediaCoordinator {
   }
 
   var isMicrophoneEnabled: Bool { microphoneEnabled }
+  var shouldAutoMuteWhenAlone: Bool { autoMuteWhenAlone }
 
   private func submitDemand() {
     let rtcTarget = target?.rtcSessionID

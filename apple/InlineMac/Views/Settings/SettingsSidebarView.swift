@@ -37,7 +37,7 @@ struct SettingsSidebarView: View {
       categories.append(.account)
     }
 
-    categories.append(contentsOf: [.general, .appearance, .notifications])
+    categories.append(contentsOf: [.general, .appearance, .audioAndVideo, .notifications])
     if auth.isLoggedIn {
       categories.append(.privacy)
     }

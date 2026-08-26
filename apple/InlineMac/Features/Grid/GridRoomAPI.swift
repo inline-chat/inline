@@ -51,8 +51,13 @@ final class GridRoomAPI {
     return response.spaces
   }
 
-  func createRoom(spaceID: Int64) async throws -> GridRoomMutationResult {
-    let result = try await realtime.send(.createGridRoom(spaceID: spaceID))
+  func createRoom(
+    spaceID: Int64,
+    microphoneEnabled: Bool
+  ) async throws -> GridRoomMutationResult {
+    let result = try await realtime.send(
+      .createGridRoom(spaceID: spaceID, microphoneEnabled: microphoneEnabled)
+    )
     guard case let .createGridRoom(response)? = result else {
       throw GridRoomAPIError.invalidResponse
     }
@@ -62,8 +67,13 @@ final class GridRoomAPI {
     )
   }
 
-  func joinRoom(roomID: Int64) async throws -> GridRoomMutationResult {
-    let result = try await realtime.send(.joinGridRoom(roomID: roomID))
+  func joinRoom(
+    roomID: Int64,
+    microphoneEnabled: Bool
+  ) async throws -> GridRoomMutationResult {
+    let result = try await realtime.send(
+      .joinGridRoom(roomID: roomID, microphoneEnabled: microphoneEnabled)
+    )
     guard case let .joinGridRoom(response)? = result else {
       throw GridRoomAPIError.invalidResponse
     }

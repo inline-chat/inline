@@ -8699,9 +8699,20 @@ public nonisolated struct CreateGridRoomInput: Sendable {
 
   public var spaceID: Int64 = 0
 
+  public var microphoneEnabled: Bool {
+    get {_microphoneEnabled ?? false}
+    set {_microphoneEnabled = newValue}
+  }
+  /// Returns true if `microphoneEnabled` has been explicitly set.
+  public var hasMicrophoneEnabled: Bool {self._microphoneEnabled != nil}
+  /// Clears the value of `microphoneEnabled`. Subsequent reads from it will return its default value.
+  public mutating func clearMicrophoneEnabled() {self._microphoneEnabled = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _microphoneEnabled: Bool? = nil
 }
 
 public nonisolated struct CreateGridRoomResult: Sendable {
@@ -8734,9 +8745,20 @@ public nonisolated struct JoinGridRoomInput: Sendable {
 
   public var roomID: Int64 = 0
 
+  public var microphoneEnabled: Bool {
+    get {_microphoneEnabled ?? false}
+    set {_microphoneEnabled = newValue}
+  }
+  /// Returns true if `microphoneEnabled` has been explicitly set.
+  public var hasMicrophoneEnabled: Bool {self._microphoneEnabled != nil}
+  /// Clears the value of `microphoneEnabled`. Subsequent reads from it will return its default value.
+  public mutating func clearMicrophoneEnabled() {self._microphoneEnabled = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _microphoneEnabled: Bool? = nil
 }
 
 public nonisolated struct JoinGridRoomResult: Sendable {
@@ -30316,7 +30338,7 @@ nonisolated extension GetGridHomeResult: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension CreateGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateGridRoomInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}space_id\0\u{3}microphone_enabled\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -30325,20 +30347,29 @@ nonisolated extension CreateGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf.
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._microphoneEnabled) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.spaceID != 0 {
       try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
     }
+    try { if let v = self._microphoneEnabled {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: CreateGridRoomInput, rhs: CreateGridRoomInput) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
+    if lhs._microphoneEnabled != rhs._microphoneEnabled {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -30385,7 +30416,7 @@ nonisolated extension CreateGridRoomResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension JoinGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "JoinGridRoomInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}room_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}room_id\0\u{3}microphone_enabled\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -30394,20 +30425,29 @@ nonisolated extension JoinGridRoomInput: SwiftProtobuf.Message, SwiftProtobuf._M
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.roomID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._microphoneEnabled) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.roomID != 0 {
       try visitor.visitSingularInt64Field(value: self.roomID, fieldNumber: 1)
     }
+    try { if let v = self._microphoneEnabled {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: JoinGridRoomInput, rhs: JoinGridRoomInput) -> Bool {
     if lhs.roomID != rhs.roomID {return false}
+    if lhs._microphoneEnabled != rhs._microphoneEnabled {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

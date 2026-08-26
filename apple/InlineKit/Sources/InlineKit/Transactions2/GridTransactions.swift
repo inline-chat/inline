@@ -71,11 +71,16 @@ public struct CreateGridRoomTransaction: Transaction2 {
   public var context: Context
   public var type: TransactionKindType = .mutation(.init(transient: true))
 
-  public struct Context: Sendable, Codable { let spaceID: Int64 }
+  public struct Context: Sendable, Codable { let spaceID: Int64; let microphoneEnabled: Bool }
   enum CodingKeys: String, CodingKey { case context }
-  public init(spaceID: Int64) { context = Context(spaceID: spaceID) }
+  public init(spaceID: Int64, microphoneEnabled: Bool) {
+    context = Context(spaceID: spaceID, microphoneEnabled: microphoneEnabled)
+  }
   public func input(from context: Context) -> RpcCall.OneOf_Input? {
-    .createGridRoom(.with { $0.spaceID = context.spaceID })
+    .createGridRoom(.with {
+      $0.spaceID = context.spaceID
+      $0.microphoneEnabled = context.microphoneEnabled
+    })
   }
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
     guard case .createGridRoom = result else { throw .invalid }
@@ -87,11 +92,16 @@ public struct JoinGridRoomTransaction: Transaction2 {
   public var context: Context
   public var type: TransactionKindType = .mutation(.init(transient: true))
 
-  public struct Context: Sendable, Codable { let roomID: Int64 }
+  public struct Context: Sendable, Codable { let roomID: Int64; let microphoneEnabled: Bool }
   enum CodingKeys: String, CodingKey { case context }
-  public init(roomID: Int64) { context = Context(roomID: roomID) }
+  public init(roomID: Int64, microphoneEnabled: Bool) {
+    context = Context(roomID: roomID, microphoneEnabled: microphoneEnabled)
+  }
   public func input(from context: Context) -> RpcCall.OneOf_Input? {
-    .joinGridRoom(.with { $0.roomID = context.roomID })
+    .joinGridRoom(.with {
+      $0.roomID = context.roomID
+      $0.microphoneEnabled = context.microphoneEnabled
+    })
   }
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
     guard case .joinGridRoom = result else { throw .invalid }
@@ -217,11 +227,15 @@ public extension Transaction2 where Self == GetGridHomeTransaction {
 }
 
 public extension Transaction2 where Self == CreateGridRoomTransaction {
-  static func createGridRoom(spaceID: Int64) -> Self { .init(spaceID: spaceID) }
+  static func createGridRoom(spaceID: Int64, microphoneEnabled: Bool) -> Self {
+    .init(spaceID: spaceID, microphoneEnabled: microphoneEnabled)
+  }
 }
 
 public extension Transaction2 where Self == JoinGridRoomTransaction {
-  static func joinGridRoom(roomID: Int64) -> Self { .init(roomID: roomID) }
+  static func joinGridRoom(roomID: Int64, microphoneEnabled: Bool) -> Self {
+    .init(roomID: roomID, microphoneEnabled: microphoneEnabled)
+  }
 }
 
 public extension Transaction2 where Self == LeaveGridRoomTransaction {

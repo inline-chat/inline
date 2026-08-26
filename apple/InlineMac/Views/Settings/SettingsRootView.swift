@@ -146,6 +146,8 @@ private struct SettingsDetailView: View {
       switch category {
       case .general:
         GeneralSettingsDetailView()
+      case .audioAndVideo:
+        AudioAndVideoSettingsDetailView()
       case .dataStorage:
         DataStorageSettingsDetailView()
       case .connectors:

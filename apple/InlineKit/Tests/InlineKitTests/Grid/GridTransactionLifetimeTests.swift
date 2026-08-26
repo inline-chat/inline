@@ -29,4 +29,23 @@ struct GridTransactionLifetimeTests {
     #expect(home.effectiveReconnectReplayPolicy == .neverReplay)
     #expect(connection.effectiveReconnectReplayPolicy == .neverReplay)
   }
+
+  @Test("membership mutations carry microphone intent atomically")
+  func membershipMutationsCarryMicrophoneIntent() {
+    let create = CreateGridRoomTransaction(spaceID: 42, microphoneEnabled: true)
+    guard case let .createGridRoom(createInput)? = create.input(from: create.context) else {
+      Issue.record("Expected createGridRoom input")
+      return
+    }
+    #expect(createInput.hasMicrophoneEnabled)
+    #expect(createInput.microphoneEnabled)
+
+    let join = JoinGridRoomTransaction(roomID: 7, microphoneEnabled: false)
+    guard case let .joinGridRoom(joinInput)? = join.input(from: join.context) else {
+      Issue.record("Expected joinGridRoom input")
+      return
+    }
+    #expect(joinInput.hasMicrophoneEnabled)
+    #expect(joinInput.microphoneEnabled == false)
+  }
 }

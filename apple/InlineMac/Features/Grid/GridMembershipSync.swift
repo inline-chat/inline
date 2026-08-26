@@ -11,6 +11,8 @@ struct GridMembershipOperation: Equatable, Sendable {
 
   let kind: Kind
   let spaceID: Int64
+  let microphoneEnabled: Bool
+  let automaticMicrophoneChange: GridAutomaticMicrophoneChange?
   let accessRevision: Int
   let revision: Int
   let startedAt: Date
@@ -101,9 +103,21 @@ final class GridMembershipSync {
       do {
         let event: GridMembershipSyncEvent = switch operation.kind {
         case .create:
-          .created(operation, try await api.createRoom(spaceID: operation.spaceID))
+          .created(
+            operation,
+            try await api.createRoom(
+              spaceID: operation.spaceID,
+              microphoneEnabled: operation.microphoneEnabled
+            )
+          )
         case let .join(roomID):
-          .joined(operation, try await api.joinRoom(roomID: roomID))
+          .joined(
+            operation,
+            try await api.joinRoom(
+              roomID: roomID,
+              microphoneEnabled: operation.microphoneEnabled
+            )
+          )
         case let .leave(roomID):
           .left(operation, try await api.leaveRoom(roomID: roomID))
         }

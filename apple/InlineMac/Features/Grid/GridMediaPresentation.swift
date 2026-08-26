@@ -21,6 +21,8 @@ final class GridMediaPresentation {
   fileprivate(set) var connectionState: GridMediaConnectionStatus = .disconnected
   fileprivate(set) var audioState: InlineRTCAudioState = .cold
   fileprivate(set) var isMicrophoneEnabled: Bool
+  fileprivate(set) var autoUnmuteOnJoin: Bool
+  fileprivate(set) var autoMuteWhenAlone: Bool
   fileprivate(set) var inputDevices: [AudioInputDeviceDescriptor] = []
   fileprivate(set) var automaticInputDeviceName = "System Default"
   fileprivate(set) var activeInputDeviceID: String?
@@ -57,11 +59,15 @@ final class GridMediaPresentation {
 
   fileprivate init(
     microphoneEnabled: Bool,
+    autoUnmuteOnJoin: Bool,
+    autoMuteWhenAlone: Bool,
     inputSelection: AudioInputSelection,
     outputSelection: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
   ) {
     isMicrophoneEnabled = microphoneEnabled
+    self.autoUnmuteOnJoin = autoUnmuteOnJoin
+    self.autoMuteWhenAlone = autoMuteWhenAlone
     self.inputSelection = inputSelection
     self.outputSelection = outputSelection
     self.outputVolume = min(max(outputVolume, 0), 1)
@@ -101,12 +107,16 @@ final class GridMediaPresentationController {
 
   init(
     microphoneEnabled: Bool,
+    autoUnmuteOnJoin: Bool,
+    autoMuteWhenAlone: Bool,
     inputSelection: AudioInputSelection,
     outputSelection: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
   ) {
     presentation = GridMediaPresentation(
       microphoneEnabled: microphoneEnabled,
+      autoUnmuteOnJoin: autoUnmuteOnJoin,
+      autoMuteWhenAlone: autoMuteWhenAlone,
       inputSelection: inputSelection,
       outputSelection: outputSelection,
       outputVolume: outputVolume
@@ -115,6 +125,14 @@ final class GridMediaPresentationController {
 
   func setMicrophoneEnabled(_ enabled: Bool) {
     presentation.isMicrophoneEnabled = enabled
+  }
+
+  func setAutoUnmuteOnJoin(_ enabled: Bool) {
+    presentation.autoUnmuteOnJoin = enabled
+  }
+
+  func setAutoMuteWhenAlone(_ enabled: Bool) {
+    presentation.autoMuteWhenAlone = enabled
   }
 
   func setDesiredInputSelection(_ selection: AudioInputSelection) {
