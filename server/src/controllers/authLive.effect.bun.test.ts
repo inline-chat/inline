@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it } from "bun:test"
 import {
   Context,
   ErrorReporter as EffectErrorReporter,
@@ -67,12 +67,7 @@ const makeLiveHandler = async () => {
   }
 }
 
-const describeWithBun =
-  process.versions.bun === undefined
-    ? describe.skip
-    : describe
-
-describeWithBun("AuthRouteGroupLive", () => {
+describe("AuthRouteGroupLive", () => {
   it("preserves transport and auth rejection boundaries through production adapters", async () => {
     const live = await makeLiveHandler()
 
