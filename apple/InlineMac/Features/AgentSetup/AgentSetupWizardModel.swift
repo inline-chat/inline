@@ -37,6 +37,50 @@ struct AgentSetupProgressItem: Equatable, Identifiable {
   var state: State = .pending
 }
 
+private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
+  let code: String
+
+  var privacySafeErrorCategory: String {
+    let safeCode = Self.allowlistedCodes.contains(code) ? code : "other"
+    return "agent_setup:\(safeCode)"
+  }
+
+  private static let allowlistedCodes: Set<String> = [
+    "agent_setup_failed",
+    "agent_setup_requires_direct_app",
+    "cli_auth_failed",
+    "cli_auth_launch_failed",
+    "cli_auth_protocol_mismatch",
+    "cli_auth_timed_out",
+    "cli_auth_unavailable",
+    "cli_checksumMismatch",
+    "cli_conflictingInstallation",
+    "cli_install_incomplete",
+    "cli_installationFailed",
+    "cli_invalidArchive",
+    "cli_invalidManifest",
+    "cli_invalidSignature",
+    "cli_launch_failed",
+    "cli_missing",
+    "cli_network",
+    "cli_operationInProgress",
+    "cli_output_too_large",
+    "cli_packageManaged",
+    "cli_permissionDenied",
+    "cli_unavailable",
+    "cli_unsupportedArchitecture",
+    "inline_not_authenticated",
+    "invalid_cli_response",
+    "invalid_target",
+    "mapped_bot_missing",
+    "not_authenticated",
+    "operation_in_progress",
+    "setup_conflict",
+    "setup_timed_out",
+    "unexpected_target",
+  ]
+}
+
 @MainActor
 @Observable
 final class AgentSetupWizardModel {
@@ -458,7 +502,8 @@ final class AgentSetupWizardModel {
     let failureCode = failure?.code ?? "unknown"
     let failedPhase = failure?.failedPhase ?? "unknown"
     log.error(
-      "AGENT_SETUP phase=failed code=\(failureCode) failedPhase=\(failedPhase)"
+      "AGENT_SETUP phase=failed code=\(failureCode) failedPhase=\(failedPhase)",
+      error: AgentSetupTelemetryFailure(code: failureCode)
     )
     phase = .failed
   }
