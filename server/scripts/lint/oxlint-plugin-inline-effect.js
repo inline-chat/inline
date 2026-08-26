@@ -37,6 +37,26 @@ const noEffectEscapeHatch = {
     if (isTestLike(context.filename)) return {}
 
     const effectBindings = new Set()
+    const effectModuleBindings = new Set()
+
+    const isEffectObject = (node) => {
+      if (
+        node?.type === "Identifier" &&
+        effectBindings.has(node.name)
+      ) {
+        return true
+      }
+
+      return (
+        node?.type === "MemberExpression" &&
+        node.object?.type === "Identifier" &&
+        effectModuleBindings.has(
+          node.object.name,
+        ) &&
+        propertyName(node.property) ===
+          "Effect"
+      )
+    }
 
     return {
       ImportDeclaration(node) {
@@ -44,6 +64,15 @@ const noEffectEscapeHatch = {
 
         if (source === "effect") {
           for (const specifier of node.specifiers) {
+            if (
+              specifier.type ===
+                "ImportNamespaceSpecifier"
+            ) {
+              effectModuleBindings.add(
+                specifier.local.name,
+              )
+            }
+
             if (
               specifier.type === "ImportSpecifier" &&
               propertyName(specifier.imported) === "Effect"
@@ -70,8 +99,7 @@ const noEffectEscapeHatch = {
       },
       MemberExpression(node) {
         if (
-          node.object?.type === "Identifier" &&
-          effectBindings.has(node.object.name) &&
+          isEffectObject(node.object) &&
           escapeHatches.has(propertyName(node.property))
         ) {
           context.report({ node, message: escapeHatchMessage })
