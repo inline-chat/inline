@@ -119,6 +119,9 @@ jobs:
       - name: Run database migrations
         run: cd server && bun db:migrate
 
+      - name: Smoke test the production artifact
+        run: cd server && bun run core:artifact-smoke
+
       - name: Smoke test the full core shadow
         run: cd server && bun run core:smoke
 

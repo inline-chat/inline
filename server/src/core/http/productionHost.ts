@@ -52,7 +52,10 @@ import {
   type InlineProtocolRealtimeTransport,
   type InlineProtocolWebSocketData,
 } from "./realtimeV3Host"
-import { loadInlineProtocolConfiguration } from "../../modules/inlineProtocol/config"
+import {
+  loadInlineProtocolConfiguration,
+  type InlineProtocolConfiguration,
+} from "../../modules/inlineProtocol/config"
 
 export type CoreWebSocketData = RealtimeWebSocketData | InlineProtocolWebSocketData
 
@@ -143,10 +146,31 @@ export class CoreProductionShutdownError extends
 
 export const coreProductionStartupErrorDetails = (
   error: unknown,
-): string | undefined =>
-  error instanceof CoreProductionStartupError
-    ? Cause.pretty(error.cause)
-    : undefined
+): string | undefined => {
+  if (
+    !(
+      error instanceof CoreProductionStartupError ||
+      (
+        typeof error === "object" &&
+        error !== null &&
+        "_tag" in error &&
+        error._tag ===
+          "CoreProductionStartupError" &&
+        "cause" in error
+      )
+    )
+  ) {
+    return undefined
+  }
+
+  try {
+    return Cause.pretty(
+      error.cause as Cause.Cause<unknown>,
+    )
+  } catch {
+    return undefined
+  }
+}
 
 export interface StartCoreProductionServerOptions<
   ApplicationError,
@@ -170,6 +194,9 @@ export interface StartCoreProductionServerOptions<
     | number
     | undefined
   readonly hostname?: string | undefined
+  readonly inlineProtocolConfiguration?:
+    | InlineProtocolConfiguration
+    | undefined
   readonly installSignalHandlers?:
     | boolean
     | undefined
@@ -262,6 +289,8 @@ export const startCoreProductionServer = async <
   gracefulShutdownMillis =
     DEFAULT_GRACEFUL_SHUTDOWN_MILLIS,
   hostname = "0.0.0.0",
+  inlineProtocolConfiguration:
+    providedInlineProtocolConfiguration,
   installSignalHandlers = false,
   markShuttingDown =
     markServerShuttingDown,
@@ -333,7 +362,8 @@ export const startCoreProductionServer = async <
 
   try {
     const inlineProtocolConfiguration =
-      loadInlineProtocolConfiguration()
+      providedInlineProtocolConfiguration ??
+        loadInlineProtocolConfiguration()
     realtimeV3 = inlineProtocolConfiguration.enabled
       ? makeInlineProtocolRealtimeTransport(
         makeInlineProtocolRuntime(
