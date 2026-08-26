@@ -45,7 +45,7 @@ import { encodeOutputPeerFromChat, encodePeerFromChat } from "@in/server/realtim
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
-import { and, eq, gt, inArray, or, sql } from "drizzle-orm"
+import { and, eq, exists, gt, inArray, ne, or, sql } from "drizzle-orm"
 import {
   agentSessionHash,
   agentSourceHash,
@@ -325,7 +325,7 @@ function prepareSync(input: AgentSessionMessageSync): PreparedSync {
   const assistantRandomId = input.operation.upsert.assistantRandomId
   if (assistantRandomId !== undefined) {
     if (input.role !== AgentSessionMessageRole.ASSISTANT) throw RealtimeRpcError.BadRequest()
-    safePositiveNumber(assistantRandomId)
+    if (assistantRandomId <= 0n) throw RealtimeRpcError.BadRequest()
   }
   if (
     Buffer.byteLength(text, "utf8") > MAX_MESSAGE_BYTES ||
@@ -600,18 +600,41 @@ export async function syncAgentSessionMessages(
         }
 
         const linked = item.input.role === AgentSessionMessageRole.USER
-          ? await tx
+          ? input.mode === AgentSessionSyncMode.HISTORY
+            // HISTORY is an owner-authorized repair of an already-bound
+            // session thread. Delivery routes are intentionally transient, so
+            // repair may adopt any existing non-self row in that thread,
+            // including another user's or bot's prompt. LIVE still requires
+            // this bot's current routed delivery below.
+            ? await tx
+                .select({ globalId: messages.globalId })
+                .from(messages)
+                .where(and(
+                  eq(messages.chatId, lockedChat.id),
+                  eq(messages.messageId, messageId),
+                  ne(messages.fromId, botUserId),
+                ))
+                .for("update")
+                .limit(1)
+            : await tx
               .select({ globalId: messages.globalId })
               .from(messages)
-              .innerJoin(botMessageRoutes, and(
-                eq(botMessageRoutes.chatId, messages.chatId),
-                eq(botMessageRoutes.messageId, messages.messageId),
-              ))
               .where(and(
                 eq(messages.chatId, lockedChat.id),
                 eq(messages.messageId, messageId),
-                eq(botMessageRoutes.botUserId, botUserId),
-                gt(botMessageRoutes.expiresAt, new Date()),
+                ne(messages.fromId, botUserId),
+                or(
+                  eq(messages.fromId, lockedSession.ownerUserId),
+                  exists(tx
+                    .select({ one: sql`1` })
+                    .from(botMessageRoutes)
+                    .where(and(
+                      eq(botMessageRoutes.chatId, messages.chatId),
+                      eq(botMessageRoutes.messageId, messages.messageId),
+                      eq(botMessageRoutes.botUserId, botUserId),
+                      gt(botMessageRoutes.expiresAt, new Date()),
+                    ))),
+                ),
               ))
               .for("update")
               .limit(1)
