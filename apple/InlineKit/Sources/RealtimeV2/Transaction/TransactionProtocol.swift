@@ -133,21 +133,26 @@ public protocol Transaction: Sendable, Codable {
   var effectiveReconnectReplayPolicy: TransactionReconnectPolicy { get }
 }
 
-public extension Transaction {
-  var debugDescription: String {
-    """
-    Transaction
-    method: \(method)
-    input: \(String(describing: input)))
-    """
+func transactionFailureLogScope(method: InlineProtocol.Method) -> String {
+  let methodName = String(describing: method)
+  let isSafeMethodName = methodName.utf8.count <= 40 && methodName.utf8.allSatisfy { byte in
+    switch byte {
+    case 48 ... 57, 65 ... 90, 95, 97 ... 122:
+      true
+    default:
+      false
+    }
   }
+  let suffix = isSafeMethodName ? methodName : "method_\(method.rawValue)"
+  return "RealtimeV2.Transaction.\(suffix)"
 }
 
 public extension Transaction {
   func cancelled() async {}
   func optimistic() async {}
   func failed(error: TransactionError) async {
-    Log.shared.error("Transaction failed \(debugDescription)", error: error)
+    Log.scoped(transactionFailureLogScope(method: method))
+      .error("Transaction failed", error: error)
   }
   func commitOutcomeUnknown() async {}
   var blockers: [TransactionBlocker] { [] }
