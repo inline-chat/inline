@@ -30,6 +30,7 @@
     "src/core/**/*.ts",
     "src/**/*.effect.ts",
     "src/**/*.effect.test.ts",
+    "src/**/*.effect.bun.test.ts",
     "src/**/*.effect.spec.ts",
     "src/modules/effect/**/*.ts"
   ]

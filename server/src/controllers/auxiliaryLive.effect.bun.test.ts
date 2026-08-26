@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it } from "bun:test"
 import {
   Context,
   ErrorReporter as EffectErrorReporter,
@@ -23,6 +23,11 @@ import {
 import {
   AuxiliaryApiGroup,
 } from "./auxiliary.effect"
+import {
+  setupTestLifecycle,
+} from "../__tests__/setup"
+
+setupTestLifecycle()
 
 const makeLiveHandler = async () => {
   const AuxiliaryRouteGroupLive = await import(
@@ -73,12 +78,7 @@ const makeLiveHandler = async () => {
   }
 }
 
-const describeWithBun =
-  process.versions.bun === undefined
-    ? describe.skip
-    : describe
-
-describeWithBun(
+describe(
   "AuxiliaryRouteGroupLive compatibility",
   () => {
     it("matches root and health behavior through production adapters", async () => {
@@ -301,9 +301,32 @@ describeWithBun(
               "content-type",
             ),
           )
-          expect(await effectResponse.text()).toBe(
-            await legacyResponse.text(),
-          )
+          const effectBody =
+            await effectResponse.text()
+          const legacyBody =
+            await legacyResponse.text()
+          if (
+            new URL(request.url).pathname ===
+              "/integrations/notion/callback"
+          ) {
+            // The replacement intentionally accepts OAuth error callbacks
+            // without a code, so an entirely empty query first reports the
+            // still-required state. The legacy oracle rejects code first.
+            expect(
+              JSON.parse(effectBody),
+            ).toMatchObject({
+              property: "/state",
+            })
+            expect(
+              JSON.parse(legacyBody),
+            ).toMatchObject({
+              property: "/code",
+            })
+          } else {
+            expect(effectBody).toBe(
+              legacyBody,
+            )
+          }
         }
 
         for (const provider of [
@@ -319,18 +342,37 @@ describeWithBun(
               live.handler(request),
             ])
 
-          expect(effectResponse.status).toBe(302)
+          // The replacement does not redirect an unclaimed callback into an
+          // app scheme. It clears the legacy cookies and reports the expired
+          // browser session directly; valid app handoffs use claimed,
+          // single-use connector state and are covered by the route tests.
+          const effectBody =
+            await effectResponse.json()
+          expect(legacyResponse.status).toBe(302)
+          expect(effectBody).toEqual({
+            error:
+              "OAuth session expired or was already used",
+          })
+          expect(effectResponse.status).toBe(400)
           expect(
-            effectResponse.headers.get("location"),
-          ).toBe(
-            legacyResponse.headers.get("location"),
+            legacyResponse.headers.get(
+              "location",
+            ),
+          ).toContain(
+            `${provider}?success=false&error=missing_cookie`,
           )
           expect(
-            effectResponse.headers.get("set-cookie"),
-          ).toBe(
-            legacyResponse.headers.get("set-cookie"),
+            effectResponse.headers.get(
+              "location",
+            ),
+          ).toBeNull()
+          expect(
+            effectResponse.headers.get(
+              "set-cookie",
+            ),
+          ).toContain(
+            "state=; Max-Age=0",
           )
-          expect(await effectResponse.text()).toBe("")
         }
       } finally {
         await live.dispose()
