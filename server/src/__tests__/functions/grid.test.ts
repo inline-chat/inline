@@ -135,6 +135,27 @@ describe("grid", () => {
     expect(await db.select().from(gridRooms)).toHaveLength(0)
   })
 
+  test("applies microphone intent in the create and join snapshots", async () => {
+    const { space, contexts } = await createFixture("join-microphone-intent", 2)
+    await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)
+
+    const created = await createGridRoom(
+      { spaceId: BigInt(space.id), microphoneEnabled: true },
+      contexts[0]!,
+    )
+    const roomId = created.grids[0]!.rooms[0]!.id
+    expect(created.grids[0]!.rooms[0]!.avatars[0]!.microphoneEnabled).toBe(true)
+
+    const joined = await joinGridRoom(
+      { roomId, microphoneEnabled: true },
+      contexts[1]!,
+    )
+    expect(joined.grids[0]!.rooms[0]!.avatars.map((avatar) => avatar.microphoneEnabled)).toEqual([
+      true,
+      true,
+    ])
+  })
+
   test("keeps presence leased across the ten-minute recovery budget", async () => {
     const { space, contexts } = await createFixture("lease-budget", 1)
     await toggleSpaceGrid({ spaceId: BigInt(space.id), enabled: true }, contexts[0]!)

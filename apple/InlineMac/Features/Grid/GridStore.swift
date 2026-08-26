@@ -23,6 +23,29 @@ final class GridRoomService {
   var connectionRecoveryAttempt: Int { media.recoveryAttempt }
   let media: GridMediaPresentation
 
+  var inputSelection: AudioInputSelection {
+    get { media.inputSelection }
+    set { mediaCoordinator.setInput(newValue) }
+  }
+
+  var outputSelection: AudioOutputSelection {
+    get { media.outputSelection }
+    set { mediaCoordinator.setOutput(newValue) }
+  }
+
+  var autoUnmuteOnJoin: Bool {
+    get { media.autoUnmuteOnJoin }
+    set { mediaCoordinator.setAutoUnmuteOnJoin(newValue) }
+  }
+
+  var autoMuteWhenAlone: Bool {
+    get { media.autoMuteWhenAlone }
+    set {
+      mediaCoordinator.setAutoMuteWhenAlone(newValue)
+      reconcileAloneAutoMute()
+    }
+  }
+
   @ObservationIgnored private let api: GridRoomAPI
   @ObservationIgnored private let avatarStateSync: GridAvatarStateSync
   @ObservationIgnored private let membershipSync: GridMembershipSync
@@ -291,6 +314,7 @@ final class GridRoomService {
 
   func createAndJoin(spaceID: Int64) {
     let startedAt = Date()
+    let automaticMicrophoneChange = mediaCoordinator.applyAutoUnmuteOnJoin()
     mediaCoordinator.requestMicrophonePermission()
     GridSoundEffects.shared.play(.join)
     log.debug("GRID_TRACE phase=create_client_start space=\(spaceID)")
@@ -298,6 +322,8 @@ final class GridRoomService {
     membershipSync.submit(GridMembershipOperation(
       kind: .create,
       spaceID: spaceID,
+      microphoneEnabled: mediaCoordinator.isMicrophoneEnabled,
+      automaticMicrophoneChange: automaticMicrophoneChange,
       accessRevision: spaceAccessRevisions[spaceID, default: 0],
       revision: membershipMutationRevision,
       startedAt: startedAt
@@ -315,6 +341,15 @@ final class GridRoomService {
     GridSoundEffects.shared.play(.join)
     log.debug("GRID_TRACE phase=join_client_start room=\(roomID)")
     guard let mutation = optimisticallyJoin(roomID: roomID) else { return }
+    let automaticMicrophoneChange = mediaCoordinator.applyAutoUnmuteOnJoin()
+    if automaticMicrophoneChange != nil {
+      applyAvatarMicrophoneState(
+        spaceID: mutation.spaceID,
+        roomID: mutation.roomID,
+        userID: nil,
+        enabled: true
+      )
+    }
     mediaCoordinator.requestMicrophonePermission()
     reconcileMediaDemand()
 
@@ -322,6 +357,8 @@ final class GridRoomService {
     membershipSync.submit(GridMembershipOperation(
       kind: .join(roomID: roomID),
       spaceID: mutation.spaceID,
+      microphoneEnabled: mediaCoordinator.isMicrophoneEnabled,
+      automaticMicrophoneChange: automaticMicrophoneChange,
       accessRevision: spaceAccessRevisions[mutation.spaceID, default: 0],
       revision: mutation.revision,
       startedAt: startedAt
@@ -340,6 +377,8 @@ final class GridRoomService {
     membershipSync.submit(GridMembershipOperation(
       kind: .leave(roomID: mutation.roomID),
       spaceID: spaceID,
+      microphoneEnabled: mediaCoordinator.isMicrophoneEnabled,
+      automaticMicrophoneChange: nil,
       accessRevision: spaceAccessRevisions[spaceID, default: 0],
       revision: mutation.revision,
       startedAt: Date()
@@ -524,6 +563,10 @@ final class GridRoomService {
   }
 
   private func reconcileAloneAutoMute() {
+    guard mediaCoordinator.shouldAutoMuteWhenAlone else {
+      cancelAloneAutoMute()
+      return
+    }
     let target = grids.values.lazy.compactMap { grid -> GridAloneAutoMuteTarget? in
       guard grid.hasCurrentRoomID,
             let room = grid.rooms.first(where: { $0.id == grid.currentRoomID }),
@@ -557,7 +600,8 @@ final class GridRoomService {
     aloneAutoMuteTask = nil
     aloneAutoMuteTarget = nil
 
-    guard let grid = grids[target.spaceID],
+    guard mediaCoordinator.shouldAutoMuteWhenAlone,
+          let grid = grids[target.spaceID],
           grid.hasCurrentRoomID,
           grid.currentRoomID == target.roomID,
           let room = grid.rooms.first(where: { $0.id == target.roomID }),
@@ -837,13 +881,19 @@ final class GridRoomService {
     }
 
     let mutation = pendingMembershipMutations.removeValue(forKey: operation.revision)
+    let isLatestIntent = operation.revision == membershipMutationRevision
     guard operation.accessRevision == spaceAccessRevisions[operation.spaceID, default: 0] else {
+      if isLatestIntent {
+        mediaCoordinator.restoreAutomaticMicrophoneChangeIfCurrent(
+          operation.automaticMicrophoneChange
+        )
+      }
       return
     }
-    let isLatestIntent = operation.revision == membershipMutationRevision
 
     switch event {
     case let .created(_, response):
+      mediaCoordinator.commitAutomaticMicrophoneChange(operation.automaticMicrophoneChange)
       updateMembershipRollbackBaseline(with: response.grids)
       await apply(
         grids: response.grids,
@@ -853,6 +903,7 @@ final class GridRoomService {
         "GRID_TRACE phase=create_client_done space=\(operation.spaceID) elapsed_ms=\(Self.elapsedMilliseconds(since: operation.startedAt))"
       )
     case let .joined(_, response):
+      mediaCoordinator.commitAutomaticMicrophoneChange(operation.automaticMicrophoneChange)
       updateMembershipRollbackBaseline(with: response.grids)
       await apply(
         grids: response.grids,
@@ -866,8 +917,16 @@ final class GridRoomService {
       applySnapshot(nextGrids)
     case let .failed(_, message):
       mediaInteractionStartedAt = nil
-      if isLatestIntent, let mutation {
-        rollbackMembershipMutation(mutation)
+      if isLatestIntent {
+        if let mutation {
+          rollbackMembershipMutation(mutation)
+        }
+        if mediaCoordinator.restoreAutomaticMicrophoneChangeIfCurrent(
+          operation.automaticMicrophoneChange
+        ), let restoredGrid = grids.values.first(where: { $0.hasCurrentRoomID }) {
+          syncMicrophoneStateIfNeeded(grid: restoredGrid)
+          reconcileMediaDemand()
+        }
         if case .leave = operation.kind, let restoredGrid = grids[operation.spaceID] {
           await prepareConnectionIfNeeded(grid: restoredGrid)
         }
@@ -885,6 +944,11 @@ final class GridRoomService {
   private func handle(_ event: GridEvent) async {
     switch event.event {
     case let .changed(changed):
+      if let target = aloneAutoMuteTarget,
+         changed.spaceIds.contains(target.spaceID)
+           || (changed.hasRoomID && changed.roomID == target.roomID) {
+        cancelAloneAutoMute()
+      }
       log.debug(
         "GRID_TRACE phase=changed_event_received spaces=\(changed.spaceIds.map { String($0) }.joined(separator: ",")) room=\(changed.hasRoomID ? String(changed.roomID) : "none")"
       )

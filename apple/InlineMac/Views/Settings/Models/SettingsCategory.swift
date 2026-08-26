@@ -3,6 +3,7 @@ import Foundation
 enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
   case activeSessions
+  case audioAndVideo
   case bots
   case connectors
   case dataStorage
@@ -23,6 +24,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general:
       return "General"
+    case .audioAndVideo:
+      return "Audio and Video"
     case .dataStorage:
       return "Data & Storage"
     case .connectors:
@@ -56,6 +59,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general:
       return "gear"
+    case .audioAndVideo:
+      return "speaker.wave.2"
     case .dataStorage:
       return "externaldrive"
     case .connectors:

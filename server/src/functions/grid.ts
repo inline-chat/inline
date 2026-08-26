@@ -167,7 +167,7 @@ export async function createGridRoom(
         .where(and(eq(gridPresence.roomId, existing.room.id), gt(gridPresence.leaseExpiresAt, new Date())))
 
       if (Number(occupancy?.value ?? 0) === 1) {
-        await claimPresence(tx, context, existing.room.id)
+        await claimPresence(tx, context, existing.room.id, input.microphoneEnabled)
         state.changedRoomId = existing.room.id
         return state
       }
@@ -180,7 +180,7 @@ export async function createGridRoom(
     if (!room) throw RealtimeRpcError.InternalError()
 
     state.changedRoomId = room.id
-    await movePresence(tx, context, room, existing, state)
+    await movePresence(tx, context, room, existing, state, input.microphoneEnabled)
     return state
   })
 
@@ -232,7 +232,7 @@ export async function joinGridRoom(
     }
     const existing = await getActivePresenceWithRoom(tx, context.currentUserId, state)
     if (existing?.room.id === room.id) {
-      await claimPresence(tx, context, room.id)
+      await claimPresence(tx, context, room.id, input.microphoneEnabled)
       return state
     }
 
@@ -245,7 +245,7 @@ export async function joinGridRoom(
       .where(and(eq(gridPresence.roomId, room.id), gt(gridPresence.leaseExpiresAt, new Date())))
     if (Number(occupancy?.value ?? 0) >= MAX_ROOM_CAPACITY) throw RealtimeRpcError.BadRequest()
 
-    await movePresence(tx, context, room, existing, state)
+    await movePresence(tx, context, room, existing, state, input.microphoneEnabled)
     return state
   })
 
@@ -629,6 +629,7 @@ async function movePresence(
   targetRoom: DbGridRoom,
   existing: Awaited<ReturnType<typeof getPresenceWithRoom>>,
   state: GridMutationState,
+  microphoneEnabled?: boolean,
 ) {
   if (existing) {
     state.affectedSpaceIds.add(existing.room.spaceId)
@@ -647,7 +648,7 @@ async function movePresence(
     }
   }
 
-  await claimPresence(tx, context, targetRoom.id)
+  await claimPresence(tx, context, targetRoom.id, microphoneEnabled)
 
   if (existing && existing.room.id !== targetRoom.id) {
     const endedConnection = await reconcileGridRoom(tx, existing.room.id)
@@ -657,7 +658,12 @@ async function movePresence(
   if (endedConnection) state.endedConnections.push(endedConnection)
 }
 
-async function claimPresence(tx: Transaction, context: FunctionContext, roomId: number) {
+async function claimPresence(
+  tx: Transaction,
+  context: FunctionContext,
+  roomId: number,
+  microphoneEnabled?: boolean,
+) {
   const now = new Date()
   await tx
     .insert(gridPresence)
@@ -665,6 +671,7 @@ async function claimPresence(tx: Transaction, context: FunctionContext, roomId: 
       userId: context.currentUserId,
       roomId,
       ownerSessionId: context.currentSessionId,
+      microphoneEnabled: microphoneEnabled ?? false,
       joinedAt: now,
       leaseExpiresAt: new Date(now.getTime() + PRESENCE_LEASE_MS),
     })
@@ -675,8 +682,14 @@ async function claimPresence(tx: Transaction, context: FunctionContext, roomId: 
         ownerSessionId: context.currentSessionId,
         joinedAt: sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.joinedAt} else now() end`,
         mediaMembershipId: sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.mediaMembershipId} else gen_random_uuid() end`,
-        microphoneEnabled: sql`case when ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneEnabled} else false end`,
-        microphoneRevision: sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneRevision} else 0 end`,
+        microphoneEnabled:
+          microphoneEnabled === undefined
+            ? sql`case when ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneEnabled} else false end`
+            : microphoneEnabled,
+        microphoneRevision:
+          microphoneEnabled === undefined
+            ? sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneRevision} else 0 end`
+            : sql`case when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} and ${gridPresence.microphoneEnabled} != ${microphoneEnabled} then ${gridPresence.microphoneRevision} + 1 when ${gridPresence.roomId} = ${roomId} and ${gridPresence.ownerSessionId} = ${context.currentSessionId} then ${gridPresence.microphoneRevision} else 0 end`,
         leaseExpiresAt: new Date(now.getTime() + PRESENCE_LEASE_MS),
       },
     })
