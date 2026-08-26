@@ -6,8 +6,7 @@ import { request as httpsRequest } from "node:https"
 
 const log = new Log("botUpdates.delivery")
 const requestTimeoutMs = 10_000
-let interval: ReturnType<typeof setInterval> | undefined
-let ticking = false
+const workerPollIntervalMs = 2_500
 
 export const webhookRetryDelayMs = (attempt: number): number => {
   const schedule = [10_000, 30_000, 120_000, 600_000, 1_800_000]
@@ -101,25 +100,134 @@ export async function runBotWebhookDeliveryOnce(limit = 25): Promise<number> {
   return claims.length
 }
 
-async function tick() {
-  if (ticking) return
-  ticking = true
-  try {
-    await runBotWebhookDeliveryOnce()
-  } catch (error) {
-    log.error("Bot webhook delivery tick failed", { error })
-  } finally {
-    ticking = false
+export type BotWebhookDeliveryWorkerOptions = {
+  readonly clearIntervalFn?:
+    | typeof clearInterval
+    | undefined
+  readonly pollIntervalMs?: number | undefined
+  readonly runOnce?:
+    | (() => Promise<number>)
+    | undefined
+  readonly setIntervalFn?:
+    | typeof setInterval
+    | undefined
+}
+
+export class BotWebhookDeliveryWorker {
+  private readonly clearIntervalFn:
+    typeof clearInterval
+  private readonly pollIntervalMs: number
+  private readonly runOnce:
+    () => Promise<number>
+  private readonly setIntervalFn:
+    typeof setInterval
+  private inFlight:
+    | Promise<void>
+    | undefined
+  private interval:
+    | ReturnType<typeof setInterval>
+    | undefined
+  private stopping = false
+
+  constructor(
+    options:
+      BotWebhookDeliveryWorkerOptions = {},
+  ) {
+    this.clearIntervalFn =
+      options.clearIntervalFn ??
+      clearInterval
+    this.pollIntervalMs = Math.max(
+      100,
+      options.pollIntervalMs ??
+        workerPollIntervalMs,
+    )
+    this.runOnce =
+      options.runOnce ??
+      (() => runBotWebhookDeliveryOnce())
+    this.setIntervalFn =
+      options.setIntervalFn ??
+      setInterval
+  }
+
+  start(): boolean {
+    if (this.interval !== undefined) {
+      return false
+    }
+
+    this.stopping = false
+    this.interval = this.setIntervalFn(
+      () => void this.pollOnce(),
+      this.pollIntervalMs,
+    )
+    void this.pollOnce()
+    return true
+  }
+
+  async stop(): Promise<void> {
+    this.stopping = true
+    if (this.interval !== undefined) {
+      this.clearIntervalFn(this.interval)
+      this.interval = undefined
+    }
+    await this.inFlight
+  }
+
+  pollOnce(): Promise<void> {
+    if (this.stopping) {
+      return Promise.resolve()
+    }
+    if (this.inFlight !== undefined) {
+      return this.inFlight
+    }
+
+    let work: Promise<void>
+    work = this.drainOnce().finally(() => {
+      if (this.inFlight === work) {
+        this.inFlight = undefined
+      }
+    })
+    this.inFlight = work
+    return work
+  }
+
+  private async drainOnce(): Promise<void> {
+    try {
+      await this.runOnce()
+    } catch (error) {
+      log.error(
+        "Bot webhook delivery tick failed",
+        { error },
+      )
+    }
   }
 }
 
-export function startBotWebhookDeliveryWorker(): void {
-  if (interval || isTest) return
-  void tick()
-  interval = setInterval(() => void tick(), 2_500)
+let worker:
+  | BotWebhookDeliveryWorker
+  | undefined
+
+export function startBotWebhookDeliveryWorker():
+  | BotWebhookDeliveryWorker
+  | null {
+  if (isTest) {
+    return null
+  }
+  worker ??=
+    new BotWebhookDeliveryWorker()
+  worker.start()
+  return worker
 }
 
-export function stopBotWebhookDeliveryWorker(): void {
-  if (interval) clearInterval(interval)
-  interval = undefined
+export async function stopBotWebhookDeliveryWorker(
+  ownedWorker:
+    | BotWebhookDeliveryWorker
+    | null = worker ?? null,
+): Promise<void> {
+  if (ownedWorker === null) {
+    return
+  }
+  await ownedWorker.stop()
+  if (worker === ownedWorker) {
+    worker = undefined
+  }
 }

@@ -7,6 +7,8 @@ import {
 } from "../../core/errors/errorReporter"
 
 export type OwnedProcessName =
+  | "block-content-image"
+  | "bot-webhook-delivery"
   | "database-health-monitor"
   | "grid-provider-effects"
   | "realtime-state"

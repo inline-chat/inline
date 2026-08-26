@@ -38,8 +38,6 @@ import {
 import {
   EventEmitter,
 } from "node:events"
-import { startBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
-import { startBlockContentImageWorker } from "@in/server/modules/message/blockContentImageWorker"
 import { assertProviderAuthStartupConfiguration } from "@in/server/modules/auth/provider/startup"
 
 const sentryRelease =
@@ -143,10 +141,10 @@ export const startServer = (
 }
 
 export const runServer =
-  async (): Promise<CoreProductionServerHandle> => {
-    const handle = await startServer()
-    startBotWebhookDeliveryWorker()
-    startBlockContentImageWorker()
+  async (
+    options: StartServerOptions = {},
+  ): Promise<CoreProductionServerHandle> => {
+    const handle = await startServer(options)
     Log.shared.info(
       `Running on http://${handle.hostname}:${handle.port}`,
     )

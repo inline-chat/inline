@@ -6,11 +6,17 @@ import {
   UserSettingsCleanupProcessLive,
 } from "../../modules/cache/userSettings.effect"
 import {
+  BotWebhookDeliveryProcessLive,
+} from "../../modules/botUpdates/delivery.effect"
+import {
   GridProviderEffectsProcessLive,
 } from "../../modules/grid/providerEffects.effect"
 import {
   DatabaseHealthMonitorProcessLive,
 } from "../../modules/monitoring/databaseHealthMonitor.effect"
+import {
+  BlockContentImageProcessLive,
+} from "../../modules/message/blockContentImageWorker.effect"
 import {
   LegacyRealtimeSessionsLive,
 } from "../../realtime/legacyHostAdapter.effect"
@@ -33,6 +39,8 @@ const OwnedProcessServicesLive =
   LegacyRealtimeSessionsLive.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
+        BlockContentImageProcessLive,
+        BotWebhookDeliveryProcessLive,
         DatabaseHealthMonitorProcessLive,
         GridProviderEffectsProcessLive,
         UserSettingsCleanupProcessLive,
