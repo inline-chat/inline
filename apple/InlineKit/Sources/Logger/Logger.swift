@@ -578,28 +578,28 @@ private actor SentryReporter {
     guard SentryLogPolicy.shouldReport(http: http) else { return }
     if let originalError, !shouldReport(originalError) { return }
 
-    await MainActor.run {
-      _ = SentrySDK.capture(message: "app_error") { sentryScope in
-        sentryScope.setLevel(.error)
-        sentryScope.setFingerprint(SentryLogPolicy.fingerprint(entry: entry, http: http))
-        sentryScope.setTag(value: entry.scope, key: "scope")
-        sentryScope.setTag(value: entry.fileName, key: "source_file")
-        sentryScope.setExtra(value: entry.error ?? "none", key: "error_category")
-        sentryScope.setExtra(value: entry.line, key: "line")
-        if let http {
-          sentryScope.setTag(value: "http.request_failed", key: "event")
-          sentryScope.setTag(value: http.method, key: "http.method")
-          sentryScope.setTag(value: http.endpointTemplate, key: "http.endpoint_template")
-          sentryScope.setTag(value: String(http.statusCode), key: "http.status_code")
-          if let requestID = http.requestID {
-            sentryScope.setExtra(value: requestID, key: "http.request_id")
-          }
-          if let responseBytes = http.responseBytes {
-            sentryScope.setExtra(value: responseBytes, key: "http.response_bytes")
-          }
-          if let apiErrorCode = http.apiErrorCode {
-            sentryScope.setExtra(value: apiErrorCode, key: "http.api_error_code")
-          }
+    // Scope copying and capture are synchronous in sentry-cocoa. Keep that work on
+    // this serial reporter actor so an ordinary handled error cannot stall the UI.
+    _ = SentrySDK.capture(message: "app_error") { sentryScope in
+      sentryScope.setLevel(.error)
+      sentryScope.setFingerprint(SentryLogPolicy.fingerprint(entry: entry, http: http))
+      sentryScope.setTag(value: entry.scope, key: "scope")
+      sentryScope.setTag(value: entry.fileName, key: "source_file")
+      sentryScope.setExtra(value: entry.error ?? "none", key: "error_category")
+      sentryScope.setExtra(value: entry.line, key: "line")
+      if let http {
+        sentryScope.setTag(value: "http.request_failed", key: "event")
+        sentryScope.setTag(value: http.method, key: "http.method")
+        sentryScope.setTag(value: http.endpointTemplate, key: "http.endpoint_template")
+        sentryScope.setTag(value: String(http.statusCode), key: "http.status_code")
+        if let requestID = http.requestID {
+          sentryScope.setExtra(value: requestID, key: "http.request_id")
+        }
+        if let responseBytes = http.responseBytes {
+          sentryScope.setExtra(value: responseBytes, key: "http.response_bytes")
+        }
+        if let apiErrorCode = http.apiErrorCode {
+          sentryScope.setExtra(value: apiErrorCode, key: "http.api_error_code")
         }
       }
     }
