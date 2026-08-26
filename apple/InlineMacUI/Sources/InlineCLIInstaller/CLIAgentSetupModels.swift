@@ -101,6 +101,40 @@ public struct AgentSetupResult: Codable, Equatable, Sendable {
   }
 }
 
+public struct AgentSetupProgressEvent: Codable, Equatable, Sendable {
+  public enum Event: String, Codable, Sendable {
+    case phaseStarted = "phase.started"
+    case phaseCompleted = "phase.completed"
+  }
+
+  public enum Phase: String, Codable, Sendable {
+    case preflight
+    case bot
+    case integration
+    case access
+    case service
+    case verification
+    case configuration
+  }
+
+  public let protocolVersion: Int
+  public let event: Event
+  public let phase: Phase
+  public let outcome: String?
+
+  public init(
+    protocolVersion: Int,
+    event: Event,
+    phase: Phase,
+    outcome: String? = nil
+  ) {
+    self.protocolVersion = protocolVersion
+    self.event = event
+    self.phase = phase
+    self.outcome = outcome
+  }
+}
+
 public struct AgentSetupFailure: LocalizedError, Equatable, Sendable {
   public let code: String
   public let message: String
@@ -155,7 +189,8 @@ public protocol AgentSetupCLIRunning: Sendable {
   func setup(
     target: AgentHarnessTarget,
     installation: CLIInstallation,
-    replaceExisting: Bool
+    replaceExisting: Bool,
+    progress: @escaping @Sendable (AgentSetupProgressEvent) -> Void
   ) async throws -> AgentSetupResult
   func cancel()
   func cancelAndWait()

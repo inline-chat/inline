@@ -3,6 +3,40 @@ import InlineCLIInstaller
 import Logger
 import Observation
 
+struct AgentSetupProgressItem: Equatable, Identifiable {
+  enum ID: String, Equatable, Identifiable {
+    case cli
+    case authentication
+    case discovery
+    case preflight
+    case bot
+    case integration
+    case access
+    case service
+    case verification
+    case configuration
+
+    var id: String { rawValue }
+  }
+
+  enum Outcome: Equatable {
+    case ready
+    case authenticated
+    case found(Int)
+    case cli(String)
+  }
+
+  enum State: Equatable {
+    case pending
+    case active(startedAt: Date)
+    case completed(Outcome?)
+    case failed
+  }
+
+  let id: ID
+  var state: State = .pending
+}
+
 @MainActor
 @Observable
 final class AgentSetupWizardModel {
@@ -20,10 +54,17 @@ final class AgentSetupWizardModel {
     case failed
   }
 
+  enum FailureOperation: Equatable {
+    case preparation
+    case targetSetup
+  }
+
   private(set) var phase: Phase = .choosingLocation
   private(set) var discovery: AgentHarnessDiscovery?
   private(set) var result: AgentSetupResult?
   private(set) var failure: AgentSetupFailure?
+  private(set) var failureOperation: FailureOperation?
+  private(set) var progressItems: [AgentSetupProgressItem] = []
   private(set) var isCancelling = false
   var selectedTargetID: String?
 
@@ -72,6 +113,35 @@ final class AgentSetupWizardModel {
     failure?.supportsConfirmedReplacement == true && selectedTarget?.family == .gateway
   }
 
+  var canGoBack: Bool {
+    switch phase {
+    case .remoteSetup, .choosing, .noHarnesses, .failed:
+      true
+    case .idle, .choosingLocation, .installingCLI, .signingIn, .discovering, .settingUp,
+         .completed:
+      false
+    }
+  }
+
+  var canRetryFailure: Bool {
+    guard let code = failure?.code else { return false }
+    return ![
+      "agent_setup_requires_direct_app",
+      "cli_auth_unavailable",
+      "cli_invalidmanifest",
+    ].contains(code.lowercased())
+  }
+
+  var showsActionFooter: Bool {
+    switch phase {
+    case .idle, .choosingLocation, .remoteSetup:
+      false
+    case .installingCLI, .signingIn, .discovering, .choosing, .noHarnesses, .settingUp,
+         .completed, .failed:
+      true
+    }
+  }
+
   var documentationURL: URL {
     discovery?.documentationURL
       ?? failure?.recoveryURL
@@ -100,8 +170,31 @@ final class AgentSetupWizardModel {
     discovery = nil
     result = nil
     failure = nil
+    failureOperation = nil
+    progressItems = []
     selectedTargetID = nil
     phase = .choosingLocation
+  }
+
+  func goBack() {
+    guard canGoBack, !isBusy else { return }
+    switch phase {
+    case .remoteSetup, .noHarnesses:
+      returnToLocationChoice()
+    case .choosing:
+      returnToLocationChoice()
+    case .failed where failureOperation == .targetSetup:
+      failure = nil
+      failureOperation = nil
+      result = nil
+      progressItems = []
+      phase = .choosing
+    case .failed:
+      returnToLocationChoice()
+    case .idle, .choosingLocation, .installingCLI, .signingIn, .discovering, .settingUp,
+         .completed:
+      break
+    }
   }
 
   func start() {
@@ -133,30 +226,52 @@ final class AgentSetupWizardModel {
       defer { task = nil }
       phase = .settingUp(target.displayName)
       failure = nil
+      failureOperation = nil
       result = nil
+      progressItems = Self.targetSetupProgress
+      beginProgress(.preflight)
       log.info(
         "AGENT_SETUP phase=setup_start target=\(target.id) replaceExisting=\(replaceExisting)"
       )
       do {
-        let setupResult = try await runner.setup(
-          target: target,
-          installation: installation,
-          replaceExisting: replaceExisting
-        )
+        let progressChannel = AsyncStream.makeStream(of: AgentSetupProgressEvent.self)
+        let progressTask = Task { @MainActor [weak self] in
+          for await event in progressChannel.stream {
+            guard let self else { return }
+            self.receiveCLIProgress(event)
+          }
+        }
+        let setupResult: AgentSetupResult
+        do {
+          setupResult = try await runner.setup(
+            target: target,
+            installation: installation,
+            replaceExisting: replaceExisting,
+            progress: { event in
+              progressChannel.continuation.yield(event)
+            }
+          )
+        } catch {
+          progressChannel.continuation.finish()
+          await progressTask.value
+          throw error
+        }
+        progressChannel.continuation.finish()
+        await progressTask.value
         try Task.checkCancellation()
+        completeRemainingSetupProgress(with: setupResult)
         result = setupResult
         phase = .completed
         let readinessCode = setupResult.readiness?.code ?? "none"
         log.info(
           "AGENT_SETUP phase=setup_complete target=\(target.id) status=\(setupResult.status) serviceReady=\(setupResult.service.ready) readinessCode=\(readinessCode)"
         )
-        if isReady {
-          openBot()
-        }
       } catch is CancellationError {
         isCancelling = false
+        progressItems = []
         phase = .choosing
       } catch {
+        failureOperation = .targetSetup
         fail(error)
       }
     }
@@ -166,8 +281,19 @@ final class AgentSetupWizardModel {
     guard !isBusy else { return }
     result = nil
     failure = nil
+    failureOperation = nil
+    progressItems = []
     selectedTargetID = nil
     phase = .choosing
+  }
+
+  func retryFailure() {
+    guard phase == .failed, canRetryFailure else { return }
+    if failureOperation == .targetSetup, selectedTarget != nil, installation != nil {
+      setUpSelectedTarget()
+    } else {
+      start()
+    }
   }
 
   func cancelOperation() {
@@ -196,6 +322,8 @@ final class AgentSetupWizardModel {
     discovery = nil
     result = nil
     failure = nil
+    failureOperation = nil
+    progressItems = Self.preparationProgress
     selectedTargetID = nil
     isCancelling = false
     log.info("AGENT_SETUP phase=prepare_start")
@@ -219,21 +347,28 @@ final class AgentSetupWizardModel {
       }
 
       phase = .installingCLI
+      beginProgress(.cli)
       let preparedInstallation = try await prepareCLI()
       try Task.checkCancellation()
       installation = preparedInstallation
+      completeProgress(.cli, outcome: .ready)
 
       phase = .signingIn
+      beginProgress(.authentication)
       _ = try await LocalCLIAuthenticationService.authenticate(
         preparedInstallation,
         dependencies: dependencies
       )
       try Task.checkCancellation()
+      completeProgress(.authentication, outcome: .authenticated)
 
       phase = .discovering
+      beginProgress(.discovery)
       let harnesses = try await runner.discover(installation: preparedInstallation)
       try Task.checkCancellation()
       discovery = harnesses
+      let installedCount = harnesses.targets.count(where: \.installed)
+      completeProgress(.discovery, outcome: .found(installedCount))
       guard harnesses.targets.contains(where: { $0.installed }) else {
         log.info("AGENT_SETUP phase=discovery_complete installedTargets=0")
         phase = .noHarnesses
@@ -245,8 +380,10 @@ final class AgentSetupWizardModel {
       phase = .choosing
     } catch is CancellationError {
       isCancelling = false
+      progressItems = []
       phase = .choosingLocation
     } catch {
+      failureOperation = .preparation
       fail(error)
     }
   }
@@ -305,6 +442,7 @@ final class AgentSetupWizardModel {
 
   private func fail(_ error: any Error) {
     isCancelling = false
+    failActiveProgress()
     if let setupFailure = error as? AgentSetupFailure {
       failure = setupFailure
     } else if let authFailure = error as? CLIAuthBootstrapError {
@@ -324,6 +462,99 @@ final class AgentSetupWizardModel {
     )
     phase = .failed
   }
+
+  private func receiveCLIProgress(_ event: AgentSetupProgressEvent) {
+    guard case .settingUp = phase else { return }
+    if event.phase == .configuration,
+       !progressItems.contains(where: { $0.id == .configuration }) {
+      progressItems = [AgentSetupProgressItem(id: .configuration)]
+    }
+    guard let id = Self.progressID(for: event.phase) else { return }
+    switch event.event {
+    case .phaseStarted:
+      beginProgress(id)
+    case .phaseCompleted:
+      completeProgress(id, outcome: event.outcome.map(AgentSetupProgressItem.Outcome.cli))
+    }
+  }
+
+  private func beginProgress(_ id: AgentSetupProgressItem.ID) {
+    guard let index = progressItems.firstIndex(where: { $0.id == id }) else { return }
+    if case .completed = progressItems[index].state { return }
+    progressItems[index].state = .active(startedAt: Date())
+  }
+
+  private func completeProgress(
+    _ id: AgentSetupProgressItem.ID,
+    outcome: AgentSetupProgressItem.Outcome? = nil
+  ) {
+    guard let index = progressItems.firstIndex(where: { $0.id == id }) else { return }
+    progressItems[index].state = .completed(outcome)
+  }
+
+  private func failActiveProgress() {
+    if let index = progressItems.lastIndex(where: {
+      if case .active = $0.state { return true }
+      return false
+    }) {
+      progressItems[index].state = .failed
+    } else if let index = progressItems.firstIndex(where: {
+      if case .pending = $0.state { return true }
+      return false
+    }) {
+      progressItems[index].state = .failed
+    }
+  }
+
+  private func completeRemainingSetupProgress(with result: AgentSetupResult) {
+    for index in progressItems.indices {
+      if case .completed = progressItems[index].state { continue }
+      let outcome: AgentSetupProgressItem.Outcome? = switch progressItems[index].id {
+      case .service:
+        .cli(result.service.action)
+      case .verification:
+        .cli(Self.isReadyResult(result) ? "ready" : "action_required")
+      case .cli, .authentication, .discovery, .preflight, .bot, .integration, .access,
+           .configuration:
+        nil
+      }
+      progressItems[index].state = .completed(outcome)
+    }
+  }
+
+  private static func isReadyResult(_ result: AgentSetupResult) -> Bool {
+    guard result.status == "ready", result.service.ready else { return false }
+    return result.readiness?.ready ?? true
+  }
+
+  private static func progressID(
+    for phase: AgentSetupProgressEvent.Phase
+  ) -> AgentSetupProgressItem.ID? {
+    switch phase {
+    case .preflight: .preflight
+    case .bot: .bot
+    case .integration: .integration
+    case .access: .access
+    case .service: .service
+    case .verification: .verification
+    case .configuration: .configuration
+    }
+  }
+
+  private static let preparationProgress: [AgentSetupProgressItem] = [
+    AgentSetupProgressItem(id: .cli),
+    AgentSetupProgressItem(id: .authentication),
+    AgentSetupProgressItem(id: .discovery),
+  ]
+
+  private static let targetSetupProgress: [AgentSetupProgressItem] = [
+    AgentSetupProgressItem(id: .preflight),
+    AgentSetupProgressItem(id: .bot),
+    AgentSetupProgressItem(id: .integration),
+    AgentSetupProgressItem(id: .access),
+    AgentSetupProgressItem(id: .service),
+    AgentSetupProgressItem(id: .verification),
+  ]
 
   private func failureForAuthentication(_ error: CLIAuthBootstrapError) -> AgentSetupFailure {
     let code: String
