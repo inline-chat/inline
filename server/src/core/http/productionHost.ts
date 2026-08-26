@@ -23,6 +23,12 @@ import {
   ProductionProcessServicesLive,
 } from "../effect/productionRuntime"
 import {
+  BotWebhookDeliveryProcess,
+} from "../../modules/botUpdates/delivery.effect"
+import {
+  BlockContentImageProcess,
+} from "../../modules/message/blockContentImageWorker.effect"
+import {
   markServerShuttingDown,
   type ShutdownSignal,
 } from "../../lifecycle/shutdownState"
@@ -206,6 +212,9 @@ export interface StartCoreProductionServerOptions<
     ) => void)
     | undefined
   readonly port?: number | undefined
+  readonly startBackgroundProcesses?:
+    | boolean
+    | undefined
 }
 
 export interface CoreProductionServerHandle {
@@ -235,7 +244,9 @@ const bindCurrentRealtimeServer = async (
 const startupCause = (
   cause: unknown,
 ): Cause.Cause<unknown> =>
-  Cause.die(cause)
+  cause instanceof CoreProductionStartupError
+    ? cause.cause
+    : Cause.die(cause)
 
 export const shutdownWithDeadline = async (
   operation: () => Promise<void>,
@@ -295,6 +306,7 @@ export const startCoreProductionServer = async <
   markShuttingDown =
     markServerShuttingDown,
   port = 0,
+  startBackgroundProcesses = false,
 }: StartCoreProductionServerOptions<
   ApplicationError,
   ApplicationRequirements
@@ -479,6 +491,30 @@ export const startCoreProductionServer = async <
       throw new Error(
         "The Effect production listener did not bind a TCP address.",
       )
+    }
+
+    if (startBackgroundProcesses) {
+      // Preserve the pre-Effect production contract: the listener and
+      // realtime registry bind before either worker launches its first poll.
+      const processStartExit =
+        await bridge.runPromiseExit(
+          Effect.all(
+            [
+              BotWebhookDeliveryProcess.use(
+                (process) => process.start,
+              ),
+              BlockContentImageProcess.use(
+                (process) => process.start,
+              ),
+            ],
+            { concurrency: 1 },
+          ),
+        )
+      if (Exit.isFailure(processStartExit)) {
+        throw new CoreProductionStartupError({
+          cause: processStartExit.cause,
+        })
+      }
     }
   } catch (cause) {
     await server?.stop(true)

@@ -101,8 +101,9 @@ export interface StartServerOptions {
  * The deployed request graph is Effect/Bun owned. Retained business functions
  * remain behind the narrow Live adapters until their later module migrations.
  */
-export const startServer = (
+const startServerWithProcessOwnership = (
   options: StartServerOptions = {},
+  startBackgroundProcesses: boolean,
 ): Promise<CoreProductionServerHandle> => {
   assertProviderAuthStartupConfiguration({
     isProduction: NODE_ENV === "production",
@@ -145,14 +146,27 @@ export const startServer = (
       options.installSignalHandlers ??
       true,
     port: options.port ?? PORT,
+    startBackgroundProcesses,
   })
 }
+
+export const startServer = (
+  options: StartServerOptions = {},
+): Promise<CoreProductionServerHandle> =>
+  startServerWithProcessOwnership(
+    options,
+    false,
+  )
 
 export const runServer =
   async (
     options: StartServerOptions = {},
   ): Promise<CoreProductionServerHandle> => {
-    const handle = await startServer(options)
+    const handle =
+      await startServerWithProcessOwnership(
+        options,
+        true,
+      )
     Log.shared.info(
       `Running on http://${handle.hostname}:${handle.port}`,
     )

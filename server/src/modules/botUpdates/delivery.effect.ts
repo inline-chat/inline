@@ -8,16 +8,17 @@ import {
 } from "../../core/errors/errorReporter"
 import {
   ProcessServiceStartFailure,
-  acquireOwnedProcess,
+  acquireDeferredOwnedProcess,
 } from "../monitoring/ownedProcess.effect"
 import type {
   BotWebhookDeliveryWorker,
 } from "./delivery"
 
 export interface BotWebhookDeliveryProcessShape {
-  readonly worker:
-    | BotWebhookDeliveryWorker
-    | null
+  readonly start: Effect.Effect<
+    BotWebhookDeliveryWorker | null,
+    ProcessServiceStartFailure
+  >
 }
 
 export class BotWebhookDeliveryProcess extends Context.Service<
@@ -97,13 +98,11 @@ export const makeBotWebhookDeliveryProcessLayer =
   > =>
   Layer.effect(
     BotWebhookDeliveryProcess,
-    acquireOwnedProcess({
+    acquireDeferredOwnedProcess({
       name: "bot-webhook-delivery",
       start: adapter.start,
       stop: adapter.stop,
-    }).pipe(
-      Effect.map((worker) => ({ worker })),
-    ),
+    }),
   )
 
 export const BotWebhookDeliveryProcessLive =

@@ -8,16 +8,17 @@ import {
 } from "../../core/errors/errorReporter"
 import {
   ProcessServiceStartFailure,
-  acquireOwnedProcess,
+  acquireDeferredOwnedProcess,
 } from "../monitoring/ownedProcess.effect"
 import type {
   BlockContentImageWorker,
 } from "./blockContentImageWorker"
 
 export interface BlockContentImageProcessShape {
-  readonly worker:
-    | BlockContentImageWorker
-    | null
+  readonly start: Effect.Effect<
+    BlockContentImageWorker | null,
+    ProcessServiceStartFailure
+  >
 }
 
 export class BlockContentImageProcess extends Context.Service<
@@ -97,13 +98,11 @@ export const makeBlockContentImageProcessLayer =
   > =>
   Layer.effect(
     BlockContentImageProcess,
-    acquireOwnedProcess({
+    acquireDeferredOwnedProcess({
       name: "block-content-image",
       start: adapter.start,
       stop: adapter.stop,
-    }).pipe(
-      Effect.map((worker) => ({ worker })),
-    ),
+    }),
   )
 
 export const BlockContentImageProcessLive =
