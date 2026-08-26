@@ -50,10 +50,11 @@ describe(
 
           yield* BotWebhookDeliveryProcess.use(
             (process) =>
-              Effect.sync(() => {
-                expect(process.worker).toBe(
-                  worker,
-                )
+              Effect.gen(function* () {
+                expect(events).toEqual([])
+                expect(
+                  yield* process.start,
+                ).toBe(worker)
               }),
           ).pipe(Effect.provide(layer))
 

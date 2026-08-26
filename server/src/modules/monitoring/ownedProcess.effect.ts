@@ -36,6 +36,13 @@ export interface OwnedProcessAdapter<Resource> {
   ) => void | Promise<void>
 }
 
+export interface DeferredOwnedProcess<Resource> {
+  readonly start: Effect.Effect<
+    Resource,
+    ProcessServiceStartFailure
+  >
+}
+
 /**
  * Acquires one process-owned legacy service in an Effect Scope.
  *
@@ -75,4 +82,73 @@ export const acquireOwnedProcess = <Resource>(
           }),
         ),
       ),
+  )
+
+/**
+ * Acquires ownership immediately but defers starting the legacy process until
+ * the returned Effect runs. This lets the production host bind its listener
+ * before background work begins while retaining scoped, awaited release.
+ */
+export const acquireDeferredOwnedProcess = <Resource>(
+  adapter: OwnedProcessAdapter<Resource>,
+) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      let starting:
+        | Promise<Resource>
+        | undefined
+
+      const start = Effect.tryPromise({
+        try: () => {
+          starting ??=
+            Promise.resolve().then(
+              () => adapter.start(),
+            )
+          return starting
+        },
+        catch: (cause) =>
+          new ProcessServiceStartFailure({
+            cause,
+            service: adapter.name,
+          }),
+      })
+
+      return {
+        start,
+        stop: async () => {
+          if (starting === undefined) {
+            return
+          }
+
+          let resource: Resource
+          try {
+            resource = await starting
+          } catch {
+            return
+          }
+          await adapter.stop(resource)
+        },
+      }
+    }),
+    (process) =>
+      Effect.tryPromise({
+        try: process.stop,
+        catch: (cause) =>
+          new ProcessServiceStopFailure({
+            cause,
+            service: adapter.name,
+          }),
+      }).pipe(
+        Effect.catchCause((cause) =>
+          reportUnexpectedError({
+            cause,
+            context: {
+              operation:
+                `process.${adapter.name}.stop`,
+            },
+          }),
+        ),
+      ),
+  ).pipe(
+    Effect.map(({ start }) => ({ start })),
   )
