@@ -5,7 +5,7 @@ mod hermes;
 mod openclaw;
 mod process;
 
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
@@ -32,6 +32,58 @@ pub(super) struct GatewaySetupOutcome {
 
 pub(super) struct GatewayPreflight {
     pub(super) configured_bot_id: Option<i64>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct SetupProgressReporter {
+    protocol_version: Option<u32>,
+}
+
+impl SetupProgressReporter {
+    fn new(protocol_version: Option<u32>) -> Self {
+        Self { protocol_version }
+    }
+
+    pub(super) fn started(&self, phase: &'static str) {
+        self.emit("phase.started", phase, None);
+    }
+
+    pub(super) fn completed(&self, phase: &'static str, outcome: &'static str) {
+        self.emit("phase.completed", phase, Some(outcome));
+    }
+
+    fn emit(&self, event: &'static str, phase: &'static str, outcome: Option<&'static str>) {
+        let Some(protocol_version) = self.protocol_version else {
+            return;
+        };
+        if let Ok(line) = app_progress_event_line(protocol_version, event, phase, outcome) {
+            println!("{line}");
+            let _ = io::stdout().flush();
+        }
+    }
+}
+
+fn app_progress_event_line(
+    protocol_version: u32,
+    event: &'static str,
+    phase: &'static str,
+    outcome: Option<&'static str>,
+) -> Result<String, serde_json::Error> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ProgressEvent {
+        protocol_version: u32,
+        event: &'static str,
+        phase: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        outcome: Option<&'static str>,
+    }
+    serde_json::to_string(&ProgressEvent {
+        protocol_version,
+        event,
+        phase,
+        outcome,
+    })
 }
 
 #[derive(Subcommand)]
@@ -91,6 +143,9 @@ pub(crate) struct AgentsSetupArgs {
     /// Disable prompts; all required selections must be provided as flags.
     #[arg(long)]
     pub(crate) non_interactive: bool,
+    /// Emit versioned NDJSON setup events for a native app host.
+    #[arg(long, value_name = "VERSION", hide = true)]
+    pub(crate) app_protocol: Option<u32>,
 }
 
 pub(crate) struct ResolvedSetup {
@@ -168,6 +223,9 @@ pub(crate) fn resolve_setup(
 ) -> Result<ResolvedSetup, Box<dyn std::error::Error>> {
     debug_assert!(catalog::bridge_catalog_matches());
     validate_common_args(&args)?;
+    if args.app_protocol.is_some() && !json {
+        return Err(CliError::invalid_args("--app-protocol requires --json").into());
+    }
     let non_interactive =
         args.non_interactive || json || !io::stdin().is_terminal() || !io::stderr().is_terminal();
     let installed = if let Some(target) = args.target {
@@ -305,6 +363,8 @@ pub(crate) async fn setup(
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let target = resolved.installed.descriptor.target;
+    let app_protocol = resolved.args.app_protocol;
+    let progress = SetupProgressReporter::new(app_protocol);
     if resolved.args.dry_run {
         let preflight = match target {
             AgentTarget::Openclaw => openclaw::preflight(&resolved.installed, &resolved.args)
@@ -320,12 +380,12 @@ pub(crate) async fn setup(
         if let Err(error) = preflight {
             return report_setup_failure(error, target, "preflight", &[], false, json, json_format);
         }
-        return print_dry_run(&resolved, json, json_format);
+        return print_dry_run(&resolved, json, json_format, app_protocol);
     }
     let owner_auth = owner_auth.ok_or_else(CliError::not_authenticated)?;
     match target {
         AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
-            let outcome = match bridge::setup_provider_core(
+            let outcome = match bridge::setup_provider_core_with_progress(
                 config,
                 owner_auth,
                 target.descriptor().id,
@@ -336,6 +396,12 @@ pub(crate) async fn setup(
                     allow_adapter_install: !resolved.args.no_install,
                     manage_service: !resolved.args.no_restart,
                     operator_user_ids: Some(resolved.args.allow_users),
+                },
+                |event| match event {
+                    bridge::ProviderSetupProgress::Started(phase) => progress.started(phase),
+                    bridge::ProviderSetupProgress::Completed(phase, outcome) => {
+                        progress.completed(phase, outcome)
+                    }
                 },
             )
             .await
@@ -353,9 +419,10 @@ pub(crate) async fn setup(
                     );
                 }
             };
-            print_bridge_result(outcome, json, json_format)
+            print_bridge_result(outcome, json, json_format, app_protocol)
         }
         AgentTarget::Openclaw | AgentTarget::Hermes => {
+            progress.started("preflight");
             let preflight = match target {
                 AgentTarget::Openclaw => {
                     openclaw::preflight(&resolved.installed, &resolved.args).await
@@ -364,7 +431,10 @@ pub(crate) async fn setup(
                 _ => unreachable!(),
             };
             let preflight = match preflight {
-                Ok(preflight) => preflight,
+                Ok(preflight) => {
+                    progress.completed("preflight", "ready");
+                    preflight
+                }
                 Err(error) => {
                     return report_setup_failure(
                         error,
@@ -378,6 +448,7 @@ pub(crate) async fn setup(
                 }
             };
             let instance = gateway_instance(resolved.args.profile.as_deref());
+            progress.started("bot");
             let bot = match bot::ensure_gateway_bot(
                 config,
                 owner_auth,
@@ -388,7 +459,10 @@ pub(crate) async fn setup(
             )
             .await
             {
-                Ok(bot) => bot,
+                Ok(bot) => {
+                    progress.completed("bot", bot.action);
+                    bot
+                }
                 Err(error) => {
                     return report_setup_failure(
                         error,
@@ -403,10 +477,10 @@ pub(crate) async fn setup(
             };
             let outcome = match target {
                 AgentTarget::Openclaw => {
-                    openclaw::setup(&resolved.installed, &bot, &resolved.args).await
+                    openclaw::setup(&resolved.installed, &bot, &resolved.args, &progress).await
                 }
                 AgentTarget::Hermes => {
-                    hermes::setup(&resolved.installed, &bot, &resolved.args).await
+                    hermes::setup(&resolved.installed, &bot, &resolved.args, &progress).await
                 }
                 _ => unreachable!(),
             };
@@ -431,6 +505,7 @@ pub(crate) async fn setup(
                 outcome,
                 json,
                 json_format,
+                app_protocol,
             )
         }
     }
@@ -515,6 +590,7 @@ fn print_bridge_result(
     outcome: bridge::ProviderSetupOutcome,
     json: bool,
     json_format: JsonFormat,
+    app_protocol: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -590,7 +666,7 @@ fn print_bridge_result(
         },
     };
     if json {
-        crate::output::print_json(&output, json_format)?;
+        print_setup_result(&output, json_format, app_protocol)?;
     } else {
         if ready {
             println!("{} is ready in Inline.", outcome.display_name);
@@ -612,6 +688,15 @@ fn print_bridge_result(
 }
 
 fn validate_common_args(args: &AgentsSetupArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if args
+        .app_protocol
+        .is_some_and(|version| version != AGENTS_PROTOCOL_VERSION)
+    {
+        return Err(CliError::invalid_args(format!(
+            "unsupported --app-protocol version; expected {AGENTS_PROTOCOL_VERSION}"
+        ))
+        .into());
+    }
     if args.allow_users.iter().any(|id| *id <= 0) {
         return Err(CliError::invalid_args("--allow-user IDs must be positive").into());
     }
@@ -663,6 +748,7 @@ fn print_gateway_result(
     outcome: GatewaySetupOutcome,
     json: bool,
     json_format: JsonFormat,
+    app_protocol: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -735,7 +821,7 @@ fn print_gateway_result(
         },
     };
     if json {
-        crate::output::print_json(&output, json_format)?;
+        print_setup_result(&output, json_format, app_protocol)?;
     } else {
         println!("{} is configured in Inline.", descriptor.display_name);
         println!("Bot: @{} ({})", bot.username, bot.id);
@@ -747,6 +833,38 @@ fn print_gateway_result(
         }
     }
     Ok(())
+}
+
+fn print_setup_result<T: serde::Serialize>(
+    result: &T,
+    json_format: JsonFormat,
+    app_protocol: Option<u32>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(protocol_version) = app_protocol {
+        println!("{}", app_result_event_line(protocol_version, result)?);
+        io::stdout().flush()?;
+    } else {
+        crate::output::print_json(result, json_format)?;
+    }
+    Ok(())
+}
+
+fn app_result_event_line<T: serde::Serialize>(
+    protocol_version: u32,
+    result: &T,
+) -> Result<String, serde_json::Error> {
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ResultEvent<'a, T> {
+        protocol_version: u32,
+        event: &'static str,
+        result: &'a T,
+    }
+    serde_json::to_string(&ResultEvent {
+        protocol_version,
+        event: "result",
+        result,
+    })
 }
 
 fn validate_target_args(
@@ -802,6 +920,7 @@ fn print_dry_run(
     resolved: &ResolvedSetup,
     json: bool,
     json_format: JsonFormat,
+    app_protocol: Option<u32>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -824,7 +943,7 @@ fn print_dry_run(
         installed: true,
     };
     if json {
-        crate::output::print_json(&result, json_format)?;
+        print_setup_result(&result, json_format, app_protocol)?;
     } else {
         println!(
             "{} is installed and can be set up.",
@@ -858,5 +977,30 @@ mod app_protocol_tests {
                 .any(|target| target.id == "codex" && target.installed)
         );
         assert!(!json.contains("/private/example"));
+    }
+
+    #[test]
+    fn setup_progress_is_token_free_fixed_code_ndjson() {
+        let line = app_progress_event_line(1, "phase.completed", "bot", Some("reused"))
+            .expect("serialize progress event");
+        let value: serde_json::Value = serde_json::from_str(&line).expect("decode progress event");
+
+        assert_eq!(value["protocolVersion"], 1);
+        assert_eq!(value["event"], "phase.completed");
+        assert_eq!(value["phase"], "bot");
+        assert_eq!(value["outcome"], "reused");
+        assert!(!line.contains("token"));
+        assert!(!line.contains("/private/"));
+    }
+
+    #[test]
+    fn setup_result_is_the_terminal_event() {
+        let result = serde_json::json!({"ok": true, "action": "agents.setup"});
+        let line = app_result_event_line(1, &result).expect("serialize result event");
+        let value: serde_json::Value = serde_json::from_str(&line).expect("decode result event");
+
+        assert_eq!(value["protocolVersion"], 1);
+        assert_eq!(value["event"], "result");
+        assert_eq!(value["result"]["action"], "agents.setup");
     }
 }

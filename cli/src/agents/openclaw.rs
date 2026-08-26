@@ -7,7 +7,10 @@ use std::time::Duration;
 use super::bot::ManagedBot;
 use super::discovery::InstalledTarget;
 use super::process::{require_success, run};
-use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, cli_error};
+use super::{
+    AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, SetupProgressReporter,
+    cli_error,
+};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -105,7 +108,9 @@ pub(super) async fn setup(
     installed: &InstalledTarget,
     bot: &ManagedBot,
     args: &AgentsSetupArgs,
+    progress: &SetupProgressReporter,
 ) -> Result<GatewaySetupOutcome, Box<dyn std::error::Error>> {
+    progress.started("integration");
     let prefix = profile_prefix(args.profile.as_deref());
     let _host_version = require_success(
         &installed.executable,
@@ -174,7 +179,9 @@ pub(super) async fn setup(
         };
         version
     };
+    progress.completed("integration", integration_action);
 
+    progress.started("access");
     let config_output = require_success(
         &installed.executable,
         &prefix,
@@ -208,7 +215,9 @@ pub(super) async fn setup(
     )
     .await?;
     configure_access(installed, &prefix, bot, args).await?;
+    progress.completed("access", "configured");
 
+    progress.started("service");
     let (service_action, ready) = if args.no_restart {
         ("skipped", false)
     } else {
@@ -249,6 +258,8 @@ pub(super) async fn setup(
             .await?;
             "installed"
         };
+        progress.completed("service", action);
+        progress.started("verification");
         let channel_status = require_success(
             &installed.executable,
             &prefix,
@@ -265,8 +276,14 @@ pub(super) async fn setup(
         )
         .await?;
         verify_channel_status(&channel_status, bot.id)?;
+        progress.completed("verification", "ready");
         (action, true)
     };
+    if !ready {
+        progress.completed("service", service_action);
+        progress.started("verification");
+        progress.completed("verification", "action_required");
+    }
     Ok(GatewaySetupOutcome {
         integration_action,
         integration_version: version,

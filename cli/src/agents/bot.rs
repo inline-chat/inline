@@ -17,6 +17,7 @@ pub(super) struct ManagedBot {
     pub(super) id: i64,
     pub(super) username: String,
     pub(super) name: String,
+    pub(super) action: &'static str,
     token: String,
 }
 
@@ -175,6 +176,11 @@ pub(super) async fn ensure_gateway_bot(
             })?;
     }
 
+    let action = if created_token.is_some() {
+        "created"
+    } else {
+        "reused"
+    };
     let token = match created_token {
         Some(token) if !token.trim().is_empty() => token,
         _ => {
@@ -226,6 +232,7 @@ pub(super) async fn ensure_gateway_bot(
             .filter(|name| !name.is_empty())
             .unwrap_or(&create_name)
             .to_string(),
+        action,
         token,
     })
 }

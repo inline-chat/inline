@@ -200,6 +200,11 @@ pub(crate) struct ProviderSetupOptions {
     pub(crate) operator_user_ids: Option<Vec<i64>>,
 }
 
+pub(crate) enum ProviderSetupProgress {
+    Started(&'static str),
+    Completed(&'static str, &'static str),
+}
+
 pub async fn setup_provider(
     config: &Config,
     owner_auth: AuthCredential,
@@ -264,6 +269,31 @@ pub(crate) async fn setup_provider_core(
     name: Option<String>,
     options: ProviderSetupOptions,
 ) -> Result<ProviderSetupOutcome, Box<dyn std::error::Error>> {
+    setup_provider_core_with_progress(
+        config,
+        owner_auth,
+        provider_id,
+        folder,
+        name,
+        options,
+        |_| {},
+    )
+    .await
+}
+
+pub(crate) async fn setup_provider_core_with_progress<F>(
+    config: &Config,
+    owner_auth: AuthCredential,
+    provider_id: &str,
+    folder: Option<PathBuf>,
+    name: Option<String>,
+    options: ProviderSetupOptions,
+    mut progress: F,
+) -> Result<ProviderSetupOutcome, Box<dyn std::error::Error>>
+where
+    F: FnMut(ProviderSetupProgress),
+{
+    progress(ProviderSetupProgress::Started("preflight"));
     let workspace = resolve_setup_workspace(folder)?;
     let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
     let me = owner
@@ -275,6 +305,9 @@ pub(crate) async fn setup_provider_core(
         return Err(io::Error::new(io::ErrorKind::InvalidData, "owner id is invalid").into());
     }
     let account_paths = BridgePaths::for_owner(config, me.id);
+    progress(ProviderSetupProgress::Completed("preflight", "ready"));
+
+    progress(ProviderSetupProgress::Started("integration"));
     let provider = prepare_setup_provider(
         &account_paths,
         provider_id,
@@ -282,6 +315,9 @@ pub(crate) async fn setup_provider_core(
         options.allow_adapter_install,
     )
     .map_err(io::Error::other)?;
+    progress(ProviderSetupProgress::Completed("integration", "ready"));
+
+    progress(ProviderSetupProgress::Started("bot"));
     let provisioned = provision_dev_bot(
         config,
         &mut owner,
@@ -291,10 +327,16 @@ pub(crate) async fn setup_provider_core(
         name.as_deref(),
     )
     .await?;
+    progress(ProviderSetupProgress::Completed("bot", "configured"));
+
+    progress(ProviderSetupProgress::Started("access"));
     validate_account(&provisioned.account, &provisioned.secrets)?;
     if let Some(operator_user_ids) = options.operator_user_ids.as_deref() {
         set_provider_operator_ids(&provisioned.account, provider_id, operator_user_ids)?;
     }
+    progress(ProviderSetupProgress::Completed("access", "configured"));
+
+    progress(ProviderSetupProgress::Started("service"));
     let background_service = if options.manage_service {
         service::install_service(&provisioned.paths, &provisioned.account)?;
         service::start_service(
@@ -303,15 +345,25 @@ pub(crate) async fn setup_provider_core(
             &provisioned.secrets,
         )
         .await?;
-        service::wait_for_provider_ready(
+        progress(ProviderSetupProgress::Completed("service", "started"));
+        progress(ProviderSetupProgress::Started("verification"));
+        let status = service::wait_for_provider_ready(
             &provisioned.paths,
             &provisioned.account,
             &provisioned.installation,
             &provisioned.secrets,
         )
         .await?
-        .status
+        .status;
+        progress(ProviderSetupProgress::Completed("verification", "ready"));
+        status
     } else {
+        progress(ProviderSetupProgress::Completed("service", "skipped"));
+        progress(ProviderSetupProgress::Started("verification"));
+        progress(ProviderSetupProgress::Completed(
+            "verification",
+            "action_required",
+        ));
         "restart_required".to_string()
     };
     Ok(ProviderSetupOutcome {

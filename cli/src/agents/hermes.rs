@@ -6,7 +6,10 @@ use std::time::Duration;
 use super::bot::ManagedBot;
 use super::discovery::{InstalledTarget, find_executable};
 use super::process::{require_success, require_success_with_environment, run_with_environment};
-use super::{AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, cli_error};
+use super::{
+    AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, SetupProgressReporter,
+    cli_error,
+};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -98,7 +101,9 @@ pub(super) async fn setup(
     installed: &InstalledTarget,
     bot: &ManagedBot,
     args: &AgentsSetupArgs,
+    progress: &SetupProgressReporter,
 ) -> Result<GatewaySetupOutcome, Box<dyn std::error::Error>> {
+    progress.started("integration");
     let profile = resolve_profile(installed, args.profile.as_deref()).await?;
     let environment = &profile.environment;
     let _host_version = require_success(
@@ -141,7 +146,9 @@ pub(super) async fn setup(
             )
         })?;
     integration.version = machine.version;
+    progress.completed("integration", integration.action);
 
+    progress.started("access");
     let owner_user_id = bot.owner_user_id.to_string();
     let allowed = args
         .allow_users
@@ -186,7 +193,9 @@ pub(super) async fn setup(
     )
     .await?;
     verify_status(&credential_status, bot.id)?;
+    progress.completed("access", "configured");
 
+    progress.started("service");
     let (service_action, ready) = if args.no_restart {
         ("skipped", false)
     } else {
@@ -233,6 +242,12 @@ pub(super) async fn setup(
         .await?;
         (action, true)
     };
+    progress.completed("service", service_action);
+    progress.started("verification");
+    progress.completed(
+        "verification",
+        if ready { "ready" } else { "action_required" },
+    );
 
     Ok(GatewaySetupOutcome {
         integration_action: integration.action,
