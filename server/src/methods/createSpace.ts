@@ -23,6 +23,7 @@ import {
   normalizeSpaceHandle,
 } from "@in/server/modules/spaces/spaceHandle"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
+import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 
 export const Input = Type.Object({
   name: Type.String(),
@@ -46,8 +47,7 @@ export const handler = async (
   }
 
   try {
-    // Create the space
-    let space = await db.transaction(async (tx) => {
+    const { space, member, mainChat } = await db.transaction(async (tx) => {
       if (handle) {
         await lockPublicHandleNamespace(tx, handle)
         const availability = await getPublicHandleAvailability(tx, handle)
@@ -56,25 +56,20 @@ export const handler = async (
         }
       }
 
-      return (
-        await tx
-          .insert(spaces)
-          .values({
-            name: input.name,
-            handle,
-            creatorId: context.currentUserId,
-          })
-          .returning()
-      )[0]
-    })
+      const [space] = await tx
+        .insert(spaces)
+        .values({
+          name: input.name,
+          handle,
+          creatorId: context.currentUserId,
+        })
+        .returning()
 
-    if (!space) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
+      if (!space) {
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
 
-    // Create the space membership
-    let member = (
-      await db
+      const [member] = await tx
         .insert(members)
         .values({
           spaceId: space.id,
@@ -83,29 +78,31 @@ export const handler = async (
           date: new Date(),
         })
         .returning()
-    )[0]
 
-    if (!member) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
+      if (!member) {
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
 
-    // Create the primary chat with the space's identity.
-    let [mainChat] = await db
-      .insert(chats)
-      .values({
-        spaceId: space.id,
-        type: "thread",
-        title: space.name,
-        publicThread: true,
-        description: "Main chat for everyone in the space",
-        threadNumber: 1,
-        date: new Date(),
-      })
-      .returning()
+      const threadNumber = await allocateThreadNumber(tx, { type: "space", id: space.id })
+      const [mainChat] = await tx
+        .insert(chats)
+        .values({
+          spaceId: space.id,
+          type: "thread",
+          title: space.name,
+          publicThread: true,
+          description: "Main chat for everyone in the space",
+          threadNumber,
+          date: new Date(),
+        })
+        .returning()
 
-    if (!mainChat) {
-      throw new InlineError(InlineError.ApiError.INTERNAL)
-    }
+      if (!mainChat) {
+        throw new InlineError(InlineError.ApiError.INTERNAL)
+      }
+
+      return { space, member, mainChat }
+    })
 
     const { dialogs: openedDialogs } = await setDialogOpenForUsers({
       chat: mainChat,
