@@ -1,4 +1,10 @@
-import { MessageActions, MessageEntities, type BlockContent, type InputPeer } from "@inline-chat/protocol/core"
+import {
+  MessageActions,
+  MessageEntities,
+  type AgentSessionMessageInfo,
+  type BlockContent,
+  type InputPeer,
+} from "@inline-chat/protocol/core"
 import { cleanMultilinePreviewText, cleanPreviewText } from "@inline-chat/url-preview"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
@@ -16,6 +22,8 @@ import {
 } from "@in/server/db/models/files"
 import {
   chats,
+  agentSessionMessages,
+  agentSessions,
   blockContents,
   messages,
   type DbBlockContent,
@@ -95,6 +103,7 @@ export type DbInputFullMessage = DbMessage & {
   voice?: InputDbFullVoice | null
   messageAttachments?: DbInputFullAttachment[]
   blockContent?: DbBlockContent | null
+  agentSession?: AgentSessionMessageInfo
 }
 
 export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links" | "voice_memos"
@@ -163,6 +172,7 @@ export type DbFullMessage = Omit<
   document: DbFullDocument | null
   voice: DbFullVoice | null
   messageAttachments?: ProcessedAttachment[]
+  agentSession?: AgentSessionMessageInfo
 }
 
 export type ProcessedExternalTask = Omit<DbExternalTask, "title" | "titleIv" | "titleTag"> & {
@@ -342,8 +352,41 @@ async function addMessageAttachments(messagesList: DbInputFullMessage[]): Promis
   }))
 }
 
+async function addAgentSessionInfo(messagesList: DbInputFullMessage[]): Promise<DbInputFullMessage[]> {
+  const globalIds = Array.from(new Set(messagesList.map((message) => message.globalId)))
+  if (globalIds.length === 0) return messagesList
+
+  const rows = await db
+    .select({
+      messageGlobalId: agentSessionMessages.messageGlobalId,
+      agentSessionId: agentSessionMessages.agentSessionId,
+      provider: agentSessions.provider,
+      role: agentSessionMessages.role,
+      relation: agentSessionMessages.relation,
+    })
+    .from(agentSessionMessages)
+    .innerJoin(agentSessions, eq(agentSessions.id, agentSessionMessages.agentSessionId))
+    .where(inArray(agentSessionMessages.messageGlobalId, globalIds))
+
+  const byMessageGlobalId = new Map<bigint, AgentSessionMessageInfo>()
+  for (const row of rows) {
+    if (row.messageGlobalId === null) continue
+    byMessageGlobalId.set(row.messageGlobalId, {
+      agentSessionId: row.agentSessionId,
+      provider: row.provider,
+      role: row.role,
+      relation: row.relation,
+    })
+  }
+
+  return messagesList.map((message) => ({
+    ...message,
+    agentSession: byMessageGlobalId.get(message.globalId),
+  }))
+}
+
 async function processMessages(messagesList: DbInputFullMessage[]): Promise<DbFullMessage[]> {
-  const hydrated = await addMessageAttachments(messagesList)
+  const hydrated = await addAgentSessionInfo(await addMessageAttachments(messagesList))
   const processed = hydrated.map(processMessage)
   const readyPhotoIdsByMessage = processed.map((message) =>
     message.blockContent ? collectReadyBlockPhotoIds(message.blockContent) : []

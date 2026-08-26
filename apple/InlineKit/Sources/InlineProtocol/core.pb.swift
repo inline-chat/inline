@@ -70,6 +70,138 @@ public nonisolated enum DialogFollowMode: SwiftProtobuf.Enum, Swift.CaseIterable
 
 }
 
+/// Agent providers that implement Inline's session continuity contract. The
+/// numeric values are stored by the server; additions must be append-only.
+public nonisolated enum AgentSessionProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case codex // = 1
+  case codexCloud // = 2
+  case claude // = 3
+  case openCode // = 4
+  case amp // = 5
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .codex
+    case 2: self = .codexCloud
+    case 3: self = .claude
+    case 4: self = .openCode
+    case 5: self = .amp
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .codex: return 1
+    case .codexCloud: return 2
+    case .claude: return 3
+    case .openCode: return 4
+    case .amp: return 5
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [AgentSessionProvider] = [
+    .unspecified,
+    .codex,
+    .codexCloud,
+    .claude,
+    .openCode,
+    .amp,
+  ]
+
+}
+
+public nonisolated enum AgentSessionMessageRole: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case user // = 1
+  case assistant // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .user
+    case 2: self = .assistant
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .user: return 1
+    case .assistant: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [AgentSessionMessageRole] = [
+    .unspecified,
+    .user,
+    .assistant,
+  ]
+
+}
+
+public nonisolated enum AgentSessionMessageRelation: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// The provider owns this projected Inline row.
+  case imported // = 1
+
+  /// An existing Inline-authored row is linked to its provider echo.
+  case linked // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .imported
+    case 2: self = .linked
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .imported: return 1
+    case .linked: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [AgentSessionMessageRelation] = [
+    .unspecified,
+    .imported,
+    .linked,
+  ]
+
+}
+
 public nonisolated enum MessageSendMode: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case modeUnspecified // = 0
@@ -100,6 +232,148 @@ public nonisolated enum MessageSendMode: SwiftProtobuf.Enum, Swift.CaseIterable 
   public static let allCases: [MessageSendMode] = [
     .modeUnspecified,
     .modeSilent,
+  ]
+
+}
+
+public nonisolated enum ConnectAgentSessionState: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case created // = 1
+  case alreadyConnected // = 2
+  case connectedElsewhere // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .created
+    case 2: self = .alreadyConnected
+    case 3: self = .connectedElsewhere
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .created: return 1
+    case .alreadyConnected: return 2
+    case .connectedElsewhere: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [ConnectAgentSessionState] = [
+    .unspecified,
+    .created,
+    .alreadyConnected,
+    .connectedElsewhere,
+  ]
+
+}
+
+public nonisolated enum AgentSessionSyncMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// Historical repair: visible in realtime but not counted as unread or pushed.
+  case history // = 1
+
+  /// Current provider output: normal realtime visibility and unread semantics.
+  case live // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .history
+    case 2: self = .live
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .history: return 1
+    case .live: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [AgentSessionSyncMode] = [
+    .unspecified,
+    .history,
+    .live,
+  ]
+
+}
+
+public nonisolated enum AgentSessionMessageSyncState: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case created // = 1
+  case edited // = 2
+  case linked // = 3
+  case unchanged // = 4
+  case stale // = 5
+  case tombstoned // = 6
+  case conflict // = 7
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .created
+    case 2: self = .edited
+    case 3: self = .linked
+    case 4: self = .unchanged
+    case 5: self = .stale
+    case 6: self = .tombstoned
+    case 7: self = .conflict
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .created: return 1
+    case .edited: return 2
+    case .linked: return 3
+    case .unchanged: return 4
+    case .stale: return 5
+    case .tombstoned: return 6
+    case .conflict: return 7
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [AgentSessionMessageSyncState] = [
+    .unspecified,
+    .created,
+    .edited,
+    .linked,
+    .unchanged,
+    .stale,
+    .tombstoned,
+    .conflict,
   ]
 
 }
@@ -233,6 +507,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case updateDialogFolder // = 125
   case deleteDialogFolder // = 126
   case getSpace // = 127
+  case connectAgentSession // = 128
+  case syncAgentSessionMessages // = 129
+  case getAgentSession // = 130
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -368,6 +645,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 125: self = .updateDialogFolder
     case 126: self = .deleteDialogFolder
     case 127: self = .getSpace
+    case 128: self = .connectAgentSession
+    case 129: self = .syncAgentSessionMessages
+    case 130: self = .getAgentSession
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -501,6 +781,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .updateDialogFolder: return 125
     case .deleteDialogFolder: return 126
     case .getSpace: return 127
+    case .connectAgentSession: return 128
+    case .syncAgentSessionMessages: return 129
+    case .getAgentSession: return 130
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -634,6 +917,9 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .updateDialogFolder,
     .deleteDialogFolder,
     .getSpace,
+    .connectAgentSession,
+    .syncAgentSessionMessages,
+    .getAgentSession,
   ]
 
 }
@@ -3884,11 +4170,41 @@ public nonisolated struct Message: @unchecked Sendable {
   /// Clears the value of `blockContent`. Subsequent reads from it will return its default value.
   public mutating func clearBlockContent() {_uniqueStorage()._blockContent = nil}
 
+  /// Present only when this row is durably associated with an external agent
+  /// session. Raw provider identifiers remain server-private.
+  public var agentSession: AgentSessionMessageInfo {
+    get {_storage._agentSession ?? AgentSessionMessageInfo()}
+    set {_uniqueStorage()._agentSession = newValue}
+  }
+  /// Returns true if `agentSession` has been explicitly set.
+  public var hasAgentSession: Bool {_storage._agentSession != nil}
+  /// Clears the value of `agentSession`. Subsequent reads from it will return its default value.
+  public mutating func clearAgentSession() {_uniqueStorage()._agentSession = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public nonisolated struct AgentSessionMessageInfo: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Stable Inline database identity, not the provider's session identifier.
+  public var agentSessionID: Int64 = 0
+
+  public var provider: AgentSessionProvider = .unspecified
+
+  public var role: AgentSessionMessageRole = .unspecified
+
+  public var relation: AgentSessionMessageRelation = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct MessageFwdHeader: Sendable {
@@ -4417,6 +4733,422 @@ public nonisolated struct GetSpaceResult: Sendable {
   fileprivate var _space: Space? = nil
   fileprivate var _membership: Member? = nil
   fileprivate var _settings: SpaceSettings? = nil
+}
+
+/// Durable Inline association between one bridge bot, one existing Inline
+/// thread, and one external agent session. Provider identifiers are not exposed.
+public nonisolated struct AgentSession: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: Int64 = 0
+
+  public var peerID: Peer {
+    get {_peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var botUserID: Int64 = 0
+
+  public var provider: AgentSessionProvider = .unspecified
+
+  public var statusMessageID: Int64 {
+    get {_statusMessageID ?? 0}
+    set {_statusMessageID = newValue}
+  }
+  /// Returns true if `statusMessageID` has been explicitly set.
+  public var hasStatusMessageID: Bool {self._statusMessageID != nil}
+  /// Clears the value of `statusMessageID`. Subsequent reads from it will return its default value.
+  public mutating func clearStatusMessageID() {self._statusMessageID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: Peer? = nil
+  fileprivate var _statusMessageID: Int64? = nil
+}
+
+public nonisolated struct ConnectAgentSessionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Existing Inline thread to adopt. The server never creates or moves it.
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Bridge bot that will synchronize this session. The caller must own it.
+  public var botUserID: Int64 = 0
+
+  /// Agent provider; future providers extend the enum without changing the RPC.
+  public var provider: AgentSessionProvider = .unspecified
+
+  /// Stable provider installation or account namespace. Opaque to Inline.
+  public var instanceRef: String = String()
+
+  /// Stable provider task, thread, or session identifier. Opaque to Inline.
+  public var sessionRef: String = String()
+
+  /// Optional stable workspace, repository, or environment identity. It is
+  /// descriptive metadata and does not participate in session identity.
+  public var projectRef: String {
+    get {_projectRef ?? String()}
+    set {_projectRef = newValue}
+  }
+  /// Returns true if `projectRef` has been explicitly set.
+  public var hasProjectRef: Bool {self._projectRef != nil}
+  /// Clears the value of `projectRef`. Subsequent reads from it will return its default value.
+  public mutating func clearProjectRef() {self._projectRef = nil}
+
+  /// Optional bot-authored message in peer_id used as the pinned connection card.
+  public var statusMessageID: Int64 {
+    get {_statusMessageID ?? 0}
+    set {_statusMessageID = newValue}
+  }
+  /// Returns true if `statusMessageID` has been explicitly set.
+  public var hasStatusMessageID: Bool {self._statusMessageID != nil}
+  /// Clears the value of `statusMessageID`. Subsequent reads from it will return its default value.
+  public mutating func clearStatusMessageID() {self._statusMessageID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _projectRef: String? = nil
+  fileprivate var _statusMessageID: Int64? = nil
+}
+
+public nonisolated struct ConnectAgentSessionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var agentSession: AgentSession {
+    get {_agentSession ?? AgentSession()}
+    set {_agentSession = newValue}
+  }
+  /// Returns true if `agentSession` has been explicitly set.
+  public var hasAgentSession: Bool {self._agentSession != nil}
+  /// Clears the value of `agentSession`. Subsequent reads from it will return its default value.
+  public mutating func clearAgentSession() {self._agentSession = nil}
+
+  public var state: ConnectAgentSessionState = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _agentSession: AgentSession? = nil
+}
+
+public nonisolated struct AgentSessionConnection: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var agentSession: AgentSession {
+    get {_agentSession ?? AgentSession()}
+    set {_agentSession = newValue}
+  }
+  /// Returns true if `agentSession` has been explicitly set.
+  public var hasAgentSession: Bool {self._agentSession != nil}
+  /// Clears the value of `agentSession`. Subsequent reads from it will return its default value.
+  public mutating func clearAgentSession() {self._agentSession = nil}
+
+  /// Exact opaque provider namespace originally supplied at connection time.
+  public var instanceRef: String = String()
+
+  /// Exact opaque provider task, thread, or session identity.
+  public var sessionRef: String = String()
+
+  /// Stable workspace/repository/environment identity, when one was supplied.
+  public var projectRef: String {
+    get {_projectRef ?? String()}
+    set {_projectRef = newValue}
+  }
+  /// Returns true if `projectRef` has been explicitly set.
+  public var hasProjectRef: Bool {self._projectRef != nil}
+  /// Clears the value of `projectRef`. Subsequent reads from it will return its default value.
+  public mutating func clearProjectRef() {self._projectRef = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _agentSession: AgentSession? = nil
+  fileprivate var _projectRef: String? = nil
+}
+
+public nonisolated struct GetAgentSessionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Inline conversation whose durable agent connection should be recovered.
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Bridge bot connection to look up. The authenticated caller must own it.
+  public var botUserID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public nonisolated struct GetAgentSessionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Absent when this bot has no agent session connected to the conversation.
+  public var connection: AgentSessionConnection {
+    get {_connection ?? AgentSessionConnection()}
+    set {_connection = newValue}
+  }
+  /// Returns true if `connection` has been explicitly set.
+  public var hasConnection: Bool {self._connection != nil}
+  /// Clears the value of `connection`. Subsequent reads from it will return its default value.
+  public mutating func clearConnection() {self._connection = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _connection: AgentSessionConnection? = nil
+}
+
+public nonisolated struct AgentSessionMessageUpsert: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var text: String = String()
+
+  public var entities: MessageEntities {
+    get {_entities ?? MessageEntities()}
+    set {_entities = newValue}
+  }
+  /// Returns true if `entities` has been explicitly set.
+  public var hasEntities: Bool {self._entities != nil}
+  /// Clears the value of `entities`. Subsequent reads from it will return its default value.
+  public mutating func clearEntities() {self._entities = nil}
+
+  /// Optional idempotent bot-send identity. For assistant history, the server
+  /// links the existing bot row when this random ID exists; otherwise it
+  /// imports a new row. This closes the send-before-ledger crash boundary.
+  public var assistantRandomID: Int64 {
+    get {_assistantRandomID ?? 0}
+    set {_assistantRandomID = newValue}
+  }
+  /// Returns true if `assistantRandomID` has been explicitly set.
+  public var hasAssistantRandomID: Bool {self._assistantRandomID != nil}
+  /// Clears the value of `assistantRandomID`. Subsequent reads from it will return its default value.
+  public mutating func clearAssistantRandomID() {self._assistantRandomID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _entities: MessageEntities? = nil
+  fileprivate var _assistantRandomID: Int64? = nil
+}
+
+public nonisolated struct AgentSessionMessageLink: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Existing Inline-local message ID whose provider dispatch route is verified.
+  public var messageID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct AgentSessionMessageSync: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var role: AgentSessionMessageRole = .unspecified
+
+  /// Stable provider item identity. Required for uncorrelated provider history.
+  public var itemRef: String {
+    get {_itemRef ?? String()}
+    set {_itemRef = newValue}
+  }
+  /// Returns true if `itemRef` has been explicitly set.
+  public var hasItemRef: Bool {self._itemRef != nil}
+  /// Clears the value of `itemRef`. Subsequent reads from it will return its default value.
+  public mutating func clearItemRef() {self._itemRef = nil}
+
+  /// Stable Inline-to-provider input identity. It is canonical when present.
+  public var correlationRef: String {
+    get {_correlationRef ?? String()}
+    set {_correlationRef = newValue}
+  }
+  /// Returns true if `correlationRef` has been explicitly set.
+  public var hasCorrelationRef: Bool {self._correlationRef != nil}
+  /// Clears the value of `correlationRef`. Subsequent reads from it will return its default value.
+  public mutating func clearCorrelationRef() {self._correlationRef = nil}
+
+  /// Provider event time in Unix seconds. Required when creating an imported row.
+  public var sourceDate: Int64 {
+    get {_sourceDate ?? 0}
+    set {_sourceDate = newValue}
+  }
+  /// Returns true if `sourceDate` has been explicitly set.
+  public var hasSourceDate: Bool {self._sourceDate != nil}
+  /// Clears the value of `sourceDate`. Subsequent reads from it will return its default value.
+  public mutating func clearSourceDate() {self._sourceDate = nil}
+
+  /// Opaque stable content/provider revision used for idempotency.
+  public var revisionRef: String {
+    get {_revisionRef ?? String()}
+    set {_revisionRef = newValue}
+  }
+  /// Returns true if `revisionRef` has been explicitly set.
+  public var hasRevisionRef: Bool {self._revisionRef != nil}
+  /// Clears the value of `revisionRef`. Subsequent reads from it will return its default value.
+  public mutating func clearRevisionRef() {self._revisionRef = nil}
+
+  /// Expected stored revision when changing an imported row.
+  public var baseRevisionRef: String {
+    get {_baseRevisionRef ?? String()}
+    set {_baseRevisionRef = newValue}
+  }
+  /// Returns true if `baseRevisionRef` has been explicitly set.
+  public var hasBaseRevisionRef: Bool {self._baseRevisionRef != nil}
+  /// Clears the value of `baseRevisionRef`. Subsequent reads from it will return its default value.
+  public mutating func clearBaseRevisionRef() {self._baseRevisionRef = nil}
+
+  /// True once the provider considers this item's content final.
+  public var complete: Bool = false
+
+  public var operation: AgentSessionMessageSync.OneOf_Operation? = nil
+
+  public var upsert: AgentSessionMessageUpsert {
+    get {
+      if case .upsert(let v)? = operation {return v}
+      return AgentSessionMessageUpsert()
+    }
+    set {operation = .upsert(newValue)}
+  }
+
+  public var link: AgentSessionMessageLink {
+    get {
+      if case .link(let v)? = operation {return v}
+      return AgentSessionMessageLink()
+    }
+    set {operation = .link(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Operation: Equatable, Sendable {
+    case upsert(AgentSessionMessageUpsert)
+    case link(AgentSessionMessageLink)
+
+  }
+
+  public init() {}
+
+  fileprivate var _itemRef: String? = nil
+  fileprivate var _correlationRef: String? = nil
+  fileprivate var _sourceDate: Int64? = nil
+  fileprivate var _revisionRef: String? = nil
+  fileprivate var _baseRevisionRef: String? = nil
+}
+
+public nonisolated struct SyncAgentSessionMessagesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Durable Inline session ID returned by connectAgentSession.
+  public var agentSessionID: Int64 = 0
+
+  /// Selects history versus current-message side effects; it is not persisted.
+  public var mode: AgentSessionSyncMode = .unspecified
+
+  /// Ordered, atomic batch. The server currently accepts at most 100 operations.
+  public var messages: [AgentSessionMessageSync] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct AgentSessionMessageSyncResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Zero-based position in the request batch.
+  public var index: Int32 = 0
+
+  public var state: AgentSessionMessageSyncState = .unspecified
+
+  public var messageID: Int64 {
+    get {_messageID ?? 0}
+    set {_messageID = newValue}
+  }
+  /// Returns true if `messageID` has been explicitly set.
+  public var hasMessageID: Bool {self._messageID != nil}
+  /// Clears the value of `messageID`. Subsequent reads from it will return its default value.
+  public mutating func clearMessageID() {self._messageID = nil}
+
+  /// Returned on compare-and-swap conflict so the bridge may repair explicitly.
+  public var currentRevisionRef: String {
+    get {_currentRevisionRef ?? String()}
+    set {_currentRevisionRef = newValue}
+  }
+  /// Returns true if `currentRevisionRef` has been explicitly set.
+  public var hasCurrentRevisionRef: Bool {self._currentRevisionRef != nil}
+  /// Clears the value of `currentRevisionRef`. Subsequent reads from it will return its default value.
+  public mutating func clearCurrentRevisionRef() {self._currentRevisionRef = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _messageID: Int64? = nil
+  fileprivate var _currentRevisionRef: String? = nil
+}
+
+public nonisolated struct SyncAgentSessionMessagesResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var messages: [AgentSessionMessageSyncResult] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct JoinPublicSpaceInput: Sendable {
@@ -5625,6 +6357,7 @@ public nonisolated struct RpcError: Sendable {
     case usernameTaken // = 16
     case firstNameInvalid // = 17
     case urlPreviewUnavailable // = 18
+    case agentSessionMessageImmutable // = 19
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -5652,6 +6385,7 @@ public nonisolated struct RpcError: Sendable {
       case 16: self = .usernameTaken
       case 17: self = .firstNameInvalid
       case 18: self = .urlPreviewUnavailable
+      case 19: self = .agentSessionMessageImmutable
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -5677,6 +6411,7 @@ public nonisolated struct RpcError: Sendable {
       case .usernameTaken: return 16
       case .firstNameInvalid: return 17
       case .urlPreviewUnavailable: return 18
+      case .agentSessionMessageImmutable: return 19
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -5702,6 +6437,7 @@ public nonisolated struct RpcError: Sendable {
       .usernameTaken,
       .firstNameInvalid,
       .urlPreviewUnavailable,
+      .agentSessionMessageImmutable,
     ]
 
   }
@@ -6726,6 +7462,30 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .getSpace(newValue)}
   }
 
+  public var connectAgentSession: ConnectAgentSessionInput {
+    get {
+      if case .connectAgentSession(let v)? = input {return v}
+      return ConnectAgentSessionInput()
+    }
+    set {input = .connectAgentSession(newValue)}
+  }
+
+  public var syncAgentSessionMessages: SyncAgentSessionMessagesInput {
+    get {
+      if case .syncAgentSessionMessages(let v)? = input {return v}
+      return SyncAgentSessionMessagesInput()
+    }
+    set {input = .syncAgentSessionMessages(newValue)}
+  }
+
+  public var getAgentSession: GetAgentSessionInput {
+    get {
+      if case .getAgentSession(let v)? = input {return v}
+      return GetAgentSessionInput()
+    }
+    set {input = .getAgentSession(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Input: Equatable, Sendable {
@@ -6855,6 +7615,9 @@ public nonisolated struct RpcCall: Sendable {
     case updateDialogFolder(UpdateDialogFolderInput)
     case deleteDialogFolder(DeleteDialogFolderInput)
     case getSpace(GetSpaceInput)
+    case connectAgentSession(ConnectAgentSessionInput)
+    case syncAgentSessionMessages(SyncAgentSessionMessagesInput)
+    case getAgentSession(GetAgentSessionInput)
 
   }
 
@@ -7884,6 +8647,30 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getSpace(newValue)}
   }
 
+  public var connectAgentSession: ConnectAgentSessionResult {
+    get {
+      if case .connectAgentSession(let v)? = _storage._result {return v}
+      return ConnectAgentSessionResult()
+    }
+    set {_uniqueStorage()._result = .connectAgentSession(newValue)}
+  }
+
+  public var syncAgentSessionMessages: SyncAgentSessionMessagesResult {
+    get {
+      if case .syncAgentSessionMessages(let v)? = _storage._result {return v}
+      return SyncAgentSessionMessagesResult()
+    }
+    set {_uniqueStorage()._result = .syncAgentSessionMessages(newValue)}
+  }
+
+  public var getAgentSession: GetAgentSessionResult {
+    get {
+      if case .getAgentSession(let v)? = _storage._result {return v}
+      return GetAgentSessionResult()
+    }
+    set {_uniqueStorage()._result = .getAgentSession(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -8013,6 +8800,9 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     case updateDialogFolder(UpdateDialogFolderResult)
     case deleteDialogFolder(DeleteDialogFolderResult)
     case getSpace(GetSpaceResult)
+    case connectAgentSession(ConnectAgentSessionResult)
+    case syncAgentSessionMessages(SyncAgentSessionMessagesResult)
+    case getAgentSession(GetAgentSessionResult)
 
   }
 
@@ -18960,12 +19750,36 @@ nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DIALOG_FOLLOW_MODE_UNSPECIFIED\0\u{1}FOLLOWING\0\u{1}UNFOLLOWED\0")
 }
 
+nonisolated extension AgentSessionProvider: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_SESSION_PROVIDER_UNSPECIFIED\0\u{1}AGENT_SESSION_PROVIDER_CODEX\0\u{1}AGENT_SESSION_PROVIDER_CODEX_CLOUD\0\u{1}AGENT_SESSION_PROVIDER_CLAUDE\0\u{1}AGENT_SESSION_PROVIDER_OPEN_CODE\0\u{1}AGENT_SESSION_PROVIDER_AMP\0")
+}
+
+nonisolated extension AgentSessionMessageRole: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_SESSION_MESSAGE_ROLE_UNSPECIFIED\0\u{1}AGENT_SESSION_MESSAGE_ROLE_USER\0\u{1}AGENT_SESSION_MESSAGE_ROLE_ASSISTANT\0")
+}
+
+nonisolated extension AgentSessionMessageRelation: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_SESSION_MESSAGE_RELATION_UNSPECIFIED\0\u{1}AGENT_SESSION_MESSAGE_RELATION_IMPORTED\0\u{1}AGENT_SESSION_MESSAGE_RELATION_LINKED\0")
+}
+
 nonisolated extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MODE_UNSPECIFIED\0\u{1}MODE_SILENT\0")
 }
 
+nonisolated extension ConnectAgentSessionState: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONNECT_AGENT_SESSION_STATE_UNSPECIFIED\0\u{1}CONNECT_AGENT_SESSION_STATE_CREATED\0\u{1}CONNECT_AGENT_SESSION_STATE_ALREADY_CONNECTED\0\u{1}CONNECT_AGENT_SESSION_STATE_CONNECTED_ELSEWHERE\0")
+}
+
+nonisolated extension AgentSessionSyncMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_SESSION_SYNC_MODE_UNSPECIFIED\0\u{1}AGENT_SESSION_SYNC_MODE_HISTORY\0\u{1}AGENT_SESSION_SYNC_MODE_LIVE\0")
+}
+
+nonisolated extension AgentSessionMessageSyncState: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_SESSION_MESSAGE_SYNC_STATE_UNSPECIFIED\0\u{1}AGENT_SESSION_MESSAGE_SYNC_STATE_CREATED\0\u{1}AGENT_SESSION_MESSAGE_SYNC_STATE_EDITED\0\u{1}AGENT_SESSION_MESSAGE_SYNC_STATE_LINKED\0\u{1}AGENT_SESSION_MESSAGE_SYNC_STATE_UNCHANGED\0\u{1}AGENT_SESSION_MESSAGE_SYNC_STATE_STALE\0\u{1}AGENT_SESSION_MESSAGE_SYNC_STATE_TOMBSTONED\0\u{1}AGENT_SESSION_MESSAGE_SYNC_STATE_CONFLICT\0")
+}
+
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0")
 }
 
 nonisolated extension GridConnectionUnavailableReason: SwiftProtobuf._ProtoNameProviding {
@@ -22284,7 +23098,7 @@ nonisolated extension BlockTableRow: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{4}Y]\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{4}X]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -22311,6 +23125,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _rev: Int64? = nil
     var _serviceMessage: MessageService? = nil
     var _blockContent: BlockContent? = nil
+    var _agentSession: AgentSessionMessageInfo? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -22345,6 +23160,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       _rev = source._rev
       _serviceMessage = source._serviceMessage
       _blockContent = source._blockContent
+      _agentSession = source._agentSession
     }
   }
 
@@ -22386,6 +23202,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         case 21: try { try decoder.decodeSingularInt64Field(value: &_storage._rev) }()
         case 22: try { try decoder.decodeSingularMessageField(value: &_storage._serviceMessage) }()
         case 23: try { try decoder.decodeSingularMessageField(value: &_storage._blockContent) }()
+        case 24: try { try decoder.decodeSingularMessageField(value: &_storage._agentSession) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -22468,6 +23285,9 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       try { if let v = _storage._blockContent {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
       } }()
+      try { if let v = _storage._agentSession {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -22504,10 +23324,56 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         if _storage._rev != rhs_storage._rev {return false}
         if _storage._serviceMessage != rhs_storage._serviceMessage {return false}
         if _storage._blockContent != rhs_storage._blockContent {return false}
+        if _storage._agentSession != rhs_storage._agentSession {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentSessionMessageInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentSessionMessageInfo"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}agent_session_id\0\u{1}provider\0\u{1}role\0\u{1}relation\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.agentSessionID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.provider) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.role) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.relation) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.agentSessionID != 0 {
+      try visitor.visitSingularInt64Field(value: self.agentSessionID, fieldNumber: 1)
+    }
+    if self.provider != .unspecified {
+      try visitor.visitSingularEnumField(value: self.provider, fieldNumber: 2)
+    }
+    if self.role != .unspecified {
+      try visitor.visitSingularEnumField(value: self.role, fieldNumber: 3)
+    }
+    if self.relation != .unspecified {
+      try visitor.visitSingularEnumField(value: self.relation, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentSessionMessageInfo, rhs: AgentSessionMessageInfo) -> Bool {
+    if lhs.agentSessionID != rhs.agentSessionID {return false}
+    if lhs.provider != rhs.provider {return false}
+    if lhs.role != rhs.role {return false}
+    if lhs.relation != rhs.relation {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -23258,6 +24124,580 @@ nonisolated extension GetSpaceResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs._space != rhs._space {return false}
     if lhs._membership != rhs._membership {return false}
     if lhs._settings != rhs._settings {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentSession: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentSession"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}peer_id\0\u{3}bot_user_id\0\u{1}provider\0\u{3}status_message_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.provider) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._statusMessageID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    }
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 3)
+    }
+    if self.provider != .unspecified {
+      try visitor.visitSingularEnumField(value: self.provider, fieldNumber: 4)
+    }
+    try { if let v = self._statusMessageID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentSession, rhs: AgentSession) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.provider != rhs.provider {return false}
+    if lhs._statusMessageID != rhs._statusMessageID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ConnectAgentSessionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ConnectAgentSessionInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}bot_user_id\0\u{1}provider\0\u{3}instance_ref\0\u{3}session_ref\0\u{3}project_ref\0\u{3}status_message_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.provider) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.instanceRef) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.sessionRef) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self._projectRef) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self._statusMessageID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 2)
+    }
+    if self.provider != .unspecified {
+      try visitor.visitSingularEnumField(value: self.provider, fieldNumber: 3)
+    }
+    if !self.instanceRef.isEmpty {
+      try visitor.visitSingularStringField(value: self.instanceRef, fieldNumber: 4)
+    }
+    if !self.sessionRef.isEmpty {
+      try visitor.visitSingularStringField(value: self.sessionRef, fieldNumber: 5)
+    }
+    try { if let v = self._projectRef {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._statusMessageID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ConnectAgentSessionInput, rhs: ConnectAgentSessionInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.provider != rhs.provider {return false}
+    if lhs.instanceRef != rhs.instanceRef {return false}
+    if lhs.sessionRef != rhs.sessionRef {return false}
+    if lhs._projectRef != rhs._projectRef {return false}
+    if lhs._statusMessageID != rhs._statusMessageID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ConnectAgentSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ConnectAgentSessionResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}agent_session\0\u{1}state\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._agentSession) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.state) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._agentSession {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.state != .unspecified {
+      try visitor.visitSingularEnumField(value: self.state, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ConnectAgentSessionResult, rhs: ConnectAgentSessionResult) -> Bool {
+    if lhs._agentSession != rhs._agentSession {return false}
+    if lhs.state != rhs.state {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentSessionConnection: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentSessionConnection"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}agent_session\0\u{3}instance_ref\0\u{3}session_ref\0\u{3}project_ref\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._agentSession) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.instanceRef) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.sessionRef) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._projectRef) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._agentSession {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.instanceRef.isEmpty {
+      try visitor.visitSingularStringField(value: self.instanceRef, fieldNumber: 2)
+    }
+    if !self.sessionRef.isEmpty {
+      try visitor.visitSingularStringField(value: self.sessionRef, fieldNumber: 3)
+    }
+    try { if let v = self._projectRef {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentSessionConnection, rhs: AgentSessionConnection) -> Bool {
+    if lhs._agentSession != rhs._agentSession {return false}
+    if lhs.instanceRef != rhs.instanceRef {return false}
+    if lhs.sessionRef != rhs.sessionRef {return false}
+    if lhs._projectRef != rhs._projectRef {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetAgentSessionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetAgentSessionInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}bot_user_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetAgentSessionInput, rhs: GetAgentSessionInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetAgentSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetAgentSessionResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}connection\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._connection) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._connection {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetAgentSessionResult, rhs: GetAgentSessionResult) -> Bool {
+    if lhs._connection != rhs._connection {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentSessionMessageUpsert: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentSessionMessageUpsert"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0\u{1}entities\0\u{3}assistant_random_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._assistantRandomID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 1)
+    }
+    try { if let v = self._entities {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._assistantRandomID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentSessionMessageUpsert, rhs: AgentSessionMessageUpsert) -> Bool {
+    if lhs.text != rhs.text {return false}
+    if lhs._entities != rhs._entities {return false}
+    if lhs._assistantRandomID != rhs._assistantRandomID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentSessionMessageLink: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentSessionMessageLink"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.messageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentSessionMessageLink, rhs: AgentSessionMessageLink) -> Bool {
+    if lhs.messageID != rhs.messageID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentSessionMessageSync: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentSessionMessageSync"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}role\0\u{3}item_ref\0\u{3}correlation_ref\0\u{3}source_date\0\u{3}revision_ref\0\u{3}base_revision_ref\0\u{1}complete\0\u{1}upsert\0\u{1}link\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.role) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._itemRef) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._correlationRef) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self._sourceDate) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._revisionRef) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self._baseRevisionRef) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.complete) }()
+      case 8: try {
+        var v: AgentSessionMessageUpsert?
+        var hadOneofValue = false
+        if let current = self.operation {
+          hadOneofValue = true
+          if case .upsert(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.operation = .upsert(v)
+        }
+      }()
+      case 9: try {
+        var v: AgentSessionMessageLink?
+        var hadOneofValue = false
+        if let current = self.operation {
+          hadOneofValue = true
+          if case .link(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.operation = .link(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.role != .unspecified {
+      try visitor.visitSingularEnumField(value: self.role, fieldNumber: 1)
+    }
+    try { if let v = self._itemRef {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._correlationRef {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._sourceDate {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._revisionRef {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._baseRevisionRef {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 6)
+    } }()
+    if self.complete != false {
+      try visitor.visitSingularBoolField(value: self.complete, fieldNumber: 7)
+    }
+    switch self.operation {
+    case .upsert?: try {
+      guard case .upsert(let v)? = self.operation else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    }()
+    case .link?: try {
+      guard case .link(let v)? = self.operation else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentSessionMessageSync, rhs: AgentSessionMessageSync) -> Bool {
+    if lhs.role != rhs.role {return false}
+    if lhs._itemRef != rhs._itemRef {return false}
+    if lhs._correlationRef != rhs._correlationRef {return false}
+    if lhs._sourceDate != rhs._sourceDate {return false}
+    if lhs._revisionRef != rhs._revisionRef {return false}
+    if lhs._baseRevisionRef != rhs._baseRevisionRef {return false}
+    if lhs.complete != rhs.complete {return false}
+    if lhs.operation != rhs.operation {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SyncAgentSessionMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SyncAgentSessionMessagesInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}agent_session_id\0\u{1}mode\0\u{1}messages\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.agentSessionID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.mode) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.agentSessionID != 0 {
+      try visitor.visitSingularInt64Field(value: self.agentSessionID, fieldNumber: 1)
+    }
+    if self.mode != .unspecified {
+      try visitor.visitSingularEnumField(value: self.mode, fieldNumber: 2)
+    }
+    if !self.messages.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SyncAgentSessionMessagesInput, rhs: SyncAgentSessionMessagesInput) -> Bool {
+    if lhs.agentSessionID != rhs.agentSessionID {return false}
+    if lhs.mode != rhs.mode {return false}
+    if lhs.messages != rhs.messages {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentSessionMessageSyncResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentSessionMessageSyncResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}index\0\u{1}state\0\u{3}message_id\0\u{3}current_revision_ref\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.index) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.state) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._messageID) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._currentRevisionRef) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.index != 0 {
+      try visitor.visitSingularInt32Field(value: self.index, fieldNumber: 1)
+    }
+    if self.state != .unspecified {
+      try visitor.visitSingularEnumField(value: self.state, fieldNumber: 2)
+    }
+    try { if let v = self._messageID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._currentRevisionRef {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentSessionMessageSyncResult, rhs: AgentSessionMessageSyncResult) -> Bool {
+    if lhs.index != rhs.index {return false}
+    if lhs.state != rhs.state {return false}
+    if lhs._messageID != rhs._messageID {return false}
+    if lhs._currentRevisionRef != rhs._currentRevisionRef {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension SyncAgentSessionMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SyncAgentSessionMessagesResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.messages.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SyncAgentSessionMessagesResult, rhs: SyncAgentSessionMessagesResult) -> Bool {
+    if lhs.messages != rhs.messages {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -24806,12 +26246,12 @@ nonisolated extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 }
 
 nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNKNOWN\0\u{1}BAD_REQUEST\0\u{1}UNAUTHENTICATED\0\u{1}RATE_LIMIT\0\u{1}INTERNAL_ERROR\0\u{1}PEER_ID_INVALID\0\u{1}MESSAGE_ID_INVALID\0\u{1}USER_ID_INVALID\0\u{1}USER_ALREADY_MEMBER\0\u{1}SPACE_ID_INVALID\0\u{1}CHAT_ID_INVALID\0\u{1}EMAIL_INVALID\0\u{1}PHONE_NUMBER_INVALID\0\u{1}SPACE_ADMIN_REQUIRED\0\u{1}SPACE_OWNER_REQUIRED\0\u{1}USERNAME_INVALID\0\u{1}USERNAME_TAKEN\0\u{1}FIRST_NAME_INVALID\0\u{1}URL_PREVIEW_UNAVAILABLE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNKNOWN\0\u{1}BAD_REQUEST\0\u{1}UNAUTHENTICATED\0\u{1}RATE_LIMIT\0\u{1}INTERNAL_ERROR\0\u{1}PEER_ID_INVALID\0\u{1}MESSAGE_ID_INVALID\0\u{1}USER_ID_INVALID\0\u{1}USER_ALREADY_MEMBER\0\u{1}SPACE_ID_INVALID\0\u{1}CHAT_ID_INVALID\0\u{1}EMAIL_INVALID\0\u{1}PHONE_NUMBER_INVALID\0\u{1}SPACE_ADMIN_REQUIRED\0\u{1}SPACE_OWNER_REQUIRED\0\u{1}USERNAME_INVALID\0\u{1}USERNAME_TAKEN\0\u{1}FIRST_NAME_INVALID\0\u{1}URL_PREVIEW_UNAVAILABLE\0\u{1}AGENT_SESSION_MESSAGE_IMMUTABLE\0")
 }
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -26458,6 +27898,45 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .getSpace(v)
         }
       }()
+      case 129: try {
+        var v: ConnectAgentSessionInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .connectAgentSession(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .connectAgentSession(v)
+        }
+      }()
+      case 130: try {
+        var v: SyncAgentSessionMessagesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .syncAgentSessionMessages(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .syncAgentSessionMessages(v)
+        }
+      }()
+      case 131: try {
+        var v: GetAgentSessionInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getAgentSession(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getAgentSession(v)
+        }
+      }()
       default: break
       }
     }
@@ -26976,6 +28455,18 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .getSpace(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 128)
     }()
+    case .connectAgentSession?: try {
+      guard case .connectAgentSession(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 129)
+    }()
+    case .syncAgentSessionMessages?: try {
+      guard case .syncAgentSessionMessages(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 130)
+    }()
+    case .getAgentSession?: try {
+      guard case .getAgentSession(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 131)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -26991,7 +28482,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{c}S\u{1}\u{1}")
 
   fileprivate class _StorageClass {
     var _reqMsgID: UInt64 = 0
@@ -28665,6 +30156,45 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
             _storage._result = .getSpace(v)
           }
         }()
+        case 129: try {
+          var v: ConnectAgentSessionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .connectAgentSession(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .connectAgentSession(v)
+          }
+        }()
+        case 130: try {
+          var v: SyncAgentSessionMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .syncAgentSessionMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .syncAgentSessionMessages(v)
+          }
+        }()
+        case 131: try {
+          var v: GetAgentSessionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getAgentSession(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getAgentSession(v)
+          }
+        }()
         default: break
         }
       }
@@ -29184,6 +30714,18 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       case .getSpace?: try {
         guard case .getSpace(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 128)
+      }()
+      case .connectAgentSession?: try {
+        guard case .connectAgentSession(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 129)
+      }()
+      case .syncAgentSessionMessages?: try {
+        guard case .syncAgentSessionMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 130)
+      }()
+      case .getAgentSession?: try {
+        guard case .getAgentSession(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 131)
       }()
       case nil: break
       }

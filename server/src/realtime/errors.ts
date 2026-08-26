@@ -155,6 +155,14 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.UrlPreviewUnavailable,
     )
   }
+  public static AgentSessionMessageImmutable() {
+    return RealtimeRpcError.create(
+      RpcError_Code.AGENT_SESSION_MESSAGE_IMMUTABLE,
+      "Imported agent session history cannot be edited or deleted yet",
+      409,
+      RealtimeRpcError.AgentSessionMessageImmutable,
+    )
+  }
   public static SpaceAdminRequired() {
     return RealtimeRpcError.create(
       RpcError_Code.SPACE_ADMIN_REQUIRED,

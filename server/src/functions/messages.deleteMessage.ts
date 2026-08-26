@@ -18,6 +18,7 @@ import { members, messages, type DbChat } from "@in/server/db/schema"
 import { and, eq, inArray } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
+import { hasImportedAgentMessages } from "@in/server/modules/agentSessions/service"
 
 type Input = {
   messageIds: bigint[]
@@ -31,6 +32,13 @@ type Output = {
 export const deleteMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+
+  const numericMessageIds = input.messageIds
+    .map(Number)
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (await hasImportedAgentMessages(chat.id, numericMessageIds)) {
+    throw RealtimeRpcError.AgentSessionMessageImmutable()
+  }
 
   await ensureDeleteAllowed({
     chat,

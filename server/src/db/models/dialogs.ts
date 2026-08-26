@@ -23,6 +23,7 @@ export class DialogsModel {
           inArray(messages.chatId, chatIds),
           gt(messages.messageId, sql`COALESCE(${dialogs.readInboxMaxId}, 0)`),
           ne(messages.fromId, userId),
+          eq(messages.countsAsUnread, true),
           isNull(messages.systemMessageEncrypted),
         ),
       )
@@ -52,6 +53,7 @@ export class DialogsModel {
           eq(messages.chatId, chatId),
           gt(messages.messageId, sql`COALESCE(${dialogs.readInboxMaxId}, 0)`),
           ne(messages.fromId, userId),
+          eq(messages.countsAsUnread, true),
           isNull(messages.systemMessageEncrypted),
         ),
       )

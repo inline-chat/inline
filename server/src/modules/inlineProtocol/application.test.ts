@@ -222,4 +222,29 @@ describe("Inline Protocol application ordering", () => {
     expect(inlineProtocolRpcExecutionLane(member)).toBe("space:8")
     expect(inlineProtocolRpcExecutionLane(grid)).toBe("space:8")
   })
+
+  test("serializes agent connection and sync mutations on their narrow owners", () => {
+    const peerId = { type: { oneofKind: "chat" as const, chat: { chatId: 44n } } }
+    const connect = RpcCall.create({
+      input: {
+        oneofKind: "connectAgentSession",
+        connectAgentSession: {
+          peerId,
+          botUserId: 2n,
+          provider: 1,
+          instanceRef: "instance",
+          sessionRef: "session",
+        },
+      },
+    })
+    const sync = RpcCall.create({
+      input: {
+        oneofKind: "syncAgentSessionMessages",
+        syncAgentSessionMessages: { agentSessionId: 91n, mode: 1, messages: [] },
+      },
+    })
+
+    expect(inlineProtocolRpcExecutionLane(connect)).toBe("chat:44")
+    expect(inlineProtocolRpcExecutionLane(sync)).toBe("agent-session:91")
+  })
 })

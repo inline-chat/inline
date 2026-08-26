@@ -36,6 +36,7 @@ import { projectReadyBlockPhotos } from "@in/server/modules/message/blockContent
 type EncodableMessage = DbMessage & {
   systemMessage?: SystemMessage | null
   blockContent?: BlockContent | null
+  agentSession?: Message["agentSession"]
 }
 
 function encodeServiceMessage(systemMessage: SystemMessage | null | undefined): MessageService | undefined {
@@ -233,6 +234,7 @@ export const encodeMessage = ({
     actions,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: message.blockContent ?? undefined,
+    agentSession: message.agentSession,
   }
 
   return messageProto
@@ -379,6 +381,7 @@ export const encodeFullMessage = ({
     actions: message.actions ?? undefined,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: blockContent ?? undefined,
+    agentSession: message.agentSession,
   }
 
   return messageProto

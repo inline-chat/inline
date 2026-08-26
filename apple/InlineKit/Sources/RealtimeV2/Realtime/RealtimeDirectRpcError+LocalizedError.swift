@@ -89,6 +89,8 @@ public enum RealtimeErrorPresentation {
       String(localized: "Enter a valid first name.")
     case .urlPreviewUnavailable:
       String(localized: "This link can’t be previewed.")
+    case .agentSessionMessageImmutable:
+      String(localized: "Imported agent session history cannot be edited or deleted yet.")
     case .unknown, .UNRECOGNIZED:
       statusFallback(statusCode)
     }

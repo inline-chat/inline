@@ -102,6 +102,9 @@ export const messages = pgTable(
     isSticker: boolean("is_sticker").default(false),
 
     hasLink: boolean("has_link"),
+
+    /** False for historical projections that must remain visible without becoming unread. */
+    countsAsUnread: boolean("counts_as_unread").default(true).notNull(),
   },
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),
