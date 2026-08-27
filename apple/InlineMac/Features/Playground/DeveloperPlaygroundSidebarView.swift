@@ -377,6 +377,7 @@ final class DeveloperSidebarPlaygroundModel {
         otherUnreadCount: renderState.scopedOtherUnreadCount,
         avatars: [],
         accessibilityValue: "Fixture unread totals",
+        contextMenuAction: nil,
         action: { [weak self] in self?.record("Opened All Chats.") }
       ))
     case .grid:
@@ -391,6 +392,11 @@ final class DeveloperSidebarPlaygroundModel {
         otherUnreadCount: 0,
         avatars: Self.gridAvatars,
         accessibilityValue: "Two recent participants",
+        contextMenuAction: .init(
+          title: "Hide Grid",
+          systemImage: "eye.slash",
+          action: { [weak self] in self?.record("Hid Grid from the sidebar.") }
+        ),
         action: { [weak self] in self?.record("Opened Grid.") }
       ))
     case .archiveHeader:
@@ -462,6 +468,7 @@ final class DeveloperSidebarPlaygroundModel {
         otherUnreadCount: 0,
         avatars: [],
         accessibilityValue: "",
+        contextMenuAction: nil,
         action: { [weak self] in self?.addChat() }
       ))
     case .emptyState:
@@ -512,6 +519,7 @@ final class DeveloperSidebarPlaygroundModel {
             otherUnreadCount: 5,
             avatars: [],
             accessibilityValue: "2 prominent and 5 other unread chats",
+            contextMenuAction: nil,
             action: { [weak self] in self?.record("Activated catalog All Chats.") }
           )),
           animatesChanges: animationsEnabled
@@ -534,6 +542,7 @@ final class DeveloperSidebarPlaygroundModel {
             otherUnreadCount: 0,
             avatars: [],
             accessibilityValue: "",
+            contextMenuAction: nil,
             action: { [weak self] in self?.record("Activated catalog New thread.") }
           )),
           animatesChanges: animationsEnabled

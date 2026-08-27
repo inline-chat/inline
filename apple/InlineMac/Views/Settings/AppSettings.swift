@@ -171,6 +171,7 @@ final class AppSettings: ObservableObject {
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
   static let sidebarItemSizeKey = "sidebarItemSize"
   static let sidebarModeKey = "sidebarMode"
+  static let showGridInSidebarKey = "showGridInSidebar"
   static let nativeSidebarRowsEnabledKey = "experimental.nativeSidebarRowsEnabled"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let sidebarSortKey = "sidebarSort"
@@ -386,6 +387,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var showGridInSidebar: Bool {
+    didSet {
+      UserDefaults.standard.set(showGridInSidebar, forKey: Self.showGridInSidebarKey)
+    }
+  }
+
   /// Compatibility boundary for call sites that only care about Inbox
   /// behavior and for the one-time legacy preference migration.
   var sidebarAsInbox: Bool {
@@ -564,6 +571,7 @@ final class AppSettings: ObservableObject {
       accountCreatedAt: accountCreatedAt
     )
     sidebarMode = inboxEnabled ? .inbox : .allChats
+    showGridInSidebar = persistentDefaults?[Self.showGridInSidebarKey] as? Bool ?? true
     if sidebarModeNeedsAccountMigration == false {
       UserDefaults.standard.set(sidebarMode.rawValue, forKey: Self.sidebarModeKey)
       UserDefaults.standard.set(sidebarMode == .inbox, forKey: ExperimentalFeatureFlags.sidebarAsInboxKey)

@@ -97,6 +97,20 @@ struct SidebarView: View {
 
   var body: some View {
     sidebarContent
+      .commandBar(id: "sidebar-grid", value: gridDestinationSpaceID) {
+        if let spaceID = gridDestinationSpaceID {
+          CommandBarAction(
+            String(localized: "Grid", comment: "Command-K action that opens Grid."),
+            systemImage: "square.grid.2x2",
+            id: "open-grid",
+            keywords: ["grid", "voice", "room", "call"],
+            typeLabel: "Navigation",
+            priority: 25
+          ) {
+            openGrid(spaceID: spaceID)
+          }
+        }
+      }
       .alert(
         pendingSpaceAction?.action.title ?? "Confirm",
         isPresented: spaceConfirmationPresented,
@@ -628,6 +642,7 @@ struct SidebarView: View {
         otherUnreadCount: unreadCounts.scopedUnopenedOtherUnreadCount,
         avatars: [],
         accessibilityValue: nativeAllChatsUnreadAccessibilityValue,
+        contextMenuAction: nil,
         action: openAllChats
       ))
     case .grid:
@@ -642,6 +657,11 @@ struct SidebarView: View {
         otherUnreadCount: 0,
         avatars: nativeGridAvatars.map(SidebarNativeRowConfiguration.Avatar.init),
         accessibilityValue: "",
+        contextMenuAction: SidebarNativeRowConfiguration.NavigationContextMenuAction(
+          title: String(localized: "Hide Grid", comment: "Context-menu action that hides Grid from the sidebar."),
+          systemImage: "eye.slash",
+          action: hideGridFromSidebar
+        ),
         action: nativeGridAction
       ))
     case .archiveHeader:
@@ -722,6 +742,7 @@ struct SidebarView: View {
         otherUnreadCount: 0,
         avatars: [],
         accessibilityValue: "",
+        contextMenuAction: nil,
         action: createNewThread
       ))
     case .emptyState:
@@ -1048,8 +1069,14 @@ struct SidebarView: View {
   }
 
   private var showsGridRow: Bool {
-    if nav.selectedSpaceId != nil { return selectedSpaceGridEnabled }
-    return gridStore.homeSpaces.isEmpty == false
+    settings.showGridInSidebar && gridDestinationSpaceID != nil
+  }
+
+  private var gridDestinationSpaceID: Int64? {
+    if let spaceID = nav.selectedSpaceId {
+      return selectedSpaceGridEnabled ? spaceID : nil
+    }
+    return homeGridSpaces.first?.spaceID
   }
 
   @ViewBuilder
@@ -1066,6 +1093,7 @@ struct SidebarView: View {
         titleDimmed: sidebarTitlesDimmed,
         size: .compact,
         usesFullWidthCollectionLayout: usesFullWidthCollectionLayout,
+        hideAction: hideGridFromSidebar,
         action: { openGrid(spaceID: spaceID) }
       )
     } else if let home = homeGridSpaces.first {
@@ -1075,6 +1103,7 @@ struct SidebarView: View {
         titleDimmed: sidebarTitlesDimmed,
         size: .compact,
         usesFullWidthCollectionLayout: usesFullWidthCollectionLayout,
+        hideAction: hideGridFromSidebar,
         action: { openGrid(spaceID: home.spaceID) }
       )
     }
@@ -1101,6 +1130,10 @@ struct SidebarView: View {
   private func openGrid(spaceID: Int64) {
     gridStore.recordGridOpened(spaceID: spaceID)
     nav.openGrid(spaceId: spaceID)
+  }
+
+  private func hideGridFromSidebar() {
+    settings.showGridInSidebar = false
   }
 
   @ViewBuilder
@@ -3472,6 +3505,7 @@ private struct SidebarGridRow: View {
   let titleDimmed: Bool
   let size: SidebarItemSize
   var usesFullWidthCollectionLayout = false
+  let hideAction: () -> Void
   let action: () -> Void
 
   @Environment(\.colorScheme) private var colorScheme
@@ -3492,6 +3526,9 @@ private struct SidebarGridRow: View {
     .accessibilityLabel("Grid")
     .accessibilityAddTraits(selected ? .isSelected : [])
     .onHover { isHovered = $0 }
+    .contextMenu {
+      Button("Hide Grid", systemImage: "eye.slash", action: hideAction)
+    }
   }
 
   private var backgroundColor: Color {

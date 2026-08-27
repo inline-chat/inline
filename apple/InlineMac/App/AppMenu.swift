@@ -628,6 +628,12 @@ final class AppMenu: NSObject {
       action: #selector(selectSidebarMode(_:)),
       itemTitle: \SidebarMode.title
     ))
+    menu.addItem(togglePreferenceItem(
+      title: AppSettings.shared.showGridInSidebar
+        ? "Hide Grid in Sidebar"
+        : "Show Grid in Sidebar",
+      action: #selector(toggleGridInSidebar(_:))
+    ))
     menu.addItem(preferenceSubmenu(
       title: "Sidebar Item Size",
       values: SidebarItemSize.allCases,
@@ -1181,9 +1187,9 @@ final class AppMenu: NSObject {
 
   @objc private func showSpaceGrid(_ sender: Any?) {
     guard let context = MainWindowOpenCoordinator.shared.activeSpaceMenuContext,
-          let id = context.selectedSpaceID
+          let id = (sender as? NSMenuItem)?.representedObject as? NSNumber
     else { return }
-    context.showGrid(id)
+    context.showGrid(id.int64Value)
   }
 
   @objc private func selectAppearance(_ sender: NSMenuItem) {
@@ -1212,6 +1218,10 @@ final class AppMenu: NSObject {
   @objc private func selectSidebarMode(_ sender: NSMenuItem) {
     guard SidebarMode.allCases.indices.contains(sender.tag) else { return }
     AppSettings.shared.sidebarMode = SidebarMode.allCases[sender.tag]
+  }
+
+  @objc private func toggleGridInSidebar(_ sender: Any?) {
+    AppSettings.shared.showGridInSidebar.toggle()
   }
 
   @objc private func selectSidebarItemSize(_ sender: NSMenuItem) {
@@ -1352,9 +1362,14 @@ extension AppMenu: NSMenuDelegate {
       let integrations = NSMenuItem(title: "Integrations", action: #selector(showSpaceIntegrations(_:)), keyEquivalent: "")
       integrations.target = self
       menu.addItem(integrations)
+    }
 
+    let gridSpaceID = context.selectedSpaceID
+      ?? dependencies?.grid.orderedHomeSpaces.first?.spaceID
+    if let gridSpaceID {
       let grid = NSMenuItem(title: "Grid", action: #selector(showSpaceGrid(_:)), keyEquivalent: "")
       grid.target = self
+      grid.representedObject = NSNumber(value: gridSpaceID)
       menu.addItem(grid)
     }
 
@@ -1471,6 +1486,13 @@ extension AppMenu: NSMenuItemValidation {
     if menuItem.action == #selector(selectSidebarMode(_:)) {
       guard SidebarMode.allCases.indices.contains(menuItem.tag) else { return false }
       menuItem.state = settings.sidebarMode == SidebarMode.allCases[menuItem.tag] ? .on : .off
+      return true
+    }
+    if menuItem.action == #selector(toggleGridInSidebar(_:)) {
+      menuItem.title = settings.showGridInSidebar
+        ? "Hide Grid in Sidebar"
+        : "Show Grid in Sidebar"
+      menuItem.state = .off
       return true
     }
     if menuItem.action == #selector(selectSidebarItemSize(_:)) {

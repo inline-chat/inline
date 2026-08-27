@@ -230,6 +230,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       AppSettings.sidebarModeKey: SidebarMode.inbox.rawValue,
       AppSettings.sidebarSortKey: SidebarSortMode.openedOrder.rawValue,
       AppSettings.sidebarCleanupIntervalKey: SidebarCleanupInterval.defaultValue.rawValue,
+      AppSettings.showGridInSidebarKey: true,
       AppSettings.messageDoubleClickActionKey: MessageGestureAction.defaultDoubleClick.rawValue,
       AppSettings.messageHoldActionKey: MessageGestureAction.defaultHold.rawValue,
     ])

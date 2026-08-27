@@ -8,6 +8,12 @@ import SwiftUI
 
 @MainActor
 struct SidebarNativeRowConfiguration {
+  struct NavigationContextMenuAction {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+  }
+
   struct InteractionPresentation: Equatable {
     enum DragMode: Equatable {
       case idle
@@ -70,6 +76,7 @@ struct SidebarNativeRowConfiguration {
     let otherUnreadCount: Int
     let avatars: [Avatar]
     let accessibilityValue: String
+    let contextMenuAction: NavigationContextMenuAction?
     let action: () -> Void
   }
 
@@ -904,6 +911,17 @@ private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveCont
 
   override func interactionPresentationDidChange() {
     setAccessibilitySelected(interactionPresentation.selected)
+  }
+
+  override func menu(for _: NSEvent) -> NSMenu? {
+    guard let action = configuration?.contextMenuAction else { return nil }
+    let menu = NSMenu()
+    menu.addItem(SidebarNativeMenuItem(
+      title: action.title,
+      systemImage: action.systemImage,
+      action: action.action
+    ))
+    return menu
   }
 
   override func prepareForReuse() {
