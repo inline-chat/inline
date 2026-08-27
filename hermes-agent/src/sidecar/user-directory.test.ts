@@ -103,6 +103,17 @@ describe("InlineUserDirectory", () => {
     expect(attempts).toBe(3)
   })
 
+  it("marks sender provenance unverified when participant and directory hydration fail", async () => {
+    const directory = new InlineUserDirectory({
+      async invokeUncheckedRaw() {
+        throw new Error("directory unavailable")
+      },
+    })
+
+    await expect(directory.resolveWithProvenance({ userId: 5n, chatId: 10n, direct: false }))
+      .resolves.toEqual({ provenanceVerified: false })
+  })
+
   it("expires cached profiles and bounds the cache", async () => {
     let now = 0
     let requests = 0

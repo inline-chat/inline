@@ -661,6 +661,17 @@ def fake_inline_sidecar(path, body):
             "botUserId": "20",
             "name": body["name"],
         }}}
+    if path == "/get-agent":
+        return {"ok": True, "result": {
+            "bot": {"id": "20", "first_name": "Research Bot"},
+            "agent": {"id": body["agentId"], "name": "Concierge"},
+        }}
+    if path == "/list-agents":
+        return {"ok": True, "result": {"agents": [{"id": "73", "name": "Concierge"}]}}
+    if path == "/update-agent":
+        return {"ok": True, "result": {"agent": {"id": body["agentId"], "name": body.get("name", "Concierge")}}}
+    if path == "/delete-agent":
+        return {"ok": True, "result": {"agentId": body["agentId"]}}
     return {"ok": True, "result": {}}
 
 real_inline_sidecar = inline_tools._sidecar_call
@@ -953,6 +964,32 @@ try:
     assert name_only_agent["result"]["agent"]["name"] == "Concierge"
     assert tool_calls[-1] == ("/create-agent", {"name": "Concierge"})
 
+    listed_agents = json.loads(ctx.tool["handler"]({"action": "list_agents"}))
+    assert listed_agents["result"]["agents"][0]["name"] == "Concierge"
+    assert tool_calls[-1] == ("/list-agents", {})
+
+    fetched_agent = json.loads(ctx.tool["handler"]({"action": "get_agent", "agent_id": "73"}))
+    assert fetched_agent["result"]["bot"]["id"] == "20"
+    assert fetched_agent["result"]["agent"]["id"] == "73"
+    assert tool_calls[-1] == ("/get-agent", {"agentId": "73"})
+
+    updated_agent = json.loads(ctx.tool["handler"]({
+        "action": "update_agent",
+        "agent_id": "73",
+        "name": "Research Concierge",
+        "description": "",
+    }))
+    assert updated_agent["result"]["agent"]["name"] == "Research Concierge"
+    assert tool_calls[-1] == ("/update-agent", {
+        "agentId": "73",
+        "name": "Research Concierge",
+        "description": "",
+    })
+
+    deleted_agent = json.loads(ctx.tool["handler"]({"action": "delete_agent", "agent_id": "73"}))
+    assert deleted_agent["result"]["agentId"] == "73"
+    assert tool_calls[-1] == ("/delete-agent", {"agentId": "73"})
+
     os.environ["HERMES_SESSION_PLATFORM"] = "inline"
     os.environ["HERMES_SESSION_CHAT_ID"] = "10"
     os.environ["HERMES_SESSION_THREAD_ID"] = "99"
@@ -1109,7 +1146,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.8",
+    "pluginVersion": "0.0.9",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1149,7 +1186,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.8"
+assert probe_payload["pluginVersion"] == "0.0.9"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1689,6 +1726,7 @@ async def assert_mentioned_agent_projection():
     adapter = InlineAdapter(PlatformConfig(extra={
         **base_extra,
         "require_mention": False,
+        "channel_skill_bindings": [{"id": "10", "skills": ["triage", "analysis"]}],
     }))
     adapter._me_id = "20"
     events = []
@@ -1709,6 +1747,7 @@ async def assert_mentioned_agent_projection():
     await adapter._dispatch_message({
         "seq": 10,
         "chatId": "10",
+        "sender": {"id": "u1", "firstName": "Automation Bot", "bot": True},
         "message": {
             "id": "9002",
             "chatId": "10",
@@ -1726,9 +1765,115 @@ async def assert_mentioned_agent_projection():
 
     assert len(events) == 1
     assert 'You are a specialized agent named "Data Analyst".' in events[0].channel_prompt
-    assert events[0].auto_skill == ["analysis"]
+    assert events[0].auto_skill == ["triage", "analysis"]
 
 asyncio.run(assert_mentioned_agent_projection())
+
+async def assert_ambient_bot_message_is_context_only():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": False,
+    }))
+    adapter._me_id = "20"
+    events = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    adapter.handle_message = fake_handle_message
+    await adapter._dispatch_message({
+        "seq": 10,
+        "chatId": "10",
+        "sender": {"id": "u1", "firstName": "Automation Bot", "bot": True},
+        "message": {
+            "id": "9002",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "ambient automation update",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+
+    assert events == []
+
+asyncio.run(assert_ambient_bot_message_is_context_only())
+
+async def assert_unverified_sender_provenance_is_context_only():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": False,
+    }))
+    adapter._me_id = "20"
+    events = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    adapter.handle_message = fake_handle_message
+    await adapter._dispatch_message({
+        "seq": 10,
+        "chatId": "10",
+        "_inlineSenderProvenanceVerified": False,
+        "message": {
+            "id": "9002",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "ambient message with unknown provenance",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+
+    assert events == []
+
+asyncio.run(assert_unverified_sender_provenance_is_context_only())
+
+async def assert_activated_agent_avoids_lookup():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **base_extra,
+        "require_mention": False,
+    }))
+    adapter._me_id = "20"
+    events = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    async def fake_get_chat_info(chat_id):
+        return {"chatId": chat_id, "title": "Planning"}
+
+    async def fake_sidecar_call(path, body):
+        raise AssertionError(f"activated Agent should avoid lookup: {path} {body}")
+
+    adapter.handle_message = fake_handle_message
+    adapter._get_chat_info = fake_get_chat_info
+    adapter._sidecar_call = fake_sidecar_call
+    await adapter._dispatch_message({
+        "seq": 11,
+        "chatId": "10",
+        "message": {
+            "id": "9003",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "Data Analyst inspect this",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+            "activatedAgent": {
+                "id": "73",
+                "name": "Data Analyst",
+                "instructions": "Inspect the supplied data carefully.",
+            },
+            "entities": {"entities": [{
+                "type": 4,
+                "offset": "0",
+                "length": "12",
+                "entity": {"oneofKind": "mention", "mention": {"userId": "20", "agentId": "73"}},
+            }]},
+        },
+    })
+
+    assert len(events) == 1
+    assert "Inspect the supplied data carefully." in events[0].channel_prompt
+
+asyncio.run(assert_activated_agent_avoids_lookup())
 
 async def assert_forced_reply_thread_creation():
     adapter = InlineAdapter(PlatformConfig(extra={

@@ -7,6 +7,7 @@ export type GenericSenderProfile = {
   firstName?: string
   lastName?: string
   username?: string
+  bot?: boolean
 }
 export type SecretRedaction = { value: string | null | undefined; label: string }
 

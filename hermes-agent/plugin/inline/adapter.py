@@ -354,20 +354,23 @@ def _target_from_chat_id(chat_id: str) -> Dict[str, str]:
     return {"chatId": raw}
 
 
-def _inline_sender_profile(event: Dict[str, Any], message: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+def _inline_sender_profile(event: Dict[str, Any], message: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     raw = event.get("sender")
     if not isinstance(raw, dict) and isinstance(message, dict):
         raw = message.get("sender")
     if not isinstance(raw, dict):
         return {}
-    return {
+    profile: Dict[str, Any] = {
         key: str(raw.get(key) or "").strip()
         for key in ("id", "firstName", "lastName", "username")
         if str(raw.get(key) or "").strip()
     }
+    if isinstance(raw.get("bot"), bool):
+        profile["bot"] = raw["bot"]
+    return profile
 
 
-def _inline_sender_identity(profile: Dict[str, str]) -> tuple[str, str, str]:
+def _inline_sender_identity(profile: Dict[str, Any]) -> tuple[str, str, str]:
     first_name = str(profile.get("firstName") or "").strip()
     last_name = str(profile.get("lastName") or "").strip()
     username = str(profile.get("username") or "").strip().lstrip("@")
@@ -873,6 +876,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._model_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._thread_action_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._chat_info_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
+        self._bot_agent_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
         self._reply_thread_cache: "OrderedDict[str, str]" = OrderedDict()
         self._reply_thread_parent_reply_ids: "OrderedDict[str, set[str]]" = OrderedDict()
         self._reply_thread_parent_typing_targets: "OrderedDict[str, str]" = OrderedDict()
@@ -2150,6 +2154,13 @@ class InlineAdapter(BasePlatformAdapter):
             text = f"{text}\n{media_text}".strip() if text else media_text
         if not text and not media_urls:
             text = "[Inline message with no text]"
+        explicitly_mentions_me = self._message_entity_mentions_me(msg)
+        if event.get("_inlineSenderProvenanceVerified") is False and not explicitly_mentions_me:
+            self._remember_observed_context(chat_id, msg, text)
+            return
+        if sender_profile.get("bot") is True and not explicitly_mentions_me:
+            self._remember_observed_context(chat_id, msg, text)
+            return
 
         chat_type = self._chat_type_from_message(msg)
         thread_id = self._thread_id_from_message(msg)
@@ -2261,8 +2272,9 @@ class InlineAdapter(BasePlatformAdapter):
         mentioned_agent_id = self._mentioned_agent_id(msg)
         if mentioned_agent_id:
             try:
-                resolved_agent = await self._sidecar_call("/get-agent", {"agentId": mentioned_agent_id})
-                agent = resolved_agent.get("agent") if isinstance(resolved_agent.get("agent"), dict) else {}
+                agent = self._activated_agent(msg, mentioned_agent_id)
+                if not agent:
+                    agent = await self._resolve_bot_agent(mentioned_agent_id)
                 agent_name = str(agent.get("name") or "").strip()
                 agent_instructions = str(agent.get("instructions") or "").strip()
                 agent_skill = str(agent.get("skillKey") or agent.get("skill_key") or "").strip()
@@ -2270,7 +2282,7 @@ class InlineAdapter(BasePlatformAdapter):
                     specialization = agent_instructions or f'You are a specialized agent named "{agent_name}".'
                     channel_prompt = self._merge_channel_prompt(channel_prompt, specialization)
                 if agent_skill:
-                    auto_skill = [agent_skill]
+                    auto_skill = list(dict.fromkeys([*(auto_skill or []), agent_skill]))
             except Exception as exc:
                 logger.warning("[inline] failed to resolve mentioned Agent %s: %s", mentioned_agent_id, exc)
         entity_text = self._inline_entity_text(msg, str(msg.get("message") or ""))
@@ -2423,17 +2435,24 @@ class InlineAdapter(BasePlatformAdapter):
             return False
         if bool(msg.get("mentioned")):
             return True
+        if self._message_entity_mentions_me(msg):
+            return True
+        username = str(self._me_username or "").strip().lstrip("@")
+        text = str(msg.get("message") or "")
+        if not username or not text:
+            return False
+        return bool(re.search(rf"(^|\s)@{re.escape(username)}(?=$|[\s,.:;!?])", text, re.IGNORECASE))
+
+    def _message_entity_mentions_me(self, msg: Dict[str, Any]) -> bool:
+        if not self._me_id:
+            return False
         for entity in self._message_entities(msg):
             if self._entity_kind(entity) != "mention":
                 continue
             payload = self._entity_payload(entity, "mention")
             if self._entity_id(payload, "userId") == self._me_id:
                 return True
-        username = str(self._me_username or "").strip().lstrip("@")
-        text = str(msg.get("message") or "")
-        if not username or not text:
-            return False
-        return bool(re.search(rf"(^|\s)@{re.escape(username)}(?=$|[\s,.:;!?])", text, re.IGNORECASE))
+        return False
 
     async def _recover_self_join_mentions(self, event: Dict[str, Any]) -> bool:
         participant = event.get("participant") if isinstance(event.get("participant"), dict) else {}
@@ -2988,6 +3007,36 @@ class InlineAdapter(BasePlatformAdapter):
             if agent_id:
                 return agent_id
         return None
+
+    @staticmethod
+    def _activated_agent(msg: Dict[str, Any], agent_id: str) -> Optional[Dict[str, Any]]:
+        candidates = [msg]
+        raw = msg.get("raw")
+        if isinstance(raw, dict):
+            candidates.append(raw)
+        for container in candidates:
+            value = container.get("activatedAgent") or container.get("activated_agent")
+            if not isinstance(value, dict):
+                continue
+            value_id = value.get("id") or value.get("agentId") or value.get("agent_id")
+            if str(value_id or "") == agent_id:
+                return value
+        return None
+
+    async def _resolve_bot_agent(self, agent_id: str) -> Dict[str, Any]:
+        now = time.monotonic()
+        cached = self._bot_agent_cache.get(agent_id)
+        if cached and now - cached[0] < 60:
+            self._bot_agent_cache.move_to_end(agent_id)
+            return cached[1]
+
+        resolved = await self._sidecar_call("/get-agent", {"agentId": agent_id})
+        agent = resolved.get("agent") if isinstance(resolved.get("agent"), dict) else {}
+        self._bot_agent_cache[agent_id] = (now, agent)
+        self._bot_agent_cache.move_to_end(agent_id)
+        if len(self._bot_agent_cache) > 100:
+            self._bot_agent_cache.popitem(last=False)
+        return agent
 
     @staticmethod
     def _merge_channel_prompt(*parts: Optional[str]) -> Optional[str]:

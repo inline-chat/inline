@@ -91,6 +91,10 @@ _ACTION_MANIFEST = [
     ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
     ("create_chat", "(title, space_id?, participant_user_ids?, is_public?)", "Create a top-level Inline thread/chat."),
     ("create_agent", "(name, skill_key?, instructions?)", "Create a named Inline Agent backed by this bot."),
+    ("get_agent", "(agent_id)", "Inspect one Agent backed by this bot."),
+    ("list_agents", "()", "List Agents backed by this bot."),
+    ("update_agent", "(agent_id, fields...)", "Update a named Inline Agent; empty optional fields clear them."),
+    ("delete_agent", "(agent_id)", "Delete an Agent backed by this bot."),
     ("set_presence", "(chat_id?|user_id?, kind, comment?)", "Set the bot avatar presence/status message."),
 ]
 _ACTIONS = [name for name, _, _ in _ACTION_MANIFEST]
@@ -207,11 +211,12 @@ INLINE_TOOL_SCHEMA = {
             },
             "title": {"type": "string", "description": "Thread title. Required for create_chat and optional for create_thread."},
             "name": {"type": "string", "description": "Agent name for create_agent."},
+            "agent_id": {"type": "string", "description": "Globally unique Inline Agent ID for get_agent, update_agent, or delete_agent."},
             "handle": {"type": "string", "description": "Optional Agent handle."},
-            "skill_key": {"type": "string", "description": "Optional harness skill key for create_agent."},
-            "instructions": {"type": "string", "description": "Optional specialized Agent instructions."},
-            "description": {"type": "string", "description": "Optional thread description for create_thread or create_chat."},
-            "emoji": {"type": "string", "description": "Optional thread emoji for create_thread/create_chat, or reaction emoji for reaction actions."},
+            "skill_key": {"type": "string", "description": "Optional harness skill key for create_agent or update_agent."},
+            "instructions": {"type": "string", "description": "Optional specialized Agent instructions for create_agent or update_agent."},
+            "description": {"type": "string", "description": "Optional thread or Agent description."},
+            "emoji": {"type": "string", "description": "Optional thread or Agent emoji, or reaction emoji for reaction actions."},
             "space_id": {"type": "string", "description": "Optional parent space ID for create_chat."},
             "participant_user_ids": {
                 "type": "array",
@@ -419,6 +424,26 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
             if value:
                 body[key] = value
         return "/create-agent", body
+
+    if action == "get_agent":
+        return "/get-agent", {"agentId": _required_id(args, "agent_id")}
+
+    if action == "list_agents":
+        return "/list-agents", {}
+
+    if action == "update_agent":
+        body = {"agentId": _required_id(args, "agent_id")}
+        if "name" in args:
+            body["name"] = _required_str(args, "name", max_chars=256)
+        for key in ("handle", "emoji", "description", "skill_key", "instructions"):
+            if key in args and args.get(key) is not None:
+                body[key] = _str(args.get(key))
+        if len(body) == 1:
+            raise InlineToolError("update_agent requires at least one field", "bad_format")
+        return "/update-agent", body
+
+    if action == "delete_agent":
+        return "/delete-agent", {"agentId": _required_id(args, "agent_id")}
 
     if action == "set_presence":
         kind = _str(args.get("kind"))
@@ -657,8 +682,17 @@ def _compact_result(action: str, result: Dict[str, Any]) -> Dict[str, Any]:
             "chat": _compact_chat(result.get("chat") if isinstance(result.get("chat"), dict) else {}),
             "dialog": _summarize_value(result.get("dialog")) if result.get("dialog") is not None else None,
         }
-    if action == "create_agent":
+    if action in {"create_agent", "update_agent"}:
         return {"agent": _summarize_value(result.get("agent"))}
+    if action == "get_agent":
+        return {
+            "bot": _summarize_value(result.get("bot")),
+            "agent": _summarize_value(result.get("agent")),
+        }
+    if action == "list_agents":
+        return {"agents": _summarize_value(result.get("agents"))}
+    if action == "delete_agent":
+        return {"agentId": _str(result.get("agentId") or result.get("agent_id"))}
     return result
 
 

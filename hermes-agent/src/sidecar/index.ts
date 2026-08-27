@@ -189,8 +189,11 @@ async function connectClientLoop() {
 async function consumeEvents() {
   try {
     for await (const event of client.events()) {
-      const sender = await resolveInboundSender(event)
-      await deliver(normalizeInboundEvent(event, meId, sender, meUsername))
+      const senderResolution = await resolveInboundSender(event)
+      const normalized = normalizeInboundEvent(event, meId, senderResolution.profile, meUsername)
+      await deliver(senderResolution.provenanceVerified
+        ? normalized
+        : { ...asRecord(normalized), _inlineSenderProvenanceVerified: false })
     }
   } catch (error) {
     if (!stopping) {
@@ -315,6 +318,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return
     case "/get-agent":
       await endpointGetAgent(res, body)
+      return
+    case "/list-agents":
+      await endpointListAgents(res)
+      return
+    case "/update-agent":
+      await endpointUpdateAgent(res, body)
+      return
+    case "/delete-agent":
+      await endpointDeleteAgent(res, body)
       return
     case "/answer-action":
       await endpointAnswerAction(res, body)
@@ -838,6 +850,65 @@ async function endpointGetAgent(res: ServerResponse, body: unknown) {
   writeJson(res, 200, { ok: true, result: safeJson(result) })
 }
 
+async function endpointListAgents(res: ServerResponse) {
+  const result = await callBotApi("getMyAgents", "GET")
+  writeJson(res, 200, { ok: true, result: safeJson(result) })
+}
+
+function readAgentPatchString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  if (!(key in record)) return undefined
+  const value = record[key]
+  if (typeof value !== "string") {
+    throw new SidecarError(`${key} must be a string`, "bad_format")
+  }
+  return value.trim()
+}
+
+async function endpointUpdateAgent(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const agentId = readRequiredInlineId(record, "agentId")
+  const name = readAgentPatchString(record, "name")
+  if (name !== undefined && !name) {
+    throw new SidecarError("name cannot be empty", "bad_format")
+  }
+  const patch = {
+    ...(name !== undefined ? { name } : {}),
+    ...agentPatchField(record, "handle"),
+    ...agentPatchField(record, "emoji"),
+    ...agentPatchField(record, "description"),
+    ...agentPatchField(record, "skill_key"),
+    ...agentPatchField(record, "instructions"),
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new SidecarError("update-agent requires at least one field", "bad_format")
+  }
+  const result = await callBotApi("updateAgent", "POST", {
+    agent_id: String(agentId),
+    ...patch,
+  })
+  const agent = asOptionalRecord(result.agent)
+  if (!agent) throw new SidecarError("update-agent returned no Agent", "unknown")
+  writeJson(res, 200, { ok: true, result: { agent: safeJson(agent) } })
+}
+
+function agentPatchField(
+  record: Record<string, unknown>,
+  key: "handle" | "emoji" | "description" | "skill_key" | "instructions",
+): Record<string, string> {
+  const value = readAgentPatchString(record, key)
+  return value === undefined ? {} : { [key]: value }
+}
+
+async function endpointDeleteAgent(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const agentId = readRequiredInlineId(record, "agentId")
+  const result = await callBotApi("deleteAgent", "POST", { agent_id: String(agentId) })
+  writeJson(res, 200, { ok: true, result: safeJson(result) })
+}
+
 async function getRawChatSnapshot(chatId: bigint): Promise<{
   chat: RawChat
   dialog?: RawDialog
@@ -912,7 +983,10 @@ function orderMessagesByRequestedIds(messages: unknown[], requestedIds: bigint[]
   })
 }
 
-async function resolveInboundSender(event: GenericInboundEvent): Promise<GenericSenderProfile | undefined> {
+async function resolveInboundSender(event: GenericInboundEvent): Promise<{
+  profile?: GenericSenderProfile
+  provenanceVerified: boolean
+}> {
   const message = asOptionalRecord(event.message)
   const reaction = asOptionalRecord(event.reaction)
   const participant = asOptionalRecord(event.participant)
@@ -924,8 +998,8 @@ async function resolveInboundSender(event: GenericInboundEvent): Promise<Generic
       ?? participant?.userId,
   )
   const chatId = asPositiveBigInt(event.chatId ?? message?.chatId ?? reaction?.chatId)
-  if (!userId || !chatId || userId.toString() === meId) return undefined
-  return userDirectory.resolve({
+  if (!userId || !chatId || userId.toString() === meId) return { provenanceVerified: true }
+  return userDirectory.resolveWithProvenance({
     userId,
     chatId,
     direct: message ? messagePeerIsDirect(message) : false,

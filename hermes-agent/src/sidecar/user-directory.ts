@@ -8,6 +8,12 @@ export type InlineSenderProfile = {
   firstName?: string
   lastName?: string
   username?: string
+  bot?: boolean
+}
+
+export type InlineUserResolution = {
+  profile?: InlineSenderProfile
+  provenanceVerified: boolean
 }
 
 type CachedProfile = {
@@ -29,9 +35,9 @@ type UserDirectoryOptions = {
 export class InlineUserDirectory {
   private readonly profiles = new Map<string, CachedProfile>()
   private readonly hydratedChats = new Map<string, number>()
-  private readonly chatFetches = new Map<string, Promise<void>>()
+  private readonly chatFetches = new Map<string, Promise<boolean>>()
   private directoryExpiresAt = 0
-  private directoryFetch: Promise<void> | null = null
+  private directoryFetch: Promise<boolean> | null = null
   private readonly ttlMs: number
   private readonly maxProfiles: number
   private readonly now: () => number
@@ -48,22 +54,46 @@ export class InlineUserDirectory {
   }
 
   async resolve(params: { userId: bigint; chatId: bigint; direct: boolean }): Promise<InlineSenderProfile | undefined> {
+    const cached = this.getFresh(params.userId.toString())
+    if (hasDisplayIdentity(cached)) return cached
+    return (await this.resolveWithProvenance(params)).profile
+  }
+
+  async resolveWithProvenance(
+    params: { userId: bigint; chatId: bigint; direct: boolean },
+  ): Promise<InlineUserResolution> {
     const userId = params.userId.toString()
     const cached = this.getFresh(userId)
-    if (hasDisplayIdentity(cached)) return cached
+    if (hasDisplayIdentity(cached) && cached.bot != null) {
+      return { profile: cached, provenanceVerified: true }
+    }
 
     if (params.direct) {
-      await this.hydrateDirectory()
+      const directoryHydrated = await this.hydrateDirectory()
+      const resolved = this.getFresh(userId)
+      return {
+        ...(hasDisplayIdentity(resolved) ? { profile: resolved } : {}),
+        provenanceVerified: directoryHydrated,
+      }
     } else {
-      await this.hydrateChat(params.chatId)
+      const chatHydrated = await this.hydrateChat(params.chatId)
+      const participant = this.getFresh(userId)
+      if (hasDisplayIdentity(participant)) {
+        return {
+          profile: participant,
+          provenanceVerified: chatHydrated || participant.bot != null,
+        }
+      }
       // Participant payloads can be partial (especially for reply threads), so
       // this deliberate extra directory fetch fills the miss. Both RPC paths
       // are TTL-cached and in-flight deduplicated to avoid a per-message fetch.
-      if (!hasDisplayIdentity(this.getFresh(userId))) await this.hydrateDirectory()
+      const directoryHydrated = await this.hydrateDirectory()
+      const resolved = this.getFresh(userId)
+      return {
+        ...(hasDisplayIdentity(resolved) ? { profile: resolved } : {}),
+        provenanceVerified: directoryHydrated && (chatHydrated || hasDisplayIdentity(resolved)),
+      }
     }
-
-    const resolved = this.getFresh(userId)
-    return hasDisplayIdentity(resolved) ? resolved : undefined
   }
 
   remember(users: readonly User[]): void {
@@ -77,6 +107,7 @@ export class InlineUserDirectory {
         ...readProfileField(user.firstName, previous?.firstName, "firstName"),
         ...readProfileField(user.lastName, previous?.lastName, "lastName"),
         ...readProfileField(user.username, previous?.username, "username"),
+        ...readBooleanProfileField(user.bot, previous?.bot, "bot"),
       }
       this.profiles.delete(id)
       this.profiles.set(id, { profile, expiresAt })
@@ -106,13 +137,13 @@ export class InlineUserDirectory {
     return cached.profile
   }
 
-  private async hydrateChat(chatId: bigint): Promise<void> {
+  private async hydrateChat(chatId: bigint): Promise<boolean> {
     const key = chatId.toString()
     const hydratedUntil = this.hydratedChats.get(key) ?? 0
     if (hydratedUntil > this.now()) {
       this.hydratedChats.delete(key)
       this.hydratedChats.set(key, hydratedUntil)
-      return
+      return true
     }
     this.hydratedChats.delete(key)
     const existing = this.chatFetches.get(key)
@@ -131,16 +162,20 @@ export class InlineUserDirectory {
         if (oldest == null) break
         this.hydratedChats.delete(oldest)
       }
+      return true
     })()
-      .catch((error) => this.onError?.("getChatParticipants", error))
+      .catch((error) => {
+        this.onError?.("getChatParticipants", error)
+        return false
+      })
       .finally(() => this.chatFetches.delete(key))
 
     this.chatFetches.set(key, fetch)
-    await fetch
+    return await fetch
   }
 
-  private async hydrateDirectory(): Promise<void> {
-    if (this.directoryExpiresAt > this.now()) return
+  private async hydrateDirectory(): Promise<boolean> {
+    if (this.directoryExpiresAt > this.now()) return true
     if (this.directoryFetch) return this.directoryFetch
 
     const fetch = (async () => {
@@ -150,19 +185,23 @@ export class InlineUserDirectory {
       })
       this.remember(readUsers(result, "getChats"))
       this.directoryExpiresAt = this.now() + this.ttlMs
+      return true
     })()
-      .catch((error) => this.onError?.("getChats", error))
+      .catch((error) => {
+        this.onError?.("getChats", error)
+        return false
+      })
       .finally(() => {
         this.directoryFetch = null
       })
 
     this.directoryFetch = fetch
-    await fetch
+    return await fetch
   }
 }
 
 function hasDisplayIdentity(profile: InlineSenderProfile | undefined): profile is InlineSenderProfile {
-  return Boolean(profile?.firstName || profile?.lastName || profile?.username)
+  return Boolean(profile?.firstName || profile?.lastName || profile?.username || profile?.bot != null)
 }
 
 function readProfileField<K extends "firstName" | "lastName" | "username">(
@@ -173,6 +212,15 @@ function readProfileField<K extends "firstName" | "lastName" | "username">(
   const normalized = typeof value === "string" ? value.trim() : ""
   const resolved = normalized || previous
   return resolved ? { [key]: resolved } as Record<K, string> : {}
+}
+
+function readBooleanProfileField<K extends "bot">(
+  value: boolean | undefined,
+  previous: boolean | undefined,
+  key: K,
+): Partial<Record<K, boolean>> {
+  const resolved = value ?? previous
+  return resolved == null ? {} : { [key]: resolved } as Record<K, boolean>
 }
 
 function readUsers(result: unknown, kind: "getChatParticipants" | "getChats"): User[] {
