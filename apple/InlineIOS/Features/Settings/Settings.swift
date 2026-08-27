@@ -137,7 +137,7 @@ struct SettingsView: View {
   }
 }
 
-private enum SettingsBuildAudience {
+enum SettingsBuildAudience {
   static var showsDebugTools: Bool {
     #if DEBUG || DEBUG_BUILD
     true

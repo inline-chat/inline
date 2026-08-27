@@ -1,6 +1,14 @@
+import InlineKit
+import InlineIOSUI
 import SwiftUI
 
 struct ExperimentalView: View {
+  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
+  private var mentionableAgentsEnabled = false
+
+  @AppStorage(MessageView2Feature.preferenceKey)
+  private var messageView2Enabled = false
+
   var body: some View {
     List {
       Section {
@@ -18,10 +26,42 @@ struct ExperimentalView: View {
       } footer: {
         Text("New Home is now the standard experience for everyone.")
       }
+
+      Section {
+        SettingsItem(
+          icon: "at",
+          iconColor: .purple,
+          title: "Mentionable Agents"
+        ) {
+          Toggle("Mentionable Agents", isOn: $mentionableAgentsEnabled)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Show Agent creation, profiles, and @mention autocomplete. Server and Bot API support remain available when this is off.")
+      }
+
+      if SettingsBuildAudience.showsDebugTools {
+        Section {
+          SettingsItem(
+            icon: "text.bubble.fill",
+            iconColor: .orange,
+            title: "Message View 2"
+          ) {
+            Toggle("Message View 2", isOn: $messageView2Enabled)
+              .labelsHidden()
+          }
+        } footer: {
+          Text("Uses the experimental iOS message renderer. Reopen the chat after changing this setting.")
+        }
+      }
     }
     .listStyle(.insetGrouped)
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
+    .onChange(of: mentionableAgentsEnabled) { _, _ in
+      BotAgentDirectory.shared.clear()
+      NotificationCenter.default.post(name: .mentionableAgentsExperimentChanged, object: nil)
+    }
   }
 }
 
