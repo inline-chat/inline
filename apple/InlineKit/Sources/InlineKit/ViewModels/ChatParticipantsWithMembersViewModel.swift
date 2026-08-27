@@ -5,7 +5,7 @@ import Logger
 import SwiftUI
 
 /// Chat participants view model that falls back to space members for public threads
-/// and parent participants for linked subthreads.
+/// and parent participants for subthreads.
 public final class ChatParticipantsWithMembersViewModel: ObservableObject {
   public enum Purpose: Sendable {
     case participantsList
@@ -23,6 +23,12 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     var groupParticipants: [UserGroup]
     var effectiveUserIds: Set<Int64>
     var mentionCandidates: MentionCompletionCandidates
+  }
+
+  public struct EffectiveParticipantAccess: Sendable {
+    public let sourceChat: Chat
+    public let userIds: Set<Int64>
+    public let groupIds: Set<Int64>
   }
 
   @Published public private(set) var participants: [UserInfo] = []
@@ -123,10 +129,36 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
   private static func fetchGroupMemberIds(_ db: Database, groupIds: [Int64]) throws -> Set<Int64> {
     guard !groupIds.isEmpty else { return [] }
 
-    return Set(try UserGroupMember
+    let memberships = try UserGroupMember
       .filter(groupIds.contains(UserGroupMember.Columns.groupId))
       .fetchAll(db)
-      .map(\.userId))
+    guard !memberships.isEmpty else { return [] }
+
+    let groups = try UserGroup
+      .filter(groupIds.contains(UserGroup.Columns.id))
+      .fetchAll(db)
+    let spaceIdByGroupId = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.spaceId) })
+    let userIds = Set(memberships.map(\.userId))
+    let spaceIds = Set(groups.map(\.spaceId))
+    let members = try Member
+      .filter(spaceIds.contains(Member.Columns.spaceId))
+      .filter(userIds.contains(Member.Columns.userId))
+      .fetchAll(db)
+    let currentMemberships = Set(members.map { SpaceUserKey(spaceId: $0.spaceId, userId: $0.userId) })
+
+    return Set(memberships.compactMap { membership in
+      guard let spaceId = spaceIdByGroupId[membership.groupId],
+            currentMemberships.contains(SpaceUserKey(spaceId: spaceId, userId: membership.userId))
+      else {
+        return nil
+      }
+      return membership.userId
+    })
+  }
+
+  private struct SpaceUserKey: Hashable {
+    let spaceId: Int64
+    let userId: Int64
   }
 
   private static func fetchDirectChatCandidates(_ db: Database) throws -> [MentionCompletionUser] {
@@ -176,27 +208,86 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     )
   }
 
-  private static func participantsSourceChat(_ db: Database, chatId: Int64, purpose: Purpose) throws -> Chat? {
+  static func participantsSourceChat(_ db: Database, chatId: Int64, purpose: Purpose) throws -> Chat? {
     guard let chat = try Chat.fetchOne(db, id: chatId) else { return nil }
     return try participantsSourceChat(db, for: chat, purpose: purpose)
   }
 
-  private static func participantsSourceChat(_ db: Database, for chat: Chat, purpose: Purpose) throws -> Chat {
-    guard purpose == .participantsList else { return chat }
+  private static func participantsSourceChat(_ db: Database, for chat: Chat, purpose _: Purpose) throws -> Chat {
+    // Every subthread inherits access from its top-level parent. Participant and
+    // mention projections therefore use that same source instead of presenting
+    // an empty child-local participant set on first open.
+    try participantAccessChain(db, for: chat).last ?? chat
+  }
 
-    // Linked reply threads inherit access from their parent, but for now this view
-    // only displays the inherited parent participant set. TODO: expose parent +
-    // child-direct participants separately so the UI can group inherited users
-    // and safely manage direct reply-thread participants.
-    var source = chat
-    var seenIds: Set<Int64> = [chat.id]
-    while let parentChatId = source.parentChatId, !seenIds.contains(parentChatId) {
-      guard let parent = try Chat.fetchOne(db, id: parentChatId) else { break }
-      source = parent
-      seenIds.insert(parent.id)
+  /// Resolves access already granted to a chat directly or by its top-level root.
+  ///
+  /// Subthread autocomplete keeps its broad space/direct-chat candidates and
+  /// projects the inherited `sourceChat` roster. Send-time mention handling uses
+  /// the target's direct grants plus the server-defined root access mode: normal
+  /// root grants, a DM peer, or eligible public members. Intermediate subthread
+  /// grants do not propagate. A missing parent or cycle simply ends the chain.
+  public static func effectiveParticipantAccess(
+    _ db: Database,
+    for chat: Chat
+  ) throws -> EffectiveParticipantAccess {
+    let chain = try participantAccessChain(db, for: chat)
+    let sourceChat = chain.last ?? chat
+    let isPublicRoot = sourceChat.type == .thread &&
+      sourceChat.parentChatId == nil &&
+      sourceChat.isPublic == true
+    var directGrantChatIds: Set<Int64> = [chat.id]
+
+    // Top-level chats always retain their own direct grants. An inherited
+    // normal thread also contributes root grants, while inherited DM/public
+    // roots use their dedicated access modes below.
+    if sourceChat.id == chat.id || (sourceChat.type == .thread && !isPublicRoot) {
+      directGrantChatIds.insert(sourceChat.id)
     }
 
-    return source
+    var userIds = Set(try ChatParticipant
+      .filter(directGrantChatIds.contains(ChatParticipant.Columns.chatId))
+      .fetchAll(db)
+      .map(\.userId))
+
+    let groupIds = Set(try ChatParticipantGroup
+      .filter(directGrantChatIds.contains(ChatParticipantGroup.Columns.chatId))
+      .fetchAll(db)
+      .map(\.groupId))
+
+    userIds.formUnion(try fetchGroupMemberIds(db, groupIds: Array(groupIds)))
+
+    if sourceChat.type == .privateChat, let peerUserId = sourceChat.peerUserId {
+      userIds.insert(peerUserId)
+    }
+
+    if isPublicRoot, let spaceId = sourceChat.spaceId {
+      userIds.formUnion(try Member
+        .filter(Member.Columns.spaceId == spaceId)
+        .filter(Member.Columns.canAccessPublicChats == true)
+        .fetchAll(db)
+        .map(\.userId))
+    }
+
+    return EffectiveParticipantAccess(
+      sourceChat: sourceChat,
+      userIds: userIds,
+      groupIds: groupIds
+    )
+  }
+
+  private static func participantAccessChain(_ db: Database, for chat: Chat) throws -> [Chat] {
+    var chain = [chat]
+    var seenIds: Set<Int64> = [chat.id]
+    var current = chat
+
+    while let parentChatId = current.parentChatId, seenIds.insert(parentChatId).inserted {
+      guard let parent = try Chat.fetchOne(db, id: parentChatId) else { break }
+      chain.append(parent)
+      current = parent
+    }
+
+    return chain
   }
 
   private func fetchParticipants() {

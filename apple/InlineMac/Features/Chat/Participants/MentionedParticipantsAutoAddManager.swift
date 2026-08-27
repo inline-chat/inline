@@ -81,9 +81,11 @@ final class MentionedParticipantsAutoAddManager {
           groupIds: request.reservedGroupIds
         )
 
+        // Linked subthreads may copy the root's public flag, but an outsider
+        // still needs a grant on the child without gaining parent access.
         let context = MentionedParticipantAddContext(
           chatType: snapshot.chat.type,
-          isPublic: snapshot.chat.isPublic == true,
+          isPublic: snapshot.chat.isPublic == true && snapshot.chat.parentChatId == nil,
           isReplyThread: snapshot.chat.isReplyThread,
           currentUserId: request.currentUserId,
           messageCount: snapshot.messageCount,
@@ -257,15 +259,7 @@ final class MentionedParticipantsAutoAddManager {
         .filter(Column("chatId") == chat.id)
         .fetchCount(db)
 
-      let participantIds = Set(try ChatParticipant
-        .filter(ChatParticipant.Columns.chatId == chat.id)
-        .fetchAll(db)
-        .map(\.userId))
-
-      let groupParticipantIds = Set(try ChatParticipantGroup
-        .filter(ChatParticipantGroup.Columns.chatId == chat.id)
-        .fetchAll(db)
-        .map(\.groupId))
+      let access = try ChatParticipantsWithMembersViewModel.effectiveParticipantAccess(db, for: chat)
 
       let users = try User
         .filter(ids: Array(userIds))
@@ -280,8 +274,8 @@ final class MentionedParticipantsAutoAddManager {
       return Snapshot(
         chat: chat,
         messageCount: messageCount,
-        participantIds: participantIds,
-        groupParticipantIds: groupParticipantIds,
+        participantIds: access.userIds,
+        groupParticipantIds: access.groupIds,
         users: users,
         groups: groups
       )
