@@ -655,7 +655,6 @@ const botMethods = (authPlugin: any): any => {
     response: TApiEnvelope(t.Object({ agent_id: t.Number() })),
   })
 
-
   app.post(
     "/sendMessage",
     async ({ body, query, store }: any) => {
