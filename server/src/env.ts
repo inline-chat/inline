@@ -1,4 +1,5 @@
 import { Log } from "@in/server/utils/log"
+import { REQUIRED_PRODUCTION_VARIABLES } from "@in/server/envRequirements"
 
 export const NODE_ENV = process.env.NODE_ENV ?? "development"
 export const isProd = NODE_ENV === "production"
@@ -119,28 +120,7 @@ export const LIVEKIT_SELF_HOSTED_API_KEY = process.env["LIVEKIT_SELF_HOSTED_API_
 export const LIVEKIT_SELF_HOSTED_API_SECRET = process.env["LIVEKIT_SELF_HOSTED_API_SECRET"]
 
 // Check required variables
-const requiredProductionVariables = [
-  "DATABASE_URL",
-  "ENCRYPTION_KEY",
-  "AMAZON_ACCESS_KEY",
-  "AMAZON_SECRET_ACCESS_KEY",
-  "SES_ACCESS_KEY_ID",
-  "SES_SECRET_ACCESS_KEY",
-  "TWILIO_SID",
-  "TWILIO_VERIFY_SERVICE_SID",
-  "SENTRY_DSN",
-  "RESEND_API_KEY",
-  "APN_KEY",
-  "APN_KEY_ID",
-  "APN_TEAM_ID",
-  "R2_ACCESS_KEY_ID",
-  "R2_SECRET_ACCESS_KEY",
-  "R2_BUCKET",
-  "R2_ENDPOINT",
-  "PRELUDE_API_TOKEN",
-]
-
-for (const variable of requiredProductionVariables) {
+for (const variable of REQUIRED_PRODUCTION_VARIABLES) {
   if (!process.env[variable]) {
     if (isProd) {
       throw new Error(`Required production variable ${variable} is not defined.`)

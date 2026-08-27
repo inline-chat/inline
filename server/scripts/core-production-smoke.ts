@@ -5,6 +5,10 @@ import {
   HealthHttpResponseSchema,
   LivenessHttpResponseSchema,
 } from "../src/controllers/health.effect"
+import {
+  REQUIRED_PRODUCTION_VARIABLES,
+  type RequiredProductionVariable,
+} from "../src/envRequirements"
 
 const START_TIMEOUT_MILLIS = 20_000
 const REQUEST_TIMEOUT_MILLIS = 10_000
@@ -15,6 +19,72 @@ type CapturedOutput = {
   stderr: string
   stdout: string
 }
+
+type SmokeEnvironment =
+  Record<string, string | undefined>
+
+const artifactSmokeValue = (
+  variable: RequiredProductionVariable,
+): string => {
+  switch (variable) {
+    case "DATABASE_URL":
+      throw new Error(
+        "Artifact smoke must inherit its local database URL.",
+      )
+    case "ENCRYPTION_KEY":
+      return "0".repeat(64)
+    case "SENTRY_DSN":
+      return "https://public@example.invalid/1"
+    case "R2_ENDPOINT":
+      return "https://artifact-smoke.invalid"
+    default:
+      return "artifact-smoke"
+  }
+}
+
+const artifactSmokeRequiredEnvironment =
+  Object.fromEntries(
+    REQUIRED_PRODUCTION_VARIABLES
+      .filter(
+        (variable) =>
+          variable !== "DATABASE_URL",
+      )
+      .map(
+        (variable) => [
+          variable,
+          artifactSmokeValue(variable),
+        ],
+      ),
+  )
+
+export const makeCoreProductionSmokeEnvironment = (
+  environment: SmokeEnvironment,
+  useArtifact: boolean,
+): SmokeEnvironment => ({
+  ...environment,
+  ...(useArtifact
+    ? artifactSmokeRequiredEnvironment
+    : {}),
+  ENABLE_DATABASE_HEALTH_MONITOR: "0",
+  INLINE_API_RATE_LIMIT_MAX: "180",
+  INLINE_TRUSTED_CLIENT_IP_HEADER:
+    "direct",
+  INLINE_SERVER_SMOKE: "1",
+  LIVEKIT_API_KEY: "",
+  LIVEKIT_API_SECRET: "",
+  LIVEKIT_URL: "",
+  NODE_ENV: useArtifact
+    ? "production"
+    : "test",
+  PORT: "0",
+  SENTRY_DSN: useArtifact
+    ? artifactSmokeValue("SENTRY_DSN")
+    : "",
+  SKIP_DB_MIGRATIONS: "1",
+  TWILIO_AUTH_TOKEN: useArtifact
+    ? "artifact-smoke"
+    : environment["TWILIO_AUTH_TOKEN"],
+})
 
 const appendBounded = (
   current: string,
@@ -154,26 +224,10 @@ const main = async (): Promise<void> => {
       "..",
       import.meta.url,
     ).pathname,
-    env: {
-      ...process.env,
-      ENABLE_DATABASE_HEALTH_MONITOR:
-        "0",
-      INLINE_API_RATE_LIMIT_MAX: "180",
-      INLINE_TRUSTED_CLIENT_IP_HEADER:
-        "direct",
-      INLINE_SERVER_SMOKE: "1",
-      LIVEKIT_API_KEY: "",
-      LIVEKIT_API_SECRET: "",
-      LIVEKIT_URL: "",
-      NODE_ENV: useArtifact
-        ? "production"
-        : "test",
-      PORT: "0",
-      SENTRY_DSN: useArtifact
-        ? "https://public@example.invalid/1"
-        : "",
-      SKIP_DB_MIGRATIONS: "1",
-    },
+    env: makeCoreProductionSmokeEnvironment(
+      process.env,
+      useArtifact,
+    ),
     stdin: "ignore",
     stderr: "pipe",
     stdout: "pipe",
@@ -513,4 +567,6 @@ const main = async (): Promise<void> => {
   ])
 }
 
-await main()
+if (import.meta.main) {
+  await main()
+}
