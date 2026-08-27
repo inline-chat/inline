@@ -228,16 +228,16 @@ type InlineMonitorHandle = {
   done: Promise<void>
 }
 
-async function dispatchInlineReplyWithSessionInitRetry(params: {
-  run: () => Promise<unknown>
+async function dispatchInlineReplyWithSessionInitRetry<T>(params: {
+  run: () => Promise<T>
   shouldRetry: () => boolean
   onRetry?: (retry: number, delayMs: number) => void
-}): Promise<number> {
+}): Promise<{ result: T; retries: number }> {
   let retries = 0
   while (true) {
     try {
-      await params.run()
-      return retries
+      const result = await params.run()
+      return { result, retries }
     } catch (error) {
       const delayMs = INLINE_REPLY_SESSION_INIT_RETRY_DELAYS_MS[retries]
       if (
@@ -380,6 +380,20 @@ type InlineDispatchReplyInfo = {
   reason?: string
 }
 
+type InlineDispatchResult = {
+  queuedFinal?: boolean
+  observedReplyDelivery?: boolean
+  noVisibleReplyFallbackDelivered?: boolean
+  noVisibleReplyFallbackEligible?: boolean
+  deliberateSilentTerminalReply?: boolean
+  sourceReplyDeliveryMode?: string
+}
+
+type InlineReplyDeliveryResult = {
+  visibleReplySent: boolean
+  suppression?: { reason: "no_visible_result" }
+}
+
 type InlineReplyPayload = {
   text?: string
   mediaUrl?: string
@@ -387,6 +401,16 @@ type InlineReplyPayload = {
   replyToId?: string
   channelData?: Record<string, unknown>
   isReasoning?: boolean
+}
+
+function normalizeInlineDispatchResult(value: unknown): InlineDispatchResult {
+  return isRecord(value) ? (value as InlineDispatchResult) : {}
+}
+
+function inlineReplyDeliveryResult(visibleReplySent: boolean): InlineReplyDeliveryResult {
+  return visibleReplySent
+    ? { visibleReplySent: true }
+    : { visibleReplySent: false, suppression: { reason: "no_visible_result" } }
 }
 
 class OpenClawBotChatSettingsMutationError extends Error {}
@@ -5791,16 +5815,16 @@ export async function monitorInlineProvider(params: {
 
     try {
       let delivered = false
-      let deliveryAttempted = false
       let skippedNonSilent = false
       let skippedSilently = false
       let failedNonSilent = false
       let dispatchError: unknown = null
+      let dispatchResult: InlineDispatchResult = {}
       let streamedFinalEditRejected = false
       let undeliveredFinalText = ""
       let undeliveredFinalActions: MessageActions | undefined
       try {
-        const sessionInitRetries = await dispatchInlineReplyWithSessionInitRetry({
+        const dispatch = await dispatchInlineReplyWithSessionInitRetry({
           shouldRetry: () => !delivered && !skippedNonSilent && !failedNonSilent,
           onRetry: (retry, delayMs) => {
             log?.warn(
@@ -5818,14 +5842,19 @@ export async function monitorInlineProvider(params: {
               payload: InlineReplyPayload,
               info?: InlineDispatchReplyInfo,
             ) => {
-              deliveryAttempted = true
+              let payloadVisible = false
+              const markPayloadVisible = () => {
+                delivered = true
+                payloadVisible = true
+              }
+              const finishPayload = () => inlineReplyDeliveryResult(payloadVisible)
               const presenceSignal = resolveInlineBotPresenceSignal(payload)
               if (presenceSignal) {
                 botPresenceLifecycle.express(presenceSignal)
               }
 
               const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
-              if (!visiblePayload) return
+              if (!visiblePayload) return finishPayload()
               await cleanupInlineProgressPlaceholder()
 
               const payloadRecord = visiblePayload as InlineReplyPayload & {
@@ -5889,7 +5918,7 @@ export async function monitorInlineProvider(params: {
                     ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
                     parseMarkdown,
                   })
-                  delivered = true
+                  markPayloadVisible()
                   try {
                     rememberSent(sent.messageId)
                   } catch (error) {
@@ -5897,7 +5926,7 @@ export async function monitorInlineProvider(params: {
                   }
                 } catch (error) {
                   if (!isInlineSendOutcomeUnknown(error)) throw error
-                  delivered = true
+                  markPayloadVisible()
                   runtime.error?.(
                     `inline text delivery outcome is unknown; suppressing duplicate (${String(error)})`,
                   )
@@ -5964,12 +5993,12 @@ export async function monitorInlineProvider(params: {
                 if (shouldEditCallbackTargetInPlace && editStreamState.messageId != null) {
                   const callbackEditActions = outboundActions ?? { rows: [] }
                   if (!outboundText.trim() && outboundActions === undefined) {
-                    return
+                    return finishPayload()
                   }
                   await updateStreamedMessage(outboundText, callbackEditActions)
-                  delivered = true
+                  markPayloadVisible()
                   publishStatus({ lastOutboundAt: Date.now() })
-                  return
+                  return finishPayload()
                 }
                 if (
                   streamViaEditMessage &&
@@ -5984,24 +6013,25 @@ export async function monitorInlineProvider(params: {
                     editStreamState.finalTextAccumulator += outboundText
                   }
                   if (!editStreamState.finalTextAccumulator.trim() && outboundActions === undefined) {
-                    return
+                    markPayloadVisible()
+                    return finishPayload()
                   }
                   await updateStreamedMessage(editStreamState.finalTextAccumulator, outboundActions)
-                  delivered = true
+                  markPayloadVisible()
                   if (infoKind === "final") {
                     finalDeliveredForCurrentAssistantMessage = true
                   }
                   publishStatus({ lastOutboundAt: Date.now() })
-                  return
+                  return finishPayload()
                 }
-                if (!outboundText.trim()) return
+                if (!outboundText.trim()) return finishPayload()
                 if (streamViaEditMessage && editStreamState.initialSendMayHaveLanded) {
-                  delivered = true
-                  return
+                  markPayloadVisible()
+                  return finishPayload()
                 }
                 await sendTextFallback(outboundText, true, true)
                 publishStatus({ lastOutboundAt: Date.now() })
-                return
+                return finishPayload()
               }
 
               if (streamViaEditMessage && editStreamState.messageId != null && outboundText.trim()) {
@@ -6025,7 +6055,7 @@ export async function monitorInlineProvider(params: {
                 if (partialDelivery) {
                   const result = await partialDelivery
                   if (result.sent) {
-                    delivered = true
+                    markPayloadVisible()
                     if (result.commitOutcomeUnknown) {
                       // The first send may already be visible. Do not turn an
                       // unknown receipt into a duplicate caption/media bubble.
@@ -6109,7 +6139,7 @@ export async function monitorInlineProvider(params: {
                       : {}),
                     ...(caption ? { parseMarkdown } : {}),
                   })
-                  delivered = true
+                  markPayloadVisible()
                   try {
                     rememberSent(sent.messageId)
                   } catch (error) {
@@ -6117,7 +6147,7 @@ export async function monitorInlineProvider(params: {
                   }
                 } catch (error) {
                   if (isInlineSendOutcomeUnknown(error)) {
-                    delivered = true
+                    markPayloadVisible()
                     runtime.error?.(
                       `inline media delivery outcome is unknown; suppressing duplicate (${String(error)})`,
                     )
@@ -6132,6 +6162,7 @@ export async function monitorInlineProvider(params: {
               }
 
               publishStatus({ lastOutboundAt: Date.now() })
+              return finishPayload()
             },
             onSkip: (_payload, info) => {
               if (info?.reason === "silent") {
@@ -6149,10 +6180,11 @@ export async function monitorInlineProvider(params: {
             replyOptions,
           }),
         })
-        if (sessionInitRetries > 0) {
+        dispatchResult = normalizeInlineDispatchResult(dispatch.result)
+        if (dispatch.retries > 0) {
           log?.info(
             `[${account.accountId}] AGENT_DISPATCH_TRACE phase=session_init_conflict_recovered ` +
-            `retries=${sessionInitRetries}`,
+            `retries=${dispatch.retries}`,
           )
         }
       } catch (error) {
@@ -6175,9 +6207,24 @@ export async function monitorInlineProvider(params: {
       ) {
         delivered = true
       }
-      if (!delivered && !skippedSilently && (
-        !deliveryAttempted || dispatchError != null || skippedNonSilent || failedNonSilent
-      )) {
+      const hostHandledTurn =
+        dispatchResult.queuedFinal === true ||
+        dispatchResult.observedReplyDelivery === true ||
+        dispatchResult.noVisibleReplyFallbackDelivered === true
+      const deliberateSilence =
+        skippedSilently || dispatchResult.deliberateSilentTerminalReply === true
+      const skipFallbackSuppressed =
+        dispatchResult.sourceReplyDeliveryMode === "message_tool_only"
+      const hostRequestedNoVisibleRecovery =
+        dispatchResult.noVisibleReplyFallbackEligible === true
+      const explicitFailure = dispatchError != null || failedNonSilent
+      if (
+        !delivered &&
+        (explicitFailure ||
+          (!hostHandledTurn &&
+            !deliberateSilence &&
+            ((skippedNonSilent && !skipFallbackSuppressed) || hostRequestedNoVisibleRecovery)))
+      ) {
         botPresenceLifecycle.fail()
         const fallbackText =
           undeliveredFinalText.trim()

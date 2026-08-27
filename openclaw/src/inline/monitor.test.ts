@@ -258,6 +258,15 @@ type MonitorSetup = {
     interactive?: unknown
     channelData?: Record<string, unknown>
   }>
+  dispatchReplyResult?: {
+    queuedFinal?: boolean
+    observedReplyDelivery?: boolean
+    noVisibleReplyFallbackDelivered?: boolean
+    noVisibleReplyFallbackEligible?: boolean
+    deliberateSilentTerminalReply?: boolean
+    sourceReplyDeliveryMode?: string
+  }
+  deliveryResults?: unknown[]
   replyPipeline?: {
     onModelSelected?: (ctx: unknown) => void
     responsePrefix?: string
@@ -591,11 +600,13 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       if (!payload) continue
       const transformed = dispatcherOptions.transformReplyPayload?.(payload) ?? payload
       const kind = setup.payloadInfoKinds?.[index]
+      let deliveryResult: unknown
       if (kind) {
-        await dispatcherOptions.deliver(transformed, { kind })
+        deliveryResult = await dispatcherOptions.deliver(transformed, { kind })
       } else {
-        await dispatcherOptions.deliver(transformed)
+        deliveryResult = await dispatcherOptions.deliver(transformed)
       }
+      setup.deliveryResults?.push(deliveryResult)
     }
     for (const skipInfo of setup.skipInfos ?? []) {
       await dispatcherOptions.onSkip?.({ isError: false }, skipInfo)
@@ -607,6 +618,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       ;(dispatcherOptions.onIdle ?? dispatcherOptions.typingCallbacks?.onIdle)?.()
       ;(dispatcherOptions.onCleanup ?? dispatcherOptions.typingCallbacks?.onCleanup)?.()
     }
+    return setup.dispatchReplyResult
   })
   const upsertPairingRequest = vi.fn(async () => ({ code: "PAIR-123", created: true }))
   const buildPairingReply = vi.fn(() => "PAIRING_REPLY")
@@ -6999,7 +7011,6 @@ describe("inline/monitor", () => {
         }),
       )
     })
-
     await handle.stop()
   })
 
@@ -8133,7 +8144,6 @@ describe("inline/monitor", () => {
         }),
       )
     })
-
     await handle.stop()
   })
 
@@ -8852,6 +8862,42 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("reports a sent text payload as visible to the OpenClaw dispatcher", async () => {
+    const deliveryResults: unknown[] = []
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 6721n,
+          message: {
+            id: 57031n,
+            date: 1_700_000_013n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "6721": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: { text: "visible answer" },
+      deliveryResults,
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitForMockPromise(harness.calls.dispatchReply)
+    expect(deliveryResults).toEqual([{ visibleReplySent: true }])
+
+    await handle.stop()
+  })
+
   it("sends a fallback reply when dispatch skips non-silently and nothing is delivered", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -8893,7 +8939,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("sends a fallback when dispatch completes without a delivery callback", async () => {
+  it("keeps a completed dispatch without a delivery callback silent", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -8920,10 +8966,167 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
+    await waitForMockPromise(harness.calls.dispatchReply)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it.each([
+    ["deliberate silence", { deliberateSilentTerminalReply: true }],
+    ["observed source delivery", { observedReplyDelivery: true }],
+    ["a queued final", { queuedFinal: true }],
+    ["a host-delivered fallback", { noVisibleReplyFallbackDelivered: true }],
+  ] as const)("does not duplicate %s after a non-silent callback", async (_label, dispatchReplyResult) => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 6741n,
+          message: {
+            id: 57051n,
+            date: 1_700_000_014n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "6741": { kind: "direct", title: "Alice" },
+      },
+      skipInfos: [{ reason: "policy" }],
+      dispatchReplyResult,
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitForMockPromise(harness.calls.dispatchReply)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("suppresses an empty skip when source delivery is message-tool-only", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 6742n,
+          message: {
+            id: 57052n,
+            date: 1_700_000_014n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "6742": { kind: "direct", title: "Alice" },
+      },
+      skipInfos: [{ reason: "empty" }],
+      dispatchReplyResult: { sourceReplyDeliveryMode: "message_tool_only" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitForMockPromise(harness.calls.dispatchReply)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("recovers only when the host declares a no-visible-response fallback eligible", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 6743n,
+          message: {
+            id: 57053n,
+            date: 1_700_000_014n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "6743": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyResult: { noVisibleReplyFallbackEligible: true },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
     await waitFor(() => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          chatId: 674n,
+          chatId: 6743n,
+          text: "No response generated. Please try again.",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("retains a real failure fallback for message-tool-only dispatch", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 6744n,
+          message: {
+            id: 57054n,
+            date: 1_700_000_014n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "6744": { kind: "direct", title: "Alice" },
+      },
+      skipInfos: [{ reason: "empty" }],
+      dispatchErrorInfos: [{ kind: "final" }],
+      dispatchReplyResult: {
+        queuedFinal: true,
+        sourceReplyDeliveryMode: "message_tool_only",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 6744n,
           text: "No response generated. Please try again.",
         }),
       )
@@ -9013,6 +9216,7 @@ describe("inline/monitor", () => {
   })
 
   it("suppresses reasoning-only final payloads without fallback chat text", async () => {
+    const deliveryResults: unknown[] = []
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -9033,6 +9237,7 @@ describe("inline/monitor", () => {
         { text: "Reasoning:\nprivate chain of thought" },
         { text: "<think>private chain of thought</think>" },
       ],
+      deliveryResults,
     })
 
     const handle = await harness.monitorInlineProvider({
@@ -9049,6 +9254,10 @@ describe("inline/monitor", () => {
     await waitForMockPromise(harness.calls.dispatchReply)
 
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    expect(deliveryResults).toEqual([
+      { visibleReplySent: false, suppression: { reason: "no_visible_result" } },
+      { visibleReplySent: false, suppression: { reason: "no_visible_result" } },
+    ])
 
     await handle.stop()
   })
