@@ -2,6 +2,9 @@ import {
   Schema,
 } from "effect"
 import {
+  generateKeyPairSync,
+} from "node:crypto"
+import {
   HealthHttpResponseSchema,
   LivenessHttpResponseSchema,
 } from "../src/controllers/health.effect"
@@ -57,13 +60,38 @@ const artifactSmokeRequiredEnvironment =
       ),
   )
 
+const artifactSmokeApplePrivateKey =
+  generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+  }).privateKey.export({
+    format: "pem",
+    type: "pkcs8",
+  }).toString()
+
+const artifactSmokeProviderEnvironment:
+  SmokeEnvironment = {
+    APPLE_AUTH_CLIENT_ID:
+      "artifact-smoke.apple.invalid",
+    APPLE_AUTH_KEY_ID: "artifact-smoke",
+    APPLE_AUTH_PRIVATE_KEY:
+      artifactSmokeApplePrivateKey,
+    APPLE_AUTH_TEAM_ID: "artifact-smoke",
+    GOOGLE_AUTH_CLIENT_ID:
+      "artifact-smoke.google.invalid",
+    GOOGLE_AUTH_CLIENT_SECRET:
+      "artifact-smoke",
+  }
+
 export const makeCoreProductionSmokeEnvironment = (
   environment: SmokeEnvironment,
   useArtifact: boolean,
 ): SmokeEnvironment => ({
   ...environment,
   ...(useArtifact
-    ? artifactSmokeRequiredEnvironment
+    ? {
+      ...artifactSmokeRequiredEnvironment,
+      ...artifactSmokeProviderEnvironment,
+    }
     : {}),
   ENABLE_DATABASE_HEALTH_MONITOR: "0",
   INLINE_API_RATE_LIMIT_MAX: "180",

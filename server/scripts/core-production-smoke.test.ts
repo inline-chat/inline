@@ -13,7 +13,11 @@ test("artifact smoke supplies isolated placeholders for production startup", () 
   const parentEnvironment = {
     DATABASE_URL:
       "postgres://localhost:5432/test_db",
+    APPLE_AUTH_PRIVATE_KEY:
+      "parent-secret",
     ENCRYPTION_KEY: "parent-secret",
+    GOOGLE_AUTH_CLIENT_SECRET:
+      "parent-secret",
     RESEND_API_KEY: "parent-secret",
   }
 
@@ -41,6 +45,31 @@ test("artifact smoke supplies isolated placeholders for production startup", () 
   expect(
     childEnvironment["RESEND_API_KEY"],
   ).not.toBe(parentEnvironment.RESEND_API_KEY)
+  expect(
+    childEnvironment["GOOGLE_AUTH_CLIENT_ID"],
+  ).toBeTruthy()
+  expect(
+    childEnvironment["GOOGLE_AUTH_CLIENT_SECRET"],
+  ).not.toBe(
+    parentEnvironment.GOOGLE_AUTH_CLIENT_SECRET,
+  )
+  expect(
+    childEnvironment["APPLE_AUTH_CLIENT_ID"],
+  ).toBeTruthy()
+  expect(
+    childEnvironment["APPLE_AUTH_TEAM_ID"],
+  ).toBeTruthy()
+  expect(
+    childEnvironment["APPLE_AUTH_KEY_ID"],
+  ).toBeTruthy()
+  expect(
+    childEnvironment["APPLE_AUTH_PRIVATE_KEY"],
+  ).toContain("BEGIN PRIVATE KEY")
+  expect(
+    childEnvironment["APPLE_AUTH_PRIVATE_KEY"],
+  ).not.toBe(
+    parentEnvironment.APPLE_AUTH_PRIVATE_KEY,
+  )
   expect(childEnvironment["NODE_ENV"])
     .toBe("production")
   expect(
@@ -50,7 +79,11 @@ test("artifact smoke supplies isolated placeholders for production startup", () 
   expect(parentEnvironment).toEqual({
     DATABASE_URL:
       "postgres://localhost:5432/test_db",
+    APPLE_AUTH_PRIVATE_KEY:
+      "parent-secret",
     ENCRYPTION_KEY: "parent-secret",
+    GOOGLE_AUTH_CLIENT_SECRET:
+      "parent-secret",
     RESEND_API_KEY: "parent-secret",
   })
 })
