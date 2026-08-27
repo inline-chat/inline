@@ -135,6 +135,52 @@ describe("messages.createSubthread", () => {
     expect(parentMessages.messages[0]?.replies?.recentReplierUserIds).toEqual([])
   })
 
+  test("retries one anchored creation as the same reply thread", async () => {
+    const creator = await testUtils.createUser("subthread-idempotent-creator@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, creator.id)
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: creator.id,
+      text: "session picker anchor",
+    })
+
+    const first = await createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+        parentMessageId: 1n,
+        title: "First session title",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const retried = await createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+        parentMessageId: 1n,
+        title: "A retry must not create or rename",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    expect(retried.chat.id).toBe(first.chat.id)
+    expect(retried.chat.title).toBe("First session title")
+    const children = await db
+      .select({ id: schema.chats.id })
+      .from(schema.chats)
+      .where(
+        and(
+          eq(schema.chats.parentChatId, parentChat.id),
+          eq(schema.chats.parentMessageId, 1),
+        ),
+      )
+    expect(children).toHaveLength(1)
+  })
+
   test("does not re-follow unfollowed anchor author when reusing existing reply thread", async () => {
     const creator = await testUtils.createUser("subthread-reuse-creator@example.com")
     const anchorAuthor = await testUtils.createUser("subthread-reuse-anchor-author@example.com")
