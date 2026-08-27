@@ -5983,6 +5983,7 @@ mod tests {
                 offset: 0,
                 length: 4,
                 user_id: Some(InlineId::new(99)),
+                agent_id: None,
                 group_id: None,
                 chat_id: None,
                 value: None,

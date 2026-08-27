@@ -59,6 +59,9 @@ const QUESTION_TTL_SECONDS: i64 = 15 * 60;
 const ACTIVE_STOP_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(5);
 const UNAUTHORIZED_DM_NOTICE_WINDOW_SECONDS: i64 = 10 * 60;
 const VOICE_TRANSCRIPT_WAIT: Duration = Duration::from_secs(10);
+const BOT_AGENT_CACHE_TTL: Duration = Duration::from_secs(60);
+const BOT_AGENT_NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(15);
+const BOT_AGENT_CACHE_MAX_ENTRIES: usize = 100;
 pub(super) const MAX_PENDING_VOICE_TRANSCRIPTS: usize = 64;
 
 #[cfg(not(test))]
@@ -133,6 +136,84 @@ pub(super) struct InboundRoute {
     pub pending_voice_messages: Arc<std::sync::Mutex<HashSet<(i64, i64)>>>,
     pub claude_history: Option<ClaudeHistoryRuntime>,
     pub session_browser: SessionBrowserRuntime,
+    pub bot_agent_resolver: BotAgentResolver,
+}
+
+#[derive(Clone)]
+pub(super) struct BotAgentResolver {
+    realtime_url: String,
+    bot_token: String,
+    cache: Arc<RwLock<HashMap<i64, (Instant, Option<proto::BotAgent>)>>>,
+    resolution_lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl BotAgentResolver {
+    pub fn new(realtime_url: String, bot_token: String) -> Self {
+        Self {
+            realtime_url,
+            bot_token,
+            cache: Arc::new(RwLock::new(HashMap::new())),
+            resolution_lock: Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn disabled() -> Self {
+        Self::new(String::new(), String::new())
+    }
+
+    async fn resolve(&self, agent_id: i64) -> Option<proto::BotAgent> {
+        if let Some(cached) = self.cached(agent_id) {
+            return cached;
+        }
+        if self.realtime_url.is_empty() || self.bot_token.is_empty() {
+            return None;
+        }
+
+        // Agent mentions are resolved on the inbound hot path. Serialize cache
+        // misses and recheck after acquiring the lock so concurrent mentions do
+        // not each establish their own realtime connection.
+        let _resolution_guard = self.resolution_lock.lock().await;
+        if let Some(cached) = self.cached(agent_id) {
+            return cached;
+        }
+
+        let Ok(mut realtime) = connect_realtime(&self.realtime_url, &self.bot_token).await else {
+            return None;
+        };
+        let agent = realtime
+            .call(proto::GetBotAgentInput { agent_id })
+            .await
+            .ok()
+            .and_then(|result| result.agent);
+        self.store(agent_id, agent.clone());
+        agent
+    }
+
+    fn cached(&self, agent_id: i64) -> Option<Option<proto::BotAgent>> {
+        let cache = self.cache.read().expect("bot Agent cache poisoned");
+        let (loaded_at, agent) = cache.get(&agent_id)?;
+        let ttl = if agent.is_some() {
+            BOT_AGENT_CACHE_TTL
+        } else {
+            BOT_AGENT_NEGATIVE_CACHE_TTL
+        };
+        (loaded_at.elapsed() < ttl).then(|| agent.clone())
+    }
+
+    fn store(&self, agent_id: i64, agent: Option<proto::BotAgent>) {
+        let mut cache = self.cache.write().expect("bot Agent cache poisoned");
+        if !cache.contains_key(&agent_id)
+            && cache.len() >= BOT_AGENT_CACHE_MAX_ENTRIES
+            && let Some(oldest_id) = cache
+                .iter()
+                .min_by_key(|(_, (loaded_at, _))| *loaded_at)
+                .map(|(cached_id, _)| *cached_id)
+        {
+            cache.remove(&oldest_id);
+        }
+        cache.insert(agent_id, (Instant::now(), agent));
+    }
 }
 
 impl InboundRoute {
@@ -454,7 +535,7 @@ pub(super) async fn inbound_from_delivery(
             action: None,
         },
     );
-    let (direction, is_command) = match decision {
+    let (mut direction, is_command) = match decision {
         TriggerDecision::Direction { direction, .. } => {
             (direction.with_attachments(attachments), false)
         }
@@ -468,6 +549,16 @@ pub(super) async fn inbound_from_delivery(
         ),
         _ => return Ok(None),
     };
+    if !is_command
+        && let Some(agent_id) = mentioned_agent_id(message, route.bot_user_id)
+        && let Some(agent) = route.bot_agent_resolver.resolve(agent_id).await
+    {
+        let original = direction.text.clone();
+        replace_direction_text(
+            &mut direction,
+            agent_specialization_instruction(&agent, &original),
+        );
+    }
     if let Some(notice) = content.unsupported_notice
         && !is_command
     {
@@ -581,6 +672,40 @@ pub(super) async fn inbound_from_delivery(
             Some(record)
         }
     }))
+}
+
+pub(super) fn mentioned_agent_id(
+    message: &inline_client::MessageRecord,
+    bot_user_id: i64,
+) -> Option<i64> {
+    message.metadata.entities.iter().find_map(|entity| {
+        (entity.kind == "TYPE_MENTION" && entity.user_id.is_some_and(|id| id.get() == bot_user_id))
+            .then_some(entity.agent_id)
+            .flatten()
+            .map(InlineId::get)
+    })
+}
+
+pub(super) fn agent_specialization_instruction(agent: &proto::BotAgent, task: &str) -> String {
+    let instructions = agent
+        .instructions
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("You are a specialized agent named {:?}.", agent.name));
+    let skill_hint = agent
+        .skill_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            format!("\nConfigured skill key: {value}. Use it when this harness provides it.")
+        })
+        .unwrap_or_default();
+    format!(
+        "Inline Agent specialization (trusted bot configuration):\n{instructions}{skill_hint}\n\nCurrent task:\n{task}"
+    )
 }
 
 pub(super) fn is_agent_session_projection(message: &inline_client::MessageRecord) -> bool {

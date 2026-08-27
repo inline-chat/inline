@@ -359,6 +359,7 @@ mod tests {
             pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
             claude_history: None,
             session_browser: SessionBrowserRuntime::default(),
+            bot_agent_resolver: BotAgentResolver::disabled(),
         };
 
         let prompt = build_turn_instruction(&route, &record, &record.direction.text)

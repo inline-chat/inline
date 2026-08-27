@@ -52,6 +52,46 @@ fn only_an_unedited_blank_voice_message_waits_for_transcription() {
 }
 
 #[test]
+fn mentioned_agent_requires_the_backing_bot_pair() {
+    let mut message = voice_message(Some("@Data inspect this"), None);
+    message.metadata.entities = vec![inline_client::MessageEntityRecord {
+        kind: "TYPE_MENTION".to_string(),
+        offset: 0,
+        length: 5,
+        user_id: Some(InlineId::new(20)),
+        agent_id: Some(InlineId::new(73)),
+        group_id: None,
+        chat_id: None,
+        value: None,
+    }];
+
+    assert_eq!(mentioned_agent_id(&message, 20), Some(73));
+    assert_eq!(mentioned_agent_id(&message, 21), None);
+}
+
+#[test]
+fn agent_specialization_uses_name_only_fallback_and_optional_harness_fields() {
+    let name_only = proto::BotAgent {
+        name: "Data Analyst".to_string(),
+        ..proto::BotAgent::default()
+    };
+    let fallback = agent_specialization_instruction(&name_only, "Inspect this");
+    assert!(fallback.contains("You are a specialized agent named \"Data Analyst\"."));
+    assert!(fallback.ends_with("Current task:\nInspect this"));
+
+    let configured = proto::BotAgent {
+        name: "Researcher".to_string(),
+        skill_key: Some("research".to_string()),
+        instructions: Some("Use primary sources.".to_string()),
+        ..proto::BotAgent::default()
+    };
+    let projected = agent_specialization_instruction(&configured, "Find evidence");
+    assert!(projected.contains("Use primary sources."));
+    assert!(projected.contains("Configured skill key: research."));
+    assert!(!projected.contains("specialized agent named"));
+}
+
+#[test]
 fn projected_agent_session_history_is_rejected_before_idle_or_active_handling() {
     let mut message = voice_message(None, None);
     message.metadata.agent_session = Some(inline_client::AgentSessionMessageMetadata {
@@ -87,6 +127,7 @@ fn pending_voice_registry_deduplicates_replacements_and_cancels_per_chat() {
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
         session_browser: SessionBrowserRuntime::default(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
     assert_eq!(
@@ -126,6 +167,7 @@ fn pending_voice_registry_is_bounded() {
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
         session_browser: SessionBrowserRuntime::default(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
     for message_id in 1..=MAX_PENDING_VOICE_TRANSCRIPTS as i64 {
@@ -221,6 +263,7 @@ fn unbound_chat_without_a_default_workspace_binds_the_user_home() {
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
         session_browser: SessionBrowserRuntime::default(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
     let conversation = conversation_for_chat(&route, 706).expect("home workspace");
@@ -278,6 +321,7 @@ fn unbound_chat_with_a_replaced_default_workspace_binds_the_user_home() {
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
         session_browser: SessionBrowserRuntime::default(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
     let conversation = conversation_for_chat(&route, 707).expect("home fallback");
@@ -323,6 +367,7 @@ fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
         session_browser: SessionBrowserRuntime::default(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
     let conversation = conversation_for_chat(&route, 998).expect("unbound chat should resolve");
@@ -476,6 +521,7 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
         session_browser: SessionBrowserRuntime::default(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
     let error = conversation_for_chat(&route, 706).expect_err("workspace should be unavailable");

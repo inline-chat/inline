@@ -5568,30 +5568,60 @@ fn message_entity_from_proto(entity: &proto::MessageEntity) -> crate::MessageEnt
     let kind = proto::message_entity::Type::try_from(entity.r#type)
         .map(|kind| kind.as_str_name().to_string())
         .unwrap_or_else(|_| format!("TYPE_UNKNOWN_{}", entity.r#type));
-    let (user_id, group_id, chat_id, value) = match entity.entity.as_ref() {
-        Some(Entity::Mention(mention)) => (Some(InlineId::new(mention.user_id)), None, None, None),
-        Some(Entity::GroupMention(mention)) => {
-            (None, Some(InlineId::new(mention.group_id)), None, None)
+    let (user_id, agent_id, group_id, chat_id, value) = match entity.entity.as_ref() {
+        Some(Entity::Mention(mention)) => (
+            Some(InlineId::new(mention.user_id)),
+            mention.agent_id.map(InlineId::new),
+            None,
+            None,
+            None,
+        ),
+        Some(Entity::GroupMention(mention)) => (
+            None,
+            None,
+            Some(InlineId::new(mention.group_id)),
+            None,
+            None,
+        ),
+        Some(Entity::TextUrl(link)) => (
+            None,
+            None,
+            None,
+            None,
+            trimmed_option(Some(link.url.clone())),
+        ),
+        Some(Entity::Pre(pre)) => (
+            None,
+            None,
+            None,
+            None,
+            trimmed_option(Some(pre.language.clone())),
+        ),
+        Some(Entity::Thread(thread)) => {
+            (None, None, None, Some(InlineId::new(thread.chat_id)), None)
         }
-        Some(Entity::TextUrl(link)) => (None, None, None, trimmed_option(Some(link.url.clone()))),
-        Some(Entity::Pre(pre)) => (None, None, None, trimmed_option(Some(pre.language.clone()))),
-        Some(Entity::Thread(thread)) => (None, None, Some(InlineId::new(thread.chat_id)), None),
-        Some(Entity::ThreadTitle(thread)) => {
-            (None, None, None, trimmed_option(Some(thread.title.clone())))
-        }
+        Some(Entity::ThreadTitle(thread)) => (
+            None,
+            None,
+            None,
+            None,
+            trimmed_option(Some(thread.title.clone())),
+        ),
         Some(Entity::BotCommand(command)) => (
             (command.bot_user_id > 0).then(|| InlineId::new(command.bot_user_id)),
             None,
             None,
             None,
+            None,
         ),
-        None => (None, None, None, None),
+        None => (None, None, None, None, None),
     };
     crate::MessageEntityRecord {
         kind,
         offset: entity.offset,
         length: entity.length,
         user_id,
+        agent_id,
         group_id,
         chat_id,
         value,
@@ -6102,7 +6132,7 @@ mod tests {
                     entity: Some(proto::message_entity::Entity::Mention(
                         proto::message_entity::MessageEntityMention {
                             user_id: 15100,
-                            agent_id: None,
+                            agent_id: Some(73),
                         },
                     )),
                 }],
@@ -6144,6 +6174,10 @@ mod tests {
         assert_eq!(
             record.metadata.entities[0].user_id,
             Some(InlineId::new(15100))
+        );
+        assert_eq!(
+            record.metadata.entities[0].agent_id,
+            Some(InlineId::new(73))
         );
         assert_eq!(record.metadata.attachments[0].kind, "url_preview");
         assert_eq!(record.metadata.actions[0].kind, "callback");

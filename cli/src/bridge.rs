@@ -1322,6 +1322,10 @@ async fn run_provider_installation(
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history,
         session_browser: SessionBrowserRuntime::default(),
+        bot_agent_resolver: BotAgentResolver::new(
+            config.realtime_url.clone(),
+            credentials.bot_token.clone(),
+        ),
     };
     let inline_tools = inline_tool_configuration(Arc::new(InlineToolHost::new(
         bot.clone(),

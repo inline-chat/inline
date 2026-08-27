@@ -1106,6 +1106,8 @@ pub struct MessageEntityRecord {
     pub length: i64,
     /// Mentioned user, when this is a direct mention.
     pub user_id: Option<InlineId>,
+    /// Globally unique Agent specialization on the mentioned bot, when present.
+    pub agent_id: Option<InlineId>,
     /// Mentioned group, when this is a group mention.
     pub group_id: Option<InlineId>,
     /// Referenced chat/thread, when present.
