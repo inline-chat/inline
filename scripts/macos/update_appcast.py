@@ -14,6 +14,7 @@ Environment:
   - INLINE_HARDWARE_REQUIREMENTS (optional, default: arm64)
   - INLINE_COMMIT (optional)
   - INLINE_COMMIT_LONG (optional)
+  - INLINE_EXPERIMENTAL_TIP (optional, 1 for a non-commit snapshot release)
   - ALLOW_NEW_APPCAST (must be 1 after an explicit remote 404)
 
 Output:
@@ -38,6 +39,7 @@ if not min_macos:
 hardware_requirements = os.environ.get("INLINE_HARDWARE_REQUIREMENTS", "arm64").strip()
 commit = os.environ.get("INLINE_COMMIT", "")
 commit_long = os.environ.get("INLINE_COMMIT_LONG", "")
+experimental_tip = os.environ.get("INLINE_EXPERIMENTAL_TIP", "0") == "1"
 allow_new_appcast = os.environ.get("ALLOW_NEW_APPCAST", "0") == "1"
 
 appcast_path = Path(os.environ.get("APPCAST_PATH", "appcast.xml"))
@@ -129,7 +131,10 @@ if hardware_requirements:
     sparkle_hardware = ET.SubElement(item, sparkle_tag("hardwareRequirements"))
     sparkle_hardware.text = hardware_requirements
 
-if commit:
+if experimental_tip:
+    description = ET.SubElement(item, "description")
+    description.text = f"<p>Experimental tip build {build}.</p>"
+elif commit:
     description = ET.SubElement(item, "description")
     description.text = f"<p>Build {build} from commit {commit}.</p>"
 

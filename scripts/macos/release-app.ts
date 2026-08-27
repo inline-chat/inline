@@ -4,6 +4,12 @@ import { appendFileSync, existsSync, mkdirSync, realpathSync, readFileSync, rmdi
 import { basename, dirname, resolve } from "path";
 import { createInterface } from "node:readline";
 import { readBuiltAppMetadata, readDmgAppMetadata, metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
+import {
+  macosSourceSnapshotPathsFromManifest,
+  macosSourceSnapshotSha256,
+  macosSourceSnapshotSha256ForPaths,
+  stageMacosSourceSnapshot,
+} from "./macos-source-snapshot";
 
 const sparkleVersion = "2.9.3";
 const macosReleaseArch = "arm64";
@@ -30,6 +36,7 @@ type ReleaseOptions = {
   releaseTag: string;
   skipGithubRelease: boolean;
   allowDirty: boolean;
+  experimentalTip: boolean;
   skip: Set<string>;
   fromTask: string;
   dryRun: boolean;
@@ -40,6 +47,8 @@ type ReleaseOptions = {
   createNewAppcast: boolean;
   sourceCommit: string;
   sourceBuild: string;
+  sourceSnapshot: string;
+  artifactBuild: string;
 };
 
 type ParsedArgs = Omit<ReleaseOptions, "channel" | "releaseTag"> & {
@@ -63,6 +72,8 @@ type PruneMetadata = {
 
 type ReleaseContext = ReleaseOptions & {
   rootDir: string;
+  sourceRoot: string;
+  sourceManifestPath: string;
   tempDir: string;
   signingKeyPath: string;
   signUpdatePath: string;
@@ -104,10 +115,14 @@ type HeldLock = {
 type AppcastFetchDecision = "use-existing" | "create-new";
 
 type ArtifactProvenance = {
-  schemaVersion: 1;
-  sourceCommit: string;
-  sourceBuild: string;
-  sourceClean: boolean;
+  schemaVersion: 1 | 2;
+  sourceCommit?: string;
+  sourceBuild?: string;
+  sourceClean?: boolean;
+  sourceState?: string;
+  sourceSnapshotSha256?: string;
+  buildNumber?: string;
+  revision?: string;
   appExecutableSha256: string;
   dmgSize: number;
   dmgSha256: string;
@@ -128,6 +143,7 @@ function usage(): string {
     "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: selected channel name)",
     "  --skip-github-release            Skip GitHub release/tag steps",
     "  --allow-dirty                    Allow only a local non-publishing build from dirty source",
+    "  --experimental-tip               Publish a dirty source snapshot only to the tip DMG/appcast; never GitHub",
     "  --from <id>                      Resume from a task id without rerunning earlier steps (preflight still runs)",
     "  --skip <ids>                     Skip steps (comma-separated or repeatable)",
     "                                  Known ids: build, upload-sentry-dsyms, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
@@ -139,6 +155,8 @@ function usage(): string {
     "  --create-new-appcast              Allow an absent feed only for an explicit first publication",
     "  --source-commit <sha>              Frozen source commit (printed automatically in resume commands)",
     "  --source-build <build>             Frozen source build number (printed automatically in resume commands)",
+    "  --source-snapshot <sha256>         Frozen experimental source snapshot (printed automatically when resuming)",
+    "  --artifact-build <build>           Frozen tip artifact build number (printed automatically when resuming)",
     "  --upload-sentry-dsyms            Upload dSYMs to Sentry (opt-in; requires SENTRY_AUTH_TOKEN)",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
@@ -166,6 +184,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let releaseTag: string | undefined;
   let skipGithubRelease = false;
   let allowDirty = false;
+  let experimentalTip = false;
   const skip = new Set<string>();
   let fromTask = "";
   let dryRun = false;
@@ -177,6 +196,8 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let createNewAppcast = false;
   let sourceCommit = "";
   let sourceBuild = "";
+  let sourceSnapshot = "";
+  let artifactBuild = "";
 
   const resolveFromRoot = (p: string): string => {
     if (!p) return p;
@@ -226,6 +247,10 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       allowDirty = true;
       continue;
     }
+    if (arg === "--experimental-tip") {
+      experimentalTip = true;
+      continue;
+    }
     if (arg === "--from") {
       fromTask = eat(i).trim();
       if (!fromTask) die(`Missing value for ${arg}`);
@@ -271,6 +296,18 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     if (arg === "--source-build") {
       sourceBuild = eat(i).trim();
       if (!/^\d+$/.test(sourceBuild)) die(`Invalid --source-build: ${sourceBuild}`);
+      i++;
+      continue;
+    }
+    if (arg === "--source-snapshot") {
+      sourceSnapshot = eat(i).trim();
+      if (!/^[0-9a-f]{64}$/.test(sourceSnapshot)) die(`Invalid --source-snapshot: ${sourceSnapshot}`);
+      i++;
+      continue;
+    }
+    if (arg === "--artifact-build") {
+      artifactBuild = eat(i).trim();
+      if (!/^\d+$/.test(artifactBuild)) die(`Invalid --artifact-build: ${artifactBuild}`);
       i++;
       continue;
     }
@@ -359,6 +396,30 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (dropBuild && allowDirty) {
     die("--allow-dirty is only useful for builds and is not supported with --drop-build.");
   }
+  if (experimentalTip && (rollback || dropBuild)) {
+    die("--experimental-tip is only supported for a normal release.");
+  }
+  if (experimentalTip && channel && channel !== "tip") {
+    die("--experimental-tip can publish only to --channel tip.");
+  }
+  if (experimentalTip && releaseTag) {
+    die("--experimental-tip never publishes to GitHub and cannot be combined with --release-tag.");
+  }
+  if (experimentalTip && allowDirty) {
+    die("--experimental-tip already permits dirty source; do not combine it with --allow-dirty.");
+  }
+  if (experimentalTip && (sourceCommit || sourceBuild)) {
+    die("--experimental-tip uses --source-snapshot and --artifact-build instead of commit-anchored source options.");
+  }
+  if (!experimentalTip && sourceSnapshot) {
+    die("--source-snapshot is only supported with --experimental-tip.");
+  }
+  if (artifactBuild && channel && channel !== "tip") {
+    die("--artifact-build is only supported for tip releases.");
+  }
+  if (experimentalTip && Boolean(sourceSnapshot) !== Boolean(artifactBuild)) {
+    die("--source-snapshot and --artifact-build must be supplied together when resuming an experimental tip release.");
+  }
   if ((rollback || dropBuild) && createNewAppcast) {
     die("--create-new-appcast is only supported for a normal release.");
   }
@@ -374,6 +435,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     releaseTag,
     skipGithubRelease,
     allowDirty,
+    experimentalTip,
     skip,
     fromTask,
     dryRun,
@@ -384,6 +446,8 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     createNewAppcast,
     sourceCommit,
     sourceBuild,
+    sourceSnapshot,
+    artifactBuild,
   };
 }
 
@@ -508,6 +572,24 @@ export function decideAppcastFetch(
   throw new Error(`Unable to fetch the existing appcast (curl exit ${exitCode}, HTTP ${httpStatus || "unknown"}). Refusing to replace feed history.`);
 }
 
+export function nextTipArtifactBuild(baseBuild: string, appcastXml: string, experimental: boolean): string {
+  if (!/^\d+$/.test(baseBuild)) throw new Error(`Invalid base build for tip release: ${baseBuild}`);
+  const versions = [...appcastXml.matchAll(/<(?:[A-Za-z_][\w.-]*:)?version\b[^>]*>\s*([^<]+?)\s*<\//g)]
+    .map((match) => match[1]?.trim() ?? "")
+    .filter(Boolean);
+  if (!versions.length) throw new Error("Unable to allocate a build because the tip appcast has no versions.");
+
+  const parsed = versions.map((version) => {
+    if (!/^\d+$/.test(version)) throw new Error(`Cannot safely allocate after unsupported tip build version: ${version}`);
+    return Number.parseInt(version, 10);
+  });
+  const base = Number.parseInt(baseBuild, 10);
+  const latest = Math.max(...parsed);
+  const next = experimental ? Math.max(base + 1, latest + 1) : Math.max(base, latest + 1);
+  if (next > 2_147_483_647) throw new Error("Tip build allocation exceeded the Apple client Int32 limit.");
+  return String(next);
+}
+
 export function safeResumeTask(taskId: string, operation: "release" | "rollback" | "drop-build"): string {
   if (operation !== "release") return taskId === "preflight" ? "preflight" : "fetch-appcast";
   if (["upload-dmg", "verify-dmg", "gen-appcast", "validate-appcast", "upload-appcast", "github"].includes(taskId)) {
@@ -576,19 +658,21 @@ function defaultAppcastUrl(ctx: ReleaseContext): string {
 
 function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
   const metadata = readBuiltAppMetadata(ctx.appPath);
-  const expectedBuild = ctx.sourceBuild;
-  const expectedCommit = ctx.sourceCommitShort;
+  const expectedBuild = ctx.artifactBuild || ctx.sourceBuild;
+  const expectedRevision = ctx.experimentalTip
+    ? `experimental-${ctx.sourceSnapshot.slice(0, 12)}`
+    : ctx.sourceCommitShort;
   const expectedFeedUrl = defaultAppcastUrl(ctx);
   const mismatches: string[] = [];
 
-  if (!expectedBuild) mismatches.push("Unable to compute expected CFBundleVersion from git.");
+  if (!expectedBuild) mismatches.push("Unable to compute expected CFBundleVersion.");
   else if (metadata.buildNumber !== expectedBuild) {
     mismatches.push(`CFBundleVersion is ${metadata.buildNumber}, expected ${expectedBuild}.`);
   }
 
-  if (!expectedCommit) mismatches.push("Unable to compute expected InlineCommit from git.");
-  else if (metadata.commit !== expectedCommit) {
-    mismatches.push(`InlineCommit is ${metadata.commit}, expected ${expectedCommit}.`);
+  if (!expectedRevision) mismatches.push("Unable to compute expected InlineCommit revision.");
+  else if (metadata.commit !== expectedRevision) {
+    mismatches.push(`InlineCommit is ${metadata.commit}, expected ${expectedRevision}.`);
   }
 
   if (metadata.feedUrl !== expectedFeedUrl) {
@@ -602,10 +686,10 @@ function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
   ctx.buildNumber = metadata.buildNumber;
   ctx.version = metadata.version;
   ctx.commit = metadata.commit;
-  ctx.commitLong = ctx.sourceCommit;
+  ctx.commitLong = ctx.experimentalTip ? "" : ctx.sourceCommit;
   ctx.appcastUrl = expectedFeedUrl;
   ctx.minimumSystemVersion = metadata.minimumSystemVersion;
-  ui.info(`Verified app metadata: build ${ctx.buildNumber}, minimum macOS ${ctx.minimumSystemVersion}, commit ${ctx.commit}, feed ${ctx.appcastUrl}`);
+  ui.info(`Verified app metadata: build ${ctx.buildNumber}, minimum macOS ${ctx.minimumSystemVersion}, ${ctx.experimentalTip ? "snapshot revision" : "commit"} ${ctx.commit}, feed ${ctx.appcastUrl}`);
   return metadata;
 }
 
@@ -621,15 +705,29 @@ function verifyArtifactIdentity(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
   ctx.dmgSha256 = sha256File(ctx.dmgPath);
   if (publicMutationEnabled(ctx)) {
     if (!existsSync(ctx.provenancePath)) {
-      throw new Error(`Clean-source artifact provenance not found at ${ctx.provenancePath}. Resume from build; public steps cannot publish an unbound artifact.`);
+      throw new Error(`Artifact provenance not found at ${ctx.provenancePath}. Resume from build; public steps cannot publish an unbound artifact.`);
     }
     const provenance = JSON.parse(readFileSync(ctx.provenancePath, "utf8")) as ArtifactProvenance;
     const executableSha256 = sha256File(resolve(ctx.appPath, "Contents/MacOS/Inline"));
+    const sourceMismatches = ctx.experimentalTip
+      ? [
+          provenance.schemaVersion === 2 ? "" : `schemaVersion ${provenance.schemaVersion}`,
+          provenance.sourceState === "experimental-tip" ? "" : `sourceState ${provenance.sourceState}`,
+          provenance.sourceSnapshotSha256 === ctx.sourceSnapshot ? "" : `sourceSnapshotSha256 ${provenance.sourceSnapshotSha256}`,
+          provenance.buildNumber === ctx.artifactBuild ? "" : `buildNumber ${provenance.buildNumber}`,
+          provenance.revision === `experimental-${ctx.sourceSnapshot.slice(0, 12)}` ? "" : `revision ${provenance.revision}`,
+        ]
+      : [
+          provenance.schemaVersion === 1 ? "" : `schemaVersion ${provenance.schemaVersion}`,
+          provenance.sourceClean ? "" : "source was dirty",
+          provenance.sourceCommit === ctx.sourceCommit ? "" : `sourceCommit ${provenance.sourceCommit}`,
+          provenance.sourceBuild === ctx.sourceBuild ? "" : `sourceBuild ${provenance.sourceBuild}`,
+          (provenance.buildNumber ?? provenance.sourceBuild) === (ctx.artifactBuild || ctx.sourceBuild)
+            ? ""
+            : `buildNumber ${provenance.buildNumber ?? provenance.sourceBuild}`,
+        ];
     const provenanceMismatches = [
-      provenance.schemaVersion === 1 ? "" : `schemaVersion ${provenance.schemaVersion}`,
-      provenance.sourceClean ? "" : "source was dirty",
-      provenance.sourceCommit === ctx.sourceCommit ? "" : `sourceCommit ${provenance.sourceCommit}`,
-      provenance.sourceBuild === ctx.sourceBuild ? "" : `sourceBuild ${provenance.sourceBuild}`,
+      ...sourceMismatches,
       provenance.appExecutableSha256 === executableSha256 ? "" : `app executable sha256 ${provenance.appExecutableSha256}`,
       provenance.dmgSize === ctx.dmgSize ? "" : `DMG size ${provenance.dmgSize}`,
       provenance.dmgSha256 === ctx.dmgSha256 ? "" : `DMG sha256 ${provenance.dmgSha256}`,
@@ -643,6 +741,20 @@ function verifyArtifactIdentity(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
 }
 
 function assertFrozenSource(ctx: ReleaseContext): void {
+  if (ctx.experimentalTip) {
+    if (!ctx.sourceSnapshot) throw new Error("Experimental tip source snapshot was not initialized.");
+    if (!ctx.sourceRoot || !ctx.sourceManifestPath) {
+      throw new Error("Experimental tip staged source was not initialized.");
+    }
+    const currentSnapshot = macosSourceSnapshotSha256ForPaths(
+      ctx.sourceRoot,
+      macosSourceSnapshotPathsFromManifest(ctx.sourceManifestPath),
+    );
+    if (currentSnapshot !== ctx.sourceSnapshot) {
+      throw new Error(`Staged macOS source changed during experimental tip release. Frozen snapshot ${ctx.sourceSnapshot}; current ${currentSnapshot}.`);
+    }
+    return;
+  }
   const currentCommit = git(ctx.rootDir, ["rev-parse", "HEAD"]);
   const currentBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
   if (currentCommit !== ctx.sourceCommit || currentBuild !== ctx.sourceBuild) {
@@ -660,8 +772,9 @@ function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback"
     channel: ctx.channel,
     buildNumber: ctx.buildNumber || undefined,
     version: ctx.version || undefined,
-    commit: ctx.commit || undefined,
-    commitLong: ctx.commitLong || undefined,
+    commit: ctx.experimentalTip ? undefined : ctx.commit || undefined,
+    commitLong: ctx.experimentalTip ? undefined : ctx.commitLong || undefined,
+    sourceSnapshotSha256: ctx.experimentalTip ? ctx.sourceSnapshot : undefined,
     dmgUrl: ctx.dmgUrl || undefined,
     appcastUrl: ctx.appcastUrl || undefined,
     minimumSystemVersion: ctx.minimumSystemVersion || undefined,
@@ -670,7 +783,11 @@ function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback"
     dmgPath: ctx.dmgPath,
     provenancePath: ctx.provenancePath,
     derivedData: ctx.derivedData,
-    sourceState: ctx.allowDirty && !publicMutationEnabled(ctx) ? "local-dirty-allowed" : "clean",
+    sourceState: ctx.experimentalTip
+      ? "experimental-tip"
+      : ctx.allowDirty && !publicMutationEnabled(ctx)
+        ? "local-dirty-allowed"
+        : "clean",
     dmgSize: ctx.dmgSize || undefined,
     dmgSha256: ctx.dmgSha256 || undefined,
     rollback: ctx.rollback
@@ -1086,16 +1203,22 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
     else if (ctx.rollbackStepsBack !== 1) args.push("--rollback-steps-back", String(ctx.rollbackStepsBack));
   } else if (ctx.dropBuild) {
     args.push("--drop-build", ctx.dropBuild);
-  } else if (ctx.releaseTag !== defaultTag) {
+  } else if (ctx.releaseTag && ctx.releaseTag !== defaultTag) {
     args.push("--release-tag", ctx.releaseTag);
   }
 
   if (ctx.skipGithubRelease) args.push("--skip-github-release");
   if (concreteSkipIds.length) args.push("--skip", concreteSkipIds.join(","));
   if (ctx.allowDirty) args.push("--allow-dirty");
+  if (ctx.experimentalTip) args.push("--experimental-tip");
   if (!ctx.rollback && !ctx.dropBuild && !ctx.skip.has("upload-sentry-dsyms")) args.push("--upload-sentry-dsyms");
   if (!ctx.rollback && !ctx.dropBuild) {
-    args.push("--source-commit", ctx.sourceCommit, "--source-build", ctx.sourceBuild);
+    if (ctx.experimentalTip) {
+      args.push("--source-snapshot", ctx.sourceSnapshot, "--artifact-build", ctx.artifactBuild);
+    } else {
+      args.push("--source-commit", ctx.sourceCommit, "--source-build", ctx.sourceBuild);
+      if (ctx.channel === "tip") args.push("--artifact-build", ctx.artifactBuild || ctx.sourceBuild);
+    }
     args.push("--derived-data", ctx.derivedData, "--app-path", ctx.appPath, "--dmg-path", ctx.dmgPath);
     if (ctx.createNewAppcast) args.push("--create-new-appcast");
   }
@@ -1116,6 +1239,7 @@ async function main() {
   }
   const parsed0 = parsedRaw.rollback || parsedRaw.dropBuild ? parsedRaw : computeSkipOptions(parsedRaw);
   let channel = parsed0.channel;
+  if (parsed0.experimentalTip && !channel) channel = "tip";
   if (!channel) {
     if (!interactive) {
       channel = "beta";
@@ -1125,7 +1249,9 @@ async function main() {
       console.log(`Using channel: ${channel}`);
     }
   }
-  const releaseTag = parsed0.rollback || parsed0.dropBuild ? "" : parsed0.releaseTag || defaultReleaseTag(channel);
+  const releaseTag = parsed0.rollback || parsed0.dropBuild || parsed0.experimentalTip
+    ? ""
+    : parsed0.releaseTag || defaultReleaseTag(channel);
   if (releaseTag) validateReleaseTag(channel, releaseTag);
   const operation = parsed0.rollback ? "rollback" : parsed0.dropBuild ? "drop-build" : "release";
   const fromTask = parsed0.fromTask ? safeResumeTask(parsed0.fromTask, operation) : "";
@@ -1139,8 +1265,9 @@ async function main() {
     dmgPath: parsed0.dmgPath,
     sparkleDir: parsed0.sparkleDir,
     releaseTag,
-    skipGithubRelease: parsed0.skipGithubRelease || parsed0.skip.has("github"),
+    skipGithubRelease: parsed0.experimentalTip || parsed0.skipGithubRelease || parsed0.skip.has("github"),
     allowDirty: parsed0.allowDirty,
+    experimentalTip: parsed0.experimentalTip,
     skip: parsed0.skip,
     fromTask,
     dryRun: parsed0.dryRun,
@@ -1149,11 +1276,20 @@ async function main() {
     rollbackStepsBack: parsed0.rollbackStepsBack,
     dropBuild: parsed0.dropBuild,
     createNewAppcast: parsed0.createNewAppcast,
-    sourceCommit: parsed0.sourceCommit || git(rootDir, ["rev-parse", "HEAD"]),
+    sourceCommit: parsed0.experimentalTip ? "" : parsed0.sourceCommit || git(rootDir, ["rev-parse", "HEAD"]),
     sourceBuild: parsed0.sourceBuild || git(rootDir, ["rev-list", "--count", "HEAD"]),
+    sourceSnapshot: parsed0.sourceSnapshot,
+    artifactBuild: parsed0.artifactBuild,
   };
-  if (!opts.rollback && !opts.dropBuild && (!/^[0-9a-f]{40}$/.test(opts.sourceCommit) || !/^\d+$/.test(opts.sourceBuild))) {
+  if (!opts.artifactBuild && opts.channel !== "tip") opts.artifactBuild = opts.sourceBuild;
+  if (parsed0.artifactBuild && opts.channel !== "tip") {
+    die("--artifact-build is only supported for tip releases.");
+  }
+  if (!opts.rollback && !opts.dropBuild && !opts.experimentalTip && (!/^[0-9a-f]{40}$/.test(opts.sourceCommit) || !/^\d+$/.test(opts.sourceBuild))) {
     die("Unable to freeze release source commit/build.");
+  }
+  if (!opts.rollback && !opts.dropBuild && opts.experimentalTip && !/^\d+$/.test(opts.sourceBuild)) {
+    die("Unable to compute the base build for an experimental tip release.");
   }
   if (!opts.rollback && !opts.dropBuild) {
     const integrityErrors = releaseIntegrityGateErrors(opts);
@@ -1171,6 +1307,8 @@ async function main() {
 
   const ctx: ReleaseContext = {
     rootDir,
+    sourceRoot: "",
+    sourceManifestPath: resolve(tempDir, "source-paths.nul"),
     tempDir,
     signingKeyPath: resolve(tempDir, "signing.key"),
     signUpdatePath: resolve(tempDir, "sign_update.txt"),
@@ -1195,7 +1333,7 @@ async function main() {
     pruneDroppedUrl: "",
     pruneLatestBuild: "",
     pruneLatestUrl: "",
-    sourceCommitShort: git(rootDir, ["rev-parse", "--short", opts.sourceCommit]),
+    sourceCommitShort: opts.experimentalTip ? "" : git(rootDir, ["rev-parse", "--short", opts.sourceCommit]),
     dmgSize: 0,
     dmgSha256: "",
     provenancePath: resolve(dirname(opts.dmgPath), "release-provenance.json"),
@@ -1215,7 +1353,7 @@ async function main() {
       ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.dryRun ? "  Dry run" : ""}`
       : opts.dropBuild
         ? `Drop build  Channel: ${opts.channel}  Build: ${opts.dropBuild}${opts.dryRun ? "  Dry run" : ""}`
-        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
+        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.experimentalTip ? "  Experimental snapshot" : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
   const logFiles = [{ label: "release", path: releaseLogPath }];
   if (!opts.rollback && !opts.dropBuild) {
@@ -1230,14 +1368,39 @@ async function main() {
 
   const runPreflight: Task["run"] = async (ctx, ui) => {
     if (!ctx.rollback && !ctx.dropBuild) {
-      const configuredVersion = readConfiguredMarketingVersion(ctx.rootDir, ui);
-      const plannedBuild = ctx.sourceBuild;
-      const plannedCommit = ctx.sourceCommitShort;
+      if (ctx.channel === "tip" && buildWillRun(ctx) && !ctx.artifactBuild) {
+        ctx.appcastUrl = defaultAppcastUrl(ctx);
+        fetchExistingAppcast(ctx, ui);
+        ctx.artifactBuild = nextTipArtifactBuild(ctx.sourceBuild, readFileSync(ctx.appcastPath, "utf8"), ctx.experimentalTip);
+      }
+      if (ctx.experimentalTip && buildWillRun(ctx)) {
+        if (!ctx.artifactBuild) {
+          throw new Error("Experimental tip artifact build was not allocated.");
+        }
+        if (ctx.dryRun) {
+          const currentSnapshot = macosSourceSnapshotSha256(ctx.rootDir);
+          if (ctx.sourceSnapshot && ctx.sourceSnapshot !== currentSnapshot) {
+            throw new Error(`macOS source no longer matches the requested experimental snapshot ${ctx.sourceSnapshot}; current ${currentSnapshot}.`);
+          }
+          ctx.sourceSnapshot = currentSnapshot;
+        } else {
+          ctx.sourceRoot = resolve(ctx.tempDir, "source");
+          const staged = stageMacosSourceSnapshot(ctx.rootDir, ctx.sourceRoot, ctx.sourceManifestPath);
+          if (ctx.sourceSnapshot && ctx.sourceSnapshot !== staged.sha256) {
+            throw new Error(`Staged macOS source does not match the requested experimental snapshot ${ctx.sourceSnapshot}; current ${staged.sha256}.`);
+          }
+          ctx.sourceSnapshot = staged.sha256;
+          ui.detail("Staged source", `${staged.fileCount} files in ${ctx.sourceRoot}`);
+        }
+      }
+      const configuredVersion = readConfiguredMarketingVersion(ctx.sourceRoot || ctx.rootDir, ui);
+      const plannedBuild = ctx.artifactBuild || ctx.sourceBuild;
+      const plannedRevision = ctx.experimentalTip ? "" : ctx.sourceCommitShort;
       if (configuredVersion) ctx.version = configuredVersion;
       ui.detail("Version", `${configuredVersion || "unknown"}${plannedBuild ? ` (build ${plannedBuild})` : ""}`);
       ui.detail("Tag", ctx.releaseTag || "none");
       ui.detail("Channel", ctx.channel);
-      if (plannedCommit) ui.detail("Commit", plannedCommit);
+      if (plannedRevision) ui.detail(ctx.experimentalTip ? "Source snapshot" : "Commit", plannedRevision);
       ui.detail("DerivedData", `${existsSync(ctx.derivedData) ? "reusing" : "creating"} ${ctx.derivedData}`);
     }
     const missing: string[] = [];
@@ -1269,19 +1432,21 @@ async function main() {
     }
     if (!ctx.rollback && !ctx.dropBuild) {
       if (buildWillRun(ctx)) {
-        assertFrozenSource(ctx);
+        if (!ctx.experimentalTip) assertFrozenSource(ctx);
         const dirty = gitLines(ctx.rootDir, ["status", "--porcelain"]);
         const willPublish = publicMutationEnabled(ctx);
-        if (dirty.length && willPublish) {
+        if (dirty.length && willPublish && !ctx.experimentalTip) {
           const sample = dirty.slice(0, 12).join("\n");
           const extra = dirty.length > 12 ? `\n... and ${dirty.length - 12} more` : "";
           const message = `Public macOS releases require a clean frozen source on every channel. Dirty source cannot upload a DMG/appcast or move a GitHub tag.\n${sample}${extra}`;
           if (ctx.dryRun) ui.info(`Warning: ${message}`);
           else throw new Error(message);
-        } else if (dirty.length && !ctx.allowDirty) {
+        } else if (dirty.length && !ctx.allowDirty && !ctx.experimentalTip) {
           const message = "Dirty source is allowed only for an explicitly local, non-publishing run with --allow-dirty and all public mutation steps skipped.";
           if (ctx.dryRun) ui.info(`Warning: ${message}`);
           else throw new Error(message);
+        } else if (dirty.length && ctx.experimentalTip) {
+          ui.info("Warning: publishing a dirty macOS source snapshot to the experimental tip feed; GitHub is disabled.");
         } else if (dirty.length) {
           ui.info("Warning: local non-publishing build from dirty source because --allow-dirty was passed.");
         }
@@ -1310,15 +1475,16 @@ async function main() {
     }
     ui.detail("Tools", "available");
     if (!ctx.rollback && !ctx.dropBuild && buildWillRun(opts)) {
-      const command = ["bun", "run", resolve(ctx.rootDir, "scripts/macos/check-grid-livekit-pin.ts")];
+      const sourceRoot = ctx.sourceRoot || ctx.rootDir;
+      const command = ["bun", "run", resolve(sourceRoot, "scripts/macos/check-grid-livekit-pin.ts")];
       if (ctx.dryRun) {
         try {
-          await runStreaming(ui, command, { cwd: ctx.rootDir });
+          await runStreaming(ui, command, { cwd: sourceRoot });
         } catch (error) {
           ui.info(`Warning: ${String(error)}`);
         }
       } else {
-        await runStreaming(ui, command, { cwd: ctx.rootDir });
+        await runStreaming(ui, command, { cwd: sourceRoot });
         ui.detail("LiveKit pin", "verified");
       }
     }
@@ -1331,6 +1497,10 @@ async function main() {
         });
         ui.detail("Notarization credentials", "verified");
       }
+    }
+    if (!ctx.rollback && !ctx.dropBuild && ctx.experimentalTip && buildWillRun(ctx)) {
+      if (!ctx.dryRun) assertFrozenSource(ctx);
+      ui.detail("Source snapshot", `experimental-${ctx.sourceSnapshot.slice(0, 12)}`);
     }
   };
 
@@ -1653,8 +1823,8 @@ async function main() {
           ui.detail("Built app", ctx.appPath);
           ui.detail("DMG", ctx.dmgPath);
         };
-        await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/build-direct.sh")], {
-          cwd: ctx.rootDir,
+        await runStreaming(ui, ["bash", resolve(ctx.sourceRoot || ctx.rootDir, "scripts/macos/build-direct.sh")], {
+          cwd: ctx.sourceRoot || ctx.rootDir,
           env: {
             CHANNEL: ctx.channel,
             DERIVED_DATA: ctx.derivedData,
@@ -1662,9 +1832,15 @@ async function main() {
             DMG_PATH: ctx.dmgPath,
             SPARKLE_DIR: ctx.sparkleDir,
             MACOS_RELEASE_ARCH: macosReleaseArch,
-            EXPECTED_SOURCE_COMMIT: ctx.sourceCommit,
-            EXPECTED_SOURCE_BUILD: ctx.sourceBuild,
-            REQUIRE_CLEAN_SOURCE: publicMutationEnabled(ctx) ? "1" : "0",
+            EXPECTED_SOURCE_COMMIT: ctx.experimentalTip ? "" : ctx.sourceCommit,
+            EXPECTED_SOURCE_BUILD: ctx.experimentalTip ? "" : ctx.sourceBuild,
+            EXPECTED_SOURCE_SNAPSHOT: ctx.experimentalTip ? ctx.sourceSnapshot : "",
+            SOURCE_SNAPSHOT_MANIFEST: ctx.experimentalTip ? ctx.sourceManifestPath : "",
+            BUILD_NUMBER_OVERRIDE: ctx.artifactBuild && ctx.artifactBuild !== ctx.sourceBuild ? ctx.artifactBuild : "",
+            INLINE_REVISION_OVERRIDE: ctx.experimentalTip ? `experimental-${ctx.sourceSnapshot.slice(0, 12)}` : "",
+            EXPERIMENTAL_TIP: ctx.experimentalTip ? "1" : "0",
+            RELEASE_CONFIG_ROOT: ctx.rootDir,
+            REQUIRE_CLEAN_SOURCE: publicMutationEnabled(ctx) && !ctx.experimentalTip ? "1" : "0",
             ARTIFACT_PROVENANCE_PATH: ctx.provenancePath,
           },
           onLine: (line) => {
@@ -1891,8 +2067,9 @@ async function main() {
           INLINE_DMG_URL: ctx.dmgUrl,
           INLINE_MIN_MACOS: ctx.minimumSystemVersion,
           INLINE_HARDWARE_REQUIREMENTS: macosReleaseArch,
-          INLINE_COMMIT: ctx.commit,
-          INLINE_COMMIT_LONG: ctx.commitLong,
+          INLINE_COMMIT: ctx.experimentalTip ? "" : ctx.commit,
+          INLINE_COMMIT_LONG: ctx.experimentalTip ? "" : ctx.commitLong,
+          INLINE_EXPERIMENTAL_TIP: ctx.experimentalTip ? "1" : "0",
           SIGN_UPDATE_PATH: ctx.signUpdatePath,
           APPCAST_PATH: ctx.appcastPath,
           APPCAST_OUTPUT: ctx.appcastOutputPath,

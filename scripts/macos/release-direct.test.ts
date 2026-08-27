@@ -4,6 +4,7 @@ import {
   appcastConditionFromEnv,
   appcastConditionalHeaders,
   conditionalAppcastPut,
+  uploadDmgPut,
   validateDmgAttestation,
   validateUploadMode,
 } from "./release-direct";
@@ -24,6 +25,27 @@ describe("conditional appcast publication", () => {
     expect(() => validateDmgAttestation(fixture, String(file.size + 1), hash)).toThrow("attestation mismatch");
     expect(() => validateDmgAttestation(fixture, String(file.size), "0".repeat(64))).toThrow("attestation mismatch");
     expect(() => validateDmgAttestation(fixture, "", "")).toThrow("requires valid");
+  });
+
+  test("DMG upload uses a bounded immutable presigned PUT", async () => {
+    let method = "";
+    let headers: Headers | undefined;
+    let signal: AbortSignal | null | undefined;
+    const fakeFetch: typeof fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      method = init?.method ?? "";
+      headers = new Headers(init?.headers);
+      signal = init?.signal;
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    await uploadDmgPut(
+      "https://r2.invalid/Inline.dmg",
+      resolve(import.meta.dir, "test-fixtures/sign-update.txt"),
+      fakeFetch,
+    );
+    expect(method).toBe("PUT");
+    expect(headers?.get("content-type")).toBe("application/octet-stream");
+    expect(headers?.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(signal).toBeInstanceOf(AbortSignal);
   });
   test("existing feeds require their exact fetched ETag", () => {
     const condition = appcastConditionFromEnv({ APPCAST_EXPECTED_ETAG: '"abc123"' });

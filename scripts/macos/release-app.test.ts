@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
-import { decideAppcastFetch, releaseIntegrityGateErrors, safeResumeTask } from "./release-app";
+import { decideAppcastFetch, nextTipArtifactBuild, releaseIntegrityGateErrors, safeResumeTask } from "./release-app";
 
 const releaseAppSource = readFileSync(resolve(import.meta.dir, "release-app.ts"), "utf8");
 const buildDirectSource = readFileSync(resolve(import.meta.dir, "build-direct.sh"), "utf8");
+const sourceSnapshotSource = readFileSync(resolve(import.meta.dir, "macos-source-snapshot.ts"), "utf8");
+const updateAppcastSource = readFileSync(resolve(import.meta.dir, "update_appcast.py"), "utf8");
 
 function metadata(overrides: Partial<BuiltAppMetadata> = {}): BuiltAppMetadata {
   return {
@@ -41,6 +43,15 @@ describe("release integrity helpers", () => {
     expect(() => decideAppcastFetch(22, 500, false)).toThrow("HTTP 500");
   });
 
+  test("tip builds stay integer and advance past feed collisions", () => {
+    const appcast = (versions: string[]) => `<rss><channel>${versions.map((version) => `<item><sparkle:version>${version}</sparkle:version></item>`).join("")}</channel></rss>`;
+    expect(nextTipArtifactBuild("5226", appcast(["5182"]), false)).toBe("5226");
+    expect(nextTipArtifactBuild("5226", appcast(["5182"]), true)).toBe("5227");
+    expect(nextTipArtifactBuild("5227", appcast(["5227"]), false)).toBe("5228");
+    expect(nextTipArtifactBuild("5226", appcast(["5229"]), true)).toBe("5230");
+    expect(() => nextTipArtifactBuild("5226", appcast(["5226.1"]), true)).toThrow("unsupported");
+  });
+
   test("channel and DerivedData ownership use exclusive filesystem locks", () => {
     expect(releaseAppSource).toContain('mkdirSync(path, { mode: 0o700 })');
     expect(releaseAppSource).toContain('`channel-${ctx.channel}.lockdir`');
@@ -70,19 +81,42 @@ describe("release integrity helpers", () => {
   });
 
   test("publication binds frozen source and exact local/remote artifacts", () => {
-    expect(releaseAppSource).toContain('EXPECTED_SOURCE_COMMIT: ctx.sourceCommit');
-    expect(releaseAppSource).toContain('EXPECTED_SOURCE_BUILD: ctx.sourceBuild');
+    expect(releaseAppSource).toContain('EXPECTED_SOURCE_COMMIT: ctx.experimentalTip ? "" : ctx.sourceCommit');
+    expect(releaseAppSource).toContain('EXPECTED_SOURCE_BUILD: ctx.experimentalTip ? "" : ctx.sourceBuild');
     expect(releaseAppSource).toContain('APP_PATH: ""');
     expect(releaseAppSource).toContain('remoteSha256 !== ctx.dmgSha256');
     expect(releaseAppSource).toContain('APPCAST_EXPECTED_ETAG: ctx.appcastExpectedEtag');
     expect(releaseAppSource).toContain('RELEASE_CHANNEL_LOCK_TOKEN: ctx.channelLockToken');
-    expect(releaseAppSource).toContain("Clean-source artifact provenance not found");
+    expect(releaseAppSource).toContain("Artifact provenance not found");
     expect(releaseAppSource).toContain("provenance.appExecutableSha256 === executableSha256");
     expect(releaseAppSource).toContain('"Latest Sparkle release", ctx.sourceCommit');
     expect(releaseAppSource).toContain("Public macOS releases require a clean frozen source on every channel");
+    expect(releaseAppSource).toContain('ctx.experimentalTip ? "1" : "0"');
+    expect(releaseAppSource).toContain('provenance.sourceState === "experimental-tip"');
+    expect(releaseAppSource).toContain('experimental-${ctx.sourceSnapshot.slice(0, 12)}');
+    expect(releaseAppSource).toContain("stageMacosSourceSnapshot(ctx.rootDir, ctx.sourceRoot, ctx.sourceManifestPath)");
+    expect(releaseAppSource).toContain('resolve(ctx.sourceRoot || ctx.rootDir, "scripts/macos/build-direct.sh")');
     expect(buildDirectSource).toContain('verify_frozen_source');
     expect(buildDirectSource).toContain('"sourceClean": source_clean == "1"');
+    expect(buildDirectSource).toContain('"sourceSnapshotSha256": source_snapshot');
+    expect(buildDirectSource).toContain('bun run "${ROOT_DIR}/scripts/macos/macos-source-snapshot.ts"');
+    expect(buildDirectSource).toContain('--manifest "${SOURCE_SNAPSHOT_MANIFEST}"');
+    expect(buildDirectSource).toContain('RELEASE_CONFIG_ROOT=${RELEASE_CONFIG_ROOT:-"${ROOT_DIR}"}');
+    expect(sourceSnapshotSource).toContain('["apple", "scripts/apple", "scripts/macos", "bun.lock"]');
+    expect(sourceSnapshotSource).toContain('component === ".env" || component.startsWith(".env.")');
+    expect(sourceSnapshotSource).toContain("assertSafeSymlink(rootDir, relativePath, absolutePath)");
+    expect(sourceSnapshotSource).toContain("copiedPaths.length !== finalPaths.length");
+    expect(sourceSnapshotSource).toContain('sourceSha256 !== stagedSha256 || sourceSha256 !== sourceSha256AfterVerification');
     expect(buildDirectSource).toContain('Artifact provenance: ${ARTIFACT_PROVENANCE_PATH}');
+  });
+
+  test("experimental mode is tip-only and never enables GitHub", () => {
+    expect(releaseAppSource).toContain('die("--experimental-tip can publish only to --channel tip.")');
+    expect(releaseAppSource).toContain('skipGithubRelease: parsed0.experimentalTip ||');
+    expect(releaseAppSource).toContain('parsed0.rollback || parsed0.dropBuild || parsed0.experimentalTip');
+    expect(releaseAppSource).toContain('? "experimental-tip"');
+    expect(updateAppcastSource).toContain('description.text = f"<p>Experimental tip build {build}.</p>"');
+    expect(updateAppcastSource).toContain("elif commit:");
   });
 
   test("app and DMG identity compares every release-bearing field", () => {

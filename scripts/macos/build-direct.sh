@@ -2,13 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+RELEASE_CONFIG_ROOT=${RELEASE_CONFIG_ROOT:-"${ROOT_DIR}"}
 
 source "${ROOT_DIR}/scripts/macos/arch-utils.sh"
 
-if [[ -f "${ROOT_DIR}/scripts/.env" ]]; then
+if [[ -f "${RELEASE_CONFIG_ROOT}/scripts/.env" ]]; then
   set -a
   # shellcheck disable=SC1090
-  source "${ROOT_DIR}/scripts/.env"
+  source "${RELEASE_CONFIG_ROOT}/scripts/.env"
   set +a
 fi
 
@@ -32,6 +33,11 @@ DEBUG_BUILD=${DEBUG_BUILD:-0}
 CREATE_DMG_NODE_BIN_DIR=${CREATE_DMG_NODE_BIN_DIR:-""}
 EXPECTED_SOURCE_COMMIT=${EXPECTED_SOURCE_COMMIT:-""}
 EXPECTED_SOURCE_BUILD=${EXPECTED_SOURCE_BUILD:-""}
+EXPECTED_SOURCE_SNAPSHOT=${EXPECTED_SOURCE_SNAPSHOT:-""}
+SOURCE_SNAPSHOT_MANIFEST=${SOURCE_SNAPSHOT_MANIFEST:-""}
+BUILD_NUMBER_OVERRIDE=${BUILD_NUMBER_OVERRIDE:-""}
+INLINE_REVISION_OVERRIDE=${INLINE_REVISION_OVERRIDE:-""}
+EXPERIMENTAL_TIP=${EXPERIMENTAL_TIP:-0}
 REQUIRE_CLEAN_SOURCE=${REQUIRE_CLEAN_SOURCE:-0}
 ARTIFACT_PROVENANCE_PATH=${ARTIFACT_PROVENANCE_PATH:-"${OUTPUT_DIR}/release-provenance.json"}
 
@@ -44,25 +50,40 @@ case "${CHANNEL}" in
 esac
 
 verify_frozen_source() {
-  local current_commit current_build
-  current_commit=$(git -C "${ROOT_DIR}" rev-parse HEAD)
-  current_build=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
-  if [[ -n "${EXPECTED_SOURCE_COMMIT}" && "${current_commit}" != "${EXPECTED_SOURCE_COMMIT}" ]]; then
-    echo "Source commit changed during release: expected ${EXPECTED_SOURCE_COMMIT}, found ${current_commit}" >&2
-    exit 1
+  local current_commit current_build current_snapshot
+  if [[ -n "${EXPECTED_SOURCE_SNAPSHOT}" ]]; then
+    if [[ -z "${SOURCE_SNAPSHOT_MANIFEST}" || ! -f "${SOURCE_SNAPSHOT_MANIFEST}" ]]; then
+      echo "SOURCE_SNAPSHOT_MANIFEST is required for an experimental tip build." >&2
+      exit 1
+    fi
+    current_snapshot=$(bun run "${ROOT_DIR}/scripts/macos/macos-source-snapshot.ts" --root "${ROOT_DIR}" --manifest "${SOURCE_SNAPSHOT_MANIFEST}")
+    if [[ "${current_snapshot}" != "${EXPECTED_SOURCE_SNAPSHOT}" ]]; then
+      echo "macOS source changed during experimental tip release: expected snapshot ${EXPECTED_SOURCE_SNAPSHOT}, found ${current_snapshot}" >&2
+      exit 1
+    fi
   fi
-  if [[ -n "${EXPECTED_SOURCE_BUILD}" && "${current_build}" != "${EXPECTED_SOURCE_BUILD}" ]]; then
-    echo "Source build changed during release: expected ${EXPECTED_SOURCE_BUILD}, found ${current_build}" >&2
-    exit 1
-  fi
-  if [[ "${REQUIRE_CLEAN_SOURCE}" == "1" && -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
-    echo "Source became dirty during a public release; refusing to label or publish the artifact." >&2
-    exit 1
+  if [[ -n "${EXPECTED_SOURCE_COMMIT}" || -n "${EXPECTED_SOURCE_BUILD}" || "${REQUIRE_CLEAN_SOURCE}" == "1" ]]; then
+    current_commit=$(git -C "${ROOT_DIR}" rev-parse HEAD)
+    current_build=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
+    if [[ -n "${EXPECTED_SOURCE_COMMIT}" && "${current_commit}" != "${EXPECTED_SOURCE_COMMIT}" ]]; then
+      echo "Source commit changed during release: expected ${EXPECTED_SOURCE_COMMIT}, found ${current_commit}" >&2
+      exit 1
+    fi
+    if [[ -n "${EXPECTED_SOURCE_BUILD}" && "${current_build}" != "${EXPECTED_SOURCE_BUILD}" ]]; then
+      echo "Source build changed during release: expected ${EXPECTED_SOURCE_BUILD}, found ${current_build}" >&2
+      exit 1
+    fi
+    if [[ "${REQUIRE_CLEAN_SOURCE}" == "1" && -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
+      echo "Source became dirty during a public release; refusing to label or publish the artifact." >&2
+      exit 1
+    fi
   fi
 }
 
-SOURCE_WAS_CLEAN=1
-if [[ -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
+SOURCE_WAS_CLEAN=0
+if [[ "${EXPERIMENTAL_TIP}" != "1" && -z "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
+  SOURCE_WAS_CLEAN=1
+elif [[ "${EXPERIMENTAL_TIP}" != "1" ]]; then
   SOURCE_WAS_CLEAN=0
 fi
 verify_frozen_source
@@ -210,8 +231,10 @@ fi
 APP_PATH="${DERIVED_DATA}/Build/Products/${configuration}/${app_name}"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
 verify_frozen_source
-BUILD_NUMBER=${EXPECTED_SOURCE_BUILD:-$(git -C "${ROOT_DIR}" rev-list --count HEAD)}
-if [[ -n "${EXPECTED_SOURCE_COMMIT}" ]]; then
+BUILD_NUMBER=${BUILD_NUMBER_OVERRIDE:-${EXPECTED_SOURCE_BUILD:-$(git -C "${ROOT_DIR}" rev-list --count HEAD)}}
+if [[ -n "${INLINE_REVISION_OVERRIDE}" ]]; then
+  INLINE_COMMIT=${INLINE_REVISION_OVERRIDE}
+elif [[ -n "${EXPECTED_SOURCE_COMMIT}" ]]; then
   INLINE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short "${EXPECTED_SOURCE_COMMIT}")
 else
   INLINE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
@@ -432,20 +455,40 @@ APP_EXECUTABLE_SHA256=$(shasum -a 256 "${APP_PATH}/Contents/MacOS/Inline" | awk 
 DMG_SHA256=$(shasum -a 256 "${DMG_PATH}" | awk '{print $1}')
 DMG_SIZE=$(stat -f %z "${DMG_PATH}")
 mkdir -p "$(dirname "${ARTIFACT_PROVENANCE_PATH}")"
-python3 - "${ARTIFACT_PROVENANCE_PATH}" "${EXPECTED_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD)}" "${BUILD_NUMBER}" "${SOURCE_WAS_CLEAN}" "${APP_EXECUTABLE_SHA256}" "${DMG_SIZE}" "${DMG_SHA256}" <<'PY'
+if [[ "${EXPERIMENTAL_TIP}" == "1" ]]; then
+  PROVENANCE_SOURCE_COMMIT=""
+  PROVENANCE_SOURCE_BUILD="${BUILD_NUMBER}"
+else
+  PROVENANCE_SOURCE_COMMIT=${EXPECTED_SOURCE_COMMIT:-$(git -C "${ROOT_DIR}" rev-parse HEAD)}
+  PROVENANCE_SOURCE_BUILD=${EXPECTED_SOURCE_BUILD:-${BUILD_NUMBER}}
+fi
+python3 - "${ARTIFACT_PROVENANCE_PATH}" "${EXPERIMENTAL_TIP}" "${PROVENANCE_SOURCE_COMMIT}" "${PROVENANCE_SOURCE_BUILD}" "${EXPECTED_SOURCE_SNAPSHOT}" "${BUILD_NUMBER}" "${INLINE_COMMIT}" "${SOURCE_WAS_CLEAN}" "${APP_EXECUTABLE_SHA256}" "${DMG_SIZE}" "${DMG_SHA256}" <<'PY'
 import json
 import sys
 
-path, source_commit, source_build, source_clean, app_sha256, dmg_size, dmg_sha256 = sys.argv[1:]
-payload = {
-    "schemaVersion": 1,
-    "sourceCommit": source_commit,
-    "sourceBuild": source_build,
-    "sourceClean": source_clean == "1",
-    "appExecutableSha256": app_sha256,
-    "dmgSize": int(dmg_size),
-    "dmgSha256": dmg_sha256,
-}
+path, experimental_tip, source_commit, source_build, source_snapshot, build_number, revision, source_clean, app_sha256, dmg_size, dmg_sha256 = sys.argv[1:]
+if experimental_tip == "1":
+    payload = {
+        "schemaVersion": 2,
+        "sourceState": "experimental-tip",
+        "sourceSnapshotSha256": source_snapshot,
+        "buildNumber": build_number,
+        "revision": revision,
+        "appExecutableSha256": app_sha256,
+        "dmgSize": int(dmg_size),
+        "dmgSha256": dmg_sha256,
+    }
+else:
+    payload = {
+        "schemaVersion": 1,
+        "sourceCommit": source_commit,
+        "sourceBuild": source_build,
+        "buildNumber": build_number,
+        "sourceClean": source_clean == "1",
+        "appExecutableSha256": app_sha256,
+        "dmgSize": int(dmg_size),
+        "dmgSha256": dmg_sha256,
+    }
 with open(path, "w", encoding="utf-8") as file:
     json.dump(payload, file, indent=2)
     file.write("\n")

@@ -52,17 +52,23 @@ function getR2Context() {
   return { r2, publicBaseUrl, prefix };
 }
 
-async function uploadFile(
-  r2: S3Client,
-  key: string,
+export async function uploadDmgPut(
+  uploadUrl: string,
   path: string,
-  contentType: string,
-  cacheControl?: string,
-) {
-  await r2.file(key).write(Bun.file(path), {
-    type: contentType,
-    cacheControl,
-  } as never);
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetchImpl(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+    body: Bun.file(path),
+    signal: AbortSignal.timeout(5 * 60 * 1000),
+  });
+  if (response.ok) return;
+  const detail = (await response.text()).trim().slice(0, 500);
+  throw new Error(`DMG upload failed with HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
 }
 
 export function appcastConditionFromEnv(env: Record<string, string | undefined>): AppcastCondition {
@@ -145,7 +151,8 @@ async function main(): Promise<void> {
   const appcastKey = `${prefix}/${channel}/appcast.xml`;
 
   if (uploadMode === "dmg") {
-    await uploadFile(r2, dmgKey, dmgPath, "application/octet-stream", "public, max-age=31536000, immutable");
+    const uploadUrl = r2.presign(dmgKey, { method: "PUT", expiresIn: 600 });
+    await uploadDmgPut(uploadUrl, dmgPath);
   }
 
   if (uploadMode === "appcast") {
