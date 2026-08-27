@@ -9,7 +9,7 @@ protocol UpdatePresenting: AnyObject {
 }
 
 @MainActor
-final class UpdateWindowController: NSWindowController, UpdatePresenting {
+final class UpdateWindowController: NSWindowController, NSWindowDelegate, UpdatePresenting {
   private let controller: UpdateController
 
   init(controller: UpdateController) {
@@ -17,7 +17,7 @@ final class UpdateWindowController: NSWindowController, UpdatePresenting {
 
     let window = NSWindow(
       contentRect: NSRect(origin: .zero, size: UpdateWindowView.contentSize),
-      styleMask: [.titled],
+      styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false
     )
@@ -39,29 +39,25 @@ final class UpdateWindowController: NSWindowController, UpdatePresenting {
       NSApp.activate(ignoringOtherApps: true)
     }
 
-    if let sheetParent = window.sheetParent {
-      sheetParent.makeKeyAndOrderFront(nil)
-      return
-    }
-
-    if let parent = presentingWindow(excluding: window), parent.attachedSheet == nil {
-      parent.beginSheet(window)
-      parent.makeKeyAndOrderFront(nil)
-      return
-    }
-
-    window.center()
     window.makeKeyAndOrderFront(nil)
   }
 
   func closeIfNeeded() {
-    guard let window else { return }
+    window?.orderOut(nil)
+  }
 
-    if let sheetParent = window.sheetParent {
-      sheetParent.endSheet(window)
-    } else {
-      window.orderOut(nil)
+  func windowShouldClose(_: NSWindow) -> Bool {
+    switch controller.phase {
+    case .idle, .upToDate, .failed:
+      controller.dismissStatus()
+    case .checking, .downloading:
+      controller.cancel()
+    case .updateAvailable, .readyToInstall:
+      controller.remindLater()
+    case .extracting, .installing:
+      closeIfNeeded()
     }
+    return false
   }
 
   private func configure(_ window: NSWindow) {
@@ -71,6 +67,8 @@ final class UpdateWindowController: NSWindowController, UpdatePresenting {
     window.animationBehavior = .documentWindow
     window.collectionBehavior = [.moveToActiveSpace]
     window.isReleasedWhenClosed = false
+    window.tabbingMode = .disallowed
+    window.delegate = self
 
     let hostingController = NSHostingController(
       rootView: UpdateWindowView(controller: controller)
@@ -83,18 +81,6 @@ final class UpdateWindowController: NSWindowController, UpdatePresenting {
     window.contentMinSize = contentSize
     window.contentMaxSize = contentSize
     window.center()
-  }
-
-  private func presentingWindow(excluding updateWindow: NSWindow) -> NSWindow? {
-    let candidates = [NSApp.keyWindow, NSApp.mainWindow] + NSApp.orderedWindows.map(Optional.some)
-    return candidates
-      .compactMap { $0 }
-      .first { window in
-        window !== updateWindow
-          && window.isVisible
-          && window.canBecomeKey
-          && !(window is NSPanel)
-      }
   }
 }
 #endif
