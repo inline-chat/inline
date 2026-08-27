@@ -7,6 +7,8 @@ import RealtimeV2
 import SwiftUI
 
 struct ExperimentalProfileToolbarLabel: View {
+  private static let avatarSize: CGFloat = 42
+
   @Query(CurrentUser()) private var currentUser: UserInfo?
 
   @ViewBuilder
@@ -22,12 +24,18 @@ struct ExperimentalProfileToolbarLabel: View {
   @ViewBuilder
   private var avatar: some View {
     if let currentUser {
-      UserAvatar(userInfo: currentUser, size: 42)
-        .frame(width: 42, height: 42)
+      UserAvatar(userInfo: currentUser, size: Self.avatarSize)
+        .frame(width: Self.avatarSize, height: Self.avatarSize)
     } else {
-      Image(systemName: "person.crop.circle.fill")
-        .font(.system(size: 40))
-        .foregroundStyle(.secondary)
+      Circle()
+        .fill(.secondary)
+        .overlay {
+          Image(systemName: "person.fill")
+            .font(.system(size: Self.avatarSize * 0.46))
+            .foregroundStyle(Color(uiColor: .systemBackground))
+        }
+        .frame(width: Self.avatarSize, height: Self.avatarSize)
+        .fixedSize()
     }
   }
 }
