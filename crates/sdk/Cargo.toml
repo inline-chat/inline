@@ -20,7 +20,7 @@ base64 = "0.22.1"
 futures-util.workspace = true
 getrandom = "0.3.4"
 hostname.workspace = true
-inline-protocol = { version = "0.7.4", path = "../protocol" }
+inline-protocol = { version = "0.7.5", path = "../protocol" }
 log.workspace = true
 prost.workspace = true
 reqwest.workspace = true
