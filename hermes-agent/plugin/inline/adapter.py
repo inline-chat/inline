@@ -48,6 +48,14 @@ from gateway.platforms.base import (
 )
 from gateway.platforms.helpers import strip_markdown
 
+from .message_actions import (
+    build_inline_agent_action_input,
+    build_inline_agent_action_turn_id,
+    build_inline_system_action_id,
+    parse_inline_agent_action_reply_target,
+    resolve_inline_message_action_ownership,
+)
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SIDECAR_PORT = 8794
@@ -2041,6 +2049,13 @@ class InlineAdapter(BasePlatformAdapter):
         if kind == "message.action.invoke":
             if await self._handle_action(event):
                 return
+            ownership = resolve_inline_message_action_ownership(event.get("actionId"))
+            if ownership.owner == "system" and ownership.explicit:
+                await self._answer_action(str(event.get("interactionId") or ""), "Action expired")
+                logger.info("[inline] dropped unhandled system action %s", event.get("actionId") or "")
+                return
+            await self._dispatch_agent_action(event)
+            return
         if kind == "reaction.add":
             await self._dispatch_reaction(event, added=True)
             return
@@ -2099,6 +2114,7 @@ class InlineAdapter(BasePlatformAdapter):
         return False
 
     async def _dispatch_message(self, event: Dict[str, Any], *, edit: bool = False) -> None:
+        agent_action = event.get("_inlineAgentAction") if isinstance(event.get("_inlineAgentAction"), dict) else None
         msg = event.get("message") or {}
         msg_id = str(msg.get("id") or "")
         chat_id = str(event.get("chatId") or msg.get("chatId") or "")
@@ -2163,7 +2179,7 @@ class InlineAdapter(BasePlatformAdapter):
         )
         if has_command_target and not command_addressed_to_me:
             return
-        if await self._handle_thread_command(
+        if not agent_action and await self._handle_thread_command(
             chat_id=chat_id,
             msg_id=msg_id,
             text=text,
@@ -2172,7 +2188,7 @@ class InlineAdapter(BasePlatformAdapter):
             parent_chat_id=parent_chat_id,
         ):
             return
-        if await self._handle_follow_command(
+        if not agent_action and await self._handle_follow_command(
             chat_id=chat_id,
             msg_id=msg_id,
             from_id=from_id,
@@ -2227,6 +2243,7 @@ class InlineAdapter(BasePlatformAdapter):
             text = f"message:edited:{text}" if text else "message:edited"
         if (
             not edit
+            and not agent_action
             and not thread_id
             and self._should_create_reply_thread_for_message(
                 chat_id=chat_id,
@@ -2314,6 +2331,16 @@ class InlineAdapter(BasePlatformAdapter):
             parent_message_id=parent_message_id,
             entity_text=entity_text,
         )
+        if agent_action:
+            metadata["inline"]["action"] = {
+                "event_kind": "message.action.invoke",
+                "actor_user_id": str(agent_action.get("actorUserId") or ""),
+                "chat_id": str(agent_action.get("chatId") or ""),
+                "target_message_id": str(agent_action.get("messageId") or ""),
+                "interaction_id": str(agent_action.get("interactionId") or ""),
+                "action_id": str(agent_action.get("actionId") or ""),
+                "callback_data_base64": str(agent_action.get("dataBase64") or ""),
+            }
 
         source = self.build_source(
             chat_id=chat_id,
@@ -2330,7 +2357,14 @@ class InlineAdapter(BasePlatformAdapter):
             message_type=message_type,
             source=source,
             raw_message=event,
-            message_id=msg_id,
+            message_id=(
+                build_inline_agent_action_turn_id(
+                    agent_action.get("messageId"),
+                    agent_action.get("interactionId"),
+                )
+                if agent_action
+                else msg_id
+            ),
             platform_update_id=int(event.get("seq") or 0) if str(event.get("seq") or "").isdigit() else None,
             media_urls=media_urls,
             media_types=media_types,
@@ -2343,7 +2377,46 @@ class InlineAdapter(BasePlatformAdapter):
             channel_context=channel_context,
             metadata=metadata,
             timestamp=self._timestamp(event.get("date") or msg.get("date")),
+            allow_gateway_control=not bool(agent_action),
         ))
+
+    async def _dispatch_agent_action(self, event: Dict[str, Any]) -> None:
+        interaction_id = str(event.get("interactionId") or "")
+        await self._answer_action(interaction_id, "")
+
+        chat_id = str(event.get("chatId") or "")
+        message_id = str(event.get("messageId") or "")
+        actor_user_id = str(event.get("actorUserId") or "")
+        if not chat_id or not message_id or not interaction_id or not actor_user_id:
+            logger.warning("[inline] ignored incomplete agent action event")
+            return
+        target = await self._fetch_message(chat_id, message_id)
+        if not target:
+            logger.info("[inline] ignored agent action for unavailable message %s", message_id)
+            return
+
+        synthetic_message = dict(target)
+        for stale_key in ("actions", "attachments", "entities", "media", "reactions", "replies"):
+            synthetic_message.pop(stale_key, None)
+        synthetic_message.update({
+            "id": message_id,
+            "chatId": chat_id,
+            "fromId": actor_user_id,
+            "message": build_inline_agent_action_input(event),
+            "out": False,
+            "mentioned": True,
+            "replyToMsgId": message_id,
+            "date": event.get("date") or target.get("date"),
+        })
+        sender = event.get("sender")
+        if isinstance(sender, dict):
+            synthetic_message["sender"] = sender
+        await self._dispatch_message({
+            **event,
+            "kind": "message.new",
+            "message": synthetic_message,
+            "_inlineAgentAction": dict(event),
+        })
 
     def _message_explicitly_mentions_me(self, msg: Dict[str, Any]) -> bool:
         if not self._me_id:
@@ -3443,7 +3516,12 @@ class InlineAdapter(BasePlatformAdapter):
             return None
 
     async def _handle_action(self, event: Dict[str, Any]) -> bool:
-        action_id = str(event.get("actionId") or "")
+        ownership = resolve_inline_message_action_ownership(event.get("actionId"))
+        if ownership.owner == "agent" and ownership.explicit:
+            return False
+        action_id = ownership.native_action_id
+        if ownership.owner == "system":
+            event = {**event, "actionId": action_id}
         if self._is_model_picker_action(action_id):
             if not await self._action_allowed(event):
                 return True
@@ -3877,6 +3955,48 @@ class InlineAdapter(BasePlatformAdapter):
         actions: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         target = self._target_for(chat_id, metadata)
+        agent_action_target = parse_inline_agent_action_reply_target(reply_to)
+        if agent_action_target:
+            chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH)
+            edit_body: Dict[str, Any] = {
+                "target": target,
+                "messageId": agent_action_target,
+                "text": chunks[0],
+                "parseMarkdown": self._parse_markdown,
+                "actions": actions if actions is not None else {"rows": []},
+            }
+            first_result = await self._send_sidecar("/edit", edit_body)
+            if first_result.success:
+                self._mark_reply_thread_visible(target)
+                if len(chunks) == 1:
+                    return first_result
+                continuation_ids: List[str] = []
+                raw_responses: List[Any] = [first_result.raw_response]
+                previous_id = agent_action_target
+                for chunk in chunks[1:]:
+                    continuation = await self._send_sidecar("/send", {
+                        "target": target,
+                        "text": chunk,
+                        "parseMarkdown": self._parse_markdown,
+                        "replyToMsgId": previous_id,
+                    })
+                    raw_responses.append(continuation.raw_response)
+                    if not continuation.success:
+                        return continuation
+                    if continuation.message_id:
+                        previous_id = str(continuation.message_id)
+                        continuation_ids.append(previous_id)
+                return _send_result(
+                    success=True,
+                    message_id=previous_id,
+                    raw_response={"action_response": True, "responses": raw_responses},
+                    continuation_message_ids=tuple(continuation_ids),
+                )
+            logger.warning(
+                "[inline] agent action response edit failed; sending fallback: %s",
+                first_result.error,
+            )
+            reply_to = agent_action_target
         reply_to = self._reply_to_for_target(reply_to, target)
         chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH)
         message_ids: List[str] = []
@@ -4115,10 +4235,10 @@ class InlineAdapter(BasePlatformAdapter):
         self._remember(self._clarify_choices, clarify_id, clean_choices)
         lines = [f"Clarify: {question}", "", *[f"{i + 1}. {c}" for i, c in enumerate(clean_choices)]]
         actions = [
-            {"id": f"cl:{clarify_id}:{i}", "text": str(i + 1), "callback": f"cl:{clarify_id}:{i}"}
+            self._action(f"cl:{clarify_id}:{i}", str(i + 1))
             for i in range(len(clean_choices))
         ]
-        actions.append({"id": f"cl:{clarify_id}:other", "text": "Other", "callback": f"cl:{clarify_id}:other"})
+        actions.append(self._action(f"cl:{clarify_id}:other", "Other"))
         return await self._send_sidecar("/send", {
             "target": self._target_for(chat_id, metadata),
             "text": "\n".join(lines),
@@ -4164,9 +4284,9 @@ class InlineAdapter(BasePlatformAdapter):
             "text": f"{title}\n\n{message}",
             "parseMarkdown": self._parse_markdown,
             "actions": {"rows": [{"actions": [
-                {"id": f"sc:once:{confirm_id}", "text": "Approve Once", "callback": f"sc:once:{confirm_id}"},
-                {"id": f"sc:always:{confirm_id}", "text": "Always", "callback": f"sc:always:{confirm_id}"},
-                {"id": f"sc:cancel:{confirm_id}", "text": "Cancel", "callback": f"sc:cancel:{confirm_id}"},
+                self._action(f"sc:once:{confirm_id}", "Approve Once"),
+                self._action(f"sc:always:{confirm_id}", "Always"),
+                self._action(f"sc:cancel:{confirm_id}", "Cancel"),
             ]}]},
         })
 
@@ -4331,6 +4451,7 @@ class InlineAdapter(BasePlatformAdapter):
 
     @staticmethod
     def _action(action_id: str, text: str) -> Dict[str, str]:
+        action_id = build_inline_system_action_id(action_id)
         return {"id": action_id, "text": text, "callback": action_id}
 
     @staticmethod

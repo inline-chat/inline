@@ -15,6 +15,7 @@ import io
 import os
 import inspect
 import argparse
+import base64
 import json
 import socket
 import tempfile
@@ -271,8 +272,18 @@ from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
+from inline.message_actions import (
+    build_inline_agent_action_turn_id,
+    parse_inline_agent_action_reply_target,
+    resolve_inline_message_action_ownership,
+)
 
 base_extra = {"token": "fake", "context_history_limit": 0}
+assert resolve_inline_message_action_ownership("agent:1:2").owner == "agent"
+assert resolve_inline_message_action_ownership("system:cl:abc:0").native_action_id == "cl:abc:0"
+assert resolve_inline_message_action_ownership("legacy").explicit is False
+assert parse_inline_agent_action_reply_target(build_inline_agent_action_turn_id("42", "9")) == "42"
+assert parse_inline_agent_action_reply_target("42") is None
 assert "visible label is their first name, falling back to username" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert "never fenced-code tables" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert '<summary>Title</summary>' in inline_tools.INLINE_PLATFORM_GUIDANCE
@@ -548,8 +559,8 @@ assert ctx.tool["toolset"] == "inline"
 assert ctx.tool["emoji"] == chr(0x1F4AC)
 assert "participate" not in ctx.tool["description"]
 assert ctx.tool["schema"]["name"] == "inline"
-assert "send_message" not in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
-assert "send_message" not in ctx.tool["schema"]["description"]
+assert "send_message" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
+assert "send_message" in ctx.tool["schema"]["description"]
 assert "set_typing" not in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "set_presence" in ctx.tool["schema"]["parameters"]["properties"]["action"]["enum"]
 assert "reply_to_msg_id" not in ctx.tool["schema"]["parameters"]["properties"]
@@ -708,15 +719,66 @@ try:
     send_result = json.loads(ctx.tool["handler"]({
         "action": "send_message",
         "user_id": "user:42",
-        "text": "hello",
-        "reply_to_msg_id": "msg:7",
+        "text": "Choose",
+        "buttons": [[
+            {"text": "Approve", "callback_data": '{"decision":"approve"}'},
+            {"text": "Copy", "copy_text": "copied"},
+        ]],
         "parse_markdown": False,
-        "send_mode": "silent",
     }))
-    assert send_result["error"].startswith("inline: unknown action send_message")
-    assert "send_message" not in send_result["allowed_actions"]
-    assert "opt_in_env" not in send_result
-    assert tool_calls[-1][0] == "/messages"
+    assert send_result["success"] is True
+    assert send_result["result"] == {"messageId": "9001"}
+    assert tool_calls[-1] == ("/send", {
+        "target": {"userId": "42"},
+        "text": "Choose",
+        "parseMarkdown": False,
+        "actions": {"rows": [{"actions": [
+            {"id": "agent:1:1", "text": "Approve", "callback": '{"decision":"approve"}'},
+            {"id": "agent:1:2", "text": "Copy", "copyText": "copied"},
+        ]}]},
+    })
+
+    edit_result = json.loads(ctx.tool["handler"]({
+        "action": "edit_message",
+        "chat_id": "chat:10",
+        "message_id": "msg:7",
+        "text": "Approved",
+        "buttons": [[{"text": "Reopen", "callback_data": "reopen"}]],
+    }))
+    assert edit_result["success"] is True
+    assert tool_calls[-1] == ("/edit", {
+        "target": {"chatId": "10"},
+        "messageId": "7",
+        "text": "Approved",
+        "parseMarkdown": True,
+        "actions": {"rows": [{"actions": [
+            {"id": "agent:1:1", "text": "Reopen", "callback": "reopen"},
+        ]}]},
+    })
+
+    clear_result = json.loads(ctx.tool["handler"]({
+        "action": "edit_message",
+        "chat_id": "chat:10",
+        "message_id": "msg:7",
+        "text": "Closed",
+        "buttons": [],
+    }))
+    assert clear_result["success"] is True
+    assert tool_calls[-1] == ("/edit", {
+        "target": {"chatId": "10"},
+        "messageId": "7",
+        "text": "Closed",
+        "parseMarkdown": True,
+        "actions": {"rows": []},
+    })
+
+    invalid_buttons = json.loads(ctx.tool["handler"]({
+        "action": "send_message",
+        "chat_id": "chat:10",
+        "text": "Broken",
+        "buttons": [[{"text": "Ambiguous", "callback_data": "x", "copy_text": "y"}]],
+    }))
+    assert invalid_buttons["error_kind"] == "bad_format"
 
     typing_result = json.loads(ctx.tool["handler"]({
         "action": "set_typing",
@@ -725,7 +787,7 @@ try:
     }))
     assert typing_result["error"].startswith("inline: unknown action set_typing")
     assert "set_typing" not in typing_result["allowed_actions"]
-    assert tool_calls[-1][0] == "/messages"
+    assert tool_calls[-1][0] == "/edit"
 
     presence_result = json.loads(ctx.tool["handler"]({
         "action": "set_presence",
@@ -2414,7 +2476,7 @@ async def assert_reply_thread_slash_command():
         assert sends[-1][3] == {"thread_id": "99"}
         assert sends[-1][1] == "Unfollowed this chat—mentions and replies can still wake Hermes."
 
-        assert auto_action.startswith("th:")
+        assert auto_action.startswith("system:th:")
         assert await adapter._handle_action({
             "chatId": "10",
             "messageId": "sent-1",
@@ -2919,7 +2981,7 @@ async def assert_model_picker_flow():
     assert result.success
     assert calls[0][0] == "/send"
     assert calls[0][1]["target"] == {"chatId": "99"}
-    assert calls[0][1]["actions"]["rows"][0]["actions"][0]["id"].startswith("mp:")
+    assert calls[0][1]["actions"]["rows"][0]["actions"][0]["id"].startswith("system:mp:")
     picker_id = next(iter(adapter._model_picker_sessions.keys()))
 
     await adapter._handle_model_picker_action({
@@ -2931,7 +2993,7 @@ async def assert_model_picker_flow():
     assert calls[-1][0] == "/edit"
     assert calls[-1][1]["messageId"] == "42"
     model_actions = calls[-1][1]["actions"]["rows"][0]["actions"]
-    assert model_actions[0]["id"] == f"mm:{picker_id}:0"
+    assert model_actions[0]["id"] == f"system:mm:{picker_id}:0"
     assert answers[-1] == ("interaction-model-1", "Choose a model")
 
     warning_state["warning"] = types.SimpleNamespace(message="this one is expensive")
@@ -2942,7 +3004,7 @@ async def assert_model_picker_flow():
         "actionId": f"mm:{picker_id}:1",
     })
     assert selected == []
-    assert calls[-1][1]["actions"]["rows"][0]["actions"][0]["id"] == f"mc:{picker_id}:1"
+    assert calls[-1][1]["actions"]["rows"][0]["actions"][0]["id"] == f"system:mc:{picker_id}:1"
     assert "Expensive model warning" in calls[-1][1]["text"]
     assert answers[-1] == ("interaction-model-2", "Confirm expensive model")
 
@@ -3299,6 +3361,113 @@ async def assert_callback_state_lifecycle():
     assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
 
 asyncio.run(assert_callback_state_lifecycle())
+
+async def assert_agent_action_turn_and_same_message_response():
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "allow_all": True}))
+    adapter._me_id = "bot"
+    answers = []
+    events = []
+    sends = []
+    order = []
+
+    async def fake_answer_action(interaction_id, toast):
+        order.append("ack")
+        answers.append((interaction_id, toast))
+
+    async def fake_fetch_message(chat_id, message_id):
+        return {
+            "id": message_id,
+            "chatId": chat_id,
+            "fromId": "bot",
+            "message": "Approve proposal 17?",
+            "out": True,
+            "peerId": {"peer": {"oneofKind": "user", "user": {"userId": "u1"}}},
+        }
+
+    async def fake_context_backfill(**kwargs):
+        return {"reply_context_messages": [], "recent_messages": []}
+
+    async def capture(event):
+        order.append("turn")
+        events.append(event)
+
+    async def fake_send_sidecar(path, body):
+        sends.append((path, body))
+        return SendResult(
+            success=True,
+            message_id=str(body.get("messageId") or "new-message"),
+            raw_response=body,
+        )
+
+    adapter._answer_action = fake_answer_action
+    adapter._fetch_message = fake_fetch_message
+    adapter._inline_context_backfill = fake_context_backfill
+    adapter.handle_message = capture
+    adapter._send_sidecar = fake_send_sidecar
+
+    callback_data = base64.b64encode(b'{"decision":"approve","revision":3}').decode("ascii")
+    await adapter._on_inbound(json.dumps({
+        "kind": "message.action.invoke",
+        "seq": 501,
+        "date": 1700000000,
+        "chatId": "10",
+        "messageId": "20",
+        "interactionId": "30",
+        "actorUserId": "u1",
+        "actionId": "agent:1:1",
+        "dataBase64": callback_data,
+        "sender": {"id": "u1", "firstName": "Alice", "username": "alice"},
+    }))
+
+    assert answers == [("30", "")]
+    assert order == ["ack", "turn"]
+    assert len(events) == 1
+    action_turn = events[0]
+    assert action_turn.text.startswith("Inline action button pressed on message 20.")
+    assert "event_kind: message.action.invoke" in action_turn.text
+    assert 'target_message_id: "20"' in action_turn.text
+    assert 'action_id: "agent:1:1"' in action_turn.text
+    assert 'callback_data_utf8: "{\\"decision\\":\\"approve\\",\\"revision\\":3}"' in action_turn.text
+    assert "Your response will replace Inline message 20." in action_turn.text
+    assert action_turn.message_id == "inline-agent-action:20:30"
+    assert action_turn.source.message_id == "20"
+    assert action_turn.reply_to_message_id == "20"
+    assert action_turn.reply_to_text == "Approve proposal 17?"
+    assert action_turn.reply_to_is_own_message is True
+    assert action_turn.allow_gateway_control is False
+    assert action_turn.metadata["inline"]["action"] == {
+        "event_kind": "message.action.invoke",
+        "actor_user_id": "u1",
+        "chat_id": "10",
+        "target_message_id": "20",
+        "interaction_id": "30",
+        "action_id": "agent:1:1",
+        "callback_data_base64": callback_data,
+    }
+
+    response = await adapter.send("10", "Approved revision 3.", reply_to=action_turn.message_id)
+    assert response.success
+    assert response.message_id == "20"
+    assert sends == [("/edit", {
+        "target": {"chatId": "10"},
+        "messageId": "20",
+        "text": "Approved revision 3.",
+        "parseMarkdown": True,
+        "actions": {"rows": []},
+    })]
+
+    await adapter._on_inbound(json.dumps({
+        "kind": "message.action.invoke",
+        "chatId": "10",
+        "messageId": "20",
+        "interactionId": "31",
+        "actorUserId": "u1",
+        "actionId": "system:unknown",
+    }))
+    assert answers[-1] == ("31", "Action expired")
+    assert len(events) == 1
+
+asyncio.run(assert_agent_action_turn_and_same_message_response())
 
 async def assert_inline_lifecycle_events():
     adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "group_policy": "open"}))

@@ -8,6 +8,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, Iterable, Optional
 
+from .message_actions import build_inline_agent_action_id
+
 try:
     from tools.registry import tool_error, tool_result
 except Exception:  # pragma: no cover - used by lightweight package tests
@@ -27,6 +29,11 @@ _MAX_MESSAGE_IDS = 100
 _MAX_INLINE_ID = 9_223_372_036_854_775_807
 _DEFAULT_HISTORY_LIMIT = 20
 _MAX_TEXT_CHARS = 4000
+_MAX_ACTION_ROWS = 8
+_MAX_ACTIONS_PER_ROW = 8
+_MAX_ACTION_LABEL_CHARS = 64
+_MAX_ACTION_CALLBACK_BYTES = 1024
+_MAX_ACTION_COPY_TEXT_CHARS = 4096
 _MAX_QUERY_CHARS = 500
 _MAX_RESULT_TEXT_CHARS = 1600
 _MAX_MESSAGE_ENTITIES = 12
@@ -68,11 +75,12 @@ INLINE_PLATFORM_GUIDANCE = (
 _sidecar: Dict[str, Any] = {}
 
 _ACTION_MANIFEST = [
+    ("send_message", "(chat_id?|user_id?, text, buttons?)", "Send a message, including optional agent-owned buttons."),
     ("get_chat", "(chat_id?)", "Get metadata for a chat or reply thread."),
     ("get_messages", "(chat_id?, message_ids)", "Fetch specific Inline messages by ID."),
     ("get_history", "(chat_id?, limit?, anchor_id?)", "Fetch recent or anchored Inline history."),
     ("search_messages", "(chat_id?|user_id?, query, limit?, offset_id?)", "Search Inline message text in a chat, thread, or DM."),
-    ("edit_message", "(chat_id?|user_id?, message_id, text)", "Edit a bot-owned message."),
+    ("edit_message", "(chat_id?|user_id?, message_id, text, buttons?)", "Edit a bot-owned message and optionally replace or clear its buttons."),
     ("delete_message", "(chat_id?|user_id?, message_id)", "Delete a bot-owned message."),
     ("add_reaction", "(chat_id?|user_id?, message_id?, emoji)", "Add a reaction to an Inline message."),
     ("remove_reaction", "(chat_id?|user_id?, message_id?, emoji)", "Remove the bot's reaction from an Inline message."),
@@ -139,7 +147,9 @@ def tool_context_prompt(
         return None
     lines = [
         "- The `inline` tool is available for Inline history, search, exact message lookup, reactions, pins, and explicit thread management.",
-        "- Do not use the `inline` tool to send normal replies; return reply text normally and Hermes will deliver it to the current chat or thread.",
+        "- Return normal replies as text. Use inline send_message only to create a message with action buttons or to send into a different destination.",
+        "- An Inline action-button turn names its source message. A normal response replaces that message; omitted buttons clear the old buttons. Use edit_message with buttons to replace them explicitly.",
+        "- If edit_message already finalized the source action card during this turn, return NO_REPLY so the automatic final response does not overwrite that edit.",
     ]
     if thread_id:
         lines.append(f"- Current Inline reply thread: `{thread_id}`. Use this as `chat_id` for thread-scoped reads.")
@@ -166,7 +176,8 @@ INLINE_TOOL_SCHEMA = {
         + "\n".join(f"  {name}{sig} - {desc}" for name, sig, desc in _ACTION_MANIFEST)
         + "\n\n"
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
-        "Do not use this tool to send the normal assistant reply; return text normally and Hermes will deliver it. "
+        "Return normal assistant replies as text. Use send_message only for a button card or a different destination. "
+        "Agent-owned button presses return as ordinary turns, and the normal response replaces the source card while clearing omitted buttons. "
         "Use create_thread with the current triggering message as parent_message_id to move large top-level discussions into a reply thread. "
         "Use create_chat to create a new top-level destination outside the current conversation; it defaults to private, and public creation must explicitly set is_public with a space_id. "
         "Use search_messages for exact catch-up across older chat history. "
@@ -213,7 +224,25 @@ INLINE_TOOL_SCHEMA = {
                 "description": "Whether create_chat is visible to the parent space. Defaults to false and requires space_id when true.",
             },
             "query": {"type": "string", "description": "Search query for search_messages."},
-            "text": {"type": "string", "description": "Message text for edit_message."},
+            "text": {"type": "string", "description": "Message text for send_message or edit_message."},
+            "buttons": {
+                "type": "array",
+                "maxItems": _MAX_ACTION_ROWS,
+                "description": "Button rows. Omit to preserve buttons on edit; pass [] to clear them.",
+                "items": {
+                    "type": "array",
+                    "maxItems": _MAX_ACTIONS_PER_ROW,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string", "description": "Visible button label."},
+                            "callback_data": {"type": "string", "description": "Opaque data returned in an agent turn when pressed."},
+                            "copy_text": {"type": "string", "description": "Text copied locally instead of invoking the agent."},
+                        },
+                        "required": ["text"],
+                    },
+                },
+            },
             "parse_markdown": {"type": "boolean", "description": "Whether Inline should parse Markdown. Defaults to true."},
             "limit": {
                 "type": "integer",
@@ -261,6 +290,17 @@ def _handle_inline_tool(args: Dict[str, Any], **_: Any) -> str:
 
 
 def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    if action == "send_message":
+        body = {
+            "target": _target(args),
+            "text": _required_str(args, "text", max_chars=_MAX_TEXT_CHARS),
+            "parseMarkdown": _bool(args.get("parse_markdown"), True),
+        }
+        actions = _message_actions(args)
+        if actions is not None:
+            body["actions"] = actions
+        return "/send", body
+
     if action == "get_chat":
         return "/chat", {"target": _target(args)}
 
@@ -292,12 +332,16 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         return "/search", body
 
     if action == "edit_message":
-        return "/edit", {
+        body = {
             "target": _target(args),
             "messageId": _required_id(args, "message_id"),
             "text": _required_str(args, "text", max_chars=_MAX_TEXT_CHARS),
             "parseMarkdown": _bool(args.get("parse_markdown"), True),
         }
+        actions = _message_actions(args)
+        if actions is not None:
+            body["actions"] = actions
+        return "/edit", body
 
     if action == "delete_message":
         return "/delete", {
@@ -504,7 +548,75 @@ def _message_id_or_current(args: Dict[str, Any]) -> str:
     return message_id
 
 
+def _message_actions(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if "buttons" not in args:
+        return None
+    raw_rows = args.get("buttons")
+    if not isinstance(raw_rows, list):
+        raise InlineToolError("buttons must be an array of button rows", "bad_format")
+    if len(raw_rows) > _MAX_ACTION_ROWS:
+        raise InlineToolError(f"buttons supports at most {_MAX_ACTION_ROWS} rows", "bad_format")
+
+    rows: list[Dict[str, Any]] = []
+    for row_index, raw_row in enumerate(raw_rows):
+        if not isinstance(raw_row, list) or not raw_row:
+            raise InlineToolError("each buttons row must be a non-empty array", "bad_format")
+        if len(raw_row) > _MAX_ACTIONS_PER_ROW:
+            raise InlineToolError(
+                f"each buttons row supports at most {_MAX_ACTIONS_PER_ROW} buttons",
+                "bad_format",
+            )
+        actions: list[Dict[str, str]] = []
+        for action_index, raw_button in enumerate(raw_row):
+            if not isinstance(raw_button, dict):
+                raise InlineToolError("each button must be an object", "bad_format")
+            label = _str(raw_button.get("text"))
+            if not label:
+                raise InlineToolError("button text is required", "bad_format")
+            if len(label) > _MAX_ACTION_LABEL_CHARS:
+                raise InlineToolError(
+                    f"button text supports at most {_MAX_ACTION_LABEL_CHARS} characters",
+                    "bad_format",
+                )
+            has_callback = "callback_data" in raw_button
+            has_copy = "copy_text" in raw_button
+            if has_callback == has_copy:
+                raise InlineToolError(
+                    "each button requires exactly one of callback_data or copy_text",
+                    "bad_format",
+                )
+            action: Dict[str, str] = {
+                "id": build_inline_agent_action_id(row_index, action_index),
+                "text": label,
+            }
+            if has_callback:
+                callback_data = raw_button.get("callback_data")
+                if not isinstance(callback_data, str):
+                    raise InlineToolError("callback_data must be a string", "bad_format")
+                if len(callback_data.encode("utf-8")) > _MAX_ACTION_CALLBACK_BYTES:
+                    raise InlineToolError(
+                        f"callback_data supports at most {_MAX_ACTION_CALLBACK_BYTES} UTF-8 bytes",
+                        "bad_format",
+                    )
+                action["callback"] = callback_data
+            else:
+                copy_text = raw_button.get("copy_text")
+                if not isinstance(copy_text, str) or not copy_text:
+                    raise InlineToolError("copy_text must be a non-empty string", "bad_format")
+                if len(copy_text) > _MAX_ACTION_COPY_TEXT_CHARS:
+                    raise InlineToolError(
+                        f"copy_text supports at most {_MAX_ACTION_COPY_TEXT_CHARS} characters",
+                        "bad_format",
+                    )
+                action["copyText"] = copy_text
+            actions.append(action)
+        rows.append({"actions": actions})
+    return {"rows": rows}
+
+
 def _compact_result(action: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    if action in {"send_message", "edit_message"}:
+        return {"messageId": _str(result.get("messageId"))}
     if action == "get_chat":
         return _compact_chat(result)
     if action in {"get_messages", "get_history", "search_messages"}:

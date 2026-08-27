@@ -108,6 +108,7 @@ describe("inline-hermes installer", () => {
     const installed = path.join(home, "plugins", "inline")
     await expect(readFile(path.join(installed, "plugin.yaml"), "utf8")).resolves.toContain("name: inline-platform")
     await expect(readFile(path.join(installed, "adapter.py"), "utf8")).resolves.toContain("class InlineAdapter")
+    await expect(readFile(path.join(installed, "message_actions.py"), "utf8")).resolves.toContain("INLINE_AGENT_ACTION_PREFIX")
     await expect(readFile(path.join(installed, "sidecar", "index.mjs"), "utf8")).resolves.toContain("inline-sidecar")
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
