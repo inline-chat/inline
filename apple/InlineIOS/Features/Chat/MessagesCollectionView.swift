@@ -2,6 +2,7 @@ import Auth
 import Combine
 import ContextMenuAccessoryStructs
 import GRDB
+import InlineIOSUI
 import InlineKit
 import InlineTheme
 import InlineUI
@@ -62,6 +63,9 @@ final class MessagesCollectionView: UICollectionView {
     self.spaceId = spaceId
     self.isPreview = isPreview
     self.theme = theme
+    let messageViewImplementation = MessageView2Feature.selectedImplementation(
+      isExperimentAvailable: SettingsBuildAudience.showsDebugTools
+    )
     let coordinator = Coordinator(
       peerId: peerId,
       chatId: chatId,
@@ -69,7 +73,8 @@ final class MessagesCollectionView: UICollectionView {
       collapsedMaxId: collapsedMaxId,
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator,
-      theme: theme
+      theme: theme,
+      messageViewImplementation: messageViewImplementation
     )
     self.coordinator = coordinator
     let layout = MessagesCollectionView.createLayout { [weak coordinator] sectionIndex in
@@ -142,7 +147,7 @@ final class MessagesCollectionView: UICollectionView {
       self,
       selector: #selector(orientationDidChange),
       name: UIDevice.orientationDidChangeNotification,
-      object: nil,
+      object: nil
     )
   }
 
@@ -287,7 +292,8 @@ final class MessagesCollectionView: UICollectionView {
         (cell as? MessageCollectionViewCell)?.clearHighlight()
       }
       if isValidIndexPath(indexPath),
-         let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell {
+         let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell
+      {
         cell.highlightBubble()
       }
     }
@@ -348,13 +354,12 @@ final class MessagesCollectionView: UICollectionView {
       return
     }
 
-    let shouldShow: Bool
-    if !hasScrollableContent {
-      shouldShow = false
+    let shouldShow: Bool = if !hasScrollableContent {
+      false
     } else if scrollAffordanceState.isVisible {
-      shouldShow = visualBottomDistance > ScrollAffordanceMetrics.hideDistance
+      visualBottomDistance > ScrollAffordanceMetrics.hideDistance
     } else {
-      shouldShow = visualBottomDistance > ScrollAffordanceMetrics.showDistance
+      visualBottomDistance > ScrollAffordanceMetrics.showDistance
     }
 
     guard shouldShow != scrollAffordanceState.isVisible else { return }
@@ -605,7 +610,10 @@ final class MessagesCollectionView: UICollectionView {
   var shouldScrollToBottom: Bool {
     visualBottomDistance <= ScrollAffordanceMetrics.showDistance
   }
-  var itemsEmpty: Bool { coordinator.items.isEmpty }
+
+  var itemsEmpty: Bool {
+    coordinator.items.isEmpty
+  }
 
   private func findIndexPath(
     forMessageId messageId: Int64,
@@ -719,11 +727,10 @@ final class MessagesCollectionView: UICollectionView {
       return nil
     }
 
-    let presentationDelta: CGFloat?
-    if currentOffsetY == nil {
-      presentationDelta = nil
+    let presentationDelta: CGFloat? = if currentOffsetY == nil {
+      nil
     } else {
-      presentationDelta = presentationContentOffsetYDeltaToTarget
+      presentationContentOffsetYDeltaToTarget
     }
 
     return SendMessageAnimationScrollPlan(
@@ -1011,6 +1018,7 @@ private extension MessagesCollectionView {
     private let spaceId: Int64?
     private let isPreview: Bool
     private var theme: IOSThemeSnapshot
+    private let messageViewImplementation: MessageViewImplementation
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
@@ -1030,6 +1038,9 @@ private extension MessagesCollectionView {
     private weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
     private var mediaWarmupTask: Task<Void, Never>?
     private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
+    private var v2GeometryAnimator: UIViewPropertyAnimator?
+    private var deferredContextMenuUpdatedMessageIDs = Set<Int64>()
+    private var deferredContextMenuUpdateAnimated = false
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
@@ -1068,7 +1079,8 @@ private extension MessagesCollectionView {
     ) {
       defer {
         if let messagesCollectionView = collectionView as? MessagesCollectionView,
-           let cell = cell as? MessageCollectionViewCell {
+           let cell = cell as? MessageCollectionViewCell
+        {
           messagesCollectionView.syncBubbleGradient(for: cell)
         }
       }
@@ -1084,7 +1096,8 @@ private extension MessagesCollectionView {
         cell.alpha = 1
         if let cell = cell as? MessageCollectionViewCell {
           if cell.isPreparedForSendAnimationTarget,
-             let identity = sendAnimationIdentity(for: item) {
+             let identity = sendAnimationIdentity(for: item)
+          {
             if sendAnimationCoordinator?.isAnimating(identity: identity) == true {
               SendMessageAnimationDiagnostics.debug(
                 "willDisplay keep-hidden item=\(item) preparedTarget=true state=animating"
@@ -1104,7 +1117,8 @@ private extension MessagesCollectionView {
 
       if let cell = cell as? MessageCollectionViewCell {
         if cell.isPreparedForSendAnimationTarget,
-           let identity = sendAnimationIdentity(for: item) {
+           let identity = sendAnimationIdentity(for: item)
+        {
           SendMessageAnimationDiagnostics.debug(
             "willDisplay keep-hidden item=\(item) preparedTarget=true state=\(sendAnimationCoordinator?.isAnimating(identity: identity) == true ? "animating" : "pending-final-layout")"
           )
@@ -1166,7 +1180,8 @@ private extension MessagesCollectionView {
           if didBegin,
              let scrollTargetOffset = targetStart.scrollTargetOffset,
              let scrollDuration = targetStart.scrollDuration,
-             let collectionView = currentCollectionView as? MessagesCollectionView {
+             let collectionView = currentCollectionView as? MessagesCollectionView
+          {
             collectionView.animateSendAnimationScrollToBottom(
               targetOffset: scrollTargetOffset,
               duration: scrollDuration
@@ -1231,8 +1246,6 @@ private extension MessagesCollectionView {
       willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
       animator: UIContextMenuInteractionAnimating?
     ) {
-      (collectionView as? MessagesCollectionView)?.isContextMenuOpen = false
-
       if let identifierView = configuration.identifier as? ContextMenuIdentifierUIView {
         identifierView.removeFromSuperview()
       }
@@ -1245,8 +1258,16 @@ private extension MessagesCollectionView {
         animator.addAnimations {
           updateInsets(true)
         }
+        animator.addCompletion { [weak self, weak collectionView] in
+          (collectionView as? MessagesCollectionView)?.isContextMenuOpen = false
+          self?.flushDeferredContextMenuMessageUpdates()
+        }
       } else {
-        DispatchQueue.main.async { updateInsets(true) }
+        DispatchQueue.main.async { [weak self, weak collectionView] in
+          updateInsets(true)
+          (collectionView as? MessagesCollectionView)?.isContextMenuOpen = false
+          self?.flushDeferredContextMenuMessageUpdates()
+        }
       }
     }
 
@@ -1443,7 +1464,8 @@ private extension MessagesCollectionView {
         return true
       }
       if let randomId = message.message.randomId,
-         randomId == target.identity.randomId {
+         randomId == target.identity.randomId
+      {
         return true
       }
       return false
@@ -1477,7 +1499,7 @@ private extension MessagesCollectionView {
       let beginTargets = { [weak self, weak collectionView] in
         guard let self, let collectionView else { return }
 
-        let remaining = self.sendAnimationListTransaction.remainder(
+        let remaining = sendAnimationListTransaction.remainder(
           for: items,
           identities: identities
         )
@@ -1514,7 +1536,7 @@ private extension MessagesCollectionView {
           "post-apply target-start remainingItems=\(remaining.items.count) remainingIdentities=\(remaining.identities.count) offsetY=\(String(format: "%.1f", collectionView.contentOffset.y)) scrollDy=\(scrollPlan.map { String(format: "%.1f", $0.modelContentOffsetYDeltaToTarget) } ?? "nil") targetOffsetY=\(scrollPlan.map { String(format: "%.1f", $0.targetOffset.y) } ?? "nil")"
         )
 
-        self.retargetActiveSendAnimationTargetsAfterApply(
+        retargetActiveSendAnimationTargetsAfterApply(
           excluding: identities,
           finalizedScrollPlan: scrollPlan,
           collectionView: collectionView
@@ -1524,24 +1546,24 @@ private extension MessagesCollectionView {
         var consumedIdentities = Set<SendMessageAnimationIdentity>()
 
         for item in remaining.items {
-          guard let identity = self.sendAnimationIdentity(for: item) else {
+          guard let identity = sendAnimationIdentity(for: item) else {
             consumedItems.insert(item)
             continue
           }
 
-          guard let indexPath = self.dataSource.indexPath(for: item),
+          guard let indexPath = dataSource.indexPath(for: item),
                 let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell
           else {
             consumedItems.insert(item)
             consumedIdentities.insert(identity)
-            self.sendAnimationCoordinator?.cancel(identity: identity)
+            sendAnimationCoordinator?.cancel(identity: identity)
             SendMessageAnimationDiagnostics.event(
               "post-apply target-start unavailable-cell item=\(item) random=\(identity.randomId)"
             )
             continue
           }
 
-          if self.beginSendAnimationTargetIfPossible(
+          if beginSendAnimationTargetIfPossible(
             for: item,
             at: indexPath,
             cell: cell,
@@ -1556,13 +1578,13 @@ private extension MessagesCollectionView {
           consumedItems.insert(item)
           consumedIdentities.insert(identity)
           cell.revealSendAnimationTarget()
-          self.sendAnimationCoordinator?.cancel(identity: identity)
+          sendAnimationCoordinator?.cancel(identity: identity)
           SendMessageAnimationDiagnostics.event(
             "post-apply target-start fallback-reveal item=\(item) random=\(identity.randomId)"
           )
         }
 
-        self.sendAnimationListTransaction.subtract(
+        sendAnimationListTransaction.subtract(
           SendMessageAnimationListRemainder(
             items: consumedItems,
             identities: consumedIdentities
@@ -1853,7 +1875,7 @@ private extension MessagesCollectionView {
         "target frames item=\(item) stable=\(message.id) mode=\(projected.mode) cell=[\(SendMessageAnimationDiagnostics.rect(projected.originalCellFrame))] bubble=[\(SendMessageAnimationDiagnostics.rect(projected.originalBubbleFrame))] text=[\(SendMessageAnimationDiagnostics.rect(projected.originalTextFrame))] projectedCell=[\(SendMessageAnimationDiagnostics.rect(projected.cellFrame))] projectedBubble=[\(SendMessageAnimationDiagnostics.rect(projected.bubbleFrame))] projectedText=[\(SendMessageAnimationDiagnostics.rect(projected.textFrame))] scrollWindowDy=\(String(format: "%.1f", scrollProjectionY)) textInBubble=[\(SendMessageAnimationDiagnostics.rect(presentation.textFrameInBubble))] baselineY=\(String(format: "%.1f", projected.textFirstBaselineYInWindow)) baselineBubbleY=\(String(format: "%.1f", presentation.textFirstBaselineYInBubble)) targetSnapshot=\(type(of: presentation.bubbleSnapshotView))"
       )
 
-      let target = SendMessageAnimationTarget(
+      return SendMessageAnimationTarget(
         identity: identity,
         messageStableId: message.id,
         bubbleFrameInWindow: projected.bubbleFrame,
@@ -1864,7 +1886,6 @@ private extension MessagesCollectionView {
         textFirstBaselineYInBubble: presentation.textFirstBaselineYInBubble,
         bubbleTailSide: cell.bubbleTailSideForSendAnimation()
       )
-      return target
     }
 
     private func makeSendAnimationTargetStart(
@@ -1891,7 +1912,8 @@ private extension MessagesCollectionView {
           "target scroll-finalized item=\(item) modelContentDy=\(String(format: "%.1f", finalizedScrollPlan.modelContentOffsetYDeltaToTarget)) presentationContentDy=\(finalizedScrollPlan.presentationContentOffsetYDeltaToTarget.map { String(format: "%.1f", $0) } ?? "nil") targetOffsetY=\(String(format: "%.1f", finalizedScrollPlan.targetOffset.y)) duration=\(String(format: "%.3f", duration)) windowDy=\(String(format: "%.1f", scrollProjectionY))"
         )
       } else if isPendingSendAnimationScrollTarget(item: item, identity: identity),
-         let collectionView = currentCollectionView as? MessagesCollectionView {
+                let collectionView = currentCollectionView as? MessagesCollectionView
+      {
         if collectionView.isSendAnimationScrollInFlight {
           if let scrollPlan = collectionView.activeSendAnimationScrollPlanToTarget() {
             scrollProjectionY = scrollPlan.presentationContentOffsetYDeltaToTarget
@@ -1912,7 +1934,8 @@ private extension MessagesCollectionView {
             collectionView.makeSendAnimationScrollPlanToBottom(currentOffsetY: $0)
           } ?? scrollPlan
           if presentationAwarePlan.presentationContentOffsetYDeltaToTarget != nil,
-             collectionView.stopComposeInsetAnimationAtPresentation() {
+             collectionView.stopComposeInsetAnimationAtPresentation()
+          {
             SendMessageAnimationDiagnostics.debug(
               "target scroll-retarget-compose-presentation item=\(item) presentationOffsetY=\(String(format: "%.1f", presentationOffsetY ?? collectionView.contentOffset.y)) modelOffsetY=\(String(format: "%.1f", collectionView.contentOffset.y))"
             )
@@ -2037,12 +2060,12 @@ private extension MessagesCollectionView {
         deadline: .now() + SendMessageAnimationTiming.duration + 0.4
       ) { [weak self] in
         guard let self else { return }
-        let stale = self.sendAnimationListTransaction.remainder(
+        let stale = sendAnimationListTransaction.remainder(
           for: remaining.items,
           identities: remaining.identities
         )
         guard !stale.isEmpty else { return }
-        self.sendAnimationListTransaction.subtract(stale)
+        sendAnimationListTransaction.subtract(stale)
         SendMessageAnimationDiagnostics.event(
           "list scroll-completion cleanup-stale items=\(stale.items.count) identities=\(stale.identities.count)"
         )
@@ -2064,13 +2087,15 @@ private extension MessagesCollectionView {
       collapsedMaxId: Int64? = nil,
       isPreview: Bool = false,
       sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil,
-      theme: IOSThemeSnapshot
+      theme: IOSThemeSnapshot,
+      messageViewImplementation: MessageViewImplementation
     ) {
       self.peerId = peerId
       self.chatId = chatId
       self.spaceId = spaceId
       self.isPreview = isPreview
       self.theme = theme
+      self.messageViewImplementation = messageViewImplementation
       self.sendAnimationCoordinator = sendAnimationCoordinator
       viewModel = MessagesSectionedViewModel(
         peer: peerId,
@@ -2162,11 +2187,11 @@ private extension MessagesCollectionView {
 
           DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let hasLinearConnected = self.peerId.isThread
+            let hasLinearConnected = peerId.isThread
               ? integrations.hasLinearConnected
               : (integrations.linearSpaces?.isEmpty == false)
             self.hasLinearConnected = hasLinearConnected
-            self.linearTeamId = integrations.linearTeamId
+            linearTeamId = integrations.linearTeamId
           }
         } catch {
           NotionTaskManager.shared.clearIntegrationAccess()
@@ -2308,8 +2333,14 @@ private extension MessagesCollectionView {
         // Preserve the clock until reveal so the same sending-to-sent transition remains visible.
         let shouldStartFromSendingStatus = sendTargetIdentity != nil && message.message.status == .sent
         let initialMetadataStatus: MessageSendingStatus? = shouldStartFromSendingStatus ? .sending : nil
+        let v2GeometryChangeHandler: ((
+          MessageCollectionViewCell,
+          MessageBubbleLayoutV2,
+          MessageBubbleLayoutV2
+        ) -> Void)? = messageViewImplementation == .v2 ? makeV2GeometryChangeHandler() : nil
 
         let configureCell = {
+          cell.onV2GeometryChange = v2GeometryChangeHandler
           cell.configure(
             with: message,
             firstInGroup: firstInGroup,
@@ -2319,7 +2350,8 @@ private extension MessagesCollectionView {
             displayMode: displayMode,
             animateTail: true,
             theme: self.theme,
-            initialMetadataStatus: initialMetadataStatus
+            initialMetadataStatus: initialMetadataStatus,
+            messageViewImplementation: self.messageViewImplementation
           )
         }
 
@@ -2448,6 +2480,168 @@ private extension MessagesCollectionView {
 
       // Set initial data after configuring the data source
       setInitialData()
+    }
+
+    private func makeV2GeometryChangeHandler() -> (
+      MessageCollectionViewCell,
+      MessageBubbleLayoutV2,
+      MessageBubbleLayoutV2
+    ) -> Void {
+      { [weak self] cell, oldLayout, newLayout in
+        self?.animateV2GeometryChange(in: cell, from: oldLayout, to: newLayout)
+      }
+    }
+
+    private func animateV2GeometryChange(
+      in changedCell: MessageCollectionViewCell,
+      from oldLayout: MessageBubbleLayoutV2,
+      to newLayout: MessageBubbleLayoutV2
+    ) {
+      guard let collectionView = currentCollectionView as? MessagesCollectionView,
+            let window = collectionView.window,
+            collectionView.indexPath(for: changedCell) != nil,
+            let nextView = changedCell.messageView as? UIMessageView2
+      else {
+        let fallbackView = nextViewIfAvailable(in: changedCell)
+        let transitionGeneration = fallbackView?.geometryTransitionGeneration
+        if let transitionGeneration {
+          fallbackView?.applyGeometryTransition(to: newLayout, generation: transitionGeneration)
+        }
+        if let transitionGeneration {
+          fallbackView?.finishGeometryTransition(generation: transitionGeneration)
+        }
+        return
+      }
+
+      let transitionGeneration = nextView.geometryTransitionGeneration
+
+      guard oldLayout != newLayout || nextView.hasPendingContentTransition else {
+        nextView.applyGeometryTransition(to: newLayout, generation: transitionGeneration)
+        nextView.finishGeometryTransition(generation: transitionGeneration)
+        return
+      }
+
+      if let activeAnimator = v2GeometryAnimator {
+        v2GeometryAnimator = nil
+        activeAnimator.stopAnimation(false)
+        activeAnimator.finishAnimation(at: .current)
+      }
+
+      let visibleCells = collectionView.visibleCells
+      let previousTransforms = Dictionary(uniqueKeysWithValues: visibleCells.map {
+        (ObjectIdentifier($0), $0.transform)
+      })
+      let oldFramesInWindow = Dictionary(uniqueKeysWithValues: visibleCells.map { cell in
+        let frame: CGRect = if let presentation = cell.layer.presentation(), let parent = cell.superview {
+          parent.convert(presentation.frame, to: window)
+        } else {
+          cell.convert(cell.bounds, to: window)
+        }
+        return (ObjectIdentifier(cell), frame)
+      })
+
+      let anchor = makeV2GeometryContentAnchor(
+        around: changedCell,
+        collectionView: collectionView,
+        window: window
+      )
+
+      UIView.performWithoutAnimation {
+        collectionView.collectionViewLayout.invalidateLayout()
+        collectionView.layoutIfNeeded()
+        restoreSendAnimationContentAnchor(anchor, in: collectionView)
+        changedCell.layoutIfNeeded()
+        nextView.layoutIfNeeded()
+      }
+
+      for cell in visibleCells {
+        let id = ObjectIdentifier(cell)
+        guard let oldFrame = oldFramesInWindow[id] else { continue }
+        let newFrame = cell.convert(cell.bounds, to: window)
+        let visualDeltaY = oldFrame.minY - newFrame.minY
+        guard abs(visualDeltaY) > 0.25,
+              let parent = cell.superview
+        else { continue }
+
+        let parentOrigin = parent.convert(CGPoint.zero, to: window)
+        let parentUnitY = parent.convert(CGPoint(x: 0, y: 1), to: window)
+        let windowScaleY = parentUnitY.y - parentOrigin.y
+        guard abs(windowScaleY) > 0.001 else { continue }
+        let localDeltaY = visualDeltaY / windowScaleY
+        let previousTransform = previousTransforms[id] ?? .identity
+        cell.transform = CGAffineTransform(translationX: 0, y: localDeltaY)
+          .concatenating(previousTransform)
+      }
+
+      let animations = {
+        for cell in visibleCells {
+          cell.transform = previousTransforms[ObjectIdentifier(cell)] ?? .identity
+        }
+        nextView.applyGeometryTransition(to: newLayout, generation: transitionGeneration)
+        collectionView.layoutIfNeeded()
+        changedCell.layoutIfNeeded()
+      }
+
+      guard !UIAccessibility.isReduceMotionEnabled else {
+        UIView.performWithoutAnimation(animations)
+        nextView.finishGeometryTransition(generation: transitionGeneration)
+        return
+      }
+
+      let animator = UIViewPropertyAnimator(duration: 0.28, curve: .easeInOut)
+      animator.addAnimations(animations)
+      animator.addCompletion { [weak self, weak animator, weak collectionView, weak changedCell, weak nextView] _ in
+        guard let nextView else { return }
+        nextView.finishGeometryTransition(generation: transitionGeneration)
+        if let changedCell {
+          collectionView?.syncBubbleGradient(for: changedCell)
+        }
+        if let animator, self?.v2GeometryAnimator === animator {
+          self?.v2GeometryAnimator = nil
+        }
+      }
+      v2GeometryAnimator = animator
+      animator.startAnimation()
+    }
+
+    private func makeV2GeometryContentAnchor(
+      around changedCell: MessageCollectionViewCell,
+      collectionView: MessagesCollectionView,
+      window: UIWindow
+    ) -> SendAnimationContentAnchor? {
+      collectionView.layoutIfNeeded()
+      let changedFrame = changedCell.convert(changedCell.bounds, to: window)
+      let candidates = collectionView.visibleCells.compactMap { cell -> (
+        item: MessageListItem,
+        frame: CGRect,
+        distance: CGFloat
+      )? in
+        guard cell !== changedCell,
+              let indexPath = collectionView.indexPath(for: cell),
+              let item = dataSource.itemIdentifier(for: indexPath)
+        else { return nil }
+        let frame = cell.convert(cell.bounds, to: window)
+        return (item, frame, abs(frame.midY - changedFrame.midY))
+      }
+      if let nearest = candidates.min(by: { $0.distance < $1.distance }) {
+        return SendAnimationContentAnchor(
+          item: nearest.item,
+          frameInWindow: nearest.frame,
+          contentOffset: collectionView.contentOffset
+        )
+      }
+      guard let indexPath = collectionView.indexPath(for: changedCell),
+            let item = dataSource.itemIdentifier(for: indexPath)
+      else { return nil }
+      return SendAnimationContentAnchor(
+        item: item,
+        frameInWindow: changedFrame,
+        contentOffset: collectionView.contentOffset
+      )
+    }
+
+    private func nextViewIfAvailable(in cell: MessageCollectionViewCell) -> UIMessageView2? {
+      cell.messageView as? UIMessageView2
     }
 
     private func isFirstInGroup(at indexPath: IndexPath) -> Bool {
@@ -2659,8 +2853,8 @@ private extension MessagesCollectionView {
       mediaWarmupTask?.cancel()
       mediaWarmupTask = Task { @MainActor [weak self] in
         guard let self else { return }
-        let previousWarmups = self.mediaWarmups
-        self.mediaWarmups.removeAll()
+        let previousWarmups = mediaWarmups
+        mediaWarmups.removeAll()
         for warmup in previousWarmups {
           await InlineTinyThumbnailPrewarmer.cancel(warmup)
         }
@@ -2668,7 +2862,7 @@ private extension MessagesCollectionView {
         await Task.yield()
         guard !Task.isCancelled else { return }
 
-        let groups = self.mediaWarmupIndexPathsAroundVisible()
+        let groups = mediaWarmupIndexPathsAroundVisible()
         let visibleMessages = groups.visible.compactMap { self.message(at: $0) }
         let nearbyMessages = groups.nearby.compactMap { self.message(at: $0) }
         var newWarmups: [InlineTinyThumbnailWarmup] = []
@@ -2695,7 +2889,7 @@ private extension MessagesCollectionView {
           }
           return
         }
-        self.mediaWarmups = newWarmups
+        mediaWarmups = newWarmups
       }
     }
 
@@ -2815,7 +3009,8 @@ private extension MessagesCollectionView {
           collectionWidth: collectionView.bounds.width,
           displayMode: displayMode,
           animateTail: animateTail,
-          theme: theme
+          theme: theme,
+          messageViewImplementation: messageViewImplementation
         )
       }
     }
@@ -3009,17 +3204,18 @@ private extension MessagesCollectionView {
             }
           }
 
-          let sendAnimationContentAnchor: SendAnimationContentAnchor?
-          if shouldCoordinateOutgoingInsert,
-             let collectionView = coordinatedCollectionView,
-             let anchorSectionId {
-            sendAnimationContentAnchor = makeSendAnimationContentAnchor(
+          let sendAnimationContentAnchor: SendAnimationContentAnchor? = if shouldCoordinateOutgoingInsert,
+                                                                           let collectionView =
+                                                                           coordinatedCollectionView,
+                                                                           let anchorSectionId
+          {
+            makeSendAnimationContentAnchor(
               in: snapshot,
               sectionId: anchorSectionId,
               collectionView: collectionView
             )
           } else {
-            sendAnimationContentAnchor = nil
+            nil
           }
 
           if let firstItemInSection = snapshot.itemIdentifiers(inSection: sectionId).first {
@@ -3069,17 +3265,20 @@ private extension MessagesCollectionView {
             snapshot,
             animatingDifferences: animatesDiffableInsertion,
             withCustomTiming: true,
-            immediateAfterApply: (shouldCoordinateOutgoingInsert || shouldCoordinateIncomingInsertScroll) ? { [weak self, weak collectionView = coordinatedCollectionView] in
+            immediateAfterApply: (shouldCoordinateOutgoingInsert || shouldCoordinateIncomingInsertScroll) ? { [
+              weak self,
+              weak collectionView = coordinatedCollectionView
+            ] in
               guard let self, let collectionView else { return }
               if shouldCoordinateSendAnimationScroll {
-                self.beginPendingSendAnimationTargetsAfterApply(
+                beginPendingSendAnimationTargetsAfterApply(
                   sendAnimationScrollItems,
                   identities: sendAnimationScrollIdentities,
                   collectionView: collectionView,
                   contentAnchor: sendAnimationContentAnchor
                 )
               } else if shouldCoordinateDeferredComposeOnly {
-                self.applyDeferredComposeInsetAfterFallbackInsert(
+                applyDeferredComposeInsetAfterFallbackInsert(
                   collectionView: collectionView,
                   contentAnchor: sendAnimationContentAnchor
                 )
@@ -3089,7 +3288,8 @@ private extension MessagesCollectionView {
             } : nil,
             completion: { [weak self] in
               if shouldScroll,
-                 let collectionView = self?.currentCollectionView as? MessagesCollectionView {
+                 let collectionView = self?.currentCollectionView as? MessagesCollectionView
+              {
                 if !shouldCoordinateOutgoingInsert, !shouldCoordinateIncomingInsertScroll, wasAtBottom {
                   collectionView.safeScrollToTop(animated: true)
                 }
@@ -3116,26 +3316,53 @@ private extension MessagesCollectionView {
           safeApplySnapshot(snapshot, animatingDifferences: true)
 
         case let .messagesUpdated(_, messageIds, animated):
-          var snapshot = dataSource.snapshot()
-          // Safety check: only reconfigure items that actually exist in the snapshot
-          let existingItems = messageIds.flatMap { id in
-            [
-              MessageListItem.message(id: id),
-              MessageListItem.threadAnchor(id: id),
-            ]
-          }.filter { snapshot.itemIdentifiers.contains($0) }
-          if !existingItems.isEmpty {
-            let boundaryItems = groupBoundaryItems(around: existingItems, in: snapshot)
-              .filter { snapshot.itemIdentifiers.contains($0) }
-            snapshot.reconfigureItems(existingItems + boundaryItems)
-            reconfigureVisibleItems(boundaryItems)
-            safeApplySnapshot(snapshot, animatingDifferences: animated ?? false)
+          if messageViewImplementation == .v2,
+             (currentCollectionView as? MessagesCollectionView)?.isContextMenuOpen == true
+          {
+            // UIKit animates a detached preview back to the source bubble. Reconfiguring the live
+            // cell during that dismissal gives the preview and source different destination
+            // geometry, producing the duplicated/ghosted bubble seen in device recordings.
+            deferredContextMenuUpdatedMessageIDs.formUnion(messageIds)
+            deferredContextMenuUpdateAnimated = deferredContextMenuUpdateAnimated || (animated ?? false)
+          } else {
+            applyUpdatedMessages(messageIds, animated: animated)
           }
 
         case .multiSectionUpdate:
           // Multiple sections affected - do a full data reload for simplicity
           setInitialData(animated: false, reconfigureExisting: false)
       }
+    }
+
+    private func applyUpdatedMessages(_ messageIds: [Int64], animated: Bool?) {
+      var snapshot = dataSource.snapshot()
+      // Safety check: only reconfigure items that actually exist in the snapshot.
+      let existingItems = messageIds.flatMap { id in
+        [
+          MessageListItem.message(id: id),
+          MessageListItem.threadAnchor(id: id),
+        ]
+      }.filter { snapshot.itemIdentifiers.contains($0) }
+      guard !existingItems.isEmpty else { return }
+
+      let boundaryItems = groupBoundaryItems(around: existingItems, in: snapshot)
+        .filter { snapshot.itemIdentifiers.contains($0) }
+      snapshot.reconfigureItems(existingItems + boundaryItems)
+      reconfigureVisibleItems(boundaryItems)
+      // V2 owns same-item geometry with one explicit transaction. A simultaneous diffable
+      // reconfigure animation writes the same cell frames and causes bubble-height jumps.
+      let animatesDiffableReconfigure = messageViewImplementation == .legacy
+        && (animated ?? false)
+      safeApplySnapshot(snapshot, animatingDifferences: animatesDiffableReconfigure)
+    }
+
+    private func flushDeferredContextMenuMessageUpdates() {
+      guard !deferredContextMenuUpdatedMessageIDs.isEmpty else { return }
+      let messageIDs = deferredContextMenuUpdatedMessageIDs.sorted()
+      let animated = deferredContextMenuUpdateAnimated
+      deferredContextMenuUpdatedMessageIDs.removeAll(keepingCapacity: true)
+      deferredContextMenuUpdateAnimated = false
+      applyUpdatedMessages(messageIDs, animated: animated)
     }
 
     func updateUnreadIfNeeded() {
@@ -3181,6 +3408,7 @@ private extension MessagesCollectionView {
       (currentCollectionView as? MessagesCollectionView)?
         .setScrollAffordanceHasUnread(hasUnreadSinceScroll)
     }
+
     private func presentPhotoGallery(
       for message: FullMessage,
       sourceView: UIView,
@@ -3289,7 +3517,8 @@ private extension MessagesCollectionView {
       if #available(iOS 26.0, *) {
         containerHeight = ContextMenuAccessoryLayout.accessoryHostHeight
         horizontalGlassInset = 0
-        verticalGlassInset = (ContextMenuAccessoryLayout.accessoryHostHeight - ContextMenuAccessoryLayout.reactionPickerHeight) / 2
+        verticalGlassInset = (ContextMenuAccessoryLayout.accessoryHostHeight - ContextMenuAccessoryLayout
+          .reactionPickerHeight) / 2
       } else {
         containerHeight = ContextMenuAccessoryLayout.reactionPickerHeight
         horizontalGlassInset = 0
@@ -3400,7 +3629,7 @@ private extension MessagesCollectionView {
 
       button.addAction(UIAction { [weak self, weak button] _ in
         guard let self, let button else { return }
-        self.handleReactionButtonTap(
+        handleReactionButtonTap(
           button,
           reaction: reaction,
           messageStableId: messageStableId,
@@ -3465,7 +3694,6 @@ private extension MessagesCollectionView {
       randomId: Int64?
     ) {
       buttonTouchUp(sender)
-      (currentCollectionView as? MessagesCollectionView)?.isContextMenuOpen = false
       dismissContextMenuIfNeeded()
       guard let fullMessage = currentFullMessage(
         stableId: messageStableId,
@@ -3838,7 +4066,7 @@ private extension MessagesCollectionView {
         let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
           [weak self] _ in
           guard let self else { return }
-          self.presentForwardSheet(fullMessage)
+          presentForwardSheet(fullMessage)
         }
         actions.append(forwardAction)
 
@@ -3885,7 +4113,7 @@ private extension MessagesCollectionView {
           menuChildren.append(basicMenu)
         }
 
-        let integrationActions = [willDoAction, linearIssueAction].compactMap { $0 }
+        let integrationActions = [willDoAction, linearIssueAction].compactMap(\.self)
         if !integrationActions.isEmpty {
           let integrationsMenu = UIMenu(
             title: "Actions",
@@ -4149,7 +4377,7 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      return targetedPreview(for: indexPath)
+      targetedPreview(for: indexPath)
     }
 
     func collectionView(
@@ -4157,7 +4385,7 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      return targetedPreview(for: indexPath)
+      targetedPreview(for: indexPath)
     }
 
     // MARK: - Private
@@ -4182,8 +4410,7 @@ private extension MessagesCollectionView {
       let bubbleView = messageView.bubbleView
       parameters.visiblePath = bubbleView.visiblePath()
 
-      let targetedPreview = UITargetedPreview(view: bubbleView, parameters: parameters)
-      return targetedPreview
+      return UITargetedPreview(view: bubbleView, parameters: parameters)
     }
 
     private var isUserDragging = false
@@ -4228,9 +4455,9 @@ private extension MessagesCollectionView {
         setDateSeparators(hidden: false, animated: false)
       }
 
-      /// Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
-      /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y =
-      /// -58.0)
+      // Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
+      // (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y =
+      // -58.0)
 
       guard let messagesCollectionView = currentCollectionView as? MessagesCollectionView else { return }
 
@@ -4276,11 +4503,11 @@ private extension MessagesCollectionView {
         defer { self.olderLoadTask = nil }
         guard !Task.isCancelled else { return }
 
-        let didLoad = await self.viewModel.loadBatchAsync(at: .older)
+        let didLoad = await viewModel.loadBatchAsync(at: .older)
         guard !Task.isCancelled else { return }
         guard !didLoad, let oldestMessageIdBeforeLoad, !self.viewModel.canLoadOlderFromLocal else { return }
 
-        self.requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
+        requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
       }
     }
 
@@ -4437,8 +4664,8 @@ private extension MessagesCollectionView {
           guard let self else { return }
 
           if message.peerId.isThread {
-            guard self.hasLinearConnected else { return }
-            guard let linearTeamId = self.linearTeamId, !linearTeamId.isEmpty else {
+            guard hasLinearConnected else { return }
+            guard let linearTeamId, !linearTeamId.isEmpty else {
               ToastManager.shared.showToast(
                 "Select a default Linear team in Space Integrations first.",
                 type: .error,
@@ -4446,7 +4673,7 @@ private extension MessagesCollectionView {
               )
               return
             }
-            await self.createLinearIssue(text: text, message: message, spaceId: self.spaceId.validSpaceId)
+            await createLinearIssue(text: text, message: message, spaceId: spaceId.validSpaceId)
             return
           }
 
@@ -4474,7 +4701,7 @@ private extension MessagesCollectionView {
               return
             }
 
-            self.showIntegrationSpaceSelectionSheet(
+            showIntegrationSpaceSelectionSheet(
               title: "Select Space",
               message: "Choose which space to create the Linear issue in:",
               spaces: linearSpaces.map { (id: $0.spaceId, name: $0.spaceName) },
@@ -4505,7 +4732,7 @@ private extension MessagesCollectionView {
                       return
                     }
 
-                    await self.createLinearIssue(text: text, message: message, spaceId: selectedSpaceId)
+                    await createLinearIssue(text: text, message: message, spaceId: selectedSpaceId)
                   } catch {
                     ToastManager.shared.showToast(
                       "Failed to fetch integrations for that space",
@@ -4620,7 +4847,7 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
 
-      // Find the view controller by traversing the responder chain from the collection view
+      /// Find the view controller by traversing the responder chain from the collection view
       func findViewController(from view: UIView?) -> UIViewController? {
         guard let view else { return nil }
 
@@ -4750,7 +4977,7 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
   }
 }
 
-private extension Optional where Wrapped == Int64 {
+private extension Int64? {
   var validSpaceId: Int64? {
     guard let self, self > 0 else { return nil }
     return self
