@@ -12,6 +12,7 @@ final class AppUndoHistory {
   struct ClosedChat {
     let peer: Peer
     let order: String?
+    let folderID: Int64?
     let pinnedOrder: String?
     let restoresNestedPin: Bool
   }
@@ -202,7 +203,12 @@ final class AppUndoHistory {
         switch direction {
         case .undo:
           _ = try await dependencies.realtimeV2.send(
-            .updateDialogOpen(peerId: chat.peer, open: true, order: chat.order)
+            .updateDialogOpen(
+              peerId: chat.peer,
+              open: true,
+              order: chat.order,
+              folderId: chat.folderID
+            )
           )
           if chat.restoresNestedPin {
             _ = try await dependencies.realtimeV2.send(.updateDialogOrder(

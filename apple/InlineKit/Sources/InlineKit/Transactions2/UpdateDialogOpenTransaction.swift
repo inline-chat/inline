@@ -13,6 +13,7 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     let peerId: Peer
     let open: Bool
     let order: String?
+    let folderId: Int64?
     let intentId: String?
     let requiresChatCreated: Bool?
   }
@@ -27,6 +28,7 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     peerId: Peer,
     open: Bool,
     order: String? = nil,
+    folderId: Int64? = nil,
     placement: DialogOpenPlacement = .defaultValue,
     requiresChatCreated: Bool = false
   ) {
@@ -34,6 +36,7 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       peerId: peerId,
       open: open,
       order: order ?? Self.initialOrder(open: open, placement: placement),
+      folderId: folderId,
       intentId: UUID().uuidString,
       requiresChatCreated: requiresChatCreated
     )
@@ -45,6 +48,9 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       $0.open = context.open
       if let order = context.order {
         $0.order = order
+      }
+      if let folderId = context.folderId {
+        $0.folderID = folderId
       }
     })
   }
@@ -64,7 +70,12 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       )
       try await AppDatabase.shared.dbWriter.write { db in
         guard var dialog = try optimisticDialog(db) else { return }
-        Self.applyLocalOpenState(&dialog, open: context.open, order: context.order)
+        Self.applyLocalOpenState(
+          &dialog,
+          open: context.open,
+          order: context.order,
+          folderId: context.folderId
+        )
         try dialog.save(db, onConflict: .replace)
       }
     } catch {
@@ -120,7 +131,13 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
         }
 
         _ = try response.dialog.saveFull(db)
-        try Self.applyLocalOpenState(peerId: context.peerId, open: context.open, order: context.order, db: db)
+        try Self.applyLocalOpenState(
+          peerId: context.peerId,
+          open: context.open,
+          order: context.order,
+          folderId: context.folderId,
+          db: db
+        )
       }
       await DialogMutationRollbackTracker.shared.complete(
         intentID: context.intentId,
@@ -151,6 +168,8 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
         dialog.open = original.open
         dialog.openedDate = original.openedDate
         dialog.order = original.order
+        dialog.folderId = original.folderId
+        dialog.pinned = original.pinned
         dialog.archived = original.archived
         try dialog.save(db, onConflict: .replace)
       }
@@ -189,16 +208,31 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
     }
   }
 
-  static func applyLocalOpenState(peerId: Peer, open: Bool, order: String? = nil, db: Database) throws {
+  static func applyLocalOpenState(
+    peerId: Peer,
+    open: Bool,
+    order: String? = nil,
+    folderId: Int64? = nil,
+    db: Database
+  ) throws {
     guard var dialog = try Dialog.get(peerId: peerId).fetchOne(db) else { return }
-    applyLocalOpenState(&dialog, open: open, order: order)
+    applyLocalOpenState(&dialog, open: open, order: order, folderId: folderId)
     try dialog.save(db, onConflict: .replace)
   }
 
-  private static func applyLocalOpenState(_ dialog: inout Dialog, open: Bool, order: String?) {
+  private static func applyLocalOpenState(
+    _ dialog: inout Dialog,
+    open: Bool,
+    order: String?,
+    folderId: Int64?
+  ) {
     if open {
       if dialog.open == false || dialog.order == nil {
         dialog.order = order ?? dialog.order
+      }
+      if let folderId {
+        dialog.folderId = folderId
+        dialog.pinned = false
       }
       dialog.open = true
       dialog.openedDate = Date()
@@ -207,6 +241,7 @@ public struct UpdateDialogOpenTransaction: Transaction2 {
       dialog.open = false
       dialog.openedDate = nil
       dialog.order = nil
+      dialog.folderId = nil
     }
   }
 
@@ -253,6 +288,7 @@ public extension Transaction2 where Self == UpdateDialogOpenTransaction {
     peerId: Peer,
     open: Bool,
     order: String? = nil,
+    folderId: Int64? = nil,
     placement: DialogOpenPlacement = .defaultValue,
     requiresChatCreated: Bool = false
   ) -> UpdateDialogOpenTransaction {
@@ -260,6 +296,7 @@ public extension Transaction2 where Self == UpdateDialogOpenTransaction {
       peerId: peerId,
       open: open,
       order: order,
+      folderId: folderId,
       placement: placement,
       requiresChatCreated: requiresChatCreated
     )

@@ -19,7 +19,12 @@ export const updateDialogOpen = async (
     currentUserId: handlerContext.userId,
   }
   const result = await Functions.messages.updateDialogOpen(
-    { peerId: input.peerId, open: input.open, order: input.order },
+    {
+      peerId: input.peerId,
+      open: input.open,
+      order: input.order,
+      folderId: input.folderId === undefined ? undefined : Number(input.folderId),
+    },
     context,
   )
 

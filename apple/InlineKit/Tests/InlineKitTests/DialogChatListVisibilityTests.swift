@@ -127,6 +127,46 @@ struct DialogChatListVisibilityTests {
     }
   }
 
+  @Test("dialog open transaction restores local folder placement")
+  func updateDialogOpenRestoresLocalFolderPlacement() throws {
+    let dbQueue = try makeInMemoryDB()
+
+    try dbQueue.write { db in
+      try DialogFolder(id: 7, title: "Saved", order: "U").insert(db)
+      try seedDialog(db, chatId: 16, chatListHidden: nil, open: false)
+
+      try UpdateDialogOpenTransaction.applyLocalOpenState(
+        peerId: .thread(id: 16),
+        open: true,
+        order: "z",
+        folderId: 7,
+        db: db
+      )
+
+      let saved = try #require(try Dialog.get(peerId: .thread(id: 16)).fetchOne(db))
+      #expect(saved.open == true)
+      #expect(saved.order == "z")
+      #expect(saved.folderId == 7)
+    }
+  }
+
+  @Test("dialog open transaction carries folder placement")
+  func updateDialogOpenCarriesFolderPlacement() {
+    let transaction = UpdateDialogOpenTransaction(
+      peerId: .thread(id: 16),
+      open: true,
+      order: "z",
+      folderId: 7
+    )
+
+    guard case let .updateDialogOpen(input)? = transaction.input(from: transaction.context) else {
+      Issue.record("Expected an updateDialogOpen input")
+      return
+    }
+    #expect(input.order == "z")
+    #expect(input.folderID == 7)
+  }
+
   @Test("dialog open placement allocates both normal-lane edges")
   func dialogOpenPlacementAllocatesBothEdges() throws {
     let dbQueue = try makeInMemoryDB()

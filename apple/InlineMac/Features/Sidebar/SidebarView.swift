@@ -1862,6 +1862,7 @@ struct SidebarView: View {
       AppUndoHistory.ClosedChat(
         peer: item.peerId,
         order: item.order,
+        folderID: item.folderID,
         pinnedOrder: item.pinnedOrder,
         restoresNestedPin: false
       )
@@ -2463,6 +2464,7 @@ struct SidebarView: View {
           closedChats.append(AppUndoHistory.ClosedChat(
             peer: itemToClose.peerId,
             order: itemToClose.order,
+            folderID: itemToClose.folderID,
             pinnedOrder: itemToClose.pinnedOrder,
             restoresNestedPin: itemToClose.pinned && itemToClose.parentChatId != nil
           ))

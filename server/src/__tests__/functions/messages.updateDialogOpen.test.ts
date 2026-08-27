@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { and, eq } from "drizzle-orm"
 import type { InputPeer } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { chats, dialogs, messages, updates, UpdateBucket } from "@in/server/db/schema"
+import { chats, dialogFolders, dialogs, messages, updates, UpdateBucket } from "@in/server/db/schema"
 import { updateDialogOpen } from "@in/server/functions/messages.updateDialogOpen"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -110,6 +110,87 @@ describe("messages.updateDialogOpen", () => {
     expect(dialog?.archived).toBe(false)
     expect(dialog?.chatListHidden).toBe(true)
     expect(dialog?.order).toBe(order)
+  })
+
+  test("respects a supplied order away from the current edge", async () => {
+    const userA = await testUtils.createUser("dialog-open-order-a@example.com")
+    const userB = await testUtils.createUser("dialog-open-order-b@example.com")
+    const userC = await testUtils.createUser("dialog-open-order-c@example.com")
+    const { chat: chatToOpen } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+    const { chat: openChat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB: userC,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+
+    await db
+      .update(dialogs)
+      .set({ open: false, openedDate: null, order: null })
+      .where(and(eq(dialogs.chatId, chatToOpen.id), eq(dialogs.userId, userA.id)))
+    await db
+      .update(dialogs)
+      .set({ open: true, order: "U" })
+      .where(and(eq(dialogs.chatId, openChat.id), eq(dialogs.userId, userA.id)))
+
+    await updateDialogOpen(
+      { peerId: peerUser(userB.id), open: true, order: "z" },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+
+    const [dialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chatToOpen.id), eq(dialogs.userId, userA.id)))
+      .limit(1)
+
+    expect(dialog?.order).toBe("z")
+  })
+
+  test("restores folder membership when opening", async () => {
+    const userA = await testUtils.createUser("dialog-open-folder-a@example.com")
+    const userB = await testUtils.createUser("dialog-open-folder-b@example.com")
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+    const [folder] = await db
+      .insert(dialogFolders)
+      .values({ userId: userA.id, title: "Saved", order: "U" })
+      .returning()
+    if (!folder) throw new Error("Failed to create dialog folder")
+
+    await db
+      .update(dialogs)
+      .set({ open: false, openedDate: null, order: null, folderId: null })
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, userA.id)))
+
+    await updateDialogOpen(
+      {
+        peerId: peerUser(userB.id),
+        open: true,
+        order: "z",
+        folderId: folder.id,
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+
+    const [dialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, userA.id)))
+      .limit(1)
+
+    expect(dialog?.open).toBe(true)
+    expect(dialog?.order).toBe("z")
+    expect(dialog?.folderId).toBe(folder.id)
   })
 
   test("rejects invalid order keys", async () => {

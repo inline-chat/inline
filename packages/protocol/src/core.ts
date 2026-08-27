@@ -6102,11 +6102,17 @@ export interface UpdateDialogOpenInput {
      */
     open: boolean;
     /**
-     * Client-generated fractional order for local-first open transitions.
+     * Client-supplied fractional order. The server allocates one when absent.
      *
      * @generated from protobuf field: optional string order = 3;
      */
     order?: string;
+    /**
+     * Personal folder to restore when opening a previously closed dialog.
+     *
+     * @generated from protobuf field: optional int64 folder_id = 4;
+     */
+    folderId?: bigint;
 }
 /**
  * @generated from protobuf message UpdateDialogOpenResult
@@ -27783,7 +27789,8 @@ class UpdateDialogOpenInput$Type extends MessageType<UpdateDialogOpenInput> {
         super("UpdateDialogOpenInput", [
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "open", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateDialogOpenInput>): UpdateDialogOpenInput {
@@ -27807,6 +27814,9 @@ class UpdateDialogOpenInput$Type extends MessageType<UpdateDialogOpenInput> {
                 case /* optional string order */ 3:
                     message.order = reader.string();
                     break;
+                case /* optional int64 folder_id */ 4:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -27828,6 +27838,9 @@ class UpdateDialogOpenInput$Type extends MessageType<UpdateDialogOpenInput> {
         /* optional string order = 3; */
         if (message.order !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.order);
+        /* optional int64 folder_id = 4; */
+        if (message.folderId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.folderId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -79,7 +79,6 @@ export async function dialogOrderForPlacement(
   userId: number,
   placement: DialogOpenPlacement,
   lane: "sidebar" | "pinned" = "sidebar",
-  preferredOrder?: string | null,
 ): Promise<string> {
   // The user row is the database-owned serialization point for all derived
   // order allocations. Lock it before reading the edge so UPDATE_DIALOG_OPEN,
@@ -121,21 +120,13 @@ export async function dialogOrderForPlacement(
     edgeOrder = edgeFolder.order
   }
 
-  return dialogOrderAtPlacement(edgeOrder, placement, preferredOrder)
+  return dialogOrderAtPlacement(edgeOrder, placement)
 }
 
 export function dialogOrderAtPlacement(
   edgeOrder: string | null | undefined,
   placement: DialogOpenPlacement,
-  preferredOrder?: string | null,
 ): string {
-  const preferredOrderIsAtEdge =
-    preferredOrder != null &&
-    (edgeOrder == null || (placement === "top" ? preferredOrder < edgeOrder : preferredOrder > edgeOrder))
-  if (preferredOrderIsAtEdge) {
-    return preferredOrder
-  }
-
   return placement === "top" ? FractionalIndex.before(edgeOrder) : FractionalIndex.after(edgeOrder)
 }
 
@@ -188,6 +179,7 @@ export async function setDialogOpenForUsers(input: {
   userIds: number[]
   open: boolean
   order?: string | null
+  folderId?: number
   openPlacementByUserId?: ReadonlyMap<number, DialogOpenPlacement>
   showInChatList?: boolean
 }): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
@@ -217,7 +209,12 @@ export async function setDialogOpenForUsers(input: {
     if (input.open) {
       const showInChatList = input.showInChatList !== false
       const dialogsToOpen = existingDialogs.filter((dialog) => {
-        if (dialog.open !== true || !dialog.order || dialog.archived === true) {
+        if (
+          dialog.open !== true ||
+          !dialog.order ||
+          dialog.archived === true ||
+          (input.folderId !== undefined && dialog.folderId !== input.folderId)
+        ) {
           return true
         }
 
@@ -237,6 +234,7 @@ export async function setDialogOpenForUsers(input: {
           .set({
             ...dialogOpenFieldsForOpen(dialog, order),
             archived: false,
+            ...(input.folderId !== undefined ? { folderId: input.folderId, pinned: false } : {}),
             ...(showInChatList ? { chatListHidden: null } : {}),
           })
           .where(and(eq(dialogs.chatId, input.chat.id), eq(dialogs.userId, dialog.userId)))
@@ -258,6 +256,7 @@ export async function setDialogOpenForUsers(input: {
               await orderForUser(tx, userId, userIds.length, input.order, placement),
             ),
             archived: false,
+            ...(input.folderId !== undefined ? { folderId: input.folderId, pinned: false } : {}),
             ...chatListVisibilityFieldsForOpen(input.chat, showInChatList),
           })
         }
@@ -327,16 +326,14 @@ async function orderForUser(
   tx: Transaction,
   userId: number,
   userCount: number,
-  preferredOrder?: string | null,
+  suppliedOrder?: string | null,
   placement: DialogOpenPlacement = defaultDialogOpenPlacement,
 ): Promise<string> {
-  return dialogOrderForPlacement(
-    tx,
-    userId,
-    placement,
-    "sidebar",
-    userCount === 1 ? preferredOrder : undefined,
-  )
+  if (userCount === 1 && suppliedOrder != null) {
+    return suppliedOrder
+  }
+
+  return dialogOrderForPlacement(tx, userId, placement)
 }
 
 function uniqueUserIds(userIds: number[]): number[] {

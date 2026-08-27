@@ -2183,8 +2183,11 @@ message UpdateDialogOpenInput {
   // Whether this dialog should appear in the sidebar inbox.
   bool open = 2;
 
-  // Client-generated fractional order for local-first open transitions.
+  // Client-supplied fractional order. The server allocates one when absent.
   optional string order = 3;
+
+  // Personal folder to restore when opening a previously closed dialog.
+  optional int64 folder_id = 4;
 }
 
 message UpdateDialogOpenResult {

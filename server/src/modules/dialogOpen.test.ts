@@ -16,12 +16,4 @@ describe("dialog open placement", () => {
     const last = "U"
     expect(dialogOrderAtPlacement(last, "bottom") > last).toBe(true)
   })
-
-  test("accepts an optimistic hint only at the selected edge", () => {
-    expect(dialogOrderAtPlacement("U", "top", "F")).toBe("F")
-    expect(dialogOrderAtPlacement("U", "bottom", "z")).toBe("z")
-
-    expect(dialogOrderAtPlacement("U", "top", "z") < "U").toBe(true)
-    expect(dialogOrderAtPlacement("U", "bottom", "F") > "U").toBe(true)
-  })
 })

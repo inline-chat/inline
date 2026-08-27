@@ -10504,7 +10504,7 @@ public nonisolated struct UpdateDialogOpenInput: Sendable {
   /// Whether this dialog should appear in the sidebar inbox.
   public var `open`: Bool = false
 
-  /// Client-generated fractional order for local-first open transitions.
+  /// Client-supplied fractional order. The server allocates one when absent.
   public var order: String {
     get {_order ?? String()}
     set {_order = newValue}
@@ -10514,12 +10514,23 @@ public nonisolated struct UpdateDialogOpenInput: Sendable {
   /// Clears the value of `order`. Subsequent reads from it will return its default value.
   public mutating func clearOrder() {self._order = nil}
 
+  /// Personal folder to restore when opening a previously closed dialog.
+  public var folderID: Int64 {
+    get {_folderID ?? 0}
+    set {_folderID = newValue}
+  }
+  /// Returns true if `folderID` has been explicitly set.
+  public var hasFolderID: Bool {self._folderID != nil}
+  /// Clears the value of `folderID`. Subsequent reads from it will return its default value.
+  public mutating func clearFolderID() {self._folderID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: InputPeer? = nil
   fileprivate var _order: String? = nil
+  fileprivate var _folderID: Int64? = nil
 }
 
 public nonisolated struct UpdateDialogOpenResult: @unchecked Sendable {
@@ -34138,7 +34149,7 @@ nonisolated extension ShowInChatListResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateDialogOpenInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}open\0\u{1}order\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}open\0\u{1}order\0\u{3}folder_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -34149,6 +34160,7 @@ nonisolated extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobu
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self.`open`) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self._order) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self._folderID) }()
       default: break
       }
     }
@@ -34168,6 +34180,9 @@ nonisolated extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobu
     try { if let v = self._order {
       try visitor.visitSingularStringField(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._folderID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -34175,6 +34190,7 @@ nonisolated extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobu
     if lhs._peerID != rhs._peerID {return false}
     if lhs.`open` != rhs.`open` {return false}
     if lhs._order != rhs._order {return false}
+    if lhs._folderID != rhs._folderID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
