@@ -14,12 +14,12 @@
     },
     "hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.8",
+      "version": "0.0.9",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.15",
+        "@inline-chat/realtime-sdk": "0.0.16",
         "yaml": "2.9.0",
       },
       "devDependencies": {
@@ -48,9 +48,9 @@
     },
     "openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.58",
+      "version": "0.0.59",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.15",
+        "@inline-chat/realtime-sdk": "0.0.16",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -71,7 +71,7 @@
       "name": "@inline-chat/bot-client",
       "version": "0.1.0",
       "dependencies": {
-        "@inline-chat/bot-api-types": "^0.1.0",
+        "@inline-chat/bot-api-types": "^0.1.1",
       },
       "devDependencies": {
         "@types/node": "^20.11.30",
@@ -82,7 +82,7 @@
     },
     "packages/bot-api-types": {
       "name": "@inline-chat/bot-api-types",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "devDependencies": {
         "@types/node": "^20.11.30",
         "typescript": "^5.8.3",
@@ -98,7 +98,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.8",
+      "version": "0.0.9",
       "dependencies": {
         "@noble/ciphers": "^1.3.0",
         "@noble/hashes": "^1.8.0",
@@ -110,9 +110,9 @@
     },
     "sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.15",
+      "version": "0.0.16",
       "dependencies": {
-        "@inline-chat/protocol": "0.0.8",
+        "@inline-chat/protocol": "0.0.9",
         "ws": "^8.18.3",
       },
       "devDependencies": {
