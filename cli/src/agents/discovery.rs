@@ -52,6 +52,7 @@ fn find_executable_in(
         .find(|candidate| is_executable(candidate))
 }
 
+#[cfg(target_os = "macos")]
 fn find_executable_candidate(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
     candidates
         .into_iter()
