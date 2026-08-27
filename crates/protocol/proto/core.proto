@@ -1955,14 +1955,20 @@ message GetGridHomeInput {}
 
 message GetGridHomeResult { repeated GridHomeSpace spaces = 1; }
 
-message CreateGridRoomInput { int64 space_id = 1; }
+message CreateGridRoomInput {
+  int64 space_id = 1;
+  optional bool microphone_enabled = 2;
+}
 
 message CreateGridRoomResult {
   repeated Grid grids = 1;
   optional GridConnectionCredentials connection = 2;
 }
 
-message JoinGridRoomInput { int64 room_id = 1; }
+message JoinGridRoomInput {
+  int64 room_id = 1;
+  optional bool microphone_enabled = 2;
+}
 
 message JoinGridRoomResult {
   repeated Grid grids = 1;
@@ -2300,7 +2306,6 @@ message UpdateBotAgentResult { BotAgent agent = 1; }
 message DeleteBotAgentInput { int64 agent_id = 1; }
 
 message DeleteBotAgentResult { int64 agent_id = 1; }
-
 
 message ListBotsInput {}
 
@@ -3320,6 +3325,10 @@ message CreateChatInput {
 
   // Optional previously reserved chat id to claim during creation.
   optional int64 reserved_chat_id = 7;
+
+  // Optional temporary title derived from the first message. Unlike `title`,
+  // this remains server-owned and may be replaced by automatic title generation.
+  optional string placeholder_title = 8;
 }
 
 message CreateChatResult {

@@ -2551,6 +2551,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         is_public: args.public,
                         participants,
                         reserved_chat_id: None,
+                        placeholder_title: None,
                     };
                     let payload = realtime.call(input).await?;
                     if cli.json {
@@ -2577,6 +2578,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                 group_id: None,
                             }],
                             reserved_chat_id: None,
+                            placeholder_title: None,
                         })
                         .await?;
                     if cli.json {

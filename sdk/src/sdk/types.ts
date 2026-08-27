@@ -119,6 +119,7 @@ export type InlineSdkSendMessageMedia =
   | { kind: "photo"; photoId: InlineIdLike }
   | { kind: "video"; videoId: InlineIdLike }
   | { kind: "document"; documentId: InlineIdLike }
+  | { kind: "voice"; voiceId: InlineIdLike }
 
 export type InlineSdkSendMessageParams =
   | {

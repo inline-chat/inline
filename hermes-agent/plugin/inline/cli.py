@@ -13,6 +13,9 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from pathlib import Path
 
@@ -21,7 +24,18 @@ _MIN_NODE_MAJOR = 20
 _BOT_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]+bot$", re.IGNORECASE)
 _CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
 _MAX_TOKEN_BYTES = 16 * 1024
+_MAX_PROBE_RESPONSE_BYTES = 64 * 1024
 _MACHINE_SETUP_PROTOCOL_VERSION = 1
+_ENV_REFERENCE_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_bot_api_probe(request: urllib.request.Request):
+    return urllib.request.build_opener(_RejectRedirects()).open(request, timeout=30)
 
 
 def gateway_setup() -> None:
@@ -411,13 +425,21 @@ def _machine_setup(args) -> int:
 def _status(args) -> int:
     from hermes_cli import gateway as hermes_gateway
 
+    raw_config = _read_inline_config(hermes_gateway)
     token = (
         hermes_gateway.get_env_value("INLINE_TOKEN")
         or hermes_gateway.get_env_value("INLINE_BOT_TOKEN")
+        or _resolve_config_value(hermes_gateway, raw_config.get("token"))
     )
     configured = bool(token)
     probe_requested = bool(getattr(args, "probe", False))
-    probe = _probe_inline_token(token) if configured and probe_requested else None
+    base_url = (
+        hermes_gateway.get_env_value("INLINE_BASE_URL")
+        or os.getenv("INLINE_BASE_URL")
+        or _resolve_config_value(hermes_gateway, raw_config.get("base_url"))
+        or "https://api.inline.chat"
+    )
+    probe = _probe_inline_token(token, base_url) if configured and probe_requested else None
     node = _node_status()
     sidecar = _sidecar_status(node)
     sidecar_bundled = bool(
@@ -471,37 +493,74 @@ def _plugin_version() -> str:
     return "unknown"
 
 
-def _probe_inline_token(token: str) -> dict:
-    inline_bin = _find_inline_cli()
-    if not inline_bin:
-        return {"ok": False, "error": "Inline CLI was not found for the credential probe."}
-    env = os.environ.copy()
-    for name in ("INLINE_TOKEN", "INLINE_BOT_TOKEN", "INLINE_OWNER_TOKEN", "INLINE_ACCESS_TOKEN"):
-        env.pop(name, None)
-    env["INLINE_TOKEN"] = token
+def _read_inline_config(hermes_gateway) -> dict:
     try:
-        result = subprocess.run(
-            [inline_bin, "--json", "--compact", "auth", "me"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=30,
-            check=False,
-            env=env,
+        config = hermes_gateway.read_raw_config()
+    except (AttributeError, OSError, TypeError, ValueError):
+        return {}
+    if not isinstance(config, dict):
+        return {}
+    platforms = config.get("platforms")
+    platform_inline = platforms.get("inline") if isinstance(platforms, dict) else None
+    top_level_inline = config.get("inline")
+    merged = {}
+    if isinstance(top_level_inline, dict):
+        merged.update(top_level_inline)
+    if isinstance(platform_inline, dict):
+        merged.update(platform_inline)
+    return merged
+
+
+def _resolve_config_value(hermes_gateway, raw) -> str:
+    value = str(raw or "").strip()
+    match = _ENV_REFERENCE_RE.fullmatch(value)
+    if match:
+        name = match.group(1)
+        return str(hermes_gateway.get_env_value(name) or os.getenv(name) or "").strip()
+    return value
+
+
+def _probe_inline_token(token: str, base_url: str = "https://api.inline.chat") -> dict:
+    try:
+        base_url = str(base_url or "https://api.inline.chat").rstrip("/")
+        parsed = urllib.parse.urlsplit(base_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.query or parsed.fragment:
+            raise ValueError("invalid Inline base URL")
+        request = urllib.request.Request(
+            f"{base_url}/v1/getMe",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            method="GET",
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return {"ok": False, "error": "Inline credential probe could not run."}
-    if result.returncode != 0:
-        return {"ok": False, "error": "Inline rejected the configured credential."}
+        with _open_bot_api_probe(request) as response:
+            raw = response.read(_MAX_PROBE_RESPONSE_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return {"ok": False, "errorKind": "invalid_credential", "error": "Inline rejected the configured credential."}
+        return {"ok": False, "errorKind": "unavailable", "error": "Inline API credential probe failed."}
+    except ValueError:
+        return {"ok": False, "errorKind": "invalid_config", "error": "Inline API base URL is invalid."}
+    except (OSError, TimeoutError, urllib.error.URLError):
+        return {"ok": False, "errorKind": "unavailable", "error": "Inline API credential probe could not run."}
+    if len(raw) > _MAX_PROBE_RESPONSE_BYTES:
+        return {"ok": False, "errorKind": "invalid_response", "error": "Inline API credential probe returned too much data."}
     try:
-        payload = json.loads(result.stdout)
-    except (json.JSONDecodeError, TypeError):
-        return {"ok": False, "error": "Inline credential probe returned unreadable output."}
-    raw_id = payload.get("id") if isinstance(payload, dict) else None
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        return {"ok": False, "errorKind": "invalid_response", "error": "Inline API credential probe returned unreadable output."}
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return {"ok": False, "errorKind": "invalid_response", "error": "Inline API credential probe returned an unsuccessful response."}
+    result = payload.get("result")
+    user = result.get("user") if isinstance(result, dict) else None
+    if not isinstance(user, dict):
+        return {"ok": False, "errorKind": "invalid_response", "error": "Inline API credential probe returned no user identity."}
+    raw_id = user.get("id") if isinstance(user, dict) else None
     bot_user_id = str(raw_id).strip() if raw_id is not None else ""
     if not bot_user_id.isdigit() or int(bot_user_id) <= 0:
-        return {"ok": False, "error": "Inline credential probe returned no bot identity."}
-    username = str(payload.get("username") or "").strip().lstrip("@")
+        return {"ok": False, "errorKind": "invalid_response", "error": "Inline API credential probe returned no user identity."}
+    username = str(user.get("username") or "").strip().lstrip("@")
     return {
         "ok": True,
         "botUserId": bot_user_id,

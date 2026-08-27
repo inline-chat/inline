@@ -358,10 +358,9 @@ async function endpointSend(res: ServerResponse, body: unknown) {
   }
 
   const params = {
-    ...(text ? { text } : {}),
+    ...(text ? { text, parseMarkdown } : {}),
     ...(media ? { media } : {}),
     ...(replyToMsgId ? { replyToMsgId } : {}),
-    parseMarkdown,
     ...(actions ? { actions } : {}),
     ...(sendMode === "silent" ? { sendMode: "silent" as const } : {}),
   }
@@ -457,6 +456,8 @@ async function endpointSendAttachment(res: ServerResponse, body: unknown) {
       ? { kind: "photo" as const, photoId: upload.photoId }
       : kind === "video" && upload.videoId != null
         ? { kind: "video" as const, videoId: upload.videoId }
+        : kind === "voice" && upload.voiceId != null
+          ? { kind: "voice" as const, voiceId: upload.voiceId }
         : upload.documentId != null
           ? { kind: "document" as const, documentId: upload.documentId }
           : null
@@ -1262,6 +1263,7 @@ class MockInlineClient implements SidecarClient {
     const fileUniqueId = `mock-file-${this.uploadId.toString()}`
     if (params.type === "photo") return { fileUniqueId, photoId: this.uploadId }
     if (params.type === "video") return { fileUniqueId, videoId: this.uploadId }
+    if (params.type === "voice") return { fileUniqueId, voiceId: this.uploadId }
     return { fileUniqueId, documentId: this.uploadId }
   }
 
@@ -1541,6 +1543,7 @@ function parseSendMedia(value: unknown): InlineSdkSendMessageMedia | undefined {
   if (kind === "photo") return { kind, photoId: readRequiredInlineId(media, "photoId") }
   if (kind === "video") return { kind, videoId: readRequiredInlineId(media, "videoId") }
   if (kind === "document") return { kind, documentId: readRequiredInlineId(media, "documentId") }
+  if (kind === "voice") return { kind, voiceId: readRequiredInlineId(media, "voiceId") }
   throw new SidecarError(`unsupported media kind: ${kind}`, "bad_format")
 }
 

@@ -1077,7 +1077,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  it("sendMessage() supports video and document media payloads", async () => {
+  it("sendMessage() supports video, document, and voice media payloads", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
@@ -1135,6 +1135,32 @@ describe("InlineSdkClient", () => {
       }),
     )
     await expect(p2).resolves.toEqual({ messageId: null })
+
+    const p3 = client.sendMessage({
+      chatId: 7,
+      media: { kind: "voice", voiceId: 88 },
+    })
+    await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "rpcCall").length > 2)
+    const rpcCallsAfterVoice = transport.sent.filter(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.SEND_MESSAGE,
+    )
+    const rpc3 = rpcCallsAfterVoice[rpcCallsAfterVoice.length - 1]
+    if (!rpc3 || rpc3.body.oneofKind !== "rpcCall") throw new Error("missing rpc3")
+    if (rpc3.body.rpcCall.input.oneofKind !== "sendMessage") throw new Error("missing sendMessage3")
+    expect(rpc3.body.rpcCall.input.sendMessage.media?.media.oneofKind).toBe("voice")
+    if (rpc3.body.rpcCall.input.sendMessage.media?.media.oneofKind === "voice") {
+      expect(rpc3.body.rpcCall.input.sendMessage.media.media.voice.voiceId).toBe(88n)
+    }
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 32n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: { reqMsgId: rpc3.id, result: { oneofKind: "sendMessage", sendMessage: { updates: [] } } },
+        },
+      }),
+    )
+    await expect(p3).resolves.toEqual({ messageId: null })
     await client.close()
   })
 

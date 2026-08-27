@@ -40,10 +40,11 @@ export function parseTarget(record: Record<string, unknown>): Target {
   throw new SidecarError("target requires chatId or userId", "bad_format")
 }
 
-export function normalizeUploadKind(raw: string | undefined, filePath: string): "photo" | "video" | "document" {
+export function normalizeUploadKind(raw: string | undefined, filePath: string): "photo" | "video" | "document" | "voice" {
   if (raw === "photo" || raw === "image") return "photo"
   if (raw === "video") return "video"
-  if (raw === "document" || raw === "file" || raw === "voice") return "document"
+  if (raw === "voice") return "voice"
+  if (raw === "document" || raw === "file") return "document"
   const lower = filePath.toLowerCase()
   if (/\.(png|jpg|jpeg|gif|webp|heic|heif)$/.test(lower)) return "photo"
   if (/\.(mp4|mov|webm)$/.test(lower)) return "video"

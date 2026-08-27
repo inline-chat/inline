@@ -204,6 +204,13 @@ describe("sidecar runtime", () => {
       expect(media.status).toBe(200)
       expect(resultOf(media.body)).toMatchObject({ messageId: "9002" })
 
+      const voiceMedia = await post(port, "/send", {
+        target: { userId: "42" },
+        media: { kind: "voice", voiceId: "702" },
+      }, auth)
+      expect(voiceMedia.status).toBe(200)
+      expect(resultOf(voiceMedia.body)).toMatchObject({ messageId: "9003" })
+
       await expectOk(post(port, "/edit", {
         target: { chatId: "123" },
         messageId: "9001",
@@ -236,12 +243,29 @@ describe("sidecar runtime", () => {
       }, auth)
       expect(attachment.status).toBe(200)
       expect(resultOf(attachment.body)).toMatchObject({
-        messageId: "9003",
+        messageId: "9004",
         fileUniqueId: "mock-file-7001",
       })
 
-      const healthAfterPhoto = await post(port, "/healthz", {}, auth)
-      expect(resultOf(healthAfterPhoto.body).diagnostics.calls).toEqual(
+      const voicePath = path.join(dir, "voice.ogg")
+      await writeFile(voicePath, Buffer.from("fake voice"))
+      const voiceAttachment = await post(port, "/send-attachment", {
+        target: { chatId: "123" },
+        path: voicePath,
+        kind: "voice",
+        mimeType: "audio/ogg",
+      }, auth)
+      expect(voiceAttachment.status).toBe(200)
+      expect(resultOf(voiceAttachment.body)).toMatchObject({
+        messageId: "9005",
+        fileUniqueId: "mock-file-7002",
+      })
+
+      const healthAfterAttachments = await post(port, "/healthz", {}, auth)
+      const attachmentDiagnostics = resultOf(healthAfterAttachments.body).diagnostics as {
+        calls: Array<{ method: string; params?: Record<string, unknown> }>
+      }
+      expect(attachmentDiagnostics.calls).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             method: "sendMessage",
@@ -250,8 +274,21 @@ describe("sidecar runtime", () => {
               parseMarkdown: false,
             }),
           }),
+          expect.objectContaining({
+            method: "sendMessage",
+            params: expect.objectContaining({ media: { kind: "voice", voiceId: "7002" } }),
+          }),
+          expect.objectContaining({
+            method: "sendMessage",
+            params: expect.objectContaining({ media: { kind: "voice", voiceId: "702" } }),
+          }),
         ]),
       )
+      const directVoiceCall = attachmentDiagnostics.calls.find((call) => {
+        const media = call.params?.media as Record<string, unknown> | undefined
+        return media?.kind === "voice" && media.voiceId === "702"
+      })
+      expect(directVoiceCall?.params).not.toHaveProperty("parseMarkdown")
 
       const chat = await post(port, "/chat", { target: { chatId: "123" } }, auth)
       expect(chat.status).toBe(200)

@@ -62,6 +62,9 @@ type ActivationInfo = {
   configTokenConfigured: boolean
   hermesCredentialStoreChecked: boolean
   hermesCredentialStoreTokenConfigured: boolean
+  credentialState: "not_configured" | "configured_unverified" | "verified" | "invalid" | "unknown"
+  credentialBotUserId?: string
+  credentialBotUsername?: string
   tokenPresent: boolean
   tokenConfigured: boolean
   installOwnershipAligned: boolean
@@ -74,6 +77,8 @@ type TokenInfo = {
 const defaultPluginId = "inline"
 const pluginEnableKey = "inline-platform"
 const minNodeMajor = 20
+const hermesMachineTimeoutMs = 15_000
+const hermesMachineMaxBytes = 256 * 1024
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const opts = parseArgs(argv)
@@ -224,7 +229,11 @@ async function inspectInstall(params: {
   const sourceSidecar = await inspectSidecar(params.source)
   const targetSidecar = targetExists ? await inspectSidecar(params.target) : null
   const node = await inspectNode()
-  const activation = await inspectActivation(params.opts.hermesHome, params.target)
+  const activation = await inspectActivation(
+    params.opts.hermesHome,
+    params.target,
+    params.opts.command === "doctor",
+  )
   const issues: string[] = []
   const warnings: string[] = []
   const sidecarMatches = Boolean(
@@ -254,11 +263,25 @@ async function inspectInstall(params: {
   if (params.opts.command === "doctor" && !activation.pluginEnabled) {
     issues.push(`Hermes plugin '${pluginEnableKey}' is not enabled. Run: hermes plugins enable ${pluginEnableKey}`)
   }
-  if (targetExists && activation.pluginEnabled && !activation.platformConfigured && !activation.tokenConfigured) {
-    warnings.push("Inline platform config is not enabled. Add platforms.inline.enabled: true and set INLINE_TOKEN/INLINE_BOT_TOKEN in the gateway environment, or set platforms.inline.token/inline.token in Hermes config")
+  if (targetExists && activation.pluginEnabled && !activation.platformConfigured && activation.credentialState === "not_configured") {
+    const message = "Inline platform config is not enabled. Add platforms.inline.enabled: true and set INLINE_TOKEN/INLINE_BOT_TOKEN in the gateway environment, or set platforms.inline.token/inline.token in Hermes config"
+    if (params.opts.command === "doctor") issues.push(message)
+    else warnings.push(message)
   }
-  if (targetExists && activation.pluginEnabled && !activation.tokenConfigured) {
-    warnings.push("No Inline token was detected in INLINE_TOKEN, INLINE_BOT_TOKEN, the Hermes credential store, or Hermes Inline config; live Inline realtime checks will not connect")
+  if (targetExists && activation.pluginEnabled && activation.credentialState === "not_configured") {
+    const message = "Hermes reports that no Inline credential is configured; run `hermes inline setup`"
+    if (params.opts.command === "doctor") issues.push(message)
+    else warnings.push(message)
+  }
+  if (targetExists && activation.pluginEnabled && activation.credentialState === "invalid") {
+    const message = "Hermes found the Inline credential, but Inline rejected it; reconfigure the credential"
+    if (params.opts.command === "doctor") issues.push(message)
+    else warnings.push(message)
+  }
+  if (targetExists && activation.pluginEnabled && activation.credentialState === "unknown" && activation.hermesCredentialStoreChecked) {
+    const message = "Hermes found the Inline credential, but the requested verification was inconclusive"
+    if (params.opts.command === "doctor") issues.push(message)
+    else warnings.push(message)
   }
   if (targetExists && !activation.installOwnershipAligned) {
     warnings.push("Installed plugin ownership differs from the Hermes home owner; internal /inline_update may fail until inline-hermes install --force repairs it")
@@ -646,7 +669,7 @@ async function inspectNode(): Promise<NodeInfo> {
   }
 }
 
-async function inspectActivation(hermesHome: string, target: string): Promise<ActivationInfo> {
+async function inspectActivation(hermesHome: string, target: string, probeCredential: boolean): Promise<ActivationInfo> {
   const configPath = path.join(hermesHome, "config.yaml")
   let config: unknown = null
   let configExists = false
@@ -658,7 +681,14 @@ async function inspectActivation(hermesHome: string, target: string): Promise<Ac
   }
   const tokenPresent = Boolean(process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN)
   const configTokenConfigured = configTokenIsConfigured(config, ["platforms", defaultPluginId, "token"]) || configTokenIsConfigured(config, [defaultPluginId, "token"])
-  const hermesCredentialStore = inspectHermesCredentialStore()
+  const machineCredential = inspectHermesCredential(hermesHome, probeCredential)
+  const fallbackConfigured = tokenPresent || configTokenConfigured
+  const credentialState = (
+    (machineCredential.state === "unknown" || machineCredential.state === "not_configured")
+    && fallbackConfigured
+  )
+    ? "configured_unverified"
+    : machineCredential.state
   const installOwnershipAligned = await inspectInstallOwnership(hermesHome, target)
 
   return {
@@ -667,10 +697,15 @@ async function inspectActivation(hermesHome: string, target: string): Promise<Ac
     pluginEnabled: readConfigList(config, ["plugins", "enabled"]).includes(pluginEnableKey),
     platformConfigured: readConfigBoolean(config, ["platforms", defaultPluginId, "enabled"]) || readConfigBoolean(config, [defaultPluginId, "enabled"]),
     configTokenConfigured,
-    hermesCredentialStoreChecked: hermesCredentialStore.checked,
-    hermesCredentialStoreTokenConfigured: hermesCredentialStore.tokenConfigured,
+    hermesCredentialStoreChecked: machineCredential.checked,
+    hermesCredentialStoreTokenConfigured: machineCredential.configured === true,
+    credentialState,
+    ...(machineCredential.botUserId ? { credentialBotUserId: machineCredential.botUserId } : {}),
+    ...(machineCredential.botUsername ? { credentialBotUsername: machineCredential.botUsername } : {}),
     tokenPresent,
-    tokenConfigured: tokenPresent || configTokenConfigured || hermesCredentialStore.tokenConfigured,
+    tokenConfigured: machineCredential.configured === false
+      ? fallbackConfigured
+      : (machineCredential.configured ?? fallbackConfigured),
     installOwnershipAligned,
   }
 }
@@ -723,44 +758,74 @@ async function chownTree(target: string, uid: number, gid: number): Promise<void
   await chown(target, uid, gid)
 }
 
-function inspectHermesCredentialStore(): { checked: boolean; tokenConfigured: boolean } {
-  const configuredPython = normalizeToken(process.env.INLINE_HERMES_PYTHON_BIN)
-  const candidates = configuredPython
-    ? [configuredPython]
-    : hermesPythonCandidates()
-  const probe = [
-    "from hermes_cli import gateway",
-    "configured = bool(gateway.get_env_value('INLINE_TOKEN') or gateway.get_env_value('INLINE_BOT_TOKEN'))",
-    "print('__INLINE_HERMES_TOKEN_CONFIGURED__=' + ('1' if configured else '0'))",
-  ].join("; ")
-
-  for (const candidate of candidates) {
-    const result = spawnSync(candidate, ["-c", probe], {
-      encoding: "utf8",
-      timeout: 2_000,
-      maxBuffer: 64 * 1024,
-    })
-    if (result.status !== 0) continue
-    const match = /^__INLINE_HERMES_TOKEN_CONFIGURED__=([01])$/m.exec(result.stdout || "")
-    if (match) return { checked: true, tokenConfigured: match[1] === "1" }
-  }
-  return { checked: false, tokenConfigured: false }
+type HermesCredentialInspection = {
+  checked: boolean
+  configured: boolean | null
+  state: ActivationInfo["credentialState"]
+  botUserId?: string
+  botUsername?: string
 }
 
-function hermesPythonCandidates(): string[] {
-  const candidates = ["/opt/hermes/.venv/bin/python"]
-  const hermesCommand = spawnSync("which", ["hermes"], { encoding: "utf8", timeout: 1_000 })
-  const hermesPath = normalizeToken(hermesCommand.stdout)
-  if (hermesCommand.status === 0 && hermesPath) {
-    try {
-      const binDir = path.dirname(realpathSync(hermesPath))
-      candidates.push(path.join(binDir, "python"), path.join(binDir, "python3"))
-    } catch {
-      // Continue with the standard interpreter candidates.
+function inspectHermesCredential(hermesHome: string, probe: boolean): HermesCredentialInspection {
+  const executable = normalizeToken(process.env.INLINE_HERMES_BIN) || "hermes"
+  const args = ["inline", "status", "--json", ...(probe ? ["--probe"] : [])]
+  const result = spawnSync(executable, args, {
+    encoding: "utf8",
+    timeout: hermesMachineTimeoutMs,
+    maxBuffer: hermesMachineMaxBytes,
+    env: { ...process.env, HERMES_HOME: hermesHome },
+  })
+  const raw = typeof result.stdout === "string" ? result.stdout.trim() : ""
+  if (!raw || Buffer.byteLength(raw) > hermesMachineMaxBytes) {
+    return { checked: false, configured: null, state: "unknown" }
+  }
+  let payload: unknown
+  try {
+    payload = JSON.parse(raw)
+  } catch {
+    return { checked: false, configured: null, state: "unknown" }
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { checked: false, configured: null, state: "unknown" }
+  }
+  const record = payload as Record<string, unknown>
+  if (
+    record.action !== "inline.status"
+    || typeof record.setupProtocolVersion !== "number"
+    || record.setupProtocolVersion < 1
+    || typeof record.configured !== "boolean"
+  ) {
+    return { checked: false, configured: null, state: "unknown" }
+  }
+  if (!record.configured) {
+    return { checked: true, configured: false, state: "not_configured" }
+  }
+  if (!probe) {
+    return { checked: true, configured: true, state: "configured_unverified" }
+  }
+  const probeResult = record.probe && typeof record.probe === "object" && !Array.isArray(record.probe)
+    ? record.probe as Record<string, unknown>
+    : null
+  if (probeResult?.ok === true) {
+    const botUserId = typeof probeResult.botUserId === "string" && /^[1-9]\d*$/.test(probeResult.botUserId)
+      ? probeResult.botUserId
+      : undefined
+    if (!botUserId) return { checked: false, configured: true, state: "unknown" }
+    const botUsername = typeof probeResult.botUsername === "string" && probeResult.botUsername.trim()
+      ? probeResult.botUsername.trim()
+      : undefined
+    return {
+      checked: true,
+      configured: true,
+      state: "verified",
+      botUserId,
+      ...(botUsername ? { botUsername } : {}),
     }
   }
-  candidates.push("python3", "python")
-  return [...new Set(candidates)]
+  if (probeResult?.errorKind === "invalid_credential") {
+    return { checked: true, configured: true, state: "invalid" }
+  }
+  return { checked: true, configured: true, state: "unknown" }
 }
 
 function readConfigList(config: unknown, pathParts: string[]): string[] {

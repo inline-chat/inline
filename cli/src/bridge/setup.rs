@@ -502,6 +502,7 @@ pub(super) async fn provision_dev_bot(
                         group_id: None,
                     }],
                     reserved_chat_id: None,
+                    placeholder_title: None,
                 })
                 .await?;
             result

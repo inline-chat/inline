@@ -2666,6 +2666,7 @@ function toInputMedia(media: InlineSdkSendMessageMedia): {
     | { oneofKind: "photo"; photo: { photoId: bigint } }
     | { oneofKind: "video"; video: { videoId: bigint } }
     | { oneofKind: "document"; document: { documentId: bigint } }
+    | { oneofKind: "voice"; voice: { voiceId: bigint } }
 } {
   switch (media.kind) {
     case "photo":
@@ -2692,6 +2693,15 @@ function toInputMedia(media: InlineSdkSendMessageMedia): {
           oneofKind: "document",
           document: {
             documentId: asInlineId(media.documentId, "documentId"),
+          },
+        },
+      }
+    case "voice":
+      return {
+        media: {
+          oneofKind: "voice",
+          voice: {
+            voiceId: asInlineId(media.voiceId, "voiceId"),
           },
         },
       }

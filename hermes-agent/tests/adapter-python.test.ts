@@ -52,6 +52,7 @@ setup_prompt_values = []
 setup_yes_no_values = []
 
 gateway_cli.get_env_value = lambda key: setup_saved_env.get(key, "")
+gateway_cli.read_raw_config = lambda: {}
 gateway_cli.save_env_value = lambda key, value: setup_saved_env.__setitem__(key, value)
 def write_platform_config_field(platform, field, value, raw=False):
     setup_config_writes.append((platform, field, value, raw))
@@ -1170,28 +1171,38 @@ assert setup_platform_enabled["inline"] is True
 
 probe_args = parser.parse_args(["status", "--json", "--probe"])
 probe_stdout = io.StringIO()
-real_find_inline_cli_for_probe = inline_cli._find_inline_cli
 real_subprocess_run_for_probe = inline_cli.subprocess.run
+real_open_bot_api_probe = inline_cli._open_bot_api_probe
 probe_calls = []
+probe_requests = []
 try:
-    inline_cli._find_inline_cli = lambda: "/usr/local/bin/inline"
     def fake_probe_run(command, **kwargs):
         probe_calls.append((command, kwargs))
         if command[1:] == ["--version"]:
             return types.SimpleNamespace(returncode=0, stdout="v22.0.0", stderr="")
         if len(command) > 1 and command[1] == "--check":
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-        return types.SimpleNamespace(
-            returncode=0,
-            stdout=json.dumps({"id": "42", "username": "machine_bot"}),
-            stderr="",
-        )
+        raise AssertionError(f"unexpected probe subprocess: {command}")
+    class FakeProbeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+        def read(self, _limit):
+            return json.dumps({
+                "ok": True,
+                "result": {"user": {"id": "42", "username": "machine_bot"}},
+            }).encode("utf-8")
+    def fake_open_bot_api_probe(request):
+        probe_requests.append(request)
+        return FakeProbeResponse()
     inline_cli.subprocess.run = fake_probe_run
+    inline_cli._open_bot_api_probe = fake_open_bot_api_probe
     with contextlib.redirect_stdout(probe_stdout):
         assert inline_cli.dispatch(probe_args) == 0
 finally:
-    inline_cli._find_inline_cli = real_find_inline_cli_for_probe
     inline_cli.subprocess.run = real_subprocess_run_for_probe
+    inline_cli._open_bot_api_probe = real_open_bot_api_probe
 probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
@@ -1206,17 +1217,66 @@ assert probe_payload["probe"] == {
     "botUserId": "42",
     "botUsername": "machine_bot",
 }
-credential_probe_calls = [call for call in probe_calls if call[0][-2:] == ["auth", "me"]]
-assert len(credential_probe_calls) == 1
-assert credential_probe_calls[0][0] == [
-    "/usr/local/bin/inline",
-    "--json",
-    "--compact",
-    "auth",
-    "me",
-]
-assert credential_probe_calls[0][1]["env"]["INLINE_TOKEN"] == machine_token
-assert "INLINE_BOT_TOKEN" not in credential_probe_calls[0][1]["env"]
+assert len(probe_requests) == 1
+credential_request = probe_requests[0]
+assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
+assert credential_request.get_method() == "GET"
+assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
+assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
+
+setup_saved_env.clear()
+setup_saved_env["INLINE_CONFIG_TOKEN"] = "yaml-config-secret"
+real_read_raw_config = gateway_cli.read_raw_config
+real_open_bot_api_probe = inline_cli._open_bot_api_probe
+config_probe_requests = []
+try:
+    gateway_cli.read_raw_config = lambda: {
+        "platforms": {
+            "inline": {
+                "token": "$" + "{INLINE_CONFIG_TOKEN}",
+                "base_url": "https://inline.example",
+            },
+        },
+    }
+    def fake_config_probe(request):
+        config_probe_requests.append(request)
+        return FakeProbeResponse()
+    inline_cli._open_bot_api_probe = fake_config_probe
+    config_probe_stdout = io.StringIO()
+    with contextlib.redirect_stdout(config_probe_stdout):
+        assert inline_cli.dispatch(probe_args) == 0
+finally:
+    gateway_cli.read_raw_config = real_read_raw_config
+    inline_cli._open_bot_api_probe = real_open_bot_api_probe
+config_probe_payload = json.loads(config_probe_stdout.getvalue())
+assert config_probe_payload["configured"] is True
+assert config_probe_payload["probe"]["ok"] is True
+assert len(config_probe_requests) == 1
+assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
+assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
+assert "yaml-config-secret" not in config_probe_stdout.getvalue()
+
+setup_saved_env.clear()
+real_read_raw_config = gateway_cli.read_raw_config
+try:
+    gateway_cli.read_raw_config = lambda: {"inline": {"token": "top-level-secret"}}
+    top_level_stdout = io.StringIO()
+    with contextlib.redirect_stdout(top_level_stdout):
+        assert inline_cli.dispatch(parser.parse_args(["status", "--json"])) == 0
+finally:
+    gateway_cli.read_raw_config = real_read_raw_config
+top_level_payload = json.loads(top_level_stdout.getvalue())
+assert top_level_payload["configured"] is True
+assert "top-level-secret" not in top_level_stdout.getvalue()
+
+invalid_url_probe = inline_cli._probe_inline_token("url-secret", "not a URL")
+assert invalid_url_probe["ok"] is False
+assert invalid_url_probe["errorKind"] == "invalid_config"
+assert "url-secret" not in json.dumps(invalid_url_probe)
+query_url_probe = inline_cli._probe_inline_token("url-secret", "https://inline.example?tenant=1")
+assert query_url_probe["ok"] is False
+assert query_url_probe["errorKind"] == "invalid_config"
+assert "url-secret" not in json.dumps(query_url_probe)
 
 setup_saved_env.clear()
 setup_config_writes.clear()

@@ -1602,6 +1602,7 @@ impl ClientBackend for SdkBackend {
                             group_id: None,
                         }],
                         reserved_chat_id: None,
+                        placeholder_title: None,
                     },
                 )
                 .await?;
@@ -1649,6 +1650,7 @@ impl ClientBackend for SdkBackend {
                             })
                             .collect(),
                         reserved_chat_id: None,
+                        placeholder_title: None,
                     },
                 )
                 .await?;

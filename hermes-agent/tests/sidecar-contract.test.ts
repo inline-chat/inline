@@ -74,7 +74,7 @@ describe("sidecar contract helpers", () => {
 
   it("normalizes upload kind from explicit values and file extensions", () => {
     expect(normalizeUploadKind("image", "ignored.bin")).toBe("photo")
-    expect(normalizeUploadKind("voice", "ignored.bin")).toBe("document")
+    expect(normalizeUploadKind("voice", "ignored.bin")).toBe("voice")
     expect(normalizeUploadKind(undefined, "photo.HEIC")).toBe("photo")
     expect(normalizeUploadKind(undefined, "clip.mov")).toBe("video")
     expect(normalizeUploadKind(undefined, "archive.zip")).toBe("document")

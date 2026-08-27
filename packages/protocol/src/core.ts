@@ -5486,6 +5486,10 @@ export interface CreateGridRoomInput {
      * @generated from protobuf field: int64 space_id = 1;
      */
     spaceId: bigint;
+    /**
+     * @generated from protobuf field: optional bool microphone_enabled = 2;
+     */
+    microphoneEnabled?: boolean;
 }
 /**
  * @generated from protobuf message CreateGridRoomResult
@@ -5508,6 +5512,10 @@ export interface JoinGridRoomInput {
      * @generated from protobuf field: int64 room_id = 1;
      */
     roomId: bigint;
+    /**
+     * @generated from protobuf field: optional bool microphone_enabled = 2;
+     */
+    microphoneEnabled?: boolean;
 }
 /**
  * @generated from protobuf message JoinGridRoomResult
@@ -8960,6 +8968,13 @@ export interface CreateChatInput {
      * @generated from protobuf field: optional int64 reserved_chat_id = 7;
      */
     reservedChatId?: bigint;
+    /**
+     * Optional temporary title derived from the first message. Unlike `title`,
+     * this remains server-owned and may be replaced by automatic title generation.
+     *
+     * @generated from protobuf field: optional string placeholder_title = 8;
+     */
+    placeholderTitle?: string;
 }
 /**
  * @generated from protobuf message CreateChatResult
@@ -25342,7 +25357,8 @@ export const GetGridHomeResult = new GetGridHomeResult$Type();
 class CreateGridRoomInput$Type extends MessageType<CreateGridRoomInput> {
     constructor() {
         super("CreateGridRoomInput", [
-            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<CreateGridRoomInput>): CreateGridRoomInput {
@@ -25360,6 +25376,9 @@ class CreateGridRoomInput$Type extends MessageType<CreateGridRoomInput> {
                 case /* int64 space_id */ 1:
                     message.spaceId = reader.int64().toBigInt();
                     break;
+                case /* optional bool microphone_enabled */ 2:
+                    message.microphoneEnabled = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25375,6 +25394,9 @@ class CreateGridRoomInput$Type extends MessageType<CreateGridRoomInput> {
         /* int64 space_id = 1; */
         if (message.spaceId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* optional bool microphone_enabled = 2; */
+        if (message.microphoneEnabled !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.microphoneEnabled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -25443,7 +25465,8 @@ export const CreateGridRoomResult = new CreateGridRoomResult$Type();
 class JoinGridRoomInput$Type extends MessageType<JoinGridRoomInput> {
     constructor() {
         super("JoinGridRoomInput", [
-            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "room_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<JoinGridRoomInput>): JoinGridRoomInput {
@@ -25461,6 +25484,9 @@ class JoinGridRoomInput$Type extends MessageType<JoinGridRoomInput> {
                 case /* int64 room_id */ 1:
                     message.roomId = reader.int64().toBigInt();
                     break;
+                case /* optional bool microphone_enabled */ 2:
+                    message.microphoneEnabled = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25476,6 +25502,9 @@ class JoinGridRoomInput$Type extends MessageType<JoinGridRoomInput> {
         /* int64 room_id = 1; */
         if (message.roomId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.roomId);
+        /* optional bool microphone_enabled = 2; */
+        if (message.microphoneEnabled !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.microphoneEnabled);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -36966,7 +36995,8 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
             { no: 4, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "is_public", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 6, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant },
-            { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "placeholder_title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<CreateChatInput>): CreateChatInput {
@@ -37003,6 +37033,9 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
                 case /* optional int64 reserved_chat_id */ 7:
                     message.reservedChatId = reader.int64().toBigInt();
                     break;
+                case /* optional string placeholder_title */ 8:
+                    message.placeholderTitle = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -37036,6 +37069,9 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
         /* optional int64 reserved_chat_id = 7; */
         if (message.reservedChatId !== undefined)
             writer.tag(7, WireType.Varint).int64(message.reservedChatId);
+        /* optional string placeholder_title = 8; */
+        if (message.placeholderTitle !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.placeholderTitle);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

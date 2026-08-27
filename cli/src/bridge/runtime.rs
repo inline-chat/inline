@@ -143,9 +143,11 @@ pub(super) struct InboundRoute {
 pub(super) struct BotAgentResolver {
     realtime_url: String,
     bot_token: String,
-    cache: Arc<RwLock<HashMap<i64, (Instant, Option<proto::BotAgent>)>>>,
+    cache: Arc<RwLock<BotAgentCache>>,
     resolution_lock: Arc<tokio::sync::Mutex<()>>,
 }
+
+type BotAgentCache = HashMap<i64, (Instant, Option<proto::BotAgent>)>;
 
 impl BotAgentResolver {
     pub fn new(realtime_url: String, bot_token: String) -> Self {

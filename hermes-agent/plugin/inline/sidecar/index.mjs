@@ -17059,7 +17059,8 @@ var GetGridHomeResult = new GetGridHomeResult$Type;
 class CreateGridRoomInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("CreateGridRoomInput", [
-      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 }
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -17077,6 +17078,9 @@ class CreateGridRoomInput$Type extends import_runtime4.MessageType {
         case 1:
           message.spaceId = reader.int64().toBigInt();
           break;
+        case 2:
+          message.microphoneEnabled = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -17091,6 +17095,8 @@ class CreateGridRoomInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.spaceId !== 0n)
       writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.microphoneEnabled !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.microphoneEnabled);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -17151,7 +17157,8 @@ var CreateGridRoomResult = new CreateGridRoomResult$Type;
 class JoinGridRoomInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("JoinGridRoomInput", [
-      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 }
+      { no: 1, name: "room_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "microphone_enabled", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -17169,6 +17176,9 @@ class JoinGridRoomInput$Type extends import_runtime4.MessageType {
         case 1:
           message.roomId = reader.int64().toBigInt();
           break;
+        case 2:
+          message.microphoneEnabled = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -17183,6 +17193,8 @@ class JoinGridRoomInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.roomId !== 0n)
       writer.tag(1, import_runtime.WireType.Varint).int64(message.roomId);
+    if (message.microphoneEnabled !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.microphoneEnabled);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27580,7 +27592,8 @@ class CreateChatInput$Type extends import_runtime4.MessageType {
       { no: 4, name: "emoji", kind: "scalar", opt: true, T: 9 },
       { no: 5, name: "is_public", kind: "scalar", T: 8 },
       { no: 6, name: "participants", kind: "message", repeat: 1, T: () => InputChatParticipant },
-      { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3, L: 0 }
+      { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 8, name: "placeholder_title", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -27617,6 +27630,9 @@ class CreateChatInput$Type extends import_runtime4.MessageType {
         case 7:
           message.reservedChatId = reader.int64().toBigInt();
           break;
+        case 8:
+          message.placeholderTitle = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -27643,6 +27659,8 @@ class CreateChatInput$Type extends import_runtime4.MessageType {
       InputChatParticipant.internalBinaryWrite(message.participants[i], writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.reservedChatId !== undefined)
       writer.tag(7, import_runtime.WireType.Varint).int64(message.reservedChatId);
+    if (message.placeholderTitle !== undefined)
+      writer.tag(8, import_runtime.WireType.LengthDelimited).string(message.placeholderTitle);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -43357,6 +43375,15 @@ function toInputMedia(media) {
           }
         }
       };
+    case "voice":
+      return {
+        media: {
+          oneofKind: "voice",
+          voice: {
+            voiceId: asInlineId(media.voiceId, "voiceId")
+          }
+        }
+      };
   }
 }
 function normalizeHttpBaseUrl(baseUrl) {
@@ -43607,7 +43634,9 @@ function normalizeUploadKind(raw, filePath) {
     return "photo";
   if (raw === "video")
     return "video";
-  if (raw === "document" || raw === "file" || raw === "voice")
+  if (raw === "voice")
+    return "voice";
+  if (raw === "document" || raw === "file")
     return "document";
   const lower = filePath.toLowerCase();
   if (/\.(png|jpg|jpeg|gif|webp|heic|heif)$/.test(lower))
@@ -44306,10 +44335,9 @@ async function endpointSend(res, body) {
     throw new SidecarError("send requires text or media", "bad_format");
   }
   const params = {
-    ...text ? { text } : {},
+    ...text ? { text, parseMarkdown } : {},
     ...media ? { media } : {},
     ...replyToMsgId ? { replyToMsgId } : {},
-    parseMarkdown,
     ...actions ? { actions } : {},
     ...sendMode === "silent" ? { sendMode: "silent" } : {}
   };
@@ -44377,6 +44405,7 @@ async function endpointSendAttachment(res, body) {
   const filePath = readRequiredString(record2, "path");
   const kind = normalizeUploadKind(readOptionalString(record2, "kind"), filePath);
   const caption = readOptionalString(record2, "caption");
+  const parseMarkdown = readOptionalBoolean(record2, "parseMarkdown") ?? true;
   const replyToMsgId = readOptionalInlineId(record2, "replyToMsgId");
   const fileName = readOptionalString(record2, "fileName") || path.basename(filePath);
   const contentType = readOptionalString(record2, "mimeType");
@@ -44390,12 +44419,12 @@ async function endpointSendAttachment(res, body) {
     fileName,
     ...contentType ? { contentType } : {}
   });
-  const media = kind === "photo" && upload.photoId != null ? { kind: "photo", photoId: upload.photoId } : kind === "video" && upload.videoId != null ? { kind: "video", videoId: upload.videoId } : upload.documentId != null ? { kind: "document", documentId: upload.documentId } : null;
+  const media = kind === "photo" && upload.photoId != null ? { kind: "photo", photoId: upload.photoId } : kind === "video" && upload.videoId != null ? { kind: "video", videoId: upload.videoId } : kind === "voice" && upload.voiceId != null ? { kind: "voice", voiceId: upload.voiceId } : upload.documentId != null ? { kind: "document", documentId: upload.documentId } : null;
   if (!media)
     throw new SidecarError("upload did not return a sendable media id", "unknown");
   const sendParams = {
     media,
-    ...caption ? { text: caption, parseMarkdown: true } : {},
+    ...caption ? { text: caption, parseMarkdown } : {},
     ...replyToMsgId ? { replyToMsgId } : {}
   };
   const sent = "chatId" in target ? await client.sendMessage({ chatId: target.chatId, ...sendParams }) : await client.sendMessage({ userId: target.userId, ...sendParams });
@@ -45057,6 +45086,8 @@ class MockInlineClient {
       return { fileUniqueId, photoId: this.uploadId };
     if (params.type === "video")
       return { fileUniqueId, videoId: this.uploadId };
+    if (params.type === "voice")
+      return { fileUniqueId, voiceId: this.uploadId };
     return { fileUniqueId, documentId: this.uploadId };
   }
   async sendTyping(params) {
@@ -45329,6 +45360,8 @@ function parseSendMedia(value) {
     return { kind, videoId: readRequiredInlineId(media, "videoId") };
   if (kind === "document")
     return { kind, documentId: readRequiredInlineId(media, "documentId") };
+  if (kind === "voice")
+    return { kind, voiceId: readRequiredInlineId(media, "voiceId") };
   throw new SidecarError(`unsupported media kind: ${kind}`, "bad_format");
 }
 function parseActions(value) {
