@@ -63,7 +63,10 @@ export const Input = Type.Object({
   ),
 
   isSticker: Optional(Type.Boolean()),
-  parseMarkdown: Optional(Type.Boolean()),
+  parseMarkdown: Optional(Type.Boolean({
+    description:
+      "Parse Inline's supported Markdown surface. Defaults to true; false preserves the supplied syntax literally.",
+  })),
 })
 
 type Input = Static<typeof Input>

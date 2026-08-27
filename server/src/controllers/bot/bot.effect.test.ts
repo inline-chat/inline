@@ -1552,6 +1552,20 @@ describe("Effect Bot routes", () => {
         parameters: {},
       },
     })
+    expect(
+      JSON.stringify(
+        spec.components.schemas["SendMessageInput"],
+      ),
+    ).toContain(
+      "Defaults to true; false preserves the supplied syntax literally.",
+    )
+    expect(
+      JSON.stringify(
+        spec.components.schemas["EditMessageTextInput"],
+      ),
+    ).toContain(
+      "Defaults to true; false preserves the supplied syntax literally.",
+    )
 
     const text = JSON.stringify(spec)
     expect(text).toContain("chat_id")

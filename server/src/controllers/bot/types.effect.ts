@@ -803,7 +803,7 @@ export const SendMessageInput = Schema.Struct({
     Schema.Boolean,
   ).annotateKey({
     description:
-      "Parse supported Markdown formatting from text.",
+      "Parse Inline's supported Markdown surface. Defaults to true; false preserves the supplied syntax literally.",
   }),
   media: Schema.optionalKey(Schema.Union([
     Schema.Struct({ type: Schema.Literal("nudge") }),
@@ -920,7 +920,7 @@ export const EditMessageTextInput = Schema.Struct({
     Schema.Boolean,
   ).annotateKey({
     description:
-      "Parse supported Markdown formatting from the new text.",
+      "Parse Inline's supported Markdown surface from the new text. Defaults to true; false preserves the supplied syntax literally.",
   }),
   actions: Schema.optionalKey(
     Schema.Array(Schema.Array(BotMessageAction).check(Schema.isMaxLength(8))).check(Schema.isMaxLength(8)),

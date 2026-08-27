@@ -147,6 +147,14 @@ function findBlockExtensionSyntax(text: string, matches: Match[]): void {
     }
 
     if (/^<details(?: open)?>$/.test(line.value)) {
+      const summaryLine = line.next < text.length ? readLine(text, line.next) : undefined
+      const hasCompleteSummary = summaryLine
+        ? /^<summary(?: kind="progress")?>.*<\/summary>$/.test(summaryLine.value)
+        : false
+      if (!hasCompleteSummary) {
+        cursor = line.next
+        continue
+      }
       remove(line.start, line.contentEnd)
       detailsDepth += 1
       cursor = line.next

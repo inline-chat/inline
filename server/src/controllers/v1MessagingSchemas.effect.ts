@@ -211,7 +211,10 @@ export const SendMessageInput = Schema.Struct({
   randomId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   fileUniqueId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   isSticker: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
-  parseMarkdown: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  parseMarkdown: Schema.optionalKey(Schema.NullOr(Schema.Boolean)).annotateKey({
+    description:
+      "Parse Inline's supported Markdown surface. Defaults to true; false preserves the supplied syntax literally.",
+  }),
 }).annotate({ identifier: "SendMessageInput" })
 export type SendMessageInput = typeof SendMessageInput.Type
 export const SendMessageResult = Schema.Struct({

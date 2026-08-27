@@ -553,6 +553,30 @@ describe("parseMarkdown", () => {
       expect(result.entities).toHaveLength(0)
     })
 
+    test("an incomplete disclosure opener stays literal until its summary is complete", () => {
+      for (const input of [
+        "<details>",
+        "<details>\n<summary",
+        "<details open>\n<summary kind=\"progress\">Working",
+      ]) {
+        expect(parseMarkdown(input)).toEqual({ text: input, entities: [] })
+      }
+    })
+
+    test("a complete disclosure summary may stream without the closing details tag", () => {
+      const input = "<details open>\n<summary>Working</summary>\n**step one**"
+      const result = parseMarkdown(input)
+
+      expect(result.text).toBe("\n▸ Working\n\tstep one")
+      expect(result.entities).toEqual([
+        expect.objectContaining({
+          offset: 12n,
+          length: 8n,
+          type: MessageEntity_Type.BOLD,
+        }),
+      ])
+    })
+
     test("plain URL is unchanged (not a markdown link)", () => {
       const result = parseMarkdown("Visit https://example.com today")
       expect(result.text).toBe("Visit https://example.com today")

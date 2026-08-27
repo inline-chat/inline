@@ -209,6 +209,37 @@ describe("block content parser", () => {
     )
   })
 
+  test("keeps an incomplete disclosure literal until a complete summary establishes its boundary", () => {
+    for (const markdown of [
+      "<details>",
+      "<details>\n<summary",
+      "# Complete\n\n<details>\n<summary kind=\"progress\">Working",
+    ]) {
+      const flat = parseMarkdown(markdown)
+      const parsed = parseBlockContent(markdown)
+
+      expect(flat).toEqual({ text: markdown, entities: [] })
+      expect(parsed).toBeDefined()
+      expect(parsed?.blockContent.blocks.some((block) => block.kind.oneofKind === "disclosure")).toBe(false)
+      expect(() => validateBlockContent(flat.text, parsed!.blockContent)).not.toThrow()
+    }
+  })
+
+  test("streams a disclosure through snapshot EOF after its summary is complete", () => {
+    const markdown = "<details open>\n<summary kind=\"progress\">Working</summary>\n- first\n- second"
+    const flat = parseMarkdown(markdown)
+    const parsed = parseBlockContent(markdown)
+    const disclosure = parsed?.blockContent.blocks[0]
+
+    expect(disclosure?.kind.oneofKind).toBe("disclosure")
+    if (disclosure?.kind.oneofKind !== "disclosure") throw new Error("Expected disclosure")
+    expect(disclosure.kind.disclosure.initiallyOpen).toBe(true)
+    expect(disclosure.kind.disclosure.kind).toBe(BlockDisclosure_Kind.PROGRESS)
+    expect(textFor(markdown, disclosure.kind.disclosure.summary)).toBe("Working")
+    expect(disclosure.kind.disclosure.children.map(kind)).toEqual(["list"])
+    expect(() => validateBlockContent(flat.text, parsed!.blockContent)).not.toThrow()
+  })
+
   test("coalesces consecutive images in chunks of ten and keeps origins private", () => {
     const images = Array.from({ length: 12 }, (_, index) =>
       `![image ${index}](https://example.com/${index}.png){width=${100 + index} height=100}`,
