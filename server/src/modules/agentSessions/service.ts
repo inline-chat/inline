@@ -25,6 +25,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import {
   agentSessionMessages,
   agentSessions,
+  blockContents,
   botMessageRoutes,
   chats,
   messages,
@@ -37,6 +38,14 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
+import {
+  deleteUnreferencedBlockContents,
+  insertPreparedBlockContent,
+  prepareBlockContent,
+  replacePreparedBlockContent,
+  type PreparedBlockContent,
+} from "@in/server/modules/message/blockContentStorage"
+import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { sendProjectedMessageNotification } from "@in/server/functions/messages.sendMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -78,6 +87,8 @@ type PreparedSync = {
   baseRevisionRef?: string
   encryptedText?: ReturnType<typeof encryptMessage>
   encryptedEntities?: ReturnType<typeof encryptBinary>
+  preparedBlockContent?: PreparedBlockContent
+  hasLink: boolean
   sourceDate?: Date
 }
 
@@ -119,15 +130,19 @@ async function verifiedOwnerBotChat(input: {
   botUserId: number
   ownerUserId: number
 }): Promise<void> {
-  const bot = await UsersModel.getUserById(input.botUserId)
-  if (!bot?.bot || bot.botCreatorId !== input.ownerUserId || UsersModel.isDeleted(bot)) {
-    throw RealtimeRpcError.UserIdInvalid()
-  }
+  await verifiedOwnerBot(input.botUserId, input.ownerUserId)
   await Promise.all([
     AccessGuards.ensureChatAccess(input.chat, input.ownerUserId),
     AccessGuards.ensureChatAccess(input.chat, input.botUserId),
     ensureNotInternetPublic(input.chat),
   ])
+}
+
+async function verifiedOwnerBot(botUserId: number, ownerUserId: number): Promise<void> {
+  const bot = await UsersModel.getUserById(botUserId)
+  if (!bot?.bot || bot.botCreatorId !== ownerUserId || UsersModel.isDeleted(bot)) {
+    throw RealtimeRpcError.UserIdInvalid()
+  }
 }
 
 async function statusMessageGlobalId(input: {
@@ -166,11 +181,35 @@ export async function connectAgentSession(
   input: ConnectAgentSessionInput,
   currentUserId: number,
 ): Promise<ConnectAgentSessionResult> {
-  if (!input.peerId || !validProvider(input.provider)) throw RealtimeRpcError.BadRequest()
+  if (!validProvider(input.provider)) throw RealtimeRpcError.BadRequest()
   const botUserId = safePositiveNumber(input.botUserId)
   const instanceRef = ensureBounded(input.instanceRef, 512, true)!
   const sessionRef = ensureBounded(input.sessionRef, 512, true)!
   const projectRef = ensureBounded(input.projectRef, MAX_PROJECT_REF_BYTES, false)
+  const sessionKeyHash = agentSessionHash(input.provider, instanceRef, sessionRef)
+
+  // An omitted peer is an owner-authenticated, read-only identity lookup. It
+  // lets a bridge recover the canonical Inline thread before creating a new
+  // reply thread after local state loss. A miss deliberately reserves nothing.
+  if (!input.peerId) {
+    if (input.statusMessageId !== undefined) throw RealtimeRpcError.BadRequest()
+    await verifiedOwnerBot(botUserId, currentUserId)
+    const [external] = await db.select().from(agentSessions).where(and(
+      eq(agentSessions.botUserId, botUserId),
+      eq(agentSessions.provider, input.provider),
+      eq(agentSessions.sessionKeyHash, sessionKeyHash),
+    )).limit(1)
+    if (!external) return { state: ConnectAgentSessionState.UNSPECIFIED }
+    if (external.ownerUserId !== currentUserId) throw RealtimeRpcError.UserIdInvalid()
+    const canonicalChat = await db._query.chats.findFirst({ where: eq(chats.id, external.chatId) })
+    if (!canonicalChat) throw RealtimeRpcError.PeerIdInvalid()
+    await verifiedOwnerBotChat({ chat: canonicalChat, botUserId, ownerUserId: currentUserId })
+    return {
+      agentSession: await encodeAgentSession(external, currentUserId),
+      state: ConnectAgentSessionState.ALREADY_CONNECTED,
+    }
+  }
+
   const chat = await ChatModel.getChatFromInputPeer(input.peerId, { currentUserId })
   await verifiedOwnerBotChat({ chat, botUserId, ownerUserId: currentUserId })
   const statusGlobalId = await statusMessageGlobalId({
@@ -178,7 +217,6 @@ export async function connectAgentSession(
     botUserId,
     messageId: input.statusMessageId,
   })
-  const sessionKeyHash = agentSessionHash(input.provider, instanceRef, sessionRef)
 
   const result = await db.transaction(async (tx) => {
     const [external] = await tx.select().from(agentSessions).where(and(
@@ -246,6 +284,11 @@ export async function connectAgentSession(
     return { row: created, state: ConnectAgentSessionState.CREATED }
   })
 
+  const canonicalChat = result.row.chatId === chat.id
+    ? chat
+    : await db._query.chats.findFirst({ where: eq(chats.id, result.row.chatId) })
+  if (!canonicalChat) throw RealtimeRpcError.PeerIdInvalid()
+  await verifiedOwnerBotChat({ chat: canonicalChat, botUserId, ownerUserId: currentUserId })
   return {
     agentSession: await encodeAgentSession(result.row, currentUserId),
     state: result.state,
@@ -276,7 +319,7 @@ export async function getAgentSession(
   }
 }
 
-function prepareSync(input: AgentSessionMessageSync): PreparedSync {
+async function prepareSync(input: AgentSessionMessageSync): Promise<PreparedSync> {
   if (
     input.role !== AgentSessionMessageRole.USER &&
     input.role !== AgentSessionMessageRole.ASSISTANT
@@ -317,11 +360,12 @@ function prepareSync(input: AgentSessionMessageSync): PreparedSync {
       revisionRefEncrypted: null,
       revisionRef: undefined,
       baseRevisionRef: undefined,
+      hasLink: false,
     }
   }
 
   if (input.operation.oneofKind !== "upsert") throw RealtimeRpcError.BadRequest()
-  const text = input.operation.upsert.text
+  let text = input.operation.upsert.text
   const assistantRandomId = input.operation.upsert.assistantRandomId
   if (assistantRandomId !== undefined) {
     if (input.role !== AgentSessionMessageRole.ASSISTANT) throw RealtimeRpcError.BadRequest()
@@ -340,8 +384,31 @@ function prepareSync(input: AgentSessionMessageSync): PreparedSync {
   ) throw RealtimeRpcError.BadRequest()
   const revisionRef = ensureBounded(input.revisionRef, 512, true)!
   const baseRevisionRef = ensureBounded(input.baseRevisionRef, 512, false)
-  const entityBytes = input.operation.upsert.entities
-    ? MessageEntities.toBinary(input.operation.upsert.entities)
+  let entities = input.operation.upsert.entities
+  let preparedBlockContent: PreparedBlockContent | undefined
+  if (input.role === AgentSessionMessageRole.ASSISTANT) {
+    const outgoing = await processOutgoingText({ text, entities, parseMarkdown: true })
+    text = outgoing.text
+    entities = outgoing.entities
+    if (outgoing.blockContent) {
+      try {
+        preparedBlockContent = prepareBlockContent({
+          text,
+          entities,
+          parsed: {
+            blockContent: outgoing.blockContent,
+            imageSources: outgoing.blockImageSources ?? [],
+          },
+        })
+      } catch (error) {
+        log.error("agent history rich content preparation failed; storing the plain projection", {
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        })
+      }
+    }
+  }
+  const entityBytes = entities
+    ? MessageEntities.toBinary(entities)
     : undefined
   return {
     input,
@@ -354,6 +421,8 @@ function prepareSync(input: AgentSessionMessageSync): PreparedSync {
     baseRevisionRef,
     encryptedText: text.length > 0 ? encryptMessage(text) : undefined,
     encryptedEntities: entityBytes && entityBytes.length > 0 ? encryptBinary(entityBytes) : undefined,
+    preparedBlockContent,
+    hasLink: detectHasLink({ entities }),
     sourceDate: sourceDateSeconds === undefined ? undefined : new Date(sourceDateSeconds * 1_000),
   }
 }
@@ -485,7 +554,7 @@ export async function syncAgentSessionMessages(
     throw RealtimeRpcError.BadRequest()
   }
   const context = await loadSyncContext(input.agentSessionId, botUserId)
-  const prepared = input.messages.map(prepareSync)
+  const prepared = await Promise.all(input.messages.map(prepareSync))
 
   const projected: ProjectedUpdate[] = []
   const results = await db.transaction(async (tx) => {
@@ -697,7 +766,10 @@ export async function syncAgentSessionMessages(
 
         const storedRevision = currentRevision(existing.revisionRefEncrypted)
         const [storedMessage] = await tx
-          .select({ messageId: messages.messageId })
+          .select({
+            messageId: messages.messageId,
+            blockContentId: messages.blockContentId,
+          })
           .from(messages)
           .where(eq(messages.globalId, existing.messageGlobalId!))
           .for("update")
@@ -726,6 +798,32 @@ export async function syncAgentSessionMessages(
           continue
         }
 
+        let blockContentId = storedMessage.blockContentId
+        if (item.preparedBlockContent) {
+          if (storedMessage.blockContentId) {
+            const [storedBlockContent] = await tx
+              .select({ revision: blockContents.revision })
+              .from(blockContents)
+              .where(eq(blockContents.id, storedMessage.blockContentId))
+              .for("update")
+              .limit(1)
+            if (storedBlockContent) {
+              await replacePreparedBlockContent({
+                tx,
+                contentId: storedMessage.blockContentId,
+                currentRevision: storedBlockContent.revision,
+                prepared: item.preparedBlockContent,
+              })
+            } else {
+              blockContentId = await insertPreparedBlockContent(tx, item.preparedBlockContent, 0)
+            }
+          } else {
+            blockContentId = await insertPreparedBlockContent(tx, item.preparedBlockContent, 0)
+          }
+        } else {
+          blockContentId = null
+        }
+
         const [edited] = await tx.update(messages).set({
           text: null,
           textEncrypted: item.encryptedText?.encrypted ?? null,
@@ -736,9 +834,13 @@ export async function syncAgentSessionMessages(
           entitiesTag: item.encryptedEntities?.authTag ?? null,
           editDate: null,
           rev: sql`${messages.rev} + 1`,
-          hasLink: detectHasLink({ entities: item.input.operation.upsert.entities }),
+          hasLink: item.hasLink,
+          blockContentId,
         }).where(eq(messages.globalId, existing.messageGlobalId!)).returning({ messageId: messages.messageId })
         if (!edited) throw RealtimeRpcError.InternalError()
+        if (blockContentId === null && storedMessage.blockContentId) {
+          await deleteUnreferencedBlockContents(tx, [storedMessage.blockContentId])
+        }
         await tx.update(agentSessionMessages).set({
           sourceKeyHash: identity!.sourceKeyHash,
           itemKeyHash: identity!.itemKeyHash,
@@ -829,6 +931,9 @@ export async function syncAgentSessionMessages(
       const fromId = item.input.role === AgentSessionMessageRole.USER
         ? lockedSession.ownerUserId
         : lockedSession.botUserId
+      const blockContentId = item.preparedBlockContent
+        ? await insertPreparedBlockContent(tx, item.preparedBlockContent, 0)
+        : null
       const [created] = await tx.insert(messages).values({
         chatId: lockedChat.id,
         messageId: nextMessageId,
@@ -840,8 +945,9 @@ export async function syncAgentSessionMessages(
         entitiesEncrypted: item.encryptedEntities?.encrypted ?? null,
         entitiesIv: item.encryptedEntities?.iv ?? null,
         entitiesTag: item.encryptedEntities?.authTag ?? null,
+        blockContentId,
         date: item.sourceDate!,
-        hasLink: detectHasLink({ entities: item.input.operation.upsert.entities }),
+        hasLink: item.hasLink,
         countsAsUnread: input.mode === AgentSessionSyncMode.LIVE,
       }).returning()
       if (!created) throw RealtimeRpcError.InternalError()
