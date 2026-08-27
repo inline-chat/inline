@@ -35,11 +35,15 @@ struct GridView: View {
     .toolbar {
       let titleItem =
         MacToolbarItem(placement: .navigation, priority: .high, label: "") {
-          GridToolbarTitleItem(
+          RouteToolbarSpacePickerTitleItem(
             title: title,
             selectedSpaceID: spaceID,
             spaces: toolbarSpaces,
-            onSelect: openGrid(spaceID:)
+            help: "Choose a Space Grid",
+            onSelect: { selectedSpaceID in
+              guard let selectedSpaceID else { return }
+              openGrid(spaceID: selectedSpaceID)
+            }
           )
         }
 
@@ -96,12 +100,12 @@ struct GridView: View {
     return "\(spaceName) Grid"
   }
 
-  private var toolbarSpaces: [GridToolbarSpace] {
+  private var toolbarSpaces: [RouteToolbarSpacePickerItem] {
     store.orderedHomeSpaces.map { home in
-      GridToolbarSpace(
+      RouteToolbarSpacePickerItem(
         id: home.spaceID,
         name: sidebar.space(id: home.spaceID)?.displayName ?? "Space",
-        activeAvatarCount: Int(home.activeAvatarCount)
+        menuDetail: home.activeAvatarCount > 0 ? "\(home.activeAvatarCount) active" : nil
       )
     }
   }
@@ -135,66 +139,5 @@ private struct GridAdvancedMenu: View {
     }
     .menuIndicator(.hidden)
     .help("Grid Options")
-  }
-}
-
-private struct GridToolbarSpace: Identifiable, Equatable {
-  let id: Int64
-  let name: String
-  let activeAvatarCount: Int
-}
-
-private struct GridToolbarTitleItem: View {
-  let title: String
-  let selectedSpaceID: Int64
-  let spaces: [GridToolbarSpace]
-  let onSelect: (Int64) -> Void
-
-  @Environment(\.macToolbarLayout) private var toolbarLayout
-
-  @ViewBuilder
-  var body: some View {
-    if spaces.count > 1 {
-      Menu {
-        ForEach(spaces) { space in
-          Button {
-            onSelect(space.id)
-          } label: {
-            if space.id == selectedSpaceID {
-              Label(menuTitle(for: space), systemImage: "checkmark")
-            } else {
-              Text(menuTitle(for: space))
-            }
-          }
-        }
-      } label: {
-        HStack(spacing: 6) {
-          Text(title)
-            .font(.system(size: toolbarLayout.titleFontSize + 2, weight: .semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-
-          Image(systemName: "chevron.down")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundStyle(.secondary)
-
-          Color.clear
-            .frame(minWidth: 0, maxWidth: .infinity)
-        }
-        .frame(minWidth: 0, maxWidth: toolbarLayout.titleMaxWidth, alignment: .leading)
-      }
-      .menuStyle(.button)
-      .buttonStyle(.borderless)
-      .menuIndicator(.hidden)
-      .help("Choose a Space Grid")
-      .accessibilityLabel("\(title), choose a Space Grid")
-    } else {
-      RouteToolbarTitleItem(title: title)
-    }
-  }
-
-  private func menuTitle(for space: GridToolbarSpace) -> String {
-    guard space.activeAvatarCount > 0 else { return space.name }
-    return "\(space.name) · \(space.activeAvatarCount) active"
   }
 }

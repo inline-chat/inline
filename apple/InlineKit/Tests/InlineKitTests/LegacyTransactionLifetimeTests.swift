@@ -5,6 +5,38 @@ import Testing
 
 @Suite("Legacy transaction lifetime", .serialized)
 struct LegacyTransactionLifetimeTests {
+  @Test("mutation reports durable admission")
+  func mutationReportsDurableAdmission() {
+    let cache = InMemoryTransactionsCache()
+    let transactions = Transactions(actor: TransactionsActor(), cache: cache)
+    let transaction = MockMessageTransaction(
+      id: "admitted-\(UUID().uuidString)",
+      text: "durable"
+    )
+
+    let admitted = transactions.mutate(transaction: .mockMessage(transaction))
+
+    #expect(admitted)
+    #expect(cache.addCount == 1)
+  }
+
+  @Test("mutation reports persistence rejection")
+  func mutationReportsPersistenceRejection() {
+    let transactions = Transactions(
+      actor: TransactionsActor(),
+      cache: RejectingTransactionsCache()
+    )
+
+    let admitted = transactions.mutate(transaction: .mockMessage(
+      MockMessageTransaction(
+        id: "rejected-\(UUID().uuidString)",
+        text: "must remain recoverable"
+      )
+    ))
+
+    #expect(admitted == false)
+  }
+
   @Test("worker pool is bounded and clear joins active work")
   func workerPoolIsBoundedAndClearJoins() async {
     let probe = LegacyTransactionProbe.shared
@@ -124,6 +156,17 @@ struct LegacyTransactionLifetimeTests {
   }
 }
 
+private final class RejectingTransactionsCache: @unchecked Sendable, TransactionsCaching {
+  var transactions: [PersistedTransaction] { [] }
+
+  func add(transaction: TransactionType) throws {
+    throw TransactionError.duplicate
+  }
+
+  func remove(transactionId: String) {}
+  func clearAll() {}
+}
+
 private final class InMemoryTransactionsCache: @unchecked Sendable, TransactionsCaching {
   private let lock = NSLock()
   private var storage: [PersistedTransaction] = []
@@ -131,6 +174,10 @@ private final class InMemoryTransactionsCache: @unchecked Sendable, Transactions
 
   var transactions: [PersistedTransaction] {
     lock.withLock { storage }
+  }
+
+  var addCount: Int {
+    lock.withLock { nextOrder }
   }
 
   func add(transaction: TransactionType) throws {

@@ -14919,6 +14919,17 @@ public nonisolated struct CreateChatInput: Sendable {
   /// Clears the value of `reservedChatID`. Subsequent reads from it will return its default value.
   public mutating func clearReservedChatID() {self._reservedChatID = nil}
 
+  /// Optional temporary title derived from the first message. Unlike `title`,
+  /// this remains server-owned and may be replaced by automatic title generation.
+  public var placeholderTitle: String {
+    get {_placeholderTitle ?? String()}
+    set {_placeholderTitle = newValue}
+  }
+  /// Returns true if `placeholderTitle` has been explicitly set.
+  public var hasPlaceholderTitle: Bool {self._placeholderTitle != nil}
+  /// Clears the value of `placeholderTitle`. Subsequent reads from it will return its default value.
+  public mutating func clearPlaceholderTitle() {self._placeholderTitle = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -14928,6 +14939,7 @@ public nonisolated struct CreateChatInput: Sendable {
   fileprivate var _description_p: String? = nil
   fileprivate var _emoji: String? = nil
   fileprivate var _reservedChatID: Int64? = nil
+  fileprivate var _placeholderTitle: String? = nil
 }
 
 public nonisolated struct CreateChatResult: @unchecked Sendable {
@@ -40110,7 +40122,7 @@ nonisolated extension ReserveChatIdsResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateChatInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{3}space_id\0\u{1}description\0\u{1}emoji\0\u{3}is_public\0\u{1}participants\0\u{3}reserved_chat_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{3}space_id\0\u{1}description\0\u{1}emoji\0\u{3}is_public\0\u{1}participants\0\u{3}reserved_chat_id\0\u{3}placeholder_title\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -40125,6 +40137,7 @@ nonisolated extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 5: try { try decoder.decodeSingularBoolField(value: &self.isPublic) }()
       case 6: try { try decoder.decodeRepeatedMessageField(value: &self.participants) }()
       case 7: try { try decoder.decodeSingularInt64Field(value: &self._reservedChatID) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._placeholderTitle) }()
       default: break
       }
     }
@@ -40156,6 +40169,9 @@ nonisolated extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._reservedChatID {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._placeholderTitle {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -40167,6 +40183,7 @@ nonisolated extension CreateChatInput: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.isPublic != rhs.isPublic {return false}
     if lhs.participants != rhs.participants {return false}
     if lhs._reservedChatID != rhs._reservedChatID {return false}
+    if lhs._placeholderTitle != rhs._placeholderTitle {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

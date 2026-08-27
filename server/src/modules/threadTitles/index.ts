@@ -47,6 +47,7 @@ type ThreadTitleChat = Pick<
   | "title"
   | "description"
   | "isUntitled"
+  | "messageIdCounter"
   | "parentChatId"
   | "parentMessageId"
   | "minUserId"
@@ -91,12 +92,17 @@ type MaybeScheduleInput = {
   currentUserId: number
 }
 
+type ThreadTitleGuard =
+  | { kind: "empty" }
+  | { kind: "untitledExact"; currentTitle: string | null }
+
 type GenerateInput = {
   chatId: number
   messageId: number
   text: string
   currentUserId: number
   jobId?: number
+  titleGuard?: ThreadTitleGuard
 }
 
 type GeneratedThreadTitle = {
@@ -109,9 +115,7 @@ type ThreadTitleKind = "topLevel" | "reply"
 type PreparedGeneration = {
   kind: ThreadTitleKind
   sourceText: string
-  titleGuard:
-    | { kind: "empty" }
-    | { kind: "untitledExact"; currentTitle: string | null }
+  titleGuard: ThreadTitleGuard
 }
 
 type SourceLine = {
@@ -123,7 +127,20 @@ let nextJobId = 0
 const pendingJobs = new Map<number, number>()
 
 export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput) {
-  if (!canAutoTitleThread(input.chat)) {
+  const titleGuard = titleGuardForScheduling(input.chat)
+  if (!titleGuard) {
+    return
+  }
+
+  // A top-level placeholder is derived from the first message, so only that
+  // message may replace it. The chat snapshot is loaded before message insert;
+  // checking the assigned message id also protects against concurrent sends
+  // that both observed the initial zero counter.
+  if (
+    input.chat.parentChatId == null &&
+    titleGuard.kind === "untitledExact" &&
+    input.message.messageId !== 1
+  ) {
     return
   }
 
@@ -143,6 +160,7 @@ export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput) {
     text: sourceText,
     currentUserId: input.currentUserId,
     jobId,
+    titleGuard,
   }).catch((error) => {
     log.warn("Thread title generation failed", {
       chatId: input.chat.id,
@@ -201,15 +219,28 @@ export async function generateAndApplyThreadTitle(input: GenerateInput): Promise
 }
 
 export function canAutoTitleThread(chat: ThreadTitleChat): boolean {
+  return titleGuardForScheduling(chat) !== undefined
+}
+
+function titleGuardForScheduling(chat: ThreadTitleChat): ThreadTitleGuard | undefined {
   if (chat.type !== "thread") {
-    return false
+    return undefined
   }
 
   if (chat.parentChatId == null) {
-    return !isNonEmpty(chat.title)
+    if (!isNonEmpty(chat.title)) {
+      return { kind: "empty" }
+    }
+    if (chat.isUntitled === true && chat.messageIdCounter === 0) {
+      return { kind: "untitledExact", currentTitle: chat.title }
+    }
+    return undefined
   }
 
-  return chat.parentMessageId != null && chat.isUntitled === true
+  if (chat.parentMessageId != null && chat.isUntitled === true) {
+    return { kind: "untitledExact", currentTitle: chat.title }
+  }
+  return undefined
 }
 
 export async function getMessageAttachmentTitleContext(messageGlobalId: bigint): Promise<ThreadTitleAttachmentContext[]> {
@@ -282,7 +313,12 @@ export function getThreadTitleSourceText(input: MaybeScheduleInput): string | un
 
 async function prepareGeneration(input: GenerateInput): Promise<PreparedGeneration | undefined> {
   const chat = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1).then((rows) => rows[0])
-  if (!chat || !canAutoTitleThread(chat)) {
+  if (!chat) {
+    return undefined
+  }
+
+  const titleGuard = input.titleGuard ?? titleGuardForScheduling(chat)
+  if (!titleGuard || !titleGuardMatches(chat, titleGuard)) {
     return undefined
   }
 
@@ -290,7 +326,7 @@ async function prepareGeneration(input: GenerateInput): Promise<PreparedGenerati
     return {
       kind: "topLevel",
       sourceText: input.text,
-      titleGuard: { kind: "empty" },
+      titleGuard,
     }
   }
 
@@ -302,8 +338,14 @@ async function prepareGeneration(input: GenerateInput): Promise<PreparedGenerati
   return {
     kind: "reply",
     sourceText: await buildReplyThreadSource(chat, anchorMessage, input.text, input.currentUserId),
-    titleGuard: { kind: "untitledExact", currentTitle: chat.title },
+    titleGuard,
   }
+}
+
+function titleGuardMatches(chat: ThreadTitleChat, titleGuard: ThreadTitleGuard): boolean {
+  return titleGuard.kind === "empty"
+    ? !isNonEmpty(chat.title)
+    : chat.isUntitled === true && chat.title === titleGuard.currentTitle
 }
 
 async function buildReplyThreadSource(

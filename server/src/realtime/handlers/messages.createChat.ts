@@ -18,6 +18,7 @@ export const createChat = async (input: CreateChatInput, handlerContext: Handler
   const result = await Functions.messages.createChat(
     {
       title: input.title,
+      placeholderTitle: input.placeholderTitle,
       spaceId: input.spaceId,
       emoji: input.emoji,
       description: input.description,

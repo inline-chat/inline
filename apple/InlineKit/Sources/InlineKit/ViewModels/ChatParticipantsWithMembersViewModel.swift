@@ -151,6 +151,31 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     }
   }
 
+  fileprivate static func newThreadMentionCandidates(
+    _ db: Database,
+    spaceID: Int64?
+  ) throws -> MentionCompletionCandidates {
+    let directChats = try fetchDirectChatCandidates(db).filter {
+      !filterMentionCandidates([$0.userInfo]).isEmpty
+    }
+    guard let spaceID else {
+      return MentionCompletionCandidates(users: directChats, groups: [])
+    }
+
+    let members = filterMentionCandidates(try fetchSpaceMembers(db, spaceId: spaceID))
+    let memberCandidates = members.map {
+      MentionCompletionUser(userInfo: $0, source: .spaceMember)
+    }
+    var seenUserIDs = Set<Int64>()
+    let users = (memberCandidates + directChats).filter {
+      seenUserIDs.insert($0.userInfo.id).inserted
+    }
+    return MentionCompletionCandidates(
+      users: users,
+      groups: try fetchUserGroups(db, spaceId: spaceID)
+    )
+  }
+
   private static func participantsSourceChat(_ db: Database, chatId: Int64, purpose: Purpose) throws -> Chat? {
     guard let chat = try Chat.fetchOne(db, id: chatId) else { return nil }
     return try participantsSourceChat(db, for: chat, purpose: purpose)
@@ -400,5 +425,73 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
       .fetchCount(db) > 0
 
     return hasParticipants ? .none : .participants(chat.id)
+  }
+}
+
+/// Mention candidates for a composer that has a destination but no chat yet.
+/// Home uses known direct chats; a space additionally contributes its members
+/// and user groups. The existing chat-scoped view model remains unchanged.
+@MainActor
+public final class NewThreadMentionCandidatesViewModel: ObservableObject {
+  @Published public private(set) var candidates: MentionCompletionCandidates = .empty
+
+  private let db: AppDatabase
+  private var spaceID: Int64?
+  private var cancellable: AnyCancellable?
+  private var isObserving = false
+  private let log = Log.scoped("NewThreadMentionCandidatesViewModel")
+
+  public init(db: AppDatabase, spaceID: Int64?) {
+    self.db = db
+    self.spaceID = spaceID
+  }
+
+  public func startObserving() {
+    guard !isObserving else { return }
+    isObserving = true
+    observe()
+  }
+
+  public func setSpaceID(_ spaceID: Int64?) {
+    guard self.spaceID != spaceID else { return }
+    self.spaceID = spaceID
+    if isObserving {
+      observe()
+    }
+  }
+
+  public func refresh() async {
+    startObserving()
+    guard let spaceID else { return }
+
+    do {
+      try await Api.realtime.send(.getSpaceMembers(spaceId: spaceID))
+      try await Api.realtime.send(.getUserGroups(spaceId: spaceID))
+    } catch {
+      log.error("Failed to refresh new-thread mention candidates", error: error)
+    }
+  }
+
+  private func observe() {
+    cancellable?.cancel()
+    let spaceID = spaceID
+    db.warnIfInMemoryDatabaseForObservation("NewThreadMentionCandidatesViewModel.candidates")
+    cancellable = ValueObservation
+      .tracking { db in
+        try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(
+          db,
+          spaceID: spaceID
+        )
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          guard case let .failure(error) = completion else { return }
+          self?.log.error("Failed to observe new-thread mention candidates", error: error)
+        },
+        receiveValue: { [weak self] candidates in
+          self?.candidates = candidates
+        }
+      )
   }
 }

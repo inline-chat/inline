@@ -8852,6 +8852,13 @@ export interface CreateChatInput {
      * @generated from protobuf field: optional int64 reserved_chat_id = 7;
      */
     reservedChatId?: bigint;
+    /**
+     * Optional temporary title derived from the first message. Unlike `title`,
+     * this remains server-owned and may be replaced by automatic title generation.
+     *
+     * @generated from protobuf field: optional string placeholder_title = 8;
+     */
+    placeholderTitle?: string;
 }
 /**
  * @generated from protobuf message CreateChatResult
@@ -36507,7 +36514,8 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
             { no: 4, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "is_public", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 6, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant },
-            { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "placeholder_title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<CreateChatInput>): CreateChatInput {
@@ -36544,6 +36552,9 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
                 case /* optional int64 reserved_chat_id */ 7:
                     message.reservedChatId = reader.int64().toBigInt();
                     break;
+                case /* optional string placeholder_title */ 8:
+                    message.placeholderTitle = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -36577,6 +36588,9 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
         /* optional int64 reserved_chat_id = 7; */
         if (message.reservedChatId !== undefined)
             writer.tag(7, WireType.Varint).int64(message.reservedChatId);
+        /* optional string placeholder_title = 8; */
+        if (message.placeholderTitle !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.placeholderTitle);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

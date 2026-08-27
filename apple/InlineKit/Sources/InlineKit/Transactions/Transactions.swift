@@ -143,8 +143,10 @@ public class Transactions: @unchecked Sendable {
   }
 
   /// Start a transaction
-  public func mutate(transaction transaction_: TransactionType) {
+  @discardableResult
+  public func mutate(transaction transaction_: TransactionType) -> Bool {
     let transaction = transaction_
+    var admitted = false
     lifecycleLock.withLock {
       guard clearTask == nil else { return }
 
@@ -153,6 +155,7 @@ public class Transactions: @unchecked Sendable {
 
       do {
         try cache.add(transaction: transaction)
+        admitted = true
       } catch {
         let submissionId = UUID()
         let task = Task { [weak self] in
@@ -193,6 +196,7 @@ public class Transactions: @unchecked Sendable {
       }
       submissions[submissionId] = OwnedSubmission(task: task)
     }
+    return admitted
   }
 
   /// Immediately triggers rollback and removes transaction from cache

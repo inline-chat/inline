@@ -34,6 +34,7 @@ const emptyThread = {
   title: null,
   description: null,
   isUntitled: true,
+  messageIdCounter: 0,
   parentChatId: null,
   parentMessageId: null,
   minUserId: null,
@@ -54,6 +55,18 @@ describe("thread title generation", () => {
 
   afterEach(() => {
     parseCompletion.mockReset()
+  })
+
+  test("only a first-message placeholder remains eligible for top-level auto-title", async () => {
+    const { canAutoTitleThread } = await import("@in/server/modules/threadTitles")
+    const placeholderThread = {
+      ...emptyThread,
+      title: "Please review the launch checklist before tomorrow morning",
+      isUntitled: true,
+    }
+
+    expect(canAutoTitleThread(placeholderThread)).toBe(true)
+    expect(canAutoTitleThread({ ...placeholderThread, messageIdCounter: 1 })).toBe(false)
   })
 
   test("requires substantial non-entity text", async () => {
@@ -283,6 +296,64 @@ describe("thread title generation", () => {
     expect(systemMessage).toContain("append today's date at the end in parentheses")
     expect(systemMessage).toContain(`Today's date is ${expectedToday}`)
     expect(systemMessage).toContain(`for example: (${expectedToday})`)
+  })
+
+  test("replaces a top-level first-message placeholder exactly once", async () => {
+    let resolveCompletion: (value: ReturnType<typeof completion>) => void = () => {}
+    parseCompletion.mockImplementation(
+      () => new Promise<ReturnType<typeof completion>>((resolve) => { resolveCompletion = resolve }),
+    )
+
+    const user = await testUtils.createUser("placeholder-thread-title-user@example.com")
+    const placeholder = "Please review the launch checklist before tomorrow morning"
+    const [chat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: placeholder,
+        isUntitled: true,
+        publicThread: false,
+        createdBy: user.id,
+      })
+      .returning()
+
+    if (!chat) {
+      throw new Error("Chat not created")
+    }
+
+    await testUtils.addParticipant(chat.id, user.id)
+
+    const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
+    maybeScheduleThreadTitleGeneration({
+      chat,
+      message: textMessage,
+      text: placeholder,
+      entities: undefined,
+      currentUserId: user.id,
+    })
+    await waitForParseCallCount(1)
+
+    // A concurrent send can carry the same pre-insert chat snapshot. It must
+    // not replace or cancel the title job owned by message 1.
+    maybeScheduleThreadTitleGeneration({
+      chat,
+      message: { ...textMessage, messageId: 2 },
+      text: "A later message with enough content must not take over title generation.",
+      entities: undefined,
+      currentUserId: user.id,
+    })
+
+    resolveCompletion(completion("Launch Checklist"))
+    await waitForChatTitle(chat.id, "Launch Checklist")
+
+    const updated = await db
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, chat.id))
+      .then((rows) => rows[0])
+
+    expect(updated).toEqual({ title: "Launch Checklist", isUntitled: true })
+    expect(parseCompletion).toHaveBeenCalledTimes(1)
   })
 
   test("allows generated titles longer than the old short cap", async () => {

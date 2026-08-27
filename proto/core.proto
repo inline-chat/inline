@@ -3292,6 +3292,10 @@ message CreateChatInput {
 
   // Optional previously reserved chat id to claim during creation.
   optional int64 reserved_chat_id = 7;
+
+  // Optional temporary title derived from the first message. Unlike `title`,
+  // this remains server-owned and may be replaced by automatic title generation.
+  optional string placeholder_title = 8;
 }
 
 message CreateChatResult {
