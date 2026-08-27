@@ -163,7 +163,7 @@ function buildInlineApprovalActions(view: PendingApprovalView): MessageActions |
       callback_data: action.command,
     })),
   ]
-  return resolveInlineMessageActionsParam({ buttons })
+  return resolveInlineMessageActionsParam({ buttons }, { owner: "system" })
 }
 
 function buildPendingPayload(params: {

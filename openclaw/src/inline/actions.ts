@@ -39,6 +39,10 @@ import {
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 import {
+  buildInlineMessageActionId,
+  type InlineMessageActionOwner,
+} from "./message-actions.js"
+import {
   createActionGate,
   jsonResult,
   readReactionParams,
@@ -1055,11 +1059,14 @@ function resolveInlineInteractiveButtonsParam(
   return rows.length > 0 ? rows : undefined
 }
 
-function toInlineMessageActions(rows: InlineReplyMarkupButton[][]): MessageActions {
+function toInlineMessageActions(
+  rows: InlineReplyMarkupButton[][],
+  owner: InlineMessageActionOwner,
+): MessageActions {
   return {
     rows: rows.map((row, rowIndex) => ({
       actions: row.map((button, buttonIndex) => ({
-        actionId: `btn_${rowIndex + 1}_${buttonIndex + 1}`,
+        actionId: buildInlineMessageActionId(owner, rowIndex, buttonIndex),
         text: button.text,
         action:
           button.kind === "callback"
@@ -1080,10 +1087,14 @@ function toInlineMessageActions(rows: InlineReplyMarkupButton[][]): MessageActio
   }
 }
 
-export function resolveInlineMessageActionsParam(params: Record<string, unknown>): MessageActions | undefined {
+export function resolveInlineMessageActionsParam(
+  params: Record<string, unknown>,
+  options?: { owner?: InlineMessageActionOwner },
+): MessageActions | undefined {
+  const owner = options?.owner ?? "agent"
   if (!Object.prototype.hasOwnProperty.call(params, "buttons")) {
     const interactiveRows = resolveInlineInteractiveButtonsParam(params)
-    return interactiveRows ? toInlineMessageActions(interactiveRows) : undefined
+    return interactiveRows ? toInlineMessageActions(interactiveRows, owner) : undefined
   }
 
   let rawButtons: unknown = params.buttons
@@ -1107,7 +1118,7 @@ export function resolveInlineMessageActionsParam(params: Record<string, unknown>
   }
 
   const rows = normalizeReplyMarkupButtons(rawButtons)
-  return toInlineMessageActions(rows)
+  return toInlineMessageActions(rows, owner)
 }
 
 function normalizeChatId(raw: string): string {

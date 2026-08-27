@@ -2603,7 +2603,7 @@ describe("inline/monitor", () => {
       expect.objectContaining({
         MessageActionInteractionId: "22",
         MessageActionId: "pick",
-        Body: 'Alice pressed "pick" on message #1000',
+        Body: "Inline action button pressed on message #1000 by Alice.",
       }),
     )
     expect(contexts[1]).toEqual(
@@ -5827,8 +5827,25 @@ describe("inline/monitor", () => {
           MessageActionInteractionId: "22",
           MessageActionId: "pick",
           MessageActionDataBase64: "eyJrIjoxfQ==",
-          Body: 'Alice pressed "pick" on message #1001',
-          BodyForAgent: 'Alice pressed "pick" on message #1001',
+          Body: "Inline action button pressed on message #1001 by Alice.",
+          BodyForAgent: "Inline action button pressed on message #1001 by Alice.",
+          UntrustedStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              label: "Inline action button press",
+              source: "inline",
+              type: "message_action",
+              payload: {
+                event_kind: "message.action.invoke",
+                actor_user_id: "42",
+                chat_id: "7",
+                target_message_id: "1001",
+                interaction_id: "22",
+                action_id: "pick",
+                callback_data_base64: "eyJrIjoxfQ==",
+                callback_data_utf8: '{"k":1}',
+              },
+            }),
+          ]),
         }),
       )
       const ctx = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
@@ -6148,7 +6165,7 @@ describe("inline/monitor", () => {
           interactionId: 23n,
           messageId: 1005n,
           actorUserId: 42n,
-          actionId: "toggle",
+          actionId: "system:1:1",
           data: new TextEncoder().encode("icmd:/verbose on"),
         },
       ],
@@ -6197,6 +6214,52 @@ describe("inline/monitor", () => {
         8,
         expect.objectContaining({
           oneofKind: "editMessage",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not interpret agent-owned callback data as a native command", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 230n,
+          messageId: 10050n,
+          actorUserId: 42n,
+          actionId: "agent:1:1",
+          data: new TextEncoder().encode("/verbose on"),
+          date: 1_700_000_010n,
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 10050n, date: 1_700_000_000n, fromId: 777n, message: "Verbose?" }],
+      },
+      dispatchReplyPayload: {
+        text: "handled by agent",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          CommandBody: "",
+          BodyForCommands: "",
+          MessageActionId: "agent:1:1",
         }),
       )
     })
@@ -6593,7 +6656,7 @@ describe("inline/monitor", () => {
               expect.objectContaining({
                 actions: [
                   expect.objectContaining({
-                    actionId: "btn_1_1",
+                    actionId: "agent:1:1",
                     text: "Option A",
                   }),
                 ],
@@ -6650,7 +6713,7 @@ describe("inline/monitor", () => {
     await waitFor(() => {
       const action = harness.calls.sendMessage.mock.calls[0]?.[0]?.actions?.rows?.[0]?.actions?.[0]
       expect(action).toMatchObject({
-        actionId: "btn_1_1",
+        actionId: "agent:1:1",
         text: "Copy",
         action: {
           oneofKind: "copyText",

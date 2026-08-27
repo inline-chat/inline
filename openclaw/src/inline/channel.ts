@@ -1502,7 +1502,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline markdown links: in visible replies, link returned users as `[@name](inline://user?id=<userId>)` and returned chats/threads as `[title](inline://chat?id=<chatId>)` or `[title](inline://thread?id=<chatId>)`. Use `target` values only for tool calls.",
       ...(supportsInlineMessageButtonsForConfig(cfg, accountId ?? null)
         ? [
-            "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows with `callback_data` for callbacks and `copy_text`/`copyText` for copy buttons. For quick button feedback, JSON `callback_data` can include `callbackToast`/`toast`.",
+            "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows with `callback_data` for callbacks and `copy_text`/`copyText` for copy buttons. For quick button feedback, JSON `callback_data` can include `callbackToast`/`toast`. A callback turn identifies the source message; your normal response replaces that message, omitting buttons clears them, and returning buttons replaces them.",
           ]
         : []),
       ...(supportsInlineReactionsForConfig(cfg, accountId ?? null)

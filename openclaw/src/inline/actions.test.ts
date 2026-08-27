@@ -227,6 +227,7 @@ describe("inline/actions", () => {
 
     expect(actions?.rows).toHaveLength(1)
     expect(actions?.rows?.[0]?.actions).toHaveLength(1)
+    expect(actions?.rows?.[0]?.actions?.[0]?.actionId).toBe("agent:1:1")
     expect(actions?.rows?.[0]?.actions?.[0]?.text).toHaveLength(INLINE_ACTION_LABEL_MAX_LENGTH)
     const data = actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
     expect(data).toBeInstanceOf(Uint8Array)
@@ -242,6 +243,7 @@ describe("inline/actions", () => {
     })
 
     const action = actions?.rows?.[0]?.actions?.[0]
+    expect(action?.actionId).toBe("agent:1:1")
     expect(action?.text).toBe("Copy command")
     expect(action?.action).toEqual({
       oneofKind: "copyText",
@@ -249,6 +251,17 @@ describe("inline/actions", () => {
         text: "bun run typecheck",
       },
     })
+  })
+
+  it("marks adapter-owned buttons as system actions", async () => {
+    vi.resetModules()
+    const { resolveInlineMessageActionsParam } = await import("./actions")
+
+    const actions = resolveInlineMessageActionsParam({
+      buttons: [[{ text: "Confirm", callback_data: "/approve 1 once" }]],
+    }, { owner: "system" })
+
+    expect(actions?.rows?.[0]?.actions?.[0]?.actionId).toBe("system:1:1")
   })
 
   it("uses the SDK message-tool buttons schema", async () => {
@@ -3726,7 +3739,7 @@ describe("inline/actions", () => {
             expect.objectContaining({
               actions: [
                 expect.objectContaining({
-                  actionId: "btn_1_1",
+                  actionId: "agent:1:1",
                   text: "Approve",
                 }),
               ],

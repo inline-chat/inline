@@ -114,6 +114,13 @@ import {
 } from "./message-content.js"
 import { callInlineBotApi } from "./bot-commands-api.js"
 import {
+  buildInlineAgentActionBody,
+  buildInlineAgentActionStructuredContext,
+  buildInlineMessageActionId,
+  resolveInlineMessageActionOwnership,
+  type InlineMessageActionOwner,
+} from "./message-actions.js"
+import {
   sanitizeInlineActionCallbackData,
   sanitizeInlineActionCopyText,
   sanitizeInlineActionLabel,
@@ -361,9 +368,7 @@ type InlineUntrustedStructuredContextEntry = {
   label: string
   source: typeof CHANNEL_ID
   type: string
-  payload: {
-    summary: string
-  }
+  payload: Record<string, unknown>
 }
 
 type InlineReplyThreadContext = {
@@ -2166,7 +2171,11 @@ function normalizeReplyMarkupButtonsWith(
   return rows
 }
 
-function resolveInlineReplyActions(payload: Record<string, unknown>): MessageActions | undefined {
+function resolveInlineReplyActions(
+  payload: Record<string, unknown>,
+  options?: { owner?: InlineMessageActionOwner },
+): MessageActions | undefined {
+  const owner = options?.owner ?? "agent"
   const channelData = isRecord(payload.channelData) ? payload.channelData : undefined
   const inlineData = channelData && isRecord(channelData.inline) ? channelData.inline : undefined
   const telegramData = channelData && isRecord(channelData.telegram) ? channelData.telegram : undefined
@@ -2189,7 +2198,7 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
   }
 
   if (!hasExplicitButtons) {
-    return resolveInlineMessageActionsParam(payload)
+    return resolveInlineMessageActionsParam(payload, { owner })
   }
 
   const rows = normalizeReplyMarkupButtonsWith(
@@ -2199,7 +2208,7 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
   return {
     rows: rows.map((row, rowIndex) => ({
       actions: row.map((button, buttonIndex) => ({
-        actionId: `btn_${rowIndex + 1}_${buttonIndex + 1}`,
+        actionId: buildInlineMessageActionId(owner, rowIndex, buttonIndex),
         text: button.text,
         action:
           button.kind === "callback"
@@ -2808,6 +2817,7 @@ function buildInlineUntrustedStructuredContext(params: {
   currentBody: string
   historyAttachmentText: string | null
   historyEntityText: string | null
+  actionContext?: InlineUntrustedStructuredContextEntry
 }): InlineUntrustedStructuredContextEntry[] {
   const entries: InlineUntrustedStructuredContextEntry[] = []
   const append = (label: string, type: string, summary: string | null) => {
@@ -2826,6 +2836,7 @@ function buildInlineUntrustedStructuredContext(params: {
   append("Current Inline message entities", "current_message_entities", params.currentEntityText)
   append("Recent Inline media/attachments", "recent_media_attachments", params.historyAttachmentText)
   append("Recent Inline message entities", "recent_message_entities", params.historyEntityText)
+  if (params.actionContext) entries.push(params.actionContext)
   return entries
 }
 
@@ -3863,12 +3874,18 @@ export async function monitorInlineProvider(params: {
     const senderName = isGroup
       ? senderProfile?.name
       : resolveInlineDirectSenderName({ profileName: senderProfile?.name, chatTitle: chatInfo.title, senderId })
+    const callbackActionOwnership = callbackActionEvent
+      ? resolveInlineMessageActionOwnership(callbackActionEvent.actionId)
+      : null
     if (callbackActionEvent) {
       const actor =
         senderUsername != null && senderUsername.length > 0
           ? `@${senderUsername}`
           : senderName ?? "the sender"
-      rawBody = `${actor} pressed "${callbackActionEvent.actionId}" on message #${String(callbackActionEvent.targetMessageId)}`
+      rawBody = buildInlineAgentActionBody({
+        actor,
+        targetMessageId: callbackActionEvent.targetMessageId,
+      })
     }
 
     const dmPolicy = account.config.dmPolicy ?? "pairing"
@@ -3900,7 +3917,10 @@ export async function monitorInlineProvider(params: {
     const effectiveAllowFrom = [...configAllowFrom, ...storeAllowList].filter(Boolean)
     const effectiveGroupAllowFrom = groupSenderAllowlist.expanded.filter(Boolean)
     const effectiveGroupCommandAllowFrom = effectiveGroupAllowFrom
-    const callbackCommandBody = callbackActionEvent
+    const shouldRouteCallbackThroughSystemHandlers =
+      callbackActionEvent != null &&
+      (callbackActionOwnership?.owner === "system" || callbackActionOwnership?.explicit === false)
+    const callbackCommandBody = callbackActionEvent && shouldRouteCallbackThroughSystemHandlers
       ? resolveCallbackCommandBodyFromActionData({
           data: callbackActionEvent.data,
           ...(botUsername ? { botUsername } : {}),
@@ -4351,7 +4371,7 @@ export async function monitorInlineProvider(params: {
           } satisfies PluginCommandContext,
         )
         const resultRecord = result as Record<string, unknown>
-        const actions = resolveInlineReplyActions(resultRecord)
+        const actions = resolveInlineReplyActions(resultRecord, { owner: "system" })
         const text =
           typeof result.text === "string"
             ? sanitizeInlineDeliveryText(result.text)
@@ -4399,7 +4419,7 @@ export async function monitorInlineProvider(params: {
         return
       }
     }
-    const commandsPageCallback = callbackActionEvent
+    const commandsPageCallback = callbackActionEvent && shouldRouteCallbackThroughSystemHandlers
       ? parseInlineCommandsPageCallback(callbackDataToUtf8(callbackActionEvent.data))
       : null
     if (shouldEditCallbackTargetInPlace && callbackActionEvent && commandsPageCallback) {
@@ -4424,7 +4444,7 @@ export async function monitorInlineProvider(params: {
           totalPages: paginated.totalPages,
           agentId,
         }) ?? { inline: { buttons: [] } },
-      }) ?? { rows: [] }
+      }, { owner: "system" }) ?? { rows: [] }
       const text = sanitizeInlineDeliveryText(paginated.text)
 
       try {
@@ -4470,7 +4490,7 @@ export async function monitorInlineProvider(params: {
             buttons: nativeCommandMenu.buttons,
           },
         },
-      })
+      }, { owner: "system" })
       const menuText = sanitizeInlineDeliveryText(nativeCommandMenu.title)
       let deliveredNativeMenu = false
       if (shouldEditCallbackTargetInPlace && callbackActionEvent) {
@@ -4510,7 +4530,9 @@ export async function monitorInlineProvider(params: {
       return
     }
 
-    const modelPickerCallbackData = callbackActionEvent ? callbackDataToUtf8(callbackActionEvent.data) : undefined
+    const modelPickerCallbackData = callbackActionEvent && shouldRouteCallbackThroughSystemHandlers
+      ? callbackDataToUtf8(callbackActionEvent.data)
+      : undefined
     const modelPickerCallback = modelPickerCallbackData
       ? parseInlineModelPickerCallback(modelPickerCallbackData)
       : null
@@ -4526,7 +4548,7 @@ export async function monitorInlineProvider(params: {
               buttons,
             },
           },
-        }) ?? { rows: [] }
+        }, { owner: "system" }) ?? { rows: [] }
         try {
           const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
             oneofKind: "editMessage",
@@ -4617,6 +4639,19 @@ export async function monitorInlineProvider(params: {
       await answerCallbackIfNeeded().catch((error) => {
         runtime.error?.(`inline callback answer failed: ${String(error)}`)
       })
+      return
+    }
+
+    if (
+      callbackActionEvent &&
+      callbackActionOwnership?.owner === "system" &&
+      callbackActionOwnership.explicit &&
+      callbackCommandBody == null
+    ) {
+      runtime.log?.(
+        `inline: drop unhandled system action ${callbackActionEvent.actionId} ` +
+        `message=${String(callbackActionEvent.targetMessageId)}`,
+      )
       return
     }
 
@@ -4853,12 +4888,30 @@ export async function monitorInlineProvider(params: {
             limit: historyLimit,
           })
         : effectiveHistoryContext.inboundHistory
+    const actionCallbackDataUtf8 = callbackActionEvent
+      ? callbackDataToUtf8(callbackActionEvent.data)
+      : undefined
     const untrustedStructuredContext = buildInlineUntrustedStructuredContext({
       currentAttachmentText,
       currentEntityText: currentEntityTextForAgent,
       currentBody,
       historyAttachmentText: effectiveHistoryContext.attachmentText,
       historyEntityText: effectiveHistoryContext.entityText,
+      ...(callbackActionEvent
+        ? {
+            actionContext: buildInlineAgentActionStructuredContext({
+              actorUserId: msg.fromId,
+              chatId,
+              targetMessageId: callbackActionEvent.targetMessageId,
+              interactionId: callbackActionEvent.interactionId,
+              actionId: callbackActionEvent.actionId,
+              callbackDataBase64: callbackDataToBase64(callbackActionEvent.data),
+              ...(actionCallbackDataUtf8
+                ? { callbackDataUtf8: actionCallbackDataUtf8 }
+                : {}),
+            }),
+          }
+        : {}),
     })
     const inboundEventKind = classifyChannelInboundEvent({
       conversation: { kind: isGroup ? "group" : "direct" },
