@@ -3430,6 +3430,9 @@ extension MessageListAppKit: NSTableViewDelegate {
     let cell = reusedView as? MessageTableCell ?? MessageTableCell()
     cell.identifier = identifier
     cell.setDependencies(dependencies)
+    cell.setAvatarSwipeProvider { [weak self] sourceView in
+      self?.avatarOverlayView.grabAvatar(overlapping: sourceView)
+    }
 
     let inputProps = messageProps(for: row)
     let width = measurementWidth(using: tableView, renderStyle: inputProps.renderStyle)

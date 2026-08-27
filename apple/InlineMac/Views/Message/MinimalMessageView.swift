@@ -3998,24 +3998,22 @@ class MinimalMessageViewAppKit: NSView {
   private var hasTriggerHapticFeedback = false
   private var swipeThreshold: CGFloat = 50.0
   private var didReachThreshold = false
+  private var avatarSwipeProvider: MessageAvatarSwipeProvider?
+  private weak var swipedAvatarOverlayView: NSView?
+
+  func setAvatarSwipeProvider(_ provider: MessageAvatarSwipeProvider?) {
+    avatarSwipeProvider = provider
+  }
 
   override func scrollWheel(with event: NSEvent) {
     if richBlockContentView?.consumeNestedHorizontalScroll(event) == true {
-      layer?.transform = CATransform3DIdentity
-      swipeAnimationView?.alphaValue = 0
-      isSwipeInProgress = false
-      hasTriggerHapticFeedback = false
-      didReachThreshold = false
+      resetSwipePresentation()
       return
     }
     // Do not allow swipe-to-reply if message cannot be replied to
     if !fullMessage.canReply || isAnchorMessage {
       // Ensure UI is reset and pass through
-      layer?.transform = CATransform3DIdentity
-      swipeAnimationView?.alphaValue = 0
-      isSwipeInProgress = false
-      hasTriggerHapticFeedback = false
-      didReachThreshold = false
+      resetSwipePresentation()
       super.scrollWheel(with: event)
       return
     }
@@ -4026,6 +4024,9 @@ class MinimalMessageViewAppKit: NSView {
       swipeOffset = 0
       hasTriggerHapticFeedback = false
       didReachThreshold = false
+      swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
+      swipedAvatarOverlayView = avatarSwipeProvider?(self)
+      swipedAvatarOverlayView?.wantsLayer = true
 
       // Create animation view if needed
       if swipeAnimationView == nil {
@@ -4063,6 +4064,7 @@ class MinimalMessageViewAppKit: NSView {
         wantsLayer = true
         let transform = CATransform3DMakeTranslation(offset, 0, 0)
         layer?.transform = transform
+        swipedAvatarOverlayView?.layer?.transform = transform
 
         // Update animation view
         swipeAnimationView?.alphaValue = progress
@@ -4082,6 +4084,7 @@ class MinimalMessageViewAppKit: NSView {
       } else {
         // Reset for right swipes
         layer?.transform = CATransform3DIdentity
+        swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
         swipeAnimationView?.alphaValue = 0
       }
 
@@ -4101,8 +4104,10 @@ class MinimalMessageViewAppKit: NSView {
               context.allowsImplicitAnimation = true
               context.timingFunction = CAMediaTimingFunction(name: .easeOut)
               self.layer?.transform = CATransform3DIdentity
+              self.swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
               swipeAnimationView?.animator().alphaValue = 0
             }
+            swipedAvatarOverlayView = nil
             hasTriggerHapticFeedback = false
             didReachThreshold = false
             return
@@ -4116,6 +4121,7 @@ class MinimalMessageViewAppKit: NSView {
             context.allowsImplicitAnimation = true
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             self.layer?.transform = CATransform3DIdentity
+            self.swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
             swipeAnimationView?.animator().alphaValue = 0
           }) {}
         } else {
@@ -4125,11 +4131,13 @@ class MinimalMessageViewAppKit: NSView {
             context.allowsImplicitAnimation = true
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             self.layer?.transform = CATransform3DIdentity
+            self.swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
             swipeAnimationView?.animator().alphaValue = 0
           }
         }
 
         // Reset state
+        swipedAvatarOverlayView = nil
         hasTriggerHapticFeedback = false
         didReachThreshold = false
       }
@@ -4137,6 +4145,17 @@ class MinimalMessageViewAppKit: NSView {
       // Pass the event to super if we're not handling it
       super.scrollWheel(with: event)
     }
+  }
+
+  private func resetSwipePresentation() {
+    layer?.transform = CATransform3DIdentity
+    swipedAvatarOverlayView?.layer?.transform = CATransform3DIdentity
+    swipedAvatarOverlayView = nil
+    swipeAnimationView?.alphaValue = 0
+    isSwipeInProgress = false
+    swipeOffset = 0
+    hasTriggerHapticFeedback = false
+    didReachThreshold = false
   }
 
   private func focusWindowIfNeeded() {
@@ -4168,6 +4187,8 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   func reset() {
+    resetSwipePresentation()
+
     // Cancel translation state observation
     translationStateCancellable?.cancel()
     translationStateCancellable = nil

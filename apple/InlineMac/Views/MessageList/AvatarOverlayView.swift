@@ -115,6 +115,19 @@ final class MessageAvatarOverlayView: NSView {
     return stats
   }
 
+  func grabAvatar(overlapping sourceView: NSView) -> NSView? {
+    let messageFrame = sourceView.convert(sourceView.bounds, to: self)
+    let candidates = subviews.reversed().filter { !$0.isHidden && $0.alphaValue > 0 }
+    let frames = candidates.map(\.frame)
+    guard let index = MessageAvatarSwipeOverlap.firstOverlappingIndex(
+      messageFrame: messageFrame,
+      avatarFrames: frames
+    ) else {
+      return nil
+    }
+    return candidates[index]
+  }
+
   func clearAvatars() {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
@@ -260,6 +273,8 @@ final class MessageAvatarOverlayView: NSView {
 
   private func recycle(_ view: UserAvatarView, key: ReuseKey) {
     view.onClick = nil
+    view.layer?.removeAllAnimations()
+    view.layer?.transform = CATransform3DIdentity
     view.removeFromSuperview()
 
     var views = pool[key] ?? []

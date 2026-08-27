@@ -2,6 +2,8 @@ import AppKit
 import InlineKit
 import Logger
 
+typealias MessageAvatarSwipeProvider = (NSView) -> NSView?
+
 protocol MessageTableRenderableView: AnyObject {
   func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps, animate: Bool)
   func updateSize(props: MessageViewProps)
@@ -10,6 +12,7 @@ protocol MessageTableRenderableView: AnyObject {
   func setListHoverState(_ isHovered: Bool)
   func containsListHoverPoint(_ point: NSPoint, from coordinateView: NSView) -> Bool
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem?
+  func setAvatarSwipeProvider(_ provider: MessageAvatarSwipeProvider?)
   func reset()
 }
 
@@ -23,6 +26,8 @@ extension MessageTableRenderableView where Self: NSView {
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
     nil
   }
+
+  func setAvatarSwipeProvider(_: MessageAvatarSwipeProvider?) {}
 }
 
 extension MessageViewAppKit: MessageTableRenderableView {}
@@ -33,6 +38,7 @@ class MessageTableCell: NSView {
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
   private let log = Log.scoped("MessageTableCell", enableTracing: false)
   private var dependencies: AppDependencies?
+  private var avatarSwipeProvider: MessageAvatarSwipeProvider?
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -55,6 +61,11 @@ class MessageTableCell: NSView {
   func setDependencies(_ dependencies: AppDependencies) {
     self.dependencies = dependencies
     (messageView as? ServiceMessageViewAppKit)?.setDependencies(dependencies)
+  }
+
+  func setAvatarSwipeProvider(_ provider: MessageAvatarSwipeProvider?) {
+    avatarSwipeProvider = provider
+    messageView?.setAvatarSwipeProvider(provider)
   }
 
   func configure(with message: FullMessage, props: MessageViewProps, animate: Bool = true) {
@@ -192,6 +203,8 @@ class MessageTableCell: NSView {
         isScrolling: scrollState.isScrolling
       )
     }
+
+    newMessageView.setAvatarSwipeProvider(avatarSwipeProvider)
 
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(newMessageView)
