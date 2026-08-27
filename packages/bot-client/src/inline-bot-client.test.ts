@@ -326,6 +326,38 @@ describe("InlineBotClient", () => {
     expect(seenUrl).toBe("https://api.inline.chat/bot/getMyCommands")
   })
 
+  it("uses the canonical transports for Agent management", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+    const client = new InlineBotClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        })
+        return new Response(JSON.stringify({ ok: true, result: { agents: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    await client.createAgent({ name: "Data Analyst" })
+    await client.getAgent({ agent_id: 7 })
+    await client.getMyAgents()
+    await client.updateAgent({ agent_id: 7, description: "" })
+    await client.deleteAgent({ agent_id: 7 })
+
+    expect(calls).toEqual([
+      { url: "https://api.inline.chat/bot/createAgent", method: "POST", body: { name: "Data Analyst" } },
+      { url: "https://api.inline.chat/bot/getAgent?agent_id=7", method: "GET", body: undefined },
+      { url: "https://api.inline.chat/bot/getMyAgents", method: "GET", body: undefined },
+      { url: "https://api.inline.chat/bot/updateAgent", method: "POST", body: { agent_id: 7, description: "" } },
+      { url: "https://api.inline.chat/bot/deleteAgent", method: "POST", body: { agent_id: 7 } },
+    ])
+  })
+
   it("uses POST JSON for setMyCommands", async () => {
     let seenUrl = ""
     let seenMethod = ""

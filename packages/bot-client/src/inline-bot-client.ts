@@ -6,11 +6,13 @@ import type {
   BotMethodResultByName,
   CreateReplyThreadParams,
   CreateThreadParams,
+  CreateAgentParams,
   AnswerMessageActionParams,
   DeleteReactionParams,
   DeleteWebhookParams,
   DeleteMessageParams,
   DeleteMessagesParams,
+  DeleteAgentParams,
   EditMessageActionsParams,
   ForwardMessageParams,
   ForwardMessagesParams,
@@ -19,6 +21,7 @@ import type {
   GetChatParams,
   GetChatParticipantParams,
   GetChatParticipantCountParams,
+  GetAgentParams,
   AddThreadParticipantParams,
   RemoveThreadParticipantParams,
   GetFileParams,
@@ -38,6 +41,7 @@ import type {
   SetThreadTitleParams,
   SearchMessagesParams,
   SetWebhookParams,
+  UpdateAgentParams,
   UploadFileParams,
   UploadFileResult,
 } from "./types.js"
@@ -55,6 +59,11 @@ const botMethodTransports = {
   searchMessages: "json",
   createThread: "json",
   createReplyThread: "json",
+  createAgent: "json",
+  getAgent: "get",
+  getMyAgents: "get",
+  updateAgent: "json",
+  deleteAgent: "json",
   getMyCommands: "get",
   setMyCommands: "json",
   deleteMyCommands: "json",
@@ -278,6 +287,26 @@ export class InlineBotClient implements BotClientMethodSurface {
 
   createReplyThread(params: CreateReplyThreadParams, options?: InlineBotClientMethodOptions) {
     return this.method("createReplyThread", params, options)
+  }
+
+  createAgent(params: CreateAgentParams, options?: InlineBotClientMethodOptions) {
+    return this.method("createAgent", params, options)
+  }
+
+  getAgent(params: GetAgentParams, options?: InlineBotClientMethodOptions) {
+    return this.method("getAgent", params, options)
+  }
+
+  getMyAgents(options?: InlineBotClientMethodOptions) {
+    return this.method("getMyAgents", undefined, options)
+  }
+
+  updateAgent(params: UpdateAgentParams, options?: InlineBotClientMethodOptions) {
+    return this.method("updateAgent", params, options)
+  }
+
+  deleteAgent(params: DeleteAgentParams, options?: InlineBotClientMethodOptions) {
+    return this.method("deleteAgent", params, options)
   }
 
   getMyCommands(options?: InlineBotClientMethodOptions) {
