@@ -15,6 +15,11 @@ import UIKit
 import UniformTypeIdentifiers
 
 class ComposeView: UIView, NSTextLayoutManagerDelegate {
+  enum InlineCommandExecution {
+    case completed
+    case openThread(LocalThreadCommandResult)
+  }
+
   // MARK: - Configuration Constants
 
   private let log = Log.scoped("ComposeView")
@@ -129,7 +134,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   var onHeightChange: ((CGFloat, ComposeHeightChangeAnimation) -> Void)?
-  var executeInlineCommand: ((InlineCommandAction) async throws -> Bool)?
+  var executeInlineCommand: ((InlineCommandAction) async throws -> InlineCommandExecution?)?
+  private var inlineCommandTask: Task<Void, Never>?
   var peerId: InlineKit.Peer? {
     didSet {
       updateEmbedState(animated: false)
@@ -212,6 +218,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   // MARK: - Initialization
 
   deinit {
+    inlineCommandTask?.cancel()
     stopDraftSaveTimer()
     clearAttachmentUploadTracking(cancelUploads: true)
     removeObservers()
@@ -1267,7 +1274,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func performInlineCommand(_ action: InlineCommandAction) {
-    guard let executeInlineCommand, let peerId else { return }
+    guard inlineCommandTask == nil,
+          let executeInlineCommand,
+          let peerId
+    else { return }
     let invocationPeerId = peerId
     let invocationText = textView.text ?? ""
     let invocationAttributedText = NSAttributedString(
@@ -1286,31 +1296,44 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     else { return }
 
     autocompleteManager?.dismissCompletion()
-    Task { @MainActor [weak self] in
+    inlineCommandTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      defer { inlineCommandTask = nil }
       do {
-        guard try await executeInlineCommand(action) else { return }
-        guard let self,
+        guard let execution = try await executeInlineCommand(action),
               window != nil,
               self.peerId == invocationPeerId
         else { return }
 
         let currentState = ChatState.shared.getState(peer: invocationPeerId)
-        guard (textView.text ?? "") == invocationText,
-              (textView.attributedText ?? NSAttributedString()).isEqual(to: invocationAttributedText),
-              currentState.editingMessageId == nil,
-              currentState.forwardContext == nil,
-              attachmentItems.isEmpty,
-              pendingVideoAttachments.isEmpty,
-              !hasActiveAttachmentUploads,
-              !isVoiceActive
-        else { return }
+        let invocationIsUnchanged = (textView.text ?? "") == invocationText &&
+          (textView.attributedText ?? NSAttributedString()).isEqual(to: invocationAttributedText) &&
+          currentState.editingMessageId == nil &&
+          currentState.forwardContext == nil &&
+          attachmentItems.isEmpty &&
+          pendingVideoAttachments.isEmpty &&
+          !hasActiveAttachmentUploads &&
+          !isVoiceActive
+        if invocationIsUnchanged {
+          clearInlineCommandText()
+        }
 
-        clearInlineCommandText()
+        if case let .openThread(result) = execution {
+          guard let threadId = result.peer.asThreadId() else {
+            assertionFailure("Local thread command returned a non-thread peer")
+            return
+          }
+          ThreadLinkNavigator.open(target: .chatId(threadId))
+          if !result.didOpenInSidebar {
+            ToastManager.shared.showToast(
+              "Thread created, but couldn’t open it in the sidebar.",
+              type: .error,
+              systemImage: "exclamationmark.triangle.fill"
+            )
+          }
+        }
       } catch {
-        guard let self,
-              window != nil,
-              self.peerId == invocationPeerId
-        else { return }
+        guard window != nil, self.peerId == invocationPeerId else { return }
         log.error("Inline command failed", error: error)
         ToastManager.shared.showToast(
           error.localizedDescription,

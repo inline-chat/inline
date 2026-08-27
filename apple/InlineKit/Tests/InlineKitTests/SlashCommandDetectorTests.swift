@@ -21,8 +21,8 @@ struct SlashCommandDetectorTests {
     #expect(result?.query == "help")
   }
 
-  @Test("detects slash command after whitespace")
-  func detectsAfterWhitespace() {
+  @Test("does not detect slash command after existing text")
+  func doesNotDetectAfterExistingText() {
     let detector = SlashCommandDetector()
     let text = "hello /he"
     let attributed = NSAttributedString(string: text)
@@ -33,13 +33,11 @@ struct SlashCommandDetectorTests {
       in: attributed
     )
 
-    #expect(result != nil)
-    #expect(result?.range == nsText.range(of: "/he"))
-    #expect(result?.query == "he")
+    #expect(result == nil)
   }
 
-  @Test("detects slash command after newline")
-  func detectsAfterNewline() {
+  @Test("does not detect slash command after an earlier line")
+  func doesNotDetectAfterEarlierLine() {
     let detector = SlashCommandDetector()
     let text = "hello\n/help"
     let attributed = NSAttributedString(string: text)
@@ -50,9 +48,36 @@ struct SlashCommandDetectorTests {
       in: attributed
     )
 
-    #expect(result != nil)
+    #expect(result == nil)
+  }
+
+  @Test("detects slash command after leading whitespace only")
+  func detectsAfterLeadingWhitespace() {
+    let detector = SlashCommandDetector()
+    let text = " \n\t/help"
+    let attributed = NSAttributedString(string: text)
+    let nsText = text as NSString
+
+    let result = detector.detectSlashCommandAt(
+      cursorPosition: nsText.length,
+      in: attributed
+    )
+
     #expect(result?.range == nsText.range(of: "/help"))
     #expect(result?.query == "help")
+  }
+
+  @Test("does not detect a command when message text follows it")
+  func doesNotDetectWithTrailingMessageText() {
+    let detector = SlashCommandDetector()
+    let text = "/help existing"
+
+    let result = detector.detectSlashCommandAt(
+      cursorPosition: 5,
+      in: NSAttributedString(string: text)
+    )
+
+    #expect(result == nil)
   }
 
   @Test("does not detect slash command mid-word")
@@ -86,7 +111,7 @@ struct SlashCommandDetectorTests {
   @Test("replacement range includes the active slash query")
   func replacementRangeIncludesActiveQuery() {
     let detector = SlashCommandDetector()
-    let text = "hello /hel world"
+    let text = " /hel"
     let attributed = NSAttributedString(string: text)
     let nsText = text as NSString
     let cursorPosition = nsText.range(of: "/hel").upperBound

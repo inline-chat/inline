@@ -193,6 +193,7 @@ class GlassComposeAppKit: NSView {
   private var currentSlashQuery: String?
   private var commandKeyMonitorEscUnsubscribe: (() -> Void)?
   private var commandMenuConstraints: [NSLayoutConstraint] = []
+  private var inlineCommandTask: Task<Void, Never>?
 
   // Shared autocomplete
   private let threadLinkDetector = ThreadLinkDetector()
@@ -2537,6 +2538,7 @@ class GlassComposeAppKit: NSView {
   }
 
   private func performInlineCommand(_ action: InlineCommandAction) {
+    guard inlineCommandTask == nil else { return }
     let invocationPeerId = peerId
     let invocationText = textEditor.plainText
     let invocationAttributedText = NSAttributedString(attributedString: textEditor.attributedString)
@@ -2548,39 +2550,52 @@ class GlassComposeAppKit: NSView {
           state.forwardContext == nil,
           attachmentItems.isEmpty,
           !drafts2.hasPendingAttachments(peer: invocationPeerId),
-          !voiceViewModel.isActive,
-          let messageList,
-          let maxID = messageList.highestPositiveMessageId
+          !voiceViewModel.isActive
     else { return }
 
     hideCommandCompletion()
-    Task { @MainActor [weak self] in
+    inlineCommandTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      defer { inlineCommandTask = nil }
       do {
+        let execution: InlineCommandExecution
         switch action {
         case .collapseHistory:
+          guard let messageList,
+                let maxID = messageList.highestPositiveMessageId
+          else { return }
           try await messageList.collapseHistory(maxID: maxID)
+          execution = .completed
+        case .createSubthread:
+          guard let parentChatId = chatId else { return }
+          let result = try await LocalThreadCommandService.createAndOpen(parentChatId: parentChatId) {
+            [realtimeV2 = dependencies.realtimeV2] transaction in
+            try await realtimeV2.send(transaction)
+          }
+          execution = .openThread(result)
         }
 
-        guard let self,
-              window != nil,
-              peerId == invocationPeerId
-        else { return }
-        guard textEditor.plainText == invocationText,
-              textEditor.attributedString.isEqual(to: invocationAttributedText),
-              state.replyingToMsgId == replyingToMsgId,
-              state.editingMsgId == nil,
-              state.forwardContext == nil,
-              attachmentItems.isEmpty,
-              !drafts2.hasPendingAttachments(peer: invocationPeerId),
-              !voiceViewModel.isActive
-        else { return }
+        guard window != nil, peerId == invocationPeerId else { return }
+        let invocationIsUnchanged = textEditor.plainText == invocationText &&
+          textEditor.attributedString.isEqual(to: invocationAttributedText) &&
+          state.replyingToMsgId == replyingToMsgId &&
+          state.editingMsgId == nil &&
+          state.forwardContext == nil &&
+          attachmentItems.isEmpty &&
+          !drafts2.hasPendingAttachments(peer: invocationPeerId) &&
+          !voiceViewModel.isActive
+        if invocationIsUnchanged {
+          clearInlineCommandText()
+        }
 
-        clearInlineCommandText()
+        if case let .openThread(result) = execution {
+          dependencies.openChatRoute(peer: result.peer)
+          if !result.didOpenInSidebar {
+            ToastCenter.shared.showError("Thread created, but couldn’t open it in the sidebar.")
+          }
+        }
       } catch {
-        guard let self,
-              window != nil,
-              peerId == invocationPeerId
-        else { return }
+        guard window != nil, peerId == invocationPeerId else { return }
         log.error("Inline command failed", error: error)
         ToastCenter.shared.showError(error.localizedDescription)
       }
@@ -2593,6 +2608,11 @@ class GlassComposeAppKit: NSView {
     clearDraft()
     updateSendButtonIfNeeded()
     updateHeight()
+  }
+
+  private enum InlineCommandExecution {
+    case completed
+    case openThread(LocalThreadCommandResult)
   }
 
   private func trimmedAttributedString(_ attributedString: NSAttributedString) -> NSAttributedString {
@@ -2755,6 +2775,7 @@ class GlassComposeAppKit: NSView {
   }
 
   deinit {
+    inlineCommandTask?.cancel()
     if case .chat = usage {
       requestImmediateDraftPersistenceIfNeeded()
     }

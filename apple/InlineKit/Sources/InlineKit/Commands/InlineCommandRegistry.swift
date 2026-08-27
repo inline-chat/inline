@@ -2,6 +2,7 @@ import Foundation
 
 public enum InlineCommandAction: Hashable, Sendable {
   case collapseHistory
+  case createSubthread
 }
 
 public struct InlineCommandDefinition: Identifiable, Hashable, Sendable {
@@ -26,6 +27,11 @@ public enum InlineCommandRegistry {
       command: "clear",
       description: "Collapse history for you — nothing is deleted.",
       action: .collapseHistory
+    ),
+    InlineCommandDefinition(
+      command: "thread",
+      description: "Create and open a subthread.",
+      action: .createSubthread
     ),
   ]
 
