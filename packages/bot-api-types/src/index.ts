@@ -92,6 +92,8 @@ export type BotMessageEntityOutput = {
   offset: number
   length: number
   user?: BotUser
+  /** Agent selected beneath the mentioned bot user. */
+  agent_id?: number
   url?: string
   language?: string
   chat_id?: number
@@ -363,9 +365,32 @@ export type BotChatParticipant = {
   member?: BotSpaceMember
 }
 
+export type BotAgent = {
+  id: number
+  bot_user_id: number
+  name: string
+  handle?: string
+  emoji?: string
+  description?: string
+  skill_key?: string
+  instructions?: string
+}
+
+export type CreateAgentParams = Omit<BotAgent, "id" | "bot_user_id">
+export type GetAgentParams = { agent_id: BotInputId }
+export type UpdateAgentParams = Partial<CreateAgentParams> & { agent_id: BotInputId }
+export type DeleteAgentParams = { agent_id: BotInputId }
+export type CreateAgentResult = { agent: BotAgent }
+export type GetAgentResult = { bot: BotUser; agent: BotAgent }
+export type GetMyAgentsResult = { agents: BotAgent[] }
+export type UpdateAgentResult = { agent: BotAgent }
+export type DeleteAgentResult = { agent_id: number }
+
 type BotUpdateBase = {
   update_id: number
   activation_reason?: BotActivationReason
+  /** Full specialization selected for this directed activation. */
+  activated_agent?: BotAgent
 }
 
 export type BotUpdate = BotUpdateBase &
@@ -644,6 +669,11 @@ export type BotMethodName =
   | "createThread"
   | "createReplyThread"
   | "getMyCommands"
+  | "createAgent"
+  | "getAgent"
+  | "getMyAgents"
+  | "updateAgent"
+  | "deleteAgent"
   | "setMyCommands"
   | "deleteMyCommands"
   | "sendMessage"
@@ -681,6 +711,11 @@ export type BotMethodParamsByName = {
   createThread: CreateThreadParams
   createReplyThread: CreateReplyThreadParams
   getMyCommands: undefined
+  createAgent: CreateAgentParams
+  getAgent: GetAgentParams
+  getMyAgents: undefined
+  updateAgent: UpdateAgentParams
+  deleteAgent: DeleteAgentParams
   setMyCommands: SetMyCommandsParams
   deleteMyCommands: undefined
   sendMessage: SendMessageParams
@@ -719,6 +754,11 @@ export type BotMethodResultByName = {
   createThread: CreateThreadResult
   createReplyThread: CreateReplyThreadResult
   getMyCommands: GetMyCommandsResult
+  createAgent: CreateAgentResult
+  getAgent: GetAgentResult
+  getMyAgents: GetMyAgentsResult
+  updateAgent: UpdateAgentResult
+  deleteAgent: DeleteAgentResult
   setMyCommands: EmptyResult
   deleteMyCommands: EmptyResult
   sendMessage: SendMessageResult
