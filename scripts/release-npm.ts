@@ -44,6 +44,10 @@ interface CommandResult {
   stderr: string
 }
 
+export function isRegistryNotFound(output: string): boolean {
+  return /E404|No match found|not found/i.test(output)
+}
+
 interface WorkflowRun {
   databaseId: number
   status: string
@@ -360,15 +364,19 @@ async function readRegistryState(
   if (versionResult.exitCode === 0) {
     throw new Error(`${packageName}@${version} already exists on npm`)
   }
-  if (!/E404|No match found|not found/i.test(`${versionResult.stderr}\n${versionResult.stdout}`)) {
+  if (!isRegistryNotFound(`${versionResult.stderr}\n${versionResult.stdout}`)) {
     throw new Error(`Could not check ${packageName}@${version}: ${versionResult.stderr}`)
   }
 
-  const tags = await requireCommand(
+  const tagsResult = await runCommand(
     ["npm", "view", packageName, "dist-tags", "--json"],
-    repoRoot,
+    { cwd: repoRoot },
   )
-  return parseJson<Record<string, string>>(tags, `${packageName} dist-tags`)
+  if (tagsResult.exitCode !== 0) {
+    if (isRegistryNotFound(`${tagsResult.stderr}\n${tagsResult.stdout}`)) return {}
+    throw new Error(`Could not check ${packageName} dist-tags: ${tagsResult.stderr}`)
+  }
+  return parseJson<Record<string, string>>(tagsResult.stdout, `${packageName} dist-tags`)
 }
 
 async function confirmRelease(summary: string): Promise<void> {

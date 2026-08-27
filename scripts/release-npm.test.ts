@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   PACKAGE_CONFIGS,
   expectedDistTag,
+  isRegistryNotFound,
   parseReleaseArgs,
   parseWorkflowRunUrl,
   resolveDistTag,
@@ -93,6 +94,12 @@ test("parses the workflow run URL emitted by gh", () => {
     url: "https://github.com/inline-chat/inline/actions/runs/30258929111",
   })
   expect(parseWorkflowRunUrl("workflow queued")).toBeUndefined()
+})
+
+test("recognizes an unpublished package as missing registry state", () => {
+  expect(isRegistryNotFound("npm error code E404\nNot Found")).toBe(true)
+  expect(isRegistryNotFound("No match found for version 1.2.3")).toBe(true)
+  expect(isRegistryNotFound("npm error code E401\nUnauthorized")).toBe(false)
 })
 
 test("keeps the local allowlist aligned with the workflow security boundary", async () => {
