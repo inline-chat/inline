@@ -13,6 +13,7 @@ import { MessageModel } from "@in/server/db/models/messages"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import {
   agentSessionMessages,
+  agentSessions,
   botMessageRoutes,
   chats,
   members,
@@ -116,6 +117,49 @@ describe("agent session continuity", () => {
         relation: AgentSessionMessageRelation.IMPORTED,
       },
     ])
+  })
+
+  test("parses imported assistant Markdown into Inline rich content", async () => {
+    const connected = await connect()
+    const synced = await syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.HISTORY,
+      messages: [{
+        role: AgentSessionMessageRole.ASSISTANT,
+        itemRef: "assistant-rich-item",
+        sourceDate: 1_700_000_001n,
+        revisionRef: "assistant-rich-r1",
+        complete: true,
+        operation: {
+          oneofKind: "upsert",
+          upsert: { text: "**Done**\n\n```sh\nbun test\n```" },
+        },
+      }],
+    }, botId)
+
+    expect(synced.messages[0]?.state).toBe(AgentSessionMessageSyncState.CREATED)
+    const message = await MessageModel.getMessage(Number(synced.messages[0]!.messageId), chatId)
+    expect(message.text).not.toContain("**")
+    expect(message.blockContent).toBeDefined()
+
+    const edited = await syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.HISTORY,
+      messages: [{
+        role: AgentSessionMessageRole.ASSISTANT,
+        itemRef: "assistant-rich-item",
+        sourceDate: 1_700_000_001n,
+        revisionRef: "assistant-rich-r2",
+        baseRevisionRef: "assistant-rich-r1",
+        complete: true,
+        operation: { oneofKind: "upsert", upsert: { text: "Plain completion" } },
+      }],
+    }, botId)
+    expect(edited.messages[0]?.state).toBe(AgentSessionMessageSyncState.EDITED)
+    const plain = await MessageModel.getMessage(Number(synced.messages[0]!.messageId), chatId)
+    expect(plain.text).toBe("Plain completion")
+    expect(plain.blockContent?.blocks).toHaveLength(1)
+    expect(plain.blockContent?.blocks[0]?.kind.oneofKind).toBe("paragraph")
   })
 
   test("deduplicates retries and compare-and-swap edits the same assistant row", async () => {
@@ -683,6 +727,28 @@ describe("agent session continuity", () => {
     if (canonicalPeer?.type.oneofKind === "chat") {
       expect(canonicalPeer.type.chat.chatId).toBe(BigInt(chatId))
     }
+
+    const lookup = await connectAgentSession({
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "codex-installation",
+      sessionRef: "codex-session",
+    }, ownerId)
+    expect(lookup.state).toBe(ConnectAgentSessionState.ALREADY_CONNECTED)
+    expect(lookup.agentSession?.id).toBe(first.agentSession?.id)
+  })
+
+  test("canonical lookup misses without creating or reserving a session", async () => {
+    const lookup = await connectAgentSession({
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "codex-installation",
+      sessionRef: "missing-session",
+    }, ownerId)
+
+    expect(lookup.state).toBe(ConnectAgentSessionState.UNSPECIFIED)
+    expect(lookup.agentSession).toBeUndefined()
+    expect(await db.select().from(agentSessions)).toHaveLength(0)
   })
 
   test("allows public threads in normal spaces but rejects internet-public spaces", async () => {
@@ -708,6 +774,13 @@ describe("agent session continuity", () => {
       sessionRef: "normal-space-session",
     }, ownerId)
     expect(normal.state).toBe(ConnectAgentSessionState.CREATED)
+    await db.update(spaces).set({ isPublic: true }).where(eq(spaces.id, normalSpace.id))
+    await expect(connectAgentSession({
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "codex-installation",
+      sessionRef: "normal-space-session",
+    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
 
     const internetSpace = await testUtils.createSpace("Agent internet space")
     if (!internetSpace) throw new Error("internet space not created")
