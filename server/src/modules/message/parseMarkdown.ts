@@ -286,12 +286,12 @@ function findCodeBlocks(text: string, matches: Match[]): void {
       closingCursor = candidate.next
     }
 
-    if (!closingLine) {
-      cursor = openingLine.next
-      continue
-    }
-
-    const rawCode = text.slice(openingLine.next, closingLine.start)
+    // CommonMark treats an opening fence without a closing fence as code
+    // through the end of the document. Streaming snapshots need the same
+    // top-to-bottom rule so a completed block stays closed and a later open
+    // block protects its contents from inline Markdown parsing.
+    const contentBoundary = closingLine?.start ?? text.length
+    const rawCode = text.slice(openingLine.next, contentBoundary)
     const trimmedCode = rawCode.trim()
     const leadingTrim = rawCode.length - rawCode.trimStart().length
     const trailingTrim = rawCode.length - rawCode.trimEnd().length
@@ -306,14 +306,14 @@ function findCodeBlocks(text: string, matches: Match[]): void {
       // Preserve the legacy parser's leading indentation outside the entity;
       // only the fence itself is syntax in the flat compatibility projection.
       start: openingLine.start + opening.indent,
-      end: closingLine.contentEnd,
+      end: closingLine?.contentEnd ?? text.length,
       content: trimmedCode,
       contentStart,
       contentEnd,
       type: MessageEntity_Type.PRE,
       language: cleanFenceLanguage(opening.info),
     })
-    cursor = closingLine.next
+    cursor = closingLine?.next ?? text.length
   }
 }
 

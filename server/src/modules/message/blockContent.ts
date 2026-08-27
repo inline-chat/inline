@@ -929,27 +929,44 @@ function findFencedCodeContentRange(
   start: number,
   end: number,
 ): { start: number; end: number } | undefined {
+  const sourceLineStart = markdown.lastIndexOf("\n", Math.max(0, start - 1)) + 1
+  // mdast positions may start after a block-quote or deeply nested list
+  // prefix. The legacy projection does not remove those repeated container
+  // markers, so it cannot represent that code body as one contiguous range.
+  // Keep the literal fallback until both projections share container-aware
+  // fence mapping.
+  if (!/^ {0,3}$/.test(markdown.slice(sourceLineStart, start))) return undefined
+
   const openingLine = readLine(markdown, start, end)
   const fence = parseOpeningFence(openingLine.value)
-  if (!fence || openingLine.next >= end) return undefined
+  if (!fence) return undefined
 
   let cursor = openingLine.next
   while (cursor < end) {
     const line = readLine(markdown, cursor, end)
     if (isClosingFence(line.value, fence)) {
       if (line.contentEnd !== end) return undefined
-      const raw = markdown.slice(openingLine.next, line.start)
-      const leading = raw.length - raw.trimStart().length
-      const trimmed = raw.trim()
-      const contentStart = openingLine.next + leading
-      return {
-        start: contentStart,
-        end: trimmed.length === 0 ? contentStart : contentStart + trimmed.length,
-      }
+      return trimmedRange(markdown, openingLine.next, line.start)
     }
     cursor = line.next
   }
-  return undefined
+
+  // An unclosed fenced code node extends through the end of the current
+  // CommonMark document. This is especially important for full-replacement
+  // streaming snapshots: the open trailing block remains code without
+  // borrowing a boundary from any completed block before it.
+  return trimmedRange(markdown, openingLine.next, end)
+}
+
+function trimmedRange(markdown: string, start: number, end: number): { start: number; end: number } {
+  const raw = markdown.slice(start, end)
+  const leading = raw.length - raw.trimStart().length
+  const trimmed = raw.trim()
+  const contentStart = start + leading
+  return {
+    start: contentStart,
+    end: trimmed.length === 0 ? contentStart : contentStart + trimmed.length,
+  }
 }
 
 function nodeRange(

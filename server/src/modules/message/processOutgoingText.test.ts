@@ -491,4 +491,33 @@ describe("processOutgoingText", () => {
     expect(result.entities?.entities).toHaveLength(1)
     expect(result.entities?.entities[0]?.type).toBe(MessageEntity_Type.CODE)
   })
+
+  test("projects completed and trailing open fences through one shared parse", async () => {
+    const input = [
+      "```ts",
+      "const first = true",
+      "```",
+      "```swift",
+      "let second = `value`",
+    ].join("\n")
+    const result = await processOutgoingText({
+      text: input,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe("const first = true\nlet second = `value`")
+    expect(result.entities?.entities.map((entity) => entity.type)).toEqual([
+      MessageEntity_Type.PRE,
+      MessageEntity_Type.PRE,
+    ])
+    expect(result.blockContent?.blocks.map((block) => block.kind.oneofKind)).toEqual(["code", "code"])
+
+    const second = result.blockContent?.blocks[1]
+    expect(second?.kind.oneofKind).toBe("code")
+    if (second?.kind.oneofKind !== "code") return
+    const start = Number(second.kind.code.text?.offset ?? 0n)
+    const end = start + Number(second.kind.code.text?.length ?? 0n)
+    expect(result.text.slice(start, end)).toBe("let second = `value`")
+  })
 })

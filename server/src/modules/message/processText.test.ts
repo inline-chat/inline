@@ -74,14 +74,54 @@ describe("parseMarkdown", () => {
     })
   })
 
-  test("leaves every incomplete adaptive fence prefix literal", () => {
+  test("keeps an open adaptive fence as code while its closing delimiter streams", () => {
+    for (let length = 1; length < 3; length++) {
+      const partialOpening = "`".repeat(length)
+      expect(parseMarkdown(partialOpening)).toEqual({ text: partialOpening, entities: [] })
+    }
+
     const complete = "````swift\nlet value = 1\n````"
     const closingStart = complete.lastIndexOf("````")
     for (let length = 1; length < 4; length++) {
       const prefix = complete.slice(0, closingStart + length)
-      expect(parseMarkdown(prefix)).toEqual({ text: prefix, entities: [] })
+      const parsed = parseMarkdown(prefix)
+      expect(parsed.entities).toHaveLength(1)
+      expect(parsed.entities[0]?.type).toBe(MessageEntity_Type.PRE)
+      expect(parsed.text).toBe(`let value = 1\n${"`".repeat(length)}`)
     }
     expect(parseMarkdown(complete).entities[0]?.type).toBe(MessageEntity_Type.PRE)
+  })
+
+  test("keeps completed and trailing open code fences as separate entities", () => {
+    const input = [
+      "```ts",
+      "const first = true",
+      "```",
+      "```swift",
+      "let second = `value`",
+      "[not a link](target)",
+    ].join("\n")
+    const parsed = parseMarkdown(input)
+
+    expect(parsed.text).toBe([
+      "const first = true",
+      "let second = `value`",
+      "[not a link](target)",
+    ].join("\n"))
+    expect(parsed.entities.map((entity) => entity.type)).toEqual([
+      MessageEntity_Type.PRE,
+      MessageEntity_Type.PRE,
+    ])
+    expect(parsed.entities.map((entity) => entity.entity.oneofKind === "pre" ? entity.entity.pre.language : ""))
+      .toEqual(["ts", "swift"])
+  })
+
+  test("leaves ambiguous trailing inline Markdown literal", () => {
+    const input = "**complete**\n\nunfinished **bold and [link](https://example.com"
+    const parsed = parseMarkdown(input)
+
+    expect(parsed.text).toBe("complete\n\nunfinished **bold and [link](https://example.com")
+    expect(parsed.entities.map((entity) => entity.type)).toEqual([MessageEntity_Type.BOLD])
   })
 
   describe("basic patterns", () => {
@@ -257,10 +297,16 @@ describe("parseMarkdown", () => {
       }
     })
 
-    test("unclosed code block is left unchanged", () => {
+    test("unclosed code block extends through the end of the snapshot", () => {
       const result = parseMarkdown("```js\ncode without closing")
-      expect(result.text).toBe("```js\ncode without closing")
-      expect(result.entities).toHaveLength(0)
+      expect(result.text).toBe("code without closing")
+      expect(result.entities).toHaveLength(1)
+      expect(result.entities[0]).toMatchObject({
+        offset: 0n,
+        length: 20n,
+        type: MessageEntity_Type.PRE,
+        entity: { oneofKind: "pre", pre: { language: "js" } },
+      })
     })
 
     test("code block with empty content", () => {

@@ -237,10 +237,79 @@ describe("block content parser", () => {
     expect(parsed.imageSources).toEqual([])
   })
 
-  test("an incomplete code fence stays a paragraph for stable streaming semantics", () => {
+  test("an incomplete code fence is an open code block through the current snapshot", () => {
     const markdown = "```swift\nlet value = 1"
     const parsed = parseBlockContent(markdown)!
-    expect(parsed.blockContent.blocks.map(kind)).toEqual(["paragraph"])
+    expect(parsed.blockContent.blocks.map(kind)).toEqual(["code"])
+    const code = parsed.blockContent.blocks[0]
+    expect(textFor(markdown, code?.kind.oneofKind === "code" ? code.kind.code.text : undefined)).toBe(
+      "let value = 1",
+    )
+  })
+
+  test("never reparses a completed code boundary as the opening of a trailing streamed block", () => {
+    const completed = ["```ts", "const first = true", "```"].join("\n")
+    const trailing = ["", "```swift", "let second = `value`", "[not a link](target)"].join("\n")
+
+    for (let length = 0; length <= trailing.length; length++) {
+      const markdown = `${completed}${trailing.slice(0, length)}`
+      const parsed = parseBlockContent(markdown)!
+      const first = parsed.blockContent.blocks[0]
+
+      expect(first?.kind.oneofKind).toBe("code")
+      expect(textFor(markdown, first?.kind.oneofKind === "code" ? first.kind.code.text : undefined)).toBe(
+        "const first = true",
+      )
+
+      if (trailing.slice(0, length).startsWith("\n```")) {
+        expect(parsed.blockContent.blocks[1]?.kind.oneofKind).toBe("code")
+      }
+    }
+
+    const finalMarkdown = `${completed}${trailing}`
+    const final = parseBlockContent(finalMarkdown)!
+    expect(final.blockContent.blocks.map(kind)).toEqual(["code", "code"])
+    const second = final.blockContent.blocks[1]
+    expect(textFor(finalMarkdown, second?.kind.oneofKind === "code" ? second.kind.code.text : undefined)).toBe(
+      "let second = `value`\n[not a link](target)",
+    )
+  })
+
+  test("preserves adaptive fence boundaries when open code contains shorter runs", () => {
+    const markdown = [
+      "~~~~txt",
+      "first",
+      "~~~~",
+      "````swift",
+      "let marker = ```",
+    ].join("\r\n")
+    const parsed = parseBlockContent(markdown)!
+
+    expect(parsed.blockContent.blocks.map(kind)).toEqual(["code", "code"])
+    const first = parsed.blockContent.blocks[0]
+    const second = parsed.blockContent.blocks[1]
+    expect(textFor(markdown, first?.kind.oneofKind === "code" ? first.kind.code.text : undefined)).toBe("first")
+    expect(textFor(markdown, second?.kind.oneofKind === "code" ? second.kind.code.text : undefined)).toBe(
+      "let marker = ```",
+    )
+  })
+
+  test("keeps container-prefixed fences literal when no contiguous code range exists", () => {
+    const markdown = [
+      "> ```ts",
+      "> const first = true",
+      "> ```",
+      "> ```swift",
+      "> let second = `value`",
+    ].join("\n")
+    const parsed = parseBlockContent(markdown)!
+    const quote = parsed.blockContent.blocks[0]
+
+    expect(quote?.kind.oneofKind).toBe("quote")
+    expect(quote?.kind.oneofKind === "quote" ? quote.kind.quote.children.map(kind) : []).toEqual([
+      "paragraph",
+      "paragraph",
+    ])
   })
 
   test("all structural streaming prefixes remain deterministic and valid", () => {
