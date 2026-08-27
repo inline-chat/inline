@@ -330,6 +330,12 @@ struct SidebarChatItemView: Equatable, View {
         Label("Open in New Window", systemImage: "macwindow")
       }
 
+      Button {
+        ChatMenuActions.copyLink(for: peerId)
+      } label: {
+        Label("Copy Link", systemImage: "link")
+      }
+
       if item.parentChatId != nil {
         Button {
           showRenameSheet = true

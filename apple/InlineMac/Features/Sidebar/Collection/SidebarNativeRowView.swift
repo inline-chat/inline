@@ -2438,6 +2438,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       systemImage: "macwindow",
       action: actions.openInNewWindow
     ))
+    menu.addItem(SidebarNativeMenuItem(
+      title: "Copy Link",
+      systemImage: "link"
+    ) {
+      ChatMenuActions.copyLink(for: presentation.peerID)
+    })
     if presentation.parentChatID != nil {
       menu.addItem(SidebarNativeMenuItem(
         title: "Rename Thread…",
