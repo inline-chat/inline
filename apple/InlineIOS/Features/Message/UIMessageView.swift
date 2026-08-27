@@ -1661,21 +1661,6 @@ class UIMessageView: UIView {
     guard let characterIndex = serviceCharacterIndex(at: gesture.location(in: serviceLabel)) else { return }
 
     if let userId = attributedText.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) as? Int64 {
-      if let agentId = attributedText.attribute(.mentionAgentId, at: characterIndex, effectiveRange: nil) as? Int64 {
-        Task { @MainActor in
-          guard !(await BotAgentMentionNavigator.open(
-            agentId: agentId,
-            botUserId: userId,
-            peer: message.peerId
-          )) else { return }
-          NotificationCenter.default.post(
-            name: Notification.Name("NavigateToUser"),
-            object: nil,
-            userInfo: ["userId": userId]
-          )
-        }
-        return
-      }
       NotificationCenter.default.post(
         name: Notification.Name("NavigateToUser"),
         object: nil,
@@ -1760,24 +1745,8 @@ class UIMessageView: UIView {
         length: attributedText.length
       )) { value, range, _ in
         if NSLocationInRange(characterIndex, range),
-          let userId = value as? Int64
+           let userId = value as? Int64
         {
-          if let agentId = attributedText.attribute(.mentionAgentId, at: characterIndex, effectiveRange: nil) as? Int64 {
-            foundMention = true
-            Task { @MainActor in
-              guard !(await BotAgentMentionNavigator.open(
-                agentId: agentId,
-                botUserId: userId,
-                peer: message.peerId
-              )) else { return }
-              NotificationCenter.default.post(
-                name: Notification.Name("MentionTapped"),
-                object: nil,
-                userInfo: ["userId": userId]
-              )
-            }
-            return
-          }
           NotificationCenter.default.post(
             name: Notification.Name("MentionTapped"),
             object: nil,
@@ -2135,7 +2104,7 @@ class UIMessageView: UIView {
     return url
   }
 
-  private static func inlineMentionTarget(from url: URL) -> (userId: Int64, agentId: Int64?)? {
+  private static func inlineUserId(from url: URL) -> Int64? {
     guard url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" else {
       return nil
     }
@@ -2157,11 +2126,7 @@ class UIMessageView: UIView {
     guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
       return nil
     }
-    let agentId = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
-      .first { $0.name.lowercased() == "agent_id" }?
-      .value
-      .flatMap(Int64.init)
-    return (userId, agentId.flatMap { $0 > 0 ? $0 : nil })
+    return (userId, nil)
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
