@@ -477,6 +477,7 @@ export type GetWebhookInfoResult = WebhookInfo
 export type SendMessageParams = BotTargetInput & {
   text?: string
   reply_to_message_id?: BotInputId
+  /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
   media?:
     | { type: "photo" | "video" | "document" | "voice"; file_id: string }
@@ -491,6 +492,7 @@ export type SendMessageParams = BotTargetInput & {
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
   text: string
+  /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
   actions?: BotMessageAction[][]
   // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.

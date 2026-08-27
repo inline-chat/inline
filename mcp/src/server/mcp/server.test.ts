@@ -329,12 +329,15 @@ describe("mcp tool server", () => {
 
     const send = tools.find((tool) => tool.name === "messages.send")
     expect(send.description).toContain("Provide exactly one of chatId or userId")
+    expect(send.description).toContain("parsed as Inline Markdown")
+    expect(send.inputSchema.properties.text.description).toContain("supported Inline Markdown")
     expect(send.annotations.readOnlyHint).toBe(false)
     expect(send.annotations.destructiveHint).toBe(true)
     expect(send.annotations.idempotentHint).toBe(false)
     expect(send._meta.securitySchemes[0].scopes).toEqual(["messages:write"])
 
     const sendBatch = tools.find((tool) => tool.name === "messages.send_batch")
+    expect(sendBatch.description).toContain("parsed as Inline Markdown")
     expect(sendBatch.inputSchema.required).toEqual(["items"])
     expect(sendBatch.inputSchema.properties.items.items).toMatchObject({
       type: "object",
@@ -425,6 +428,10 @@ describe("mcp tool server", () => {
     expect(byName.get("files.upload").inputSchema.properties).not.toHaveProperty("url")
     expect(byName.get("files.get").inputSchema.properties).not.toHaveProperty("messageId")
     expect(byName.get("files.get").inputSchema.properties).not.toHaveProperty("userId")
+    expect(byName.get("messages.send").description).toContain("parsed as Inline Markdown")
+    expect(byName.get("messages.send").inputSchema.properties.text.description).toContain(
+      "supported Inline Markdown",
+    )
 
     for (const name of [
       "messages.send_media",

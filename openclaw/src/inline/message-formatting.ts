@@ -1,5 +1,6 @@
 const INLINE_FORMATTING_RULES = [
-  "Use Inline markdown.",
+  "Use Inline's supported Markdown: emphasis, inline or fenced code, links, headings, lists or checklists, quotes, tables, separators, and HTTP(S) images.",
+  "Do not rely on strikethrough, footnotes, or arbitrary HTML; unrecognized or ambiguous incomplete syntax remains visible text.",
   "Use ordinary Markdown tables for genuinely tabular data; never put a table in a fenced code block.",
   'For collapsible work, use <details open> followed by <summary>Title</summary>, body Markdown, and </details>; add kind="progress" to summary only while work is in progress.',
   "Use <footer>Attribution or brief metadata</footer> for a short message footer.",

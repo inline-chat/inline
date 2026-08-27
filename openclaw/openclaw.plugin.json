@@ -1070,7 +1070,7 @@
         },
         "parseMarkdown": {
           "label": "Inline Markdown",
-          "help": "Parse OpenClaw Markdown into Inline formatting for outgoing text. Defaults to true."
+          "help": "Parse Inline's supported Markdown surface for outgoing text. Defaults to true; false disables Inline parsing."
         },
         "mediaMaxMb": {
           "label": "Inline Media Limit",

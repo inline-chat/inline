@@ -209,7 +209,8 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Selectors support single IDs (`456`), comma lists (`91,92,100`), ranges (`91-100`), and repeated flags.
   - Single-ID output keeps the detailed message view. Multiple IDs print a compact table, or JSON with `messages` and any `missingMessageIds`.
 - `inline messages send [--chat-id 123 | --user-id 42] [--text "hi" | --message "hi" | --msg "hi" | -m "hi"] [--stdin] [--reply-to 456] [--mention USER_ID:OFFSET:LENGTH ...] [--attach PATH ...] [--force-file]`
-  - Send a message (markdown parsing enabled). Mentions are provided via `--mention` with UTF-16 offsets.
+  - Send a message (Inline Markdown parsing enabled). Supported input includes emphasis, inline/fenced code, links, headings, lists/checklists, quotes, tables, separators, HTTP(S) images, and Inline disclosure/footer extensions; unlisted syntax remains text.
+  - `inline messages edit` uses the same Markdown parsing contract. Mentions are provided via `--mention` with UTF-16 offsets; because those offsets address literal input, any send or caption with `--mention` preserves Markdown syntax instead of parsing it.
   - `--stdin` reads message text from piped or redirected stdin; it fails fast if stdin is an interactive terminal.
   - `--attach` is repeatable. Each attachment is sent as its own message; `--text` is reused as the caption.
   - Folders are zipped before upload. Attachments over 200MB are rejected.

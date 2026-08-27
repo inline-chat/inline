@@ -23,7 +23,7 @@ optional_env:
     prompt: "Inline API base URL"
     password: false
   - name: INLINE_PARSE_MARKDOWN
-    description: "Parse outbound Hermes Markdown in Inline messages (true/false, default true)"
+    description: "Parse supported outbound Inline Markdown (true by default; false preserves literal syntax)"
     prompt: "Parse outbound Markdown?"
     password: false
   - name: INLINE_SYNC_COMMANDS

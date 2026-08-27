@@ -65,7 +65,11 @@ INLINE_PLATFORM_GUIDANCE = (
     "while keeping the stable user ID in the link target. Link chats as "
     "[title](inline://chat?id=123), and link reply threads as "
     "[title](inline://thread?id=123). In Inline, reply threads are chat ids; "
-    "do not treat thread ids as reply/quote message ids. Use ordinary Markdown "
+    "do not treat thread ids as reply/quote message ids. Supported Markdown is "
+    "emphasis, inline or fenced code, links, headings, lists or checklists, "
+    "quotes, tables, separators, and HTTP(S) images. Do not rely on "
+    "strikethrough, footnotes, or arbitrary HTML; unsupported or ambiguous "
+    "incomplete syntax remains visible text. Use ordinary Markdown "
     "tables for tabular data, never fenced-code tables. For collapsible work, "
     "use <details open>, then <summary>Title</summary>, body Markdown, and "
     "</details>; put kind=\"progress\" on summary only while work is in progress. "
@@ -248,7 +252,7 @@ INLINE_TOOL_SCHEMA = {
                     },
                 },
             },
-            "parse_markdown": {"type": "boolean", "description": "Whether Inline should parse Markdown. Defaults to true."},
+            "parse_markdown": {"type": "boolean", "description": "Whether Inline should parse its supported Markdown surface. Defaults to true; false preserves the supplied syntax literally."},
             "limit": {
                 "type": "integer",
                 "minimum": 1,

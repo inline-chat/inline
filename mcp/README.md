@@ -91,13 +91,13 @@ Connect new clients to `https://mcp.inline.chat/mcp/v2`. Every conversation-scop
 - `messages.unread` (read-only): list unread messages across all approved conversations.
   - Input: `{ limit?, since?, until?, content? }`
   - Output: `{ scannedChats, since, until, content, items[] }`
-- `messages.send` (write): send to chat or DM.
+- `messages.send` (write): send Inline Markdown text to a chat or DM.
   - Input: `{ chatId, text, replyToMsgId?, sendMode? }`
   - Output: `{ ok, chatId, messageId, metadata }`
-- `messages.send_media` (write): send uploaded photo/video/document to chat or DM.
+- `messages.send_media` (write): send uploaded photo/video/document to chat or DM; optional captions use Inline Markdown.
   - Input: `{ chatId, mediaKind, mediaId, text?, replyToMsgId?, sendMode? }`
   - Output: `{ ok, chatId, media, messageId, metadata }`
-- `messages.send_batch` (write): send an ordered list of text/media items to a chat or DM.
+- `messages.send_batch` (write): send an ordered list of text/media items to a chat or DM; text items use Inline Markdown.
   - Input: `{ chatId, stopOnError?, items[] }`
   - Every item has exactly `{ type, content }` and uses normal, non-reply delivery.
   - `type` is `"text"`, `"photo"`, `"video"`, or `"document"`; `content` is text for a text item and an uploaded media ID otherwise.

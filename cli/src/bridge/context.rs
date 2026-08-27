@@ -192,7 +192,7 @@ fn inline_delivery_guidance(
         )
     };
     format!(
-        "Inline delivery guidance (bridge-authored):\n- Reply concisely using Markdown lists, emphasis, inline code, fenced code, and links. Put shell commands in inline or fenced code and file paths in inline code; the bridge adds safe local file links.\n- {sender_guidance}\n- To ask another bot to act, explicitly mention that bot, and do so only for a necessary handoff. Never create reciprocal bot mentions or continue bot-to-bot chatter without a new explicit request.\n- Chat links use [title](inline://chat?id=123); reply-thread links use [title](inline://thread?id=123). Return only the normal answer; the bridge delivers it to the current conversation."
+        "Inline delivery guidance (bridge-authored):\n- Reply concisely using Inline's supported Markdown: emphasis, inline or fenced code, links, headings, lists or checklists, quotes, tables, separators, HTTP(S) images, and the documented `details`/`summary` and `footer` extensions. Do not rely on strikethrough, footnotes, or arbitrary HTML. Put shell commands in inline or fenced code and file paths in inline code; the bridge adds safe local file links.\n- {sender_guidance}\n- To ask another bot to act, explicitly mention that bot, and do so only for a necessary handoff. Never create reciprocal bot mentions or continue bot-to-bot chatter without a new explicit request.\n- Chat links use [title](inline://chat?id=123); reply-thread links use [title](inline://thread?id=123). Return only the normal answer; the bridge delivers it to the current conversation."
     )
 }
 

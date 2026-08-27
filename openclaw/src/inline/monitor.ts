@@ -4127,6 +4127,7 @@ export async function monitorInlineProvider(params: {
                     idLine: `Your Inline user id: ${senderId}`,
                     code,
                   }),
+                  parseMarkdown: account.config.parseMarkdown ?? true,
                 })
                 publishStatus({ lastOutboundAt: Date.now() })
               } catch (err) {
@@ -4555,6 +4556,7 @@ export async function monitorInlineProvider(params: {
           chatId,
           text: menuText,
           ...(menuActions ? { actions: menuActions } : {}),
+          parseMarkdown,
         })
         rememberSentBotMessage({ chatId, messageId: sent.messageId, replyThreadContext })
       }
@@ -5201,6 +5203,7 @@ export async function monitorInlineProvider(params: {
               chatId: deliveryChatId,
               text,
               sendMode: "silent",
+              parseMarkdown,
             })
             if (sent.messageId == null) {
               throw new Error("inline progress placeholder: sendMessage returned no messageId")
@@ -5218,6 +5221,7 @@ export async function monitorInlineProvider(params: {
                 messageId: progressState.messageId,
                 peerId: buildChatPeer(deliveryChatId),
                 text,
+                parseMarkdown,
               },
             })
             if (result.oneofKind !== "editMessage") {
@@ -6397,6 +6401,7 @@ export async function monitorInlineProvider(params: {
         .sendMessage({
           chatId,
           text: INLINE_DEBOUNCE_ERROR_FALLBACK,
+          parseMarkdown: account.config.parseMarkdown ?? true,
         })
         .then(() => {
           publishStatus({ lastOutboundAt: Date.now() })

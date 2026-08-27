@@ -4255,6 +4255,7 @@ class InlineAdapter(BasePlatformAdapter):
             "path": safe_path,
             "kind": kind,
             "caption": caption,
+            "parseMarkdown": self._parse_markdown,
             "fileName": file_name,
             "mimeType": mime_type,
         }
@@ -4546,7 +4547,9 @@ class InlineAdapter(BasePlatformAdapter):
         return out
 
     def format_message(self, content: str) -> str:
-        return content if self._parse_markdown else strip_markdown(content)
+        # parseMarkdown=false means literal input at every Inline API boundary.
+        # Preserve that contract instead of silently rewriting the caller's text.
+        return content
 
     def _target_for(self, chat_id: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         thread_id = (metadata or {}).get("thread_id")

@@ -286,6 +286,8 @@ assert parse_inline_agent_action_reply_target(build_inline_agent_action_turn_id(
 assert parse_inline_agent_action_reply_target("42") is None
 assert "visible label is their first name, falling back to username" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert "never fenced-code tables" in inline_tools.INLINE_PLATFORM_GUIDANCE
+assert "Supported Markdown is emphasis" in inline_tools.INLINE_PLATFORM_GUIDANCE
+assert "unsupported or ambiguous incomplete syntax remains visible text" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert '<summary>Title</summary>' in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert '<footer>Attribution or brief metadata</footer>' in inline_tools.INLINE_PLATFORM_GUIDANCE
 first_name_guidance = inline_tools.inline_sender_guidance(
@@ -306,6 +308,14 @@ assert "@user:1600" not in username_guidance
 assert validate_config(PlatformConfig(token="top-level-token"))
 token_only = InlineAdapter(PlatformConfig(token="top-level-token"))
 assert token_only._token == "top-level-token"
+literal_markdown = InlineAdapter(PlatformConfig(
+    token="top-level-token",
+    extra={"parse_markdown": False},
+))
+original_strip_markdown = inline_adapter_module.strip_markdown
+inline_adapter_module.strip_markdown = lambda text: f"stripped:{text}"
+assert literal_markdown.format_message("literal **Markdown**") == "literal **Markdown**"
+inline_adapter_module.strip_markdown = original_strip_markdown
 
 menu_commands, hidden_commands = _inline_menu_commands(100)
 assert hidden_commands == 0
@@ -3081,6 +3091,13 @@ async def assert_upload_size_cap():
         assert result.success is False
         assert "attachment exceeds Inline upload cap" in result.error
         assert calls == []
+
+        literal_adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "parse_markdown": False}))
+        literal_adapter._send_sidecar = fake_send_sidecar
+        literal_result = await literal_adapter.send_document("chat:10", str(path), caption="literal **caption**")
+        assert literal_result.success is True
+        assert calls[-1][0] == "/send-attachment"
+        assert calls[-1][1]["parseMarkdown"] is False
 
 asyncio.run(assert_upload_size_cap())
 

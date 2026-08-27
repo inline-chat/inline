@@ -44,7 +44,7 @@ Unsupported or intentionally limited:
 
 - Multiple Inline accounts in one Hermes process. Run separate Hermes instances for separate tokens.
 - Inline member, space, and admin tools beyond bounded current-chat/thread message access.
-- Full Inline rich-text span conversion. Outbound formatting uses Inline Markdown parsing; rich entities are summarized for the agent instead of converted into Hermes-specific spans.
+- Full Inline rich-text span conversion. Outbound formatting uses [Inline's bounded Markdown surface](../docs/markdown.md); rich entities are summarized for the agent instead of converted into Hermes-specific spans. Parsing is enabled by default, while disabling it preserves the supplied syntax literally.
 - Native animated draft streaming. Inline can stream by sending one preview message and editing it, but this edit-based streaming path is off by default like Discord and Slack.
 - Ephemeral in-channel private replies. Private notices are sent as DMs when a user id is available.
 - Live voice sessions or calls. Voice file messages are supported, but realtime audio is not.
@@ -294,7 +294,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On/Off buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_MENTION_PATTERNS` | JSON list, comma-separated, or newline-separated regex patterns for group wake words. |
-| `INLINE_PARSE_MARKDOWN` | Controls whether outbound Hermes Markdown is parsed by Inline. Defaults to `true`. |
+| `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
 | `INLINE_SYNC_COMMANDS` | Syncs Hermes slash commands into Inline's native `/` bot command menu on gateway connect. Defaults to `true`. |
 | `INLINE_COMMAND_LIMIT` | Caps native Inline bot command sync. Must be `1` through `100`; defaults to `100`. |
 | `INLINE_MEDIA_MAX_MB` | Maximum inbound media download size for URL-backed Inline attachments. Defaults to `25`. |

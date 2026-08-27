@@ -438,6 +438,7 @@ async function endpointSendAttachment(res: ServerResponse, body: unknown) {
   const filePath = readRequiredString(record, "path")
   const kind = normalizeUploadKind(readOptionalString(record, "kind"), filePath)
   const caption = readOptionalString(record, "caption")
+  const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true
   const replyToMsgId = readOptionalInlineId(record, "replyToMsgId")
   const fileName = readOptionalString(record, "fileName") || path.basename(filePath)
   const contentType = readOptionalString(record, "mimeType")
@@ -462,7 +463,7 @@ async function endpointSendAttachment(res: ServerResponse, body: unknown) {
   if (!media) throw new SidecarError("upload did not return a sendable media id", "unknown")
   const sendParams = {
     media,
-    ...(caption ? { text: caption, parseMarkdown: true } : {}),
+    ...(caption ? { text: caption, parseMarkdown } : {}),
     ...(replyToMsgId ? { replyToMsgId } : {}),
   }
   const sent = "chatId" in target

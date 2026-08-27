@@ -230,6 +230,7 @@ describe("sidecar runtime", () => {
         path: photoPath,
         kind: "photo",
         caption: "attached",
+        parseMarkdown: false,
         replyToMsgId: "8",
         mimeType: "image/png",
       }, auth)
@@ -238,6 +239,19 @@ describe("sidecar runtime", () => {
         messageId: "9003",
         fileUniqueId: "mock-file-7001",
       })
+
+      const healthAfterPhoto = await post(port, "/healthz", {}, auth)
+      expect(resultOf(healthAfterPhoto.body).diagnostics.calls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            method: "sendMessage",
+            params: expect.objectContaining({
+              media: { kind: "photo", photoId: "7001" },
+              parseMarkdown: false,
+            }),
+          }),
+        ]),
+      )
 
       const chat = await post(port, "/chat", { target: { chatId: "123" } }, auth)
       expect(chat.status).toBe(200)

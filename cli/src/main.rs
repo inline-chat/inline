@@ -3127,7 +3127,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             &peer,
                             Some(text),
                             None,
-                            true,
+                            parse_markdown_for_entities(&mention_entities),
                             reply_to,
                             mention_entities,
                         )
@@ -3398,14 +3398,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .ok_or_else(CliError::missing_text_or_stdin)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let input = proto::EditMessageInput {
-                        message_id,
-                        peer_id: Some(peer),
-                        text,
-                        entities: None,
-                        parse_markdown: None,
-                        actions: None,
-                    };
+                    let input = edit_message_input(peer, message_id, text);
                     let payload = realtime.call(input).await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
@@ -3779,6 +3772,25 @@ async fn send_message(
     realtime.call(input).await
 }
 
+fn parse_markdown_for_entities(entities: &Option<proto::MessageEntities>) -> bool {
+    entities.is_none()
+}
+
+fn edit_message_input(
+    peer: proto::InputPeer,
+    message_id: i64,
+    text: String,
+) -> proto::EditMessageInput {
+    proto::EditMessageInput {
+        message_id,
+        peer_id: Some(peer),
+        text,
+        entities: None,
+        parse_markdown: Some(true),
+        actions: None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn send_messages_with_attachments(
     realtime: &mut AuthenticatedRealtime,
@@ -3812,7 +3824,7 @@ async fn send_messages_with_attachments(
             peer,
             caption.clone(),
             Some(media),
-            caption.is_some(),
+            caption.is_some() && parse_markdown_for_entities(&mention_entities),
             reply_to_msg_id,
             mention_entities.clone(),
         )
@@ -6474,6 +6486,24 @@ mod cli_parsing_tests {
             } => assert_eq!(args.text.as_deref(), Some("updated")),
             _ => panic!("expected messages edit"),
         }
+    }
+
+    #[test]
+    fn message_edit_enables_inline_markdown_parsing() {
+        let peer = input_peer_from_args(Some(1), None).unwrap();
+        let input = edit_message_input(peer, 2, "updated **Markdown**".to_string());
+
+        assert_eq!(input.parse_markdown, Some(true));
+    }
+
+    #[test]
+    fn explicit_mention_entities_keep_cli_input_literal() {
+        assert!(parse_markdown_for_entities(&None));
+        assert!(!parse_markdown_for_entities(&Some(
+            proto::MessageEntities {
+                entities: Vec::new(),
+            }
+        )));
     }
 
     #[test]

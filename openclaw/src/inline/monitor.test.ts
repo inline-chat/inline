@@ -7827,6 +7827,7 @@ describe("inline/monitor", () => {
       cfg: {} as any,
       account: buildAccount({
         dmPolicy: "open",
+        parseMarkdown: false,
         streaming: { mode: "progress" },
       }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
@@ -7844,6 +7845,7 @@ describe("inline/monitor", () => {
           chatId: 773n,
           sendMode: "silent",
           text: expect.any(String),
+          parseMarkdown: false,
         }),
       )
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
@@ -7853,6 +7855,7 @@ describe("inline/monitor", () => {
           editMessage: expect.objectContaining({
             messageId: 1n,
             text: expect.stringContaining("listed files"),
+            parseMarkdown: false,
           }),
         }),
       )
