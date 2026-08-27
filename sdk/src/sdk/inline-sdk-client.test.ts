@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from "vitest"
 import { BotCapability_Kind, ConnectionError_Reason, DialogFollowMode, GetUpdatesResult_ResultType, Method, RpcError_Code, ServerProtocolMessage, SyncSkippedSequence_Reason, Update } from "@inline-chat/protocol/core"
 import { InlineSdkClient } from "./inline-sdk-client.js"
 import { MockTransport } from "../realtime/mock-transport.js"
-import type { InlineSdkAuthoritativeRepairRequest, InlineSdkState, InlineSdkStateStore } from "./types.js"
+import {
+  rpcInputKindByMethod,
+  rpcResultKindByMethod,
+  type InlineSdkAuthoritativeRepairRequest,
+  type InlineSdkState,
+  type InlineSdkStateStore,
+} from "./types.js"
 import { InlineSdkAuthenticationError } from "./errors.js"
 
 const waitFor = async (predicate: () => boolean, timeoutMs = 300) => {
@@ -2611,6 +2617,21 @@ describe("InlineSdkClient", () => {
 
     await expect(p).rejects.toThrow(/rpc result mismatch/)
     await client.close()
+  })
+
+  it("invoke() validates all Agent management RPC shapes", async () => {
+    const methodShapes = [
+      [Method.CREATE_BOT_AGENT, "createBotAgent"],
+      [Method.GET_BOT_AGENT, "getBotAgent"],
+      [Method.LIST_BOT_AGENTS, "listBotAgents"],
+      [Method.UPDATE_BOT_AGENT, "updateBotAgent"],
+      [Method.DELETE_BOT_AGENT, "deleteBotAgent"],
+    ] as const
+
+    for (const [method, oneofKind] of methodShapes) {
+      expect(rpcInputKindByMethod[method]).toBe(oneofKind)
+      expect(rpcResultKindByMethod[method]).toBe(oneofKind)
+    }
   })
 
   it("emits normalized inbound events and performs chat catch-up when state store is provided", async () => {

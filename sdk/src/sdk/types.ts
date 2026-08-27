@@ -448,12 +448,17 @@ export const rpcInputKindByMethod = {
   79: "requestBotChatSettings",
   80: "invokeBotChatSettingsItem",
   81: "answerBotChatSettings",
+  106: "createBotAgent",
+  107: "getBotAgent",
+  108: "listBotAgents",
   117: "createUpload",
   118: "saveUploadPart",
   119: "getUploadState",
   120: "finishUpload",
   121: "cancelUpload",
   127: "getSpace",
+  131: "updateBotAgent",
+  132: "deleteBotAgent",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -513,12 +518,17 @@ export const rpcResultKindByMethod = {
   79: "requestBotChatSettings",
   80: "invokeBotChatSettingsItem",
   81: "answerBotChatSettings",
+  106: "createBotAgent",
+  107: "getBotAgent",
+  108: "listBotAgents",
   117: "createUpload",
   118: "saveUploadPart",
   119: "getUploadState",
   120: "finishUpload",
   121: "cancelUpload",
   127: "getSpace",
+  131: "updateBotAgent",
+  132: "deleteBotAgent",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

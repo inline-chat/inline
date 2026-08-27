@@ -1947,6 +1947,41 @@ rpc_requests!(
         GetAgentSessionResult,
         GetAgentSession
     ),
+    (
+        CreateBotAgentInput,
+        CreateBotAgent,
+        CreateBotAgent,
+        CreateBotAgentResult,
+        CreateBotAgent
+    ),
+    (
+        GetBotAgentInput,
+        GetBotAgent,
+        GetBotAgent,
+        GetBotAgentResult,
+        GetBotAgent
+    ),
+    (
+        ListBotAgentsInput,
+        ListBotAgents,
+        ListBotAgents,
+        ListBotAgentsResult,
+        ListBotAgents
+    ),
+    (
+        UpdateBotAgentInput,
+        UpdateBotAgent,
+        UpdateBotAgent,
+        UpdateBotAgentResult,
+        UpdateBotAgent
+    ),
+    (
+        DeleteBotAgentInput,
+        DeleteBotAgent,
+        DeleteBotAgent,
+        DeleteBotAgentResult,
+        DeleteBotAgent
+    ),
 );
 
 fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::ConnectionInit {
@@ -3341,6 +3376,32 @@ mod tests {
                 proto::rpc_result::Result::AnswerBotChatSettings(
                     proto::AnswerBotChatSettingsResult::default(),
                 ),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn bot_agent_rpc_requests_map_all_transport_variants() {
+        assert_eq!(
+            <proto::CreateBotAgentInput as RpcRequest>::METHOD,
+            proto::Method::CreateBotAgent
+        );
+        assert!(matches!(
+            proto::GetBotAgentInput::default().into_rpc_input(),
+            proto::rpc_call::Input::GetBotAgent(_)
+        ));
+        assert!(matches!(
+            proto::ListBotAgentsInput::default().into_rpc_input(),
+            proto::rpc_call::Input::ListBotAgents(_)
+        ));
+        assert!(matches!(
+            proto::UpdateBotAgentInput::default().into_rpc_input(),
+            proto::rpc_call::Input::UpdateBotAgent(_)
+        ));
+        assert!(
+            <proto::DeleteBotAgentInput as RpcRequest>::response_from_rpc_result(
+                proto::rpc_result::Result::DeleteBotAgent(proto::DeleteBotAgentResult::default(),),
             )
             .is_ok()
         );
