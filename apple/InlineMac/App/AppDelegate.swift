@@ -1,6 +1,7 @@
 import AppKit
 import Auth
 import Combine
+import Darwin
 import InlineConfig
 import InlineKit
 import InlineMacUI
@@ -15,6 +16,20 @@ import UserNotifications
 #if DEVBUILD_REQUIRES_SCRIPT && !DEBUG_BUILD
   #error("DevBuild must be built through scripts/macos/build-local-app.sh or macOS release scripts.")
 #endif
+
+private final class ApplicationTerminationGate: @unchecked Sendable {
+  private let lock = NSLock()
+  // The lock protects every access to this otherwise task-shared bit.
+  private var isClaimed = false
+
+  func claim() -> Bool {
+    lock.withLock {
+      guard !isClaimed else { return false }
+      isClaimed = true
+      return true
+    }
+  }
+}
 
 class AppDelegate: NSObject, NSApplicationDelegate {
   private static var customURLSchemes: Set<String> { InlineDeepLink.currentAppSchemes }
@@ -123,6 +138,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     MainActor.assumeIsolated { () -> NSApplication.TerminateReply in
       guard terminationTask == nil else { return .terminateLater }
 
+      let terminationGate = ApplicationTerminationGate()
+      Task.detached(priority: .userInitiated) {
+        try? await Task.sleep(for: .seconds(3))
+        guard terminationGate.claim() else { return }
+
+        // Ordinary exit previously crashed in static finalizers while SQLCipher work was active.
+        Darwin._exit(EXIT_SUCCESS)
+      }
+
       dockBadgeService.prepareForTermination()
       CLIInstallerWindowController.prepareForApplicationTermination()
       AgentSetupWindowController.prepareForApplicationTermination()
@@ -133,10 +157,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       let database = dependencies.database
       terminationTask = Task { @MainActor in
         await realtime.prepareForTermination()
-        do {
+
+        let databaseCloseTask = Task.detached(priority: .userInitiated) {
           try database.closePersistentStorage()
+        }
+        do {
+          try await databaseCloseTask.value
         } catch {
           log.error("Database did not close cleanly during application termination", error: error)
+        }
+
+        guard terminationGate.claim() else { return }
+
+        // Start before replying so it can also break a hang inside AppKit's final termination path.
+        Task.detached(priority: .userInitiated) {
+          try? await Task.sleep(for: .seconds(2))
+          Darwin._exit(EXIT_SUCCESS)
         }
         sender.reply(toApplicationShouldTerminate: true)
       }
