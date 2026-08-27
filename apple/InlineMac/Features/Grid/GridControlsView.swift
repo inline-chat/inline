@@ -15,6 +15,7 @@ struct GridControlPill: View {
   let onRefreshOutputDevices: () -> Void
   let onToggleScreenShare: () -> Void
   let onSelectScreenCaptureSource: (InlineRTCScreenCaptureSource) -> Void
+  let onSelectScreenShareQualityProfile: (InlineRTCScreenShareQualityProfile) -> Void
   let onRefreshScreenCaptureSources: () -> Void
   let onStopScreenShare: () -> Void
   let onSetOutputVolume: (Float) -> Void
@@ -147,6 +148,7 @@ struct GridControlPill: View {
         media: media,
         onToggle: onToggleScreenShare,
         onSelectSource: onSelectScreenCaptureSource,
+        onSelectQualityProfile: onSelectScreenShareQualityProfile,
         onRefreshSources: onRefreshScreenCaptureSources,
         onStop: onStopScreenShare
       )
@@ -278,6 +280,7 @@ private struct GridScreenShareControl: View {
   let media: GridMediaPresentation
   let onToggle: () -> Void
   let onSelectSource: (InlineRTCScreenCaptureSource) -> Void
+  let onSelectQualityProfile: (InlineRTCScreenShareQualityProfile) -> Void
   let onRefreshSources: () -> Void
   let onStop: () -> Void
 
@@ -325,6 +328,7 @@ private struct GridScreenShareControl: View {
             onSelectSource($0)
             isPickerPresented = false
           },
+          onSelectQualityProfile: onSelectQualityProfile,
           onRefreshSources: onRefreshSources,
           onStop: {
             onStop()
@@ -341,16 +345,16 @@ private struct GridScreenShareControl: View {
 
   @ViewBuilder
   private var screenShareIcon: some View {
-    if isTransitioningScreenShare {
+    if isLoadingScreenCaptureSources {
       GridScreenShareActivityIndicator(tint: .green)
         .frame(width: 34, height: 34)
         .contentShape(Rectangle())
     } else {
       GridTintedControlIcon(
-        systemName: media.isScreenSharing
+        systemName: media.isScreenShareRequested
           ? "rectangle.on.rectangle.fill"
           : "rectangle.on.rectangle",
-        isActive: media.isScreenSharing
+        isActive: media.isScreenShareRequested
       )
     }
   }
@@ -359,32 +363,7 @@ private struct GridScreenShareControl: View {
     if isLoadingScreenCaptureSources {
       return "Loading displays"
     }
-    switch media.screenShareState {
-    case .publishing:
-      return "Cancel screen sharing"
-    case .stopping:
-      return "Stopping screen sharing"
-    default:
-      if media.isScreenShareRequested, !media.isScreenSharing {
-        return "Cancel screen sharing"
-      } else {
-        return media.isScreenSharing || media.isScreenShareRequested
-          ? "Stop sharing screen"
-          : "Share screen"
-      }
-    }
-  }
-
-  private var isTransitioningScreenShare: Bool {
-    if isLoadingScreenCaptureSources {
-      return true
-    }
-    switch media.screenShareState {
-    case .publishing, .stopping:
-      return true
-    default:
-      return media.isScreenShareRequested && !media.isScreenSharing
-    }
+    return media.isScreenShareRequested ? "Stop sharing screen" : "Share screen"
   }
 
   private var isStoppingScreenShare: Bool {
@@ -400,6 +379,7 @@ private struct GridScreenShareControl: View {
 private struct GridScreenCapturePicker: View {
   let media: GridMediaPresentation
   let onSelectSource: (InlineRTCScreenCaptureSource) -> Void
+  let onSelectQualityProfile: (InlineRTCScreenShareQualityProfile) -> Void
   let onRefreshSources: () -> Void
   let onStop: () -> Void
 
@@ -449,6 +429,22 @@ private struct GridScreenCapturePicker: View {
 
       Divider()
 
+      Text("Quality")
+        .font(.headline)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+      VStack(spacing: 4) {
+        ForEach(InlineRTCScreenShareQualityProfile.allCases, id: \.rawValue) { profile in
+          GridScreenShareQualityRow(
+            profile: profile,
+            isSelected: media.screenShareQualityProfile == profile,
+            action: { onSelectQualityProfile(profile) }
+          )
+        }
+      }
+
+      Divider()
+
       HStack(spacing: 8) {
         if media.isScreenSharing || media.isScreenShareRequested {
           Button("Stop Sharing", role: .destructive, action: onStop)
@@ -458,7 +454,65 @@ private struct GridScreenCapturePicker: View {
       }
     }
     .padding(12)
-    .frame(width: 340)
+    .frame(width: 360)
+  }
+}
+
+private struct GridScreenShareQualityRow: View {
+  let profile: InlineRTCScreenShareQualityProfile
+  let isSelected: Bool
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(profile.title)
+            .font(.subheadline.weight(.medium))
+          Text(profile.detail)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        if isSelected {
+          Image(systemName: "checkmark")
+            .foregroundStyle(.green)
+            .padding(.top, 2)
+        }
+      }
+      .contentShape(Rectangle())
+      .padding(.horizontal, 8)
+      .padding(.vertical, 6)
+    }
+    .buttonStyle(.plain)
+    .background(
+      isSelected ? Color.green.opacity(0.08) : Color.primary.opacity(0.04),
+      in: RoundedRectangle(cornerRadius: 6)
+    )
+  }
+}
+
+private extension InlineRTCScreenShareQualityProfile {
+  var title: LocalizedStringResource {
+    switch self {
+    case .automatic: "Auto"
+    case .detail: "Detail"
+    case .motion: "Motion"
+    case .saveBandwidth: "Save Bandwidth"
+    case .maximum: "Max"
+    }
+  }
+
+  var detail: LocalizedStringResource {
+    switch self {
+    case .automatic: "Adapts to your display and network."
+    case .detail: "Text, code, and presentations."
+    case .motion: "Video, camera, and smooth movement."
+    case .saveBandwidth: "Lower quality for slow or unreliable networks."
+    case .maximum: "Full display resolution at 30 FPS. Use only on fast networks."
+    }
   }
 }
 

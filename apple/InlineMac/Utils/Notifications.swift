@@ -47,6 +47,11 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
     }
 #endif
 
+    if notification.request.content.userInfo["type"] as? String == "gridScreenShare" {
+      completionHandler([.banner])
+      return
+    }
+
     let urgentOptions = UrgentNotificationPresentation.foregroundOptions(for: notification.request.content)
     if !urgentOptions.isEmpty {
       completionHandler(urgentOptions)

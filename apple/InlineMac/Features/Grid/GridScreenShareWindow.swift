@@ -73,6 +73,8 @@ private final class GridScreenShareWindowController: NSWindowController, NSWindo
   private let viewerTarget: GridScreenShareViewerTarget
   private let log = Log.scoped("GridScreenShareWindow")
   private var didApplyInitialVideoSize = false
+  private var endedCloseTask: Task<Void, Never>?
+  private static let endedCloseDelay: Duration = .seconds(60)
 
   init(
     user: InlineProtocol.User,
@@ -123,6 +125,9 @@ private final class GridScreenShareWindowController: NSWindowController, NSWindo
         onPublicationResolved: { [weak self] publicationID in
           self?.viewerTarget.publicationID = publicationID
         },
+        onShareIntentChanged: { [weak self] isActive in
+          self?.updateShareIntent(isActive)
+        },
         onVideoDimensionsChanged: { [weak self] dimensions in
           self?.applyVideoDimensions(dimensions)
         }
@@ -144,6 +149,8 @@ private final class GridScreenShareWindowController: NSWindowController, NSWindo
     // renderer synchronously so adaptive streaming can stop remote video even
     // if the window or hosting controller survives the close transaction.
     viewerTarget.isVisible = false
+    endedCloseTask?.cancel()
+    endedCloseTask = nil
     log.info(
       "GRID_SCREEN phase=viewer_closed publication=\(viewerTarget.publicationID)"
     )
@@ -163,11 +170,27 @@ private final class GridScreenShareWindowController: NSWindowController, NSWindo
   }
 
   func rebind(to share: InlineRTCScreenShare) {
+    endedCloseTask?.cancel()
+    endedCloseTask = nil
     let previousPublicationID = viewerTarget.publicationID
     viewerTarget.publicationID = share.publicationID
     log.info(
       "GRID_SCREEN phase=viewer_rebound previous_publication=\(previousPublicationID) next_publication=\(share.publicationID)"
     )
+  }
+
+  private func updateShareIntent(_ isActive: Bool) {
+    endedCloseTask?.cancel()
+    endedCloseTask = nil
+    guard !isActive else { return }
+    endedCloseTask = Task { [weak self] in
+      try? await Task.sleep(for: Self.endedCloseDelay)
+      guard !Task.isCancelled, let self else { return }
+      log.info(
+        "GRID_SCREEN phase=viewer_ended_auto_close publication=\(viewerTarget.publicationID)"
+      )
+      close()
+    }
   }
 
   private func updateViewerVisibility() {
@@ -228,6 +251,7 @@ private struct GridScreenShareViewer: View {
   let target: GridScreenShareViewerTarget
   let store: GridRoomService
   let onPublicationResolved: (String) -> Void
+  let onShareIntentChanged: (Bool) -> Void
   let onVideoDimensionsChanged: (InlineRTCVideoDimensions) -> Void
 
   @State private var lastResolvedShare: InlineRTCScreenShare?
@@ -238,11 +262,13 @@ private struct GridScreenShareViewer: View {
     initialShare: InlineRTCScreenShare,
     store: GridRoomService,
     onPublicationResolved: @escaping (String) -> Void,
+    onShareIntentChanged: @escaping (Bool) -> Void,
     onVideoDimensionsChanged: @escaping (InlineRTCVideoDimensions) -> Void
   ) {
     self.target = target
     self.store = store
     self.onPublicationResolved = onPublicationResolved
+    self.onShareIntentChanged = onShareIntentChanged
     self.onVideoDimensionsChanged = onVideoDimensionsChanged
     _lastResolvedShare = State(initialValue: initialShare)
   }
@@ -256,6 +282,9 @@ private struct GridScreenShareViewer: View {
         lastResolvedShare = share
         viewerWaitExpired = false
         onPublicationResolved(share.publicationID)
+      }
+      .onChange(of: isShareExpected, initial: true) { _, isExpected in
+        onShareIntentChanged(isExpected)
       }
       .task(id: viewerAvailabilityID) {
         guard resolvedShare?.videoTrack == nil, lastResolvedShare != nil else {
@@ -271,7 +300,14 @@ private struct GridScreenShareViewer: View {
 
   @ViewBuilder
   private var screenContent: some View {
-    if let share = resolvedShare, share.videoTrack != nil {
+    if !isShareExpected {
+      ContentUnavailableView(
+        "Screen sharing ended",
+        systemImage: "rectangle.slash",
+        description: Text("This window will close automatically in one minute.")
+      )
+      .foregroundStyle(.secondary)
+    } else if let share = resolvedShare, share.videoTrack != nil {
       GridScreenShareVideoRenderer(
         share: share,
         isVideoEnabled: target.isVisible,
@@ -283,18 +319,11 @@ private struct GridScreenShareViewer: View {
         Text("Waiting for screen…")
           .foregroundStyle(.secondary)
       }
-    } else if resolvedShare != nil {
+    } else {
       ContentUnavailableView(
         "Screen unavailable",
         systemImage: "rectangle.slash",
         description: Text("The shared screen couldn’t be received.")
-      )
-      .foregroundStyle(.secondary)
-    } else {
-      ContentUnavailableView(
-        "Screen sharing ended",
-        systemImage: "rectangle.slash",
-        description: Text("You can close this window.")
       )
       .foregroundStyle(.secondary)
     }
@@ -306,6 +335,10 @@ private struct GridScreenShareViewer: View {
       participantIdentity: target.participantIdentity,
       shares: store.media.screenShares
     )
+  }
+
+  private var isShareExpected: Bool {
+    store.isScreenShareIntended(participantIdentity: target.participantIdentity)
   }
 
   private var viewerAvailabilityID: String {

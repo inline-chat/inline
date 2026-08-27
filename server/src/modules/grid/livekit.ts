@@ -92,7 +92,10 @@ export async function createGridConnectionCredentials(
     canPublish: true,
     canSubscribe: true,
     canPublishData: false,
-    canUpdateOwnMetadata: false,
+    // Grid uses one participant attribute for ephemeral screen-share intent
+    // so remote UI can react before track publication negotiation completes.
+    // The grant remains limited to the participant's own metadata.
+    canUpdateOwnMetadata: true,
   })
 
   const jwt = await token.toJwt()

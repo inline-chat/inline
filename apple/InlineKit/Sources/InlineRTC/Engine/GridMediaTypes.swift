@@ -49,6 +49,7 @@ public struct InlineRTCDemand: Equatable, Sendable {
   public var credentials: InlineRTCCredentials?
   public var microphoneEnabled: Bool
   public var screenCaptureSource: InlineRTCScreenCaptureSource?
+  public var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
   public var input: AudioInputSelection
   public var output: AudioOutputSelection
   public var outputVolume: Float
@@ -58,6 +59,7 @@ public struct InlineRTCDemand: Equatable, Sendable {
     credentials: InlineRTCCredentials? = nil,
     microphoneEnabled: Bool = false,
     screenCaptureSource: InlineRTCScreenCaptureSource? = nil,
+    screenShareQualityProfile: InlineRTCScreenShareQualityProfile = .automatic,
     input: AudioInputSelection = .automatic,
     output: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
@@ -66,6 +68,7 @@ public struct InlineRTCDemand: Equatable, Sendable {
     self.credentials = credentials
     self.microphoneEnabled = microphoneEnabled
     self.screenCaptureSource = screenCaptureSource
+    self.screenShareQualityProfile = screenShareQualityProfile
     self.input = input
     self.output = output
     self.outputVolume = min(max(outputVolume, 0), 1)
@@ -480,11 +483,18 @@ public struct InlineRTCParticipant: Equatable, Sendable {
   public let identity: String
   public let isSpeaking: Bool
   public let audioLevel: Float
+  public let screenShareIntent: Bool?
 
-  public init(identity: String, isSpeaking: Bool, audioLevel: Float) {
+  public init(
+    identity: String,
+    isSpeaking: Bool,
+    audioLevel: Float,
+    screenShareIntent: Bool? = nil
+  ) {
     self.identity = identity
     self.isSpeaking = isSpeaking
     self.audioLevel = audioLevel
+    self.screenShareIntent = screenShareIntent
   }
 }
 
@@ -498,6 +508,7 @@ enum GridRTCLifecycleEvent: Equatable, Sendable {
   case reconnected(mode: GridRTCReconnectMode)
   case localMicrophonePublished(muted: Bool)
   case localMicrophoneUnpublished
+  case localScreenShareCaptureStopped
   case screenSharesChanged(revision: UInt64, shares: [InlineRTCScreenShare])
   case localAudioFlow(InlineRTCAudioFlowState)
   case remoteAudioFlow(identity: String, state: InlineRTCAudioFlowState)
@@ -561,6 +572,7 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
   public let localAudioFlowState: InlineRTCAudioFlowState
   public let remoteAudioFlowStates: [String: InlineRTCAudioFlowState]
   public let participants: [InlineRTCParticipant]
+  public let hasParticipantMediaSnapshot: Bool
   public let reconnectCount: Int
   public let recoveryAttempt: Int
   public let lastConnectMilliseconds: Int?
@@ -584,6 +596,7 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
     localAudioFlowState: InlineRTCAudioFlowState = .unknown,
     remoteAudioFlowStates: [String: InlineRTCAudioFlowState] = [:],
     participants: [InlineRTCParticipant],
+    hasParticipantMediaSnapshot: Bool = false,
     reconnectCount: Int,
     recoveryAttempt: Int,
     lastConnectMilliseconds: Int?,
@@ -606,6 +619,7 @@ public struct InlineRTCConnectionSnapshot: Equatable, Sendable {
     self.localAudioFlowState = localAudioFlowState
     self.remoteAudioFlowStates = remoteAudioFlowStates
     self.participants = participants
+    self.hasParticipantMediaSnapshot = hasParticipantMediaSnapshot
     self.reconnectCount = reconnectCount
     self.recoveryAttempt = recoveryAttempt
     self.lastConnectMilliseconds = lastConnectMilliseconds

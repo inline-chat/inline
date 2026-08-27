@@ -69,14 +69,14 @@ struct GridContent: View {
   let isLoading: Bool
   let didFailLoading: Bool
   let audioLevel: (Int64) -> Float
-  let isScreenSharing: (Int64) -> Bool
+  let isScreenSharing: (GridAvatar) -> Bool
   let connectionState: GridMediaConnectionStatus
   let onCreate: () -> Void
   let onRetry: () -> Void
   let onJoin: (Int64) -> Void
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
-  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onOpenScreenShare: (GridAvatar) -> Void
   let onStopScreenShare: () -> Void
   let onSetTitle: (Int64, String) -> Void
   let onSetLocked: (Int64, Bool) -> Void
@@ -165,12 +165,12 @@ private struct GridRoomCard: View {
   let room: GridRoom
   let isCurrent: Bool
   let audioLevel: (Int64) -> Float
-  let isScreenSharing: (Int64) -> Bool
+  let isScreenSharing: (GridAvatar) -> Bool
   let connectionState: GridMediaConnectionStatus
   let onJoin: () -> Void
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
-  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onOpenScreenShare: (GridAvatar) -> Void
   let onStopScreenShare: () -> Void
   let onSetTitle: (String) -> Void
   let onSetLocked: (Bool) -> Void
@@ -274,11 +274,11 @@ private struct GridRoomSurface: View {
   let room: GridRoom
   let isCurrent: Bool
   let audioLevel: (Int64) -> Float
-  let isScreenSharing: (Int64) -> Bool
+  let isScreenSharing: (GridAvatar) -> Bool
   let connectionState: GridMediaConnectionStatus
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
-  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onOpenScreenShare: (GridAvatar) -> Void
   let onStopScreenShare: () -> Void
 
   var body: some View {
@@ -363,11 +363,11 @@ private struct GridRoomAvatars: View {
 
   let avatars: [GridAvatar]
   let audioLevel: (Int64) -> Float
-  let isScreenSharing: (Int64) -> Bool
+  let isScreenSharing: (GridAvatar) -> Bool
   let showsLocalConnectingIndicator: Bool
   let onLeave: () -> Void
   let onToggleMicrophone: () -> Void
-  let onOpenScreenShare: (InlineProtocol.User) -> Void
+  let onOpenScreenShare: (GridAvatar) -> Void
   let onStopScreenShare: () -> Void
 
   var body: some View {
@@ -376,11 +376,11 @@ private struct GridRoomAvatars: View {
         GridSpeakingAvatar(
           avatar: avatar,
           audioLevel: audioLevel(avatar.user.id),
-          isScreenSharing: isScreenSharing(avatar.user.id),
+          isScreenSharing: isScreenSharing(avatar),
           showsConnectingIndicator: showsLocalConnectingIndicator && avatar.ownedByCurrentSession,
           onLeave: onLeave,
           onToggleMicrophone: onToggleMicrophone,
-          onOpenScreenShare: { onOpenScreenShare(avatar.user) },
+          onOpenScreenShare: { onOpenScreenShare(avatar) },
           onStopScreenShare: onStopScreenShare
         )
         .transition(.scale(scale: 0.76).combined(with: .opacity))
@@ -398,7 +398,7 @@ private struct GridRoomAvatars: View {
                   Button("Stop Sharing", role: .destructive, action: onStopScreenShare)
                 } else {
                   Button {
-                    onOpenScreenShare(avatar.user)
+                    onOpenScreenShare(avatar)
                   } label: {
                     Label(
                       "View \(InlineKit.User(from: avatar.user).displayName)’s Screen",
@@ -431,7 +431,7 @@ private struct GridRoomAvatars: View {
 
   private var hiddenScreenSharingAvatars: [GridAvatar] {
     Array(avatars.dropFirst(Self.maximumVisibleAvatarCount))
-      .filter { isScreenSharing($0.user.id) }
+      .filter(isScreenSharing)
   }
 
   private var overflowLabel: some View {

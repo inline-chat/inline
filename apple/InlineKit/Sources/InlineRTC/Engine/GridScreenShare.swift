@@ -31,6 +31,7 @@ public struct InlineRTCScreenCaptureSource: Identifiable, Equatable, Sendable {
   public let name: String
   public let displayID: UInt32?
   public let frame: Frame
+  public let pixelDimensions: InlineRTCVideoDimensions?
 
   let storage: InlineRTCScreenCaptureSourceStorage?
 
@@ -40,6 +41,7 @@ public struct InlineRTCScreenCaptureSource: Identifiable, Equatable, Sendable {
     displayID: UInt32?,
     kind: Kind = .display,
     frame: Frame = Frame(x: 0, y: 0, width: 1, height: 1),
+    pixelDimensions: InlineRTCVideoDimensions? = nil,
     storage: InlineRTCScreenCaptureSourceStorage? = nil
   ) {
     self.id = id
@@ -47,6 +49,7 @@ public struct InlineRTCScreenCaptureSource: Identifiable, Equatable, Sendable {
     self.name = name
     self.displayID = displayID
     self.frame = frame
+    self.pixelDimensions = pixelDimensions
     self.storage = storage
   }
 
@@ -55,6 +58,113 @@ public struct InlineRTCScreenCaptureSource: Identifiable, Equatable, Sendable {
     rhs: InlineRTCScreenCaptureSource
   ) -> Bool {
     lhs.id == rhs.id
+  }
+}
+
+public enum InlineRTCScreenShareQualityProfile: String, CaseIterable, Codable, Sendable {
+  case automatic
+  case detail
+  case motion
+  case saveBandwidth
+  case maximum
+}
+
+enum InlineRTCScreenShareDegradationPolicy: Equatable, Sendable {
+  case automatic
+  case maintainResolution
+  case maintainFramerate
+  case balanced
+}
+
+struct InlineRTCScreenShareEncodingPolicy: Equatable, Sendable {
+  let dimensions: InlineRTCVideoDimensions
+  let framesPerSecond: Int
+  let maximumBitrate: Int
+  let degradationPolicy: InlineRTCScreenShareDegradationPolicy
+
+  static func resolve(
+    profile: InlineRTCScreenShareQualityProfile,
+    source: InlineRTCScreenCaptureSource
+  ) -> Self {
+    let sourceDimensions = source.pixelDimensions
+      ?? InlineRTCVideoDimensions(width: 1_920, height: 1_080)
+    let maximumLongEdge: Int? = switch profile {
+    case .automatic, .detail: 2_560
+    case .motion: 1_920
+    case .saveBandwidth: 1_280
+    case .maximum: nil
+    }
+    let dimensions = fittedDimensions(
+      sourceDimensions,
+      maximumLongEdge: maximumLongEdge
+    )
+
+    return switch profile {
+    case .automatic:
+      Self(
+        dimensions: dimensions,
+        framesPerSecond: 15,
+        maximumBitrate: automaticBitrate(for: dimensions),
+        degradationPolicy: .automatic
+      )
+    case .detail:
+      Self(
+        dimensions: dimensions,
+        framesPerSecond: 15,
+        maximumBitrate: 5_000_000,
+        degradationPolicy: .maintainResolution
+      )
+    case .motion:
+      Self(
+        dimensions: dimensions,
+        framesPerSecond: 30,
+        maximumBitrate: 5_000_000,
+        degradationPolicy: .maintainFramerate
+      )
+    case .saveBandwidth:
+      Self(
+        dimensions: dimensions,
+        framesPerSecond: 15,
+        maximumBitrate: 1_500_000,
+        degradationPolicy: .balanced
+      )
+    case .maximum:
+      Self(
+        dimensions: dimensions,
+        framesPerSecond: 30,
+        maximumBitrate: 10_000_000,
+        degradationPolicy: .maintainResolution
+      )
+    }
+  }
+
+  private static func fittedDimensions(
+    _ source: InlineRTCVideoDimensions,
+    maximumLongEdge: Int?
+  ) -> InlineRTCVideoDimensions {
+    let sourceWidth = max(source.width, 2)
+    let sourceHeight = max(source.height, 2)
+    let sourceLongEdge = max(sourceWidth, sourceHeight)
+    let scale = maximumLongEdge.map {
+      min(Double($0) / Double(sourceLongEdge), 1)
+    } ?? 1
+    return InlineRTCVideoDimensions(
+      width: encodeSafeDimension(Double(sourceWidth) * scale),
+      height: encodeSafeDimension(Double(sourceHeight) * scale)
+    )
+  }
+
+  private static func encodeSafeDimension(_ value: Double) -> Int {
+    let rounded = max(Int(value.rounded(.down)), 2)
+    return rounded.isMultiple(of: 2) ? rounded : rounded - 1
+  }
+
+  private static func automaticBitrate(for dimensions: InlineRTCVideoDimensions) -> Int {
+    switch max(dimensions.width, dimensions.height) {
+    case ...1_280: 1_500_000
+    case ...1_920: 2_500_000
+    default: 5_000_000
+    }
   }
 }
 
@@ -253,6 +363,10 @@ extension InlineRTCScreenCaptureSource {
         y: display.frame.origin.y,
         width: display.frame.width,
         height: display.frame.height
+      ),
+      pixelDimensions: InlineRTCVideoDimensions(
+        width: Int(display.width),
+        height: Int(display.height)
       ),
       storage: InlineRTCScreenCaptureSourceStorage(rawValue: display)
     )
