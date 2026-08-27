@@ -70,6 +70,20 @@ struct IOSThemeSnapshot: Equatable {
     let chatCanvas = preset == .system
       ? nativeCanvas
       : nativeCanvas.blended(with: palette.canvas, amount: variant == .dark ? 0.189 : 0.126)
+    let sharedIncomingBubble = ThemeCatalog.secondaryBubble(preset: preset, variant: variant)
+    let sharedIncomingLighting = ThemeCatalog.messageBubbleGradientOverlayAlphas(
+      variant: variant,
+      outgoing: false
+    )
+    let incomingBubble = variant == .dark
+      ? ThemeColorValue(rgb: 0x24262A)
+      : sharedIncomingBubble
+    let incomingLighting = variant == .dark
+      ? ThemeBubbleLightingAlphas(
+        top: sharedIncomingLighting.top * 0.5,
+        bottom: sharedIncomingLighting.bottom * 0.5
+      )
+      : sharedIncomingLighting
 
     return Self(
       preset: preset,
@@ -77,7 +91,7 @@ struct IOSThemeSnapshot: Equatable {
       primary: palette.primary,
       chatCanvas: chatCanvas,
       outgoingBubble: palette.bubble,
-      incomingBubble: ThemeCatalog.secondaryBubble(preset: preset, variant: variant),
+      incomingBubble: incomingBubble,
       incomingText: .init(rgb: variant == .dark ? 0xFFFFFF : 0x000000),
       incomingSecondaryText: .init(
         rgb: variant == .dark ? 0xFFFFFF : 0x000000,
@@ -87,10 +101,7 @@ struct IOSThemeSnapshot: Equatable {
         variant: variant,
         outgoing: true
       ),
-      incomingLighting: ThemeCatalog.messageBubbleGradientOverlayAlphas(
-        variant: variant,
-        outgoing: false
-      )
+      incomingLighting: incomingLighting
     )
   }
 }
