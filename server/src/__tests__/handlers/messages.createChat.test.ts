@@ -133,6 +133,7 @@ describe("messages.createChat", () => {
         placeholderTitle: source,
         spaceId: BigInt(space.id),
         isPublic: true,
+        participants: [],
       },
       {
         ...mockHandlerContext,
@@ -151,8 +152,8 @@ describe("messages.createChat", () => {
       },
     )
 
-    expect(handlerResult.chat.title).toBe(expected)
-    expect(handlerResult.chat.untitled).toBe(true)
+    expect(handlerResult.chat?.title).toBe(expected)
+    expect(handlerResult.chat?.untitled).toBe(true)
     expect(functionResult.chat.title).toBe(expected)
     expect(functionResult.chat.untitled).toBe(true)
 

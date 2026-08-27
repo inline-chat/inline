@@ -40,6 +40,7 @@ import {
   SpaceJoinOperationFailure,
   SpaceJoinOperations,
   SpaceJoinRateLimitExceeded,
+  type SpaceJoinResolution,
 } from "./extra/spaceJoin.effect"
 import {
   EmailUnsubscribeOperations,
@@ -259,7 +260,11 @@ const makeHandler = (
           ? Effect.fail(new SpaceJoinRateLimitExceeded({ retryAfterSeconds: 17 }))
           : Effect.void
       }),
-      resolve: (input) => Effect.suspend(() => {
+      resolve: (input) => Effect.suspend<
+        SpaceJoinResolution | null,
+        SpaceJoinOperationFailure | SpaceJoinRateLimitExceeded,
+        never
+      >(() => {
         probe.spaceJoinResolveCalls += 1
         if (probe.spaceJoinFailure) {
           return Effect.fail(new SpaceJoinOperationFailure({

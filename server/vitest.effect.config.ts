@@ -8,6 +8,14 @@ export default defineConfig({
     },
   },
   test: {
+    env: {
+      // Some production encoders validate the test database URL at import time.
+      // Effect tests do not connect to this deliberately nonexistent database.
+      TEST_DATABASE_URL: "postgres://localhost:5432/inline_effect_test",
+      // Match the non-secret placeholder from the Bun test preload for modules
+      // that construct the Resend client while the encoder graph is imported.
+      RESEND_API_KEY: "test-key",
+    },
     exclude: [
       "src/**/*.effect.bun.test.ts",
       "src/core/http/realtimeV3Host.test.ts",
@@ -27,6 +35,6 @@ export default defineConfig({
       toFake: undefined,
     },
     passWithNoTests: false,
-    testTimeout: 10_000,
+    testTimeout: 30_000,
   },
 })

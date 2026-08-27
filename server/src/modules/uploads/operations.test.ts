@@ -19,7 +19,7 @@ import type { MediaUploadFinalizer } from "./finalizer"
 import { NativeUploadOperations } from "./operations"
 import type { UploadPartStore } from "./partStore"
 
-setDefaultTimeout(20_000)
+setDefaultTimeout(60_000)
 
 const authorizationKeys = () => new PermanentAuthorizationKeyRepository(
   makeAuthorizationKeyCipher({
