@@ -22,6 +22,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   private let dependencies: AppDependencies
   private let appBridge: AppBridge
   private let nav3: Nav3
+  private let chatOpenPreloader = Nav3ChatOpenPreloadBridge()
   private let keyMonitor: KeyMonitor
   private let appliesDefaultFrame: Bool
   private let windowID: UUID
@@ -243,6 +244,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     showWindow(nil)
   }
 
+  func openChat(peer: Peer, targetMessageId: Int64?) {
+    chatOpenPreloader.openChat(
+      peer: peer,
+      targetMessageId: targetMessageId,
+      nav: nav3,
+      database: dependencies.database
+    )
+    showWindow(nil)
+  }
+
   func resetNavigation() {
     nav3.reset()
     window?.invalidateRestorableState()
@@ -332,6 +343,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     let root = MainWindowRootView(
       nav3: nav3,
       initialTopLevelRoute: dependencies.viewModel.topLevelRoute,
+      chatOpenPreloader: chatOpenPreloader,
       keyMonitor: keyMonitor,
       windowID: windowID
     )

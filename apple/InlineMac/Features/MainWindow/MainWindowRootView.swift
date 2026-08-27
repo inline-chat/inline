@@ -9,7 +9,6 @@ struct MainWindowRootView: View {
   @EnvironmentObject private var viewModel: MainWindowViewModel
 
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
-  @State private var chatOpenPreloader = Nav3ChatOpenPreloadBridge()
   @State private var forwardMessages = ForwardMessagesPresenter()
   @State private var overlay = OverlayManager()
   @State private var commandBarRegistry = CommandBarRegistry()
@@ -18,6 +17,7 @@ struct MainWindowRootView: View {
   @State private var nativeTabShortcutUnsubscribe: (() -> Void)?
   @State private var topLevelRoute: TopLevelRoute = .loading
   private let nav3: Nav3
+  private let chatOpenPreloader: Nav3ChatOpenPreloadBridge
   private let keyMonitor: KeyMonitor
   private let windowID: UUID
 
@@ -34,10 +34,12 @@ struct MainWindowRootView: View {
   init(
     nav3: Nav3,
     initialTopLevelRoute: TopLevelRoute = .loading,
+    chatOpenPreloader: Nav3ChatOpenPreloadBridge,
     keyMonitor: KeyMonitor,
     windowID: UUID = UUID()
   ) {
     self.nav3 = nav3
+    self.chatOpenPreloader = chatOpenPreloader
     self.keyMonitor = keyMonitor
     self.windowID = windowID
     let settings = AppSettings.shared
@@ -394,6 +396,10 @@ extension EnvironmentValues {
 }
 
 #Preview {
-  MainWindowRootView(nav3: Nav3(), keyMonitor: KeyMonitor())
+  MainWindowRootView(
+    nav3: Nav3(),
+    chatOpenPreloader: Nav3ChatOpenPreloadBridge(),
+    keyMonitor: KeyMonitor()
+  )
     .environment(dependencies: AppDependencies())
 }

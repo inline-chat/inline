@@ -118,6 +118,21 @@ enum ChatMenuActions {
     ToastCenter.shared.showSuccess("Copied link")
   }
 
+  static func copyMessageLink(chatId: Int64, messageId: Int64) {
+    guard let url = InlineDeepLink.message(chatId: chatId, messageId: messageId).url else {
+      ToastCenter.shared.showError("Failed to copy message link")
+      return
+    }
+
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    guard pasteboard.setString(url.absoluteString, forType: .string) else {
+      ToastCenter.shared.showError("Failed to copy message link")
+      return
+    }
+    ToastCenter.shared.showSuccess("Copied message link")
+  }
+
   static func openInSidebar(peer: Peer, isHidden: Bool, dependencies: AppDependencies) {
     Task(priority: .userInitiated) {
       do {

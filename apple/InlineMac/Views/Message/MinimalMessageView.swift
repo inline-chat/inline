@@ -3119,6 +3119,13 @@ class MinimalMessageViewAppKit: NSView {
     NSPasteboard.general.setString(url.absoluteString, forType: .string)
   }
 
+  @objc private func copyMessageLink() {
+    ChatMenuActions.copyMessageLink(
+      chatId: message.chatId,
+      messageId: message.messageId
+    )
+  }
+
   @objc private func deleteMessage() {
     if message.status == .failed {
       let messageId = message.messageId
@@ -4698,6 +4705,21 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
     }
 
     var rendersCopyText = false
+
+    if regularMessage,
+       InlineDeepLink.message(chatId: message.chatId, messageId: message.messageId).url != nil {
+      let copyMessageLinkItem = NSMenuItem(
+        title: "Copy Message Link",
+        action: #selector(copyMessageLink),
+        keyEquivalent: ""
+      )
+      copyMessageLinkItem.target = self
+      copyMessageLinkItem.image = NSImage(
+        systemSymbolName: "link",
+        accessibilityDescription: "Copy Message Link"
+      )
+      menu.addItem(copyMessageLinkItem)
+    }
 
     if context == .textView, let linkURL {
       let copyLinkItem = NSMenuItem(

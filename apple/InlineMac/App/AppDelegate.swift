@@ -327,7 +327,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       case "user":
         handleUserURL(url)
       case "chat", "thread":
-        handleChatURL(url)
+        await handleChatURL(url)
       case "integrations":
         dependencies.appBridge.openSettings(
           dependencies: dependencies,
@@ -417,17 +417,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     openChat(peer: peer)
   }
 
-  @MainActor private func handleChatURL(_ url: URL) {
-    guard let chatId = inlineChatId(from: url) else {
+  @MainActor private func handleChatURL(_ url: URL) async {
+    guard let target = inlineChatTarget(from: url) else {
       log.error(
-        "Invalid chat URL format. Expected: inline://chat/<id>, inline://chat?id=<id>, inline://thread/<id>, or inline://thread?id=<id>"
+        "Invalid chat URL format. Expected a chat link or chat/message link."
       )
       return
     }
 
-    log.debug("Opening chat for ID: \(chatId)")
+    guard let messageId = target.messageId else {
+      log.debug("Opening chat for ID: \(target.chatId)")
+      openChat(peer: .thread(id: target.chatId))
+      return
+    }
 
-    openChat(peer: .thread(id: chatId))
+    guard Auth.shared.getIsLoggedIn(), dependencies.viewModel.topLevelRoute == .main else {
+      openChat(peer: .thread(id: target.chatId), targetMessageId: messageId)
+      return
+    }
+
+    let peer = await resolveMessageLinkPeer(chatId: target.chatId)
+    log.debug("Opening chat \(target.chatId) at message \(messageId)")
+
+    do {
+      _ = try await dependencies.realtimeV2.send(.getMessages(
+        peer: peer,
+        messageIds: [messageId]
+      ))
+    } catch {
+      log.error("Failed to fetch message for deep link", error: error)
+    }
+
+    openChat(peer: peer, targetMessageId: messageId)
   }
 
   private func inlineUserId(from url: URL) -> Int64? {
@@ -438,12 +459,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     return inlineId(from: url, queryNames: ["id", "user_id"])
   }
 
-  private func inlineChatId(from url: URL) -> Int64? {
-    guard Self.isInlineURL(url), let host = url.host?.lowercased(), host == "chat" || host == "thread" else {
+  private func inlineChatTarget(from url: URL) -> (chatId: Int64, messageId: Int64?)? {
+    guard let deepLink = InlineDeepLink(url: url, supportedSchemes: Self.customURLSchemes) else {
       return nil
     }
 
-    return inlineId(from: url, queryNames: ["id", "chat_id"])
+    switch deepLink {
+    case let .chat(id):
+      return (chatId: id, messageId: nil)
+    case let .message(chatId, messageId):
+      return (chatId: chatId, messageId: messageId)
+    case .user:
+      return nil
+    }
+  }
+
+  @MainActor private func resolveMessageLinkPeer(chatId: Int64) async -> Peer {
+    if let chat = ObjectCache.shared.getChat(id: chatId) {
+      return chat.peerId.toPeer()
+    }
+
+    do {
+      let result = try await dependencies.realtimeV2.send(.getChat(peer: .thread(id: chatId)))
+      if case let .getChat(response) = result, response.hasChat {
+        return Chat(from: response.chat).peerId.toPeer()
+      }
+    } catch {
+      log.error("Failed to resolve chat for message deep link", error: error)
+    }
+
+    return .thread(id: chatId)
   }
 
   private static func isInlineURL(_ url: URL, host: String? = nil) -> Bool {
@@ -477,13 +522,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     return id
   }
 
-  @MainActor private func openChat(peer: Peer) {
+  @MainActor private func openChat(peer: Peer, targetMessageId: Int64? = nil) {
     guard Auth.shared.getIsLoggedIn(), dependencies.viewModel.topLevelRoute == .main else {
       MainWindowOpenCoordinator.shared.openOnboarding()
       return
     }
 
-    setupMainWindow().route(.chat(peer: peer))
+    let mainWindow = setupMainWindow()
+    if let targetMessageId {
+      mainWindow.openChat(peer: peer, targetMessageId: targetMessageId)
+    } else {
+      mainWindow.route(.chat(peer: peer))
+    }
   }
 
   @MainActor private func registerMainWindowCoordinator() {
