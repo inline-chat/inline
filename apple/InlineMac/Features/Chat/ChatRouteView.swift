@@ -19,6 +19,7 @@ struct ChatRouteView: View {
   @State private var toolbarDialog: Dialog?
   @State private var navigationTitle = ""
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
+  @State private var botAgentMentionTarget: BotAgentMentionTarget?
 
   init(peer: Peer) {
     self.peer = peer
@@ -162,6 +163,17 @@ struct ChatRouteView: View {
       }
       .sheet(item: $userGroupMentionTarget) { target in
         UserGroupMembersSheet(target: target)
+      }
+      .onReceive(
+        NotificationCenter.default.publisher(for: .botAgentMentionTapped)
+      ) { notification in
+        guard let target = notification.userInfo?["target"] as? BotAgentMentionTarget,
+              target.peer == peer
+        else { return }
+        botAgentMentionTarget = target
+      }
+      .sheet(item: $botAgentMentionTarget) { target in
+        BotAgentProfileSheet(target: target)
       }
       .toolbar {
         let mainItem =

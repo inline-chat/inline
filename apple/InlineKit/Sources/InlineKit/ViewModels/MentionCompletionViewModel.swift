@@ -23,18 +23,25 @@ public struct MentionCompletionUser: Hashable, Sendable {
 public struct MentionCompletionCandidates: Equatable, Sendable {
   public var users: [MentionCompletionUser]
   public var groups: [UserGroup]
+  public var agents: [MentionableBotAgent]
 
-  public static let empty = MentionCompletionCandidates(users: [], groups: [])
+  public static let empty = MentionCompletionCandidates(users: [], groups: [], agents: [])
 
-  public init(users: [MentionCompletionUser], groups: [UserGroup]) {
+  public init(
+    users: [MentionCompletionUser],
+    groups: [UserGroup],
+    agents: [MentionableBotAgent] = []
+  ) {
     self.users = users
     self.groups = groups
+    self.agents = agents
   }
 }
 
 public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
   case user(MentionCompletionUser)
   case group(UserGroup)
+  case agent(MentionableBotAgent)
 
   public var id: String {
     switch self {
@@ -42,6 +49,8 @@ public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
         "user:\(user.userInfo.user.id)"
       case let .group(group):
         "group:\(group.id)"
+      case let .agent(agent):
+        "agent:\(agent.id)"
     }
   }
 
@@ -51,6 +60,8 @@ public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
         user.userInfo
       case .group:
         nil
+      case let .agent(agent):
+        agent.botUserInfo
     }
   }
 
@@ -60,7 +71,14 @@ public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
         nil
       case let .group(group):
         group
+      case .agent:
+        nil
     }
+  }
+
+  public var agent: MentionableBotAgent? {
+    guard case let .agent(agent) = self else { return nil }
+    return agent
   }
 
   public var title: String {
@@ -69,6 +87,8 @@ public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
         user.userInfo.user.displayName
       case let .group(group):
         group.name
+      case let .agent(agent):
+        agent.displayName
     }
   }
 
@@ -85,6 +105,11 @@ public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
           return count
         }
         return "\(description) - \(count)"
+      case let .agent(agent):
+        guard let description = agent.description, !description.isEmpty else {
+          return "via \(agent.botDisplayName)"
+        }
+        return "via \(agent.botDisplayName) · \(description)"
     }
   }
 }
@@ -138,6 +163,7 @@ public final class MentionCompletionViewModel {
     let currentUserId = currentUserId()
     var candidatesByUserId: [Int64: MentionCompletionCandidate] = [:]
     var groupCandidatesById: [Int64: MentionCompletionCandidate] = [:]
+    var agentCandidatesById: [Int64: MentionCompletionCandidate] = [:]
 
     for user in input.users {
       guard user.userInfo.user.pendingSetup != true else { continue }
@@ -160,7 +186,15 @@ public final class MentionCompletionViewModel {
       groupCandidatesById[group.id] = MentionCompletionCandidate(group: group, locale: locale)
     }
 
-    candidates = (Array(groupCandidatesById.values) + Array(candidatesByUserId.values)).sorted {
+    for agent in input.agents where agent.id > 0 && agent.botUserId > 0 {
+      agentCandidatesById[agent.id] = MentionCompletionCandidate(agent: agent, locale: locale)
+    }
+
+    candidates = (
+      Array(groupCandidatesById.values) +
+        Array(agentCandidatesById.values) +
+        Array(candidatesByUserId.values)
+    ).sorted {
       if $0.sortRank != $1.sortRank {
         return $0.sortRank < $1.sortRank
       }
@@ -214,6 +248,8 @@ public final class MentionCompletionViewModel {
         Self.mentionText(for: user.userInfo)
       case let .group(group):
         Self.mentionText(for: group)
+      case let .agent(agent):
+        "@\(agent.displayName)"
     }
   }
 
@@ -249,13 +285,18 @@ public final class MentionCompletionViewModel {
     exactlyMatches item: MentionCompletionItem,
     locale: Locale = .current
   ) -> Bool {
+    let normalizedQuery = normalized(query, locale: locale)
+    guard !normalizedQuery.isEmpty else { return false }
     switch item {
       case let .user(user):
         return Self.query(query, exactlyMatches: user.userInfo, locale: locale)
       case let .group(group):
-        let normalizedQuery = normalized(query, locale: locale)
-        guard !normalizedQuery.isEmpty else { return false }
         return normalized(group.name, locale: locale) == normalizedQuery
+      case let .agent(agent):
+        let values = [agent.name, agent.handle].compactMap { $0 }
+        return values
+          .map { normalized($0, locale: locale) }
+          .contains(normalizedQuery)
     }
   }
 
@@ -319,6 +360,8 @@ private struct MentionCompletionCandidate: Equatable {
         user.source
       case .group:
         .participant
+      case .agent:
+        .participant
     }
   }
 
@@ -358,6 +401,26 @@ private struct MentionCompletionCandidate: Equatable {
     matchText = normalizedValues.joined(separator: "\n")
     compactMatchText = MentionCompletionViewModel.compact(matchText)
     sortText = MentionCompletionViewModel.normalized(group.name, locale: locale)
+  }
+
+  init(agent: MentionableBotAgent, locale: Locale) {
+    item = .agent(agent)
+    sortRank = 1
+
+    let values = [
+      agent.name,
+      agent.handle,
+      agent.description,
+      agent.botDisplayName,
+      agent.botUserInfo.user.username,
+    ].compactMap { $0 }
+    let normalizedValues = values
+      .map { MentionCompletionViewModel.normalized($0, locale: locale) }
+      .filter { !$0.isEmpty }
+
+    matchText = normalizedValues.joined(separator: "\n")
+    compactMatchText = MentionCompletionViewModel.compact(matchText)
+    sortText = MentionCompletionViewModel.normalized(agent.name, locale: locale)
   }
 
   func matches(_ query: String, compactQuery: String) -> Bool {

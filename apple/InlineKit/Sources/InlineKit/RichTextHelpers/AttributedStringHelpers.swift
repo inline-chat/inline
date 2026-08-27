@@ -13,13 +13,18 @@ public class AttributedStringHelpers {
   #if os(macOS)
   public static func mentionAttributes(
     userId: Int64,
+    agentId: Int64? = nil,
     font: NSFont = .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
   ) -> [NSAttributedString.Key: Any] {
-    [
+    var attributes: [NSAttributedString.Key: Any] = [
       .mentionUserId: userId,
       .foregroundColor: NSColor.systemBlue,
       .font: font,
     ]
+    if let agentId {
+      attributes[.mentionAgentId] = agentId
+    }
+    return attributes
   }
 
   public static func groupMentionAttributes(
@@ -47,13 +52,18 @@ public class AttributedStringHelpers {
   #elseif os(iOS)
   public static func mentionAttributes(
     userId: Int64,
+    agentId: Int64? = nil,
     font: UIFont = UIFont.systemFont(ofSize: 17, weight: .regular)
   ) -> [NSAttributedString.Key: Any] {
-    [
+    var attributes: [NSAttributedString.Key: Any] = [
       .mentionUserId: userId,
       .foregroundColor: UIColor.systemBlue,
       .font: font,
     ]
+    if let agentId {
+      attributes[.mentionAgentId] = agentId
+    }
+    return attributes
   }
 
   public static func groupMentionAttributes(
@@ -81,8 +91,12 @@ public class AttributedStringHelpers {
 
   // MARK: - Mention Creation
 
-  public static func createMentionAttributedString(_ text: String, userId: Int64) -> NSAttributedString {
-    NSAttributedString(string: text, attributes: mentionAttributes(userId: userId))
+  public static func createMentionAttributedString(
+    _ text: String,
+    userId: Int64,
+    agentId: Int64? = nil
+  ) -> NSAttributedString {
+    NSAttributedString(string: text, attributes: mentionAttributes(userId: userId, agentId: agentId))
   }
 
   public static func createGroupMentionAttributedString(_ text: String, groupId: Int64) -> NSAttributedString {
@@ -163,10 +177,11 @@ public class AttributedStringHelpers {
     _ attributedString: NSAttributedString,
     range: NSRange,
     with mentionText: String,
-    userId: Int64
+    userId: Int64,
+    agentId: Int64? = nil
   ) -> NSAttributedString {
     let mutableAttributedString = attributedString.mutableCopy() as! NSMutableAttributedString
-    let mentionAttributedString = createMentionAttributedString(mentionText, userId: userId)
+    let mentionAttributedString = createMentionAttributedString(mentionText, userId: userId, agentId: agentId)
     mutableAttributedString.replaceCharacters(in: range, with: mentionAttributedString)
     return mutableAttributedString.copy() as! NSAttributedString
   }
@@ -211,6 +226,9 @@ public class AttributedStringHelpers {
         entity.length = Int64(range.length)
         entity.mention = MessageEntity.MessageEntityMention.with {
           $0.userID = userId
+          if let agentId = attributedString.attribute(.mentionAgentId, at: range.location, effectiveRange: nil) as? Int64 {
+            $0.agentID = agentId
+          }
         }
         entities.append(entity)
       }
@@ -291,6 +309,7 @@ public class AttributedStringHelpers {
 
 public extension NSAttributedString.Key {
   static let mentionUserId = NSAttributedString.Key("mentionUserId")
+  static let mentionAgentId = NSAttributedString.Key("mentionAgentId")
   static let mentionGroupId = NSAttributedString.Key("mentionGroupId")
   static let threadLink = NSAttributedString.Key("threadLink")
   static let botCommand = NSAttributedString.Key("botCommand")

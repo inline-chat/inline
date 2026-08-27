@@ -1,4 +1,5 @@
 import Testing
+import InlineProtocol
 @testable import InlineKit
 
 @MainActor
@@ -110,6 +111,29 @@ struct MentionCompletionViewModelTests {
 
     #expect(MentionCompletionViewModel.mentionText(for: bot) == "@Mo's Codex")
     #expect(MentionCompletionViewModel.mentionText(for: human) == "@Mary")
+  }
+
+  @Test("agents search and insert as the backing bot plus Agent identity")
+  func agentsSearchAndInsert() throws {
+    let model = MentionCompletionViewModel(currentUserId: { nil })
+    let bot = user(200, firstName: "Research Bot", username: "research_bot")
+    var profile = BotAgentProfile()
+    profile.id = 7
+    profile.botUserID = 200
+    profile.name = "Data Analyst"
+    profile.handle = "data"
+    profile.emoji = "📊"
+    profile.description_p = "Analyzes product metrics"
+    let agent = MentionableBotAgent(profile: profile, botUserInfo: bot)
+
+    model.updateCandidates(.init(users: [], groups: [], agents: [agent]))
+    model.filter(with: "metrics")
+
+    let item = try #require(model.items.first)
+    #expect(item.agent?.id == 7)
+    #expect(item.userInfo?.user.id == 200)
+    #expect(model.mentionText(for: item) == "@📊 Data Analyst")
+    #expect(item.subtitle == "via Research Bot · Analyzes product metrics")
   }
 
   private func user(

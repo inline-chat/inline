@@ -1231,6 +1231,20 @@ class MinimalMessageViewAppKit: NSView {
       }
 
       if let userId = attributedString.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) as? Int64 {
+        if let agentId = attributedString.attribute(.mentionAgentId, at: characterIndex, effectiveRange: nil) as? Int64 {
+          MessageGestureTrace.debug(
+            "MinimalMessageView.handleTextEntityClick messageId=\(message.messageId) action=resolveAgent agentId=\(agentId) range=\(MessageGestureTrace.range(range))"
+          )
+          Task { @MainActor in
+            guard !(await BotAgentMentionNavigator.open(
+              agentId: agentId,
+              botUserId: userId,
+              peer: message.peerId
+            )) else { return }
+            openChat(peer: .user(id: userId))
+          }
+          return true
+        }
         Task { @MainActor in
           openChat(peer: .user(id: userId))
         }

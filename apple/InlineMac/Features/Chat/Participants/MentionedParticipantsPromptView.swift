@@ -84,6 +84,16 @@ private struct MentionedParticipantPromptIcon: View {
           .frame(width: size, height: size)
           .background(.quaternary)
           .clipShape(Circle())
+
+      case let .agent(agent):
+        UserAvatar(userInfo: agent.botUserInfo, size: size)
+          .overlay(alignment: .bottomTrailing) {
+            if let emoji = agent.emoji, !emoji.isEmpty {
+              Text(emoji)
+                .font(.system(size: max(10, size * 0.38)))
+                .background(.background, in: Circle())
+            }
+          }
     }
   }
 }

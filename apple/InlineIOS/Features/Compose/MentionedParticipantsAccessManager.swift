@@ -201,6 +201,8 @@ final class MentionedParticipantsAccessManager {
             try await Api.realtime.send(
               .addChatParticipant(chatID: chatId, groupID: group.id)
             )
+          case .agent:
+            continue
         }
         addedItems.append(item)
       } catch {
@@ -234,6 +236,8 @@ final class MentionedParticipantsAccessManager {
               try await Api.realtime.send(
                 .removeChatParticipant(chatID: chatId, groupID: group.id)
               )
+            case .agent:
+              continue
           }
         } catch {
           log.error("Failed to undo mentioned participant add", error: error)
@@ -323,7 +327,7 @@ final class MentionedParticipantsAccessManager {
     guard let entities else { return [] }
     return Set(
       entities.entities.compactMap { entity in
-        guard entity.type == .mention else { return nil }
+        guard entity.type == .mention, !entity.mention.hasAgentID else { return nil }
         return entity.mention.userID
       }
     ).filter { $0 > 0 }

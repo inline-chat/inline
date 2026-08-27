@@ -64,6 +64,75 @@ public struct UserGroupMembersSheet: View {
   }
 }
 
+public struct BotAgentProfileSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  private let agent: MentionableBotAgent
+
+  public init(target: BotAgentMentionTarget) {
+    agent = target.agent
+  }
+
+  public var body: some View {
+    NavigationStack {
+      List {
+        Section {
+          HStack(spacing: 14) {
+            UserAvatar(userInfo: agent.botUserInfo, size: 52)
+              .overlay(alignment: .bottomTrailing) {
+                if let emoji = agent.emoji, !emoji.isEmpty {
+                  Text(emoji)
+                    .font(.title3)
+                    .padding(2)
+                    .background(.background, in: Circle())
+                }
+              }
+            VStack(alignment: .leading, spacing: 3) {
+              Text(agent.name)
+                .font(.headline)
+              Text("via \(agent.botDisplayName)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+          }
+          .padding(.vertical, 4)
+        }
+
+        if let description = agent.description, !description.isEmpty {
+          Section("About") {
+            Text(description)
+          }
+        }
+
+        if let handle = agent.handle, !handle.isEmpty {
+          Section("Handle") {
+            Text("@\(handle)")
+              .textSelection(.enabled)
+          }
+        }
+
+        Section {
+          Text("This Agent is a specialization of \(agent.botDisplayName). It uses the bot’s existing chat access and integration.")
+            .foregroundStyle(.secondary)
+        }
+      }
+      #if os(iOS)
+      .listStyle(.insetGrouped)
+      .navigationBarTitleDisplayMode(.inline)
+      .presentationDetents([.medium, .large])
+      #else
+      .listStyle(.inset)
+      .frame(width: 380, height: 360)
+      #endif
+      .navigationTitle("Agent")
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Close") { dismiss() }
+        }
+      }
+    }
+  }
+}
+
 private struct UserGroupMembersList: View {
   let group: UserGroup
   let members: [UserGroupMemberInfo]

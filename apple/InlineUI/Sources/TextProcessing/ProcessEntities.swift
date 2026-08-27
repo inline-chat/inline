@@ -280,14 +280,17 @@ public class ProcessEntities {
         case .textURL:
           if case let .textURL(textURL) = entity.entity {
             let rangeText = (text as NSString).substring(with: range)
-            if let userId = inlineUserId(from: textURL.url) {
+            if let mentionTarget = inlineMentionTarget(from: textURL.url) {
               var attributes: [NSAttributedString.Key: Any] = [
-                .mentionUserId: userId,
+                .mentionUserId: mentionTarget.userId,
                 .foregroundColor: configuration.linkColor,
                 .underlineStyle: 0,
               ]
+              if let agentId = mentionTarget.agentId {
+                attributes[.mentionAgentId] = agentId
+              }
               if configuration.convertMentionsToLink {
-                attributes[.link] = "inline://user/\(userId)"
+                attributes[.link] = inlineMentionURL(userId: mentionTarget.userId, agentId: mentionTarget.agentId)
               }
 
               #if os(macOS)
@@ -386,13 +389,17 @@ public class ProcessEntities {
 
         case .mention:
           if case let .mention(mention) = entity.entity {
+            let agentId = mention.hasAgentID ? mention.agentID : nil
             if configuration.convertMentionsToLink {
               var attributes: [NSAttributedString.Key: Any] = [
                 .mentionUserId: mention.userID,
                 .foregroundColor: configuration.linkColor,
-                .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
+                .link: inlineMentionURL(userId: mention.userID, agentId: agentId),
                 .underlineStyle: 0,
               ]
+              if let agentId {
+                attributes[.mentionAgentId] = agentId
+              }
 
               #if os(macOS)
               attributes[.cursor] = NSCursor.pointingHand
@@ -400,10 +407,14 @@ public class ProcessEntities {
 
               attributedString.addAttributes(attributes, range: range)
             } else {
-              attributedString.addAttributes([
+              var attributes: [NSAttributedString.Key: Any] = [
                 .mentionUserId: mention.userID,
                 .foregroundColor: configuration.linkColor,
-              ], range: range)
+              ]
+              if let agentId {
+                attributes[.mentionAgentId] = agentId
+              }
+              attributedString.addAttributes(attributes, range: range)
             }
           }
 
@@ -610,6 +621,9 @@ public class ProcessEntities {
         entity.length = Int64(range.length)
         entity.mention = MessageEntity.MessageEntityMention.with {
           $0.userID = userId
+          if let agentId = attributedString.attribute(.mentionAgentId, at: range.location, effectiveRange: nil) as? Int64 {
+            $0.agentID = agentId
+          }
         }
         entities.append(entity)
       }
@@ -770,14 +784,17 @@ public class ProcessEntities {
 
       let rangeText = (attributedString.string as NSString).substring(with: range)
 
-      if let userId = inlineUserId(from: urlString) {
+      if let mentionTarget = inlineMentionTarget(from: urlString) {
         guard let range = trimmedEntityRange(in: nsText, range: range) else { return }
         var entity = MessageEntity()
         entity.type = .mention
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
         entity.mention = MessageEntity.MessageEntityMention.with {
-          $0.userID = userId
+          $0.userID = mentionTarget.userId
+          if let agentId = mentionTarget.agentId {
+            $0.agentID = agentId
+          }
         }
         entities.append(entity)
         return
@@ -997,7 +1014,7 @@ public class ProcessEntities {
     LinkDetector.isSupportedLinkURLString(urlString)
   }
 
-  private static func inlineUserId(from urlString: String) -> Int64? {
+  private static func inlineMentionTarget(from urlString: String) -> (userId: Int64, agentId: Int64?)? {
     guard let components = URLComponents(string: urlString),
           components.scheme?.lowercased() == "inline",
           components.host?.lowercased() == "user"
@@ -1007,12 +1024,15 @@ public class ProcessEntities {
       let name = $0.name.lowercased()
       return name == "id" || name == "user_id"
     }?.value
-    if let id = positiveInt64(queryId) {
-      return id
-    }
-
     let pathId = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    return positiveInt64(pathId)
+    guard let userId = positiveInt64(queryId) ?? positiveInt64(pathId) else { return nil }
+    let agentId = positiveInt64(queryValue(in: components, names: ["agent_id"]))
+    return (userId, agentId)
+  }
+
+  private static func inlineMentionURL(userId: Int64, agentId: Int64?) -> String {
+    guard let agentId else { return "inline://user/\(userId)" }
+    return "inline://user?id=\(userId)&agent_id=\(agentId)"
   }
 
   private static func inlineThreadLink(from urlString: String, visibleText: String? = nil) -> ThreadLinkTarget? {

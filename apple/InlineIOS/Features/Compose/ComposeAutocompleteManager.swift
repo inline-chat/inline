@@ -37,10 +37,14 @@ final class ComposeAutocompleteManager: NSObject {
   private let mentionViewModel: MentionCompletionViewModel
   private let commandViewModel: PeerBotCommandsViewModel
   private let participantsViewModel: ChatParticipantsWithMembersViewModel
+  private let peerId: InlineKit.Peer
   private let viewModel: ComposeAutocompleteViewModel
   private var completionConstraints: [NSLayoutConstraint] = []
   private var cancellables = Set<AnyCancellable>()
   private var commandLoadTask: Task<Void, Never>?
+  private var agentLoadTask: Task<Void, Never>?
+  private var mentionCandidates = MentionCompletionCandidates.empty
+  private var mentionAgents: [MentionableBotAgent] = []
   private var loadingPresentationTask: Task<Void, Never>?
   private var commandLoadStateOverride: ComposeAutocompleteLoadState?
   private var suppressMentionDetection = false
@@ -56,6 +60,7 @@ final class ComposeAutocompleteManager: NSObject {
     let commandViewModel = PeerBotCommandsViewModel(peer: peerId)
     self.mentionViewModel = mentionViewModel
     self.commandViewModel = commandViewModel
+    self.peerId = peerId
     participantsViewModel = ChatParticipantsWithMembersViewModel(
       db: database,
       chatId: chatId,
@@ -93,6 +98,8 @@ final class ComposeAutocompleteManager: NSObject {
     super.init()
     bindViewModel()
     bindParticipants()
+    observeMentionableAgentsExperiment()
+    refreshMentionAgentsForExperiment()
   }
 
   func configure(spaceId: Int64?) {
@@ -173,6 +180,8 @@ final class ComposeAutocompleteManager: NSObject {
     completionView = nil
     commandLoadTask?.cancel()
     commandLoadTask = nil
+    agentLoadTask?.cancel()
+    agentLoadTask = nil
     cancellables.removeAll()
   }
 
@@ -202,16 +211,59 @@ final class ComposeAutocompleteManager: NSObject {
       .sink { [weak self] candidates in
         Task { @MainActor [weak self] in
           guard let self else { return }
-          self.mentionViewModel.updateCandidates(candidates)
-          if self.viewModel.match?.kind == .mention {
-            self.viewModel.reloadCurrentMatch()
-          }
+          self.mentionCandidates = candidates
+          self.applyMentionCandidates()
         }
       }
       .store(in: &cancellables)
 
     Task { [weak self] in
       await self?.participantsViewModel.refetchParticipants()
+    }
+  }
+
+  private func loadMentionAgents() {
+    agentLoadTask?.cancel()
+    agentLoadTask = Task { @MainActor [weak self, peerId = peerId] in
+      guard let self else { return }
+      do {
+        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId)
+        applyMentionCandidates()
+      } catch is CancellationError {
+        return
+      } catch {
+        mentionAgents = []
+        applyMentionCandidates()
+      }
+    }
+  }
+
+  private func observeMentionableAgentsExperiment() {
+    NotificationCenter.default.publisher(for: .mentionableAgentsExperimentChanged)
+      .sink { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.refreshMentionAgentsForExperiment()
+        }
+      }
+      .store(in: &cancellables)
+  }
+
+  private func refreshMentionAgentsForExperiment() {
+    agentLoadTask?.cancel()
+    mentionAgents = []
+    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else {
+      applyMentionCandidates()
+      return
+    }
+    loadMentionAgents()
+  }
+
+  private func applyMentionCandidates() {
+    var candidates = mentionCandidates
+    candidates.agents = ExperimentalFeatureFlags.mentionableAgentsEnabled ? mentionAgents : []
+    mentionViewModel.updateCandidates(candidates)
+    if viewModel.match?.kind == .mention {
+      viewModel.reloadCurrentMatch()
     }
   }
 
@@ -640,6 +692,17 @@ final class ComposeAutocompleteManager: NSObject {
         range: range,
         with: mentionText,
         groupId: group.id,
+        trailingText: trailingText,
+        mentionAttributes: mentionAttributes(for: textView),
+        trailingAttributes: baseTextAttributes(for: textView)
+      )
+    case let .agent(agent):
+      mentionDetector.replaceMention(
+        in: attributedText,
+        range: range,
+        with: mentionText,
+        userId: agent.botUserId,
+        agentId: agent.id,
         trailingText: trailingText,
         mentionAttributes: mentionAttributes(for: textView),
         trailingAttributes: baseTextAttributes(for: textView)

@@ -1,7 +1,11 @@
+import InlineKit
 import InlineIOSUI
 import SwiftUI
 
 struct ExperimentalView: View {
+  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
+  private var mentionableAgentsEnabled = false
+
   @AppStorage(MessageView2Feature.preferenceKey)
   private var messageView2Enabled = false
 
@@ -23,6 +27,19 @@ struct ExperimentalView: View {
         Text("New Home is now the standard experience for everyone.")
       }
 
+      Section {
+        SettingsItem(
+          icon: "at",
+          iconColor: .purple,
+          title: "Mentionable Agents"
+        ) {
+          Toggle("Mentionable Agents", isOn: $mentionableAgentsEnabled)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Show Agent creation, profiles, and @mention autocomplete. Server and Bot API support remain available when this is off.")
+      }
+
       if SettingsBuildAudience.showsDebugTools {
         Section {
           SettingsItem(
@@ -41,6 +58,10 @@ struct ExperimentalView: View {
     .listStyle(.insetGrouped)
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
+    .onChange(of: mentionableAgentsEnabled) { _, _ in
+      BotAgentDirectory.shared.clear()
+      NotificationCenter.default.post(name: .mentionableAgentsExperimentChanged, object: nil)
+    }
   }
 }
 

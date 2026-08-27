@@ -17,7 +17,7 @@ public enum ComposeEntityEditing {
     affectedRanges(
       in: attributedString,
       changeRange: changeRange,
-      attributes: [.mentionUserId, .mentionGroupId]
+      attributes: [.mentionUserId, .mentionAgentId, .mentionGroupId]
     )
   }
 
@@ -38,7 +38,7 @@ public enum ComposeEntityEditing {
     textColor: PlatformColor
   ) {
     strip(
-      attributes: [.mentionUserId, .mentionGroupId],
+      attributes: [.mentionUserId, .mentionAgentId, .mentionGroupId],
       in: attributedString,
       ranges: ranges,
       textColor: textColor

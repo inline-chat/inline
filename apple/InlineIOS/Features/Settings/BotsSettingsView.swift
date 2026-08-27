@@ -378,6 +378,9 @@ private struct IOSManagedBotSummary: View {
 }
 
 private struct IOSManagedBotSettingsView: View {
+  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
+  private var mentionableAgentsEnabled = false
+
   let bot: InlineProtocol.User
   let token: String?
   let isBusy: Bool
@@ -399,6 +402,9 @@ private struct IOSManagedBotSettingsView: View {
         copyToken: copyToken,
         requestRotation: { isConfirmingRotation = true }
       )
+      if mentionableAgentsEnabled {
+        IOSBotAgentsSection(botUserId: bot.id)
+      }
     }
     .listStyle(.insetGrouped)
     .navigationTitle(User(from: bot).displayName)
@@ -412,6 +418,215 @@ private struct IOSManagedBotSettingsView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("The current token will stop working immediately. Existing integrations must be updated with the new token.")
+    }
+  }
+}
+
+private struct IOSBotAgentsSection: View {
+  @State private var model: BotAgentsSettingsModel
+  @State private var editorItem: IOSBotAgentEditorItem?
+  @State private var agentToDelete: InlineProtocol.BotAgent?
+
+  init(botUserId: Int64) {
+    _model = State(initialValue: BotAgentsSettingsModel(botUserId: botUserId))
+  }
+
+  var body: some View {
+    Section {
+      if model.isLoading, model.agents.isEmpty {
+        HStack {
+          ProgressView()
+          Text("Loading agents…")
+            .foregroundStyle(.secondary)
+        }
+      } else if model.agents.isEmpty {
+        Text("Create a named specialization people can @mention in chats where this bot has access.")
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(model.agents, id: \.id) { agent in
+          Button {
+            editorItem = IOSBotAgentEditorItem(agent: agent)
+          } label: {
+            HStack(spacing: 10) {
+              Text(agent.hasEmoji ? agent.emoji : "🤖")
+                .font(.title2)
+                .frame(width: 34, height: 34)
+                .background(.quaternary, in: Circle())
+              VStack(alignment: .leading, spacing: 2) {
+                Text(agent.name)
+                  .foregroundStyle(.primary)
+                if agent.hasDescription_p, !agent.description_p.isEmpty {
+                  Text(agent.description_p)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+              Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            }
+          }
+          .buttonStyle(.plain)
+          .swipeActions {
+            Button("Delete", role: .destructive) {
+              agentToDelete = agent
+            }
+          }
+        }
+      }
+
+      if let errorMessage = model.errorMessage {
+        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+          .foregroundStyle(.red)
+      }
+
+      Button {
+        editorItem = IOSBotAgentEditorItem(agent: nil)
+      } label: {
+        Label("New Agent", systemImage: "plus")
+      }
+    } header: {
+      Text("Agents")
+    } footer: {
+      Text("Agents reuse this bot’s harness, credentials, memory, skills, and chat access. Instructions and skill keys are visible only to bot managers and the harness.")
+    }
+    .task { await model.load() }
+    .sheet(item: $editorItem) { item in
+      IOSBotAgentEditor(
+        agent: item.agent,
+        isSaving: model.savingAgentId != nil,
+        onSave: { draft in
+          await model.save(draft, agentId: item.agent?.id)
+        },
+        onDelete: item.agent.map { agent in
+          { await model.delete(agentId: agent.id) }
+        }
+      )
+    }
+    .confirmationDialog(
+      "Delete Agent?",
+      isPresented: Binding(
+        get: { agentToDelete != nil },
+        set: { if !$0 { agentToDelete = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Delete Agent", role: .destructive) {
+        guard let agent = agentToDelete else { return }
+        agentToDelete = nil
+        editorItem = nil
+        Task { await model.delete(agentId: agent.id) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Existing messages keep their text, but future mentions will no longer activate this specialization.")
+    }
+  }
+}
+
+private struct IOSBotAgentEditorItem: Identifiable {
+  let agent: InlineProtocol.BotAgent?
+  let id = UUID()
+}
+
+private struct IOSBotAgentEditor: View {
+  @Environment(\.dismiss) private var dismiss
+  @State private var draft: ManagedBotAgentDraft
+  @State private var isSaving = false
+  @State private var isDeleting = false
+  @State private var isConfirmingDelete = false
+
+  let agent: InlineProtocol.BotAgent?
+  let externallySaving: Bool
+  let onSave: (ManagedBotAgentDraft) async -> Bool
+  let onDelete: (() async -> Bool)?
+
+  init(
+    agent: InlineProtocol.BotAgent?,
+    isSaving: Bool,
+    onSave: @escaping (ManagedBotAgentDraft) async -> Bool,
+    onDelete: (() async -> Bool)?
+  ) {
+    self.agent = agent
+    externallySaving = isSaving
+    self.onSave = onSave
+    self.onDelete = onDelete
+    _draft = State(initialValue: agent.map { ManagedBotAgentDraft(agent: $0) } ?? ManagedBotAgentDraft())
+  }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section("Identity") {
+          TextField("Name", text: $draft.name)
+          TextField("Handle (optional)", text: $draft.handle)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+          TextField("Emoji (optional)", text: $draft.emoji)
+          TextField("Description (optional)", text: $draft.description, axis: .vertical)
+            .lineLimit(2 ... 4)
+        }
+
+        Section {
+          TextField("Skill key (optional)", text: $draft.skillKey)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+          TextField("Instructions (optional)", text: $draft.instructions, axis: .vertical)
+            .lineLimit(5 ... 12)
+        } header: {
+          Text("Harness")
+        } footer: {
+          Text("A name-only Agent is valid. Harnesses receive a minimal identity instruction when these fields are empty.")
+        }
+
+        if onDelete != nil {
+          Section {
+            Button("Delete Agent…", role: .destructive) {
+              isConfirmingDelete = true
+            }
+            .disabled(isDeleting)
+          }
+        }
+      }
+      .navigationTitle(agent == nil ? "New Agent" : "Edit Agent")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Save") {
+            isSaving = true
+            Task {
+              if await onSave(draft) {
+                dismiss()
+              }
+              isSaving = false
+            }
+          }
+          .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving || externallySaving)
+        }
+      }
+      .confirmationDialog(
+        "Delete Agent?",
+        isPresented: $isConfirmingDelete,
+        titleVisibility: .visible
+      ) {
+        Button("Delete Agent", role: .destructive) {
+          isDeleting = true
+          Task {
+            if await onDelete?() == true {
+              dismiss()
+            }
+            isDeleting = false
+          }
+        }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("Existing messages keep their text, but future mentions will no longer activate this specialization.")
+      }
     }
   }
 }

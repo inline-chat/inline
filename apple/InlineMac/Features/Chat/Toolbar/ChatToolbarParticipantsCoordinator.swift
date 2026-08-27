@@ -341,6 +341,8 @@ private struct ChatToolbarMentionParticipantPromptPresentation: ViewModifier {
                 chatID: chatId,
                 groupID: group.id
               ))
+            case .agent:
+              continue
           }
           addedCount += 1
         } catch {

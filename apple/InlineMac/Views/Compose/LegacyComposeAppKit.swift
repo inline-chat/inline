@@ -103,6 +103,9 @@ class LegacyComposeAppKit: NSView {
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
   private var didRequestMentionParticipants = false
   private var mentionParticipantsTask: Task<Void, Never>?
+  private var mentionAgentsTask: Task<Void, Never>?
+  private var mentionCandidates = MentionCompletionCandidates.empty
+  private var mentionAgents: [MentionableBotAgent] = []
 
   // Slash command completion
   private var commandCompletionMenu: CommandCompletionMenu?
@@ -829,7 +832,8 @@ class LegacyComposeAppKit: NSView {
       .sink { [weak self] candidates in
         guard let self else { return }
         log.trace("Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
-        mentionCompletionMenu?.updateCandidates(candidates)
+        mentionCandidates = candidates
+        applyMentionCandidates()
 
         if let currentMentionRange,
            mentionCompletionMenu?.hasItems == true,
@@ -839,6 +843,42 @@ class LegacyComposeAppKit: NSView {
         }
       }
       .store(in: &cancellables)
+
+    NotificationCenter.default.publisher(for: .mentionableAgentsExperimentChanged)
+      .sink { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.refreshMentionAgentsForExperiment()
+        }
+      }
+      .store(in: &cancellables)
+
+    refreshMentionAgentsForExperiment()
+  }
+
+  private func refreshMentionAgentsForExperiment() {
+    mentionAgentsTask?.cancel()
+    mentionAgents = []
+    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else {
+      applyMentionCandidates()
+      return
+    }
+    mentionAgentsTask = Task { @MainActor [weak self, peerId = peerId] in
+      guard let self else { return }
+      do {
+        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId)
+      } catch is CancellationError {
+        return
+      } catch {
+        mentionAgents = []
+      }
+      applyMentionCandidates()
+    }
+  }
+
+  private func applyMentionCandidates() {
+    var candidates = mentionCandidates
+    candidates.agents = ExperimentalFeatureFlags.mentionableAgentsEnabled ? mentionAgents : []
+    mentionCompletionMenu?.updateCandidates(candidates)
   }
 
   private func refetchMentionParticipantsIfNeeded() {
@@ -2061,6 +2101,8 @@ class LegacyComposeAppKit: NSView {
     mentionCompletionMenu?.removeFromSuperview()
     mentionParticipantsTask?.cancel()
     mentionParticipantsTask = nil
+    mentionAgentsTask?.cancel()
+    mentionAgentsTask = nil
 
     log.trace("deinit")
   }
@@ -2616,6 +2658,16 @@ extension LegacyComposeAppKit: MentionCompletionMenuDelegate {
         range: mentionRange.range,
         with: text,
         groupId: group.id,
+        mentionAttributes: composeMentionAttributes,
+        trailingAttributes: composeBaseTextAttributes
+      )
+    case let .agent(agent):
+      mentionDetector.replaceMention(
+        in: currentAttributedText,
+        range: mentionRange.range,
+        with: text,
+        userId: agent.botUserId,
+        agentId: agent.id,
         mentionAttributes: composeMentionAttributes,
         trailingAttributes: composeBaseTextAttributes
       )

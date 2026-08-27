@@ -290,6 +290,158 @@ struct PeerBotCommandsViewModelTests {
     #expect(suggestion.botUserInfo.user.profileLocalPath == cachedPath)
   }
 
+  @Test("Agent directory caches access-filtered profiles per peer")
+  func agentDirectoryCachesPerPeer() async throws {
+    let counter = FetchCounter()
+    let peer = Peer.thread(id: 100)
+    let directory = BotAgentDirectory(
+      fetcher: { requestedPeer in
+        #expect(requestedPeer == peer)
+        await counter.increment()
+        var bot = User()
+        bot.id = 200
+        bot.firstName = "Research Bot"
+        var profile = BotAgentProfile()
+        profile.id = 7
+        profile.botUserID = 200
+        profile.name = "Data Analyst"
+        profile.emoji = "📊"
+        var peerBot = PeerBot()
+        peerBot.bot = bot
+        peerBot.agents = [profile]
+        var result = GetPeerBotsResult()
+        result.bots = [peerBot]
+        return result
+      },
+      userInfoResolver: { UserInfo(user: User(from: $0)) }
+    )
+
+    let first = try await directory.agents(for: peer)
+    let second = try await directory.agents(for: peer)
+
+    #expect(await counter.value == 1)
+    #expect(first == second)
+    #expect(first.first?.id == 7)
+    #expect(first.first?.botUserId == 200)
+    #expect(directory.cached(agentId: 7, botUserId: 200, for: peer)?.name == "Data Analyst")
+    #expect(directory.cached(agentId: 7, botUserId: 201, for: peer) == nil)
+    #expect(directory.cached(agentId: 7, botUserId: 200, for: .thread(id: 101)) == nil)
+  }
+
+  @Test("Agent directory skips discovery when the client experiment is off")
+  func agentDirectoryHonorsClientExperiment() async throws {
+    let counter = FetchCounter()
+    let directory = BotAgentDirectory(
+      fetcher: { _ in
+        await counter.increment()
+        return GetPeerBotsResult()
+      },
+      userInfoResolver: { UserInfo(user: User(from: $0)) },
+      isEnabled: { false }
+    )
+
+    #expect(try await directory.agents(for: .thread(id: 100)).isEmpty)
+    #expect(await counter.value == 0)
+    #expect(directory.cached(agentId: 7, botUserId: 200, for: .thread(id: 100)) == nil)
+  }
+
+  @Test("Agent directory expires and bounds peer-scoped profiles")
+  func agentDirectoryExpiresAndBoundsProfiles() async throws {
+    let counter = FetchCounter()
+    var now = Date(timeIntervalSince1970: 1_000)
+    let firstPeer = Peer.thread(id: 100)
+    let secondPeer = Peer.thread(id: 101)
+    let directory = BotAgentDirectory(
+      fetcher: { peer in
+        await counter.increment()
+        return Self.makeAgentDiscoveryResult(agentId: peer == firstPeer ? 7 : 8)
+      },
+      userInfoResolver: { UserInfo(user: User(from: $0)) },
+      now: { now },
+      cacheTTL: 60,
+      maxCachedPeers: 1
+    )
+
+    _ = try await directory.agents(for: firstPeer)
+    now.addTimeInterval(61)
+    _ = try await directory.agents(for: firstPeer)
+    #expect(await counter.value == 2)
+
+    _ = try await directory.agents(for: secondPeer)
+    #expect(directory.cached(agentId: 7, botUserId: 200, for: firstPeer) == nil)
+    #expect(directory.cached(agentId: 8, botUserId: 200, for: secondPeer) != nil)
+  }
+
+  @Test("Agent directory cannot repopulate after account cache clear")
+  func agentDirectoryRejectsClearedInFlightResult() async throws {
+    let started = AsyncFlag()
+    let release = AsyncGate()
+    let peer = Peer.thread(id: 100)
+    let directory = BotAgentDirectory(
+      fetcher: { _ in
+        await started.set()
+        await release.wait()
+        return Self.makeAgentDiscoveryResult(agentId: 7)
+      },
+      userInfoResolver: { UserInfo(user: User(from: $0)) }
+    )
+
+    let fetch = Task { try await directory.agents(for: peer) }
+    while !(await started.value) { await Task.yield() }
+    directory.clear()
+    await release.open()
+
+    #expect(try await fetch.value.isEmpty)
+    #expect(directory.cached(agentId: 7, botUserId: 200, for: peer) == nil)
+  }
+
+  @Test("Agent directory invalidation replaces an in-flight result")
+  func agentDirectoryInvalidationReplacesInFlightResult() async throws {
+    let attempts = FetchCounter()
+    let started = AsyncFlag()
+    let release = AsyncGate()
+    let peer = Peer.thread(id: 100)
+    let directory = BotAgentDirectory(
+      fetcher: { _ in
+        let attempt = await attempts.next()
+        if attempt == 1 {
+          await started.set()
+          await release.wait()
+          return Self.makeAgentDiscoveryResult(agentId: 7)
+        }
+        return Self.makeAgentDiscoveryResult(agentId: 8)
+      },
+      userInfoResolver: { UserInfo(user: User(from: $0)) }
+    )
+
+    let staleFetch = Task { try await directory.agents(for: peer) }
+    while !(await started.value) { await Task.yield() }
+    directory.invalidate(botUserId: 200)
+
+    let replacement = try await directory.agents(for: peer)
+    #expect(replacement.first?.id == 8)
+
+    await release.open()
+    #expect(try await staleFetch.value.isEmpty)
+    #expect(directory.cached(agentId: 8, botUserId: 200, for: peer) != nil)
+  }
+
+  private nonisolated static func makeAgentDiscoveryResult(agentId: Int64) -> GetPeerBotsResult {
+    var bot = User()
+    bot.id = 200
+    bot.firstName = "Research Bot"
+    var profile = BotAgentProfile()
+    profile.id = agentId
+    profile.botUserID = 200
+    profile.name = "Data Analyst"
+    var peerBot = PeerBot()
+    peerBot.bot = bot
+    peerBot.agents = [profile]
+    var result = GetPeerBotsResult()
+    result.bots = [peerBot]
+    return result
+  }
+
   private nonisolated static func makeGroup(
     botId: Int64,
     username: String,

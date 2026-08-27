@@ -106,6 +106,13 @@ class MentionTableCellView: NSTableCellView {
         containerView.addSubview(imageView)
         groupIconView = imageView
         iconView = imageView
+
+      case let .agent(agent):
+        let newAvatarView = ChatIconSwiftUIBridge(.user(agent.botUserInfo), size: MentionCompletionMenu.Layout.avatarSize)
+        newAvatarView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(newAvatarView)
+        avatarView = newAvatarView
+        iconView = newAvatarView
     }
 
     // Vertical layout - name and username stacked vertically

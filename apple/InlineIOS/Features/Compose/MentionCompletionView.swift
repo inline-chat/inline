@@ -240,6 +240,12 @@ public class MentionCompletionView: UIView {
         imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
         iconView = imageView
+
+      case let .agent(agent):
+        let avatarView = UserAvatarView()
+        avatarView.configure(with: agent.botUserInfo, size: 36)
+        avatarView.translatesAutoresizingMaskIntoConstraints = false
+        iconView = avatarView
     }
 
     let nameLabel = UILabel()

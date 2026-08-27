@@ -174,6 +174,50 @@ struct ProcessEntitiesTests {
     #expect(attributes[.link] as? String == "inline://user/123")
   }
 
+  @Test("Agent mention preserves bot and Agent identity")
+  func testAgentMentionRoundTrip() throws {
+    let text = "Ask @📊 Data Analyst"
+    let range = rangeOfSubstring("@📊 Data Analyst", in: text)
+    var mention = createMentionEntity(
+      offset: Int64(range.location),
+      length: Int64(range.length),
+      userId: 200
+    )
+    mention.mention.agentID = 7
+
+    let attributed = ProcessEntities.toAttributedString(
+      text: text,
+      entities: createMessageEntities([mention]),
+      configuration: testConfiguration
+    )
+    let attributes = attributed.attributes(at: range.location, effectiveRange: nil)
+    #expect(attributes[.mentionUserId] as? Int64 == 200)
+    #expect(attributes[.mentionAgentId] as? Int64 == 7)
+    #expect(attributes[.link] as? String == "inline://user?id=200&agent_id=7")
+
+    let extracted = ProcessEntities.fromAttributedString(attributed, parseMarkdown: false)
+    let extractedMention = try #require(extracted.entities.entities.first?.mention)
+    #expect(extractedMention.userID == 200)
+    #expect(extractedMention.hasAgentID)
+    #expect(extractedMention.agentID == 7)
+  }
+
+  @Test("Agent deep link becomes an Agent mention entity")
+  func testAgentMentionDeepLinkExtraction() throws {
+    let attributed = NSMutableAttributedString(string: "@Data Analyst")
+    attributed.addAttribute(
+      .link,
+      value: "inline://user?id=200&agent_id=7",
+      range: NSRange(location: 0, length: attributed.length)
+    )
+
+    let extracted = ProcessEntities.fromAttributedString(attributed, parseMarkdown: false)
+    let mention = try #require(extracted.entities.entities.first?.mention)
+    #expect(mention.userID == 200)
+    #expect(mention.hasAgentID)
+    #expect(mention.agentID == 7)
+  }
+
   @Test("Thread link entity")
   func testThreadLinkEntity() {
     let text = "Open [[Engineering]]"

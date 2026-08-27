@@ -84,6 +84,7 @@ public class ObjectCache {
   }
 
   public func clear() {
+    BotAgentDirectory.shared.clear()
     dbCancellables.forEach { $0.cancel() }
     dbCancellables.removeAll()
 

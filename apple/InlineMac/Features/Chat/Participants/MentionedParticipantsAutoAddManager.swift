@@ -183,6 +183,8 @@ final class MentionedParticipantsAutoAddManager {
                 groupID: group.id
               )
             )
+          case .agent:
+            continue
         }
         addedItems.append(item)
       } catch {
@@ -220,6 +222,8 @@ final class MentionedParticipantsAutoAddManager {
                   groupID: group.id
                 )
               )
+            case .agent:
+              continue
           }
         } catch {
           log.error("Failed to undo mentioned participant add", error: error)
@@ -288,7 +292,7 @@ final class MentionedParticipantsAutoAddManager {
     guard let entities else { return [] }
     return Set(
       entities.entities.compactMap { entity in
-        guard entity.type == .mention else { return nil }
+        guard entity.type == .mention, !entity.mention.hasAgentID else { return nil }
         return entity.mention.userID
       }
     ).filter { $0 != 0 }

@@ -40,6 +40,9 @@ class MentionManager: NSObject {
   // Participants
   private var chatParticipantsViewModel: ChatParticipantsWithMembersViewModel?
   private var cancellables = Set<AnyCancellable>()
+  private var mentionCandidates = MentionCompletionCandidates.empty
+  private var mentionAgents: [MentionableBotAgent] = []
+  private var agentLoadTask: Task<Void, Never>?
 
   // Text view reference
   private weak var textView: UITextView?
@@ -51,6 +54,8 @@ class MentionManager: NSObject {
     self.peerId = peerId
     super.init()
     setupParticipantsViewModel()
+    observeMentionableAgentsExperiment()
+    refreshMentionAgentsForExperiment()
   }
 
   deinit {
@@ -71,7 +76,8 @@ class MentionManager: NSObject {
       .sink { [weak self] candidates in
         Log.shared.trace("🔍 Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
         guard let self else { return }
-        mentionCompletionView?.updateCandidates(candidates)
+        mentionCandidates = candidates
+        applyMentionCandidates()
 
         if let mentionCompletionView,
            mentionCompletionView.hasItems,
@@ -102,8 +108,50 @@ class MentionManager: NSObject {
 
     // Update with current participants
     if let candidates = chatParticipantsViewModel?.mentionCandidates {
-      completionView.updateCandidates(candidates)
+      mentionCandidates = candidates
+      applyMentionCandidates()
     }
+  }
+
+  private func loadMentionAgents() {
+    agentLoadTask?.cancel()
+    agentLoadTask = Task { @MainActor [weak self, peerId = peerId] in
+      guard let self else { return }
+      do {
+        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId)
+      } catch is CancellationError {
+        return
+      } catch {
+        mentionAgents = []
+      }
+      applyMentionCandidates()
+    }
+  }
+
+  private func observeMentionableAgentsExperiment() {
+    NotificationCenter.default.publisher(for: .mentionableAgentsExperimentChanged)
+      .sink { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.refreshMentionAgentsForExperiment()
+        }
+      }
+      .store(in: &cancellables)
+  }
+
+  private func refreshMentionAgentsForExperiment() {
+    agentLoadTask?.cancel()
+    mentionAgents = []
+    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else {
+      applyMentionCandidates()
+      return
+    }
+    loadMentionAgents()
+  }
+
+  private func applyMentionCandidates() {
+    var candidates = mentionCandidates
+    candidates.agents = ExperimentalFeatureFlags.mentionableAgentsEnabled ? mentionAgents : []
+    mentionCompletionView?.updateCandidates(candidates)
   }
 
   // MARK: - Public Interface
@@ -241,6 +289,8 @@ class MentionManager: NSObject {
     hideMentionCompletion()
     mentionCompletionView?.removeFromSuperview()
     mentionCompletionView = nil
+    agentLoadTask?.cancel()
+    agentLoadTask = nil
     cancellables.removeAll()
   }
 
@@ -412,6 +462,17 @@ class MentionManager: NSObject {
           range: range,
           with: mentionText,
           groupId: group.id,
+          trailingText: trailingText,
+          mentionAttributes: mentionAttributes,
+          trailingAttributes: trailingAttributes
+        )
+      case let .agent(agent):
+        mentionDetector.replaceMention(
+          in: attributedText,
+          range: range,
+          with: mentionText,
+          userId: agent.botUserId,
+          agentId: agent.id,
           trailingText: trailingText,
           mentionAttributes: mentionAttributes,
           trailingAttributes: trailingAttributes

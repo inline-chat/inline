@@ -170,19 +170,27 @@ extension InlineProtocol.MessageEntity.MessageEntityGroupMention: Codable {
 extension InlineProtocol.MessageEntity.MessageEntityMention: Codable {
   private enum CodingKeys: String, CodingKey {
     case userID
+    case agentID
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let userID = try container.decode(Int64.self, forKey: .userID)
+    let agentID = try container.decodeIfPresent(Int64.self, forKey: .agentID)
 
     self.init()
     self.userID = userID
+    if let agentID {
+      self.agentID = agentID
+    }
   }
 
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(userID, forKey: .userID)
+    if hasAgentID {
+      try container.encode(agentID, forKey: .agentID)
+    }
   }
 }
 

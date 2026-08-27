@@ -701,6 +701,8 @@ private struct BotRow: View {
 
 private struct ManagedBotSettingsSheet: View {
   @Environment(\.dismiss) private var dismiss
+  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
+  private var mentionableAgentsEnabled = false
   @State private var botToEdit: BotEditItem?
   @State private var botToEditAvatar: BotAvatarEditItem?
   @State private var isConfirmingRotation = false
@@ -730,6 +732,9 @@ private struct ManagedBotSettingsSheet: View {
           onCopyToken: onCopyToken,
           onRotateToken: { isConfirmingRotation = true }
         )
+        if mentionableAgentsEnabled {
+          MacBotAgentsSection(botUserId: bot.id)
+        }
       }
       .formStyle(.grouped)
 
@@ -742,7 +747,7 @@ private struct ManagedBotSettingsSheet: View {
       }
       .padding()
     }
-    .frame(width: 520, height: 390)
+    .frame(width: 560, height: 620)
     .sheet(item: $botToEdit) { item in
       BotProfileEditorSheet(bot: item.bot, onUpdated: onBotUpdated)
     }
@@ -759,6 +764,197 @@ private struct ManagedBotSettingsSheet: View {
     } message: {
       Text("This will revoke the existing token. Any integrations using the old token will stop working until updated.")
     }
+  }
+}
+
+private struct MacBotAgentsSection: View {
+  @State private var model: BotAgentsSettingsModel
+  @State private var editorItem: MacBotAgentEditorItem?
+  @State private var agentToDelete: InlineProtocol.BotAgent?
+
+  init(botUserId: Int64) {
+    _model = State(initialValue: BotAgentsSettingsModel(botUserId: botUserId))
+  }
+
+  var body: some View {
+    Section {
+      if model.isLoading, model.agents.isEmpty {
+        HStack(spacing: 8) {
+          ProgressView().controlSize(.small)
+          Text("Loading agents...")
+            .foregroundStyle(.secondary)
+        }
+      } else if model.agents.isEmpty {
+        Text("No agents yet. Create a named specialization people can @mention wherever this bot has access.")
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(model.agents, id: \.id) { agent in
+          HStack(spacing: 10) {
+            Text(agent.hasEmoji ? agent.emoji : "🤖")
+              .font(.title3)
+              .frame(width: 30, height: 30)
+              .background(.quaternary, in: Circle())
+            VStack(alignment: .leading, spacing: 1) {
+              Text(agent.name)
+              if agent.hasDescription_p, !agent.description_p.isEmpty {
+                Text(agent.description_p)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if model.deletingAgentIds.contains(agent.id) {
+              ProgressView().controlSize(.small)
+            } else {
+              Button("Edit...") {
+                editorItem = MacBotAgentEditorItem(agent: agent)
+              }
+              Button(role: .destructive) {
+                agentToDelete = agent
+              } label: {
+                Image(systemName: "trash")
+              }
+              .buttonStyle(.borderless)
+              .help("Delete Agent")
+            }
+          }
+        }
+      }
+
+      if let errorMessage = model.errorMessage {
+        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+          .foregroundStyle(.red)
+      }
+
+      HStack {
+        Spacer()
+        Button {
+          editorItem = MacBotAgentEditorItem(agent: nil)
+        } label: {
+          Label("New Agent...", systemImage: "plus")
+        }
+      }
+    } header: {
+      Text("Agents")
+    } footer: {
+      Text("Agents reuse this bot’s harness, credentials, memory, skills, and chat access. Harness fields remain private to bot managers and the harness.")
+    }
+    .task { await model.load() }
+    .sheet(item: $editorItem) { item in
+      MacBotAgentEditor(
+        agent: item.agent,
+        onSave: { draft in
+          await model.save(draft, agentId: item.agent?.id)
+        }
+      )
+    }
+    .confirmationDialog(
+      "Delete Agent",
+      isPresented: .init(
+        get: { agentToDelete != nil },
+        set: { if !$0 { agentToDelete = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Delete Agent", role: .destructive) {
+        guard let agent = agentToDelete else { return }
+        agentToDelete = nil
+        Task { await model.delete(agentId: agent.id) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text("Existing messages keep their text, but future mentions will no longer activate this specialization.")
+    }
+  }
+}
+
+private struct MacBotAgentEditorItem: Identifiable {
+  let agent: InlineProtocol.BotAgent?
+  let id = UUID()
+}
+
+private struct MacBotAgentEditor: View {
+  @Environment(\.dismiss) private var dismiss
+  @State private var draft: ManagedBotAgentDraft
+  @State private var isSaving = false
+
+  let agent: InlineProtocol.BotAgent?
+  let onSave: (ManagedBotAgentDraft) async -> Bool
+
+  init(
+    agent: InlineProtocol.BotAgent?,
+    onSave: @escaping (ManagedBotAgentDraft) async -> Bool
+  ) {
+    self.agent = agent
+    self.onSave = onSave
+    _draft = State(initialValue: agent.map { ManagedBotAgentDraft(agent: $0) } ?? ManagedBotAgentDraft())
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      Form {
+        Section("Identity") {
+          LabeledContent("Name") {
+            TextField("Data Analyst", text: $draft.name)
+              .frame(width: 320)
+          }
+          LabeledContent("Handle") {
+            TextField("data-analyst", text: $draft.handle)
+              .frame(width: 320)
+          }
+          LabeledContent("Emoji") {
+            TextField("📊", text: $draft.emoji)
+              .frame(width: 320)
+          }
+          LabeledContent("Description") {
+            TextField("What this Agent is for", text: $draft.description)
+              .frame(width: 320)
+          }
+        }
+
+        Section {
+          LabeledContent("Skill key") {
+            TextField("Optional harness skill", text: $draft.skillKey)
+              .frame(width: 320)
+          }
+          LabeledContent("Instructions") {
+            TextEditor(text: $draft.instructions)
+              .font(.body)
+              .frame(width: 320, height: 120)
+              .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                  .stroke(.secondary.opacity(0.25), lineWidth: 1)
+              }
+          }
+        } header: {
+          Text("Harness")
+        } footer: {
+          Text("A name-only Agent is valid and receives a minimal identity instruction.")
+        }
+      }
+      .formStyle(.grouped)
+
+      Divider()
+      HStack {
+        Spacer()
+        Button("Cancel") { dismiss() }
+        Button(isSaving ? "Saving..." : "Save") {
+          isSaving = true
+          Task {
+            if await onSave(draft) {
+              dismiss()
+            }
+            isSaving = false
+          }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+      }
+      .padding()
+    }
+    .frame(width: 560, height: 590)
   }
 }
 

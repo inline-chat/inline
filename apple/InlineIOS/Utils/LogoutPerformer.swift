@@ -56,6 +56,7 @@ enum LogoutPerformer {
     await Transactions.shared.clearAllAndWait()
 
     await MainActor.run {
+      BotAgentDirectory.shared.clear()
       TabsManager.shared.reset()
       TabsManager.shared.clearActiveSpaceId()
       ChatState.shared.reset()

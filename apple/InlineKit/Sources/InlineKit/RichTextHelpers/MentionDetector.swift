@@ -104,12 +104,13 @@ public class MentionDetector {
     range: NSRange,
     with mentionText: String,
     userId: Int64,
+    agentId: Int64? = nil,
     trailingText: String = " ",
     mentionAttributes: [NSAttributedString.Key: Any]? = nil,
     trailingAttributes: [NSAttributedString.Key: Any]? = nil
   ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
     let replacement = NSMutableAttributedString()
-    replacement.append(mentionString(mentionText, userId: userId, attributes: mentionAttributes))
+    replacement.append(mentionString(mentionText, userId: userId, agentId: agentId, attributes: mentionAttributes))
     if !trailingText.isEmpty {
       replacement.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
     }
@@ -153,13 +154,19 @@ public class MentionDetector {
   private func mentionString(
     _ text: String,
     userId: Int64,
+    agentId: Int64?,
     attributes: [NSAttributedString.Key: Any]?
   ) -> NSAttributedString {
     guard var attributes else {
-      return AttributedStringHelpers.createMentionAttributedString(text, userId: userId)
+      return AttributedStringHelpers.createMentionAttributedString(text, userId: userId, agentId: agentId)
     }
 
     attributes[.mentionUserId] = userId
+    if let agentId {
+      attributes[.mentionAgentId] = agentId
+    } else {
+      attributes.removeValue(forKey: .mentionAgentId)
+    }
     return NSAttributedString(string: text, attributes: attributes)
   }
 

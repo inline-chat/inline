@@ -57,6 +57,7 @@ struct ChatView: View {
   @State private var activeChatToken: MessagesPublisher.ActiveChatToken?
   @State private var isVisible = false
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
+  @State private var botAgentMentionTarget: BotAgentMentionTarget?
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
   @State private var isBotChatSettingsPresented = false
   @State private var translationPlacement: ChatTranslationPlacement
@@ -333,6 +334,18 @@ struct ChatView: View {
       UserGroupMembersSheet(target: target)
     }
     .onReceive(
+      NotificationCenter.default.publisher(for: .botAgentMentionTapped)
+    ) { notification in
+      guard !preview else { return }
+      guard let target = notification.userInfo?["target"] as? BotAgentMentionTarget,
+            target.peer == peerId
+      else { return }
+      botAgentMentionTarget = target
+    }
+    .sheet(item: $botAgentMentionTarget) { target in
+      BotAgentProfileSheet(target: target)
+    }
+    .onReceive(
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToUser"))
     ) { notification in
@@ -460,6 +473,7 @@ struct ChatView: View {
     isBotChatSettingsPresented = false
     presentedChatInfo = nil
     userGroupMentionTarget = nil
+    botAgentMentionTarget = nil
   }
 
   private func handleMediaSendFailure(_ notification: Notification) {
