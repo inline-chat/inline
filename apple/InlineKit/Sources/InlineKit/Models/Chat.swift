@@ -174,6 +174,18 @@ public extension Chat {
     }
   }
 
+  /// Navigation peer for a link keyed by this chat's stable database ID.
+  /// Private chats navigate by their other user; all other chats use the chat ID.
+  var deepLinkPeer: Peer? {
+    switch type {
+    case .privateChat:
+      guard let peerUserId else { return nil }
+      return .user(id: peerUserId)
+    case .thread:
+      return .thread(id: id)
+    }
+  }
+
   var isReplyThread: Bool {
     parentMessageId != nil
   }
