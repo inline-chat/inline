@@ -42,18 +42,20 @@ struct ChatToolbarLeadingView: View {
   }
 
   private var title: String {
+    guard fullChatViewModel.peer == peerId else { return "" }
+
     if case .user = peerId {
       return fullChatViewModel.peerUser.map {
-        $0.needsDisplayNameFetch ? "Loading..." : $0.displayName
-      } ?? "Loading..."
+        $0.needsDisplayNameFetch ? "" : $0.displayName
+      } ?? ""
     } else if let chat = fullChatViewModel.chat {
       if chat.isReplyThread {
         return toolbarContext?.title ?? ReplyThreadToolbarContextLoader.fallbackTitle(for: chat)
       }
-      return chat.humanReadableTitle ?? "Not Loaded Title"
+      return chat.humanReadableTitle ?? ""
     }
 
-    return "Not Loaded Title"
+    return ""
   }
 
   private var isPrivateChat: Bool {
@@ -321,7 +323,9 @@ private struct ChatToolbarTitleStack: View {
           .allowsTightening(true)
       }
       .buttonStyle(ChatToolbarHeaderButtonStyle())
-      .accessibilityLabel("Open chat info for \(title)")
+      .accessibilityLabel(
+        title.isEmpty ? Text("Open chat info") : Text("Open chat info for \(title)")
+      )
 
       if subtitle != .empty {
         ChatToolbarSubtitleContent(

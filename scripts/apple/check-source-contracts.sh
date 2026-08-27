@@ -104,6 +104,11 @@ if [[ -n "$onboarding_preview_source" ]] &&
   failures=1
 fi
 
+if git_grep --quiet --fixed-strings 'Not Loaded Title' -- 'apple/**/*.swift'; then
+  printf 'error: Apple product UI must not expose the Not Loaded Title developer placeholder\n' >&2
+  failures=1
+fi
+
 if [[ "$failures" -ne 0 ]]; then
   exit 1
 fi

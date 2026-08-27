@@ -85,6 +85,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
     switch destination {
       case let .chat(peer):
         ChatView(peer: peer, onOpenSpace: { _ in self.popToRoot() })
+          .id(peer)
       case let .space(id):
         LegacySpaceDestinationRedirect(spaceID: id) { _ in
           self.popToRoot()

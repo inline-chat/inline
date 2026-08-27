@@ -186,6 +186,7 @@ struct ExperimentalDestinationView: View {
         onOpenSpace: onSelectSpace,
         autoCleanupUntitledEmptyThreadOnBack: true
       )
+      .id(peer)
       .onAppear {
         ExperimentalHomeNavigationPerformance.completeChatOpen(peer: peer)
       }
@@ -196,6 +197,7 @@ struct ExperimentalDestinationView: View {
         onOpenSpace: onSelectSpace,
         autoCleanupUntitledEmptyThreadOnBack: true
       )
+      .id(peer)
       .onAppear {
         if nav.activeSpaceId != contextSpaceID {
           nav.activeSpaceId = nil
@@ -210,6 +212,7 @@ struct ExperimentalDestinationView: View {
         focusMessageID: messageID,
         autoCleanupUntitledEmptyThreadOnBack: true
       )
+      .id(peer)
       .onAppear {
         ExperimentalHomeNavigationPerformance.completeChatOpen(peer: peer)
       }

@@ -159,18 +159,21 @@ private struct AuthedAppRoot: View {
       LegacySpaceDestinationRedirect(spaceID: id, onRedirect: showLegacySpacesRoot)
     case let .chat(peer):
       ChatView(peer: peer, onOpenSpace: showLegacySpacesRoot)
+        .id(peer)
     case let .externalChat(peer, contextSpaceID):
       ChatView(
         peer: peer,
         contextSpaceId: contextSpaceID,
         onOpenSpace: showLegacySpacesRoot
       )
+      .id(peer)
     case let .chatMessage(peer, messageID):
       ChatView(
         peer: peer,
         onOpenSpace: showLegacySpacesRoot,
         focusMessageID: messageID
       )
+      .id(peer)
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
     case let .spaceSettings(spaceId):
