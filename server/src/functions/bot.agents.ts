@@ -1,5 +1,4 @@
 import { BotAgentsModel } from "@in/server/db/models/botAgents"
-import { getServerConfig } from "@in/server/modules/serverConfig"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type {
   CreateBotAgentInput,
@@ -8,6 +7,10 @@ import type {
   GetBotAgentResult,
   ListBotAgentsInput,
   ListBotAgentsResult,
+  DeleteBotAgentInput,
+  DeleteBotAgentResult,
+  UpdateBotAgentInput,
+  UpdateBotAgentResult,
 } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "./_types"
 import { encodeBotWithAvatar, parseBotUserId, requireManageableBot } from "./bot.avatarHelpers"
@@ -25,17 +28,31 @@ const boundedOptionalText = (value: string | undefined, maxLength: number): stri
   return text
 }
 
-const requireAgentsEnabled = async (): Promise<void> => {
-  if ((await getServerConfig("agents.rollout")).value !== "enabled") {
-    throw RealtimeRpcError.BadRequest()
-  }
+const patchOptionalText = (
+  value: string | undefined,
+  maxLength: number,
+): string | null | undefined => {
+  if (value === undefined) return undefined
+  return boundedOptionalText(value, maxLength) ?? null
+}
+
+const parseAgentId = (value: bigint): number => {
+  const agentId = Number(value)
+  if (!Number.isSafeInteger(agentId) || agentId <= 0) throw RealtimeRpcError.BadRequest()
+  return agentId
+}
+
+const requireManageableAgent = async (agentId: number, context: FunctionContext) => {
+  const agent = await BotAgentsModel.get(agentId)
+  if (!agent) throw RealtimeRpcError.BadRequest()
+  await requireManageableBot(Number(agent.botUserId), context)
+  return agent
 }
 
 export const createBotAgent = async (
   input: CreateBotAgentInput,
   context: FunctionContext,
 ): Promise<CreateBotAgentResult> => {
-  await requireAgentsEnabled()
   const botUserId = parseBotUserId(input.botUserId)
   await requireManageableBot(botUserId, context)
   return {
@@ -44,9 +61,9 @@ export const createBotAgent = async (
       name: requiredName(input.name),
       handle: boundedOptionalText(input.handle, 256),
       emoji: boundedOptionalText(input.emoji, 64),
-      description: input.description,
+      description: boundedOptionalText(input.description, 4_000),
       skillKey: boundedOptionalText(input.skillKey, 256),
-      instructions: input.instructions,
+      instructions: boundedOptionalText(input.instructions, 32_000),
     }),
   }
 }
@@ -55,13 +72,9 @@ export const getBotAgent = async (
   input: GetBotAgentInput,
   context: FunctionContext,
 ): Promise<GetBotAgentResult> => {
-  await requireAgentsEnabled()
-  const agentId = Number(input.agentId)
-  if (!Number.isSafeInteger(agentId) || agentId <= 0) throw RealtimeRpcError.BadRequest()
-  const agent = await BotAgentsModel.get(agentId)
-  if (!agent) throw RealtimeRpcError.BadRequest()
+  const agentId = parseAgentId(input.agentId)
+  const agent = await requireManageableAgent(agentId, context)
   const botUserId = Number(agent.botUserId)
-  await requireManageableBot(botUserId, context)
   return { bot: await encodeBotWithAvatar(botUserId), agent }
 }
 
@@ -69,8 +82,47 @@ export const listBotAgents = async (
   input: ListBotAgentsInput,
   context: FunctionContext,
 ): Promise<ListBotAgentsResult> => {
-  await requireAgentsEnabled()
   const botUserId = parseBotUserId(input.botUserId)
   await requireManageableBot(botUserId, context)
   return { agents: await BotAgentsModel.list(botUserId) }
+}
+
+export const updateBotAgent = async (
+  input: UpdateBotAgentInput,
+  context: FunctionContext,
+): Promise<UpdateBotAgentResult> => {
+  const agentId = parseAgentId(input.agentId)
+  await requireManageableAgent(agentId, context)
+
+  const hasPatch = [
+    input.name,
+    input.handle,
+    input.emoji,
+    input.description,
+    input.skillKey,
+    input.instructions,
+  ].some((value) => value !== undefined)
+  if (!hasPatch) throw RealtimeRpcError.BadRequest()
+
+  const agent = await BotAgentsModel.update({
+    agentId,
+    name: input.name === undefined ? undefined : requiredName(input.name),
+    handle: patchOptionalText(input.handle, 256),
+    emoji: patchOptionalText(input.emoji, 64),
+    description: patchOptionalText(input.description, 4_000),
+    skillKey: patchOptionalText(input.skillKey, 256),
+    instructions: patchOptionalText(input.instructions, 32_000),
+  })
+  if (!agent) throw RealtimeRpcError.BadRequest()
+  return { agent }
+}
+
+export const deleteBotAgent = async (
+  input: DeleteBotAgentInput,
+  context: FunctionContext,
+): Promise<DeleteBotAgentResult> => {
+  const agentId = parseAgentId(input.agentId)
+  await requireManageableAgent(agentId, context)
+  if (!await BotAgentsModel.delete(agentId)) throw RealtimeRpcError.BadRequest()
+  return { agentId: BigInt(agentId) }
 }

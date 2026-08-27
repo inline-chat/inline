@@ -1,4 +1,10 @@
-import { createBotAgent, getBotAgent, listBotAgents } from "@in/server/functions/bot.agents"
+import {
+  createBotAgent,
+  deleteBotAgent,
+  getBotAgent,
+  listBotAgents,
+  updateBotAgent,
+} from "@in/server/functions/bot.agents"
 import type { HandlerContext } from "@in/server/realtime/types"
 import type {
   CreateBotAgentInput,
@@ -7,6 +13,10 @@ import type {
   GetBotAgentResult,
   ListBotAgentsInput,
   ListBotAgentsResult,
+  DeleteBotAgentInput,
+  DeleteBotAgentResult,
+  UpdateBotAgentInput,
+  UpdateBotAgentResult,
 } from "@inline-chat/protocol/core"
 
 const context = (handlerContext: HandlerContext) => ({
@@ -28,3 +38,13 @@ export const listBotAgentsHandler = (
   input: ListBotAgentsInput,
   handlerContext: HandlerContext,
 ): Promise<ListBotAgentsResult> => listBotAgents(input, context(handlerContext))
+
+export const updateBotAgentHandler = (
+  input: UpdateBotAgentInput,
+  handlerContext: HandlerContext,
+): Promise<UpdateBotAgentResult> => updateBotAgent(input, context(handlerContext))
+
+export const deleteBotAgentHandler = (
+  input: DeleteBotAgentInput,
+  handlerContext: HandlerContext,
+): Promise<DeleteBotAgentResult> => deleteBotAgent(input, context(handlerContext))

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/core"
-import { activationReason } from "./projector"
+import { activationReason, agentMentionTarget } from "./projector"
 
-const entities = (userId?: number): MessageEntities | undefined =>
+const entities = (userId?: number, agentId?: number): MessageEntities | undefined =>
   userId === undefined
     ? undefined
     : {
@@ -12,7 +12,10 @@ const entities = (userId?: number): MessageEntities | undefined =>
           length: 1n,
           entity: {
             oneofKind: "mention",
-            mention: { userId: BigInt(userId) },
+            mention: {
+              userId: BigInt(userId),
+              ...(agentId === undefined ? {} : { agentId: BigInt(agentId) }),
+            },
           },
         }],
       }
@@ -50,5 +53,10 @@ describe("Bot update activation", () => {
 
   test("never wakes a bot from its own authored message", () => {
     expect(reason({ authorId: 20, messageEntities: entities(20) })).toBeUndefined()
+  })
+
+  test("selects an Agent only under the paired bot user mention", () => {
+    expect(agentMentionTarget(entities(20, 73), 20)).toBe(73)
+    expect(agentMentionTarget(entities(21, 73), 20)).toBeUndefined()
   })
 })

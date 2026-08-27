@@ -1,10 +1,12 @@
 import type {
+  CreateAgentParams,
   CreateReplyThreadParams,
   CreateThreadParams,
   AnswerMessageActionParams,
   DeleteReactionParams,
   DeleteWebhookParams,
   DeleteMessageParams,
+  DeleteAgentParams,
   DeleteMessagesParams,
   EditMessageActionsParams,
   EditMessageTextParams,
@@ -14,6 +16,7 @@ import type {
   AddThreadParticipantParams,
   RemoveThreadParticipantParams,
   GetChatParams,
+  GetAgentParams,
   GetFileParams,
   GetMessagesParams,
   GetUpdatesParams,
@@ -29,6 +32,7 @@ import type {
   SetThreadTitleParams,
   SetWebhookParams,
   UnpinMessageParams,
+  UpdateAgentParams,
 } from "@inline-chat/bot-api-types"
 import type { UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
@@ -92,6 +96,11 @@ import {
   BotGetSpaceSuccess,
   BotCreateThreadSuccess,
   BotGetMyCommandsSuccess,
+  BotCreateAgentSuccess,
+  BotDeleteAgentSuccess,
+  BotGetAgentSuccess,
+  BotGetMyAgentsSuccess,
+  BotUpdateAgentSuccess,
   BotGetChatParticipantSuccess,
   BotGetChatParticipantCountSuccess,
   BotGetFileSuccess,
@@ -105,15 +114,18 @@ import {
   BotMessagesSuccess,
   CreateReplyThreadInput,
   CreateThreadInput,
+  CreateAgentInput,
   AnswerMessageActionInput,
   DeleteReactionInput,
   DeleteWebhookInput,
   DeleteMessageInput,
   DeleteMessagesInput,
+  DeleteAgentInput,
   EditMessageActionsInput,
   EditMessageTextInput,
   GetChatHistoryInput,
   GetChatInput,
+  GetAgentInput,
   GetFileInput,
   GetMessagesInput,
   GetUpdatesInput,
@@ -130,6 +142,7 @@ import {
   GetChatParticipantInput,
   GetChatParticipantCountInput,
   ThreadParticipantMutationInput,
+  UpdateAgentInput,
   SetThreadTitleInput,
   botTargetFieldDescriptions,
   botApiErrorAt,
@@ -291,6 +304,26 @@ const BotMethodDocumentation = {
     summary: "Get bot commands",
     description:
       "Returns the command list currently published by the authenticated bot.",
+  },
+  createAgent: {
+    summary: "Create an Agent",
+    description: "Creates a named specialization owned by the authenticated bot. Name is required; skill and instructions are independently optional.",
+  },
+  getAgent: {
+    summary: "Get an Agent",
+    description: "Returns one globally identified Agent owned by the authenticated bot.",
+  },
+  getMyAgents: {
+    summary: "List my Agents",
+    description: "Returns every Agent owned by the authenticated bot.",
+  },
+  updateAgent: {
+    summary: "Update an Agent",
+    description: "Updates supplied Agent fields. Empty optional strings clear those fields.",
+  },
+  deleteAgent: {
+    summary: "Delete an Agent",
+    description: "Deletes an Agent owned by the authenticated bot without changing the backing bot.",
   },
   setMyCommands: {
     summary: "Replace bot commands",
@@ -574,6 +607,36 @@ const HeaderBotEndpoints = {
       success: BotGetMyCommandsSuccess,
     },
   ),
+  createAgent: headerPost(
+    "headerCreateAgent",
+    "/bot/createAgent",
+    BotMethodDocumentation.createAgent,
+    { payload: CreateAgentInput, success: BotCreateAgentSuccess },
+  ),
+  getAgent: headerGet(
+    "headerGetAgent",
+    "/bot/getAgent",
+    BotMethodDocumentation.getAgent,
+    { query: GetAgentInput.fields, success: BotGetAgentSuccess },
+  ),
+  getMyAgents: headerGet(
+    "headerGetMyAgents",
+    "/bot/getMyAgents",
+    BotMethodDocumentation.getMyAgents,
+    { query: {}, success: BotGetMyAgentsSuccess },
+  ),
+  updateAgent: headerPost(
+    "headerUpdateAgent",
+    "/bot/updateAgent",
+    BotMethodDocumentation.updateAgent,
+    { payload: UpdateAgentInput, success: BotUpdateAgentSuccess },
+  ),
+  deleteAgent: headerPost(
+    "headerDeleteAgent",
+    "/bot/deleteAgent",
+    BotMethodDocumentation.deleteAgent,
+    { payload: DeleteAgentInput, success: BotDeleteAgentSuccess },
+  ),
   setMyCommands: headerPost(
     "headerSetMyCommands",
     "/bot/setMyCommands",
@@ -726,6 +789,36 @@ const PathBotEndpoints = {
       query: {},
       success: BotGetMyCommandsSuccess,
     },
+  ),
+  createAgent: pathPost(
+    "pathCreateAgent",
+    "/bot:token/createAgent",
+    BotMethodDocumentation.createAgent,
+    { payload: CreateAgentInput, success: BotCreateAgentSuccess },
+  ),
+  getAgent: pathGet(
+    "pathGetAgent",
+    "/bot:token/getAgent",
+    BotMethodDocumentation.getAgent,
+    { query: GetAgentInput.fields, success: BotGetAgentSuccess },
+  ),
+  getMyAgents: pathGet(
+    "pathGetMyAgents",
+    "/bot:token/getMyAgents",
+    BotMethodDocumentation.getMyAgents,
+    { query: {}, success: BotGetMyAgentsSuccess },
+  ),
+  updateAgent: pathPost(
+    "pathUpdateAgent",
+    "/bot:token/updateAgent",
+    BotMethodDocumentation.updateAgent,
+    { payload: UpdateAgentInput, success: BotUpdateAgentSuccess },
+  ),
+  deleteAgent: pathPost(
+    "pathDeleteAgent",
+    "/bot:token/deleteAgent",
+    BotMethodDocumentation.deleteAgent,
+    { payload: DeleteAgentInput, success: BotDeleteAgentSuccess },
   ),
   setMyCommands: pathPost(
     "pathSetMyCommands",
@@ -938,6 +1031,11 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.deleteWebhook,
     HeaderBotEndpoints.getWebhookInfo,
     HeaderBotEndpoints.getMyCommands,
+    HeaderBotEndpoints.createAgent,
+    HeaderBotEndpoints.getAgent,
+    HeaderBotEndpoints.getMyAgents,
+    HeaderBotEndpoints.updateAgent,
+    HeaderBotEndpoints.deleteAgent,
     HeaderBotEndpoints.setMyCommands,
     HeaderBotEndpoints.deleteMyCommands,
     HeaderBotEndpoints.forwardMessage,
@@ -973,6 +1071,11 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     PathBotEndpoints.deleteWebhook,
     PathBotEndpoints.getWebhookInfo,
     PathBotEndpoints.getMyCommands,
+    PathBotEndpoints.createAgent,
+    PathBotEndpoints.getAgent,
+    PathBotEndpoints.getMyAgents,
+    PathBotEndpoints.updateAgent,
+    PathBotEndpoints.deleteAgent,
     PathBotEndpoints.setMyCommands,
     PathBotEndpoints.deleteMyCommands,
     PathBotEndpoints.forwardMessage,
@@ -1205,6 +1308,7 @@ const normalizeInputForSchema = (
     operation === "getChat" ||
     operation === "getChatHistory" ||
     operation === "getUpdates" ||
+    operation === "getAgent" ||
     operation === "getChatParticipant" ||
     operation === "getChatParticipantCount"
   const normalized = usesQueryIdCodecs
@@ -1217,6 +1321,7 @@ const normalizeInputForSchema = (
         "reply_to_message_id",
         "interaction_id",
         "space_id",
+        "agent_id",
       ])
   if (
     operation === "sendMessage" ||
@@ -1308,6 +1413,7 @@ const validateInput = (
     switch (operation) {
       case "getMe":
       case "getMyCommands":
+      case "getMyAgents":
       case "deleteMyCommands":
       case "getWebhookInfo":
         return Effect.succeed(value)
@@ -1315,6 +1421,10 @@ const validateInput = (
         return Schema.decodeUnknownEffect(GetSpaceInput)(value)
       case "sendMessage":
         return Schema.decodeUnknownEffect(SendMessageInput)(value)
+      case "createAgent": return Schema.decodeUnknownEffect(CreateAgentInput)(value)
+      case "getAgent": return Schema.decodeUnknownEffect(GetAgentInput)(value)
+      case "updateAgent": return Schema.decodeUnknownEffect(UpdateAgentInput)(value)
+      case "deleteAgent": return Schema.decodeUnknownEffect(DeleteAgentInput)(value)
       case "getChat":
         return Schema.decodeUnknownEffect(GetChatInput)(value)
       case "getChatHistory":
@@ -1390,6 +1500,7 @@ const prepareInput = (
   if (
     operation === "getMe" ||
     operation === "getMyCommands" ||
+    operation === "getMyAgents" ||
     operation === "deleteMyCommands"
     || operation === "getWebhookInfo"
   ) {
@@ -1426,6 +1537,11 @@ const runOperation = (
     switch (operation) {
       case "getMe":
         return operations.getMe(context)
+      case "createAgent": return operations.createAgent(input as CreateAgentParams, context)
+      case "getAgent": return operations.getAgent(input as GetAgentParams, context)
+      case "getMyAgents": return operations.getMyAgents(context)
+      case "updateAgent": return operations.updateAgent(input as UpdateAgentParams, context)
+      case "deleteAgent": return operations.deleteAgent(input as DeleteAgentParams, context)
       case "getSpace":
         return operations.getSpace(input as GetSpaceParams, context)
       case "sendMessage":
@@ -1514,6 +1630,11 @@ const validateSuccessEnvelope = (
         return Schema.decodeUnknownEffect(
           BotGetMeSuccess,
         )(envelope)
+      case "createAgent": return Schema.decodeUnknownEffect(BotCreateAgentSuccess)(envelope)
+      case "getAgent": return Schema.decodeUnknownEffect(BotGetAgentSuccess)(envelope)
+      case "getMyAgents": return Schema.decodeUnknownEffect(BotGetMyAgentsSuccess)(envelope)
+      case "updateAgent": return Schema.decodeUnknownEffect(BotUpdateAgentSuccess)(envelope)
+      case "deleteAgent": return Schema.decodeUnknownEffect(BotDeleteAgentSuccess)(envelope)
       case "getSpace":
         return Schema.decodeUnknownEffect(BotGetSpaceSuccess)(envelope)
       case "sendMessage":
@@ -1942,6 +2063,11 @@ export const makeBotRouteGroup = () => {
                 undefined,
               ),
           )
+          .handleRaw("headerCreateAgent", ({ request }) => execute("createAgent", request, undefined))
+          .handleRaw("headerGetAgent", ({ request }) => execute("getAgent", request, undefined))
+          .handleRaw("headerGetMyAgents", ({ request }) => execute("getMyAgents", request, undefined))
+          .handleRaw("headerUpdateAgent", ({ request }) => execute("updateAgent", request, undefined))
+          .handleRaw("headerDeleteAgent", ({ request }) => execute("deleteAgent", request, undefined))
           .handleRaw(
             "headerSetMyCommands",
             ({ request }) =>
@@ -2056,6 +2182,11 @@ export const makeBotRouteGroup = () => {
                 params.token,
               ),
           )
+          .handleRaw("pathCreateAgent", ({ params, request }) => execute("createAgent", request, params.token))
+          .handleRaw("pathGetAgent", ({ params, request }) => execute("getAgent", request, params.token))
+          .handleRaw("pathGetMyAgents", ({ params, request }) => execute("getMyAgents", request, params.token))
+          .handleRaw("pathUpdateAgent", ({ params, request }) => execute("updateAgent", request, params.token))
+          .handleRaw("pathDeleteAgent", ({ params, request }) => execute("deleteAgent", request, params.token))
           .handleRaw(
             "pathSetMyCommands",
             ({ params, request }) =>

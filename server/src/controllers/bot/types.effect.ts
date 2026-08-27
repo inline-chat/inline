@@ -1,4 +1,5 @@
 import type {
+  BotAgent as NeutralBotAgent,
   BotAttachment as NeutralBotAttachment,
   BotChat as NeutralBotChat,
   BotCommand as NeutralBotCommand,
@@ -35,10 +36,17 @@ import {
   WireNonNegativeInteger,
   WirePositiveInteger,
   WireSafeInteger,
+  WireSafeIntegerInput,
   WireSafeIntegerFromString,
 } from "../../core/schema/scalars"
 
 const OptionalString = Schema.optionalKey(Schema.String)
+const AgentName = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
+const OptionalAgentHandle = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256)))
+const OptionalAgentEmoji = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64)))
+const OptionalAgentDescription = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4_000)))
+const OptionalAgentSkillKey = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256)))
+const OptionalAgentInstructions = Schema.optionalKey(Schema.String.check(Schema.isMaxLength(32_000)))
 const OptionalWireInteger = Schema.optionalKey(WireSafeInteger)
 const OptionalUserId = Schema.optionalKey(UserId)
 const OptionalChatId = Schema.optionalKey(ChatId)
@@ -134,6 +142,9 @@ export const BotMessageEntityOutput = Schema.Struct({
     description:
       "Referenced user for mention entities.",
   }),
+  agent_id: OptionalWireInteger.annotateKey({
+    description: "Agent selected beneath the referenced bot user.",
+  }),
   url: OptionalString.annotateKey({
     description:
       "Destination URL for a text_link entity.",
@@ -221,6 +232,47 @@ export const BotCommand = Schema.Struct({
   identifier: "BotCommand",
   description: "A command advertised by the bot.",
 })
+
+export const BotAgent = Schema.Struct({
+  id: WirePositiveInteger,
+  bot_user_id: UserId,
+  name: AgentName,
+  handle: OptionalAgentHandle,
+  emoji: OptionalAgentEmoji,
+  description: OptionalAgentDescription,
+  skill_key: OptionalAgentSkillKey,
+  instructions: OptionalAgentInstructions,
+}).annotate({
+  identifier: "BotAgent",
+  description: "A named, mentionable specialization owned and executed by a bot.",
+})
+
+export const CreateAgentInput = Schema.Struct({
+  name: AgentName,
+  handle: OptionalAgentHandle,
+  emoji: OptionalAgentEmoji,
+  description: OptionalAgentDescription,
+  skill_key: OptionalAgentSkillKey,
+  instructions: OptionalAgentInstructions,
+}).annotate({ identifier: "CreateAgentInput" })
+
+export const GetAgentInput = Schema.Struct({
+  agent_id: WireSafeIntegerFromString,
+}).annotate({ identifier: "GetAgentInput" })
+
+export const UpdateAgentInput = Schema.Struct({
+  agent_id: WireSafeIntegerInput,
+  name: Schema.optionalKey(AgentName),
+  handle: OptionalAgentHandle,
+  emoji: OptionalAgentEmoji,
+  description: OptionalAgentDescription,
+  skill_key: OptionalAgentSkillKey,
+  instructions: OptionalAgentInstructions,
+}).annotate({ identifier: "UpdateAgentInput" })
+
+export const DeleteAgentInput = Schema.Struct({
+  agent_id: WireSafeIntegerInput,
+}).annotate({ identifier: "DeleteAgentInput" })
 
 export const BotChatType = Schema.Literals([
   "user",
@@ -668,6 +720,7 @@ export const BotParticipationChange = Schema.Struct({
 const BotUpdateBaseFields = {
   update_id: WirePositiveInteger,
   activation_reason: Schema.optionalKey(BotActivationReason),
+  activated_agent: Schema.optionalKey(BotAgent),
 } as const
 
 const BotActionInvocation = Schema.Union([
@@ -1396,6 +1449,26 @@ export const BotEmptyRuntimeSuccess = botApiSuccess(
   BotEmptyRuntimeResult,
 )
 
+export const BotCreateAgentSuccess = botApiSuccess(Schema.Struct({ agent: BotAgent })).annotate({
+  identifier: "BotCreateAgentSuccess",
+})
+
+export const BotGetAgentSuccess = botApiSuccess(Schema.Struct({ bot: BotUser, agent: BotAgent })).annotate({
+  identifier: "BotGetAgentSuccess",
+})
+
+export const BotGetMyAgentsSuccess = botApiSuccess(
+  Schema.Struct({ agents: Schema.mutable(Schema.Array(BotAgent)) }),
+).annotate({ identifier: "BotGetMyAgentsSuccess" })
+
+export const BotUpdateAgentSuccess = botApiSuccess(Schema.Struct({ agent: BotAgent })).annotate({
+  identifier: "BotUpdateAgentSuccess",
+})
+
+export const BotDeleteAgentSuccess = botApiSuccess(
+  Schema.Struct({ agent_id: WirePositiveInteger }),
+).annotate({ identifier: "BotDeleteAgentSuccess" })
+
 export const botApiErrorAt = (
   status: number,
   identifier: string,
@@ -1495,6 +1568,9 @@ type _BotRichMessageMatchesNeutral = Assert<
 >
 type _BotCommandMatchesNeutral = Assert<
   Extends<typeof BotCommand.Type, NeutralBotCommand>
+>
+type _BotAgentMatchesNeutral = Assert<
+  Extends<typeof BotAgent.Type, NeutralBotAgent>
 >
 type _BotEntityMatchesNeutral = Assert<
   Extends<

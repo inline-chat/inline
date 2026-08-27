@@ -183,4 +183,28 @@ describe("bot entities", () => {
       },
     ])
   })
+
+  test("encodes the Agent id beside the backing bot mention", () => {
+    const encoded = encodeBotEntities({
+      entities: [{
+        type: MessageEntity_Type.MENTION,
+        offset: 0n,
+        length: 12n,
+        entity: {
+          oneofKind: "mention",
+          mention: { userId: 20n, agentId: 73n },
+        },
+      }],
+    }, {
+      usersById: new Map([[20, { id: 20, is_bot: true, first_name: "Host Bot" }]]),
+    })
+
+    expect(encoded).toEqual([{
+      type: "text_mention",
+      offset: 0,
+      length: 12,
+      user: { id: 20, is_bot: true, first_name: "Host Bot" },
+      agent_id: 73,
+    }])
+  })
 })

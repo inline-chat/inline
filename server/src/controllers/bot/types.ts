@@ -17,6 +17,38 @@ export const TBotUser = t.Object({
   last_name: t.Optional(t.String()),
 })
 
+export const TBotAgent = t.Object({
+  id: t.Number(),
+  bot_user_id: t.Number(),
+  name: t.String({ minLength: 1, maxLength: 256 }),
+  handle: t.Optional(t.String({ maxLength: 256 })),
+  emoji: t.Optional(t.String({ maxLength: 64 })),
+  description: t.Optional(t.String({ maxLength: 4_000 })),
+  skill_key: t.Optional(t.String({ maxLength: 256 })),
+  instructions: t.Optional(t.String({ maxLength: 32_000 })),
+})
+
+export const TCreateAgentInput = t.Object({
+  name: t.String({ minLength: 1, maxLength: 256 }),
+  handle: t.Optional(t.String({ maxLength: 256 })),
+  emoji: t.Optional(t.String({ maxLength: 64 })),
+  description: t.Optional(t.String({ maxLength: 4_000 })),
+  skill_key: t.Optional(t.String({ maxLength: 256 })),
+  instructions: t.Optional(t.String({ maxLength: 32_000 })),
+})
+
+export const TGetAgentInput = t.Object({ agent_id: TTargetId })
+export const TUpdateAgentInput = t.Object({
+  agent_id: TTargetId,
+  name: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+  handle: t.Optional(t.String({ maxLength: 256 })),
+  emoji: t.Optional(t.String({ maxLength: 64 })),
+  description: t.Optional(t.String({ maxLength: 4_000 })),
+  skill_key: t.Optional(t.String({ maxLength: 256 })),
+  instructions: t.Optional(t.String({ maxLength: 32_000 })),
+})
+export const TDeleteAgentInput = TGetAgentInput
+
 // Deprecated compatibility output. Keep it opaque in the legacy codec so the
 // canonical docs only teach the required `peer_id` shape.
 export const TBotPeer = t.Any()

@@ -5,17 +5,14 @@ import { Log } from "@in/server/utils/log"
 
 export const SERVER_CONFIG_KEYS = [
   "auth.signup_mode",
-  "agents.rollout",
   "email.default_provider",
 ] as const
 
 export type ServerConfigKey = (typeof SERVER_CONFIG_KEYS)[number]
 export type SignupMode = "open" | "invite_only" | "disabled"
-export type AgentsRollout = "disabled" | "enabled"
 export type EmailProvider = "ses" | "resend"
 export interface ServerConfigValueByKey {
   readonly "auth.signup_mode": SignupMode
-  readonly "agents.rollout": AgentsRollout
   readonly "email.default_provider": EmailProvider
 }
 export type ServerConfigValue<K extends ServerConfigKey = ServerConfigKey> =
@@ -63,7 +60,6 @@ const CACHE_TTL_MS = 5_000
 const warnedInvalidLayers = new Set<string>()
 
 const signupModes: readonly SignupMode[] = ["open", "invite_only", "disabled"]
-const agentsRolloutValues: readonly AgentsRollout[] = ["disabled", "enabled"]
 const emailProviders: readonly EmailProvider[] = ["ses", "resend"]
 
 const legacySignupMode = (): SignupMode | null => {
@@ -86,15 +82,6 @@ const definitions: { readonly [K in ServerConfigKey]: ServerConfigDefinition<K> 
     allowedValues: signupModes,
     defaultValue: "invite_only",
     legacyEnvironmentValue: legacySignupMode,
-  },
-  "agents.rollout": {
-    key: "agents.rollout",
-    label: "Agents",
-    description: "Controls the parked mentionable Agents API and activation path while the user experience remains unfinished.",
-    environmentName: "INLINE_CONFIG_AGENTS_ROLLOUT",
-    allowedValues: agentsRolloutValues,
-    defaultValue: "disabled",
-    legacyEnvironmentValue: () => null,
   },
   "email.default_provider": {
     key: "email.default_provider",

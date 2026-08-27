@@ -177,12 +177,68 @@ describe("Bot HTTP API", () => {
     expect(json.result.user.username).toBe("pathbot")
   })
 
-  it("keeps Agent methods outside the Bot HTTP API", async () => {
+  it("manages the authenticated bot's Agent specializations", async () => {
     const { token } = await createBotSession("agentapibot")
-    const response = await app.handle(new Request("http://localhost/bot/getMyAgents", {
-      headers: { Authorization: `Bearer ${token}` },
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+
+    const createdResponse = await app.handle(new Request("http://localhost/bot/createAgent", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        name: "Data Analyst",
+        emoji: "📊",
+        description: "Analyzes product metrics",
+        skill_key: "analytics",
+      }),
     }))
-    expect(response.status).toBe(404)
+    expect(createdResponse.status).toBe(200)
+    const created = await createdResponse.json()
+    expect(created).toMatchObject({
+      ok: true,
+      result: {
+        agent: {
+          name: "Data Analyst",
+          emoji: "📊",
+          description: "Analyzes product metrics",
+          skill_key: "analytics",
+        },
+      },
+    })
+    const agentId = created.result.agent.id
+
+    const listedResponse = await app.handle(new Request("http://localhost/bot/getMyAgents", { headers }))
+    expect(await listedResponse.json()).toMatchObject({
+      ok: true,
+      result: { agents: [{ id: agentId, name: "Data Analyst" }] },
+    })
+
+    const updatedResponse = await app.handle(new Request("http://localhost/bot/updateAgent", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ agent_id: agentId, name: "Research Analyst", description: "" }),
+    }))
+    expect(await updatedResponse.json()).toMatchObject({
+      ok: true,
+      result: { agent: { id: agentId, name: "Research Analyst" } },
+    })
+
+    const deletedResponse = await app.handle(new Request("http://localhost/bot/deleteAgent", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ agent_id: agentId }),
+    }))
+    expect(await deletedResponse.json()).toEqual({ ok: true, result: { agent_id: agentId } })
+
+    const missingResponse = await app.handle(new Request(
+      `http://localhost/bot/getAgent?agent_id=${agentId}`,
+      { headers },
+    ))
+    expect(missingResponse.status).toBe(400)
+    expect(await missingResponse.json()).toMatchObject({
+      ok: false,
+      error: "BAD_REQUEST",
+      error_code: 400,
+    })
   })
 
   it("persists one update stream across polling and webhook settings", async () => {

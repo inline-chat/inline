@@ -3,6 +3,10 @@ import type {
   CreateReplyThreadResult,
   CreateThreadParams,
   CreateThreadResult,
+  CreateAgentParams,
+  CreateAgentResult,
+  DeleteAgentParams,
+  DeleteAgentResult,
   AnswerMessageActionParams,
   DeleteReactionParams,
   DeleteWebhookParams,
@@ -24,6 +28,9 @@ import type {
   GetFileParams,
   GetFileResult,
   GetMeResult,
+  GetAgentParams,
+  GetAgentResult,
+  GetMyAgentsResult,
   GetSpaceParams,
   GetSpaceResult,
   GetMessagesParams,
@@ -51,6 +58,8 @@ import type {
   SetWebhookResult,
   UnpinMessageParams,
   UploadFileResult,
+  UpdateAgentParams,
+  UpdateAgentResult,
 } from "@inline-chat/bot-api-types"
 import type { UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
 import {
@@ -65,6 +74,11 @@ import { InlineError } from "@in/server/types/errors"
 
 export type BotOperation =
   | "getMe"
+  | "createAgent"
+  | "getAgent"
+  | "getMyAgents"
+  | "updateAgent"
+  | "deleteAgent"
   | "getSpace"
   | "sendMessage"
   | "getChat"
@@ -132,6 +146,25 @@ export interface BotOperationsShape {
   readonly getMe: (
     context: BotOperationContext,
   ) => Effect.Effect<GetMeResult, BotOperationError>
+  readonly createAgent: (
+    input: CreateAgentParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<CreateAgentResult, BotOperationError>
+  readonly getAgent: (
+    input: GetAgentParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<GetAgentResult, BotOperationError>
+  readonly getMyAgents: (
+    context: BotOperationContext,
+  ) => Effect.Effect<GetMyAgentsResult, BotOperationError>
+  readonly updateAgent: (
+    input: UpdateAgentParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<UpdateAgentResult, BotOperationError>
+  readonly deleteAgent: (
+    input: DeleteAgentParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<DeleteAgentResult, BotOperationError>
   readonly getSpace: (
     input: GetSpaceParams,
     context: BotOperationContext,
@@ -223,6 +256,25 @@ export interface BotOperationHandlers {
   readonly getMe: (
     context: BotOperationContext,
   ) => Promise<GetMeResult>
+  readonly createAgent: (
+    input: CreateAgentParams,
+    context: BotOperationContext,
+  ) => Promise<CreateAgentResult>
+  readonly getAgent: (
+    input: GetAgentParams,
+    context: BotOperationContext,
+  ) => Promise<GetAgentResult>
+  readonly getMyAgents: (
+    context: BotOperationContext,
+  ) => Promise<GetMyAgentsResult>
+  readonly updateAgent: (
+    input: UpdateAgentParams,
+    context: BotOperationContext,
+  ) => Promise<UpdateAgentResult>
+  readonly deleteAgent: (
+    input: DeleteAgentParams,
+    context: BotOperationContext,
+  ) => Promise<DeleteAgentResult>
   readonly getSpace: (
     input: GetSpaceParams,
     context: BotOperationContext,
@@ -398,6 +450,16 @@ export const makeBotOperations = (
 ): BotOperationsShape => ({
   getMe: (context) =>
     adapt("getMe", () => handlers.getMe(context)),
+  createAgent: (input, context) =>
+    adapt("createAgent", () => handlers.createAgent(input, context)),
+  getAgent: (input, context) =>
+    adapt("getAgent", () => handlers.getAgent(input, context)),
+  getMyAgents: (context) =>
+    adapt("getMyAgents", () => handlers.getMyAgents(context)),
+  updateAgent: (input, context) =>
+    adapt("updateAgent", () => handlers.updateAgent(input, context)),
+  deleteAgent: (input, context) =>
+    adapt("deleteAgent", () => handlers.deleteAgent(input, context)),
   getSpace: (input, context) =>
     adapt("getSpace", () => handlers.getSpace(input, context)),
   sendMessage: (input, context) =>

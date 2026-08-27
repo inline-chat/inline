@@ -103,6 +103,11 @@ const makeOperations = (
   overrides: Partial<BotOperationsShape> = {},
 ): BotOperationsShape => ({
   getMe: () => unused("getMe"),
+  createAgent: () => unused("createAgent"),
+  getAgent: () => unused("getAgent"),
+  getMyAgents: () => unused("getMyAgents"),
+  updateAgent: () => unused("updateAgent"),
+  deleteAgent: () => unused("deleteAgent"),
   getSpace: () => unused("getSpace"),
   sendMessage: () => unused("sendMessage"),
   getChat: () => unused("getChat"),
@@ -258,6 +263,20 @@ describe("Effect Bot routes", () => {
     const operations = makeOperations({
       getMe: () =>
         invoked("getMe", { user: botUser }),
+      createAgent: () => invoked("createAgent", {
+        agent: { id: 73, bot_user_id: botUser.id, name: "Data Analyst" },
+      }),
+      getAgent: () => invoked("getAgent", {
+        bot: botUser,
+        agent: { id: 73, bot_user_id: botUser.id, name: "Data Analyst" },
+      }),
+      getMyAgents: () => invoked("getMyAgents", {
+        agents: [{ id: 73, bot_user_id: botUser.id, name: "Data Analyst" }],
+      }),
+      updateAgent: () => invoked("updateAgent", {
+        agent: { id: 73, bot_user_id: botUser.id, name: "Research Analyst" },
+      }),
+      deleteAgent: () => invoked("deleteAgent", { agent_id: 73 }),
       getSpace: () => invoked("getSpace", {
         space: { id: 4, name: "Product" },
         membership: {
@@ -329,6 +348,11 @@ describe("Effect Bot routes", () => {
         method: "POST",
         input: { space_id: 4 },
       },
+      { name: "createAgent", method: "POST", input: { name: "Data Analyst" } },
+      { name: "getAgent", method: "GET", input: { agent_id: "73" } },
+      { name: "getMyAgents", method: "GET", input: undefined },
+      { name: "updateAgent", method: "POST", input: { agent_id: "73", name: "Research Analyst" } },
+      { name: "deleteAgent", method: "POST", input: { agent_id: 73 } },
       {
         name: "sendMessage",
         method: "POST",
@@ -481,7 +505,7 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(52)
+      expect(calls).toHaveLength(62)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
@@ -1111,7 +1135,7 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(70)
+    expect(Object.keys(spec.paths)).toHaveLength(80)
 
     const expectedMethods = [
       "getMe",
@@ -1125,6 +1149,11 @@ describe("Effect Bot routes", () => {
       "deleteMessages",
       "sendReaction",
       "getMyCommands",
+      "createAgent",
+      "getAgent",
+      "getMyAgents",
+      "updateAgent",
+      "deleteAgent",
       "setMyCommands",
       "deleteMyCommands",
       "forwardMessage",

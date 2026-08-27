@@ -330,14 +330,12 @@ export const AdminWaitlistResult = Schema.Struct({
 
 export const AdminServerConfigKey = Schema.Literals([
   "auth.signup_mode",
-  "agents.rollout",
   "email.default_provider",
 ])
 export const AdminServerConfigValue = Schema.Literals([
   "open",
   "invite_only",
   "disabled",
-  "enabled",
   "ses",
   "resend",
 ])

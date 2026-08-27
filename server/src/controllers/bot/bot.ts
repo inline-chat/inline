@@ -10,6 +10,11 @@ import {
   TBotFile,
   TBotMessage,
   TBotUser,
+  TBotAgent,
+  TCreateAgentInput,
+  TDeleteAgentInput,
+  TGetAgentInput,
+  TUpdateAgentInput,
   TDeleteMessageInput,
   TEditMessageTextInput,
   TGetChatHistoryInput,
@@ -571,6 +576,85 @@ const botMethods = (authPlugin: any): any => {
       response: TApiEnvelope(t.Object({ user: TBotUser })),
     },
   )
+
+  app.post("/createAgent", async ({ body, query, store }: any) => {
+    try {
+      return {
+        ok: true,
+        result: await botOperationHandlers.createAgent(
+          mergePostInput(body, query) as any,
+          ctxFromStore(store),
+        ),
+      }
+    } catch (error) {
+      throwInlineFromUnknown(error)
+    }
+  }, {
+    detail: jsonBodyDoc(TCreateAgentInput),
+    response: TApiEnvelope(t.Object({ agent: TBotAgent })),
+  })
+
+  app.get("/getAgent", async ({ query, store }: any) => {
+    try {
+      return {
+        ok: true,
+        result: await botOperationHandlers.getAgent(query as any, ctxFromStore(store)),
+      }
+    } catch (error) {
+      throwInlineFromUnknown(error)
+    }
+  }, {
+    query: TGetAgentInput,
+    response: TApiEnvelope(t.Object({ bot: TBotUser, agent: TBotAgent })),
+  })
+
+  app.get("/getMyAgents", async ({ store }: any) => {
+    try {
+      return {
+        ok: true,
+        result: await botOperationHandlers.getMyAgents(ctxFromStore(store)),
+      }
+    } catch (error) {
+      throwInlineFromUnknown(error)
+    }
+  }, {
+    response: TApiEnvelope(t.Object({ agents: t.Array(TBotAgent) })),
+  })
+
+  app.post("/updateAgent", async ({ body, query, store }: any) => {
+    try {
+      return {
+        ok: true,
+        result: await botOperationHandlers.updateAgent(
+          mergePostInput(body, query) as any,
+          ctxFromStore(store),
+        ),
+      }
+    } catch (error) {
+      throwInlineFromUnknown(error)
+    }
+  }, {
+    detail: jsonBodyDoc(TUpdateAgentInput),
+    response: TApiEnvelope(t.Object({ agent: TBotAgent })),
+  })
+
+  app.post("/deleteAgent", async ({ body, query, store }: any) => {
+    try {
+      return {
+        ok: true,
+        result: await botOperationHandlers.deleteAgent(
+          mergePostInput(body, query) as any,
+          ctxFromStore(store),
+        ),
+      }
+    } catch (error) {
+      throwInlineFromUnknown(error)
+    }
+  }, {
+    detail: jsonBodyDoc(TDeleteAgentInput),
+    response: TApiEnvelope(t.Object({ agent_id: t.Number() })),
+  })
+
 
   app.post(
     "/sendMessage",

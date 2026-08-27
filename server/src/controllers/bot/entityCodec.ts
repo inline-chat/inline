@@ -343,6 +343,9 @@ export const encodeBotEntities = (
     if (entity.entity.oneofKind === "mention") {
       const userId = Number(entity.entity.mention.userId)
       out.user = options?.usersById?.get(userId)
+      if (entity.entity.mention.agentId !== undefined) {
+        out.agent_id = Number(entity.entity.mention.agentId)
+      }
     } else if (entity.entity.oneofKind === "textUrl") {
       out.url = entity.entity.textUrl.url
     } else if (entity.entity.oneofKind === "pre") {

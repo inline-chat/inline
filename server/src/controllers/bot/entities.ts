@@ -64,6 +64,7 @@ export const TBotMessageEntityOutput = t.Object({
   offset: t.Number(),
   length: t.Number(),
   user: t.Optional(TBotUserInline), // mention only
+  agent_id: t.Optional(t.Number()), // Agent selected beneath the mentioned bot
   url: t.Optional(t.String()), // text_link only
   language: t.Optional(t.String()), // pre only
   chat_id: t.Optional(t.Number()), // thread only

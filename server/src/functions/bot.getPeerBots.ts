@@ -1,5 +1,6 @@
 import { db } from "@in/server/db"
 import { BotCapabilitiesModel } from "@in/server/db/models/botCapabilities"
+import { BotAgentsModel } from "@in/server/db/models/botAgents"
 import { UsersModel } from "@in/server/db/models/users"
 import { messages } from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -13,9 +14,10 @@ export async function getPeerBots(input: GetPeerBotsInput, context: FunctionCont
   const { chat, botUserIds } = await resolvePeerBotScope(input.peerId, context.currentUserId)
   if (botUserIds.length === 0) return { bots: [] }
 
-  const [botRows, capabilitiesByBotUserId] = await Promise.all([
+  const [botRows, capabilitiesByBotUserId, agentsByBotUserId] = await Promise.all([
     UsersModel.getUsersWithPhotos(botUserIds),
     BotCapabilitiesModel.getForBotUserIds(botUserIds),
+    BotAgentsModel.listProfilesForBotUserIds(botUserIds),
   ])
   botRows.sort((left, right) => left.user.id - right.user.id)
 
@@ -40,6 +42,7 @@ export async function getPeerBots(input: GetPeerBotsInput, context: FunctionCont
         const encoded = toProtocolBotCapability(capability)
         return encoded ? [encoded] : []
       }),
+      agents: agentsByBotUserId.get(row.user.id) ?? [],
     })),
     suggestedBotUserId,
   }

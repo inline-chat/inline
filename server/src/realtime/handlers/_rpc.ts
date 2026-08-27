@@ -124,8 +124,10 @@ import { inviteToInline } from "@in/server/functions/user.inviteToInline"
 import { resolveUrlPreviewHandler } from "@in/server/realtime/handlers/urlPreview.resolve"
 import {
   createBotAgentHandler,
+  deleteBotAgentHandler,
   getBotAgentHandler,
   listBotAgentsHandler,
+  updateBotAgentHandler,
 } from "@in/server/realtime/handlers/bot.agents"
 import { nativeUploadOperations } from "@in/server/modules/uploads/operations"
 import {
@@ -909,6 +911,18 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       if (call.input.oneofKind !== "listBotAgents") throw RealtimeRpcError.BadRequest()
       const result = await listBotAgentsHandler(call.input.listBotAgents, handlerContext)
       return { oneofKind: "listBotAgents", listBotAgents: result }
+    }
+
+    case Method.UPDATE_BOT_AGENT: {
+      if (call.input.oneofKind !== "updateBotAgent") throw RealtimeRpcError.BadRequest()
+      const result = await updateBotAgentHandler(call.input.updateBotAgent, handlerContext)
+      return { oneofKind: "updateBotAgent", updateBotAgent: result }
+    }
+
+    case Method.DELETE_BOT_AGENT: {
+      if (call.input.oneofKind !== "deleteBotAgent") throw RealtimeRpcError.BadRequest()
+      const result = await deleteBotAgentHandler(call.input.deleteBotAgent, handlerContext)
+      return { oneofKind: "deleteBotAgent", deleteBotAgent: result }
     }
 
     case Method.REGISTER_DEVICE: {

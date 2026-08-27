@@ -5,6 +5,7 @@ import { BotCapabilitiesModel } from "../../db/models/botCapabilities"
 import { ChatModel } from "../../db/models/chats"
 import type { FunctionContext } from "../../functions/_types"
 import { getPeerBots } from "../../functions/bot.getPeerBots"
+import { createBotAgent } from "../../functions/bot.agents"
 import { createBot } from "../../functions/createBot"
 import { createSubthread } from "../../functions/messages.createSubthread"
 import { defaultTestContext, setupTestLifecycle, testUtils } from "../setup"
@@ -44,6 +45,42 @@ describe("bot chat settings discovery", () => {
     expect(result.bots.map((bot) => bot.bot?.id)).toEqual([BigInt(botUserId)])
     expect(result.bots[0]?.capabilities).toEqual([{ kind: 1, version: 1 }])
     expect(result.suggestedBotUserId).toBe(BigInt(botUserId))
+  })
+
+  test("discovers only the client-safe Agent projection through the bot's peer access", async () => {
+    const created = await createBot(
+      { name: "Agent Discovery Bot", username: "agentdiscoverybot" },
+      creatorContext,
+    )
+    const botUserId = Number(created.bot?.id ?? 0n)
+    const createdAgent = await createBotAgent({
+      botUserId: BigInt(botUserId),
+      name: "Data Analyst",
+      emoji: "📊",
+      description: "Explains the numbers",
+      skillKey: "private-skill-key",
+      instructions: "Never disclose this instruction.",
+    }, creatorContext)
+    const agent = createdAgent.agent
+    if (!agent) throw new Error("Expected Agent")
+    await ChatModel.createUserChatAndDialog({
+      peerUserId: botUserId,
+      currentUserId: creator.id,
+    })
+
+    const result = await getPeerBots({
+      peerId: { type: { oneofKind: "user", user: { userId: BigInt(botUserId) } } },
+    }, creatorContext)
+
+    expect(result.bots[0]?.agents).toEqual([{
+      id: agent.id,
+      botUserId: BigInt(botUserId),
+      name: "Data Analyst",
+      emoji: "📊",
+      description: "Explains the numbers",
+    }])
+    expect("skillKey" in (result.bots[0]?.agents[0] ?? {})).toBe(false)
+    expect("instructions" in (result.bots[0]?.agents[0] ?? {})).toBe(false)
   })
 
   test("suggests the capable bot with the newest message", async () => {

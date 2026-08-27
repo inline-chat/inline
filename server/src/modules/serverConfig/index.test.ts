@@ -39,17 +39,4 @@ describe("server configuration precedence", () => {
       legacyEnvironmentValue: "open",
     })).toEqual({ value: "disabled", source: "database" })
   })
-
-  it("keeps Agents parked unless an explicit rollout layer enables them", () => {
-    expect(resolveServerConfigValue("agents.rollout", {})).toEqual({
-      value: "disabled",
-      source: "default",
-    })
-    expect(resolveServerConfigValue("agents.rollout", {
-      environmentOverride: "enabled",
-    })).toEqual({
-      value: "enabled",
-      source: "environment",
-    })
-  })
 })

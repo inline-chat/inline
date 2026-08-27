@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test } from "bun:test"
-import { createBotAgent, getBotAgent, listBotAgents } from "@in/server/functions/bot.agents"
+import {
+  createBotAgent,
+  deleteBotAgent,
+  getBotAgent,
+  listBotAgents,
+  updateBotAgent,
+} from "@in/server/functions/bot.agents"
 import { createBot } from "@in/server/functions/createBot"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { defaultTestContext, setupTestLifecycle, testUtils } from "../setup"
@@ -43,6 +49,28 @@ describe("bot Agents", () => {
 
     const listed = await listBotAgents({ botUserId }, botContext)
     expect(listed.agents.map((listedAgent) => listedAgent.id)).toEqual([agent.id])
+
+    const updated = await updateBotAgent({
+      agentId: agent.id,
+      emoji: "📊",
+      description: "Find the signal",
+      instructions: "Always show the source.",
+    }, creatorContext)
+    expect(updated.agent?.emoji).toBe("📊")
+    expect(updated.agent?.instructions).toBe("Always show the source.")
+
+    const cleared = await updateBotAgent({
+      agentId: agent.id,
+      emoji: "",
+      instructions: "",
+    }, botContext)
+    expect(cleared.agent?.emoji).toBeUndefined()
+    expect(cleared.agent?.instructions).toBeUndefined()
+
+    expect(await deleteBotAgent({ agentId: agent.id }, creatorContext)).toEqual({
+      agentId: agent.id,
+    })
+    expect((await listBotAgents({ botUserId }, botContext)).agents).toEqual([])
   })
 
   test("rejects a user who does not manage the backing bot", async () => {
@@ -56,6 +84,13 @@ describe("bot Agents", () => {
     await expect(
       createBotAgent({ botUserId, name: "No Access" }, otherContext),
     ).rejects.toThrow()
+
+    const created = await createBotAgent({ botUserId, name: "Protected" }, creatorContext)
+    if (!created.agent) throw new Error("Expected Agent")
+    await expect(
+      updateBotAgent({ agentId: created.agent.id, name: "Stolen" }, otherContext),
+    ).rejects.toThrow()
+    await expect(deleteBotAgent({ agentId: created.agent.id }, otherContext)).rejects.toThrow()
   })
 
   test("rejects optional values that exceed their persisted bounds", async () => {
@@ -68,6 +103,9 @@ describe("bot Agents", () => {
 
     await expect(
       createBotAgent({ botUserId, name: "Too Wide", emoji: "x".repeat(65) }, creatorContext),
+    ).rejects.toThrow()
+    await expect(
+      updateBotAgent({ agentId: 9_999_999n, name: "Missing" }, creatorContext),
     ).rejects.toThrow()
   })
 })

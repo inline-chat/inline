@@ -1,5 +1,6 @@
 import type {
   BotActivationReason,
+  BotAgent,
   BotEventChat,
   BotEventMessage,
   BotFile,
@@ -11,6 +12,7 @@ import type {
 } from "@inline-chat/bot-api-types"
 import type { MessageActions, MessageEntities } from "@inline-chat/protocol/core"
 import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
+import { BotAgentsModel } from "@in/server/db/models/botAgents"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat, DbUser } from "@in/server/db/schema"
@@ -48,6 +50,49 @@ const mentionTargets = (entities: MessageEntities | null | undefined): number[] 
     if (entity.entity.oneofKind === "mention") return [Number(entity.entity.mention.userId)]
     return []
   })
+
+export const agentMentionTarget = (
+  entities: MessageEntities | null | undefined,
+  botUserId: number,
+): number | undefined => {
+  for (const entity of entities?.entities ?? []) {
+    if (entity.entity.oneofKind !== "mention") continue
+    if (Number(entity.entity.mention.userId) !== botUserId) continue
+    if (entity.entity.mention.agentId !== undefined) return Number(entity.entity.mention.agentId)
+  }
+  return undefined
+}
+
+const toAgent = (agent: import("@inline-chat/protocol/core").BotAgent): BotAgent => ({
+  id: Number(agent.id),
+  bot_user_id: Number(agent.botUserId),
+  name: agent.name,
+  handle: agent.handle,
+  emoji: agent.emoji,
+  description: agent.description,
+  skill_key: agent.skillKey,
+  instructions: agent.instructions,
+})
+
+const activatedAgents = async (
+  entities: MessageEntities | null | undefined,
+  botUserIds: number[],
+): Promise<Map<number, BotAgent>> => {
+  const agentIdByBotUserId = new Map<number, number>()
+  for (const botUserId of botUserIds) {
+    const agentId = agentMentionTarget(entities, botUserId)
+    if (agentId !== undefined) agentIdByBotUserId.set(botUserId, agentId)
+  }
+  if (agentIdByBotUserId.size === 0) return new Map()
+
+  const agentsById = await BotAgentsModel.getMany([...new Set(agentIdByBotUserId.values())])
+  const result = new Map<number, BotAgent>()
+  for (const [botUserId, agentId] of agentIdByBotUserId) {
+    const agent = agentsById.get(agentId)
+    if (agent && Number(agent.botUserId) === botUserId) result.set(botUserId, toAgent(agent))
+  }
+  return result
+}
 
 const commandTargets = (entities: MessageEntities | null | undefined): number[] =>
   (entities?.entities ?? []).flatMap((entity) => {
@@ -219,6 +264,7 @@ async function messageCreated(input: {
     ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
     : null
   const users = await loadEventMessageUsers(message, reply)
+  const agentsByBotUserId = await activatedAgents(message.entities, streams.map((stream) => stream.botUserId))
   for (const stream of streams) {
     const reason = activationReason({ stream, chat: input.chat, message, reply })
     if (!reason) continue
@@ -232,7 +278,13 @@ async function messageCreated(input: {
     await BotUpdatesModel.queue({
       botUserId: stream.botUserId,
       updateType: "message",
-      payload: { activation_reason: reason, message: encoded },
+      payload: {
+        activation_reason: reason,
+        ...(agentsByBotUserId.has(stream.botUserId)
+          ? { activated_agent: agentsByBotUserId.get(stream.botUserId) }
+          : {}),
+        message: encoded,
+      },
       sourceEventId: `message:${input.chat.id}:${input.messageId}`,
     })
   }
@@ -246,12 +298,19 @@ async function messageEdited(input: { chat: DbChat; messageId: number }): Promis
     ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
     : null
   const users = await loadEventMessageUsers(message, reply)
+  const agentsByBotUserId = await activatedAgents(message.entities, routes.map((route) => route.botUserId))
   for (const route of routes) {
     const encoded = eventMessage(input.chat, message, reply, users, route.botUserId)
     await BotUpdatesModel.queue({
       botUserId: route.botUserId,
       updateType: "edited_message",
-      payload: { activation_reason: route.activationReason as BotActivationReason, edited_message: encoded },
+      payload: {
+        activation_reason: route.activationReason as BotActivationReason,
+        ...(agentsByBotUserId.has(route.botUserId)
+          ? { activated_agent: agentsByBotUserId.get(route.botUserId) }
+          : {}),
+        edited_message: encoded,
+      },
       sourceEventId: `edit:${input.chat.id}:${input.messageId}:${message.editDate?.getTime() ?? Date.now()}`,
     })
   }

@@ -42,10 +42,17 @@ describe("BotUpdate", () => {
     const update = decodeUpdate({
       update_id: 1,
       activation_reason: "mention",
+      activated_agent: {
+        id: 73,
+        bot_user_id: 20,
+        name: "Data Analyst",
+        instructions: "Show the source.",
+      },
       message,
     })
 
     expect("message" in update).toBe(true)
+    expect(update.activated_agent?.id).toBe(73)
   })
 
   it("decodes the Inline-native bot participation event", () => {

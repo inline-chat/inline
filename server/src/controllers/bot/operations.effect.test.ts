@@ -15,6 +15,11 @@ const handlers = (
   getMe: BotOperationHandlers["getMe"],
 ): BotOperationHandlers => ({
   getMe,
+  createAgent: unused,
+  getAgent: unused,
+  getMyAgents: unused,
+  updateAgent: unused,
+  deleteAgent: unused,
   getSpace: unused,
   sendMessage: unused,
   getChat: unused,
