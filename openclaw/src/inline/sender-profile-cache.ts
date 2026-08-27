@@ -6,12 +6,19 @@ const DEFAULT_MAX_PROFILES = 5_000
 export type InlineSenderProfile = {
   name?: string
   username?: string
+  bot?: boolean
+}
+
+export type InlineSenderProfileResolution = {
+  profile?: InlineSenderProfile
+  provenanceVerified: boolean
 }
 
 type CachedProfile = {
   firstName?: string
   lastName?: string
   username?: string
+  bot?: boolean
   expiresAt: number
 }
 
@@ -27,9 +34,9 @@ type InlineSenderProfileCacheOptions = {
 export class InlineSenderProfileCache {
   private readonly profiles = new Map<string, CachedProfile>()
   private readonly hydratedChats = new Map<string, number>()
-  private readonly participantFetches = new Map<string, Promise<void>>()
+  private readonly participantFetches = new Map<string, Promise<boolean>>()
   private directoryExpiresAt = 0
-  private directoryFetch: Promise<void> | null = null
+  private directoryFetch: Promise<boolean> | null = null
   private readonly ttlMs: number
   private readonly maxProfiles: number
   private readonly now: () => number
@@ -55,6 +62,7 @@ export class InlineSenderProfileCache {
     return {
       ...(name ? { name } : {}),
       ...(cached.username ? { username: cached.username } : {}),
+      ...(cached.bot != null ? { bot: cached.bot } : {}),
     }
   }
 
@@ -69,6 +77,7 @@ export class InlineSenderProfileCache {
         ...readProfileField(user.firstName, previous?.firstName, "firstName"),
         ...readProfileField(user.lastName, previous?.lastName, "lastName"),
         ...readProfileField(normalizeInlineUsername(user.username), previous?.username, "username"),
+        ...readBooleanProfileField(user.bot, previous?.bot, "bot"),
         expiresAt,
       }
       this.profiles.delete(userId)
@@ -90,27 +99,45 @@ export class InlineSenderProfileCache {
   }
 
   async resolve(params: { userId: string; chatId: bigint }): Promise<InlineSenderProfile | undefined> {
+    return (await this.resolveWithProvenance(params)).profile
+  }
+
+  async resolveWithProvenance(
+    params: { userId: string; chatId: bigint },
+  ): Promise<InlineSenderProfileResolution> {
     // OpenClaw uses the participant snapshot for history authors as well as the
     // current sender, so hydrate each chat even when this sender is known from
     // another conversation or the directory cache.
-    await this.hydrateChat(params.chatId)
+    const participantHydrated = await this.hydrateChatResult(params.chatId)
     const participant = this.get(params.userId)
-    if (hasDisplayIdentity(participant)) return participant
+    if (hasDisplayIdentity(participant)) {
+      return {
+        profile: participant,
+        provenanceVerified: participantHydrated || participant.bot != null,
+      }
+    }
 
     // Reply-thread and minimized participant payloads can omit the actor. This
     // extra directory fetch is TTL-cached and in-flight deduplicated.
-    await this.hydrateDirectory()
+    const directoryHydrated = await this.hydrateDirectoryResult()
     const resolved = this.get(params.userId)
-    return hasDisplayIdentity(resolved) ? resolved : undefined
+    return {
+      ...(hasDisplayIdentity(resolved) ? { profile: resolved } : {}),
+      provenanceVerified: directoryHydrated && (participantHydrated || hasDisplayIdentity(resolved)),
+    }
   }
 
   async hydrateChat(chatId: bigint): Promise<void> {
+    await this.hydrateChatResult(chatId)
+  }
+
+  private async hydrateChatResult(chatId: bigint): Promise<boolean> {
     const chatKey = String(chatId)
     const hydratedUntil = this.hydratedChats.get(chatKey) ?? 0
     if (hydratedUntil > this.now()) {
       this.hydratedChats.delete(chatKey)
       this.hydratedChats.set(chatKey, hydratedUntil)
-      return
+      return true
     }
     this.hydratedChats.delete(chatKey)
     const existing = this.participantFetches.get(chatKey)
@@ -126,35 +153,47 @@ export class InlineSenderProfileCache {
           if (oldest == null) break
           this.hydratedChats.delete(oldest)
         }
+        return true
       })
-      .catch((error) => this.options.onError?.("getChatParticipants", error))
+      .catch((error) => {
+        this.options.onError?.("getChatParticipants", error)
+        return false
+      })
       .finally(() => this.participantFetches.delete(chatKey))
 
     this.participantFetches.set(chatKey, run)
-    await run
+    return await run
   }
 
   async hydrateDirectory(): Promise<void> {
-    if (this.directoryExpiresAt > this.now()) return
+    await this.hydrateDirectoryResult()
+  }
+
+  private async hydrateDirectoryResult(): Promise<boolean> {
+    if (this.directoryExpiresAt > this.now()) return true
     if (this.directoryFetch) return this.directoryFetch
 
     const run = this.options.fetchDirectoryUsers()
       .then((users) => {
         this.remember(users)
         this.directoryExpiresAt = this.now() + this.ttlMs
+        return true
       })
-      .catch((error) => this.options.onError?.("getChats", error))
+      .catch((error) => {
+        this.options.onError?.("getChats", error)
+        return false
+      })
       .finally(() => {
         this.directoryFetch = null
       })
 
     this.directoryFetch = run
-    await run
+    return await run
   }
 }
 
 function hasDisplayIdentity(profile: InlineSenderProfile | undefined): profile is InlineSenderProfile {
-  return Boolean(profile?.name || profile?.username)
+  return Boolean(profile?.name || profile?.username || profile?.bot != null)
 }
 
 function normalizeInlineUsername(value: string | undefined): string | undefined {
@@ -169,4 +208,13 @@ function readProfileField<K extends "firstName" | "lastName" | "username">(
 ): Partial<Record<K, string>> {
   const resolved = value?.trim() || previous
   return resolved ? { [key]: resolved } as Record<K, string> : {}
+}
+
+function readBooleanProfileField<K extends "bot">(
+  value: boolean | undefined,
+  previous: boolean | undefined,
+  key: K,
+): Partial<Record<K, boolean>> {
+  const resolved = value ?? previous
+  return resolved == null ? {} : { [key]: resolved } as Record<K, boolean>
 }

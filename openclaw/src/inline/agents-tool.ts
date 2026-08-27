@@ -4,7 +4,7 @@ import { callInlineBotApi } from "./bot-commands-api.js"
 import { jsonResult } from "../openclaw-compat.js"
 
 type Args = {
-  action: "create" | "get" | "list"
+  action: "create" | "get" | "list" | "update" | "delete"
   agent_id?: number
   name?: string
   handle?: string
@@ -19,8 +19,8 @@ const parameters = {
   type: "object",
   additionalProperties: false,
   properties: {
-    action: { type: "string", enum: ["create", "get", "list"] },
-    agent_id: { type: "number", description: "Globally unique Inline Agent ID for get." },
+    action: { type: "string", enum: ["create", "get", "list", "update", "delete"] },
+    agent_id: { type: "number", description: "Globally unique Inline Agent ID for get, update, or delete." },
     name: { type: "string", description: "Required Agent name for create." },
     handle: { type: "string" },
     emoji: { type: "string" },
@@ -37,7 +37,7 @@ export function createInlineAgentsTool(ctx: { config?: OpenClawConfig; agentAcco
   return {
     name: "inline_agents",
     label: "Inline Agents",
-    description: "Create, inspect, and list named Inline Agents backed by this bot.",
+    description: "Create, inspect, list, update, and delete named Inline Agents backed by this bot.",
     parameters,
     execute: async (_toolCallId, rawArgs) => {
       const args = (rawArgs ?? {}) as Args
@@ -78,6 +78,46 @@ export function createInlineAgentsTool(ctx: { config?: OpenClawConfig; agentAcco
           methodName: "getAgent",
           method: "GET",
           query: { agent_id: args.agent_id },
+        })
+        return jsonResult({ ok: true, action: args.action, accountId: account.accountId, ...result })
+      }
+
+      if (args.action === "update") {
+        if (!Number.isSafeInteger(args.agent_id) || Number(args.agent_id) <= 0) {
+          throw new Error("inline_agents: positive `agent_id` is required for update")
+        }
+        const body: Record<string, unknown> = { agent_id: args.agent_id }
+        if (args.name !== undefined) {
+          const name = args.name.trim()
+          if (!name) throw new Error("inline_agents: `name` cannot be empty")
+          body.name = name
+        }
+        for (const key of ["handle", "emoji", "description", "skill_key", "instructions"] as const) {
+          if (args[key] !== undefined) body[key] = args[key]?.trim() ?? ""
+        }
+        if (Object.keys(body).length === 1) {
+          throw new Error("inline_agents: update requires at least one field")
+        }
+        const result = await callInlineBotApi<{ agent?: unknown }>({
+          baseUrl: account.baseUrl,
+          token,
+          methodName: "updateAgent",
+          method: "POST",
+          body,
+        })
+        return jsonResult({ ok: true, action: args.action, accountId: account.accountId, agent: result.agent })
+      }
+
+      if (args.action === "delete") {
+        if (!Number.isSafeInteger(args.agent_id) || Number(args.agent_id) <= 0) {
+          throw new Error("inline_agents: positive `agent_id` is required for delete")
+        }
+        const result = await callInlineBotApi<{ agent_id?: number }>({
+          baseUrl: account.baseUrl,
+          token,
+          methodName: "deleteAgent",
+          method: "POST",
+          body: { agent_id: args.agent_id },
         })
         return jsonResult({ ok: true, action: args.action, accountId: account.accountId, ...result })
       }

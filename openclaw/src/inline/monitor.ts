@@ -114,6 +114,10 @@ import {
 } from "./message-content.js"
 import { callInlineBotApi } from "./bot-commands-api.js"
 import {
+  createInlineAgentSpecializationResolver,
+  projectInlineAgentSessionKey,
+} from "./agent-specialization.js"
+import {
   buildInlineAgentActionBody,
   buildInlineAgentActionStructuredContext,
   buildInlineMessageActionId,
@@ -3440,6 +3444,26 @@ export async function monitorInlineProvider(params: {
   const botMessageIdsByChat = new Map<string, string[]>()
   const seenInboundMessageInstances = new Map<string, true>()
   const groupPendingHistories = new Map<string, InlinePendingHistoryEntry[]>()
+  const inlineAgentResolver = createInlineAgentSpecializationResolver({
+    fetchAgent: async (agentId) => {
+      const result = await callInlineBotApi<{
+        agent?: { name?: string; skill_key?: string; instructions?: string }
+      }>({
+        baseUrl: botApiBaseUrl,
+        token,
+        methodName: "getAgent",
+        method: "GET",
+        query: { agent_id: agentId },
+      })
+      const agent = result.agent
+      if (!agent?.name) return null
+      return {
+        name: agent.name,
+        ...(agent.skill_key ? { skillKey: agent.skill_key } : {}),
+        ...(agent.instructions ? { instructions: agent.instructions } : {}),
+      }
+    },
+  })
   const inboundMediaMaxBytes = resolveInlineMediaMaxBytes({ cfg, account })
 
   const hydrateChatParticipants = (chatId: bigint): Promise<void> => senderProfilesById.hydrateChat(chatId)
@@ -3869,7 +3893,18 @@ export async function monitorInlineProvider(params: {
           })
         : DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT
     const senderId = String(msg.fromId)
-    const senderProfile = await senderProfilesById.resolve({ userId: senderId, chatId })
+    const senderResolution = await senderProfilesById.resolveWithProvenance({ userId: senderId, chatId })
+    const senderProfile = senderResolution.profile
+    const explicitlyMentionsThisBot = collectInlineMentionedUserIds(currentContent)
+      .includes(String(meId))
+    if (!senderResolution.provenanceVerified && !explicitlyMentionsThisBot) {
+      runtime.log?.(`inline: observe sender with unverified bot provenance chat=${String(chatId)} sender=${senderId}`)
+      return
+    }
+    if (senderProfile?.bot === true && !explicitlyMentionsThisBot) {
+      runtime.log?.(`inline: observe ambient bot message chat=${String(chatId)} sender=${senderId}`)
+      return
+    }
     const senderUsername = senderProfile?.username
     const senderName = isGroup
       ? senderProfile?.name
@@ -4810,30 +4845,10 @@ export async function monitorInlineProvider(params: {
     ])
     const inlineAgentId = currentContent?.entities.find((entity) =>
       entity.type === "mention" && entity.userId === String(meId) && entity.agentId)?.agentId
-    let inlineAgent: {
-      name: string
-      skillKey?: string
-      instructions?: string
-    } | null = null
+    let inlineAgent: Awaited<ReturnType<typeof inlineAgentResolver.resolve>> = null
     if (inlineAgentId) {
       try {
-        const result = await callInlineBotApi<{
-          agent?: { name?: string; skill_key?: string; instructions?: string }
-        }>({
-          baseUrl: botApiBaseUrl,
-          token,
-          methodName: "getAgent",
-          method: "GET",
-          query: { agent_id: inlineAgentId },
-        })
-        const agent = result.agent
-        if (agent?.name) {
-          inlineAgent = {
-            name: agent.name,
-            ...(agent.skill_key ? { skillKey: agent.skill_key } : {}),
-            ...(agent.instructions ? { instructions: agent.instructions } : {}),
-          }
-        }
+        inlineAgent = await inlineAgentResolver.resolve(inlineAgentId)
       } catch (error) {
         runtime.error?.(`inline: failed to resolve mentioned Agent ${inlineAgentId}: ${String(error)}`)
       }
@@ -4842,9 +4857,11 @@ export async function monitorInlineProvider(params: {
       deliveryReplyThreadContext && isGroup
         ? buildInlineReplyThreadSessionKey(route.sessionKey, deliveryReplyThreadContext.childChatId)
         : route.sessionKey
-    const deliverySessionKey = inlineAgentId
-      ? `${baseDeliverySessionKey}:inline-agent:${inlineAgentId}`
-      : baseDeliverySessionKey
+    const deliverySessionKey = projectInlineAgentSessionKey(
+      baseDeliverySessionKey,
+      inlineAgentId,
+      inlineAgent,
+    )
     const groupHistoryKey = isGroup
       ? deliveryReplyThreadContext
         ? deliverySessionKey

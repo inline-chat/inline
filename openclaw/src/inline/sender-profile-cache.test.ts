@@ -20,6 +20,23 @@ describe("InlineSenderProfileCache", () => {
     expect(fetchDirectoryUsers).not.toHaveBeenCalled()
   })
 
+  it("preserves bot identity across partial profile hydration", async () => {
+    const fetchChatParticipants = vi.fn(async () => [
+      { id: 42n, firstName: "Research Bot", bot: true },
+      { id: 42n, username: "research", bot: undefined },
+    ])
+    const cache = new InlineSenderProfileCache({
+      fetchChatParticipants,
+      fetchDirectoryUsers: vi.fn(async () => []),
+    })
+
+    await expect(cache.resolve({ userId: "42", chatId: 7n })).resolves.toEqual({
+      name: "Research Bot",
+      username: "research",
+      bot: true,
+    })
+  })
+
   it("uses one directory fallback for concurrent participant misses", async () => {
     const fetchChatParticipants = vi.fn(async () => [])
     const fetchDirectoryUsers = vi.fn(async () => [{ id: 42n, firstName: "Ada" }])
@@ -100,6 +117,17 @@ describe("InlineSenderProfileCache", () => {
     expect(fetchChatParticipants).toHaveBeenCalledTimes(1)
     expect(fetchDirectoryUsers).toHaveBeenCalledTimes(2)
     expect(onError).toHaveBeenCalledWith("getChats", expect.any(Error))
+  })
+
+  it("marks sender provenance unverified when both hydration paths fail", async () => {
+    const cache = new InlineSenderProfileCache({
+      fetchChatParticipants: vi.fn(async () => { throw new Error("participants unavailable") }),
+      fetchDirectoryUsers: vi.fn(async () => { throw new Error("directory unavailable") }),
+    })
+
+    await expect(cache.resolveWithProvenance({ userId: "42", chatId: 7n })).resolves.toEqual({
+      provenanceVerified: false,
+    })
   })
 
   it("bounds profiles and makes evicted users immediately fetchable", async () => {

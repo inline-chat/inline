@@ -211,8 +211,22 @@ type MonitorSetup = {
     lastMsgId?: bigint
     dialogFollowMode?: number
   }>
-  participants?: Record<string, Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>>
-  directoryUsers?: Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>
+  participants?: Record<string, Array<{
+    id: bigint
+    username?: string
+    firstName?: string
+    lastName?: string
+    bot?: boolean
+  }>>
+  directoryUsers?: Array<{
+    id: bigint
+    username?: string
+    firstName?: string
+    lastName?: string
+    bot?: boolean
+  }>
+  participantLookupError?: Error
+  directoryLookupError?: Error
   historyByChat?: Record<string, Array<{
     id: bigint
     date: bigint
@@ -672,6 +686,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }
     }
     if (method === 17 && input?.oneofKind === "getChats") {
+      if (setup.directoryLookupError) throw setup.directoryLookupError
       return {
         oneofKind: "getChats",
         getChats: {
@@ -682,6 +697,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }
     }
     if (method === 13 && input?.oneofKind === "getChatParticipants") {
+      if (setup.participantLookupError) throw setup.participantLookupError
       const chatId = String(input.getChatParticipants?.chatId ?? "")
       return {
         oneofKind: "getChatParticipants",
@@ -7371,6 +7387,129 @@ describe("inline/monitor", () => {
     })
 
     await handle.stop()
+  })
+
+  it("keeps ambient bot-authored messages as context in permissive groups", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 88n,
+        message: {
+          id: 2003n,
+          date: 1_700_000_003n,
+          fromId: 51n,
+          message: "ambient bot update",
+          mentioned: false,
+        },
+      }],
+      chats: { "88": { kind: "group", title: "Project Room" } },
+      participants: {
+        "88": [{ id: 51n, firstName: "Automation Bot", bot: true }],
+      },
+      dispatchReplyPayload: { text: "should not send" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        13,
+        expect.objectContaining({ oneofKind: "getChatParticipants" }),
+      )
+    })
+    await handle.stop()
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("accepts an exact bot-authored mention of this bot", async () => {
+    const harness = await setupMonitorHarness({
+      me: { userId: 777n, username: "inlinebot" },
+      events: [{
+        kind: "message.new",
+        chatId: 88n,
+        message: {
+          id: 2004n,
+          date: 1_700_000_004n,
+          fromId: 51n,
+          message: "@inlinebot inspect this",
+          mentioned: true,
+          entities: {
+            entities: [{
+              type: 1,
+              offset: 0n,
+              length: 10n,
+              entity: {
+                oneofKind: "mention",
+                mention: { userId: 777n },
+              },
+            }],
+          },
+        } as any,
+      }],
+      chats: { "88": { kind: "group", title: "Project Room" } },
+      participants: {
+        "88": [{ id: 51n, firstName: "Automation Bot", bot: true }],
+      },
+      dispatchReplyPayload: { text: "accepted" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    })
+    await handle.stop()
+  })
+
+  it("fails closed when sender bot provenance cannot be hydrated", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.new",
+        chatId: 88n,
+        message: {
+          id: 2005n,
+          date: 1_700_000_005n,
+          fromId: 51n,
+          message: "ambient message with unknown provenance",
+          mentioned: false,
+        },
+      }],
+      chats: { "88": { kind: "group", title: "Project Room" } },
+      participantLookupError: new Error("participants unavailable"),
+      directoryLookupError: new Error("directory unavailable"),
+      dispatchReplyPayload: { text: "should not send" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        17,
+        expect.objectContaining({ oneofKind: "getChats" }),
+      )
+    })
+    await handle.stop()
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
   })
 
   it("runs pairing flow for unknown DM senders and skips normal dispatch", async () => {
