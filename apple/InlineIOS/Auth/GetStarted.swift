@@ -47,8 +47,6 @@ private struct SignInMethods: View {
       }
       .buttonStyle(SimpleWhiteButtonStyle())
 
-      NativeAppleSignInButton()
-
       Button {
         nav.push(.email())
       } label: {
@@ -72,6 +70,8 @@ private struct SignInMethods: View {
         }
       }
       .buttonStyle(SimpleWhiteButtonStyle())
+
+      NativeAppleSignInButton()
     }
   }
 

@@ -12,7 +12,7 @@ struct NativeAppleSignInButton: View {
   var body: some View {
     ZStack {
       NativeAppleAuthorizationButton(
-        style: colorScheme == .dark ? .white : .black,
+        style: colorScheme == .dark ? .white : .whiteOutline,
         isEnabled: !coordinator.isRedeeming,
         prepare: coordinator.prepareNativeAppleAuthorization,
         onPreparingChanged: { isPreparing = $0 },
@@ -25,12 +25,12 @@ struct NativeAppleSignInButton: View {
 
       if isPreparing {
         ProgressView()
-          .tint(colorScheme == .dark ? .black : .white)
+          .tint(.black)
           .allowsHitTesting(false)
       }
     }
     .frame(maxWidth: .infinity)
-    .frame(height: 50)
+    .frame(height: 52)
   }
 
   private func handleAuthorization(_ credential: ASAuthorizationAppleIDCredential) {
@@ -71,7 +71,7 @@ private struct NativeAppleAuthorizationButton: UIViewRepresentable {
 
   func makeUIView(context: Context) -> ASAuthorizationAppleIDButton {
     let button = ASAuthorizationAppleIDButton(type: .continue, style: style)
-    button.cornerRadius = 12
+    button.cornerRadius = 26
     button.addTarget(context.coordinator, action: #selector(Coordinator.begin), for: .touchUpInside)
     context.coordinator.button = button
     return button
@@ -84,8 +84,7 @@ private struct NativeAppleAuthorizationButton: UIViewRepresentable {
 
   @MainActor
   final class Coordinator: NSObject, ASAuthorizationControllerDelegate,
-    ASAuthorizationControllerPresentationContextProviding
-  {
+    ASAuthorizationControllerPresentationContextProviding {
     var parent: NativeAppleAuthorizationButton
     weak var button: ASAuthorizationAppleIDButton?
     var isPreparing = false
@@ -145,8 +144,7 @@ private struct NativeAppleAuthorizationButton: UIViewRepresentable {
       updateButtonState()
       let nsError = error as NSError
       if nsError.domain == ASAuthorizationError.errorDomain,
-         nsError.code == ASAuthorizationError.canceled.rawValue
-      {
+         nsError.code == ASAuthorizationError.canceled.rawValue {
         parent.onCancelled()
       } else {
         parent.onFailure(error)
