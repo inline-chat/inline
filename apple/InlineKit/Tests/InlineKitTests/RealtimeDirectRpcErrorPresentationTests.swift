@@ -65,6 +65,7 @@ struct RealtimeDirectRpcErrorPresentationTests {
       (.userIDInvalid, "That person is no longer available."),
       (.userAlreadyMember, "That person is already a member."),
       (.spaceIDInvalid, "That space is no longer available."),
+      (.spaceInviteInvalid, "This invite link is invalid or no longer available."),
       (.chatIDInvalid, "That chat is no longer available."),
       (.emailInvalid, "Enter a valid email address."),
       (.phoneNumberInvalid, "Enter a valid phone number."),

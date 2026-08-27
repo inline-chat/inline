@@ -21,7 +21,7 @@ struct InviteMacView: View {
     Group {
       switch stage ?? localStage {
       case .selection:
-        InviteMacSelectionScreen(model: model) {
+        InviteMacSelectionScreen(model: model, realtime: realtime) {
           if let onContinue {
             onContinue()
           } else {
@@ -74,6 +74,7 @@ struct InviteMacView: View {
 private struct InviteMacSelectionScreen: View {
   @Bindable var model: InviteComposerModel
   @State private var isSearchFocused = true
+  let realtime: RealtimeV2
   let onNext: () -> Void
 
   var body: some View {
@@ -139,7 +140,11 @@ private struct InviteMacSelectionScreen: View {
         titleItem
       }
 
-      ToolbarItem(placement: .primaryAction) {
+      ToolbarItemGroup(placement: .primaryAction) {
+        if case let .space(id) = model.destination {
+          SpaceInviteLinkButton(spaceID: id, realtime: realtime)
+            .id(id)
+        }
         Button("Continue", systemImage: "arrow.right", action: onNext)
           .labelStyle(.iconOnly)
           .disabled(model.selected.isEmpty)

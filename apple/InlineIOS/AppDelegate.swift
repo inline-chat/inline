@@ -1,4 +1,5 @@
 import Auth
+import Combine
 import CryptoKit
 import Foundation
 import InlineConfig
@@ -8,11 +9,15 @@ import Security
 import Sentry
 import UIKit
 
-class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, ObservableObject {
   let notificationHandler = NotificationHandler()
   let nav = Navigation()
   let sceneRouterRegistry = IOSSceneRouterRegistry()
   private var protectedDataObserver: NSObjectProtocol?
+  @MainActor @Published var spaceJoinErrorMessage: String?
+  @MainActor private var pendingSpaceJoin: SpaceJoinReference?
+  @MainActor private var spaceJoinTask: Task<Void, Never>?
+  @MainActor private var spaceJoinGeneration: UInt64 = 0
 
   func application(
     _ application: UIApplication,
@@ -82,10 +87,64 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       request = .chat(peer: .thread(id: id))
     case let .message(chatId, messageId):
       request = .message(peer: .thread(id: chatId), messageID: messageId)
+    case .publicSpace, .spaceInvite:
+      guard let reference = SpaceJoinReference(deepLink: deepLink) else { return false }
+      spaceJoinGeneration &+= 1
+      spaceJoinTask?.cancel()
+      spaceJoinTask = nil
+      pendingSpaceJoin = reference
+      resumePendingSpaceJoin(router: router)
+      return true
     }
     router.navigate(request)
     openInInboxAfterExternalNavigation(request.peer)
     return true
+  }
+
+  @MainActor
+  func resumePendingSpaceJoin(router: Router) {
+    guard Auth.shared.getCurrentUserId() != nil,
+          let reference = pendingSpaceJoin,
+          spaceJoinTask == nil
+    else { return }
+
+    let generation = spaceJoinGeneration
+    spaceJoinTask = Task { @MainActor [weak self] in
+      defer {
+        if self?.spaceJoinGeneration == generation {
+          self?.spaceJoinTask = nil
+        }
+      }
+      do {
+        let spaceID = try await SpaceJoiner.join(reference)
+        guard !Task.isCancelled, self?.spaceJoinGeneration == generation else { return }
+        self?.pendingSpaceJoin = nil
+        router.resetTransientPresentation()
+        router.popToRoot(for: .spaces)
+        router.push(.space(id: spaceID), for: .spaces)
+        router.selectedTab = .spaces
+      } catch is CancellationError {
+        return
+      } catch {
+        guard self?.spaceJoinGeneration == generation else { return }
+        self?.pendingSpaceJoin = nil
+        self?.spaceJoinErrorMessage = "This invite is invalid, expired, or unavailable."
+      }
+    }
+  }
+
+  @MainActor
+  func cancelPendingSpaceJoin() {
+    spaceJoinGeneration &+= 1
+    spaceJoinTask?.cancel()
+    spaceJoinTask = nil
+    pendingSpaceJoin = nil
+    spaceJoinErrorMessage = nil
+  }
+
+  @MainActor
+  func dismissSpaceJoinError() {
+    spaceJoinErrorMessage = nil
   }
 
   private func applicationDidResignActive(_ notification: Notification) {

@@ -2376,6 +2376,85 @@ export interface JoinPublicSpaceResult {
     alreadyMember: boolean;
 }
 /**
+ * @generated from protobuf message SpaceInviteLink
+ */
+export interface SpaceInviteLink {
+    /**
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: optional int64 expires_at = 2;
+     */
+    expiresAt?: bigint;
+}
+/**
+ * @generated from protobuf message JoinSpaceByInviteTokenInput
+ */
+export interface JoinSpaceByInviteTokenInput {
+    /**
+     * @generated from protobuf field: string token = 1;
+     */
+    token: string;
+}
+/**
+ * @generated from protobuf message JoinSpaceByInviteTokenResult
+ */
+export interface JoinSpaceByInviteTokenResult {
+    /**
+     * @generated from protobuf field: Space space = 1;
+     */
+    space?: Space;
+    /**
+     * @generated from protobuf field: Member member = 2;
+     */
+    member?: Member;
+    /**
+     * @generated from protobuf field: bool already_member = 3;
+     */
+    alreadyMember: boolean;
+}
+/**
+ * @generated from protobuf message GetSpaceInviteLinkInput
+ */
+export interface GetSpaceInviteLinkInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetSpaceInviteLinkResult
+ */
+export interface GetSpaceInviteLinkResult {
+    /**
+     * @generated from protobuf field: optional SpaceInviteLink link = 1;
+     */
+    link?: SpaceInviteLink;
+}
+/**
+ * @generated from protobuf message SetSpaceInviteLinkEnabledInput
+ */
+export interface SetSpaceInviteLinkEnabledInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: bool enabled = 2;
+     */
+    enabled: boolean;
+}
+/**
+ * @generated from protobuf message SetSpaceInviteLinkEnabledResult
+ */
+export interface SetSpaceInviteLinkEnabledResult {
+    /**
+     * @generated from protobuf field: optional SpaceInviteLink link = 1;
+     */
+    link?: SpaceInviteLink;
+}
+/**
  * @generated from protobuf message UserGroup
  */
 export interface UserGroup {
@@ -3336,7 +3415,11 @@ export enum RpcError_Code {
     /**
      * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_IMMUTABLE = 19;
      */
-    AGENT_SESSION_MESSAGE_IMMUTABLE = 19
+    AGENT_SESSION_MESSAGE_IMMUTABLE = 19,
+    /**
+     * @generated from protobuf enum value: SPACE_INVITE_INVALID = 20;
+     */
+    SPACE_INVITE_INVALID = 20
 }
 /**
  * @generated from protobuf message RpcCall
@@ -4123,6 +4206,24 @@ export interface RpcCall {
          * @generated from protobuf field: GetAgentSessionInput getAgentSession = 131;
          */
         getAgentSession: GetAgentSessionInput;
+    } | {
+        oneofKind: "joinSpaceByInviteToken";
+        /**
+         * @generated from protobuf field: JoinSpaceByInviteTokenInput joinSpaceByInviteToken = 134;
+         */
+        joinSpaceByInviteToken: JoinSpaceByInviteTokenInput;
+    } | {
+        oneofKind: "getSpaceInviteLink";
+        /**
+         * @generated from protobuf field: GetSpaceInviteLinkInput getSpaceInviteLink = 135;
+         */
+        getSpaceInviteLink: GetSpaceInviteLinkInput;
+    } | {
+        oneofKind: "setSpaceInviteLinkEnabled";
+        /**
+         * @generated from protobuf field: SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136;
+         */
+        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledInput;
     } | {
         oneofKind: undefined;
     };
@@ -4913,6 +5014,24 @@ export interface RpcResult {
          */
         getAgentSession: GetAgentSessionResult;
     } | {
+        oneofKind: "joinSpaceByInviteToken";
+        /**
+         * @generated from protobuf field: JoinSpaceByInviteTokenResult joinSpaceByInviteToken = 134;
+         */
+        joinSpaceByInviteToken: JoinSpaceByInviteTokenResult;
+    } | {
+        oneofKind: "getSpaceInviteLink";
+        /**
+         * @generated from protobuf field: GetSpaceInviteLinkResult getSpaceInviteLink = 135;
+         */
+        getSpaceInviteLink: GetSpaceInviteLinkResult;
+    } | {
+        oneofKind: "setSpaceInviteLinkEnabled";
+        /**
+         * @generated from protobuf field: SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
+         */
+        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5142,6 +5261,12 @@ export interface DeleteMemberInput {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+    /**
+     * Also prevent this member from returning through a public or private link.
+     *
+     * @generated from protobuf field: bool block_join = 3;
+     */
+    blockJoin: boolean;
 }
 /**
  * Remove member from space result
@@ -12761,7 +12886,19 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_AGENT_SESSION = 130;
      */
-    GET_AGENT_SESSION = 130
+    GET_AGENT_SESSION = 130,
+    /**
+     * @generated from protobuf enum value: JOIN_SPACE_BY_INVITE_TOKEN = 133;
+     */
+    JOIN_SPACE_BY_INVITE_TOKEN = 133,
+    /**
+     * @generated from protobuf enum value: GET_SPACE_INVITE_LINK = 134;
+     */
+    GET_SPACE_INVITE_LINK = 134,
+    /**
+     * @generated from protobuf enum value: SET_SPACE_INVITE_LINK_ENABLED = 135;
+     */
+    SET_SPACE_INVITE_LINK_ENABLED = 135
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -19070,6 +19207,362 @@ class JoinPublicSpaceResult$Type extends MessageType<JoinPublicSpaceResult> {
  */
 export const JoinPublicSpaceResult = new JoinPublicSpaceResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class SpaceInviteLink$Type extends MessageType<SpaceInviteLink> {
+    constructor() {
+        super("SpaceInviteLink", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "expires_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SpaceInviteLink>): SpaceInviteLink {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<SpaceInviteLink>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SpaceInviteLink): SpaceInviteLink {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* optional int64 expires_at */ 2:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SpaceInviteLink, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* optional int64 expires_at = 2; */
+        if (message.expiresAt !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.expiresAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SpaceInviteLink
+ */
+export const SpaceInviteLink = new SpaceInviteLink$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinSpaceByInviteTokenInput$Type extends MessageType<JoinSpaceByInviteTokenInput> {
+    constructor() {
+        super("JoinSpaceByInviteTokenInput", [
+            { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JoinSpaceByInviteTokenInput>): JoinSpaceByInviteTokenInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.token = "";
+        if (value !== undefined)
+            reflectionMergePartial<JoinSpaceByInviteTokenInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinSpaceByInviteTokenInput): JoinSpaceByInviteTokenInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string token */ 1:
+                    message.token = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinSpaceByInviteTokenInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string token = 1; */
+        if (message.token !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.token);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinSpaceByInviteTokenInput
+ */
+export const JoinSpaceByInviteTokenInput = new JoinSpaceByInviteTokenInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinSpaceByInviteTokenResult$Type extends MessageType<JoinSpaceByInviteTokenResult> {
+    constructor() {
+        super("JoinSpaceByInviteTokenResult", [
+            { no: 1, name: "space", kind: "message", T: () => Space },
+            { no: 2, name: "member", kind: "message", T: () => Member },
+            { no: 3, name: "already_member", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JoinSpaceByInviteTokenResult>): JoinSpaceByInviteTokenResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.alreadyMember = false;
+        if (value !== undefined)
+            reflectionMergePartial<JoinSpaceByInviteTokenResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinSpaceByInviteTokenResult): JoinSpaceByInviteTokenResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Space space */ 1:
+                    message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+                    break;
+                case /* Member member */ 2:
+                    message.member = Member.internalBinaryRead(reader, reader.uint32(), options, message.member);
+                    break;
+                case /* bool already_member */ 3:
+                    message.alreadyMember = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinSpaceByInviteTokenResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Space space = 1; */
+        if (message.space)
+            Space.internalBinaryWrite(message.space, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Member member = 2; */
+        if (message.member)
+            Member.internalBinaryWrite(message.member, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* bool already_member = 3; */
+        if (message.alreadyMember !== false)
+            writer.tag(3, WireType.Varint).bool(message.alreadyMember);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinSpaceByInviteTokenResult
+ */
+export const JoinSpaceByInviteTokenResult = new JoinSpaceByInviteTokenResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceInviteLinkInput$Type extends MessageType<GetSpaceInviteLinkInput> {
+    constructor() {
+        super("GetSpaceInviteLinkInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceInviteLinkInput>): GetSpaceInviteLinkInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceInviteLinkInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceInviteLinkInput): GetSpaceInviteLinkInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceInviteLinkInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceInviteLinkInput
+ */
+export const GetSpaceInviteLinkInput = new GetSpaceInviteLinkInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceInviteLinkResult$Type extends MessageType<GetSpaceInviteLinkResult> {
+    constructor() {
+        super("GetSpaceInviteLinkResult", [
+            { no: 1, name: "link", kind: "message", T: () => SpaceInviteLink }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceInviteLinkResult>): GetSpaceInviteLinkResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceInviteLinkResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceInviteLinkResult): GetSpaceInviteLinkResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional SpaceInviteLink link */ 1:
+                    message.link = SpaceInviteLink.internalBinaryRead(reader, reader.uint32(), options, message.link);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceInviteLinkResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional SpaceInviteLink link = 1; */
+        if (message.link)
+            SpaceInviteLink.internalBinaryWrite(message.link, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceInviteLinkResult
+ */
+export const GetSpaceInviteLinkResult = new GetSpaceInviteLinkResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetSpaceInviteLinkEnabledInput$Type extends MessageType<SetSpaceInviteLinkEnabledInput> {
+    constructor() {
+        super("SetSpaceInviteLinkEnabledInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetSpaceInviteLinkEnabledInput>): SetSpaceInviteLinkEnabledInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.enabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<SetSpaceInviteLinkEnabledInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetSpaceInviteLinkEnabledInput): SetSpaceInviteLinkEnabledInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetSpaceInviteLinkEnabledInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* bool enabled = 2; */
+        if (message.enabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetSpaceInviteLinkEnabledInput
+ */
+export const SetSpaceInviteLinkEnabledInput = new SetSpaceInviteLinkEnabledInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetSpaceInviteLinkEnabledResult$Type extends MessageType<SetSpaceInviteLinkEnabledResult> {
+    constructor() {
+        super("SetSpaceInviteLinkEnabledResult", [
+            { no: 1, name: "link", kind: "message", T: () => SpaceInviteLink }
+        ]);
+    }
+    create(value?: PartialMessage<SetSpaceInviteLinkEnabledResult>): SetSpaceInviteLinkEnabledResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SetSpaceInviteLinkEnabledResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetSpaceInviteLinkEnabledResult): SetSpaceInviteLinkEnabledResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional SpaceInviteLink link */ 1:
+                    message.link = SpaceInviteLink.internalBinaryRead(reader, reader.uint32(), options, message.link);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetSpaceInviteLinkEnabledResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional SpaceInviteLink link = 1; */
+        if (message.link)
+            SpaceInviteLink.internalBinaryWrite(message.link, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetSpaceInviteLinkEnabledResult
+ */
+export const SetSpaceInviteLinkEnabledResult = new SetSpaceInviteLinkEnabledResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class UserGroup$Type extends MessageType<UserGroup> {
     constructor() {
         super("UserGroup", [
@@ -21031,7 +21524,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 128, name: "getSpace", kind: "message", oneof: "input", T: () => GetSpaceInput },
             { no: 129, name: "connectAgentSession", kind: "message", oneof: "input", T: () => ConnectAgentSessionInput },
             { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "input", T: () => SyncAgentSessionMessagesInput },
-            { no: 131, name: "getAgentSession", kind: "message", oneof: "input", T: () => GetAgentSessionInput }
+            { no: 131, name: "getAgentSession", kind: "message", oneof: "input", T: () => GetAgentSessionInput },
+            { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "input", T: () => JoinSpaceByInviteTokenInput },
+            { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "input", T: () => GetSpaceInviteLinkInput },
+            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "input", T: () => SetSpaceInviteLinkEnabledInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -21824,6 +22320,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getAgentSession: GetAgentSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getAgentSession)
                     };
                     break;
+                case /* JoinSpaceByInviteTokenInput joinSpaceByInviteToken */ 134:
+                    message.input = {
+                        oneofKind: "joinSpaceByInviteToken",
+                        joinSpaceByInviteToken: JoinSpaceByInviteTokenInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).joinSpaceByInviteToken)
+                    };
+                    break;
+                case /* GetSpaceInviteLinkInput getSpaceInviteLink */ 135:
+                    message.input = {
+                        oneofKind: "getSpaceInviteLink",
+                        getSpaceInviteLink: GetSpaceInviteLinkInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaceInviteLink)
+                    };
+                    break;
+                case /* SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled */ 136:
+                    message.input = {
+                        oneofKind: "setSpaceInviteLinkEnabled",
+                        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setSpaceInviteLinkEnabled)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22226,6 +22740,15 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetAgentSessionInput getAgentSession = 131; */
         if (message.input.oneofKind === "getAgentSession")
             GetAgentSessionInput.internalBinaryWrite(message.input.getAgentSession, writer.tag(131, WireType.LengthDelimited).fork(), options).join();
+        /* JoinSpaceByInviteTokenInput joinSpaceByInviteToken = 134; */
+        if (message.input.oneofKind === "joinSpaceByInviteToken")
+            JoinSpaceByInviteTokenInput.internalBinaryWrite(message.input.joinSpaceByInviteToken, writer.tag(134, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceInviteLinkInput getSpaceInviteLink = 135; */
+        if (message.input.oneofKind === "getSpaceInviteLink")
+            GetSpaceInviteLinkInput.internalBinaryWrite(message.input.getSpaceInviteLink, writer.tag(135, WireType.LengthDelimited).fork(), options).join();
+        /* SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136; */
+        if (message.input.oneofKind === "setSpaceInviteLinkEnabled")
+            SetSpaceInviteLinkEnabledInput.internalBinaryWrite(message.input.setSpaceInviteLinkEnabled, writer.tag(136, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22369,7 +22892,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 128, name: "getSpace", kind: "message", oneof: "result", T: () => GetSpaceResult },
             { no: 129, name: "connectAgentSession", kind: "message", oneof: "result", T: () => ConnectAgentSessionResult },
             { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "result", T: () => SyncAgentSessionMessagesResult },
-            { no: 131, name: "getAgentSession", kind: "message", oneof: "result", T: () => GetAgentSessionResult }
+            { no: 131, name: "getAgentSession", kind: "message", oneof: "result", T: () => GetAgentSessionResult },
+            { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "result", T: () => JoinSpaceByInviteTokenResult },
+            { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "result", T: () => GetSpaceInviteLinkResult },
+            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "result", T: () => SetSpaceInviteLinkEnabledResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -23162,6 +23688,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getAgentSession: GetAgentSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getAgentSession)
                     };
                     break;
+                case /* JoinSpaceByInviteTokenResult joinSpaceByInviteToken */ 134:
+                    message.result = {
+                        oneofKind: "joinSpaceByInviteToken",
+                        joinSpaceByInviteToken: JoinSpaceByInviteTokenResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).joinSpaceByInviteToken)
+                    };
+                    break;
+                case /* GetSpaceInviteLinkResult getSpaceInviteLink */ 135:
+                    message.result = {
+                        oneofKind: "getSpaceInviteLink",
+                        getSpaceInviteLink: GetSpaceInviteLinkResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaceInviteLink)
+                    };
+                    break;
+                case /* SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled */ 136:
+                    message.result = {
+                        oneofKind: "setSpaceInviteLinkEnabled",
+                        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setSpaceInviteLinkEnabled)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23564,6 +24108,15 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetAgentSessionResult getAgentSession = 131; */
         if (message.result.oneofKind === "getAgentSession")
             GetAgentSessionResult.internalBinaryWrite(message.result.getAgentSession, writer.tag(131, WireType.LengthDelimited).fork(), options).join();
+        /* JoinSpaceByInviteTokenResult joinSpaceByInviteToken = 134; */
+        if (message.result.oneofKind === "joinSpaceByInviteToken")
+            JoinSpaceByInviteTokenResult.internalBinaryWrite(message.result.joinSpaceByInviteToken, writer.tag(134, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceInviteLinkResult getSpaceInviteLink = 135; */
+        if (message.result.oneofKind === "getSpaceInviteLink")
+            GetSpaceInviteLinkResult.internalBinaryWrite(message.result.getSpaceInviteLink, writer.tag(135, WireType.LengthDelimited).fork(), options).join();
+        /* SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136; */
+        if (message.result.oneofKind === "setSpaceInviteLinkEnabled")
+            SetSpaceInviteLinkEnabledResult.internalBinaryWrite(message.result.setSpaceInviteLinkEnabled, writer.tag(136, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24072,13 +24625,15 @@ class DeleteMemberInput$Type extends MessageType<DeleteMemberInput> {
     constructor() {
         super("DeleteMemberInput", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "block_join", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<DeleteMemberInput>): DeleteMemberInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.spaceId = 0n;
         message.userId = 0n;
+        message.blockJoin = false;
         if (value !== undefined)
             reflectionMergePartial<DeleteMemberInput>(this, message, value);
         return message;
@@ -24093,6 +24648,9 @@ class DeleteMemberInput$Type extends MessageType<DeleteMemberInput> {
                     break;
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
+                    break;
+                case /* bool block_join */ 3:
+                    message.blockJoin = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -24112,6 +24670,9 @@ class DeleteMemberInput$Type extends MessageType<DeleteMemberInput> {
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* bool block_join = 3; */
+        if (message.blockJoin !== false)
+            writer.tag(3, WireType.Varint).bool(message.blockJoin);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

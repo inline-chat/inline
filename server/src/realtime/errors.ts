@@ -163,6 +163,14 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.AgentSessionMessageImmutable,
     )
   }
+  public static SpaceInviteInvalid() {
+    return RealtimeRpcError.create(
+      RpcError_Code.SPACE_INVITE_INVALID,
+      "Space invite is invalid or unavailable",
+      404,
+      RealtimeRpcError.SpaceInviteInvalid,
+    )
+  }
   public static SpaceAdminRequired() {
     return RealtimeRpcError.create(
       RpcError_Code.SPACE_ADMIN_REQUIRED,

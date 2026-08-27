@@ -91,6 +91,7 @@ describe("deleteMemberHandler", () => {
     const input: DeleteMemberInput = {
       spaceId: BigInt(space.id),
       userId: BigInt(memberUser.id),
+      blockJoin: false,
     }
 
     const result = await deleteMemberHandler(input, handlerContext)
@@ -120,7 +121,7 @@ describe("deleteMemberHandler", () => {
     expect(connectionManager.getSpaceUserIds(space.id)).toContain(memberUser.id)
 
     await deleteMemberHandler(
-      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
       handlerContext,
     )
 
@@ -150,7 +151,7 @@ describe("deleteMemberHandler", () => {
     try {
       await expect(
         deleteMemberHandler(
-          { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+          { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
           handlerContext,
         ),
       ).resolves.toBeDefined()
@@ -169,6 +170,7 @@ describe("deleteMemberHandler", () => {
     const input: DeleteMemberInput = {
       spaceId: BigInt(space.id),
       userId: BigInt(memberUser.id),
+      blockJoin: false,
     }
 
     await deleteMemberHandler(input, handlerContext)
@@ -223,7 +225,7 @@ describe("deleteMemberHandler", () => {
     await db.insert(schema.chatParticipantGroups).values({ chatId: child.id, groupId: group.id })
 
     await deleteMemberHandler(
-      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
       handlerContext,
     )
 
@@ -257,12 +259,12 @@ describe("deleteMemberHandler", () => {
     const handle = `delete-member-race-${space.id}`
     await db
       .update(schema.spaces)
-      .set({ handle, isPublic: true })
+      .set({ handle, isPublic: true, canPublicJoin: true })
       .where(eq(schema.spaces.id, space.id))
 
-    const [deletion, join] = await Promise.all([
+    const [deletion, join] = await Promise.allSettled([
       deleteMemberHandler(
-        { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+        { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
         handlerContext,
       ),
       joinPublicSpace(
@@ -271,17 +273,26 @@ describe("deleteMemberHandler", () => {
       ),
     ])
 
-    expect(deletion.updates.length).toBeGreaterThan(0)
-    expect(join.member?.userId).toBe(BigInt(memberUser.id))
+    expect(deletion.status).toBe("fulfilled")
+    if (deletion.status !== "fulfilled") throw deletion.reason
+    expect(deletion.value.updates.length).toBeGreaterThan(0)
+    if (join.status === "fulfilled") {
+      expect(join.value.alreadyMember).toBe(true)
+    } else {
+      expect(join.reason).toMatchObject({ codeName: "SPACE_INVITE_INVALID" })
+    }
     const remainingMembers = await db
       .select()
       .from(schema.members)
       .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, memberUser.id)))
-    // Either operation may commit first: the join can observe the old
-    // membership before deletion, or it can re-add after deletion. The
-    // invariant under the race is that the unique membership row remains
-    // singular and both operations complete without a deadlock.
-    expect(remainingMembers.length).toBeLessThanOrEqual(1)
+    expect(remainingMembers).toHaveLength(0)
+    expect(await db
+      .select()
+      .from(schema.spaceJoinBlocks)
+      .where(and(
+        eq(schema.spaceJoinBlocks.spaceId, space.id),
+        eq(schema.spaceJoinBlocks.userId, memberUser.id),
+      ))).toHaveLength(1)
   })
 
   test("revokes active Grid presence and reconciles the remaining room", async () => {
@@ -301,7 +312,7 @@ describe("deleteMemberHandler", () => {
     await joinGridRoom({ roomId: roomID }, memberContext)
 
     await deleteMemberHandler(
-      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
       handlerContext,
     )
 
@@ -348,7 +359,7 @@ describe("deleteMemberHandler", () => {
 
     await expect(
       deleteMemberHandler(
-        { spaceId: BigInt(space.id), userId: BigInt(memberUser.id) },
+        { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
         handlerContext,
       ),
     ).rejects.toThrow()

@@ -71,6 +71,8 @@ public enum RealtimeErrorPresentation {
       String(localized: "That person is already a member.")
     case .spaceIDInvalid:
       String(localized: "That space is no longer available.")
+    case .spaceInviteInvalid:
+      String(localized: "This invite link is invalid or no longer available.")
     case .chatIDInvalid:
       String(localized: "That chat is no longer available.")
     case .emailInvalid:

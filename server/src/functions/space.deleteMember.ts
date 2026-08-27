@@ -1,4 +1,4 @@
-import { members, spaces, users } from "@in/server/db/schema"
+import { members, spaces, spaceJoinBlocks, users } from "@in/server/db/schema"
 import { chatParticipants, chats } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
 import { userGroupMembers, userGroups } from "@in/server/db/schema/userGroups"
@@ -70,7 +70,7 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
     // Membership and Grid media authority are one durable state transition.
     // Provider revocation is inserted into the outbox before this commits.
     const { gridRemovalState, persisted, accessUpdates } = yield* Effect.tryPromise({
-      try: () => removeMemberAndGridPresence(spaceId, userId, context.currentUserId),
+      try: () => removeMemberAndGridPresence(spaceId, userId, context.currentUserId, input.blockJoin),
       catch: (error) =>
         error instanceof MemberNotExistsError
           ? error
@@ -113,6 +113,7 @@ async function removeMemberAndGridPresence(
   spaceId: number,
   userId: number,
   currentUserId: number,
+  blockJoin: boolean,
 ): Promise<{
   gridRemovalState: GridPresenceRemovalState
   persisted: UpdateSeqAndDate
@@ -161,6 +162,18 @@ async function removeMemberAndGridPresence(
       .returning({ id: members.id })
 
     if (removed.length === 0) throw new MemberNotExistsError()
+
+    if (space.isPublic || blockJoin) {
+      await tx
+        .insert(spaceJoinBlocks)
+        .values({ spaceId, userId })
+        .onConflictDoNothing()
+    } else {
+      await tx
+        .delete(spaceJoinBlocks)
+        .where(and(eq(spaceJoinBlocks.spaceId, spaceId), eq(spaceJoinBlocks.userId, userId)))
+    }
+
     // Keep all membership-owned cleanup in the same transaction as the
     // membership delete. A re-add on another connection must wait for this
     // transaction to commit, otherwise it can be followed by cleanup that

@@ -15,12 +15,14 @@ struct InviteIOSView: View {
   let onOpenChat: ((InlineKit.Peer) -> Void)?
 
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.realtimeV2) private var realtime
   @State private var path: [InviteIOSRoute] = []
 
   var body: some View {
     NavigationStack(path: $path) {
       InviteIOSSelectionScreen(
         model: model,
+        realtime: realtime,
         onCancel: { dismiss() },
         onNext: { path.append(.options) }
       )
@@ -53,6 +55,7 @@ struct InviteIOSView: View {
 
 private struct InviteIOSSelectionScreen: View {
   let model: InviteComposerModel
+  let realtime: RealtimeV2
   let onCancel: () -> Void
   let onNext: () -> Void
 
@@ -83,7 +86,11 @@ private struct InviteIOSSelectionScreen: View {
           selectedCount: model.selected.count
         )
       }
-      ToolbarItem(placement: .confirmationAction) {
+      ToolbarItemGroup(placement: .confirmationAction) {
+        if case let .space(id) = model.destination {
+          SpaceInviteLinkButton(spaceID: id, realtime: realtime)
+            .id(id)
+        }
         Button("Next") {
           searchIsFocused = false
           onNext()

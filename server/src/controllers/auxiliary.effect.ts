@@ -41,6 +41,14 @@ import {
   executeWaitlistVerify,
 } from "./extra/waitlist.effect"
 import {
+  SpaceJoinEndpoints,
+  SpaceJoinOperationFailure,
+  SpaceJoinOperations,
+  SpaceJoinRequestFailure,
+  executeSpaceJoinResolve,
+  spaceJoinInternalServerError,
+} from "./extra/spaceJoin.effect"
+import {
   EmailUnsubscribeEndpoints,
   EmailUnsubscribeOperationFailure,
   EmailUnsubscribeOperations,
@@ -91,6 +99,7 @@ export const AuxiliaryApiGroup =
     .add(WaitlistEndpoints.count)
     .add(WaitlistEndpoints.subscribe)
     .add(WaitlistEndpoints.verify)
+    .add(SpaceJoinEndpoints.resolve)
     .add(EmailUnsubscribeEndpoints.confirm)
     .add(EmailUnsubscribeEndpoints.submit)
     .add(ThereEndpoints.signup)
@@ -108,6 +117,8 @@ type AuxiliaryHandlerFailure =
   | MediaOperationFailure
   | ThereOperationFailure
   | WaitlistOperationFailure
+  | SpaceJoinOperationFailure
+  | SpaceJoinRequestFailure
   | EmailUnsubscribeOperationFailure
 
 const failureCause = (
@@ -126,6 +137,9 @@ const failureResponse = (
   failure instanceof IntegrationOperationFailure &&
     failure.publicResponse !== undefined
     ? failure.publicResponse
+    : failure instanceof SpaceJoinOperationFailure ||
+        failure instanceof SpaceJoinRequestFailure
+      ? spaceJoinInternalServerError()
     : auxiliaryInternalServerError()
 
 const complete = <R>(
@@ -174,6 +188,7 @@ export const makeAuxiliaryRouteGroup = () => {
           | SessionAuthentication
           | ThereOperations
           | WaitlistOperations
+          | SpaceJoinOperations
           | EmailUnsubscribeOperations
         >()
         const execute = <E, R>(
@@ -260,6 +275,18 @@ export const makeAuxiliaryRouteGroup = () => {
           .handleRaw(
             "waitlistVerify",
             () => execute(executeWaitlistVerify),
+          )
+          .handleRaw(
+            "spaceJoinResolve",
+            ({ request }) =>
+              execute(
+                HttpRequestContext.use((context) =>
+                  complete(
+                    "auxiliary.spaceJoin.resolve",
+                    executeSpaceJoinResolve(request, context.clientIp),
+                  ),
+                ),
+              ),
           )
           .handleRaw(
             "emailUnsubscribeConfirm",

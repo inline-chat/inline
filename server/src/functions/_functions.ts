@@ -17,6 +17,8 @@ import { getSpace } from "./space.getSpace"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
 import { joinPublicSpace } from "./space.joinPublicSpace"
+import { joinSpaceByInviteToken } from "./space.joinByInviteToken"
+import { getSpaceInviteLink, setSpaceInviteLinkEnabled } from "./space.inviteLinks"
 import { updateMemberAccess } from "./space.updateMemberAccess"
 import { getSpaceSettings, toggleSpaceGrid } from "./space.settings"
 import {
@@ -129,6 +131,9 @@ export const Functions = {
     getSpaceMembers: getSpaceMembers,
     inviteToSpace: inviteToSpace,
     joinPublicSpace,
+    joinSpaceByInviteToken,
+    getInviteLink: getSpaceInviteLink,
+    setInviteLinkEnabled: setSpaceInviteLinkEnabled,
     deleteMember: deleteMember,
     updateMemberAccess: updateMemberAccess,
     getSettings: getSpaceSettings,

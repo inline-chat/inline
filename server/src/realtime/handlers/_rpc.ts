@@ -24,6 +24,8 @@ import { getSpace } from "@in/server/realtime/handlers/space.getSpace"
 import { deleteChatHandler } from "@in/server/realtime/handlers/messages.deleteChat"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
 import { joinPublicSpace } from "@in/server/functions/space.joinPublicSpace"
+import { joinSpaceByInviteToken } from "@in/server/functions/space.joinByInviteToken"
+import { getSpaceInviteLink, setSpaceInviteLinkEnabled } from "@in/server/functions/space.inviteLinks"
 import { getChatParticipants } from "@in/server/realtime/handlers/messages.getChatParticipants"
 import { addChatParticipant } from "@in/server/realtime/handlers/messages.addChatParticipant"
 import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
@@ -509,6 +511,39 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
         currentSessionId: handlerContext.sessionId,
       })
       return { oneofKind: "joinPublicSpace", joinPublicSpace: result }
+    }
+
+    case Method.JOIN_SPACE_BY_INVITE_TOKEN: {
+      if (call.input.oneofKind !== "joinSpaceByInviteToken") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await joinSpaceByInviteToken(call.input.joinSpaceByInviteToken, {
+        currentUserId: handlerContext.userId,
+        currentSessionId: handlerContext.sessionId,
+      })
+      return { oneofKind: "joinSpaceByInviteToken", joinSpaceByInviteToken: result }
+    }
+
+    case Method.GET_SPACE_INVITE_LINK: {
+      if (call.input.oneofKind !== "getSpaceInviteLink") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getSpaceInviteLink(call.input.getSpaceInviteLink, {
+        currentUserId: handlerContext.userId,
+        currentSessionId: handlerContext.sessionId,
+      })
+      return { oneofKind: "getSpaceInviteLink", getSpaceInviteLink: result }
+    }
+
+    case Method.SET_SPACE_INVITE_LINK_ENABLED: {
+      if (call.input.oneofKind !== "setSpaceInviteLinkEnabled") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await setSpaceInviteLinkEnabled(call.input.setSpaceInviteLinkEnabled, {
+        currentUserId: handlerContext.userId,
+        currentSessionId: handlerContext.sessionId,
+      })
+      return { oneofKind: "setSpaceInviteLinkEnabled", setSpaceInviteLinkEnabled: result }
     }
 
     case Method.GET_USER_GROUPS: {

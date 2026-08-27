@@ -1,8 +1,9 @@
 import { creationDate, date } from "@in/server/db/schema/common"
 import { members } from "@in/server/db/schema/members"
 import { lower, users } from "@in/server/db/schema/users"
+import { sql } from "drizzle-orm"
 import { relations } from "drizzle-orm/_relations"
-import { boolean, pgTable, varchar, serial, integer, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import { boolean, check, pgTable, varchar, serial, integer, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 
 export const spaces = pgTable(
   "spaces",
@@ -12,6 +13,7 @@ export const spaces = pgTable(
     handle: varchar({ length: 256 }),
     creatorId: integer().references(() => users.id),
     isPublic: boolean("is_public").default(false).notNull(),
+    canPublicJoin: boolean("can_public_join").default(false).notNull(),
     date: creationDate,
     deleted: date,
 
@@ -30,9 +32,13 @@ export const spaces = pgTable(
     /** Monotonic version of this Space's replaceable Grid snapshot. */
     gridRevision: integer("grid_revision").default(0).notNull(),
   },
-  (table) => ({
-    spacesHandleUnique: uniqueIndex("spaces_handle_unique").on(lower(table.handle)),
-  }),
+  (table) => [
+    uniqueIndex("spaces_handle_unique").on(lower(table.handle)),
+    check(
+      "spaces_public_join_handle_check",
+      sql`not ${table.canPublicJoin} or (${table.isPublic} and ${table.handle} is not null and ${table.handle} ~ '^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$')`,
+    ),
+  ],
 )
 
 export const spaceRelations = relations(spaces, ({ many }) => ({

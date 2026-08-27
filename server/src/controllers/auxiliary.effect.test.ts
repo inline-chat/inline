@@ -37,6 +37,11 @@ import {
   WaitlistOperations,
 } from "./extra/waitlist.effect"
 import {
+  SpaceJoinOperationFailure,
+  SpaceJoinOperations,
+  SpaceJoinRateLimitExceeded,
+} from "./extra/spaceJoin.effect"
+import {
   EmailUnsubscribeOperations,
 } from "./extra/emailUnsubscribe.effect"
 import {
@@ -101,6 +106,9 @@ interface Probe {
   health: HealthHttpResponse
   liveness: LivenessHttpResponse
   mediaFailure: boolean
+  spaceJoinRequestCalls: number
+  spaceJoinResolveCalls: number
+  spaceJoinFailure: boolean
   secureCookies: boolean
   thereFailure: boolean
   waitlistFailure: boolean
@@ -162,6 +170,9 @@ const makeProbe = (): Probe => ({
   health: healthy(),
   liveness: live(),
   mediaFailure: false,
+  spaceJoinRequestCalls: 0,
+  spaceJoinResolveCalls: 0,
+  spaceJoinFailure: false,
   secureCookies: false,
   thereFailure: false,
   waitlistFailure: false,
@@ -239,6 +250,29 @@ const makeHandler = (
       ),
       suppress: () => Effect.sync(() => {
         probe.unsubscribeSuppressed = true
+      }),
+    }),
+    Layer.succeed(SpaceJoinOperations, {
+      consumeRequest: () => Effect.suspend(() => {
+        probe.spaceJoinRequestCalls += 1
+        return probe.spaceJoinRequestCalls > 60
+          ? Effect.fail(new SpaceJoinRateLimitExceeded({ retryAfterSeconds: 17 }))
+          : Effect.void
+      }),
+      resolve: (input) => Effect.suspend(() => {
+        probe.spaceJoinResolveCalls += 1
+        if (probe.spaceJoinFailure) {
+          return Effect.fail(new SpaceJoinOperationFailure({
+            cause: new Error("private resolver failure"),
+          }))
+        }
+        return input.value === "iv1_limited"
+          ? Effect.fail(new SpaceJoinRateLimitExceeded({ retryAfterSeconds: 17 }))
+          : Effect.succeed(
+              input.value === "townhall" || input.value === "iv1_valid"
+                ? { name: "Town Hall" }
+                : null,
+            )
       }),
     }),
     Layer.succeed(ThereOperations, {
@@ -431,6 +465,7 @@ describe("AuxiliaryRouteGroup", () => {
       "/integrations/notion/integrate",
       "/livez",
       "/readyz",
+      "/v1/space-join/resolve",
       "/waitlist/subscribe",
       "/waitlist/super_secret_sub_count",
       "/waitlist/verify",
@@ -587,6 +622,123 @@ describe("AuxiliaryRouteGroup", () => {
       expect(oneClick.status).toBe(200)
       expect(await oneClick.text()).toBe("")
       expect(probe.unsubscribeSuppressed).toBe(true)
+    }, probe)
+  })
+
+  it("resolves join references without disclosing anything except the space name", async () => {
+    await withHandler(async ({ handler }) => {
+      const found = await handler(new Request(
+        "http://inline.test/v1/space-join/resolve",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "public_handle", value: "townhall" }),
+        },
+      ))
+      expect(found.status).toBe(200)
+      expect(await found.json()).toEqual({ name: "Town Hall" })
+      expect(found.headers.get("cache-control")).toBe("private, no-store")
+      expect(found.headers.get("x-robots-tag")).toContain("noindex")
+
+      const missing = await handler(new Request(
+        "http://inline.test/v1/space-join/resolve",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "invite_token", value: "iv1_missing" }),
+        },
+      ))
+      expect(missing.status).toBe(404)
+      expect(await missing.text()).toBe("")
+      expect(missing.headers.get("cache-control")).toBe("private, no-store")
+
+      const limited = await handler(new Request(
+        "http://inline.test/v1/space-join/resolve",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "invite_token", value: "iv1_limited" }),
+        },
+      ))
+      expect(limited.status).toBe(429)
+      expect(limited.headers.get("retry-after")).toBe("17")
+      expect(await limited.json()).toEqual({ error: "rate_limited" })
+    })
+  })
+
+  it("charges malformed resolver requests before bounded parsing without echoing bearer input", async () => {
+    const probe = makeProbe()
+    const bearer = `iv1_${"A".repeat(43)}`
+    await withHandler(async ({ handler }) => {
+      for (let index = 0; index < 60; index += 1) {
+        const malformed = await handler(new Request(
+          "http://inline.test/v1/space-join/resolve",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ kind: "wrong", value: bearer }),
+          },
+        ))
+        expect(malformed.status).toBe(404)
+        expect(await malformed.text()).toBe("")
+        expect(malformed.headers.get("cache-control")).toBe("private, no-store")
+      }
+
+      const limited = await handler(new Request(
+        "http://inline.test/v1/space-join/resolve",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "wrong", value: bearer }),
+        },
+      ))
+      expect(limited.status).toBe(429)
+      expect(await limited.text()).not.toContain(bearer)
+      expect(probe.spaceJoinRequestCalls).toBe(61)
+      expect(probe.spaceJoinResolveCalls).toBe(0)
+    }, probe)
+  })
+
+  it("rejects oversized resolver bodies as an empty private 404", async () => {
+    const probe = makeProbe()
+    await withHandler(async ({ handler }) => {
+      const response = await handler(new Request(
+        "http://inline.test/v1/space-join/resolve",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "invite_token",
+            value: `iv1_${"A".repeat(2_000)}`,
+          }),
+        },
+      ))
+      expect(response.status).toBe(404)
+      expect(await response.text()).toBe("")
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+      expect(probe.spaceJoinRequestCalls).toBe(1)
+      expect(probe.spaceJoinResolveCalls).toBe(0)
+    }, probe)
+  })
+
+  it("keeps resolver internal failures private while reporting their typed cause", async () => {
+    const probe = makeProbe()
+    probe.spaceJoinFailure = true
+    await withHandler(async ({ handler, reports }) => {
+      const response = await handler(new Request(
+        "http://inline.test/v1/space-join/resolve",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "invite_token", value: "iv1_failure" }),
+        },
+      ))
+      expect(response.status).toBe(500)
+      expect(await response.text()).toBe("Internal Server Error")
+      expect(response.headers.get("cache-control")).toBe("private, no-store")
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+      expect(reports).toHaveLength(1)
+      expect(String(reports[0]?.cause)).not.toContain("iv1_failure")
     }, probe)
   })
 

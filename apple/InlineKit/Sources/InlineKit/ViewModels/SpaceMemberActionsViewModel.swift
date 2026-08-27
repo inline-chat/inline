@@ -22,13 +22,13 @@ public final class SpaceMemberActionsViewModel: ObservableObject {
     updatingMemberAccessIds.contains(userId)
   }
 
-  public func deleteMember(userId: Int64) async throws {
+  public func deleteMember(userId: Int64, blockJoin: Bool = false) async throws {
     guard deletingMemberIds.contains(userId) == false else { return }
 
     deletingMemberIds.insert(userId)
     defer { deletingMemberIds.remove(userId) }
 
-    let transaction = DeleteMemberTransaction(spaceId: spaceId, userId: userId)
+    let transaction = DeleteMemberTransaction(spaceId: spaceId, userId: userId, blockJoin: blockJoin)
 
     do {
       _ = try await Api.realtime.send(transaction)

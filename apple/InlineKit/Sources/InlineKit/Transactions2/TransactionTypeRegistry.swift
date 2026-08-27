@@ -33,6 +33,9 @@ public enum TransactionTypeRegistry {
       case is InviteToInlineTransaction: "invite_to_inline"
       case is SearchUsersTransaction: "search_users"
       case is JoinPublicSpaceTransaction: "join_public_space"
+      case is JoinSpaceByInviteTokenTransaction: "join_space_by_invite_token"
+      case is GetSpaceInviteLinkTransaction: "get_space_invite_link"
+      case is SetSpaceInviteLinkEnabledTransaction: "set_space_invite_link_enabled"
       case is DeleteChatTransaction: "delete_chat"
       case is GetChatParticipantsTransaction: "get_chat_participants"
       case is AddChatParticipantTransaction: "add_chat_participant"
@@ -105,6 +108,10 @@ public enum TransactionTypeRegistry {
       case "invite_to_inline": return try decoder.decode(InviteToInlineTransaction.self, from: data)
       case "search_users": return try decoder.decode(SearchUsersTransaction.self, from: data)
       case "join_public_space": return try decoder.decode(JoinPublicSpaceTransaction.self, from: data)
+      case "join_space_by_invite_token": return try decoder.decode(JoinSpaceByInviteTokenTransaction.self, from: data)
+      case "get_space_invite_link": return try decoder.decode(GetSpaceInviteLinkTransaction.self, from: data)
+      case "set_space_invite_link_enabled":
+        return try decoder.decode(SetSpaceInviteLinkEnabledTransaction.self, from: data)
       case "delete_chat": return try decoder.decode(DeleteChatTransaction.self, from: data)
       case "get_chat_participants": return try decoder.decode(GetChatParticipantsTransaction.self, from: data)
       case "add_chat_participant": return try decoder.decode(AddChatParticipantTransaction.self, from: data)

@@ -1744,7 +1744,8 @@ public actor RealtimeV2 {
          .usernameTaken,
          .firstNameInvalid,
          .urlPreviewUnavailable,
-         .agentSessionMessageImmutable:
+         .agentSessionMessageImmutable,
+         .spaceInviteInvalid:
       return true
     case .unknown,
          .unauthenticated,
