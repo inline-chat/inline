@@ -330,7 +330,7 @@ struct SidebarView: View {
       reorderPolicy: effectiveSidebarSort == .recentActivity ? .pinningOnly : .manual,
       scrollRequest: appKitScrollRequest,
       renderState: appKitRenderState,
-      renderer: settings.nativeSidebarRowsEnabled ? .appKit : .swiftUI,
+      renderer: .appKit,
       content: appKitContent,
       nativeContent: nativeAppKitContent,
       dragPreviewContent: appKitDragPreviewContent,
@@ -359,7 +359,7 @@ struct SidebarView: View {
       archiveVisible: isArchiveVisible,
       externalDropTargetID: appKitExternalDropTargetID,
       preview: SidebarCollectionRenderState.Preview(
-        renderer: settings.nativeSidebarRowsEnabled ? .appKit : .swiftUI,
+        renderer: .appKit,
         itemSize: settings.sidebarItemSize.rawValue,
         unreadBadgeStyle: settings.unreadBadgeStyle.rawValue,
         colorScheme: String(describing: colorScheme),
