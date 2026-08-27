@@ -180,8 +180,10 @@ final class AgentSetupWizardModel {
     switch phase {
     case .idle, .choosingLocation, .remoteSetup:
       false
+    case .failed:
+      canRepairSelectedSetup || canRetryFailure
     case .installingCLI, .signingIn, .discovering, .choosing, .noHarnesses, .settingUp,
-         .completed, .failed:
+         .completed:
       true
     }
   }
@@ -411,16 +413,17 @@ final class AgentSetupWizardModel {
       let harnesses = try await runner.discover(installation: preparedInstallation)
       try Task.checkCancellation()
       discovery = harnesses
-      let installedCount = harnesses.targets.count(where: \.installed)
-      completeProgress(.discovery, outcome: .found(installedCount))
-      guard harnesses.targets.contains(where: { $0.installed }) else {
+      let installedTargets = harnesses.targets.filter(\.installed)
+      completeProgress(.discovery, outcome: .found(installedTargets.count))
+      guard !installedTargets.isEmpty else {
         log.info("AGENT_SETUP phase=discovery_complete installedTargets=0")
         phase = .noHarnesses
         return
       }
       log.info(
-        "AGENT_SETUP phase=discovery_complete installedTargets=\(harnesses.targets.count(where: \.installed))"
+        "AGENT_SETUP phase=discovery_complete installedTargets=\(installedTargets.count)"
       )
+      selectedTargetID = installedTargets.count == 1 ? installedTargets[0].id : nil
       phase = .choosing
     } catch is CancellationError {
       isCancelling = false

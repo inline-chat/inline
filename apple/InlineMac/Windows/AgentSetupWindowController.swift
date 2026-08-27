@@ -38,8 +38,9 @@ final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
     super.init(window: window)
     appBridge.registerWindow(window)
 
-    window.title = "Set Up an Inline Agent"
+    window.title = "Agent Setup"
     window.toolbarStyle = .unified
+    window.tabbingMode = .disallowed
     window.contentMinSize = Self.minimumContentSize
     window.delegate = self
     let hostingController = NSHostingController(
