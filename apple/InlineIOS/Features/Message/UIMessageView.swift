@@ -486,32 +486,14 @@ class UIMessageView: UIView {
 
   func handleLinkTap() {
     linkTapHandler = { [weak self] url in
-      if let target = Self.inlineMentionTarget(from: url) {
-        if let agentId = target.agentId,
-           let peer = self?.message.peerId
-        {
-          Task { @MainActor in
-            guard !(await BotAgentMentionNavigator.open(
-              agentId: agentId,
-              botUserId: target.userId,
-              peer: peer
-            )) else { return }
-            NotificationCenter.default.post(
-              name: Notification.Name("MentionTapped"),
-              object: nil,
-              userInfo: ["userId": target.userId]
-            )
-          }
-          return
-        }
+      if let userId = Self.inlineUserId(from: url) {
         NotificationCenter.default.post(
           name: Notification.Name("MentionTapped"),
           object: nil,
-          userInfo: ["userId": target.userId]
+          userInfo: ["userId": userId]
         )
         return
       }
-
       InAppBrowser.shared.open(url, from: self?.findViewController())
     }
   }
@@ -2115,18 +2097,14 @@ class UIMessageView: UIView {
         return name == "id" || name == "user_id"
       }?.value
       if let queryId, let userId = Int64(queryId), userId > 0 {
-        let agentId = components.queryItems?
-          .first { $0.name.lowercased() == "agent_id" }?
-          .value
-          .flatMap(Int64.init)
-        return (userId, agentId.flatMap { $0 > 0 ? $0 : nil })
+        return userId
       }
     }
 
     guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
       return nil
     }
-    return (userId, nil)
+    return userId
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
