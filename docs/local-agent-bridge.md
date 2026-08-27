@@ -49,7 +49,9 @@ Current beta provider paths:
   semantic turn stream, activity disclosures, approvals, questions, final-send
   recovery, and rich Markdown projection remain the sole live path. Reopening
   idempotently hydrates only provider turns that Inline has not already
-  completed and projected.
+  completed and projected. Imported assistant Markdown goes through the same
+  server-owned rich-content parser as live answers; a partial assistant item in
+  the active tail is held back until Codex reports a stable historical turn.
 
   Codex currently gives one app-server process the rollout writer. Inline
   therefore advertises truthful **exclusive** continuity, not simultaneous
@@ -115,8 +117,23 @@ when every other Inline Codex lane in the provider epoch is idle, including
 turn preparation and session mutation; it does not interrupt running work or
 delete history. Codex can briefly report that the session is still closing
 after release; retry there in a moment. Historical Codex user input is visibly
-bot-projected as **User input · Codex**, while an Inline-origin user-message
-echo is suppressed using Codex's returned `clientId`.
+authored by the integration owner. An Inline-origin user-message echo is linked
+back to the original Inline row using Codex's returned `clientId`, preserving
+its real sender and text without duplication. Plain messages and unqualified
+commands in an opened session thread continue that exact session; a fresh
+bridge store resolves the server-canonical thread before it creates a new one.
+
+### Claude projects and bounded history
+
+Claude uses the same Agent Settings folder control and `/projects` picker as
+Codex, so users can safely choose among verified recent folders without
+exposing host paths in message actions. Native Claude session continuation is
+not enabled yet. `/history` is the intentionally separate, owner-only local
+history importer: it opens a bounded six-row picker, imports the visible
+You/Claude branch into a private Inline reply thread, omits tool and attachment
+blocks, redacts sensitive-looking local details, and does not resume or mutate
+the original Claude session. `/sessions` and `/open` remain reserved for future
+native continuity and return an explicit unavailable message if typed.
 
 Each provider has a distinct bot and session namespace. A thread is a session
 for the selected project by default. After a 100 ms ordering gate, the bot
@@ -335,10 +352,10 @@ arbitrary HTTP, raw RPC, CLI, general filesystem access, owner-token, or general
 send-message capability.
 
 Certified Codex app-server versions receive these as native `inline.*` dynamic
-tools. OpenCode and
-Claude receive the same catalog through stable ACP v1's required stdio MCP
-transport. For each provider session, ACP launches the current Inline binary in
-a hidden MCP-only mode with an ephemeral capability and loopback port. That
+tools. OpenCode, Claude, and Amp receive the same catalog through stable ACP
+v1's required stdio MCP transport. For each provider session, ACP launches the
+current Inline binary in a hidden MCP-only mode with an ephemeral capability and
+loopback port. That
 child receives no Inline credential, bot token, durable bridge state, or
 workspace mapping. The parent maps the capability back to the provider session
 and currently active turn, then invokes the same catalog and authorization core

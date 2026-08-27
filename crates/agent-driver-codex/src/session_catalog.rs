@@ -376,8 +376,10 @@ where
         window: HistoryWindow,
     ) -> DriverResult<SessionSnapshot> {
         let mut items = Vec::new();
-        for turn in thread.turns {
-            items.extend(normalize_turn(turn)?);
+        let active_tail = matches!(thread.status, CodexThreadStatus::Active { .. })
+            .then_some(thread.turns.len().saturating_sub(1));
+        for (index, turn) in thread.turns.into_iter().enumerate() {
+            items.extend(normalize_snapshot_turn(turn, active_tail == Some(index))?);
         }
 
         let mut has_older = false;
@@ -695,6 +697,22 @@ pub(crate) fn normalize_turn(turn: CodexTurn) -> DriverResult<Vec<SessionItem>> 
     Ok(normalized)
 }
 
+fn normalize_snapshot_turn(
+    mut turn: CodexTurn,
+    active_tail: bool,
+) -> DriverResult<Vec<SessionItem>> {
+    if active_tail && turn.completed_at.is_none() {
+        // Codex may expose a growing agent message in the last turn of an
+        // active thread. Hydration must not certify that partial text as a
+        // complete Inline history row: the server intentionally refuses blind
+        // edits to completed rows. Idle historical turns often omit timing, so
+        // active-thread state is the authoritative suppression boundary.
+        turn.items
+            .retain(|item| !matches!(item, CodexThreadItem::AgentMessage { .. }));
+    }
+    normalize_turn(turn)
+}
+
 fn inline_echo_origin(client_id: &str) -> Option<SessionEventOrigin> {
     let direction = client_id.strip_prefix(crate::INLINE_CLIENT_MESSAGE_ID_PREFIX)?;
     let direction_id = DirectionId::new(direction.to_owned()).ok()?;
@@ -864,6 +882,37 @@ mod tests {
             historical_user_text(INLINE_DELIVERY_ENVELOPE_PREFIX),
             INLINE_DELIVERY_ENVELOPE_PREFIX
         );
+    }
+
+    #[test]
+    fn active_snapshot_tail_omits_partial_agent_message_without_hiding_idle_history() {
+        let turn = |completed_at| CodexTurn {
+            id: "turn-1".to_string(),
+            items: vec![CodexThreadItem::AgentMessage {
+                id: "agent-1".to_string(),
+                text: "Final answer".to_string(),
+            }],
+            started_at: Some(10),
+            completed_at,
+        };
+
+        assert!(
+            normalize_snapshot_turn(turn(None), true)
+                .expect("active snapshot tail")
+                .is_empty()
+        );
+        let idle = normalize_snapshot_turn(turn(None), false).expect("idle history");
+        assert_eq!(idle.len(), 1);
+        let completed = normalize_snapshot_turn(turn(Some(20)), true).expect("completed turn");
+        assert_eq!(completed.len(), 1);
+        assert!(matches!(
+            &completed[0].payload,
+            SessionItemPayload::Message {
+                role: SessionMessageRole::Assistant,
+                text,
+                created_at: Some(20),
+            } if text == "Final answer"
+        ));
     }
 
     #[test]

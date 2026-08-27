@@ -606,6 +606,7 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
         ("clear", "Start fresh without reverting files"),
         ("compact", "Compact the current session"),
         ("folder", "Show or choose a project folder"),
+        ("projects", "Show or choose a project"),
         ("follow", "Follow this chat"),
         ("unfollow", "Stop following this chat"),
         ("queue", "Queue work after the active turn"),
@@ -624,17 +625,10 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
                 ("sessions", "Browse recent Codex sessions"),
                 ("open", "Browse recent Codex sessions"),
                 ("close", "Release Codex from Inline"),
-                ("projects", "Show or choose a project"),
             ],
         );
     } else if provider_id == "claude" {
-        commands.splice(
-            2..2,
-            [
-                ("sessions", "Import a recent local Claude session"),
-                ("open", "Import a recent local Claude session"),
-            ],
-        );
+        commands.splice(2..2, [("history", "Import recent local Claude history")]);
     }
     commands
         .into_iter()
@@ -681,6 +675,21 @@ mod tests {
             .collect::<Vec<_>>();
         for required in ["projects", "sessions", "open", "close"] {
             assert!(commands.iter().any(|command| command == required));
+        }
+        assert!(!commands.iter().any(|command| command == "history"));
+    }
+
+    #[test]
+    fn claude_command_catalog_exposes_projects_and_honest_history_import() {
+        let commands = agent_command_catalog("claude")
+            .into_iter()
+            .map(|command| command.command)
+            .collect::<Vec<_>>();
+        for required in ["projects", "history"] {
+            assert!(commands.iter().any(|command| command == required));
+        }
+        for unsupported in ["sessions", "open", "close"] {
+            assert!(!commands.iter().any(|command| command == unsupported));
         }
     }
 }

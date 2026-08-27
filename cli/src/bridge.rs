@@ -805,7 +805,7 @@ fn select_workspace_provider<'a>(
         None if account.providers.len() == 1 => Ok(&account.providers[0]),
         None => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "multiple agents are configured; choose one with --provider <codex|opencode|claude>",
+            "multiple agents are configured; choose one with --provider <codex|opencode|claude|amp>",
         )
         .into()),
     }

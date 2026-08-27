@@ -330,7 +330,7 @@ where
                     answer_session_action(
                         bot,
                         *interaction_id,
-                        "Inline is releasing the Codex connection. Try Open again in a moment.",
+                        "Inline is releasing the provider connection. Try Open again in a moment.",
                     )
                     .await?;
                     return Ok(true);
@@ -339,7 +339,7 @@ where
                     answer_session_action(
                         bot,
                         *interaction_id,
-                        "The Codex connection restarted. Try Open again.",
+                        "The provider connection restarted. Try Open again.",
                     )
                     .await?;
                     return Err(error.into());
@@ -402,7 +402,26 @@ where
                 .await?;
                 return Ok(true);
             }
+            let owner_control = route.owner_control.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "owner authorization is unavailable for session connection",
+                )
+            })?;
+            let server_canonical_session = if reverse_binding.is_none() {
+                owner_control
+                    .connect_agent_session(agent_session_lookup_input(
+                        route,
+                        open.session.session(),
+                        &open.workspace_id,
+                    )?)
+                    .await?
+                    .agent_session
+            } else {
+                None
+            };
             if reverse_binding.is_none()
+                && server_canonical_session.is_none()
                 && open.parent_chat_id != route.owner_dm_chat_id
                 && !open.confirmed
                 && thread_needs_explicit_connection(&route.bot_store, open.parent_chat_id).await?
@@ -430,15 +449,16 @@ where
                 .await?;
                 return Ok(true);
             }
-            let owner_control = route.owner_control.as_ref().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotConnected,
-                    "owner authorization is unavailable for session connection",
-                )
-            })?;
             let mut prepared = None;
+            let mut binding_parent_chat_id = open.parent_chat_id;
             let candidate_thread_id = if let Some(binding) = reverse_binding.as_ref() {
+                binding_parent_chat_id = binding.parent_chat_id();
                 binding.thread_chat_id()
+            } else if let Some(agent_session) = server_canonical_session.as_ref() {
+                let thread_id = connected_agent_session_chat_id(agent_session)?;
+                binding_parent_chat_id =
+                    session_thread_parent_chat_id(&route.bot_store, thread_id).await?;
+                thread_id
             } else if open.parent_chat_id != route.owner_dm_chat_id {
                 // An ordinary unbound conversation adopts itself. The owner DM
                 // remains the multi-session lobby and creates a child thread.
@@ -491,6 +511,8 @@ where
                     None,
                 )?)
                 .await?;
+            let connected_state = proto::ConnectAgentSessionState::try_from(connected.state)
+                .unwrap_or(proto::ConnectAgentSessionState::Unspecified);
             let agent_session = connected.agent_session.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -513,7 +535,7 @@ where
                             &SessionThreadBinding::new(
                                 open.session.session().clone(),
                                 open.workspace_id.clone(),
-                                open.parent_chat_id,
+                                binding_parent_chat_id,
                                 thread_id,
                             )?,
                             now_seconds(),
@@ -523,14 +545,12 @@ where
             } else {
                 None
             };
-            let created = matches!(
-                proto::ConnectAgentSessionState::try_from(connected.state),
-                Ok(proto::ConnectAgentSessionState::Created)
-            ) || matches!(local_outcome, Some(SessionThreadBindOutcome::Created(_)));
+            let created = matches!(connected_state, proto::ConnectAgentSessionState::Created)
+                || matches!(local_outcome, Some(SessionThreadBindOutcome::Created(_)));
             inherit_session_thread_settings(
                 &route.store,
                 &route.installation_id,
-                open.parent_chat_id,
+                binding_parent_chat_id,
                 thread_id,
                 &open.workspace_id,
             )?;
@@ -670,7 +690,7 @@ where
             return send_session_reply(
                 bot,
                 record,
-                "Inline is releasing the Codex connection. Try /sessions again in a moment.",
+                "Inline is releasing the provider connection. Try /sessions again in a moment.",
                 "connection-closing",
             )
             .await;
@@ -679,7 +699,7 @@ where
             send_session_reply(
                 bot,
                 record,
-                "The Codex connection restarted. Try /sessions again.",
+                "The provider connection restarted. Try /sessions again.",
                 "connection-restarted",
             )
             .await?;
@@ -1257,6 +1277,23 @@ fn agent_session_connect_input(
     })
 }
 
+fn agent_session_lookup_input(
+    route: &InboundRoute,
+    session: &ProviderSessionRef,
+    workspace_id: &WorkspaceId,
+) -> Result<proto::ConnectAgentSessionInput, Box<dyn std::error::Error>> {
+    let provider = agent_session_provider(session.provider().provider_id())?;
+    Ok(proto::ConnectAgentSessionInput {
+        peer_id: None,
+        bot_user_id: route.bot_user_id,
+        provider: provider as i32,
+        instance_ref: session.provider().installation_id().as_str().to_owned(),
+        session_ref: session.session_id().as_str().to_owned(),
+        project_ref: Some(workspace_id.as_str().to_owned()),
+        status_message_id: None,
+    })
+}
+
 fn agent_session_provider(
     provider_id: &ProviderId,
 ) -> Result<proto::AgentSessionProvider, Box<dyn std::error::Error>> {
@@ -1304,6 +1341,18 @@ fn connected_agent_session_chat_id(
         .into());
     }
     Ok(chat_id)
+}
+
+async fn session_thread_parent_chat_id(
+    store: &SqliteStore,
+    thread_chat_id: i64,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    Ok(store
+        .dialog(InlineId::new(thread_chat_id))
+        .await?
+        .and_then(|dialog| dialog.parent_chat_id)
+        .map(InlineId::get)
+        .unwrap_or(thread_chat_id))
 }
 
 pub(super) async fn link_agent_session_input<D: AgentDriver + 'static>(
@@ -1606,6 +1655,18 @@ async fn sync_agent_session_snapshot(
             proto::AgentSessionMessageRole::Assistant
             | proto::AgentSessionMessageRole::Unspecified => None,
         };
+        if role == proto::AgentSessionMessageRole::User
+            && item.confirmed_inline_echo().is_some()
+            && known_inline_history.is_none()
+        {
+            // A confirmed Inline echo is never safe to re-import from its
+            // provider-facing text. The local source row is authoritative and
+            // may contain a bridge envelope or private specialization. If the
+            // local bridge store was lost, the original Inline message remains
+            // visible and the server's correlation ledger still deduplicates
+            // future delivery; omit the echo rather than duplicate or expose it.
+            continue;
+        }
         let text = bounded_agent_message_text(
             known_inline_history
                 .as_ref()
@@ -2190,6 +2251,25 @@ mod tests {
                 &history_context(&store, &installation_id, &workspace_id, 10),
             )
             .expect("untrusted correlation"),
+            None
+        );
+    }
+
+    #[test]
+    fn confirmed_inline_echo_without_local_history_is_not_provider_owned_history() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        let installation_id = InstallationId::new("installation-1").expect("installation");
+        let workspace_id = WorkspaceId::new("workspace-1").expect("workspace");
+        let item = inline_user_history_item("missing-inline-message");
+
+        assert!(item.confirmed_inline_echo().is_some());
+        assert_eq!(
+            known_inline_user_history(
+                &item,
+                false,
+                &history_context(&store, &installation_id, &workspace_id, 10),
+            )
+            .expect("missing local history"),
             None
         );
     }

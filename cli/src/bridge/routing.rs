@@ -10,6 +10,20 @@ pub(super) struct MessageRoute {
     pub command_target_bot_user_id: Option<i64>,
 }
 
+pub(super) fn with_agent_session_thread_addressing(
+    mut route: MessageRoute,
+    is_agent_session_thread: bool,
+) -> MessageRoute {
+    if is_agent_session_thread && !route.bot_authored && route.addressing == Addressing::None {
+        // A bound session thread is already an explicit, durable destination
+        // for this provider. Reuse the existing addressed-conversation policy
+        // path so ordinary text and unqualified commands continue that exact
+        // session without requiring a mention, reply, or viewer follow flag.
+        route.addressing = Addressing::Followed;
+    }
+    route
+}
+
 pub(super) async fn message_sender_is_bot(
     bot_store: &SqliteStore,
     message: &MessageRecord,
@@ -124,7 +138,7 @@ async fn is_owner_dm_conversation(
     Ok(false)
 }
 
-fn starts_with_other_user_mention(message: &MessageRecord, bot_user_id: i64) -> bool {
+pub(super) fn starts_with_other_user_mention(message: &MessageRecord, bot_user_id: i64) -> bool {
     let Some(entity) = message
         .metadata
         .entities
@@ -232,6 +246,32 @@ mod tests {
             .await
             .expect("route");
         assert_eq!(route.addressing, Addressing::None);
+    }
+
+    #[test]
+    fn bound_agent_session_thread_addresses_plain_user_traffic() {
+        let plain = MessageRoute {
+            addressing: Addressing::None,
+            bot_authored: false,
+            command_target_bot_user_id: None,
+        };
+        assert_eq!(
+            with_agent_session_thread_addressing(plain, true).addressing,
+            Addressing::Followed
+        );
+        assert_eq!(
+            with_agent_session_thread_addressing(plain, false).addressing,
+            Addressing::None
+        );
+
+        let bot = MessageRoute {
+            bot_authored: true,
+            ..plain
+        };
+        assert_eq!(
+            with_agent_session_thread_addressing(bot, true).addressing,
+            Addressing::None
+        );
     }
 
     #[tokio::test]

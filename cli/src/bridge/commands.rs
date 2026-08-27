@@ -17,13 +17,13 @@ pub(super) enum IdleCommandResolution {
 }
 
 pub(super) fn static_command_help(provider_id: &ProviderId) -> String {
-    let history = if provider_id.as_str() == "claude" {
-        ", /history"
-    } else {
-        ""
+    let provider_commands = match provider_id.as_str() {
+        "codex" => ", /sessions, /open, /close",
+        "claude" => ", /history",
+        _ => "",
     };
     format!(
-        "Agent commands: /status, /sessions, /open, /close{history}, /new, /clear, /compact, /folder, /projects, /queue, /stop, /model, /reasoning, /permissions, /verbose, /threads, /follow, /unfollow, /allowlist <userid>."
+        "Agent commands: /status{provider_commands}, /new, /clear, /compact, /projects, /folder, /queue, /stop, /model, /reasoning, /permissions, /verbose, /threads, /follow, /unfollow, /allowlist <userid>."
     )
 }
 
@@ -58,7 +58,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
     let name = invocation.name.as_str();
     let arguments = invocation.arguments.trim();
     if actor_user_id != settings.identity.owner_user_id && name == "close" {
-        return handled("Only the bot owner can release the Codex connection.");
+        return handled("Only the bot owner can release the provider connection.");
     }
     if actor_user_id != settings.identity.owner_user_id
         && matches!(
@@ -449,6 +449,24 @@ mod tests {
             "/close now",
             "codex_bot"
         ));
+    }
+
+    #[test]
+    fn help_advertises_only_each_providers_real_session_surface() {
+        let codex = static_command_help(&ProviderId::new("codex").expect("provider"));
+        assert!(codex.contains("/sessions, /open, /close"));
+        assert!(!codex.contains("/history"));
+
+        let claude = static_command_help(&ProviderId::new("claude").expect("provider"));
+        assert!(claude.contains("/history"));
+        assert!(!claude.contains("/sessions"));
+        assert!(!claude.contains("/open"));
+        assert!(!claude.contains("/close"));
+
+        let amp = static_command_help(&ProviderId::new("amp").expect("provider"));
+        assert!(!amp.contains("/sessions"));
+        assert!(!amp.contains("/history"));
+        assert!(amp.contains("/projects"));
     }
 
     #[derive(Debug, Default)]
@@ -1092,7 +1110,7 @@ mod tests {
         };
         assert_eq!(
             message,
-            "Only the bot owner can release the Codex connection."
+            "Only the bot owner can release the provider connection."
         );
         assert_eq!(*driver.shutdowns.lock().expect("shutdowns"), 0);
 

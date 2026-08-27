@@ -841,7 +841,9 @@ pub(super) fn print_status(
         }
     } else {
         println!("Bridge: not installed");
-        println!("Run `inline setup codex` to get started. OpenCode and Claude are experimental.");
+        println!(
+            "Run `inline setup codex` to get started. OpenCode, Claude, and Amp are experimental."
+        );
     }
     Ok(())
 }

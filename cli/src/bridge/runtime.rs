@@ -383,7 +383,7 @@ pub(super) async fn inbound_from_delivery(
     };
     let text = content.text;
     let attachments = content.attachments;
-    let message_route = resolve_message_route(
+    let mut message_route = resolve_message_route(
         message,
         route.owner_dm_chat_id,
         route.bot_user_id,
@@ -391,6 +391,17 @@ pub(super) async fn inbound_from_delivery(
         route.owner_control.as_deref(),
     )
     .await?;
+    if message_route.addressing == Addressing::None
+        && !starts_with_other_user_mention(message, route.bot_user_id)
+    {
+        message_route = with_agent_session_thread_addressing(
+            message_route,
+            route
+                .store
+                .session_thread_binding_for_chat(&route.installation_id, message.chat_id.get())?
+                .is_some(),
+        );
+    }
     let event_id = format!("inline-message-{}-{}", message.chat_id, message.message_id);
     let command = match parse_command(&text, &route.bot_username) {
         Ok(command) => command,
