@@ -410,12 +410,16 @@ jobs:
           MACOS_CI_KEYCHAIN_PWD: ${{ secrets.MACOS_CI_KEYCHAIN_PWD }}
         run: |
           set -euo pipefail
+          keychain_path="${RUNNER_TEMP}/inline-cli-signing.keychain-db"
           echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
-          security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
-          security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
+          security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
+          security default-keychain -s "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security import certificate.p12 -k "$keychain_path" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
+          echo "MACOS_CI_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
 
       - name: Build Target
         if: steps.target.outputs.selected == 'true'
@@ -429,8 +433,11 @@ jobs:
           APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           APPLE_NOTARIZATION_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
           INLINE_SKIP_NOTARIZE: ${{ github.event.inputs.skip_notarize }}
+          MACOS_CI_KEYCHAIN_PWD: ${{ secrets.MACOS_CI_KEYCHAIN_PWD }}
         run: |
           set -euo pipefail
+          security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$MACOS_CI_KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$MACOS_CI_KEYCHAIN_PATH"
           bun run scripts/release-cli.ts build
 
       - name: Validate Signed Target Binary
