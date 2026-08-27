@@ -983,7 +983,7 @@ class MessageViewAppKit: NSView {
         MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openInlineUser userId=\(userId)")
       }
       Task { @MainActor in
-        openInlineDeepLink(deepLink)
+        await openInlineDeepLink(deepLink)
       }
       return
     }
@@ -999,17 +999,21 @@ class MessageViewAppKit: NSView {
     NSWorkspace.shared.open(url)
   }
 
-  @MainActor private func openInlineDeepLink(_ deepLink: InlineDeepLink) {
+  @MainActor private func openInlineDeepLink(_ deepLink: InlineDeepLink) async {
     switch deepLink {
     case let .user(id):
       openChat(peer: .user(id: id))
     case let .chat(id):
-      openChat(peer: .thread(id: id))
+      if let dependencies {
+        await dependencies.requestOpenChat(chatId: id)
+      } else if let url = deepLink.url() {
+        NSWorkspace.shared.open(url)
+      }
     case let .message(chatId, messageId):
       if let dependencies {
-        dependencies.requestOpenChat(peer: .thread(id: chatId), targetMessageId: messageId)
-      } else {
-        openChat(peer: .thread(id: chatId))
+        await dependencies.requestOpenChat(chatId: chatId, targetMessageId: messageId)
+      } else if let url = deepLink.url() {
+        NSWorkspace.shared.open(url)
       }
     }
   }

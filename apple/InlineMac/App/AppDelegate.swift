@@ -425,30 +425,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
 
-    guard let messageId = target.messageId else {
-      log.debug("Opening chat for ID: \(target.chatId)")
-      openChat(peer: .thread(id: target.chatId))
-      return
-    }
-
     guard Auth.shared.getIsLoggedIn(), dependencies.viewModel.topLevelRoute == .main else {
-      openChat(peer: .thread(id: target.chatId), targetMessageId: messageId)
+      MainWindowOpenCoordinator.shared.openOnboarding()
       return
     }
 
-    let peer = await resolveMessageLinkPeer(chatId: target.chatId)
-    log.debug("Opening chat \(target.chatId) at message \(messageId)")
-
-    do {
-      _ = try await dependencies.realtimeV2.send(.getMessages(
-        peer: peer,
-        messageIds: [messageId]
-      ))
-    } catch {
-      log.error("Failed to fetch message for deep link", error: error)
+    guard let peer = await dependencies.resolveChatLinkPeer(
+      chatId: target.chatId,
+      targetMessageId: target.messageId
+    ) else {
+      ToastCenter.shared.showError("Couldn’t open chat link")
+      return
     }
 
-    openChat(peer: peer, targetMessageId: messageId)
+    openChat(peer: peer, targetMessageId: target.messageId)
   }
 
   private func inlineUserId(from url: URL) -> Int64? {
@@ -472,23 +462,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     case .user:
       return nil
     }
-  }
-
-  @MainActor private func resolveMessageLinkPeer(chatId: Int64) async -> Peer {
-    if let chat = ObjectCache.shared.getChat(id: chatId) {
-      return chat.peerId.toPeer()
-    }
-
-    do {
-      let result = try await dependencies.realtimeV2.send(.getChat(peer: .thread(id: chatId)))
-      if case let .getChat(response) = result, response.hasChat {
-        return Chat(from: response.chat).peerId.toPeer()
-      }
-    } catch {
-      log.error("Failed to resolve chat for message deep link", error: error)
-    }
-
-    return .thread(id: chatId)
   }
 
   private static func isInlineURL(_ url: URL, host: String? = nil) -> Bool {

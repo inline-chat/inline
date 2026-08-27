@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import GRDB
 import InlineCLIInstaller
 import InlineKit
 import Logger
@@ -191,6 +192,82 @@ extension AppDependencies {
     }
 
     nav.open(.chat(peer: peer))
+  }
+
+  /// Opens a link whose chat component is the stable chat-table ID. A chat ID
+  /// does not imply a thread: private chats must resolve to their user peer.
+  func requestOpenChat(chatId: Int64, targetMessageId: Int64? = nil) async {
+    guard let peer = await resolveChatLinkPeer(chatId: chatId, targetMessageId: targetMessageId) else {
+      ToastCenter.shared.showError("Couldn’t open chat link")
+      return
+    }
+
+    requestOpenChat(peer: peer, targetMessageId: targetMessageId)
+  }
+
+  /// Resolves the stable chat-table ID used by `/chat` links to the peer shape
+  /// used by navigation, fetching missing chat/message state when possible.
+  func resolveChatLinkPeer(chatId: Int64, targetMessageId: Int64? = nil) async -> Peer? {
+    let peer: Peer
+
+    do {
+      if let chat = try await database.reader.read({ db in
+        try Chat.fetchOne(db, id: chatId)
+      }) {
+        guard let resolvedPeer = chat.deepLinkPeer else {
+          Log.shared.error("Private chat link is missing its user peer")
+          return nil
+        }
+        peer = resolvedPeer
+      } else {
+        // `Peer.thread` encodes InputPeer.chat. At this boundary it means a
+        // chat-table lookup, not that the resolved chat is necessarily a thread.
+        let result = try await realtimeV2.send(.getChat(peer: .thread(id: chatId)))
+        guard case let .getChat(response) = result, response.hasChat else {
+          return nil
+        }
+        guard let resolvedPeer = Chat(from: response.chat).deepLinkPeer else {
+          Log.shared.error("Private chat link response is missing its user peer")
+          return nil
+        }
+        peer = resolvedPeer
+      }
+    } catch {
+      Log.shared.error("Failed to resolve chat link", error: error)
+      return nil
+    }
+
+    if let targetMessageId {
+      await fetchMessageLinkTargetIfNeeded(
+        peer: peer,
+        chatId: chatId,
+        messageId: targetMessageId
+      )
+    }
+
+    return peer
+  }
+
+  private func fetchMessageLinkTargetIfNeeded(peer: Peer, chatId: Int64, messageId: Int64) async {
+    do {
+      let isCached = try await database.reader.read { db in
+        try Message
+          .filter(Message.Columns.chatId == chatId)
+          .filter(Message.Columns.messageId == messageId)
+          .fetchCount(db) > 0
+      }
+      guard !isCached else { return }
+    } catch {
+      Log.shared.error("Failed to check message-link cache", error: error)
+    }
+
+    do {
+      _ = try await realtimeV2.send(.getMessages(peer: peer, messageIds: [messageId]))
+    } catch {
+      // Opening the resolved chat is still useful when the target message is
+      // already available through another local projection or the app is offline.
+      Log.shared.error("Failed to fetch message-link target", error: error)
+    }
   }
 
   @MainActor
