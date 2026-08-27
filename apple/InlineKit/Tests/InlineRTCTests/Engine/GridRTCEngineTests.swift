@@ -159,6 +159,43 @@ struct GridRTCEngineTests {
     #expect(await rtc.currentSnapshot().screenShareState == .off)
   }
 
+  @Test("changing screen-share quality reconciles only the screen publication")
+  func screenShareQualityChangeReconcilesPublication() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:48:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:8",
+      name: "Main Display",
+      displayID: 8
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source,
+      screenShareQualityProfile: .detail
+    ))
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:48:display:8" }.count == 1
+    }
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source,
+      screenShareQualityProfile: .motion
+    ))
+    try await eventuallyRTC {
+      await driver.operations().filter { $0 == "screen:48:display:8" }.count == 2
+    }
+    #expect(await driver.operations().filter { $0.hasPrefix("connect:") }.count == 1)
+  }
+
   @Test("screen sharing fails when its local publication projection never arrives")
   func screenSharePublishProjectionTimeout() async throws {
     let audio = GridAudioEngine(
@@ -522,6 +559,107 @@ struct GridRTCEngineTests {
       await driver.operations().contains("screen:16:off")
     }
     #expect(await rtc.currentSnapshot().screenShareState == .off)
+  }
+
+  @Test("a stopped capturer clears the still-live screen publication")
+  func stoppedCapturerClearsLivePublication() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:48:1")
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:48",
+      name: "Main Display",
+      displayID: 48
+    )
+    let localShare = InlineRTCScreenShare(
+      participantIdentity: "local",
+      publicationID: "TR_stale_capture",
+      captureSourceID: source.id,
+      isLocal: true,
+      videoTrack: nil
+    )
+
+    await rtc.setDemand(demand(
+      target: target,
+      microphoneEnabled: false,
+      screenCaptureSource: source
+    ))
+    try await eventuallyRTC {
+      await driver.isScreenShareActive(roomID: 48)
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 1, shares: [localShare])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShares == [localShare]
+    }
+
+    await driver.emitToCurrentRoom(.localScreenShareCaptureStopped)
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .failed("Screen sharing stopped")
+    }
+    #expect(await rtc.currentSnapshot().screenShares == [localShare])
+    #expect(await driver.operations().filter { $0 == "screen:48:display:48" }.count == 1)
+
+    // The app coordinator reacts to the failure by clearing product intent.
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await driver.operations().contains("screen:48:off")
+    }
+    await driver.emitToCurrentRoom(
+      .screenSharesChanged(revision: 2, shares: [])
+    )
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().screenShareState == .off
+    }
+  }
+
+  @Test("participant snapshots carry screen-share intent independently of publications")
+  func participantMediaSnapshots() async throws {
+    let audio = GridAudioEngine(
+      driver: RTCFakeAudioDriver(),
+      permissionDriver: TestGridMicrophonePermissionDriver(current: .denied)
+    )
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:49:1")
+
+    await rtc.setDemand(demand(target: target, microphoneEnabled: false))
+    try await eventuallyRTC {
+      await rtc.currentSnapshot().state == .connected(target)
+    }
+    #expect(await rtc.currentSnapshot().hasParticipantMediaSnapshot == false)
+
+    await driver.emitParticipantsToCurrentRoom([])
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.hasParticipantMediaSnapshot && snapshot.participants.isEmpty
+    }
+
+    let participants = [
+      InlineRTCParticipant(
+        identity: "inline-grid-user-1-local",
+        isSpeaking: false,
+        audioLevel: 0,
+        screenShareIntent: false
+      ),
+      InlineRTCParticipant(
+        identity: "inline-grid-user-2-remote",
+        isSpeaking: true,
+        audioLevel: 0.7,
+        screenShareIntent: true
+      ),
+    ]
+    await driver.emitParticipantsToCurrentRoom(participants)
+
+    try await eventuallyRTC {
+      let snapshot = await rtc.currentSnapshot()
+      return snapshot.hasParticipantMediaSnapshot && snapshot.participants == participants
+    }
   }
 
   @Test("a delayed publish callback cannot confirm newer screen-share intent")
@@ -2140,6 +2278,7 @@ struct GridRTCEngineTests {
     target: InlineRTCSessionID,
     microphoneEnabled: Bool,
     screenCaptureSource: InlineRTCScreenCaptureSource? = nil,
+    screenShareQualityProfile: InlineRTCScreenShareQualityProfile = .automatic,
     outputVolume: Float = 1
   ) -> InlineRTCDemand {
     InlineRTCDemand(
@@ -2153,6 +2292,7 @@ struct GridRTCEngineTests {
       ),
       microphoneEnabled: microphoneEnabled,
       screenCaptureSource: screenCaptureSource,
+      screenShareQualityProfile: screenShareQualityProfile,
       outputVolume: outputVolume
     )
   }
@@ -2256,6 +2396,8 @@ private actor FakeGridRTCDriver: GridRTCDriver {
   nonisolated let lifecycleEvents: AsyncStream<GridRTCLifecycleEventEnvelope>
   nonisolated let participantSnapshots: AsyncStream<GridRTCParticipantSnapshotEnvelope>
   private nonisolated let lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation
+  private nonisolated let participantContinuation:
+    AsyncStream<GridRTCParticipantSnapshotEnvelope>.Continuation
   private var log: [String] = []
   private var roomIDs: [GridRTCRoomHandle: Int64] = [:]
   private var mutedStates: [Int64: Bool] = [:]
@@ -2309,7 +2451,12 @@ private actor FakeGridRTCDriver: GridRTCDriver {
     )
     lifecycleEvents = stream.stream
     lifecycleContinuation = stream.continuation
-    participantSnapshots = AsyncStream { continuation in continuation.finish() }
+    let participantStream = AsyncStream.makeStream(
+      of: GridRTCParticipantSnapshotEnvelope.self,
+      bufferingPolicy: .bufferingNewest(2)
+    )
+    participantSnapshots = participantStream.stream
+    participantContinuation = participantStream.continuation
     self.blockedRoomID = blockedRoomID
     self.blockedPublishRoomID = blockedPublishRoomID
     self.blockedMuteRoomID = blockedMuteRoomID
@@ -2392,6 +2539,7 @@ private actor FakeGridRTCDriver: GridRTCDriver {
 
   func setScreenShare(
     _ source: InlineRTCScreenCaptureSource?,
+    qualityProfile _: InlineRTCScreenShareQualityProfile,
     in room: GridRTCRoomHandle
   ) async throws {
     let roomID = roomIDs[room] ?? -1
@@ -2543,6 +2691,13 @@ private actor FakeGridRTCDriver: GridRTCDriver {
   func emitToCurrentRoom(_ event: GridRTCLifecycleEvent) {
     guard let room = roomIDs.keys.first else { return }
     lifecycleContinuation.yield(GridRTCLifecycleEventEnvelope(room: room, event: event))
+  }
+
+  func emitParticipantsToCurrentRoom(_ participants: [InlineRTCParticipant]) {
+    guard let room = roomIDs.keys.first else { return }
+    participantContinuation.yield(
+      GridRTCParticipantSnapshotEnvelope(room: room, participants: participants)
+    )
   }
 
   func currentRoom() -> GridRTCRoomHandle? {

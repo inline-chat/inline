@@ -34,7 +34,9 @@ final class GridMediaPresentation {
   fileprivate(set) var outputSelection: AudioOutputSelection
   fileprivate(set) var isFallingBackToAutomaticOutput = false
   fileprivate(set) var participantAudioLevels: [String: Float] = [:]
+  fileprivate(set) var participantScreenShareIntents: [String: Bool] = [:]
   fileprivate(set) var connectedParticipantIdentities = Set<String>()
+  fileprivate(set) var hasParticipantMediaSnapshot = false
   fileprivate(set) var reconnectCount = 0
   fileprivate(set) var recoveryAttempt = 0
   fileprivate(set) var lastConnectDurationMilliseconds: Int?
@@ -50,6 +52,7 @@ final class GridMediaPresentation {
   fileprivate(set) var outputVolume: Float
   fileprivate(set) var screenCaptureSources: [InlineRTCScreenCaptureSource] = []
   fileprivate(set) var selectedScreenCaptureSource: InlineRTCScreenCaptureSource?
+  fileprivate(set) var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
   fileprivate(set) var screenShareEpisodeID: UInt64 = 0
   fileprivate(set) var screenShareState: InlineRTCScreenShareState = .off
   fileprivate(set) var screenShares: [InlineRTCScreenShare] = []
@@ -62,6 +65,7 @@ final class GridMediaPresentation {
     autoUnmuteOnJoin: Bool,
     autoMuteWhenAlone: Bool,
     inputSelection: AudioInputSelection,
+    screenShareQualityProfile: InlineRTCScreenShareQualityProfile = .automatic,
     outputSelection: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
   ) {
@@ -69,6 +73,7 @@ final class GridMediaPresentation {
     self.autoUnmuteOnJoin = autoUnmuteOnJoin
     self.autoMuteWhenAlone = autoMuteWhenAlone
     self.inputSelection = inputSelection
+    self.screenShareQualityProfile = screenShareQualityProfile
     self.outputSelection = outputSelection
     self.outputVolume = min(max(outputVolume, 0), 1)
   }
@@ -110,6 +115,7 @@ final class GridMediaPresentationController {
     autoUnmuteOnJoin: Bool,
     autoMuteWhenAlone: Bool,
     inputSelection: AudioInputSelection,
+    screenShareQualityProfile: InlineRTCScreenShareQualityProfile = .automatic,
     outputSelection: AudioOutputSelection = .automatic,
     outputVolume: Float = 1
   ) {
@@ -118,6 +124,7 @@ final class GridMediaPresentationController {
       autoUnmuteOnJoin: autoUnmuteOnJoin,
       autoMuteWhenAlone: autoMuteWhenAlone,
       inputSelection: inputSelection,
+      screenShareQualityProfile: screenShareQualityProfile,
       outputSelection: outputSelection,
       outputVolume: outputVolume
     )
@@ -152,6 +159,10 @@ final class GridMediaPresentationController {
       presentation.screenShareEpisodeID &+= 1
     }
     presentation.selectedScreenCaptureSource = source
+  }
+
+  func setScreenShareQualityProfile(_ profile: InlineRTCScreenShareQualityProfile) {
+    presentation.screenShareQualityProfile = profile
   }
 
   func clearScreenCaptureError() {
@@ -204,7 +215,13 @@ final class GridMediaPresentationController {
         ($0.identity, $0.isSpeaking ? $0.audioLevel : 0)
       }
     )
+    presentation.participantScreenShareIntents = Dictionary(
+      uniqueKeysWithValues: snapshot.participants.compactMap { participant in
+        participant.screenShareIntent.map { (participant.identity, $0) }
+      }
+    )
     presentation.connectedParticipantIdentities = Set(snapshot.participants.map(\.identity))
+    presentation.hasParticipantMediaSnapshot = snapshot.hasParticipantMediaSnapshot
     presentation.reconnectCount = snapshot.reconnectCount
     presentation.recoveryAttempt = snapshot.recoveryAttempt
     presentation.lastConnectDurationMilliseconds = snapshot.lastConnectMilliseconds
@@ -215,9 +232,14 @@ final class GridMediaPresentationController {
     presentation.remoteAudioFlowStates = snapshot.remoteAudioFlowStates
     presentation.screenShareState = snapshot.screenShareState
     presentation.screenShares = snapshot.screenShares
-    if case let .failed(message) = snapshot.screenShareState {
+    if case let .failed(message) = snapshot.screenShareState,
+       message != "Screen sharing stopped" {
       presentation.screenCaptureError = message
       presentation.screenCaptureIssue = .sharing
+    } else if case let .failed(message) = snapshot.screenShareState,
+              message == "Screen sharing stopped" {
+      presentation.screenCaptureError = nil
+      presentation.screenCaptureIssue = nil
     } else if snapshot.screenShareState == .off,
               presentation.connectionState == .connected,
               presentation.screenCaptureError == "Screen sharing did not stop" {

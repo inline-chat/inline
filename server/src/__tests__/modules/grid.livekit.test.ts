@@ -140,7 +140,7 @@ describe("Grid LiveKit credentials", () => {
       canPublish: true,
       canSubscribe: true,
       canPublishData: false,
-      canUpdateOwnMetadata: false,
+      canUpdateOwnMetadata: true,
     })
     expect(claims.video?.canPublishSources).toBeUndefined()
   })

@@ -212,6 +212,16 @@ struct MacNotificationsTests {
     #expect(MacNotifications.messageNotificationIdentifier(chatID: 12, messageID: 34) == "chat_12_message_34")
     #expect(MacNotifications.notificationThreadIdentifier(chatID: 12) == "chat_12")
   }
+
+  @Test("Grid screen-share notification identifier replaces stale start state")
+  func gridScreenShareNotificationIdentifier() {
+    #expect(
+      MacNotifications.gridScreenShareNotificationIdentifier(
+        spaceID: 12,
+        participantIdentity: "inline-grid-user-34-membership"
+      ) == "grid_12_screen_share_inline-grid-user-34-membership"
+    )
+  }
 }
 
 @Suite("Mac notification database context")

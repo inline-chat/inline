@@ -76,6 +76,11 @@ final class GridRoomService {
   @ObservationIgnored private var screenShareAloneTask: Task<Void, Never>?
   @ObservationIgnored private var screenShareAloneTarget: GridScreenShareAloneTarget?
   @ObservationIgnored private var screenShareAloneGrace = GridScreenShareAloneGraceState()
+  @ObservationIgnored private var screenShareNotificationTarget: GridMediaTarget?
+  @ObservationIgnored private var observedRemoteScreenShares: [String: GridScreenShareNotice] = [:]
+  @ObservationIgnored private var hasPrimedScreenSharePresentationEdges = false
+  @ObservationIgnored private var pendingScreenShareOpenTasks:
+    [String: GridPendingScreenShareOpen] = [:]
   @ObservationIgnored private var mediaInteractionStartedAt: Date?
   @ObservationIgnored private let log = Log.scoped("GridRoomService")
   private static let aloneMediaGraceSeconds = 5
@@ -138,6 +143,7 @@ final class GridRoomService {
     credentialRetryTask?.cancel()
     aloneAutoMuteTask?.cancel()
     screenShareAloneTask?.cancel()
+    pendingScreenShareOpenTasks.values.forEach { $0.task.cancel() }
   }
 
   func isEnabled(spaceID: Int64) -> Bool {
@@ -154,6 +160,7 @@ final class GridRoomService {
     resetCredentialRetry()
     cancelAloneAutoMute()
     resetScreenShareAloneGrace()
+    resetScreenSharePresentationEdges()
     grids.removeAll()
     homeSpaces.removeAll()
     enabledSpaceIDs.removeAll()
@@ -231,6 +238,26 @@ final class GridRoomService {
       .max() ?? 0
   }
 
+  func isScreenSharing(avatar: GridAvatar) -> Bool {
+    if avatar.ownedByCurrentSession {
+      return media.isScreenShareRequested
+    }
+    let identities = participantIdentities(for: avatar)
+    let knownIntents = identities.compactMap { media.participantScreenShareIntents[$0] }
+    if !knownIntents.isEmpty {
+      return knownIntents.contains(true)
+    }
+    let shares = screenShares(avatar: avatar)
+    return !shares.isEmpty
+  }
+
+  func isScreenShareIntended(participantIdentity: String) -> Bool {
+    if let intent = media.participantScreenShareIntents[participantIdentity] {
+      return intent
+    }
+    return media.screenShares.contains { $0.participantIdentity == participantIdentity }
+  }
+
   func isScreenSharing(userID: Int64) -> Bool {
     let shares = screenShares(userID: userID)
     if isOwnedUser(userID) {
@@ -245,6 +272,18 @@ final class GridRoomService {
       return shares.first(where: \.isLocal)
     }
     return shares.first
+  }
+
+  func screenShare(avatar: GridAvatar) -> InlineRTCScreenShare? {
+    let shares = screenShares(avatar: avatar)
+    return avatar.ownedByCurrentSession
+      ? shares.first(where: \.isLocal)
+      : shares.first
+  }
+
+  func screenShares(avatar: GridAvatar) -> [InlineRTCScreenShare] {
+    let identities = participantIdentities(for: avatar)
+    return media.screenShares.filter { identities.contains($0.participantIdentity) }
   }
 
   func screenShares(userID: Int64) -> [InlineRTCScreenShare] {
@@ -434,6 +473,10 @@ final class GridRoomService {
     reconcileScreenShareAloneGrace()
   }
 
+  func setScreenShareQualityProfile(_ profile: InlineRTCScreenShareQualityProfile) {
+    mediaCoordinator.setScreenShareQualityProfile(profile)
+  }
+
   func stopScreenSharing() {
     mediaCoordinator.stopScreenSharing()
     resetScreenShareAloneGrace()
@@ -445,13 +488,32 @@ final class GridRoomService {
     }
   }
 
-  func openScreenShare(for user: InlineProtocol.User) {
-    guard let share = screenShare(userID: user.id) else { return }
-    GridScreenShareWindowCoordinator.shared.open(
-      user: user,
-      share: share,
-      store: self
+  func openScreenShare(for avatar: GridAvatar) {
+    guard let participantIdentity = screenShareParticipantIdentity(for: avatar) else { return }
+    openScreenShare(
+      user: avatar.user,
+      participantIdentity: participantIdentity
     )
+  }
+
+  func openScreenShareFromNotification(
+    spaceID: Int64,
+    roomID: Int64,
+    userID: Int64,
+    participantIdentity: String
+  ) {
+    Task { [weak self] in
+      guard let self else { return }
+      await load(spaceID: spaceID)
+      guard let grid = grids[spaceID],
+            let room = grid.rooms.first(where: { $0.id == roomID }),
+            let avatar = room.avatars.first(where: { $0.user.id == userID })
+      else { return }
+      openScreenShare(
+        user: avatar.user,
+        participantIdentity: participantIdentity
+      )
+    }
   }
 
   func toggleRoomLock(roomID: Int64, locked: Bool) async {
@@ -557,9 +619,86 @@ final class GridRoomService {
   private func reconcileMediaDemand() {
     let target = currentMediaTarget()
     if credentialRetryTarget != target { resetCredentialRetry() }
+    if screenShareNotificationTarget != target {
+      resetScreenSharePresentationEdges(target: target)
+    }
     mediaCoordinator.setTarget(target)
     reconcileAloneAutoMute()
     reconcileScreenShareAloneGrace()
+  }
+
+  private func resetScreenSharePresentationEdges(target: GridMediaTarget? = nil) {
+    pendingScreenShareOpenTasks.values.forEach { $0.task.cancel() }
+    pendingScreenShareOpenTasks.removeAll()
+    screenShareNotificationTarget = target
+    observedRemoteScreenShares.removeAll()
+    hasPrimedScreenSharePresentationEdges = false
+  }
+
+  private func reconcileScreenSharePresentationEdges() {
+    guard let target = currentMediaTarget(),
+          screenShareNotificationTarget == target,
+          media.hasParticipantMediaSnapshot,
+          let grid = grids[target.spaceID],
+          let room = grid.rooms.first(where: { $0.id == target.roomID })
+    else { return }
+
+    var next: [String: GridScreenShareNotice] = [:]
+    for avatar in room.avatars where !avatar.ownedByCurrentSession && isScreenSharing(avatar: avatar) {
+      guard let participantIdentity = screenShareParticipantIdentity(for: avatar) else { continue }
+      next[participantIdentity] = GridScreenShareNotice(
+        target: target,
+        user: avatar.user,
+        participantIdentity: participantIdentity
+      )
+    }
+
+    guard hasPrimedScreenSharePresentationEdges else {
+      observedRemoteScreenShares = next
+      hasPrimedScreenSharePresentationEdges = true
+      return
+    }
+
+    let previous = observedRemoteScreenShares
+    observedRemoteScreenShares = next
+    for (identity, notice) in next where previous[identity] == nil {
+      presentScreenShareChange(notice, started: true)
+    }
+    for (identity, notice) in previous where next[identity] == nil {
+      pendingScreenShareOpenTasks.removeValue(forKey: identity)?.task.cancel()
+      presentScreenShareChange(notice, started: false)
+    }
+  }
+
+  private func presentScreenShareChange(
+    _ notice: GridScreenShareNotice,
+    started: Bool
+  ) {
+    let displayName = InlineKit.User(from: notice.user).displayName
+    if started {
+      ToastCenter.shared.showSuccess(
+        "\(displayName) started sharing their screen",
+        actionTitle: "View"
+      ) { [weak self] in
+        self?.openScreenShare(
+          user: notice.user,
+          participantIdentity: notice.participantIdentity
+        )
+      }
+    } else {
+      ToastCenter.shared.showInfo("\(displayName) stopped sharing their screen")
+    }
+
+    Task {
+      await MacNotifications.shared.showGridScreenShareNotification(
+        displayName: displayName,
+        started: started,
+        spaceID: notice.target.spaceID,
+        roomID: notice.target.roomID,
+        userID: notice.user.id,
+        participantIdentity: notice.participantIdentity
+      )
+    }
   }
 
   private func reconcileAloneAutoMute() {
@@ -869,6 +1008,7 @@ final class GridRoomService {
         "GRID_TRACE phase=click_to_connected elapsed_ms=\(totalMilliseconds) rtc_ms=\(rtcConnectMilliseconds ?? -1)"
       )
     case .screenShareContextChanged:
+      reconcileScreenSharePresentationEdges()
       reconcileScreenShareAloneGrace()
     }
   }
@@ -1321,6 +1461,95 @@ final class GridRoomService {
     return identity == prefix || identity.hasPrefix("\(prefix)-")
   }
 
+  private func participantIdentities(for avatar: GridAvatar) -> Set<String> {
+    if !avatar.membershipID.isEmpty {
+      return [
+        "\(Self.liveKitIdentityPrefix(userID: avatar.user.id))-\(avatar.membershipID)",
+      ]
+    }
+    return Set(
+      media.connectedParticipantIdentities.filter {
+        Self.identity($0, matchesUserID: avatar.user.id)
+      }
+    )
+  }
+
+  private func screenShareParticipantIdentity(for avatar: GridAvatar) -> String? {
+    let identities = participantIdentities(for: avatar)
+    if let identity = identities.sorted().first(where: {
+      media.participantScreenShareIntents[$0] == true
+    }) {
+      return identity
+    }
+    if let identity = screenShares(avatar: avatar).first?.participantIdentity {
+      return identity
+    }
+    return identities.sorted().first
+  }
+
+  private func openScreenShare(
+    user: InlineProtocol.User,
+    participantIdentity: String
+  ) {
+    if let share = screenShares(participantIdentity: participantIdentity).first {
+      GridScreenShareWindowCoordinator.shared.open(
+        user: user,
+        share: share,
+        store: self
+      )
+      return
+    }
+    guard isScreenShareIntended(participantIdentity: participantIdentity) else { return }
+
+    pendingScreenShareOpenTasks.removeValue(forKey: participantIdentity)?.task.cancel()
+    let requestID = UUID()
+    let task = Task { [weak self] in
+      for _ in 0 ..< 80 {
+        guard !Task.isCancelled, let self else { return }
+        if let share = screenShares(participantIdentity: participantIdentity).first {
+          finishPendingScreenShareOpen(
+            requestID: requestID,
+            participantIdentity: participantIdentity
+          )
+          GridScreenShareWindowCoordinator.shared.open(
+            user: user,
+            share: share,
+            store: self
+          )
+          return
+        }
+        guard isScreenShareIntended(participantIdentity: participantIdentity) else {
+          finishPendingScreenShareOpen(
+            requestID: requestID,
+            participantIdentity: participantIdentity
+          )
+          return
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+      }
+      guard !Task.isCancelled, let self else { return }
+      finishPendingScreenShareOpen(
+        requestID: requestID,
+        participantIdentity: participantIdentity
+      )
+      if isScreenShareIntended(participantIdentity: participantIdentity) {
+        ToastCenter.shared.showError("The shared screen hasn’t arrived yet")
+      }
+    }
+    pendingScreenShareOpenTasks[participantIdentity] = GridPendingScreenShareOpen(
+      id: requestID,
+      task: task
+    )
+  }
+
+  private func finishPendingScreenShareOpen(
+    requestID: UUID,
+    participantIdentity: String
+  ) {
+    guard pendingScreenShareOpenTasks[participantIdentity]?.id == requestID else { return }
+    pendingScreenShareOpenTasks[participantIdentity] = nil
+  }
+
   private static func displayIDUnderPointer() -> UInt32? {
     let mouseLocation = NSEvent.mouseLocation
     guard let screen = NSScreen.screens.first(where: {
@@ -1427,6 +1656,17 @@ private struct GridScreenShareAloneTarget: Equatable {
   let mediaTarget: GridMediaTarget
   let episodeID: UInt64
   let publicationIDs: Set<String>
+}
+
+private struct GridScreenShareNotice {
+  let target: GridMediaTarget
+  let user: InlineProtocol.User
+  let participantIdentity: String
+}
+
+private struct GridPendingScreenShareOpen {
+  let id: UUID
+  let task: Task<Void, Never>
 }
 
 private struct OptimisticRoomMutation {

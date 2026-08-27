@@ -76,6 +76,11 @@ struct GridMediaFoundationTests {
     let roomOptions = configuration.makeRoomOptions()
     #expect(roomOptions.adaptiveStream)
     #expect(roomOptions.dynacast)
+    #expect(roomOptions.defaultScreenShareCaptureOptions.dimensions == .h1080_169)
+    #expect(roomOptions.defaultScreenShareCaptureOptions.fps == 15)
+    #expect(roomOptions.defaultVideoPublishOptions.screenShareEncoding?.maxBitrate == 2_500_000)
+    #expect(roomOptions.defaultVideoPublishOptions.screenShareEncoding?.maxFps == 15)
+    #expect(roomOptions.defaultVideoPublishOptions.degradationPreference == .auto)
     #expect(configuration.capture.echoCancellation)
     #expect(configuration.capture.echoCancellationMode == .software)
     #expect(configuration.capture.noiseSuppression)
@@ -92,6 +97,91 @@ struct GridMediaFoundationTests {
     #expect(configuration.voiceProcessing.platformVoiceProcessingAllowed == false)
     #expect(configuration.voiceProcessing.bypassed == false)
     #expect(configuration.voiceProcessing.microphoneMuteMode == .inputMixer)
+  }
+
+  @Test("screen-share profiles are source-aware and never upscale a small display")
+  func screenShareProfilesDoNotUpscale() {
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:small",
+      name: "Small Display",
+      displayID: 1,
+      pixelDimensions: InlineRTCVideoDimensions(width: 1_366, height: 768)
+    )
+
+    for profile in InlineRTCScreenShareQualityProfile.allCases {
+      let policy = InlineRTCScreenShareEncodingPolicy.resolve(
+        profile: profile,
+        source: source
+      )
+      #expect(policy.dimensions.width <= 1_366)
+      #expect(policy.dimensions.height <= 768)
+    }
+  }
+
+  @Test("screen-share profiles express their resolution, motion, and bandwidth tradeoffs")
+  func screenShareProfilePolicies() {
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:4k",
+      name: "4K Display",
+      displayID: 2,
+      pixelDimensions: InlineRTCVideoDimensions(width: 3_840, height: 2_160)
+    )
+
+    let automatic = InlineRTCScreenShareEncodingPolicy.resolve(
+      profile: .automatic,
+      source: source
+    )
+    #expect(automatic.dimensions == InlineRTCVideoDimensions(width: 2_560, height: 1_440))
+    #expect(automatic.framesPerSecond == 15)
+    #expect(automatic.maximumBitrate == 5_000_000)
+    #expect(automatic.degradationPolicy == .automatic)
+
+    let detail = InlineRTCScreenShareEncodingPolicy.resolve(profile: .detail, source: source)
+    #expect(detail.dimensions == InlineRTCVideoDimensions(width: 2_560, height: 1_440))
+    #expect(detail.framesPerSecond == 15)
+    #expect(detail.maximumBitrate == 5_000_000)
+    #expect(detail.degradationPolicy == .maintainResolution)
+
+    let motion = InlineRTCScreenShareEncodingPolicy.resolve(profile: .motion, source: source)
+    #expect(motion.dimensions == InlineRTCVideoDimensions(width: 1_920, height: 1_080))
+    #expect(motion.framesPerSecond == 30)
+    #expect(motion.maximumBitrate == 5_000_000)
+    #expect(motion.degradationPolicy == .maintainFramerate)
+
+    let saveBandwidth = InlineRTCScreenShareEncodingPolicy.resolve(
+      profile: .saveBandwidth,
+      source: source
+    )
+    #expect(saveBandwidth.dimensions == InlineRTCVideoDimensions(width: 1_280, height: 720))
+    #expect(saveBandwidth.framesPerSecond == 15)
+    #expect(saveBandwidth.maximumBitrate == 1_500_000)
+    #expect(saveBandwidth.degradationPolicy == .balanced)
+
+    let maximum = InlineRTCScreenShareEncodingPolicy.resolve(profile: .maximum, source: source)
+    #expect(maximum.dimensions == InlineRTCVideoDimensions(width: 3_840, height: 2_160))
+    #expect(maximum.framesPerSecond == 30)
+    #expect(maximum.maximumBitrate == 10_000_000)
+    #expect(maximum.degradationPolicy == .maintainResolution)
+  }
+
+  @Test("screen-share profile policy reaches LiveKit capture and publish options")
+  func screenShareProfileLiveKitOptions() {
+    let source = InlineRTCScreenCaptureSource(
+      id: "display:4k",
+      name: "4K Display",
+      displayID: 2,
+      pixelDimensions: InlineRTCVideoDimensions(width: 3_840, height: 2_160)
+    )
+
+    let options = InlineRTCConfiguration.voice.makeScreenShareOptions(
+      source: source,
+      profile: .maximum
+    )
+    #expect(options.capture.dimensions == Dimensions(width: 3_840, height: 2_160))
+    #expect(options.capture.fps == 30)
+    #expect(options.publish.screenShareEncoding?.maxBitrate == 10_000_000)
+    #expect(options.publish.screenShareEncoding?.maxFps == 30)
+    #expect(options.publish.degradationPreference == .maintainResolution)
   }
 
   @Test("local shutdown proof rejects retained microphone or screen publications")

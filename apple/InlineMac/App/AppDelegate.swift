@@ -771,7 +771,9 @@ extension AppDelegate {
 
     let threadIdentifier = response.notification.request.content.threadIdentifier
 
-    if let peerId = resolvePeerFromNotification(userInfo, threadIdentifier: threadIdentifier) {
+    if handleGridScreenShareNotification(userInfo) {
+      return
+    } else if let peerId = resolvePeerFromNotification(userInfo, threadIdentifier: threadIdentifier) {
       Task(priority: .userInitiated) { @MainActor in
         self.openChat(peer: peerId)
         await self.unarchiveIfNeeded(peer: peerId)
@@ -779,6 +781,30 @@ extension AppDelegate {
     } else {
       log.warning("Failed to resolve peer from notification userInfo")
     }
+  }
+
+  private func handleGridScreenShareNotification(_ userInfo: [String: Any]) -> Bool {
+    guard userInfo["type"] as? String == "gridScreenShare",
+          let spaceID = coerceInt64(userInfo["spaceId"]),
+          let roomID = coerceInt64(userInfo["roomId"]),
+          let userID = coerceInt64(userInfo["userId"]),
+          let participantIdentity = userInfo["participantIdentity"] as? String,
+          let event = userInfo["event"] as? String,
+          event == "started" || event == "stopped"
+    else { return false }
+
+    Task { @MainActor in
+      MainWindowOpenCoordinator.shared.openWindow(.grid(spaceID: spaceID))
+      if event == "started" {
+        dependencies.grid.openScreenShareFromNotification(
+          spaceID: spaceID,
+          roomID: roomID,
+          userID: userID,
+          participantIdentity: participantIdentity
+        )
+      }
+    }
+    return true
   }
 
   func resolvePeerFromNotification(_ userInfo: [String: Any], threadIdentifier: String) -> Peer? {

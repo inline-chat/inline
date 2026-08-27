@@ -261,6 +261,60 @@ extension MacNotifications {
 #endif
 
 extension MacNotifications {
+  @discardableResult
+  public func showGridScreenShareNotification(
+    displayName: String,
+    started: Bool,
+    spaceID: Int64,
+    roomID: Int64,
+    userID: Int64,
+    participantIdentity: String
+  ) async -> Bool {
+    let title = started
+      ? String(
+        localized: "\(displayName) started sharing their screen",
+        comment: "Local notification title when the named Grid participant starts screen sharing."
+      )
+      : String(
+        localized: "\(displayName) stopped sharing their screen",
+        comment: "Local notification title when the named Grid participant stops screen sharing."
+      )
+    let body = started
+      ? String(
+        localized: "Click to view the shared screen.",
+        comment: "Local notification body for a newly started Grid screen share."
+      )
+      : String(
+        localized: "The shared screen is no longer available.",
+        comment: "Local notification body when a Grid screen share ends."
+      )
+    return await showMessageNotification(
+      title: title,
+      body: body,
+      userInfo: [
+        "type": "gridScreenShare",
+        "event": started ? "started" : "stopped",
+        "spaceId": String(spaceID),
+        "roomId": String(roomID),
+        "userId": String(userID),
+        "participantIdentity": participantIdentity,
+      ],
+      soundOverride: false,
+      requestIdentifier: Self.gridScreenShareNotificationIdentifier(
+        spaceID: spaceID,
+        participantIdentity: participantIdentity
+      ),
+      threadIdentifier: "grid_\(spaceID)_room_\(roomID)"
+    )
+  }
+
+  nonisolated static func gridScreenShareNotificationIdentifier(
+    spaceID: Int64,
+    participantIdentity: String
+  ) -> String {
+    "grid_\(spaceID)_screen_share_\(participantIdentity)"
+  }
+
   public func showMessageFailedNotification(
     chatId: Int64,
     peerId: Peer

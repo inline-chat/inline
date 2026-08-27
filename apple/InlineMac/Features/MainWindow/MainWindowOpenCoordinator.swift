@@ -3,11 +3,14 @@ import InlineKit
 
 enum MainWindowDestination: Hashable, Codable {
   case chat(peer: Peer)
+  case grid(spaceID: Int64)
 
   var route: Nav3Route {
     switch self {
     case let .chat(peer):
       .chat(peer: peer)
+    case let .grid(spaceID):
+      .grid(spaceId: spaceID)
     }
   }
 }

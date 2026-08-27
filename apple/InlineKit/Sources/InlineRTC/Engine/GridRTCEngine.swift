@@ -12,6 +12,7 @@ protocol GridRTCDriver: Sendable {
   func screenCaptureSources() async throws -> [InlineRTCScreenCaptureSource]
   func setScreenShare(
     _ source: InlineRTCScreenCaptureSource?,
+    qualityProfile: InlineRTCScreenShareQualityProfile,
     in room: GridRTCRoomHandle
   ) async throws
   func setOutputVolume(_ volume: Float, in room: GridRTCRoomHandle) async
@@ -60,6 +61,7 @@ actor GridRTCEngine {
   private var microphonePublished = false
   private var microphoneMuted = true
   private var appliedScreenCaptureSource: InlineRTCScreenCaptureSource?
+  private var appliedScreenShareQualityProfile: InlineRTCScreenShareQualityProfile?
   private var screenShareState: InlineRTCScreenShareState = .off
   private var screenShares: [InlineRTCScreenShare] = []
   private var screenShareCleanupRequired = false
@@ -71,6 +73,7 @@ actor GridRTCEngine {
   private var microphonePublishAttempt = 0
   private var microphoneReconcileFailures = 0
   private var participants: [InlineRTCParticipant] = []
+  private var hasParticipantMediaSnapshot = false
   private var reconnectCount = 0
   private var recoveryAttempt = 0
   private var lastConnectMilliseconds: Int?
@@ -302,10 +305,12 @@ actor GridRTCEngine {
       guard let target = desiredTarget else {
         state = .idle
         participants = []
+        hasParticipantMediaSnapshot = false
         recoveryAttempt = 0
         microphonePublishAttempt = 0
         microphonePublicationState = .notRequested
         appliedScreenCaptureSource = nil
+        appliedScreenShareQualityProfile = nil
         screenShareState = .off
         screenShares = []
         screenShareCleanupRequired = false
@@ -340,6 +345,8 @@ actor GridRTCEngine {
         }
         if screenShareRepublishExpectations[room] == nil,
            appliedScreenCaptureSource != demand.screenCaptureSource
+             || (demand.screenCaptureSource != nil
+               && appliedScreenShareQualityProfile != demand.screenShareQualityProfile)
              || screenShareCleanupRequired {
           guard await reconcileScreenShare(in: room, target: target) else { return }
           continue
@@ -498,6 +505,7 @@ actor GridRTCEngine {
     microphonePublished = false
     microphoneMuted = true
     appliedScreenCaptureSource = nil
+    appliedScreenShareQualityProfile = nil
     screenShareState = .off
     screenShares = []
     screenShareCleanupRequired = false
@@ -508,6 +516,7 @@ actor GridRTCEngine {
     remoteAudioFlowStates = [:]
     microphonePublishAttempt = 0
     participants = []
+    hasParticipantMediaSnapshot = false
 
     state = .connecting(target, attempt: recoveryAttempt)
     emitSnapshot()
@@ -954,6 +963,8 @@ actor GridRTCEngine {
   ) async -> Bool {
     let source = demand.screenCaptureSource
     let previousSource = appliedScreenCaptureSource
+    let qualityProfile = demand.screenShareQualityProfile
+    let previousQualityProfile = appliedScreenShareQualityProfile
     let operation: GridRTCProviderOperation = if source == nil {
       .stopScreenShare
     } else if previousSource == nil {
@@ -976,13 +987,20 @@ actor GridRTCEngine {
     )
     defer { watchdogTask?.cancel() }
     do {
-      try await driver.setScreenShare(source, in: room)
+      try await driver.setScreenShare(
+        source,
+        qualityProfile: qualityProfile,
+        in: room
+      )
     } catch {
       guard self.room == room, roomTarget == target else { return false }
       // Treat a failed start as requiring an explicit cleanup pass. LiveKit
       // may have created or partially published the track before surfacing
       // the error.
       appliedScreenCaptureSource = source ?? previousSource
+      appliedScreenShareQualityProfile = source == nil
+        ? previousQualityProfile
+        : qualityProfile
       screenShareState = .failed(String(describing: error))
       log.error(
         "GRID_ENGINE phase=rtc_screen_share_reconcile_failed session=\(target.rawValue) requested_source=\(source?.id ?? "none") previous_source=\(previousSource?.id ?? "none") demand_revision=\(demandRevision) confirmed_publications=\(screenShares.filter(\.isLocal).map(\.publicationID).joined(separator: ","))",
@@ -1007,6 +1025,7 @@ actor GridRTCEngine {
     // reconcile pass can undo a stale publication instead of assuming that
     // nothing reached LiveKit.
     appliedScreenCaptureSource = source
+    appliedScreenShareQualityProfile = source == nil ? nil : qualityProfile
     screenShareCleanupRequired = false
     if source == nil {
       clearScreenShareRepublishExpectation(for: room)
@@ -1021,6 +1040,7 @@ actor GridRTCEngine {
     } else {
       clearScreenShareStopConfirmation(for: room)
       if demand.screenCaptureSource == source,
+         demand.screenShareQualityProfile == qualityProfile,
          !screenShares.contains(where: \.isLocal) {
         scheduleScreenSharePublishConfirmation(for: room, target: target)
       } else {
@@ -1028,7 +1048,9 @@ actor GridRTCEngine {
       }
       screenShareState = .published
     }
-    guard demand.screenCaptureSource == source else {
+    guard demand.screenCaptureSource == source,
+          demand.screenShareQualityProfile == qualityProfile
+    else {
       emitSnapshot()
       return true
     }
@@ -1088,6 +1110,7 @@ actor GridRTCEngine {
     microphonePublished = false
     microphoneMuted = true
     appliedScreenCaptureSource = nil
+    appliedScreenShareQualityProfile = nil
     screenShareState = .off
     screenShares = []
     screenShareCleanupRequired = false
@@ -1098,6 +1121,7 @@ actor GridRTCEngine {
     remoteAudioFlowStates = [:]
     microphonePublishAttempt = 0
     participants = []
+    hasParticipantMediaSnapshot = false
     startAudioPreparationWait(for: demand.target)
     emitSnapshot()
   }
@@ -1274,6 +1298,12 @@ actor GridRTCEngine {
         "GRID_ENGINE phase=rtc_microphone_unpublished session=\(target.rawValue) action=await_republish"
       )
       scheduleMicrophoneRetry(for: target)
+    case .localScreenShareCaptureStopped:
+      guard demand.screenCaptureSource != nil else { break }
+      screenShareState = .failed("Screen sharing stopped")
+      log.warning(
+        "GRID_ENGINE phase=rtc_screen_share_capture_stopped session=\(target.rawValue) action=clear_intent_and_unpublish"
+      )
     case let .screenSharesChanged(revision, nextScreenShares):
       guard revision > screenShareSnapshotRevision else {
         log.debug(
@@ -1322,9 +1352,11 @@ actor GridRTCEngine {
       } else if hadLocalShare, !hasLocalShare {
         if demand.screenCaptureSource == nil {
           appliedScreenCaptureSource = nil
+          appliedScreenShareQualityProfile = nil
           screenShareState = .off
         } else if case .reconnecting = state {
           appliedScreenCaptureSource = nil
+          appliedScreenShareQualityProfile = nil
           screenShareState = .publishing
           scheduleReconcile()
         } else {
@@ -1354,6 +1386,7 @@ actor GridRTCEngine {
           clearScreenShareStopConfirmation(for: eventRoom)
           screenShareCleanupRequired = false
           appliedScreenCaptureSource = nil
+          appliedScreenShareQualityProfile = nil
           screenShareState = .off
         }
       }
@@ -1766,6 +1799,7 @@ actor GridRTCEngine {
   ) {
     guard eventRoom == room else { return }
     participants = nextParticipants
+    hasParticipantMediaSnapshot = true
     let currentIdentities = Set(nextParticipants.map(\.identity))
     remoteAudioFlowStates = remoteAudioFlowStates.filter { currentIdentities.contains($0.key) }
     emitSnapshot()
@@ -1825,6 +1859,7 @@ actor GridRTCEngine {
       localAudioFlowState: localAudioFlowState,
       remoteAudioFlowStates: remoteAudioFlowStates,
       participants: participants,
+      hasParticipantMediaSnapshot: hasParticipantMediaSnapshot,
       reconnectCount: reconnectCount,
       recoveryAttempt: recoveryAttempt,
       lastConnectMilliseconds: lastConnectMilliseconds,

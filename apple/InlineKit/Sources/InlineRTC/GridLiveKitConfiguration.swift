@@ -230,6 +230,13 @@ struct InlineRTCConfiguration: Equatable, Sendable {
 
   func makeRoomOptions() -> RoomOptions {
     RoomOptions(
+      // Real screen tracks always receive source-aware options from
+      // `makeScreenShareOptions`. Keep these defaults conservative for SDK
+      // fallback paths that do not carry an Inline source/profile.
+      defaultScreenShareCaptureOptions: ScreenShareCaptureOptions(
+        dimensions: .h1080_169,
+        fps: 15
+      ),
       defaultAudioCaptureOptions: AudioCaptureOptions(
         echoCancellation: capture.echoCancellation,
         autoGainControl: capture.automaticGainControl,
@@ -241,6 +248,10 @@ struct InlineRTCConfiguration: Equatable, Sendable {
         noiseSuppressionMode: capture.noiseSuppressionMode,
         highpassFilterMode: capture.highPassFilterMode
       ),
+      defaultVideoPublishOptions: VideoPublishOptions(
+        screenShareEncoding: VideoEncoding(maxBitrate: 2_500_000, maxFps: 15),
+        degradationPreference: .auto
+      ),
       defaultAudioPublishOptions: AudioPublishOptions(
         name: publishing.trackName,
         encoding: AudioEncoding(maxBitrate: publishing.quality.rawValue),
@@ -250,6 +261,38 @@ struct InlineRTCConfiguration: Equatable, Sendable {
       adaptiveStream: connection.adaptiveStream,
       dynacast: connection.dynacast,
       singlePeerConnection: connection.singlePeerConnection
+    )
+  }
+
+  func makeScreenShareOptions(
+    source: InlineRTCScreenCaptureSource,
+    profile: InlineRTCScreenShareQualityProfile
+  ) -> (capture: ScreenShareCaptureOptions, publish: VideoPublishOptions) {
+    let policy = InlineRTCScreenShareEncodingPolicy.resolve(
+      profile: profile,
+      source: source
+    )
+    let degradationPreference: DegradationPreference = switch policy.degradationPolicy {
+    case .automatic: .auto
+    case .maintainResolution: .maintainResolution
+    case .maintainFramerate: .maintainFramerate
+    case .balanced: .balanced
+    }
+    return (
+      capture: ScreenShareCaptureOptions(
+        dimensions: Dimensions(
+          width: Int32(clamping: policy.dimensions.width),
+          height: Int32(clamping: policy.dimensions.height)
+        ),
+        fps: policy.framesPerSecond
+      ),
+      publish: VideoPublishOptions(
+        screenShareEncoding: VideoEncoding(
+          maxBitrate: policy.maximumBitrate,
+          maxFps: policy.framesPerSecond
+        ),
+        degradationPreference: degradationPreference
+      )
     )
   }
 

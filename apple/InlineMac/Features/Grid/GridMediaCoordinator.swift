@@ -35,6 +35,7 @@ final class GridMediaCoordinator {
   private var outputSelection: AudioOutputSelection
   private var outputVolume: Float = 1
   private var screenCaptureSource: InlineRTCScreenCaptureSource?
+  private var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
   private var screenCaptureSourceRefresh: GridScreenCaptureSourceRefresh?
   private var target: GridMediaTarget?
   private var connectedTarget: GridMediaTarget?
@@ -47,6 +48,7 @@ final class GridMediaCoordinator {
   private static let microphoneEnabledKey = "grid.microphoneEnabled"
   private static let autoUnmuteOnJoinKey = "grid.autoUnmuteOnJoin"
   private static let autoMuteWhenAloneKey = "grid.autoMuteWhenAlone"
+  private static let screenShareQualityProfileKey = "grid.screenShareQualityProfile"
 
   init(
     engine: InlineRTCSession,
@@ -63,11 +65,15 @@ final class GridMediaCoordinator {
     microphoneEnabled = defaults.bool(forKey: Self.microphoneEnabledKey)
     autoUnmuteOnJoin = defaults.bool(forKey: Self.autoUnmuteOnJoinKey)
     autoMuteWhenAlone = defaults.bool(forKey: Self.autoMuteWhenAloneKey)
+    screenShareQualityProfile = defaults.string(forKey: Self.screenShareQualityProfileKey)
+      .flatMap(InlineRTCScreenShareQualityProfile.init(rawValue:))
+      ?? .automatic
     let controller = GridMediaPresentationController(
       microphoneEnabled: microphoneEnabled,
       autoUnmuteOnJoin: autoUnmuteOnJoin,
       autoMuteWhenAlone: autoMuteWhenAlone,
       inputSelection: inputSelection,
+      screenShareQualityProfile: screenShareQualityProfile,
       outputSelection: outputSelection
     )
     presentationController = controller
@@ -321,6 +327,14 @@ final class GridMediaCoordinator {
     submitDemand()
   }
 
+  func setScreenShareQualityProfile(_ profile: InlineRTCScreenShareQualityProfile) {
+    guard screenShareQualityProfile != profile else { return }
+    screenShareQualityProfile = profile
+    defaults.set(profile.rawValue, forKey: Self.screenShareQualityProfileKey)
+    presentationController.setScreenShareQualityProfile(profile)
+    submitDemand()
+  }
+
   func retryAudio() {
     engine.retryAudio()
   }
@@ -363,6 +377,7 @@ final class GridMediaCoordinator {
       credentials: credentials,
       microphoneEnabled: microphoneEnabled,
       screenCaptureSource: screenCaptureSource,
+      screenShareQualityProfile: screenShareQualityProfile,
       input: inputSelection,
       output: outputSelection,
       outputVolume: outputVolume

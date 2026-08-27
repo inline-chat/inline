@@ -2,6 +2,8 @@ import Foundation
 import LiveKit
 import Logger
 
+private let gridScreenShareIntentAttribute = "inline.screen_share_intent"
+
 actor LiveKitGridRTCDriver: GridRTCDriver {
   nonisolated let lifecycleEvents: AsyncStream<GridRTCLifecycleEventEnvelope>
   nonisolated let participantSnapshots: AsyncStream<GridRTCParticipantSnapshotEnvelope>
@@ -90,6 +92,9 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
       url: credentials.serverURL.absoluteString,
       token: credentials.token
     )
+    // `Room.connect()` returns a complete provider state. Project it even when
+    // the room is empty so UI can stop falling back to persisted avatar state.
+    context.delegate.refreshMediaState(in: context.room)
     log.debug(
       "GRID_ENGINE phase=livekit_connect_finished handle=\(room.id) elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
     )
@@ -227,6 +232,7 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
 
   func setScreenShare(
     _ source: InlineRTCScreenCaptureSource?,
+    qualityProfile: InlineRTCScreenShareQualityProfile,
     in room: GridRTCRoomHandle
   ) async throws {
     #if os(macOS)
@@ -236,18 +242,16 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     let context = try context(for: room)
     try beginLocalMediaMutation(in: context)
     defer { endLocalMediaMutation(in: room, context: context) }
-    if context.screenCaptureSourceID == source?.id,
-       context.room.localParticipant.firstScreenSharePublication != nil {
-      return
-    }
-
     guard let source else {
+      try await setScreenShareIntent(false, in: context)
       if let publication = context.room.localParticipant
         .firstScreenSharePublication as? LocalTrackPublication {
         try await unpublishScreenShare(publication, context: context)
       }
+      clearScreenShareCaptureObserver(in: context)
       context.screenShareTrack = nil
       context.screenCaptureSourceID = nil
+      context.screenShareQualityProfile = nil
       context.delegate.setLocalScreenCaptureSourceID(nil)
       log.debug("GRID_ENGINE phase=livekit_screen_share_stopped handle=\(room.id)")
       return
@@ -255,23 +259,39 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     guard let liveKitSource = source.liveKitSource else {
       throw LiveKitGridRTCDriverError.invalidScreenCaptureSource
     }
+    try await setScreenShareIntent(true, in: context)
+    if context.screenCaptureSourceID == source.id,
+       context.screenShareQualityProfile == qualityProfile,
+       context.room.localParticipant.firstScreenSharePublication != nil {
+      return
+    }
 
     if let publication = context.room.localParticipant
       .firstScreenSharePublication as? LocalTrackPublication {
-      guard let track = publication.track as? LocalVideoTrack,
-            let capturer = track.capturer as? MacOSScreenCapturer
-      else {
-        throw LiveKitGridRTCDriverError.screenSharePublicationTransitioning
+      if context.screenShareQualityProfile != qualityProfile {
+        try await unpublishScreenShare(publication, context: context)
+        clearScreenShareCaptureObserver(in: context)
+        context.screenShareTrack = nil
+        context.screenCaptureSourceID = nil
+        context.screenShareQualityProfile = nil
+        context.delegate.setLocalScreenCaptureSourceID(nil)
+      } else {
+        guard let track = publication.track as? LocalVideoTrack,
+              let capturer = track.capturer as? MacOSScreenCapturer
+        else {
+          throw LiveKitGridRTCDriverError.screenSharePublicationTransitioning
+        }
+        try await capturer.updateCaptureSource(liveKitSource)
+        context.screenShareTrack = track
+        context.screenCaptureSourceID = source.id
+        context.screenShareQualityProfile = qualityProfile
+        context.delegate.setLocalScreenCaptureSourceID(source.id)
+        context.delegate.refreshScreenShares(in: context.room)
+        log.debug(
+          "GRID_ENGINE phase=livekit_screen_share_source_updated handle=\(room.id) source=\(source.id) publication=\(publication.sid)"
+        )
+        return
       }
-      try await capturer.updateCaptureSource(liveKitSource)
-      context.screenShareTrack = track
-      context.screenCaptureSourceID = source.id
-      context.delegate.setLocalScreenCaptureSourceID(source.id)
-      context.delegate.refreshScreenShares(in: context.room)
-      log.debug(
-        "GRID_ENGINE phase=livekit_screen_share_source_updated handle=\(room.id) source=\(source.id) publication=\(publication.sid)"
-      )
-      return
     }
     guard context.screenShareTrack == nil else {
       // A full reconnect retains the track while LiveKit serially replaces its
@@ -280,21 +300,38 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
       throw LiveKitGridRTCDriverError.screenSharePublicationTransitioning
     }
 
-    let roomOptions = context.configuration.makeRoomOptions()
+    let screenShareOptions = context.configuration.makeScreenShareOptions(
+      source: source,
+      profile: qualityProfile
+    )
     let track = LocalVideoTrack.createMacOSScreenShareTrack(
       source: liveKitSource,
-      options: roomOptions.defaultScreenShareCaptureOptions
+      options: screenShareOptions.capture
     )
+    let captureObserver = LiveKitGridScreenCaptureObserver(
+      handle: room,
+      room: context.room,
+      track: track,
+      lifecycleContinuation: lifecycleContinuation
+    )
+    track.capturer.add(delegate: captureObserver)
+    context.screenShareCaptureObserver = captureObserver
     context.screenCaptureSourceID = source.id
+    context.screenShareQualityProfile = qualityProfile
     context.delegate.setLocalScreenCaptureSourceID(source.id)
     do {
       _ = try await context.room.localParticipant.publish(
         videoTrack: track,
-        options: roomOptions.defaultVideoPublishOptions
+        options: screenShareOptions.publish
       )
       context.screenShareTrack = track
     } catch {
+      track.capturer.remove(delegate: captureObserver)
+      if context.screenShareCaptureObserver === captureObserver {
+        context.screenShareCaptureObserver = nil
+      }
       context.screenCaptureSourceID = nil
+      context.screenShareQualityProfile = nil
       context.delegate.setLocalScreenCaptureSourceID(nil)
       throw error
     }
@@ -325,8 +362,10 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
       .firstScreenSharePublication as? LocalTrackPublication {
       try? await unpublishScreenShare(publication, context: context)
     }
+    clearScreenShareCaptureObserver(in: context)
     context.screenShareTrack = nil
     context.screenCaptureSourceID = nil
+    context.screenShareQualityProfile = nil
     context.delegate.setLocalScreenCaptureSourceID(nil)
     for participant in context.room.remoteParticipants.values {
       for publication in participant.audioTracks {
@@ -453,6 +492,25 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     context: RoomContext
   ) async throws {
     try await context.room.localParticipant.unpublish(publication: publication)
+  }
+
+  private func setScreenShareIntent(
+    _ enabled: Bool,
+    in context: RoomContext
+  ) async throws {
+    let value = enabled ? "true" : "false"
+    guard context.room.localParticipant.attributes[gridScreenShareIntentAttribute] != value else {
+      return
+    }
+    var attributes = context.room.localParticipant.attributes
+    attributes[gridScreenShareIntentAttribute] = value
+    try await context.room.localParticipant.set(attributes: attributes)
+  }
+
+  private func clearScreenShareCaptureObserver(in context: RoomContext) {
+    guard let observer = context.screenShareCaptureObserver else { return }
+    context.screenShareTrack?.capturer.remove(delegate: observer)
+    context.screenShareCaptureObserver = nil
   }
 
   private func isPublished(_ track: LocalAudioTrack, in context: RoomContext) -> Bool {
@@ -605,7 +663,9 @@ private final class RoomContext: @unchecked Sendable {
   let configuration: InlineRTCConfiguration
   var microphoneTrack: LocalAudioTrack?
   var screenShareTrack: LocalVideoTrack?
+  var screenShareCaptureObserver: LiveKitGridScreenCaptureObserver?
   var screenCaptureSourceID: String?
+  var screenShareQualityProfile: InlineRTCScreenShareQualityProfile?
   var localFlowCheckTask: Task<Void, Never>?
   var localFlowGeneration: UInt64 = 0
   var localFlowProof: GridLocalAudioTransportProof
@@ -622,6 +682,48 @@ private final class RoomContext: @unchecked Sendable {
     self.configuration = configuration
     localFlowProof = GridLocalAudioTransportProof(
       missThreshold: configuration.connection.localAudioFlowMissThreshold
+    )
+  }
+}
+
+private final class LiveKitGridScreenCaptureObserver: NSObject, VideoCapturerDelegate, @unchecked Sendable {
+  private let handle: GridRTCRoomHandle
+  private weak var room: Room?
+  private weak var track: LocalVideoTrack?
+  private let lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation
+
+  init(
+    handle: GridRTCRoomHandle,
+    room: Room,
+    track: LocalVideoTrack,
+    lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation
+  ) {
+    self.handle = handle
+    self.room = room
+    self.track = track
+    self.lifecycleContinuation = lifecycleContinuation
+  }
+
+  func capturer(
+    _: VideoCapturer,
+    didUpdate state: VideoCapturer.CapturerState
+  ) {
+    guard state == .stopped,
+          let room,
+          let track,
+          room.localParticipant.localVideoTracks.contains(where: {
+            $0.source == .screenShareVideo && $0.track === track
+          })
+    else { return }
+
+    // App-owned unpublish removes the publication before stopping capture.
+    // A stopped capturer with a live publication is therefore an external
+    // ScreenCaptureKit stop and must travel through the normal intent cleanup.
+    lifecycleContinuation.yield(
+      GridRTCLifecycleEventEnvelope(
+        room: handle,
+        event: .localScreenShareCaptureStopped
+      )
     )
   }
 }
@@ -676,9 +778,22 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     emitScreenShares(in: room)
   }
 
+  func refreshMediaState(in room: Room) {
+    emitParticipants(in: room)
+    emitScreenShares(in: room)
+  }
+
   func room(_ room: Room, didUpdateSpeakingParticipants _: [Participant]) {
     emitParticipants(in: room)
     updateRemoteFlowMonitoring()
+  }
+
+  func room(
+    _ room: Room,
+    participant _: Participant,
+    didUpdateAttributes _: [String: String]
+  ) {
+    emitParticipants(in: room)
   }
 
   func room(
@@ -709,6 +824,9 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     log.debug(
       "GRID_ENGINE phase=livekit_remote_track_announced handle=\(handle.id) participant=\(identity(of: participant)) track=\(publication.sid) kind=\(publication.kind) source=\(publication.source)"
     )
+    if publication.source == .microphone {
+      emitParticipants(in: room)
+    }
     if publication.source == .screenShareVideo {
       emitScreenShares(in: room)
     }
@@ -719,6 +837,9 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     participant _: RemoteParticipant,
     didUnpublishTrack publication: RemoteTrackPublication
   ) {
+    if publication.source == .microphone {
+      emitParticipants(in: room)
+    }
     if publication.source == .screenShareVideo {
       emitScreenShares(in: room)
     }
@@ -755,6 +876,9 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     log.debug(
       "GRID_ENGINE phase=livekit_remote_track_subscribed handle=\(handle.id) participant=\(identity(of: participant)) track=\(publication.sid) kind=\(publication.kind) source=\(publication.source)"
     )
+    if publication.source == .microphone {
+      emitParticipants(in: room)
+    }
     if publication.source == .screenShareVideo {
       emitScreenShares(in: room)
     }
@@ -766,6 +890,9 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     trackPublication: TrackPublication,
     didUpdateIsMuted isMuted: Bool
   ) {
+    if trackPublication.source == .microphone {
+      emitParticipants(in: room)
+    }
     guard let remoteParticipant = participant as? RemoteParticipant,
           let publication = trackPublication as? RemoteTrackPublication
     else { return }
@@ -804,6 +931,9 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     log.debug(
       "GRID_ENGINE phase=livekit_remote_track_unsubscribed handle=\(handle.id) participant=\(identity(of: participant)) track=\(publication.sid)"
     )
+    if publication.source == .microphone {
+      emitParticipants(in: room)
+    }
     if publication.source == .screenShareVideo {
       emitScreenShares(in: room)
     }
@@ -859,6 +989,7 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     switch publication.source {
     case .microphone:
       emitLifecycle(.localMicrophonePublished(muted: publication.isMuted))
+      emitParticipants(in: room)
     case .screenShareVideo:
       emitScreenShares(in: room)
     default:
@@ -874,6 +1005,7 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     switch publication.source {
     case .microphone:
       emitLifecycle(.localMicrophoneUnpublished)
+      emitParticipants(in: room)
     case .screenShareVideo:
       emitScreenShares(in: room)
     default:
@@ -884,21 +1016,30 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
   private func emitParticipants(in room: Room) {
     var participants: [InlineRTCParticipant] = []
     if let identity = room.localParticipant.identity?.stringValue {
+      let microphoneEnabled = room.localParticipant.audioTracks.contains {
+        $0.source == .microphone && !$0.isMuted
+      }
       participants.append(
         InlineRTCParticipant(
           identity: identity,
-          isSpeaking: room.localParticipant.isSpeaking,
-          audioLevel: room.localParticipant.isSpeaking ? room.localParticipant.audioLevel : 0
+          isSpeaking: microphoneEnabled && room.localParticipant.isSpeaking,
+          audioLevel: microphoneEnabled && room.localParticipant.isSpeaking
+            ? room.localParticipant.audioLevel : 0,
+          screenShareIntent: screenShareIntent(for: room.localParticipant)
         )
       )
     }
     for participant in room.remoteParticipants.values {
       guard let identity = participant.identity?.stringValue else { continue }
+      let microphoneEnabled = participant.audioTracks.contains {
+        $0.source == .microphone && !$0.isMuted
+      }
       participants.append(
         InlineRTCParticipant(
           identity: identity,
-          isSpeaking: participant.isSpeaking,
-          audioLevel: participant.isSpeaking ? participant.audioLevel : 0
+          isSpeaking: microphoneEnabled && participant.isSpeaking,
+          audioLevel: microphoneEnabled && participant.isSpeaking ? participant.audioLevel : 0,
+          screenShareIntent: screenShareIntent(for: participant)
         )
       )
     }
@@ -906,6 +1047,14 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
     participantContinuation.yield(
       GridRTCParticipantSnapshotEnvelope(room: handle, participants: participants)
     )
+  }
+
+  private func screenShareIntent(for participant: Participant) -> Bool? {
+    switch participant.attributes[gridScreenShareIntentAttribute] {
+    case "true": true
+    case "false": false
+    default: nil
+    }
   }
 
   private func emitScreenShares(in room: Room) {
