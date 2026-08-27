@@ -32,6 +32,7 @@ class ComposeMenuButton: NSView {
   }
 
   weak var delegate: ComposeMenuButtonDelegate?
+  var isCommandsEnabledProvider: (() -> Bool)?
   var isSendSilentlyEnabledProvider: (() -> Bool)?
   var onToggleSendSilently: (() -> Void)?
   private var cameraWindow: NSWindow?
@@ -134,6 +135,7 @@ class ComposeMenuButton: NSView {
 
   private func makeMenu() -> NSMenu {
     let menu = NSMenu()
+    menu.autoenablesItems = false
 
     if capabilities.contains(.mediaPicker) {
       let photoItem = NSMenuItem(
@@ -166,6 +168,22 @@ class ComposeMenuButton: NSView {
       fileItem.target = self
       fileItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
       menu.addItem(fileItem)
+    }
+
+    if capabilities.contains(.commands) {
+      if !menu.items.isEmpty {
+        menu.addItem(.separator())
+      }
+
+      let commandsItem = NSMenuItem(
+        title: "Show Commands",
+        action: #selector(showCommands),
+        keyEquivalent: ""
+      )
+      commandsItem.target = self
+      commandsItem.image = NSImage(systemSymbolName: "slash.circle", accessibilityDescription: nil)
+      commandsItem.isEnabled = isCommandsEnabledProvider?() ?? false
+      menu.addItem(commandsItem)
     }
 
     if capabilities.contains(.sendSilently) {
@@ -210,6 +228,10 @@ class ComposeMenuButton: NSView {
 
   @objc private func toggleSendSilently() {
     onToggleSendSilently?()
+  }
+
+  @objc private func showCommands() {
+    delegate?.composeMenuButtonDidRequestCommands(self)
   }
 
   @objc private func openMediaPicker() {
@@ -588,6 +610,7 @@ extension CameraViewController: AVCapturePhotoCaptureDelegate {
 // MARK: - Delegate Protocol
 
 protocol ComposeMenuButtonDelegate: AnyObject {
+  func composeMenuButtonDidRequestCommands(_ button: ComposeMenuButton)
   func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage, url: URL)
   func composeMenuButton(_ button: ComposeMenuButton, didSelectVideo url: URL)
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL])

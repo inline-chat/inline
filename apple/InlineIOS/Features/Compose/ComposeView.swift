@@ -114,6 +114,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     return false
   }
 
+  func commandLaunchState() -> ComposeCommandLaunchState {
+    let state = peerId.map { ChatState.shared.getState(peer: $0) }
+    return ComposeCommandLaunchState(
+      text: textView.text ?? "",
+      isEditing: state?.editingMessageId != nil,
+      isForwarding: state?.forwardContext != nil,
+      hasAttachments: !attachmentItems.isEmpty,
+      hasPendingAttachments: !pendingVideoAttachments.isEmpty || hasActiveAttachmentUploads,
+      isVoiceActive: isVoiceActive
+    )
+  }
+
   var canSend: Bool {
     if isVoiceActive {
       return false
@@ -1344,7 +1356,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
 
-  private func clearInlineCommandText() {
+  func clearInlineCommandText() {
     clearDraft()
     stopDraftSaveTimer()
     textView.text = ""

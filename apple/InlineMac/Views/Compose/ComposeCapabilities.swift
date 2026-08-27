@@ -5,8 +5,9 @@ struct ComposeMenuCapabilities: OptionSet {
   static let camera = Self(rawValue: 1 << 1)
   static let files = Self(rawValue: 1 << 2)
   static let sendSilently = Self(rawValue: 1 << 3)
+  static let commands = Self(rawValue: 1 << 4)
 
-  static let chatDefault: Self = [.mediaPicker, .camera, .files, .sendSilently]
+  static let chatDefault: Self = [.mediaPicker, .camera, .files, .sendSilently, .commands]
   static let newThread: Self = [.mediaPicker, .files]
 }
 

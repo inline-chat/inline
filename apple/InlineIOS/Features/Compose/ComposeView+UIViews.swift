@@ -153,7 +153,7 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
     layer.cornerCurve = .continuous
     layer.masksToBounds = true
     isAccessibilityElement = true
-    accessibilityLabel = "Add attachment"
+    accessibilityLabel = "Add"
     accessibilityTraits = .button
 
     imageView.translatesAutoresizingMaskIntoConstraints = false

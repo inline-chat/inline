@@ -404,6 +404,9 @@ class GlassComposeAppKit: NSView {
       presentation: layout == .accessoryBar ? .accessoryBar : .standard
     )
     view.delegate = self
+    view.isCommandsEnabledProvider = { [weak self] in
+      self?.commandLaunchState().isEnabled == true
+    }
     view.onToggleSendSilently = { [weak self] in
       guard let self, case .chat = usage else { return }
       state.toggleSendSilently()
@@ -2658,6 +2661,51 @@ class GlassComposeAppKit: NSView {
     case openThread(LocalThreadCommandResult)
   }
 
+  private func commandLaunchState() -> ComposeCommandLaunchState {
+    guard case .chat = usage else { return .blocked }
+    return ComposeCommandLaunchState(
+      text: textEditor.plainText,
+      isEditing: state.editingMsgId != nil,
+      isForwarding: state.forwardContext != nil,
+      hasAttachments: !attachmentItems.isEmpty,
+      hasPendingAttachments: drafts2.hasPendingAttachments(peer: peerId),
+      isVoiceActive: voiceViewModel.isActive
+    )
+  }
+
+  private func showCommandsFromMenu() {
+    switch commandLaunchState() {
+      case .blocked:
+        return
+      case .empty:
+        insertSlashAndShowCommands()
+      case .text:
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Clear message to show commands?"
+        alert.informativeText = "Commands only work when the message is empty."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear and Show Commands")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+          guard response == .alertFirstButtonReturn else { return }
+          self?.clearInlineCommandText()
+          self?.insertSlashAndShowCommands()
+        }
+    }
+  }
+
+  private func insertSlashAndShowCommands() {
+    guard commandLaunchState() == .empty else { return }
+    if !textEditor.plainText.isEmpty {
+      clearInlineCommandText()
+    }
+    focusWindowIfNeeded()
+    focus()
+    textEditor.insertText("/")
+    _ = detectSlashCommandAtCursor()
+  }
+
   private func trimmedAttributedString(_ attributedString: NSAttributedString) -> NSAttributedString {
     let whitespaceSet = CharacterSet.whitespacesAndNewlines
     let fullString = attributedString.string as NSString
@@ -3412,6 +3460,10 @@ extension GlassComposeAppKit: ComposeEmojiButtonDelegate {
 // MARK: ComposeMenuButtonDelegate
 
 extension GlassComposeAppKit: ComposeMenuButtonDelegate {
+  func composeMenuButtonDidRequestCommands(_ button: ComposeMenuButton) {
+    showCommandsFromMenu()
+  }
+
   func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage, url: URL) {
     handleImageDropOrPaste(image, url)
   }

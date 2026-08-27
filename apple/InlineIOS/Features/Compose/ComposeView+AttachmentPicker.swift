@@ -20,6 +20,10 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
 
       let rootView = AttachmentPickerSheet(
         actions: AttachmentPickerActions(
+          showCommands: { [weak self] in
+            self?.showCommandsFromAttachmentPicker()
+          },
+          isCommandsEnabled: self.commandLaunchState().isEnabled,
           openCamera: { [weak self] in
             self?.presentCamera()
           },
@@ -77,6 +81,53 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
 
     attachmentPickerViewController = nil
     controller.dismiss(animated: animated, completion: completion)
+  }
+
+  private func showCommandsFromAttachmentPicker() {
+    switch commandLaunchState() {
+      case .blocked:
+        return
+      case .empty:
+        dismissAttachmentPicker(animated: true) { [weak self] in
+          self?.insertSlashAndShowCommands()
+        }
+      case .text:
+        dismissAttachmentPicker(animated: true) { [weak self] in
+          guard let self, let presenter = attachmentPickerPresenter() else { return }
+
+          let alert = UIAlertController(
+            title: "Clear message to show commands?",
+            message: "Commands only work when the message is empty.",
+            preferredStyle: .alert
+          )
+          alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+          alert.addAction(UIAlertAction(title: "Clear and Show Commands", style: .destructive) { [weak self] _ in
+            self?.clearInlineCommandText()
+            self?.insertSlashAndShowCommands()
+          })
+          presenter.present(alert, animated: true)
+        }
+    }
+  }
+
+  private func insertSlashAndShowCommands() {
+    guard commandLaunchState() == .empty else { return }
+    if !(textView.text ?? "").isEmpty {
+      clearInlineCommandText()
+    }
+
+    textView.attributedText = NSAttributedString(
+      string: "/",
+      attributes: [
+        .font: UIFont.systemFont(ofSize: 17),
+        .foregroundColor: UIColor.label,
+      ]
+    )
+    textView.selectedRange = NSRange(location: 1, length: 0)
+    resetTextViewState()
+    textView.textDidChange()
+    _ = textView.becomeFirstResponder()
+    textViewDidChange(textView)
   }
 
   func dismissAttachmentPickerIfPresented(animated: Bool, completion: (() -> Void)? = nil) {

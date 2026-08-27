@@ -50,6 +50,35 @@ public enum InlineCommandRegistry {
   }
 }
 
+/// One shared availability rule for opening the slash-command picker from Compose.
+/// Reply context is intentionally absent: commands can target a replied-to message.
+public enum ComposeCommandLaunchState: Equatable, Sendable {
+  case empty
+  case text
+  case blocked
+
+  public init(
+    text: String,
+    isEditing: Bool,
+    isForwarding: Bool,
+    hasAttachments: Bool,
+    hasPendingAttachments: Bool,
+    isVoiceActive: Bool
+  ) {
+    if isEditing || isForwarding || hasAttachments || hasPendingAttachments || isVoiceActive {
+      self = .blocked
+    } else if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      self = .empty
+    } else {
+      self = .text
+    }
+  }
+
+  public var isEnabled: Bool {
+    self != .blocked
+  }
+}
+
 public enum ComposeCommandSuggestion: Identifiable, Hashable, Sendable {
   case bot(PeerBotCommandSuggestion)
   case inline(InlineCommandDefinition)

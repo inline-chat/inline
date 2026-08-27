@@ -25,4 +25,34 @@ struct InlineCommandRegistryTests {
     #expect(InlineCommandRegistry.action(forStandaloneText: "hello /clear") == nil)
     #expect(InlineCommandRegistry.action(forStandaloneText: "/clear@bot") == nil)
   }
+
+  @Test("Compose command launch ignores reply context and blocks content modes")
+  func composeLaunchState() {
+    #expect(launchState(text: "") == .empty)
+    #expect(launchState(text: " \n") == .empty)
+    #expect(launchState(text: "draft") == .text)
+    #expect(launchState(text: "", isEditing: true) == .blocked)
+    #expect(launchState(text: "", isForwarding: true) == .blocked)
+    #expect(launchState(text: "", hasAttachments: true) == .blocked)
+    #expect(launchState(text: "", hasPendingAttachments: true) == .blocked)
+    #expect(launchState(text: "", isVoiceActive: true) == .blocked)
+  }
+
+  private func launchState(
+    text: String,
+    isEditing: Bool = false,
+    isForwarding: Bool = false,
+    hasAttachments: Bool = false,
+    hasPendingAttachments: Bool = false,
+    isVoiceActive: Bool = false
+  ) -> ComposeCommandLaunchState {
+    ComposeCommandLaunchState(
+      text: text,
+      isEditing: isEditing,
+      isForwarding: isForwarding,
+      hasAttachments: hasAttachments,
+      hasPendingAttachments: hasPendingAttachments,
+      isVoiceActive: isVoiceActive
+    )
+  }
 }

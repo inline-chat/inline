@@ -12,6 +12,8 @@ public enum AttachmentPickerRecentMediaChangeUserInfo {
 }
 
 public struct AttachmentPickerActions {
+  public let showCommands: () -> Void
+  public let isCommandsEnabled: Bool
   public let openCamera: () -> Void
   public let openLibrary: () -> Void
   public let openFiles: () -> Void
@@ -20,6 +22,8 @@ public struct AttachmentPickerActions {
   public let manageLimitedAccess: () -> Void
 
   public init(
+    showCommands: @escaping () -> Void,
+    isCommandsEnabled: Bool,
     openCamera: @escaping () -> Void,
     openLibrary: @escaping () -> Void,
     openFiles: @escaping () -> Void,
@@ -27,6 +31,8 @@ public struct AttachmentPickerActions {
     openRecentItems: @escaping ([AttachmentPickerModel.RecentItem]) -> Void,
     manageLimitedAccess: @escaping () -> Void
   ) {
+    self.showCommands = showCommands
+    self.isCommandsEnabled = isCommandsEnabled
     self.openCamera = openCamera
     self.openLibrary = openLibrary
     self.openFiles = openFiles
@@ -141,6 +147,14 @@ public struct AttachmentPickerSheet: View {
   private var actionList: some View {
     VStack(spacing: 18) {
       listActionButton(
+        title: "Commands",
+        systemImage: "slash.circle",
+        subtitle: "Use a slash command",
+        isEnabled: actions.isCommandsEnabled && model.selectedRecentItems.isEmpty,
+        action: actions.showCommands
+      )
+
+      listActionButton(
         title: "Files",
         systemImage: "folder",
         subtitle: "Browse iCloud Drive and on-device files",
@@ -177,6 +191,7 @@ public struct AttachmentPickerSheet: View {
     title: String,
     systemImage: String,
     subtitle: String? = nil,
+    isEnabled: Bool = true,
     action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
@@ -204,6 +219,8 @@ public struct AttachmentPickerSheet: View {
       .contentShape(.rect)
     }
     .buttonStyle(.plain)
+    .disabled(!isEnabled)
+    .opacity(isEnabled ? 1 : 0.38)
     .accessibilityLabel(title)
   }
 
