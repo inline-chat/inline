@@ -30,6 +30,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   private var rootEscapeUnsubscribe: (() -> Void)?
   private var toolbarStyleCancellable: AnyCancellable?
 
+  func openSpace(_ spaceID: Int64) {
+    nav3.selectSpace(spaceID)
+    showWindow(nil)
+    window?.makeKeyAndOrderFront(nil)
+  }
+
   @discardableResult
   static func showDefault(dependencies: AppDependencies) -> MainWindowController {
     if let controller = firstVisible {
