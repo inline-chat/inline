@@ -435,6 +435,7 @@ final class DeveloperSidebarPlaygroundModel {
         presentation: .init(folder),
         titleDimmed: false,
         size: itemSize,
+        unreadBadgeStyle: unreadBadgeStyle,
         disclosureExpanded: context.disclosureExpandedOverride ?? folder.isExpanded,
         isDropTargeted: context.isDropTargeted,
         forceHoverAppearance: context.forceHoverAppearance,
