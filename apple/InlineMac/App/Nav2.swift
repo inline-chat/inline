@@ -255,6 +255,18 @@ struct Nav2Entry: Codable {
     requestOpenChat(peer: peer, database: database)
   }
 
+  /// A newly-created chat already has a complete local projection. Commit its
+  /// route directly instead of preloading an empty history before navigation.
+  @MainActor
+  func openNewlyCreatedChat(peer: Peer, space: Space?) {
+    if let space {
+      openSpace(space)
+    } else {
+      openHomeTabIfNeeded()
+    }
+    navigate(to: .chat(peer: peer))
+  }
+
   private func scrollOpenChat(peer: Peer, targetMessageId: Int64, database: AppDatabase) {
     Task { @MainActor in
       do {

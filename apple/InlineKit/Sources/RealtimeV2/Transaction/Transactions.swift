@@ -120,7 +120,11 @@ actor Transactions {
     queueContinuation.yield(())
   }
 
-  func reset(owner expectedOwner: TransactionOwner, deletePersisted: Bool) async {
+  func reset(
+    owner expectedOwner: TransactionOwner,
+    deletePersisted: Bool,
+    invokeCancellationHandlers: Bool = true
+  ) async {
     guard owner == expectedOwner else { return }
 
     acceptsTransactions = false
@@ -136,8 +140,10 @@ actor Transactions {
     pendingAckMsgIds.removeAll()
     satisfiedBlockers.removeAll()
 
-    for wrapper in wrappers {
-      await wrapper.transaction.cancelled()
+    if invokeCancellationHandlers {
+      for wrapper in wrappers {
+        await wrapper.transaction.cancelled()
+      }
     }
     executionOwners.removeAll()
 

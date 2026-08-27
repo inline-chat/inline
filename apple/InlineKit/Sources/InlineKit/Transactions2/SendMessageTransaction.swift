@@ -245,6 +245,20 @@ public struct SendMessageTransaction: Transaction2 {
     #endif
   }
 
+  public func validateOptimisticState() async -> Bool {
+    do {
+      return try await AppDatabase.shared.reader.read { db in
+        try Message.fetchOne(
+          db,
+          key: ["messageId": context.temporaryMessageId, "chatId": context.chatId]
+        ) != nil
+      }
+    } catch {
+      log.error("Failed to validate optimistic message", error: error)
+      return false
+    }
+  }
+
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
     guard case let .sendMessage(response) = result else {
       throw TransactionExecutionError.invalid

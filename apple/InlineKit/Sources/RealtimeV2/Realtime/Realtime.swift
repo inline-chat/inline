@@ -151,6 +151,7 @@ public actor RealtimeV2 {
   private var transactionOwnerTransitionTask: Task<Void, Never>?
   private var transactionOwnerTransitionID: UUID?
   private var acceptsTransactions: Bool
+  private var isPreparingForTermination = false
   private var transactionRetryTask: Task<Void, Never>?
   private var transactionOperationsInProgress = 0
   private var transactionDrainWaiters: [CheckedContinuation<Void, Never>] = []
@@ -298,6 +299,7 @@ public actor RealtimeV2 {
   /// durable transactions or sync checkpoints needed by the next launch.
   public func prepareForTermination() async {
     log.info("Quiescing realtime for application termination")
+    isPreparingForTermination = true
     acceptsTransactions = false
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
@@ -329,7 +331,14 @@ public actor RealtimeV2 {
     await waitForTransactionOperationsToFinish()
 
     if let endingOwner {
-      await transactions.reset(owner: endingOwner, deletePersisted: false)
+      // Durable transactions and their optimistic database projections belong
+      // to the next launch. Detach process-owned execution without invoking the
+      // rollback-style cancellation hooks used by logout/account replacement.
+      await transactions.reset(
+        owner: endingOwner,
+        deletePersisted: false,
+        invokeCancellationHandlers: false
+      )
     } else {
       await transactions.waitForPersistence()
     }
@@ -925,7 +934,9 @@ public actor RealtimeV2 {
 
     guard isCurrentTransactionOwner(owner) else {
       resumeTransactionContinuation(for: transactionId, throwing: CancellationError())
-      await transactions.cancel(transactionId: transactionId)
+      if !shouldPreserveAdmittedTransactionDuringTermination(owner: owner) {
+        await transactions.cancel(transactionId: transactionId)
+      }
       return
     }
 
@@ -1055,6 +1066,12 @@ public actor RealtimeV2 {
     acceptsTransactions && transactionOwner == owner && auth.userId() == owner.accountID
   }
 
+  private func shouldPreserveAdmittedTransactionDuringTermination(
+    owner: TransactionOwner
+  ) -> Bool {
+    isPreparingForTermination && auth.userId() == owner.accountID
+  }
+
   private func hasActiveTransactionOwner() -> Bool {
     guard let transactionOwner else { return false }
     return isCurrentTransactionOwner(transactionOwner)
@@ -1166,29 +1183,71 @@ public actor RealtimeV2 {
   @discardableResult
   public nonisolated func sendQueued(_ transaction: any Transaction2) async -> TransactionId {
     let transactionId = TransactionId.generate()
+    _ = await admitQueuedTransaction(
+      transaction,
+      transactionId: transactionId,
+      validateOptimisticState: false
+    )
+    return transactionId
+  }
+
+  /// Send a transaction without waiting for its remote result, while reporting
+  /// whether local optimistic work and durable queue admission succeeded.
+  ///
+  /// Use this when the caller transfers ownership of recoverable user content
+  /// to the transaction and therefore must not clear its fallback on rejection.
+  @discardableResult
+  public nonisolated func sendQueuedIfAccepted(
+    _ transaction: any Transaction2
+  ) async -> TransactionId? {
+    let transactionId = TransactionId.generate()
+    guard await admitQueuedTransaction(
+      transaction,
+      transactionId: transactionId,
+      validateOptimisticState: true
+    ) else {
+      return nil
+    }
+    return transactionId
+  }
+
+  private nonisolated func admitQueuedTransaction(
+    _ transaction: any Transaction2,
+    transactionId: TransactionId,
+    validateOptimisticState: Bool
+  ) async -> Bool {
     guard !Task.isCancelled, let owner = await beginTransactionSubmission() else {
       await transaction.cancelled()
-      return transactionId
+      return false
     }
 
     guard await admitEphemeralTransactionWhileConnected(transaction) else {
       await transaction.failed(error: .timeout)
       await endTransactionOperation()
-      return transactionId
+      return false
     }
 
     guard !Task.isCancelled else {
       await transaction.cancelled()
       await endTransactionOperation()
-      return transactionId
+      return false
     }
 
     await transaction.optimistic()
 
+    if validateOptimisticState {
+      guard await transaction.validateOptimisticState() else {
+        log.error("Rejected queued transaction with missing optimistic state method=\(transaction.method)")
+        await transaction.cancelled()
+        await endTransactionOperation()
+        return false
+      }
+    }
+
     guard !Task.isCancelled, await isCurrentTransactionOwner(owner) else {
       await transaction.cancelled()
       await endTransactionOperation()
-      return transactionId
+      return false
     }
 
     let admission = await transactions.enqueue(
@@ -1202,19 +1261,22 @@ public actor RealtimeV2 {
       case .ownerUnavailable, .persistenceFailed:
         await transaction.cancelled()
         await endTransactionOperation()
-        return transactionId
+        return false
     }
 
     guard await isCurrentTransactionOwner(owner) else {
-      await transactions.cancel(transactionId: transactionId)
+      let preserveForNextLaunch = await shouldPreserveAdmittedTransactionDuringTermination(owner: owner)
+      if !preserveForNextLaunch {
+        await transactions.cancel(transactionId: transactionId)
+      }
       await endTransactionOperation()
-      return transactionId
+      return preserveForNextLaunch
     }
 
     await endTransactionOperation()
     log.trace("Queued transaction method=\(transaction.method)")
     await transactions.signalQueue()
-    return transactionId
+    return true
   }
 
   /// Returns a stream of connection state changes that can be consumed from any task.

@@ -100,6 +100,20 @@ public struct CreateChatTransaction: Transaction2 {
     }
   }
 
+  public func validateOptimisticState() async -> Bool {
+    guard let reservedChatId = context.reservedChatId else { return true }
+
+    do {
+      return try await AppDatabase.shared.reader.read { db in
+        try Chat.fetchOne(db, key: reservedChatId) != nil
+          && Dialog.fetchOne(db, key: Dialog.getDialogId(peerThreadId: reservedChatId)) != nil
+      }
+    } catch {
+      log.error("Failed to validate optimistic chat", error: error)
+      return false
+    }
+  }
+
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(
     TransactionExecutionError
   ) {
@@ -108,32 +122,34 @@ public struct CreateChatTransaction: Transaction2 {
     }
 
     do {
-      // Save chat and dialog to database
+      // Reconciliation must succeed before dependents are told that the chat
+      // exists. Preserve an optimistic first message written while creation was
+      // in flight, then atomically install the authoritative chat and dialog.
       try await AppDatabase.shared.dbWriter.write { db in
-        do {
-          var chat = Chat(from: response.chat)
-          if let existingChat = try Chat.fetchOne(db, key: chat.id), chat.lastMsgId == nil {
-            chat.lastMsgId = existingChat.lastMsgId
-          }
-          _ = try chat.saveFull(db)
-        } catch {
-          log.error("Failed to save chat", error: error)
+        var chat = Chat(from: response.chat)
+        if let existingChat = try Chat.fetchOne(db, key: chat.id), chat.lastMsgId == nil {
+          chat.lastMsgId = existingChat.lastMsgId
         }
-
-        do {
-          try response.dialog.saveFull(db)
-        } catch {
-          log.error("Failed to save dialog", error: error)
-        }
+        _ = try chat.saveFull(db)
+        try response.dialog.saveFull(db)
       }
     } catch {
-      log.error("Failed to save chat in transaction", error: error)
+      log.error("Failed to reconcile created chat", error: error)
+      throw TransactionExecutionError.invalid
     }
   }
 
   public func failed(error: TransactionError2) async {
     log.error("Failed to create chat", error: error)
+    await markOptimisticCreationFailed()
+  }
 
+  public func commitOutcomeUnknown() async {
+    log.warning("Chat creation outcome is unknown; retaining the local shell as failed")
+    await markOptimisticCreationFailed()
+  }
+
+  private func markOptimisticCreationFailed() async {
     guard let reservedChatId = context.reservedChatId else { return }
 
     do {
@@ -144,6 +160,25 @@ public struct CreateChatTransaction: Transaction2 {
       }
     } catch {
       log.error("Failed to mark chat creation as failed", error: error)
+    }
+  }
+
+  public func cancelled() async {
+    guard let reservedChatId = context.reservedChatId else { return }
+
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        guard let chat = try Chat.fetchOne(db, key: reservedChatId),
+              chat.createState == .pending
+        else {
+          return
+        }
+
+        try Dialog.deleteOne(db, key: Dialog.getDialogId(peerThreadId: reservedChatId))
+        try Chat.deleteOne(db, key: reservedChatId)
+      }
+    } catch {
+      log.error("Failed to remove cancelled optimistic chat", error: error)
     }
   }
 

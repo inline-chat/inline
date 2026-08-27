@@ -64,6 +64,47 @@ final class RealtimeSendTests {
     withExtendedLifetime(realtime) {}
   }
 
+  @Test("sendQueuedIfAccepted reports durable admission")
+  func testSendQueuedIfAcceptedReportsAdmission() async throws {
+    await SendTestRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let realtime = RealtimeV2(
+      transport: MockTransport(),
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let id = UUID()
+    let transactionID = await realtime.sendQueuedIfAccepted(SendTestTransaction(id: id))
+
+    #expect(transactionID != nil)
+    #expect(await SendTestRecorder.shared.didRunOptimistic(id))
+    withExtendedLifetime(realtime) {}
+  }
+
+  @Test("sendQueuedIfAccepted rejects missing optimistic state before persistence")
+  func testSendQueuedIfAcceptedRejectsMissingOptimisticState() async throws {
+    await OptimisticValidationRecorder.shared.reset()
+
+    let transport = MockTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: Auth.mocked(authenticated: true).handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let transactionID = await realtime.sendQueuedIfAccepted(RejectedOptimisticStateTransaction())
+
+    #expect(transactionID == nil)
+    #expect(await OptimisticValidationRecorder.shared.optimisticCount() == 1)
+    #expect(await OptimisticValidationRecorder.shared.cancelledCount() == 1)
+    #expect(await transport.sentMessages.isEmpty)
+    withExtendedLifetime(realtime) {}
+  }
+
   @Test("unauthenticated sendQueued rejects before optimistic work")
   func testUnauthenticatedSendQueuedRejectsBeforeOptimisticWork() async throws {
     await SendTestRecorder.shared.reset()
@@ -79,6 +120,26 @@ final class RealtimeSendTests {
     let id = UUID()
     _ = await realtime.sendQueued(SendTestTransaction(id: id))
 
+    #expect(await SendTestRecorder.shared.didRunOptimistic(id) == false)
+    withExtendedLifetime(realtime) {}
+  }
+
+  @Test("sendQueuedIfAccepted reports unauthenticated rejection")
+  func testSendQueuedIfAcceptedReportsUnauthenticatedRejection() async throws {
+    await SendTestRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: false)
+    let realtime = RealtimeV2(
+      transport: MockTransport(),
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let id = UUID()
+    let transactionID = await realtime.sendQueuedIfAccepted(SendTestTransaction(id: id))
+
+    #expect(transactionID == nil)
     #expect(await SendTestRecorder.shared.didRunOptimistic(id) == false)
     withExtendedLifetime(realtime) {}
   }
@@ -190,6 +251,29 @@ final class RealtimeSendTests {
     #expect(await AccountSwitchSendRecorder.shared.cancelledCount(id) == 1)
     #expect(await AccountSwitchSendRecorder.shared.applyCount(id) == 0)
     #expect(await AccountSwitchSendRecorder.shared.failedCount(id) == 0)
+    #expect(await transport.didDispatchAccountSwitchMutation() == false)
+    await realtime.loggedOut()
+  }
+
+  @Test("sendQueuedIfAccepted reports persistence rejection")
+  func testSendQueuedIfAcceptedReportsPersistenceRejection() async throws {
+    await AccountSwitchSendRecorder.shared.reset()
+    let auth = Auth.mocked(authenticated: true)
+    let transport = AccountSwitchSendTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage(),
+      persistenceHandler: FailingAccountSwitchSendPersistence()
+    )
+
+    let id = UUID()
+    let transactionID = await realtime.sendQueuedIfAccepted(AccountSwitchSendTransaction(id: id))
+
+    #expect(transactionID == nil)
+    #expect(await AccountSwitchSendRecorder.shared.optimisticCount(id) == 1)
+    #expect(await AccountSwitchSendRecorder.shared.cancelledCount(id) == 1)
     #expect(await transport.didDispatchAccountSwitchMutation() == false)
     await realtime.loggedOut()
   }
@@ -835,6 +919,7 @@ final class RealtimeSendTests {
   @Test("application termination preserves persisted mutations")
   func testTerminationPreservesPersistedMutations() async throws {
     await FailingDependencyResolver.shared.reset()
+    await TerminationProjectionRecorder.shared.reset()
     await FailingDependencyResolver.shared.setState(.blocked, for: .chatCreated(chatId: 77))
 
     let auth = Auth.mocked(authenticated: true)
@@ -872,7 +957,42 @@ final class RealtimeSendTests {
 
     #expect(await sendTask.value)
     #expect(await persistence.deletedAllOwners().isEmpty)
+    #expect(await TerminationProjectionRecorder.shared.wasCancelled() == false)
     #expect(await storage.clearCallCount() == 0)
+  }
+
+  @Test("application termination preserves a queued admission racing persistence")
+  func testTerminationPreservesQueuedAdmissionRacingPersistence() async throws {
+    await AccountSwitchSendRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let persistence = TerminationAdmissionPersistence()
+    let realtime = RealtimeV2(
+      transport: AccountSwitchSendTransport(),
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage(),
+      persistenceHandler: persistence
+    )
+    let transactionID = UUID()
+    let sendTask = Task {
+      await realtime.sendQueuedIfAccepted(AccountSwitchSendTransaction(id: transactionID))
+    }
+
+    try #require(await waitForCondition(timeout: .seconds(3)) {
+      await persistence.hasStartedSaving()
+    })
+
+    let terminationTask = Task {
+      await realtime.prepareForTermination()
+    }
+    try? await Task.sleep(for: .milliseconds(50))
+    await persistence.releaseSave()
+
+    #expect(await sendTask.value != nil)
+    await terminationTask.value
+    #expect(await AccountSwitchSendRecorder.shared.cancelledCount(transactionID) == 0)
+    #expect(await persistence.deletedAllOwners().isEmpty)
   }
 
   @Test("failed dependency wakes blocked send and fails it")
@@ -1768,6 +1888,41 @@ private actor AccountSwitchSendPersistence: TransactionPersistenceHandler {
   }
 }
 
+private actor TerminationAdmissionPersistence: TransactionPersistenceHandler {
+  private var startedSaving = false
+  private var saveWasReleased = false
+  private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+  private var deletedOwners: [TransactionOwner] = []
+
+  func saveTransaction(_ transaction: TransactionWrapper, for owner: TransactionOwner) async throws {
+    startedSaving = true
+    await withCheckedContinuation { continuation in
+      if saveWasReleased {
+        continuation.resume()
+      } else {
+        releaseWaiters.append(continuation)
+      }
+    }
+  }
+
+  func deleteTransaction(_ transactionId: TransactionId, for owner: TransactionOwner) async throws {}
+  func loadTransactions(for owner: TransactionOwner) async throws -> [TransactionWrapper] { [] }
+  func deleteAllTransactions(for owner: TransactionOwner) async throws {
+    deletedOwners.append(owner)
+  }
+
+  func hasStartedSaving() -> Bool { startedSaving }
+
+  func releaseSave() {
+    saveWasReleased = true
+    let waiters = releaseWaiters
+    releaseWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+  }
+
+  func deletedAllOwners() -> [TransactionOwner] { deletedOwners }
+}
+
 private actor FailingAccountSwitchSendPersistence: TransactionPersistenceHandler {
   struct SaveFailure: Error {}
 
@@ -1865,6 +2020,55 @@ private struct SendTestTransaction: Transaction, Codable {
   }
 }
 
+private struct RejectedOptimisticStateTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {}
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = .UNRECOGNIZED(9_999_976)
+  var type: TransactionKindType = .mutation()
+  var context = Context()
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
+
+  func optimistic() async {
+    await OptimisticValidationRecorder.shared.markOptimistic()
+  }
+
+  func validateOptimisticState() async -> Bool { false }
+
+  func cancelled() async {
+    await OptimisticValidationRecorder.shared.markCancelled()
+  }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
+}
+
+private actor OptimisticValidationRecorder {
+  static let shared = OptimisticValidationRecorder()
+
+  private var optimistic = 0
+  private var cancelled = 0
+
+  func reset() {
+    optimistic = 0
+    cancelled = 0
+  }
+
+  func markOptimistic() {
+    optimistic += 1
+  }
+
+  func markCancelled() {
+    cancelled += 1
+  }
+
+  func optimisticCount() -> Int { optimistic }
+  func cancelledCount() -> Int { cancelled }
+}
+
 private actor SendTestRecorder {
   static let shared = SendTestRecorder()
 
@@ -1959,6 +2163,24 @@ private actor ApplicationUnauthenticatedTransport: Transport {
 private let terminationBlockingMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_977)
 private let terminationPersistedMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_978)
 
+private actor TerminationProjectionRecorder {
+  static let shared = TerminationProjectionRecorder()
+
+  private var cancelled = false
+
+  func reset() {
+    cancelled = false
+  }
+
+  func markCancelled() {
+    cancelled = true
+  }
+
+  func wasCancelled() -> Bool {
+    cancelled
+  }
+}
+
 private actor TerminationApplyGate {
   static let shared = TerminationApplyGate()
 
@@ -2028,6 +2250,10 @@ private struct TerminationPersistedTransaction: Transaction, Codable {
 
   func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? { nil }
   func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
+
+  func cancelled() async {
+    await TerminationProjectionRecorder.shared.markCancelled()
+  }
 }
 
 private actor SendCancellationRecorder {

@@ -69,6 +69,36 @@ struct CreateThreadExecutorTests {
     #expect(await recorder.didRunDirect() == false)
     #expect(await recorder.reservedChatIds() == [777])
   }
+
+  @Test("reserved creation failure does not fall back to a second create")
+  func testReservedCreationFailureDoesNotCreateAnotherThread() async throws {
+    struct QueuedCreationFailure: Error {}
+
+    let recorder = CreateThreadExecutionRecorder()
+    let executor = CreateThreadExecutor(
+      reservedChatIdProvider: { 778 },
+      queuedCreateWithReservation: { reservedChatId in
+        await recorder.markReserved(reservedChatId)
+        throw QueuedCreationFailure()
+      },
+      directCreate: {
+        await recorder.markDirect()
+        return 554
+      }
+    )
+
+    do {
+      _ = try await executor.create()
+      Issue.record("Expected reserved creation to fail")
+    } catch is QueuedCreationFailure {
+      // Expected. A consumed reservation must retain single creation ownership.
+    } catch {
+      Issue.record("Unexpected error: \(error)")
+    }
+
+    #expect(await recorder.didRunDirect() == false)
+    #expect(await recorder.reservedChatIds() == [778])
+  }
 }
 
 private actor CreateThreadExecutionRecorder {

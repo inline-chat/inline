@@ -5,6 +5,7 @@ import InlineKit
 import InlineProtocol
 import InlineUI
 import Logger
+import os.signpost
 import SwiftUI
 
 struct AllChatsComposeSpace: Identifiable, Equatable {
@@ -107,6 +108,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   private let attachmentStore = NewThreadComposeAttachmentStore()
   private let log = Log.scoped("AllChatsNewThreadCompose")
+  private let performanceLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   private let mentionSource: DefaultNewThreadComposeMentionSource
   private let preferences: AllChatsComposePreferences
   private var lastSpaceVisibility: NewThreadComposeDestination.SpaceVisibility
@@ -293,7 +295,22 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     }
 
     isSubmitting = true
-    defer { isSubmitting = false }
+    let signpostID = OSSignpostID(log: performanceLog)
+    os_signpost(
+      .begin,
+      log: performanceLog,
+      name: "AllChatsNewThreadSubmit",
+      signpostID: signpostID
+    )
+    defer {
+      isSubmitting = false
+      os_signpost(
+        .end,
+        log: performanceLog,
+        name: "AllChatsNewThreadSubmit",
+        signpostID: signpostID
+      )
+    }
 
     do {
       try await validateGroupMentions(in: draft)
@@ -321,11 +338,114 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       ))
     }
 
+    let participantIDs = draft.destination.isPublic
+      ? []
+      : Array(draft.mentionedUserIDs.union([draft.authorUserID])).sorted()
+
+    if draft.attachments.isEmpty, draft.mentionedGroupIDs.isEmpty {
+      return await submitOptimistically(
+        draft,
+        participantIDs: participantIDs,
+        signpostID: signpostID
+      )
+    }
+
+    return await submitAfterAuthoritativeCreation(
+      draft,
+      participantIDs: participantIDs,
+      signpostID: signpostID
+    )
+  }
+
+  /// The common text/user-mention path is fully local until transaction replay:
+  /// create a reserved shell, project the message, and navigate immediately.
+  /// The first-message transaction is durably blocked on server chat creation.
+  private func submitOptimistically(
+    _ draft: PreparedNewThreadDraft,
+    participantIDs: [Int64],
+    signpostID: OSSignpostID
+  ) async -> Result<InlineKit.Peer, NewThreadComposeSubmissionFailure> {
     var createdPeer: InlineKit.Peer?
     do {
-      let participantIDs = draft.destination.isPublic
-        ? []
-        : Array(draft.mentionedUserIDs.union([draft.authorUserID])).sorted()
+      let chatID = try await dependencies.realtimeV2.createThreadLocally(
+        title: nil,
+        placeholderTitle: placeholderTitle(for: draft),
+        emoji: nil,
+        isPublic: draft.destination.isPublic,
+        spaceId: draft.destination.spaceID,
+        participants: participantIDs
+      )
+      let peer: InlineKit.Peer = .thread(id: chatID)
+      createdPeer = peer
+      os_signpost(
+        .event,
+        log: performanceLog,
+        name: "AllChatsLocalThreadReady",
+        signpostID: signpostID,
+        "%{public}s",
+        "optimistic"
+      )
+
+      guard await admitTextSend(draft, peer: peer, chatID: chatID) else {
+        log.error("New-thread durable send admission failed after local creation")
+        installDraft(draft, on: peer)
+        openCreatedThread(peer, destination: draft.destination)
+        queueDialogOpen(peer)
+        os_signpost(
+          .event,
+          log: performanceLog,
+          name: "AllChatsCreatedRouteStateUpdated",
+          signpostID: signpostID,
+          "%{public}s",
+          "recovery_draft"
+        )
+        await Drafts2.shared.flush()
+        return .failure(NewThreadComposeSubmissionFailure(
+          message: "The thread was created, but the message couldn't be queued. It was saved as a draft.",
+          createdPeer: peer
+        ))
+      }
+      os_signpost(
+        .event,
+        log: performanceLog,
+        name: "AllChatsFirstMessageAdmitted",
+        signpostID: signpostID,
+        "%{public}s",
+        "durable"
+      )
+
+      openCreatedThread(peer, destination: draft.destination)
+      queueDialogOpen(peer)
+      os_signpost(
+        .event,
+        log: performanceLog,
+        name: "AllChatsCreatedRouteStateUpdated",
+        signpostID: signpostID,
+        "%{public}s",
+        "message_ready"
+      )
+      return .success(peer)
+    } catch {
+      log.error("Optimistic new-thread submission failed", error: error)
+      return .failure(NewThreadComposeSubmissionFailure(
+        message: createdPeer == nil
+          ? "Failed to create thread. Your message is still here."
+          : "The thread was created, but the message couldn't be sent. It was saved as a draft.",
+        createdPeer: createdPeer
+      ))
+    }
+  }
+
+  /// Media and group access still require their existing authoritative order.
+  /// We nevertheless skip chat preloading and yield while the recovery draft is
+  /// flushed. The route commits once its first frame owns a message or recovery.
+  private func submitAfterAuthoritativeCreation(
+    _ draft: PreparedNewThreadDraft,
+    participantIDs: [Int64],
+    signpostID: OSSignpostID
+  ) async -> Result<InlineKit.Peer, NewThreadComposeSubmissionFailure> {
+    var createdPeer: InlineKit.Peer?
+    do {
       let result = try await dependencies.realtimeV2.send(.createChat(
         title: nil,
         placeholderTitle: placeholderTitle(for: draft),
@@ -341,12 +461,20 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       let chatID = response.chat.id
       let peer: InlineKit.Peer = .thread(id: chatID)
       createdPeer = peer
-      installDraft(draft, on: peer)
-      openCreatedThread(peer, destination: draft.destination)
-
-      await dependencies.realtimeV2.sendQueued(
-        .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
+      os_signpost(
+        .event,
+        log: performanceLog,
+        name: "AllChatsLocalThreadReady",
+        signpostID: signpostID,
+        "%{public}s",
+        "authoritative"
       )
+
+      installDraft(draft, on: peer)
+
+      // Preserve a disk-backed recovery copy before any legacy attachment
+      // transaction owns the content, while yielding the main actor.
+      await Drafts2.shared.flush()
 
       if !draft.destination.isPublic {
         for groupID in draft.mentionedGroupIDs.sorted() {
@@ -357,19 +485,65 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         }
       }
 
-      guard admitSend(draft, peer: peer, chatID: chatID) else {
+      let admitted = if draft.attachments.isEmpty {
+        await admitTextSend(draft, peer: peer, chatID: chatID)
+      } else {
+        admitAttachmentSends(draft, peer: peer, chatID: chatID)
+      }
+      guard admitted else {
         log.error("New-thread send transaction admission failed after thread creation")
+        openCreatedThread(peer, destination: draft.destination)
+        queueDialogOpen(peer)
+        os_signpost(
+          .event,
+          log: performanceLog,
+          name: "AllChatsCreatedRouteStateUpdated",
+          signpostID: signpostID,
+          "%{public}s",
+          "recovery_draft"
+        )
+        await Drafts2.shared.flush()
         return .failure(NewThreadComposeSubmissionFailure(
           message: "The thread was created, but the message couldn't be queued. It was saved as a draft.",
           createdPeer: peer
         ))
       }
 
+      os_signpost(
+        .event,
+        log: performanceLog,
+        name: "AllChatsFirstMessageAdmitted",
+        signpostID: signpostID,
+        "%{public}s",
+        draft.attachments.isEmpty ? "durable" : "legacy_media"
+      )
       Drafts2.shared.clear(peer: peer)
-      Drafts2.shared.flushBlocking()
+      await Drafts2.shared.flush()
+      openCreatedThread(peer, destination: draft.destination)
+      queueDialogOpen(peer)
+      os_signpost(
+        .event,
+        log: performanceLog,
+        name: "AllChatsCreatedRouteStateUpdated",
+        signpostID: signpostID,
+        "%{public}s",
+        "message_ready"
+      )
       return .success(peer)
     } catch {
       log.error("New-thread submission failed", error: error)
+      if let createdPeer {
+        openCreatedThread(createdPeer, destination: draft.destination)
+        queueDialogOpen(createdPeer)
+        os_signpost(
+          .event,
+          log: performanceLog,
+          name: "AllChatsCreatedRouteStateUpdated",
+          signpostID: signpostID,
+          "%{public}s",
+          "recovery_draft"
+        )
+      }
       return .failure(NewThreadComposeSubmissionFailure(
         message: createdPeer == nil
           ? "Failed to create thread. Your message is still here."
@@ -411,44 +585,55 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     for attachment in draft.attachments {
       Drafts2.shared.appendAttachment(peer: peer, media: attachment.media, id: attachment.id)
     }
-    Drafts2.shared.flushBlocking()
   }
 
   private func openCreatedThread(
     _ peer: InlineKit.Peer,
     destination: NewThreadComposeDestination
   ) {
-    guard let spaceID = destination.spaceID else {
-      dependencies.requestOpenChatInHome(peer: peer)
-      return
+    let spaceName = destination.spaceID.flatMap { spaceID in
+      spaces.first(where: { $0.id == spaceID })?.title
     }
+    dependencies.openNewlyCreatedChat(
+      peer: peer,
+      spaceId: destination.spaceID,
+      spaceName: spaceName
+    )
+  }
 
-    let spaceName = spaces.first(where: { $0.id == spaceID })?.title ?? "Space"
-    if dependencies.nav2 != nil {
-      dependencies.openSpaceContext(id: spaceID, name: spaceName, keeping: peer)
-    } else if let nav3 = dependencies.nav3 {
-      nav3.selectSpace(spaceID)
-      dependencies.requestOpenChat(peer: peer)
-    } else {
-      dependencies.openSpaceContext(id: spaceID, name: spaceName, keeping: peer)
+  private func queueDialogOpen(_ peer: InlineKit.Peer) {
+    let realtimeV2 = dependencies.realtimeV2
+    Task {
+      await realtimeV2.sendQueued(
+        .updateDialogOpen(peerId: peer, open: true, requiresChatCreated: true)
+      )
     }
   }
 
-  private func admitSend(_ draft: PreparedNewThreadDraft, peer: InlineKit.Peer, chatID: Int64) -> Bool {
+  private func admitTextSend(
+    _ draft: PreparedNewThreadDraft,
+    peer: InlineKit.Peer,
+    chatID: Int64
+  ) async -> Bool {
     let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       ? nil
       : draft.text
-    if draft.attachments.isEmpty {
-      return dependencies.transactions.mutate(transaction: .sendMessage(
-        TransactionSendMessage(
-          text: text,
-          peerId: peer,
-          chatId: chatID,
-          entities: draft.entities
-        )
-      ))
-    }
+    return await dependencies.realtimeV2.sendQueuedIfAccepted(.sendMessage(
+      text: text,
+      peerId: peer,
+      chatId: chatID,
+      entities: draft.entities
+    )) != nil
+  }
 
+  private func admitAttachmentSends(
+    _ draft: PreparedNewThreadDraft,
+    peer: InlineKit.Peer,
+    chatID: Int64
+  ) -> Bool {
+    let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      ? nil
+      : draft.text
     for (index, attachment) in draft.attachments.enumerated() {
       let admitted = dependencies.transactions.mutate(transaction: .sendMessage(
         TransactionSendMessage(
@@ -464,9 +649,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         return false
       }
 
-      // Once a transaction is durably admitted it owns this portion of the
-      // content. Remove only that portion from recovery so a later admission
-      // failure cannot make the fallback draft duplicate already-queued work.
+      // Once the existing media transaction accepts this portion, remove only
+      // that portion from recovery so a later admission failure cannot make the
+      // fallback draft duplicate already-queued work.
       Drafts2.shared.removeAttachment(peer: peer, id: attachment.id)
       if index == 0 {
         let revision = Drafts2.shared.updateText(peer: peer, text: "")

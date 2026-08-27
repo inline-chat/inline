@@ -97,6 +97,10 @@ public protocol Transaction: Sendable, Codable {
   /// Optimistically update the database
   func optimistic() async
 
+  /// Confirms that optimistic state required for safe queue ownership exists.
+  /// The default accepts transactions that do not require a local projection.
+  func validateOptimisticState() async -> Bool
+
   /// Called when the transaction fails to execute
   func failed(error: TransactionError) async
 
@@ -150,6 +154,7 @@ func transactionFailureLogScope(method: InlineProtocol.Method) -> String {
 public extension Transaction {
   func cancelled() async {}
   func optimistic() async {}
+  func validateOptimisticState() async -> Bool { true }
   func failed(error: TransactionError) async {
     Log.scoped(transactionFailureLogScope(method: method))
       .error("Transaction failed", error: error)
