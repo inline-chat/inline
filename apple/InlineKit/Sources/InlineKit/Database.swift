@@ -96,6 +96,13 @@ public final class AppDatabase: @unchecked Sendable {
   internal func markCredentialStoragePrepared(for key: String?) {
     writerLock.withLock { preparedDatabaseKey = key }
   }
+
+  /// Closes the on-disk pool after its admitted work completes.
+  /// The promotable in-memory fallback is process-local and intentionally remains open.
+  public func closePersistentStorage() throws {
+    guard let databasePool = dbWriter as? DatabasePool else { return }
+    try databasePool.close()
+  }
 }
 
 // MARK: - Migrations
