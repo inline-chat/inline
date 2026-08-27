@@ -157,7 +157,7 @@ function usage(): string {
     "  --source-build <build>             Frozen source build number (printed automatically in resume commands)",
     "  --source-snapshot <sha256>         Frozen experimental source snapshot (printed automatically when resuming)",
     "  --artifact-build <build>           Frozen tip artifact build number (printed automatically when resuming)",
-    "  --upload-sentry-dsyms            Upload dSYMs to Sentry (opt-in; requires SENTRY_AUTH_TOKEN)",
+    "  --upload-sentry-dsyms            Upload dSYMs to Sentry (default; retained for explicitness)",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
     "  -h, --help                       Show help",
@@ -357,9 +357,6 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (!rollback && !dropBuild) {
     if (uploadSentryDsyms && skip.has("upload-sentry-dsyms")) {
       die("Use either --upload-sentry-dsyms or --skip upload-sentry-dsyms, not both.");
-    }
-    if (!uploadSentryDsyms) {
-      skip.add("upload-sentry-dsyms");
     }
   }
 
@@ -1434,8 +1431,8 @@ async function main() {
       if (!commandExists("ditto")) {
         ui.info("Warning: upload-sentry-dsyms is best-effort and will fail because `ditto` is missing.");
       }
-      if (!process.env.SENTRY_AUTH_TOKEN) {
-        ui.info("Warning: upload-sentry-dsyms is best-effort and will fail unless SENTRY_AUTH_TOKEN is present in the release process environment.");
+      if (!process.env.SENTRY_AUTH_TOKEN && !commandExists("sentry")) {
+        ui.info("Warning: upload-sentry-dsyms is best-effort and needs SENTRY_AUTH_TOKEN or the authenticated modern `sentry` CLI.");
       }
     }
     if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "post-check")) {
@@ -1889,7 +1886,8 @@ async function main() {
         ui.info("Would run:");
         ui.info(`  bun run scripts/macos/upload-dsyms.ts --search-root ${resolve(ctx.derivedData, "Build/Products/Release")}`);
         ui.info("Auth:");
-        ui.info("  Requires SENTRY_AUTH_TOKEN in the release process environment; the token is never placed in command arguments.");
+        ui.info("  Uses SENTRY_AUTH_TOKEN, or falls back to the authenticated modern `sentry` CLI.");
+        ui.info("  The token is kept in process memory and never placed in command arguments.");
         ui.info("Optional env:");
         ui.info("  SENTRY_ORG (default: usenoor), SENTRY_PROJECT (default: inline-ios-macos), SENTRY_API_URL (default: https://us.sentry.io)");
         ui.info("Behavior:");

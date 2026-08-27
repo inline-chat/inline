@@ -42,8 +42,8 @@ function usage(): string {
     "  -h, --help             Show help",
     "",
     "Authentication:",
-    "  Export SENTRY_AUTH_TOKEN for the upload process. The token is passed to curl over stdin",
-    "  and is never accepted on the command line or printed.",
+    "  Uses SENTRY_AUTH_TOKEN when present, otherwise the authenticated `sentry auth token` value.",
+    "  The token is passed to curl over stdin and is never accepted on the command line or printed.",
     "",
     "Examples:",
     "  bun run scripts/macos/upload-dsyms.ts --build 5182 --channel tip --dry-run",
@@ -175,9 +175,25 @@ function commandExists(cmd: string): boolean {
   return res.exitCode === 0;
 }
 
+export function selectSentryAuthToken(
+  environmentToken: string | undefined,
+  readManagedToken: () => string | undefined,
+): string | undefined {
+  const token = environmentToken?.trim();
+  if (token) return token;
+  return readManagedToken()?.trim() || undefined;
+}
+
 function resolveAuthToken(): string {
-  const token = process.env.SENTRY_AUTH_TOKEN?.trim();
-  if (!token) die("Missing Sentry auth. Export SENTRY_AUTH_TOKEN for this upload process.");
+  const token = selectSentryAuthToken(process.env.SENTRY_AUTH_TOKEN, () => {
+    if (!commandExists("sentry")) return undefined;
+    const result = spawnSync({ cmd: ["sentry", "auth", "token"], stdout: "pipe", stderr: "pipe" });
+    if (result.exitCode !== 0) return undefined;
+    return new TextDecoder().decode(result.stdout);
+  });
+  if (!token) {
+    die("Missing Sentry auth. Set SENTRY_AUTH_TOKEN or log in with the modern `sentry` CLI.");
+  }
   return token;
 }
 
@@ -330,4 +346,4 @@ async function main() {
   console.log(`Upload archives retained at ${tempDir}`);
 }
 
-await main();
+if (import.meta.main) await main();

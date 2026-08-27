@@ -11,7 +11,6 @@ Options:
   --archive-path <path>  Path to an .xcarchive bundle. Uploads dSYMs from <path>/dSYMs.
   --search-root <path>   Directory to scan recursively for .dSYM bundles.
   --required-dsym <name> Require a named dSYM bundle, such as InlineIOS.app.dSYM.
-  --auth-token <token>   Sentry auth token. Defaults to SENTRY_AUTH_TOKEN or `sentry auth token`.
   --org <slug>           Sentry org slug. Default: usenoor
   --project <slug>       Sentry project slug. Default: inline-ios-macos
   --api-url <url>        Sentry base URL. Default: https://us.sentry.io
@@ -41,10 +40,6 @@ while [ "$#" -gt 0 ]; do
       ;;
     --required-dsym)
       required_dsym="${2:-}"
-      shift 2
-      ;;
-    --auth-token)
-      auth_token="${2:-}"
       shift 2
       ;;
     --org)
@@ -124,17 +119,46 @@ if ! command -v ditto >/dev/null 2>&1; then
   exit 1
 fi
 
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/inline-sentry-dsyms.XXXXXX")"
-cleanup() {
-  rm -rf "$tmp_dir"
+tmp_dir=""
+if [ "$dry_run" -ne 1 ]; then
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/inline-sentry-dsyms.XXXXXX")"
+fi
+
+sentry_curl() {
+  printf 'Authorization: Bearer %s\n' "$auth_token" | curl --header @- "$@"
 }
-trap cleanup EXIT INT TERM
+
+verify_uuid() {
+  local uuid="$1"
+  local normalized_uuid
+  local attempt=1
+  local response
+  local normalized_response
+  normalized_uuid="$(printf '%s' "$uuid" | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+  while [ "$attempt" -le 6 ]; do
+    if response="$(sentry_curl --fail-with-body --silent --show-error --get \
+      "$api_url/api/0/projects/$org/$project/files/dsyms/" \
+      --data-urlencode "query=$uuid")"; then
+      normalized_response="$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+      if printf '%s' "$normalized_response" | grep -q "$normalized_uuid"; then
+        echo "Verified $uuid"
+        return 0
+      fi
+    fi
+    if [ "$attempt" -lt 6 ]; then
+      sleep 2
+    fi
+    attempt=$((attempt + 1))
+  done
+  echo "Sentry did not expose uploaded dSYM UUID $uuid after 12 seconds" >&2
+  return 1
+}
 
 count=0
 
 while IFS= read -r -d '' dsym; do
   base_name="$(basename "$dsym")"
-  zip_path="$tmp_dir/$base_name.zip"
+  uuids=""
 
   if command -v xcrun >/dev/null 2>&1; then
     if ! uuids="$(xcrun dwarfdump --uuid "$dsym" 2>&1)"; then
@@ -152,13 +176,19 @@ while IFS= read -r -d '' dsym; do
   fi
 
   echo "Uploading $base_name to $org/$project"
+  zip_path="$tmp_dir/$base_name.zip"
   ditto -c -k --sequesterRsrc --keepParent "$dsym" "$zip_path"
 
-  curl --fail-with-body --silent --show-error \
+  sentry_curl --fail-with-body --silent --show-error \
     -X POST \
-    -H "Authorization: Bearer $auth_token" \
     -F "file=@$zip_path;type=application/zip" \
     "$api_url/api/0/projects/$org/$project/files/dsyms/" >/dev/null
+
+  if [ -n "$uuids" ]; then
+    printf '%s\n' "$uuids" | awk '/UUID:/ { print $2 }' | while IFS= read -r uuid; do
+      verify_uuid "$uuid"
+    done
+  fi
 
   count=$((count + 1))
 done < <(find "$search_root" -type d -name '*.dSYM' -print0)
@@ -172,4 +202,5 @@ if [ "$dry_run" -eq 1 ]; then
   echo "Found $count dSYM bundle(s) under $search_root"
 else
   echo "Uploaded $count dSYM bundle(s) from $search_root"
+  echo "Upload archives retained at $tmp_dir"
 fi

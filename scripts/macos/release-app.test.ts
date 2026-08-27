@@ -141,6 +141,15 @@ describe("release integrity helpers", () => {
     expect(updateAppcastSource).toContain("elif commit:");
   });
 
+  test("release dSYM upload is default and never blocks publication", () => {
+    expect(releaseAppSource).not.toContain('if (!uploadSentryDsyms) {\n      skip.add("upload-sentry-dsyms");');
+    const taskStart = releaseAppSource.indexOf('id: "upload-sentry-dsyms"');
+    const taskEnd = releaseAppSource.indexOf('id: "post-check"', taskStart);
+    const taskSource = releaseAppSource.slice(taskStart, taskEnd);
+    expect(taskSource).toContain("softFail: true");
+    expect(taskSource).toContain("authenticated modern `sentry` CLI");
+  });
+
   test("app and DMG identity compares every release-bearing field", () => {
     expect(metadataMismatches(metadata(), metadata())).toEqual([]);
     expect(metadataMismatches(metadata(), metadata({
