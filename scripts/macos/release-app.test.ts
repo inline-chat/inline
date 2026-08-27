@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
-import { decideAppcastFetch, nextTipArtifactBuild, releaseIntegrityGateErrors, safeResumeTask } from "./release-app";
+import {
+  appcastXmlForBuildAllocation,
+  decideAppcastFetch,
+  nextTipArtifactBuild,
+  releaseIntegrityGateErrors,
+  safeResumeTask,
+} from "./release-app";
 
 const releaseAppSource = readFileSync(resolve(import.meta.dir, "release-app.ts"), "utf8");
 const buildDirectSource = readFileSync(resolve(import.meta.dir, "build-direct.sh"), "utf8");
@@ -43,12 +49,28 @@ describe("release integrity helpers", () => {
     expect(() => decideAppcastFetch(22, 500, false)).toThrow("HTTP 500");
   });
 
+  test("first tip publication does not read a missing appcast", () => {
+    let readCount = 0;
+    const readExisting = () => {
+      readCount += 1;
+      return "<rss><channel><item><sparkle:version>5225</sparkle:version></item></channel></rss>";
+    };
+
+    expect(appcastXmlForBuildAllocation("create-new", readExisting)).toBeUndefined();
+    expect(readCount).toBe(0);
+    expect(appcastXmlForBuildAllocation("use-existing", readExisting)).toContain("5225");
+    expect(readCount).toBe(1);
+  });
+
   test("tip builds stay integer and advance past feed collisions", () => {
     const appcast = (versions: string[]) => `<rss><channel>${versions.map((version) => `<item><sparkle:version>${version}</sparkle:version></item>`).join("")}</channel></rss>`;
+    expect(nextTipArtifactBuild("5226", undefined, false)).toBe("5226");
+    expect(nextTipArtifactBuild("5226", undefined, true)).toBe("5227");
     expect(nextTipArtifactBuild("5226", appcast(["5182"]), false)).toBe("5226");
     expect(nextTipArtifactBuild("5226", appcast(["5182"]), true)).toBe("5227");
     expect(nextTipArtifactBuild("5227", appcast(["5227"]), false)).toBe("5228");
     expect(nextTipArtifactBuild("5226", appcast(["5229"]), true)).toBe("5230");
+    expect(() => nextTipArtifactBuild("5226", appcast([]), false)).toThrow("has no versions");
     expect(() => nextTipArtifactBuild("5226", appcast(["5226.1"]), true)).toThrow("unsupported");
   });
 

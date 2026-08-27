@@ -572,8 +572,21 @@ export function decideAppcastFetch(
   throw new Error(`Unable to fetch the existing appcast (curl exit ${exitCode}, HTTP ${httpStatus || "unknown"}). Refusing to replace feed history.`);
 }
 
-export function nextTipArtifactBuild(baseBuild: string, appcastXml: string, experimental: boolean): string {
+export function appcastXmlForBuildAllocation(
+  decision: AppcastFetchDecision,
+  readExistingAppcast: () => string,
+): string | undefined {
+  return decision === "create-new" ? undefined : readExistingAppcast();
+}
+
+export function nextTipArtifactBuild(baseBuild: string, appcastXml: string | undefined, experimental: boolean): string {
   if (!/^\d+$/.test(baseBuild)) throw new Error(`Invalid base build for tip release: ${baseBuild}`);
+  const base = Number.parseInt(baseBuild, 10);
+  if (appcastXml === undefined) {
+    const first = experimental ? base + 1 : base;
+    if (first > 2_147_483_647) throw new Error("Tip build allocation exceeded the Apple client Int32 limit.");
+    return String(first);
+  }
   const versions = [...appcastXml.matchAll(/<(?:[A-Za-z_][\w.-]*:)?version\b[^>]*>\s*([^<]+?)\s*<\//g)]
     .map((match) => match[1]?.trim() ?? "")
     .filter(Boolean);
@@ -583,7 +596,6 @@ export function nextTipArtifactBuild(baseBuild: string, appcastXml: string, expe
     if (!/^\d+$/.test(version)) throw new Error(`Cannot safely allocate after unsupported tip build version: ${version}`);
     return Number.parseInt(version, 10);
   });
-  const base = Number.parseInt(baseBuild, 10);
   const latest = Math.max(...parsed);
   const next = experimental ? Math.max(base + 1, latest + 1) : Math.max(base, latest + 1);
   if (next > 2_147_483_647) throw new Error("Tip build allocation exceeded the Apple client Int32 limit.");
@@ -1370,8 +1382,12 @@ async function main() {
     if (!ctx.rollback && !ctx.dropBuild) {
       if (ctx.channel === "tip" && buildWillRun(ctx) && !ctx.artifactBuild) {
         ctx.appcastUrl = defaultAppcastUrl(ctx);
-        fetchExistingAppcast(ctx, ui);
-        ctx.artifactBuild = nextTipArtifactBuild(ctx.sourceBuild, readFileSync(ctx.appcastPath, "utf8"), ctx.experimentalTip);
+        const fetchDecision = fetchExistingAppcast(ctx, ui);
+        const appcastXml = appcastXmlForBuildAllocation(
+          fetchDecision,
+          () => readFileSync(ctx.appcastPath, "utf8"),
+        );
+        ctx.artifactBuild = nextTipArtifactBuild(ctx.sourceBuild, appcastXml, ctx.experimentalTip);
       }
       if (ctx.experimentalTip && buildWillRun(ctx)) {
         if (!ctx.artifactBuild) {
