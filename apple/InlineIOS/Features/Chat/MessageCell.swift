@@ -1,5 +1,5 @@
-import InlineKit
 import InlineIOSUI
+import InlineKit
 import InlineTheme
 import InlineUI
 import Logger
@@ -18,18 +18,29 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     let layoutDirection: UITraitEnvironmentLayoutDirection
   }
 
+  private struct PendingV2Snapshot {
+    let message: FullMessage
+    let animatedReactionEmoji: String?
+  }
+
   static let reuseIdentifier = "MessageCell"
   static let sendAnimationHorizontalPadding: CGFloat = 8
   private static let contentTransform = CGAffineTransform(scaleX: 1, y: -1)
   private static let insertionContentTransform = contentTransform.scaledBy(x: 0.985, y: 0.985)
 
   var messageView: UIMessageView?
+  private var messageRootView: UIView?
   var avatarView: UserAvatarView?
   var avatarSpacerView: UIView?
 
   weak var delegate: MessageCellDelegate?
   var onUserTap: ((Int64) -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
+  var onV2GeometryChange: ((
+    MessageCollectionViewCell,
+    MessageBubbleLayoutV2,
+    MessageBubbleLayoutV2
+  ) -> Void)?
   private var panGesture: UIPanGestureRecognizer!
   private var swipeActive = false
   private var initialTranslation: CGFloat = 0
@@ -40,6 +51,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var selfSizingTraitSignature: SelfSizingTraitSignature?
   private var collectionWidth: CGFloat = 0
   private var theme: IOSThemeSnapshot?
+  private var messageViewImplementation: MessageViewImplementation = .legacy
+  private var pendingV2Snapshot: PendingV2Snapshot?
+  private var v2SnapshotDisplayLink: CADisplayLink?
 
   // MARK: - Props
 
@@ -121,7 +135,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     displayMode: MessageDisplayMode = .normal,
     animateTail: Bool = true,
     theme: IOSThemeSnapshot,
-    initialMetadataStatus: MessageSendingStatus? = nil
+    initialMetadataStatus: MessageSendingStatus? = nil,
+    messageViewImplementation: MessageViewImplementation = .legacy
   ) {
     let newOutgoing = message.message.out == true
     var animatedReactionEmoji: String?
@@ -131,8 +146,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
          self.firstInGroup == firstInGroup, self.lastInGroup == lastInGroup,
          self.spaceId == spaceId, outgoing == newOutgoing, self.displayMode == displayMode,
          self.theme == theme,
-         abs(self.collectionWidth - collectionWidth) <= 0.5 {
+         self.messageViewImplementation == messageViewImplementation,
+         abs(self.collectionWidth - collectionWidth) <= 0.5
+      {
         // skip only if everything is exact match including outgoing state and layout width
+        if let pendingV2Snapshot, pendingV2Snapshot.message != message {
+          cancelPendingV2Snapshot()
+        }
         return
       }
 
@@ -144,7 +164,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
          outgoing == newOutgoing,
          displayMode == self.displayMode,
          self.theme == theme,
-         let messageView {
+         self.messageViewImplementation == messageViewImplementation,
+         let messageView
+      {
         prevText = message.displayText
         self.message = message
         canReply = message.canReply && displayMode != .threadAnchor
@@ -162,8 +184,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
            outgoing == newOutgoing,
            displayMode == self.displayMode,
            self.theme == theme,
+           self.messageViewImplementation == messageViewImplementation,
            let messageView,
-           messageView.canUpdateReactionsInPlace(to: message) {
+           messageView.canUpdateReactionsInPlace(to: message)
+        {
           prevText = message.displayText
           self.message = message
           canReply = message.canReply && displayMode != .threadAnchor
@@ -176,22 +200,51 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
       if abs(self.collectionWidth - collectionWidth) <= 0.5,
          self.theme == theme,
+         self.messageViewImplementation == messageViewImplementation,
          canUpdateBubbleTailOnly(
-        with: message,
-        firstInGroup: firstInGroup,
-        lastInGroup: lastInGroup,
-        spaceId: spaceId,
-        displayMode: displayMode,
-        outgoing: newOutgoing
-      ) {
+           with: message,
+           firstInGroup: firstInGroup,
+           lastInGroup: lastInGroup,
+           spaceId: spaceId,
+           displayMode: displayMode,
+           outgoing: newOutgoing
+         )
+      {
         self.lastInGroup = lastInGroup
         canReply = message.canReply && displayMode != .threadAnchor
         messageView?.updateBubbleTail(side: bubbleTailSide, animated: animateTail)
         updateSwipeAvailability()
         return
       }
+
+      if messageViewImplementation == .v2,
+         self.messageViewImplementation == .v2,
+         abs(self.collectionWidth - collectionWidth) <= 0.5,
+         firstInGroup == self.firstInGroup,
+         lastInGroup == self.lastInGroup,
+         spaceId == self.spaceId,
+         outgoing == newOutgoing,
+         displayMode == self.displayMode,
+         self.theme == theme,
+         let nextView = messageView as? UIMessageView2,
+         nextView.canApplySnapshot(message)
+      {
+        if isHighFrequencyTextUpdate(from: currentMessage, to: message) {
+          enqueueV2Snapshot(message, animatedReactionEmoji: animatedReactionEmoji)
+          return
+        }
+        prevText = message.displayText
+        self.message = message
+        canReply = message.canReply && displayMode != .threadAnchor
+        resetSelfSizingState()
+        nextView.applySnapshot(message, animatedReactionEmoji: animatedReactionEmoji)
+        updateSwipeAvailability()
+        setNeedsLayout()
+        return
+      }
     }
 
+    cancelPendingV2Snapshot()
     resetSelfSizingState()
 
     // update it first
@@ -203,6 +256,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     self.collectionWidth = collectionWidth
     self.displayMode = displayMode
     self.theme = theme
+    self.messageViewImplementation = messageViewImplementation
     isThread = message.peerId.isThread
     outgoing = newOutgoing
     canReply = message.canReply && displayMode != .threadAnchor
@@ -332,7 +386,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       contentView.layoutIfNeeded()
       messageView?.layoutIfNeeded()
       messageView?.bubbleView.layoutIfNeeded()
-      messageView?.messageLabel.layoutIfNeeded()
+      messageView?.sendAnimationTextView().layoutIfNeeded()
     }
 
     defer {
@@ -385,7 +439,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       contentView.layoutIfNeeded()
       messageView?.layoutIfNeeded()
       messageView?.bubbleView.layoutIfNeeded()
-      messageView?.messageLabel.layoutIfNeeded()
+      messageView?.sendAnimationTextView().layoutIfNeeded()
       clearSendAnimationTargetLayerAnimations()
     }
   }
@@ -415,7 +469,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       contentView.layoutIfNeeded()
       messageView?.layoutIfNeeded()
       messageView?.bubbleView.layoutIfNeeded()
-      messageView?.messageLabel.layoutIfNeeded()
+      messageView?.sendAnimationTextView().layoutIfNeeded()
       clearSendAnimationTargetLayerAnimations()
     }
 
@@ -468,23 +522,24 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     messageView.layoutIfNeeded()
     messageView.bubbleView.layoutIfNeeded()
-    messageView.messageLabel.layoutIfNeeded()
+    let textView = messageView.sendAnimationTextView()
+    textView.layoutIfNeeded()
 
     let cellFrame = convert(bounds, to: window)
     let bubbleFrame = messageView.bubbleView.convert(messageView.bubbleView.bounds, to: window)
-    let textGeometry = messageView.messageLabel.sendAnimationTextFrame()
+    let textGeometry = textView.sendAnimationTextFrame()
     let textFrameInLabel = textGeometry?.visibleTextFrame
     let textFrame = textGeometry.map {
-      messageView.messageLabel.convert($0.visibleTextFrame, to: window)
+      textView.convert($0.visibleTextFrame, to: window)
     }
     let textFrameInBubble = textGeometry.map {
-      messageView.messageLabel.convert($0.visibleTextFrame, to: messageView.bubbleView)
+      textView.convert($0.visibleTextFrame, to: messageView.bubbleView)
     }
     let textFirstBaselineYInWindow = textGeometry.map {
-      messageView.messageLabel.convert(CGPoint(x: 0, y: $0.firstBaselineY), to: window).y
+      textView.convert(CGPoint(x: 0, y: $0.firstBaselineY), to: window).y
     }
     let textFirstBaselineYInBubble = textGeometry.map {
-      messageView.messageLabel.convert(CGPoint(x: 0, y: $0.firstBaselineY), to: messageView.bubbleView).y
+      textView.convert(CGPoint(x: 0, y: $0.firstBaselineY), to: messageView.bubbleView).y
     }
 
     guard cellFrame.isFiniteAndVisible,
@@ -523,6 +578,12 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    if messageViewImplementation == .v2 {
+      cancelPendingV2Snapshot()
+      layer.removeAllAnimations()
+      contentView.layer.removeAllAnimations()
+      transform = .identity
+    }
 
     alpha = 1
     contentView.alpha = 1
@@ -545,11 +606,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     prevText = nil
     message = nil
     theme = nil
+    messageViewImplementation = .legacy
     resetSelfSizingState()
 
     // Reset delegate
     delegate = nil
     onPhotoTap = nil
+    onV2GeometryChange = nil
   }
 
   // MARK: - Constraints
@@ -586,6 +649,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     }
 
     let displayScale = max(traitCollection.displayScale, 1)
+    if messageViewImplementation == .v2 {
+      var fittedFrame = layoutAttributes.frame
+      fittedFrame.size.height = ceil(size.height * displayScale) / displayScale
+      attributes.frame = fittedFrame
+      return attributes
+    }
+
     let traitSignature = SelfSizingTraitSignature(
       contentSizeCategory: traitCollection.preferredContentSizeCategory,
       displayScale: displayScale,
@@ -693,6 +763,13 @@ extension MessageCollectionViewCell {
     if !canReply { return false }
 
     let velocity = panGesture.velocity(in: contentView)
+
+    if let nextView = messageView as? UIMessageView2 {
+      let point = panGesture.location(in: nextView)
+      if nextView.containsHorizontalScroller(at: point), abs(velocity.x) > abs(velocity.y) {
+        return false
+      }
+    }
 
     // If the gesture starts as a rightward swipe, let the navigation controller
     // (back swipe) handle it by declining recognition here.
@@ -1027,7 +1104,8 @@ extension MessageCollectionViewCell {
     var candidates: [String] = []
 
     for emoji in newMessage.groupedReactions.map(\.emoji) + currentMessage.groupedReactions.map(\.emoji)
-      where !candidates.contains(emoji) {
+      where !candidates.contains(emoji)
+    {
       candidates.append(emoji)
     }
 
@@ -1071,41 +1149,89 @@ extension MessageCollectionViewCell {
     initialMetadataStatus: MessageSendingStatus? = nil
   ) {
     guard let theme else { return }
-    let newMessageView = UIMessageView(
-      fullMessage: message,
-      spaceId: spaceId,
-      displayMode: displayMode,
-      bubbleTailSide: bubbleTailSide,
-      maximumBubbleContentWidth: maximumBubbleContentWidth,
-      theme: theme,
-      animatedReactionEmoji: animatedReactionEmoji,
-      initialMetadataStatus: initialMetadataStatus
-    )
-    newMessageView.translatesAutoresizingMaskIntoConstraints = false
+    let newMessageView: UIMessageView
+    let newMessageRootView: UIView
+    switch messageViewImplementation {
+      case .legacy:
+        let legacyView = UIMessageView(
+          fullMessage: message,
+          spaceId: spaceId,
+          displayMode: displayMode,
+          bubbleTailSide: bubbleTailSide,
+          maximumBubbleContentWidth: maximumBubbleContentWidth,
+          theme: theme,
+          animatedReactionEmoji: animatedReactionEmoji,
+          initialMetadataStatus: initialMetadataStatus
+        )
+        newMessageView = legacyView
+        newMessageRootView = legacyView
+      case .v2:
+        let nextView = UIMessageView2(
+          fullMessage: message,
+          spaceId: spaceId,
+          displayMode: displayMode,
+          bubbleTailSide: bubbleTailSide,
+          maximumBubbleContentWidth: maximumBubbleContentWidth,
+          theme: theme,
+          animatedReactionEmoji: animatedReactionEmoji,
+          initialMetadataStatus: initialMetadataStatus
+        )
+        nextView.onGeometryChange = { [weak self, weak nextView] oldLayout, newLayout in
+          guard let self, let nextView else { return }
+          let transitionGeneration = nextView.geometryTransitionGeneration
+          nextView.prepareGeometryTransition(
+            from: oldLayout,
+            generation: transitionGeneration
+          )
+          resetSelfSizingState()
+          setNeedsLayout()
+          guard let onV2GeometryChange else {
+            nextView.applyGeometryTransition(
+              to: newLayout,
+              generation: transitionGeneration
+            )
+            nextView.finishGeometryTransition(generation: transitionGeneration)
+            return
+          }
+          onV2GeometryChange(self, oldLayout, newLayout)
+        }
+        newMessageView = nextView
+        newMessageRootView = nextView
+    }
+    newMessageRootView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
       self?.onPhotoTap?(message, sourceView, sourceImage, url)
     }
-    contentView.addSubview(newMessageView)
+    contentView.addSubview(newMessageRootView)
 
     let topConstraint: NSLayoutConstraint
     let leadingConstraint: NSLayoutConstraint
     let trailingConstraint: NSLayoutConstraint
 
     // Bubble top constraint
-    topConstraint = newMessageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: topBubblePadding)
+    topConstraint = newMessageRootView.topAnchor.constraint(
+      equalTo: contentView.topAnchor,
+      constant: topBubblePadding
+    )
 
     // Sync reply view
     replyViewCenterYConstraint.constant = topBubblePadding / 2
 
     if usesThreadLayout, !outgoing, let avatarOrSpacer = avatarSpacerView {
-      leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: avatarOrSpacer.trailingAnchor, constant: 3)
-      trailingConstraint = newMessageView.trailingAnchor.constraint(
+      leadingConstraint = newMessageRootView.leadingAnchor.constraint(
+        equalTo: avatarOrSpacer.trailingAnchor,
+        constant: 3
+      )
+      trailingConstraint = newMessageRootView.trailingAnchor.constraint(
         equalTo: contentView.trailingAnchor,
         constant: firstInGroup ? -(10 + horizontalPadding) : -horizontalPadding
       )
     } else {
-      leadingConstraint = newMessageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: horizontalPadding)
-      trailingConstraint = newMessageView.trailingAnchor.constraint(
+      leadingConstraint = newMessageRootView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor,
+        constant: horizontalPadding
+      )
+      trailingConstraint = newMessageRootView.trailingAnchor.constraint(
         equalTo: contentView.trailingAnchor,
         constant: -horizontalPadding
       )
@@ -1114,10 +1240,11 @@ extension MessageCollectionViewCell {
       leadingConstraint,
       trailingConstraint,
       topConstraint,
-      newMessageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+      newMessageRootView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
     ])
 
     messageView = newMessageView
+    messageRootView = newMessageRootView
   }
 
   private var maximumBubbleContentWidth: CGFloat {
@@ -1135,11 +1262,14 @@ extension MessageCollectionViewCell {
     return messageViewWidth * MessageBubbleWidthPolicy.maximumWidthFraction
   }
 
-  // Add avatar if we have user info
+  /// Add avatar if we have user info
   func resetCell() {
+    cancelPendingV2Snapshot()
+    (messageView as? UIMessageView2)?.cancelPendingGeometryTransitions()
     messageView?.stopShineAnimation()
 
-    messageView?.removeFromSuperview()
+    messageRootView?.removeFromSuperview()
+    messageRootView = nil
     messageView = nil
 
     nameLabel.removeFromSuperview()
@@ -1147,6 +1277,50 @@ extension MessageCollectionViewCell {
     avatarView = nil
     avatarSpacerView?.removeFromSuperview()
     avatarSpacerView = nil
+  }
+
+  private func isHighFrequencyTextUpdate(from current: FullMessage, to updated: FullMessage) -> Bool {
+    current.displayText != updated.displayText
+      || current.message.entities != updated.message.entities
+      || current.message.blockContentPayload != updated.message.blockContentPayload
+      || current.translations != updated.translations
+  }
+
+  private func enqueueV2Snapshot(_ message: FullMessage, animatedReactionEmoji: String?) {
+    pendingV2Snapshot = .init(message: message, animatedReactionEmoji: animatedReactionEmoji)
+    guard v2SnapshotDisplayLink == nil else { return }
+    let displayLink = CADisplayLink(target: self, selector: #selector(flushPendingV2Snapshot))
+    displayLink.add(to: .main, forMode: .common)
+    v2SnapshotDisplayLink = displayLink
+  }
+
+  @objc private func flushPendingV2Snapshot() {
+    v2SnapshotDisplayLink?.invalidate()
+    v2SnapshotDisplayLink = nil
+    guard let pending = pendingV2Snapshot,
+          let nextView = messageView as? UIMessageView2,
+          nextView.canApplySnapshot(pending.message)
+    else {
+      pendingV2Snapshot = nil
+      return
+    }
+    pendingV2Snapshot = nil
+    prevText = pending.message.displayText
+    message = pending.message
+    canReply = pending.message.canReply && displayMode != .threadAnchor
+    resetSelfSizingState()
+    nextView.applySnapshot(
+      pending.message,
+      animatedReactionEmoji: pending.animatedReactionEmoji
+    )
+    updateSwipeAvailability()
+    setNeedsLayout()
+  }
+
+  private func cancelPendingV2Snapshot() {
+    pendingV2Snapshot = nil
+    v2SnapshotDisplayLink?.invalidate()
+    v2SnapshotDisplayLink = nil
   }
 
   func applyTheme(_ theme: IOSThemeSnapshot) {

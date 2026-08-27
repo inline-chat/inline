@@ -10,6 +10,18 @@ struct DebugView: View {
 
   var body: some View {
     List {
+      #if DEBUG || DEBUG_BUILD
+      Section("Playgrounds") {
+        NavigationLink(destination: DeveloperPlaygroundsView()) {
+          SettingsItem(
+            icon: "hammer.fill",
+            iconColor: .orange,
+            title: "Playgrounds"
+          )
+        }
+      }
+      #endif
+
       Section("Sync") {
         NavigationLink(destination: SyncEngineStatsView()) {
           SettingsItem(
@@ -78,7 +90,6 @@ struct DebugView: View {
       }
     }
   }
-
 }
 
 private struct IntentDonationDebugSection: View {
