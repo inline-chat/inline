@@ -13,8 +13,7 @@ openclaw plugins install @inline-openclaw/inline
 If already installed, update to latest:
 
 ```sh
-openclaw config set plugins.installs.inline.spec '"@inline-openclaw/inline@latest"'
-openclaw plugins update inline
+openclaw plugins install --force @inline-openclaw/inline@latest
 openclaw gateway restart
 openclaw plugins list
 openclaw channels status
