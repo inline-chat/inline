@@ -1466,6 +1466,8 @@ enum Method {
   CONNECT_AGENT_SESSION = 128;
   SYNC_AGENT_SESSION_MESSAGES = 129;
   GET_AGENT_SESSION = 130;
+  UPDATE_BOT_AGENT = 131;
+  DELETE_BOT_AGENT = 132;
 }
 
 message RpcCall {
@@ -1601,6 +1603,8 @@ message RpcCall {
     ConnectAgentSessionInput connectAgentSession = 129;
     SyncAgentSessionMessagesInput syncAgentSessionMessages = 130;
     GetAgentSessionInput getAgentSession = 131;
+    UpdateBotAgentInput updateBotAgent = 132;
+    DeleteBotAgentInput deleteBotAgent = 133;
   }
 }
 
@@ -1738,6 +1742,8 @@ message RpcResult {
     ConnectAgentSessionResult connectAgentSession = 129;
     SyncAgentSessionMessagesResult syncAgentSessionMessages = 130;
     GetAgentSessionResult getAgentSession = 131;
+    UpdateBotAgentResult updateBotAgent = 132;
+    DeleteBotAgentResult deleteBotAgent = 133;
   }
 }
 
@@ -2245,6 +2251,17 @@ message BotAgent {
   optional string instructions = 8;
 }
 
+// A client-safe Agent identity. Harness-only skill and instruction fields are
+// deliberately excluded from ordinary peer discovery.
+message BotAgentProfile {
+  int64 id = 1;
+  int64 bot_user_id = 2;
+  string name = 3;
+  optional string handle = 4;
+  optional string emoji = 5;
+  optional string description = 6;
+}
+
 message CreateBotAgentInput {
   int64 bot_user_id = 1;
   string name = 2;
@@ -2267,6 +2284,23 @@ message GetBotAgentResult {
 message ListBotAgentsInput { int64 bot_user_id = 1; }
 
 message ListBotAgentsResult { repeated BotAgent agents = 1; }
+
+message UpdateBotAgentInput {
+  int64 agent_id = 1;
+  optional string name = 2;
+  optional string handle = 3;
+  optional string emoji = 4;
+  optional string description = 5;
+  optional string skill_key = 6;
+  optional string instructions = 7;
+}
+
+message UpdateBotAgentResult { BotAgent agent = 1; }
+
+message DeleteBotAgentInput { int64 agent_id = 1; }
+
+message DeleteBotAgentResult { int64 agent_id = 1; }
+
 
 message ListBotsInput {}
 
@@ -3950,6 +3984,7 @@ message BotCapability {
 message PeerBot {
   User bot = 1;
   repeated BotCapability capabilities = 2;
+  repeated BotAgentProfile agents = 3;
 }
 
 message GetPeerBotsInput { InputPeer peer_id = 1; }
