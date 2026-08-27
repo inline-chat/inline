@@ -44,11 +44,11 @@ public final class SlashCommandDetector {
       return nil
     }
 
-    if slashLocation > 0 {
-      let charBeforeSlash = nsString.character(at: slashLocation - 1)
-      if charBeforeSlash != 32, charBeforeSlash != 10, charBeforeSlash != 9 {
-        return nil
-      }
+    let leadingText = nsString.substring(
+      with: NSRange(location: 0, length: slashLocation)
+    )
+    guard leadingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return nil
     }
 
     let startIndex = slashLocation + 1
@@ -60,6 +60,13 @@ public final class SlashCommandDetector {
         break
       }
       endIndex += 1
+    }
+
+    let trailingText = nsString.substring(
+      with: NSRange(location: endIndex, length: nsString.length - endIndex)
+    )
+    guard trailingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return nil
     }
 
     let queryRange = NSRange(location: startIndex, length: max(0, endIndex - startIndex))

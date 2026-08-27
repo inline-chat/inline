@@ -84,12 +84,18 @@ public class ChatContainerView: UIView {
     view.spaceId = spaceId
     view.sendAnimationCoordinator = sendAnimationCoordinator
     view.executeInlineCommand = { [weak self] action in
-      guard let self else { return false }
+      guard let self else { return nil }
       switch action {
       case .collapseHistory:
-        guard let maxID = messagesCollectionView.highestPositiveMessageId else { return false }
+        guard let maxID = messagesCollectionView.highestPositiveMessageId else { return nil }
         try await messagesCollectionView.collapseHistory(maxID: maxID)
-        return true
+        return .completed
+      case .createSubthread:
+        guard let chatId else { return nil }
+        let result = try await LocalThreadCommandService.createAndOpen(parentChatId: chatId) { transaction in
+          try await Api.realtime.send(transaction)
+        }
+        return .openThread(result)
       }
     }
     return view
