@@ -36,8 +36,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
   @MainActor private var terminationTask: Task<Void, Never>?
-  @MainActor private var terminationDeadlineTask: Task<Void, Never>?
-  @MainActor private var didReplyToTermination = false
   @MainActor private var isLoggingOut = false
 
   private let installLocationPrompt = AppInstallLocationPrompt()
@@ -120,30 +118,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       Drafts2.shared.flushBlocking()
 
       let realtime = dependencies.realtimeV2
+      let database = dependencies.database
       terminationTask = Task { @MainActor in
         await realtime.prepareForTermination()
-        finishTermination(sender)
-      }
-      terminationDeadlineTask = Task { @MainActor in
         do {
-          try await Task.sleep(for: .milliseconds(250))
+          try database.closePersistentStorage()
         } catch {
-          return
+          log.error("Database did not close cleanly during application termination", error: error)
         }
-        log.warning("Realtime termination cleanup exceeded deadline; allowing app termination")
-        finishTermination(sender)
+        sender.reply(toApplicationShouldTerminate: true)
       }
       return .terminateLater
     }
-  }
-
-  @MainActor
-  private func finishTermination(_ sender: NSApplication) {
-    guard !didReplyToTermination else { return }
-    didReplyToTermination = true
-    terminationTask?.cancel()
-    terminationDeadlineTask?.cancel()
-    sender.reply(toApplicationShouldTerminate: true)
   }
 
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
