@@ -10,6 +10,7 @@ describe("provider authentication startup guard", () => {
     google: { clientId: "google-client", clientSecret: "google-secret" },
     apple: {
       clientId: "apple-client",
+      nativeClientIds: ["chat.inline.InlineIOS", "chat.inline.InlineIOS.debug"],
       teamId: "apple-team",
       keyId: "apple-key",
       privateKey: new Uint8Array([1, 2, 3]),
