@@ -43,6 +43,8 @@ public enum InlineDeepLink: Equatable, Sendable {
   case user(id: Int64)
   case chat(id: Int64)
   case message(chatId: Int64, messageId: Int64)
+  case publicSpace(handle: String)
+  case spaceInvite(token: String)
 
   public init?(url: URL, supportedSchemes: Set<String> = Self.supportedSchemes) {
     guard let scheme = url.scheme, supportedSchemes.contains(scheme.lowercased()) else {
@@ -85,6 +87,22 @@ public enum InlineDeepLink: Equatable, Sendable {
         return nil
       }
 
+    case "join":
+      guard pathComponents.count == 2 else {
+        return nil
+      }
+
+      switch pathComponents[0].lowercased() {
+      case "public":
+        guard Self.isValidPublicSpaceHandle(pathComponents[1]) else { return nil }
+        self = .publicSpace(handle: pathComponents[1])
+      case "invite":
+        guard Self.isValidSpaceInviteToken(pathComponents[1]) else { return nil }
+        self = .spaceInvite(token: pathComponents[1])
+      default:
+        return nil
+      }
+
     default:
       return nil
     }
@@ -111,6 +129,14 @@ public enum InlineDeepLink: Equatable, Sendable {
     case let .message(chatId, messageId):
       components.host = "chat"
       components.path = "/\(chatId)/message/\(messageId)"
+
+    case let .publicSpace(handle):
+      components.host = "join"
+      components.path = "/public/\(handle)"
+
+    case let .spaceInvite(token):
+      components.host = "join"
+      components.path = "/invite/\(token)"
     }
 
     return components.url
@@ -130,6 +156,10 @@ public enum InlineDeepLink: Equatable, Sendable {
     switch self {
     case let .chat(id):
       components.path = "/c/\(id)"
+    case let .publicSpace(handle):
+      components.path = "/s/\(handle)"
+    case let .spaceInvite(token):
+      components.path = "/invite/\(token)"
     case .user, .message:
       return nil
     }
@@ -155,6 +185,10 @@ private extension InlineDeepLink {
       id > 0
     case let .message(chatId, messageId):
       chatId > 0 && messageId > 0
+    case let .publicSpace(handle):
+      Self.isValidPublicSpaceHandle(handle)
+    case let .spaceInvite(token):
+      Self.isValidSpaceInviteToken(token)
     }
   }
 
@@ -202,5 +236,22 @@ private extension InlineDeepLink {
       return nil
     }
     return id
+  }
+
+  static func isValidPublicSpaceHandle(_ value: String) -> Bool {
+    guard (2 ... 64).contains(value.count), let first = value.first, first.isASCII else {
+      return false
+    }
+    guard first.isLetter || first.isNumber else { return false }
+    return value.allSatisfy { character in
+      character.isASCII && (character.isLetter || character.isNumber || character == "_" || character == "-")
+    }
+  }
+
+  static func isValidSpaceInviteToken(_ value: String) -> Bool {
+    guard value.count == 47, value.hasPrefix("iv1_") else { return false }
+    return value.dropFirst(4).allSatisfy { character in
+      character.isASCII && (character.isLetter || character.isNumber || character == "_" || character == "-")
+    }
   }
 }

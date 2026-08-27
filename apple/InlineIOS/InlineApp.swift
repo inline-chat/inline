@@ -18,7 +18,7 @@ struct InlineApp: App {
 private struct InlineSceneRoot: View {
   private static let sceneMigrationKey = "ios.navigation.didMigrateToSceneStorage.v1"
 
-  let appDelegate: AppDelegate
+  @ObservedObject private var appDelegate: AppDelegate
 
   @State private var router: Router
   @StateObject private var themeManager = ThemeManager.shared
@@ -29,7 +29,7 @@ private struct InlineSceneRoot: View {
   @Environment(\.scenePhase) private var scenePhase
 
   init(appDelegate: AppDelegate) {
-    self.appDelegate = appDelegate
+    _appDelegate = ObservedObject(wrappedValue: appDelegate)
     let shouldRestoreLegacyState = !UserDefaults.standard.bool(forKey: Self.sceneMigrationKey)
     _router = State(initialValue: Router(
       initialTab: .allChats,
@@ -82,10 +82,28 @@ private struct InlineSceneRoot: View {
       }
       .onChange(of: auth.currentUserId) { oldValue, newValue in
         appDelegate.sceneRouterRegistry.accountDidChange(from: oldValue, to: newValue)
+        if newValue != nil {
+          appDelegate.resumePendingSpaceJoin(router: router)
+        }
       }
       .onChange(of: router.persistenceRevision) { _, _ in
         guard didRestoreScene else { return }
         routerState = router.encodedPersistentState()
+      }
+      .alert(
+        "Couldn’t join space",
+        isPresented: Binding(
+          get: { appDelegate.spaceJoinErrorMessage != nil },
+          set: { presented in
+            if !presented { appDelegate.dismissSpaceJoinError() }
+          }
+        )
+      ) {
+        Button("OK", role: .cancel) {
+          appDelegate.dismissSpaceJoinError()
+        }
+      } message: {
+        Text(appDelegate.spaceJoinErrorMessage ?? "")
       }
   }
 

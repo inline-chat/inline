@@ -1015,6 +1015,10 @@ class MessageViewAppKit: NSView {
       } else if let url = deepLink.url() {
         NSWorkspace.shared.open(url)
       }
+    case .publicSpace, .spaceInvite:
+      if let url = deepLink.url() {
+        NSWorkspace.shared.open(url)
+      }
     }
   }
 

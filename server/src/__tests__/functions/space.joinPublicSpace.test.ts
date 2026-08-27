@@ -19,7 +19,7 @@ describe("joinPublicSpace", () => {
     const user = await testUtils.createUser("public-join@example.com")
     const [space] = await db
       .insert(spaces)
-      .values({ name: "Town Hall", handle: "TownHall", isPublic: true })
+      .values({ name: "Town Hall", handle: "TownHall", isPublic: true, canPublicJoin: true })
       .returning()
     if (!space) throw new Error("Failed to create public space")
     const [primaryChat] = await db
@@ -107,7 +107,7 @@ describe("joinPublicSpace", () => {
     const user = await testUtils.createUser("public-idempotent@example.com")
     const [space] = await db
       .insert(spaces)
-      .values({ name: "Community", handle: "community", isPublic: true })
+      .values({ name: "Community", handle: "community", isPublic: true, canPublicJoin: true })
       .returning()
     if (!space) throw new Error("Failed to create public space")
     const [primaryChat] = await db
@@ -148,7 +148,7 @@ describe("joinPublicSpace", () => {
     const user = await testUtils.createUser("public-concurrent@example.com")
     const [space] = await db
       .insert(spaces)
-      .values({ name: "Concurrent", handle: "concurrent", isPublic: true })
+      .values({ name: "Concurrent", handle: "concurrent", isPublic: true, canPublicJoin: true })
       .returning()
     if (!space) throw new Error("Failed to create public space")
 
@@ -171,11 +171,14 @@ describe("joinPublicSpace", () => {
     const user = await testUtils.createUser("public-reject@example.com")
     await db.insert(spaces).values([
       { name: "Private", handle: "privateplace", isPublic: false },
-      { name: "Deleted", handle: "deletedplace", isPublic: true, deleted: new Date() },
+      { name: "Deleted", handle: "deletedplace", isPublic: true, canPublicJoin: true, deleted: new Date() },
+      { name: "Disabled", handle: "disabledplace", isPublic: true },
     ])
 
-    for (const handle of ["privateplace", "deletedplace", "missingplace"]) {
-      await expect(joinPublicSpace({ handle }, context(user.id))).rejects.toThrow()
+    for (const handle of ["privateplace", "deletedplace", "disabledplace", "missingplace"]) {
+      await expect(joinPublicSpace({ handle }, context(user.id))).rejects.toMatchObject({
+        codeName: "SPACE_ID_INVALID",
+      })
     }
     expect(await db.select().from(members)).toHaveLength(0)
     expect(await db.select().from(updates)).toHaveLength(0)
@@ -183,7 +186,12 @@ describe("joinPublicSpace", () => {
 
   test("dispatches through the RealtimeV2 RPC method", async () => {
     const user = await testUtils.createUser("public-rpc@example.com")
-    await db.insert(spaces).values({ name: "RPC Community", handle: "rpccommunity", isPublic: true })
+    await db.insert(spaces).values({
+      name: "RPC Community",
+      handle: "rpccommunity",
+      isPublic: true,
+      canPublicJoin: true,
+    })
 
     const result = await handleRpcCall(
       {

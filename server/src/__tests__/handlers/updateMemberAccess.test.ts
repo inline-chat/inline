@@ -38,7 +38,7 @@ describe("updateMemberAccess", () => {
       testUtils.functionContext({ userId: admin.id, sessionId: 1 }),
     )
     const deletion = deleteMemberHandler(
-      { spaceId: BigInt(space.id), userId: BigInt(target.id) },
+      { spaceId: BigInt(space.id), userId: BigInt(target.id), blockJoin: false },
       deleteContext,
     )
 

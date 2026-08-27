@@ -37,6 +37,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
   @MainActor private var terminationTask: Task<Void, Never>?
   @MainActor private var isLoggingOut = false
+  @MainActor private var pendingSpaceJoin: SpaceJoinReference?
+  @MainActor private var spaceJoinTask: Task<Void, Never>?
+  @MainActor private var spaceJoinGeneration: UInt64 = 0
 
   private let installLocationPrompt = AppInstallLocationPrompt()
   @MainActor private let launchAtLoginController = LaunchAtLoginController()
@@ -76,6 +79,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     registerMainWindowCoordinator()
     setupRealtimeConnectionFailureObserver()
     setupRealtimeAuthInvalidatedObserver()
+    dependencies.viewModel.$topLevelRoute
+      .receive(on: RunLoop.main)
+      .sink { [weak self] route in
+        guard route == .main else { return }
+        Task { @MainActor in
+          self?.resumePendingSpaceJoin()
+        }
+      }
+      .store(in: &cancellables)
     setupGlobalHotkeys()
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
@@ -286,6 +298,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         log.debug("Received local CLI auth request via application:open")
       } else if ProviderSignInCoordinator.shared.canHandle(url) {
         log.debug("Received provider auth callback via application:open")
+      } else if url.host?.lowercased() == "join" {
+        log.debug("Received space join URL via application:open")
       } else {
         log.debug("Received URL via application:open: \(url)")
       }
@@ -314,6 +328,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         handleUserURL(url)
       case "chat", "thread":
         await handleChatURL(url)
+      case "join":
+        handleSpaceJoinURL(url)
       case "integrations":
         dependencies.appBridge.openSettings(
           dependencies: dependencies,
@@ -427,6 +443,62 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     openChat(peer: peer, targetMessageId: target.messageId)
   }
 
+  @MainActor private func handleSpaceJoinURL(_ url: URL) {
+    guard let deepLink = InlineDeepLink(url: url, supportedSchemes: Self.customURLSchemes),
+          let reference = SpaceJoinReference(deepLink: deepLink)
+    else {
+      ToastCenter.shared.showError("This invite is invalid, expired, or unavailable.")
+      return
+    }
+
+    spaceJoinGeneration &+= 1
+    spaceJoinTask?.cancel()
+    spaceJoinTask = nil
+    pendingSpaceJoin = reference
+
+    guard Auth.shared.getIsLoggedIn(), dependencies.viewModel.topLevelRoute == .main else {
+      MainWindowOpenCoordinator.shared.openOnboarding()
+      return
+    }
+    resumePendingSpaceJoin()
+  }
+
+  @MainActor private func resumePendingSpaceJoin() {
+    guard Auth.shared.getIsLoggedIn(),
+          dependencies.viewModel.topLevelRoute == .main,
+          let reference = pendingSpaceJoin,
+          spaceJoinTask == nil
+    else { return }
+
+    let generation = spaceJoinGeneration
+    spaceJoinTask = Task { @MainActor [weak self] in
+      defer {
+        if self?.spaceJoinGeneration == generation {
+          self?.spaceJoinTask = nil
+        }
+      }
+      do {
+        let spaceID = try await SpaceJoiner.join(reference)
+        guard !Task.isCancelled, self?.spaceJoinGeneration == generation else { return }
+        self?.pendingSpaceJoin = nil
+        self?.setupMainWindow().openSpace(spaceID)
+      } catch is CancellationError {
+        return
+      } catch {
+        guard self?.spaceJoinGeneration == generation else { return }
+        self?.pendingSpaceJoin = nil
+        ToastCenter.shared.showError("This invite is invalid, expired, or unavailable.")
+      }
+    }
+  }
+
+  @MainActor private func cancelPendingSpaceJoin() {
+    spaceJoinGeneration &+= 1
+    spaceJoinTask?.cancel()
+    spaceJoinTask = nil
+    pendingSpaceJoin = nil
+  }
+
   private func inlineUserId(from url: URL) -> Int64? {
     guard Self.isInlineURL(url, host: "user") else {
       return nil
@@ -445,7 +517,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       return (chatId: id, messageId: nil)
     case let .message(chatId, messageId):
       return (chatId: chatId, messageId: messageId)
-    case .user:
+    case .user, .publicSpace, .spaceInvite:
       return nil
     }
   }
@@ -892,6 +964,7 @@ extension AppDelegate {
       return
     }
 
+    cancelPendingSpaceJoin()
     await Auth.shared.beginLogout()
     LoggingOutWindowController.show()
     await Task.yield()
@@ -987,6 +1060,8 @@ extension AppDelegate {
 
     if Self.isCLIAuthURL(url) {
       log.debug("Received local CLI auth request")
+    } else if url.host?.lowercased() == "join" {
+      log.debug("Received space join URL")
     } else {
       log.debug("Received URL: \(url)")
     }

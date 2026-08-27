@@ -437,23 +437,49 @@ public struct MemberManagementView: View {
   private func confirmAndDelete(member: FullMemberItem) async {
     guard canDelete(member: member) else { return }
 
-    let confirmed = await MainActor.run { () -> Bool in
+    enum RemovalAction {
+      case cancel
+      case remove
+      case blockAndRemove
+    }
+
+    guard let spaceIsPublic = membersViewModel.space?.isPublic else {
+      errorMessage = "Space details are still loading. Please try again."
+      return
+    }
+    let action = await MainActor.run { () -> RemovalAction in
       let alert = NSAlert()
       alert.messageText = "Remove \(member.userInfo.user.displayName)?"
-      alert.informativeText = "They will lose access to this space and its chats."
+      alert.informativeText = if spaceIsPublic {
+        "They will lose access to this public space and won’t be able to rejoin from its public link."
+      } else {
+        "Remove lets them rejoin with an active invite link. Block and Remove prevents link re-entry."
+      }
       alert.alertStyle = .warning
       let cancelButton = alert.addButton(withTitle: "Cancel")
       cancelButton.keyEquivalent = "\r"
-      let deleteButton = alert.addButton(withTitle: "Delete")
-      deleteButton.hasDestructiveAction = true
-      deleteButton.keyEquivalent = ""
-      return alert.runModal() == .alertSecondButtonReturn
+      let removeButton = alert.addButton(withTitle: "Remove")
+      removeButton.hasDestructiveAction = true
+      removeButton.keyEquivalent = ""
+      if !spaceIsPublic {
+        let blockButton = alert.addButton(withTitle: "Block and Remove")
+        blockButton.hasDestructiveAction = true
+      }
+
+      switch alert.runModal() {
+      case .alertSecondButtonReturn: return .remove
+      case .alertThirdButtonReturn: return .blockAndRemove
+      default: return .cancel
+      }
     }
 
-    guard confirmed else { return }
+    guard action != .cancel else { return }
 
     do {
-      try await memberActionsViewModel.deleteMember(userId: member.userInfo.user.id)
+      try await memberActionsViewModel.deleteMember(
+        userId: member.userInfo.user.id,
+        blockJoin: action == .blockAndRemove
+      )
     } catch {
       errorMessage = error.localizedDescription
     }

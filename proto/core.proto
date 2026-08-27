@@ -927,6 +927,30 @@ message JoinPublicSpaceResult {
   bool already_member = 3;
 }
 
+message SpaceInviteLink {
+  string url = 1;
+  optional int64 expires_at = 2;
+}
+
+message JoinSpaceByInviteTokenInput { string token = 1; }
+
+message JoinSpaceByInviteTokenResult {
+  Space space = 1;
+  Member member = 2;
+  bool already_member = 3;
+}
+
+message GetSpaceInviteLinkInput { int64 space_id = 1; }
+
+message GetSpaceInviteLinkResult { optional SpaceInviteLink link = 1; }
+
+message SetSpaceInviteLinkEnabledInput {
+  int64 space_id = 1;
+  bool enabled = 2;
+}
+
+message SetSpaceInviteLinkEnabledResult { optional SpaceInviteLink link = 1; }
+
 message UserGroup {
   int64 id = 1;
   int64 space_id = 2;
@@ -1331,6 +1355,7 @@ message RpcError {
     FIRST_NAME_INVALID = 17;
     URL_PREVIEW_UNAVAILABLE = 18;
     AGENT_SESSION_MESSAGE_IMMUTABLE = 19;
+    SPACE_INVITE_INVALID = 20;
   }
 }
 
@@ -1466,6 +1491,9 @@ enum Method {
   CONNECT_AGENT_SESSION = 128;
   SYNC_AGENT_SESSION_MESSAGES = 129;
   GET_AGENT_SESSION = 130;
+  JOIN_SPACE_BY_INVITE_TOKEN = 133;
+  GET_SPACE_INVITE_LINK = 134;
+  SET_SPACE_INVITE_LINK_ENABLED = 135;
 }
 
 message RpcCall {
@@ -1601,6 +1629,9 @@ message RpcCall {
     ConnectAgentSessionInput connectAgentSession = 129;
     SyncAgentSessionMessagesInput syncAgentSessionMessages = 130;
     GetAgentSessionInput getAgentSession = 131;
+    JoinSpaceByInviteTokenInput joinSpaceByInviteToken = 134;
+    GetSpaceInviteLinkInput getSpaceInviteLink = 135;
+    SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136;
   }
 }
 
@@ -1738,6 +1769,9 @@ message RpcResult {
     ConnectAgentSessionResult connectAgentSession = 129;
     SyncAgentSessionMessagesResult syncAgentSessionMessages = 130;
     GetAgentSessionResult getAgentSession = 131;
+    JoinSpaceByInviteTokenResult joinSpaceByInviteToken = 134;
+    GetSpaceInviteLinkResult getSpaceInviteLink = 135;
+    SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
   }
 }
 
@@ -1836,6 +1870,9 @@ message DeleteMemberInput {
 
   // Member ID
   int64 user_id = 2;
+
+  // Also prevent this member from returning through a public or private link.
+  bool block_join = 3;
 }
 
 // Remove member from space result

@@ -1,6 +1,7 @@
 import Auth
 import InlineKit
 import Logger
+import UIKit
 
 enum LogoutPerformer {
   @MainActor private static var isRunning = false
@@ -18,6 +19,10 @@ enum LogoutPerformer {
       return true
     }
     guard shouldRun else { return }
+
+    await MainActor.run {
+      (UIApplication.shared.delegate as? AppDelegate)?.cancelPendingSpaceJoin()
+    }
 
     await Auth.shared.beginLogout()
 

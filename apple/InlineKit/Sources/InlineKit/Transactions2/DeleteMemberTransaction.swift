@@ -14,16 +14,37 @@ public struct DeleteMemberTransaction: Transaction2 {
   public struct Context: Sendable, Codable {
     let spaceId: Int64
     let userId: Int64
+    let blockJoin: Bool
+
+    private enum CodingKeys: String, CodingKey {
+      case spaceId
+      case userId
+      case blockJoin
+    }
+
+    init(spaceId: Int64, userId: Int64, blockJoin: Bool) {
+      self.spaceId = spaceId
+      self.userId = userId
+      self.blockJoin = blockJoin
+    }
+
+    public init(from decoder: any Decoder) throws {
+      let values = try decoder.container(keyedBy: CodingKeys.self)
+      spaceId = try values.decode(Int64.self, forKey: .spaceId)
+      userId = try values.decode(Int64.self, forKey: .userId)
+      blockJoin = try values.decodeIfPresent(Bool.self, forKey: .blockJoin) ?? false
+    }
   }
 
-  public init(spaceId: Int64, userId: Int64) {
-    context = Context(spaceId: spaceId, userId: userId)
+  public init(spaceId: Int64, userId: Int64, blockJoin: Bool = false) {
+    context = Context(spaceId: spaceId, userId: userId, blockJoin: blockJoin)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .deleteMember(.with {
       $0.spaceID = context.spaceId
       $0.userID = context.userId
+      $0.blockJoin = context.blockJoin
     })
   }
 
@@ -59,7 +80,7 @@ public struct DeleteMemberTransaction: Transaction2 {
 // MARK: - Helper
 
 public extension Transaction2 where Self == DeleteMemberTransaction {
-  static func deleteMember(spaceId: Int64, userId: Int64) -> DeleteMemberTransaction {
-    DeleteMemberTransaction(spaceId: spaceId, userId: userId)
+  static func deleteMember(spaceId: Int64, userId: Int64, blockJoin: Bool = false) -> DeleteMemberTransaction {
+    DeleteMemberTransaction(spaceId: spaceId, userId: userId, blockJoin: blockJoin)
   }
 }
