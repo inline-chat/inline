@@ -446,12 +446,10 @@ does not stop its siblings, and at most four independent agent turns run across
 the whole account at once.
 
 Before upgrading an existing on-disk bridge database, Inline creates a
-consistent mode-`0600` sibling backup named like
-`bridge.sqlite.pre-schema-25-from-23.backup`. This is the pre-upgrade rollback
-point. Stop every bridge process—especially the newer binary—before restoring
-that backup, then start the older binary. A newer-schema live database must
-never be opened concurrently by the older binary. Local bindings and other
-bridge state created after the migration are not present in the rollback copy.
+permission-restricted sibling backup as the rollback point. Stop every bridge
+process before restoring that backup and starting an older binary. Local
+bindings and other bridge state created after the backup are not present in the
+rollback copy.
 
 ```bash
 inline bridge status

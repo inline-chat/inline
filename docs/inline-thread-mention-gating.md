@@ -24,9 +24,7 @@ dialog to `FOLLOWING`:
 - reply threads are auto-followed when the bot sends into them
 - the reply-thread anchor sender may also be auto-followed when eligible
 - parentless normal Inline threads are auto-followed only while they are fresh
-- the freshness threshold currently lives in
-  `server/src/modules/threadAutoFollow.ts` as
-  `FRESH_NORMAL_THREAD_MESSAGE_ID_LIMIT`, currently 15
+- the server currently uses a freshness threshold of 15 messages
 - a dialog explicitly set to `UNFOLLOWED` is excluded from automatic following,
   so later activity does not silently turn following back on
 
