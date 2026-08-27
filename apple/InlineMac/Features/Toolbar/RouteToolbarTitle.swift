@@ -118,6 +118,7 @@ struct RouteToolbarSpacePickerTitleItem: View {
       .menuStyle(.button)
       .buttonStyle(.borderless)
       .menuIndicator(.hidden)
+      .tint(Color.primary)
       .help(help)
       .accessibilityLabel("\(title), \(help)")
     }

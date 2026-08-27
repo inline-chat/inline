@@ -17,14 +17,20 @@ struct AllChatsRouteView: View {
   @State private var rowLayout: AllChatsRowLayout = .twoLine
   @State private var listFilter: AllChatsListFilter = .all
   @AppStorage private var pinnedExpanded: Bool
+  @AppStorage private var selectedSpaceIDValue: String
 
   private let filter: AllChatsFilter
 
   init(archived: Bool = false) {
     filter = archived ? .archived : .chats
+    let account = Auth.shared.getCurrentUserId().map(String.init) ?? "signed-out"
     _pinnedExpanded = AppStorage(
       wrappedValue: true,
-      "macos.allChats.pinnedExpanded.\(Auth.shared.getCurrentUserId().map(String.init) ?? "signed-out")"
+      "macos.allChats.pinnedExpanded.\(account)"
+    )
+    _selectedSpaceIDValue = AppStorage(
+      wrappedValue: "",
+      "macos.allChats.selectedSpaceID.\(account)"
     )
     _viewModel = EnvironmentStateObject { env in
       AllChatsViewModel(db: env.appDatabase)
@@ -36,7 +42,7 @@ struct AllChatsRouteView: View {
     let presentation = viewModel.presentation(
       for: filter,
       listFilter: listFilter,
-      spaceId: nav.selectedSpaceId
+      spaceId: selectedSpaceID
     )
 
     ScrollView {
@@ -48,7 +54,7 @@ struct AllChatsRouteView: View {
           AllChatsNewThreadComposeHost(
             dependencies: dependencies,
             spaces: composeSpaces,
-            selectedSpaceID: nav.selectedSpaceId
+            selectedSpaceID: selectedSpaceID
           )
           .padding(.top, 10)
         }
@@ -76,7 +82,7 @@ struct AllChatsRouteView: View {
         MacToolbarItem(placement: .navigation, priority: .high, label: "") {
           RouteToolbarSpacePickerTitleItem(
             title: title,
-            selectedSpaceID: nav.selectedSpaceId,
+            selectedSpaceID: selectedSpaceID,
             homeTitle: "Home",
             spaces: toolbarSpaces,
             help: "Choose All Chats Space",
@@ -100,6 +106,7 @@ struct AllChatsRouteView: View {
             listFilterMenu
             archiveButton
           }
+          .controlGroupStyle(.navigation)
         }
       } else {
         ToolbarItem {
@@ -147,7 +154,7 @@ struct AllChatsRouteView: View {
       ChatListRow(
         item: item,
         selected: nav.currentRoute.selectedPeer == item.peerId,
-        showsSpaceName: nav.selectedSpaceId == nil,
+        showsSpaceName: selectedSpaceID == nil,
         layout: rowLayout,
         unreadBadgeStyle: settings.unreadBadgeStyle,
         switchToSpace: openSpace,
@@ -164,7 +171,11 @@ struct AllChatsRouteView: View {
   }
 
   private var activeSpaceName: String? {
-    viewModel.spaceName(id: nav.selectedSpaceId)
+    viewModel.spaceName(id: selectedSpaceID)
+  }
+
+  private var selectedSpaceID: Int64? {
+    Int64(selectedSpaceIDValue)
   }
 
   private var showsAllChatsNewThreadCompose: Bool {
@@ -190,11 +201,7 @@ struct AllChatsRouteView: View {
   }
 
   private func selectAllChatsSpace(_ spaceID: Int64?) {
-    if let spaceID {
-      nav.selectSpace(spaceID)
-    } else {
-      nav.selectHome()
-    }
+    selectedSpaceIDValue = spaceID.map(String.init) ?? ""
   }
 
   private func open(_ item: AllChatsItem) {
@@ -219,11 +226,11 @@ struct AllChatsRouteView: View {
 
   private func createNewThread() {
     guard let dependencies else {
-      nav.open(.newChat(spaceId: nav.selectedSpaceId))
+      nav.open(.newChat(spaceId: selectedSpaceID))
       return
     }
 
-    NewThreadAction.start(dependencies: dependencies, spaceId: nav.selectedSpaceId)
+    NewThreadAction.start(dependencies: dependencies, spaceId: selectedSpaceID)
   }
 
   private var rowLayoutMenu: some View {
@@ -245,13 +252,17 @@ struct AllChatsRouteView: View {
 
   private var listFilterMenu: some View {
     Menu {
-      listFilterButton(.all, title: "All Chats")
-      listFilterButton(.unread, title: "Unread")
+      Picker("Filter Chats", selection: $listFilter) {
+        Text("All Chats").tag(AllChatsListFilter.all)
+        Text("Unread").tag(AllChatsListFilter.unread)
+      }
+      .labelsHidden()
+      .pickerStyle(.inline)
     } label: {
       Label("Filter", systemImage: listFilterSystemImage)
         .labelStyle(.iconOnly)
-        .foregroundStyle(listFilter == .all ? Color.primary : Color(nsColor: Theme.accentColor))
     }
+    .tint(listFilter == .all ? Color.primary : Color(nsColor: .systemBlue))
     .help("Filter Chats")
     .accessibilityValue(listFilter == .all ? "All Chats" : "Unread")
   }
@@ -267,21 +278,6 @@ struct AllChatsRouteView: View {
       Label(filter.archiveButtonTitle, systemImage: filter.archiveButtonSystemImage)
     }
     .help(filter.archiveButtonTitle)
-  }
-
-  private func listFilterButton(
-    _ value: AllChatsListFilter,
-    title: LocalizedStringKey
-  ) -> some View {
-    Button {
-      listFilter = value
-    } label: {
-      if listFilter == value {
-        Label(title, systemImage: "checkmark")
-      } else {
-        Text(title)
-      }
-    }
   }
 
   private func showsEmptyFilterState(presentation: AllChatsPresentation) -> Bool {
