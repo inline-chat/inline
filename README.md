@@ -91,7 +91,7 @@ Inline is in beta:
 
 ## Support the project
 
-Inline is built by a team of two focused solely on this project since September 2024, mostly using our savings (I sold my car :)). We love building Inline in public, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
+Inline is built by a team of two focused solely on this project since September 2024. We love building Inline in public, and we want to keep it free for most users and communities without annoying limitations while charging commercial teams.
 
 ## Packages
 
