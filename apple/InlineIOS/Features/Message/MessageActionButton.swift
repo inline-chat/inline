@@ -10,6 +10,7 @@ final class MessageActionButton: UIButton {
   let spinner = UIActivityIndicatorView(style: .medium)
 
   private var outgoing = false
+  private var usesMessageView2Presentation = false
 
   override var isHighlighted: Bool {
     didSet {
@@ -68,11 +69,29 @@ final class MessageActionButton: UIButton {
     setLoading(false)
   }
 
+  func useMessageView2Presentation() {
+    usesMessageView2Presentation = true
+    titleLabel?.font = .systemFont(ofSize: 14, weight: .regular)
+    contentEdgeInsets = UIEdgeInsets(top: 9, left: 12, bottom: 9, right: 12)
+    layer.cornerRadius = 12
+    layer.cornerCurve = .continuous
+    layer.borderWidth = 0
+    refreshStyle()
+  }
+
   func refreshStyle() {
     let isDark = traitCollection.userInterfaceStyle == .dark
     let textColor = outgoing ? UIColor.white : (ThemeManager.shared.selected.primaryTextColor ?? .label)
     setTitleColor(textColor, for: .normal)
     setTitleColor(textColor.withAlphaComponent(0.45), for: .disabled)
+
+    if usesMessageView2Presentation {
+      layer.borderWidth = 0
+      backgroundColor = outgoing
+        ? UIColor.white.withAlphaComponent(isDark ? 0.14 : 0.11)
+        : textColor.withAlphaComponent(isDark ? 0.11 : 0.06)
+      return
+    }
 
     if outgoing {
       backgroundColor = UIColor.white.withAlphaComponent(isDark ? 0.2 : 0.13)

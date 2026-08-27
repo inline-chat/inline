@@ -33,12 +33,12 @@ class UIMessageView: UIView {
   let displayMode: MessageDisplayMode
   private let maximumBubbleContentWidth: CGFloat
   var initialMetadataStatus: MessageSendingStatus?
-  private var bubbleTailSide: MessageBubbleTailSide
+  var bubbleTailSide: MessageBubbleTailSide
   private(set) var theme: IOSThemeSnapshot
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
-  private var messageActionButtonsById: [String: MessageActionButton] = [:]
+  var messageActionButtonsById: [String: MessageActionButton] = [:]
   private var bubbleHorizontalConstraint: NSLayoutConstraint?
   private var isTranslating = false {
     didSet {
@@ -101,7 +101,7 @@ class UIMessageView: UIView {
     outgoing ? .white : theme.incomingText.uiColor
   }
 
-  private var forwardHeaderTextColor: UIColor {
+  var forwardHeaderTextColor: UIColor {
     if outgoing, bubbleColor != .clear {
       return .white
     }
@@ -146,7 +146,7 @@ class UIMessageView: UIView {
     return true
   }
 
-  private var forwardHeaderText: String {
+  var forwardHeaderText: String {
     if forwardHeaderIsPrivate {
       return "Forwarded from a private chat"
     }
@@ -166,7 +166,7 @@ class UIMessageView: UIView {
     return false
   }
 
-  private var shouldShowForwardHeader: Bool {
+  var shouldShowForwardHeader: Bool {
     message.forwardFromUserId != nil && !isForwardFromSelfDm
   }
 
@@ -184,12 +184,13 @@ class UIMessageView: UIView {
       && message.repliedToMessageId == nil
   }
 
-  private lazy var supportsContinuousBubbleGradient =
-    !message.isServiceMessage &&
-    message.status != .failed &&
-    !isEmojiOnlyMessage &&
-    !isSticker &&
-    !shouldClearBubbleForMedia
+  private var supportsContinuousBubbleGradient: Bool {
+    !message.isServiceMessage
+      && message.status != .failed
+      && !isEmojiOnlyMessage
+      && !isSticker
+      && !shouldClearBubbleForMedia
+  }
 
   var isSticker: Bool {
     fullMessage.message.isSticker == true
@@ -206,7 +207,7 @@ class UIMessageView: UIView {
     }
   }
 
-  private var shouldShowVoiceMessage: Bool {
+  var shouldShowVoiceMessage: Bool {
     message.hasVoice
   }
 
@@ -260,7 +261,7 @@ class UIMessageView: UIView {
       !hasMessageActionRows
   }
 
-  private lazy var messageActionRows: [MessageActionRow] = makeMessageActionRows()
+  lazy var messageActionRows: [MessageActionRow] = makeMessageActionRows()
 
   private func makeMessageActionRows() -> [MessageActionRow] {
     guard let actions = message.actions else { return [] }
@@ -279,15 +280,15 @@ class UIMessageView: UIView {
     }
   }
 
-  private var hasMessageActionRows: Bool {
+  var hasMessageActionRows: Bool {
     !messageActionRows.isEmpty
   }
 
-  private var shouldShowReplyThreadSummary: Bool {
+  var shouldShowReplyThreadSummary: Bool {
     displayMode != .threadAnchor && message.hasReplyThreadSummary
   }
 
-  private var shouldUseWhiteReplyThreadSummary: Bool {
+  var shouldUseWhiteReplyThreadSummary: Bool {
     outgoing && bubbleColor != .clear
   }
 
@@ -458,7 +459,8 @@ class UIMessageView: UIView {
     maximumBubbleContentWidth: CGFloat,
     theme: IOSThemeSnapshot,
     animatedReactionEmoji: String? = nil,
-    initialMetadataStatus: MessageSendingStatus? = nil
+    initialMetadataStatus: MessageSendingStatus? = nil,
+    buildHierarchy: Bool = true
   ) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
@@ -472,7 +474,9 @@ class UIMessageView: UIView {
     super.init(frame: .zero)
 
     handleLinkTap()
-    setupViews()
+    if buildHierarchy {
+      setupViews()
+    }
   }
 
   @available(*, unavailable)
@@ -482,11 +486,28 @@ class UIMessageView: UIView {
 
   func handleLinkTap() {
     linkTapHandler = { [weak self] url in
-      if let userId = Self.inlineUserId(from: url) {
+      if let target = Self.inlineMentionTarget(from: url) {
+        if let agentId = target.agentId,
+           let peer = self?.message.peerId
+        {
+          Task { @MainActor in
+            guard !(await BotAgentMentionNavigator.open(
+              agentId: agentId,
+              botUserId: target.userId,
+              peer: peer
+            )) else { return }
+            NotificationCenter.default.post(
+              name: Notification.Name("MentionTapped"),
+              object: nil,
+              userInfo: ["userId": target.userId]
+            )
+          }
+          return
+        }
         NotificationCenter.default.post(
           name: Notification.Name("MentionTapped"),
           object: nil,
-          userInfo: ["userId": userId]
+          userInfo: ["userId": target.userId]
         )
         return
       }
@@ -496,8 +517,16 @@ class UIMessageView: UIView {
   }
 
   private func presentLinkActionSheet(for linkTarget: LinkContextMenuTarget) {
+    presentLinkActionSheet(
+      url: linkTarget.url,
+      sourceView: messageLabel,
+      sourceRect: linkTarget.rectInMessageLabel
+    )
+  }
+
+  func presentLinkActionSheet(url: URL, sourceView: UIView, sourceRect: CGRect) {
     guard let viewController = findViewController() else {
-      InAppBrowser.shared.open(linkTarget.url)
+      InAppBrowser.shared.open(url)
       return
     }
 
@@ -505,16 +534,16 @@ class UIMessageView: UIView {
 
     let alert = UIAlertController(
       title: nil,
-      message: linkTarget.url.absoluteString,
+      message: url.absoluteString,
       preferredStyle: .actionSheet
     )
 
     alert.addAction(UIAlertAction(title: "Open", style: .default) { _ in
-      InAppBrowser.shared.open(linkTarget.url, from: viewController)
+      InAppBrowser.shared.open(url, from: viewController)
     })
 
     alert.addAction(UIAlertAction(title: "Copy Link", style: .default) { _ in
-      UIPasteboard.general.string = linkTarget.url.absoluteString
+      UIPasteboard.general.string = url.absoluteString
       ToastManager.shared.showToast(
         "Copied link",
         type: .success,
@@ -525,8 +554,8 @@ class UIMessageView: UIView {
     alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
 
     if let popover = alert.popoverPresentationController {
-      popover.sourceView = messageLabel
-      popover.sourceRect = linkTarget.rectInMessageLabel
+      popover.sourceView = sourceView
+      popover.sourceRect = sourceRect
       popover.permittedArrowDirections = []
     }
 
@@ -590,7 +619,7 @@ class UIMessageView: UIView {
     ])
   }
 
-  private func serviceAttributedText() -> NSAttributedString {
+  func serviceAttributedText() -> NSAttributedString {
     let segments = fullMessage.serviceDisplaySegments ?? [
       MessageServiceDisplaySegment(text: message.serviceFallbackText
         ?? message.text
@@ -637,7 +666,7 @@ class UIMessageView: UIView {
     }
   }
 
-  private func setupTranslationObserver() {
+  func setupTranslationObserver() {
     translationCancellable = TranslatingStatePublisher.shared.publisher.sink { [weak self] translatingSet in
       guard let self else { return }
       let isCurrentlyTranslating = translatingSet.contains { translating in
@@ -746,16 +775,22 @@ class UIMessageView: UIView {
     }
   }
 
-  private func createURLPreviewView(for attachment: FullAttachment) -> URLPreviewView {
+  func createURLPreviewView(for attachment: FullAttachment) -> URLPreviewView {
     let previewView = URLPreviewView()
     previewView.translatesAutoresizingMaskIntoConstraints = false
+    configureURLPreviewView(previewView, for: attachment)
+    return previewView
+  }
+
+  func configureURLPreviewView(_ previewView: URLPreviewView, for attachment: FullAttachment) {
+    guard let preview = attachment.urlPreview else { return }
     previewView.configure(
-      with: attachment.urlPreview!,
+      with: preview,
       photoInfo: attachment.photoInfo,
       authorPhotoInfo: attachment.authorPhotoInfo,
       parentViewController: findViewController(),
       outgoing: outgoing,
-      mode: URLPreviewView.preferredMode(for: attachment.urlPreview!, photoInfo: attachment.photoInfo),
+      mode: URLPreviewView.preferredMode(for: preview, photoInfo: attachment.photoInfo),
       reloadMessageOnFinish: message,
       canRemove: outgoing && attachment.attachment.attachmentId != nil,
       onRemove: { [weak self] in
@@ -765,7 +800,6 @@ class UIMessageView: UIView {
         self?.makeURLPreviewExclusionAction(for: attachment)
       }
     )
-    return previewView
   }
 
   private func makeURLPreviewExclusionAction(for attachment: FullAttachment) -> URLPreviewView.NeverShowPreviewAction? {
@@ -895,6 +929,11 @@ class UIMessageView: UIView {
     }
   }
 
+  func replaceFullMessageSnapshot(_ updatedMessage: FullMessage) {
+    fullMessage = updatedMessage
+    reactionGroups = updatedMessage.groupedReactions
+  }
+
   func animateInitialDeliveryAcknowledgementIfNeeded() {
     guard initialMetadataStatus != nil else { return }
     initialMetadataStatus = nil
@@ -934,7 +973,7 @@ class UIMessageView: UIView {
     NSLayoutConstraint.activate(constraints)
   }
 
-  private func setupMessageActionsIfNeeded() {
+  func setupMessageActionsIfNeeded() {
     guard hasMessageActionRows else { return }
 
     if messageActionsContainer.superview == nil {
@@ -961,7 +1000,7 @@ class UIMessageView: UIView {
     updateMessageActionButtonsLoadingState()
   }
 
-  private func setupMessageActionStateSubscriptions() {
+  func setupMessageActionStateSubscriptions() {
     messageActionLoadingCancellable?.cancel()
     messageActionAnsweredCancellable?.cancel()
 
@@ -986,7 +1025,7 @@ class UIMessageView: UIView {
       }
   }
 
-  private func updateMessageActionButtonsLoadingState() {
+  func updateMessageActionButtonsLoadingState() {
     guard !messageActionButtonsById.isEmpty else { return }
 
     for (actionId, button) in messageActionButtonsById {
@@ -1085,7 +1124,7 @@ class UIMessageView: UIView {
     NSLayoutConstraint.activate(constraints)
   }
 
-  private func setupReplyThreadSummaryIfNeeded() {
+  func setupReplyThreadSummaryIfNeeded() {
     guard shouldShowReplyThreadSummary, let summary = message.replyThreadSummary else { return }
 
     replyThreadSummaryView.configure(
@@ -1108,7 +1147,7 @@ class UIMessageView: UIView {
     containerStack.addArrangedSubview(replyThreadSummaryView)
   }
 
-  private func makeReplyThreadSummaryMenu() -> UIMenu {
+  func makeReplyThreadSummaryMenu() -> UIMenu {
     let isDisabled = message.status == .sending || message.status == .failed
     let attributes: UIMenuElement.Attributes = isDisabled ? [.disabled] : []
 
@@ -1143,7 +1182,7 @@ class UIMessageView: UIView {
     return UIMenu(children: [openAction, copyLinkAction, addToInboxAction])
   }
 
-  private func recentReplyThreadAuthors() -> [UserInfo] {
+  func recentReplyThreadAuthors() -> [UserInfo] {
     message.replyThreadRecentReplierUserIds.map { userId in
       ObjectCache.shared.getUser(id: userId) ?? UserInfo(
         user: User(id: userId, email: nil, firstName: nil)
@@ -1201,7 +1240,7 @@ class UIMessageView: UIView {
     }
   }
 
-  private func ensureRepliedMessageCachedOnce() {
+  func ensureRepliedMessageCachedOnce() {
     guard let repliedId = message.repliedToMessageId, repliedId > 0 else { return }
     let peer = message.peerId
     let chatId = message.chatId
@@ -1320,7 +1359,7 @@ class UIMessageView: UIView {
     }
   }
 
-  private func bindPhotoTapHandlerIfNeeded() {
+  func bindPhotoTapHandlerIfNeeded() {
     guard fullMessage.photoInfo != nil else { return }
     guard let onPhotoTap else {
       newPhotoView.onTap = nil
@@ -1617,11 +1656,26 @@ class UIMessageView: UIView {
     addGestureRecognizer(backgroundDoubleTapGesture)
   }
 
-  @objc private func handleServiceMessageTap(_ gesture: UITapGestureRecognizer) {
+  @objc func handleServiceMessageTap(_ gesture: UITapGestureRecognizer) {
     guard let attributedText = serviceLabel.attributedText else { return }
     guard let characterIndex = serviceCharacterIndex(at: gesture.location(in: serviceLabel)) else { return }
 
     if let userId = attributedText.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) as? Int64 {
+      if let agentId = attributedText.attribute(.mentionAgentId, at: characterIndex, effectiveRange: nil) as? Int64 {
+        Task { @MainActor in
+          guard !(await BotAgentMentionNavigator.open(
+            agentId: agentId,
+            botUserId: userId,
+            peer: message.peerId
+          )) else { return }
+          NotificationCenter.default.post(
+            name: Notification.Name("NavigateToUser"),
+            object: nil,
+            userInfo: ["userId": userId]
+          )
+        }
+        return
+      }
       NotificationCenter.default.post(
         name: Notification.Name("NavigateToUser"),
         object: nil,
@@ -1706,8 +1760,24 @@ class UIMessageView: UIView {
         length: attributedText.length
       )) { value, range, _ in
         if NSLocationInRange(characterIndex, range),
-           let userId = value as? Int64
+          let userId = value as? Int64
         {
+          if let agentId = attributedText.attribute(.mentionAgentId, at: characterIndex, effectiveRange: nil) as? Int64 {
+            foundMention = true
+            Task { @MainActor in
+              guard !(await BotAgentMentionNavigator.open(
+                agentId: agentId,
+                botUserId: userId,
+                peer: message.peerId
+              )) else { return }
+              NotificationCenter.default.post(
+                name: Notification.Name("MentionTapped"),
+                object: nil,
+                userInfo: ["userId": userId]
+              )
+            }
+            return
+          }
           NotificationCenter.default.post(
             name: Notification.Name("MentionTapped"),
             object: nil,
@@ -1795,7 +1865,7 @@ class UIMessageView: UIView {
     }
   }
 
-  private func sendBotCommand(_ command: String) {
+  func sendBotCommand(_ command: String) {
     Task {
       do {
         try await Api.realtime.send(.sendMessage(
@@ -2019,7 +2089,7 @@ class UIMessageView: UIView {
     return LinkContextMenuTarget(url: linkTarget.url, rectInMessageLabel: clippedRect)
   }
 
-  private func linkURL(at characterIndex: Int, in attributedText: NSAttributedString) -> URL? {
+  func linkURL(at characterIndex: Int, in attributedText: NSAttributedString) -> URL? {
     linkTarget(at: characterIndex, in: attributedText)?.url
   }
 
@@ -2065,7 +2135,7 @@ class UIMessageView: UIView {
     return url
   }
 
-  private static func inlineUserId(from url: URL) -> Int64? {
+  private static func inlineMentionTarget(from url: URL) -> (userId: Int64, agentId: Int64?)? {
     guard url.scheme?.lowercased() == "inline", url.host?.lowercased() == "user" else {
       return nil
     }
@@ -2076,14 +2146,22 @@ class UIMessageView: UIView {
         return name == "id" || name == "user_id"
       }?.value
       if let queryId, let userId = Int64(queryId), userId > 0 {
-        return userId
+        let agentId = components.queryItems?
+          .first { $0.name.lowercased() == "agent_id" }?
+          .value
+          .flatMap(Int64.init)
+        return (userId, agentId.flatMap { $0 > 0 ? $0 : nil })
       }
     }
 
     guard let userIdString = url.pathComponents.last, let userId = Int64(userIdString), userId > 0 else {
       return nil
     }
-    return userId
+    let agentId = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+      .first { $0.name.lowercased() == "agent_id" }?
+      .value
+      .flatMap(Int64.init)
+    return (userId, agentId.flatMap { $0 > 0 ? $0 : nil })
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
@@ -2293,6 +2371,12 @@ class UIMessageView: UIView {
     messageLabel.attributedText = attributedMessageText()
   }
 
+  func updateReactionBackgroundOverridesForCurrentMessage() {
+    let overrides = shouldUseTransparentOutgoingReactions ? transparentOutgoingReactionOverrides : nil
+    reactionsFlowView.reactionBackgroundPrimaryOverride = overrides?.primary
+    reactionsFlowView.reactionBackgroundSecondaryOverride = overrides?.secondary
+  }
+
   private lazy var singleLineTextWidth: CGFloat = {
     guard let cacheKey = attributedMessageCacheKey,
           let attributedString = attributedMessageText(),
@@ -2328,7 +2412,7 @@ class UIMessageView: UIView {
     ].joined(separator: "-") as NSString
   }
 
-  private func attributedMessageText() -> NSAttributedString? {
+  func attributedMessageText() -> NSAttributedString? {
     guard let text = fullMessage.displayText,
           let cacheKey = attributedMessageCacheKey
     else { return nil }
@@ -2499,5 +2583,9 @@ class UIMessageView: UIView {
       }
     }
     return nil
+  }
+
+  func sendAnimationTextView() -> UITextView {
+    messageLabel
   }
 }
