@@ -1,7 +1,7 @@
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
-import { DOCS_NAV } from "~/docs/nav"
+import { DOCS_NAV, TECHNICAL_DOCS_NAV, type DocsNavGroup } from "~/docs/nav"
 import { MoonIcon, SunIcon } from "~/docs/lucide"
 import { SUPPORT_EMAIL, emailValue, useHydratedEmail } from "~/lib/email"
 
@@ -11,8 +11,16 @@ import "../../landing/styles/page-content.css"
 
 const normalizePath = (path: string) => (path.length > 1 ? path.replace(/\/+$/g, "") : path)
 
-function DocsNavLinks({ activePath, onNavigate }: { activePath: string; onNavigate?: () => void }) {
-  return DOCS_NAV.map((group) => (
+function DocsNavLinks({
+  activePath,
+  groups,
+  onNavigate,
+}: {
+  activePath: string
+  groups: DocsNavGroup[]
+  onNavigate?: () => void
+}) {
+  return groups.map((group) => (
     <div className="docs-sidebar-group" key={group.title}>
       <div className="docs-sidebar-title">{group.title}</div>
       {group.items.map((item) => {
@@ -28,6 +36,7 @@ function DocsNavLinks({ activePath, onNavigate }: { activePath: string; onNaviga
             onClick={onNavigate}
           >
             {item.title}
+            {item.draft ? <span className="docs-sidebar-draft">Draft</span> : null}
           </Link>
         )
       })}
@@ -53,7 +62,10 @@ function DocsLayout() {
   })
 
   const activePath = normalizePath(pathname)
-  const activeTitle = DOCS_NAV.flatMap((group) => group.items).find(
+  const isTechnicalDocs = activePath === "/docs/technical" || activePath.startsWith("/docs/technical/")
+  const navGroups = isTechnicalDocs ? TECHNICAL_DOCS_NAV : DOCS_NAV
+  const navLabel = isTechnicalDocs ? "Technical Docs" : "Docs"
+  const activeTitle = navGroups.flatMap((group) => group.items).find(
     (item) => normalizePath(item.to) === activePath,
   )?.title
 
@@ -126,18 +138,19 @@ function DocsLayout() {
       <div className="docs-body">
         <div className="docs-container">
           <div className="docs-layout">
-            <aside className="docs-sidebar" aria-label="Docs navigation">
-              <DocsNavLinks activePath={activePath} />
+            <aside className="docs-sidebar" aria-label={`${navLabel} navigation`}>
+              <DocsNavLinks activePath={activePath} groups={navGroups} />
             </aside>
 
             <details ref={mobileNavRef} className="docs-mobile-nav">
               <summary>
-                <span>Docs</span>
+                <span>{navLabel}</span>
                 <strong>{activeTitle ?? "Navigation"}</strong>
               </summary>
-              <nav aria-label="Mobile docs navigation">
+              <nav aria-label={`Mobile ${navLabel.toLowerCase()} navigation`}>
                 <DocsNavLinks
                   activePath={activePath}
+                  groups={navGroups}
                   onNavigate={() => {
                     if (mobileNavRef.current) mobileNavRef.current.open = false
                   }}

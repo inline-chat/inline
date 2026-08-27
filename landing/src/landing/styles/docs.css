@@ -188,6 +188,16 @@
   line-height: 1.35;
 }
 
+.docs-sidebar-draft {
+  display: inline-block;
+  margin-left: 7px;
+  color: var(--docs-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .docs-sidebar-link:hover {
   opacity: 1;
   background: var(--docs-hover);
@@ -411,6 +421,12 @@
 .docs-article-meta > span + span::before {
   content: "·";
   margin-right: 6px;
+}
+
+.docs-article-draft {
+  color: var(--docs-text);
+  font-weight: 650;
+  text-transform: uppercase;
 }
 
 .docs-content.page-content h2 {
@@ -716,42 +732,41 @@ html[data-theme="light"] .docs-page {
 
 .docs-codeblock {
   position: relative;
-  margin: 1rem 0 1.35rem;
+  margin: 0.8rem 0 1.1rem;
   border: 1px solid var(--docs-code-border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--docs-code-bg);
   overflow: hidden;
 }
 
 .docs-codeblock pre {
   margin: 0;
-  padding: 45px 18px 17px;
+  padding: 36px 14px 12px;
   border-radius: 0;
   background: transparent;
 }
 
 .docs-codeblock-language {
   position: absolute;
-  top: 11px;
-  left: 16px;
+  top: 7px;
+  left: 13px;
   color: var(--docs-muted);
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.055em;
+  font-weight: 400;
+  letter-spacing: 0;
   line-height: 22px;
-  text-transform: uppercase;
   user-select: none;
 }
 
 .docs-codeblock-copy {
   position: absolute;
-  top: 8px;
-  right: 9px;
+  top: 4px;
+  right: 6px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
+  min-height: 26px;
   padding: 4px 7px;
   border-radius: 7px;
   border: none;
@@ -785,7 +800,7 @@ html[data-theme="light"] .docs-page {
 
 .page-content .docs-codeblock pre {
   margin: 0;
-  padding: 45px 18px 17px;
+  padding: 36px 14px 12px;
   border-radius: 0;
   background: transparent;
 }
@@ -801,8 +816,8 @@ html[data-theme="light"] .docs-page {
   display: block;
   min-width: max-content;
   color: var(--docs-text);
-  font-size: 14px;
-  line-height: 1.62;
+  font-size: 13px;
+  line-height: 1.5;
   letter-spacing: -0.01em;
 }
 

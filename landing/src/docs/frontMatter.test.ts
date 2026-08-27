@@ -1,66 +1,62 @@
 import { describe, expect, it } from "vitest"
 import { parseDocsFrontMatter, resolveDocsMarkdown, serializeDocsFrontMatter } from "./frontMatter"
 
+const authored = (fields: string, body = "Opening paragraph.") => `---\n${fields}\n---\n\n${body}`
+
 describe("docs front matter", () => {
-  it("leaves ordinary Markdown unchanged", () => {
-    const source = "# Origin Story\n\nStart writing.\n"
+  it("uses front matter as the canonical title and description", () => {
+    const resolved = resolveDocsMarkdown(
+      authored('title: "Origin Story"\ndescription: "How Inline came to be."\nauthor: Mo\ndate: 2026-08-26'),
+    )
 
-    expect(resolveDocsMarkdown(source, "Origin Story")).toEqual({
+    expect(resolved).toMatchObject({
       title: "Origin Story",
-      markdown: source,
-      frontMatter: {},
-    })
-  })
-
-  it("resolves optional title, author, and date fields", () => {
-    const source = [
-      "---",
-      'title: "Inline: the public beta"',
-      "author: Mo",
-      "date: August 18, 2026",
-      "---",
-      "",
-      "# Old title",
-      "",
-      "Start writing.",
-    ].join("\n")
-
-    expect(resolveDocsMarkdown(source, "Fallback")).toEqual({
-      title: "Inline: the public beta",
-      markdown: "# Inline: the public beta\n\nStart writing.",
+      description: "How Inline came to be.",
+      markdown: "# Origin Story\n\nOpening paragraph.",
       frontMatter: {
-        title: "Inline: the public beta",
+        title: "Origin Story",
+        description: "How Inline came to be.",
         author: "Mo",
-        date: "August 18, 2026",
+        date: "2026-08-26",
+        draft: false,
       },
     })
   })
 
-  it("supports metadata without a title override", () => {
-    const source = "---\nauthor: Mo\n---\n\n# Existing title\n"
-
-    expect(resolveDocsMarkdown(source, "Registered title")).toEqual({
-      title: "Registered title",
-      markdown: "# Existing title\n",
-      frontMatter: { author: "Mo" },
-    })
-  })
-
-  it("adds the overridden title when the body has no H1", () => {
-    const source = "---\ntitle: Public beta\n---\n\nOpening paragraph."
-
-    expect(resolveDocsMarkdown(source, "Fallback").markdown).toBe("# Public beta\n\nOpening paragraph.")
-  })
-
-  it("rejects malformed or unsupported front matter", () => {
-    expect(() => parseDocsFrontMatter("---\nauthor: Mo\n")).toThrow("missing its closing")
-    expect(() => parseDocsFrontMatter("---\ntags: beta\n---\n")).toThrow("Unsupported")
-  })
-
-  it("serializes only authored metadata", () => {
-    expect(serializeDocsFrontMatter({ title: "Public beta", author: "Mo" })).toBe(
-      '---\ntitle: "Public beta"\nauthor: "Mo"\n---',
+  it("marks drafts and replaces a redundant body H1", () => {
+    const resolved = resolveDocsMarkdown(
+      authored('title: "Public beta"\ndescription: "Announcement draft."\ndraft: true', "# Old title\n\nDraft body."),
     )
-    expect(serializeDocsFrontMatter({})).toBe("")
+
+    expect(resolved.markdown).toBe("# Public beta\n\nDraft body.")
+    expect(resolved.frontMatter.draft).toBe(true)
+  })
+
+  it("requires front matter, title, and description", () => {
+    expect(() => parseDocsFrontMatter("# Missing metadata\n")).toThrow("require front matter")
+    expect(() => parseDocsFrontMatter(authored('description: "Missing title"'))).toThrow("title")
+    expect(() => parseDocsFrontMatter(authored('title: "Missing description"'))).toThrow("description")
+  })
+
+  it("rejects unsupported fields and non-boolean draft values", () => {
+    expect(() => parseDocsFrontMatter(authored('title: Page\ndescription: Summary\ntags: docs'))).toThrow(
+      "Unsupported",
+    )
+    expect(() => parseDocsFrontMatter(authored('title: Page\ndescription: Summary\ndraft: yes'))).toThrow(
+      "draft must be true or false",
+    )
+  })
+
+  it("serializes public metadata without inventing draft state", () => {
+    expect(
+      serializeDocsFrontMatter({
+        title: "Origin Story",
+        description: "How Inline came to be.",
+        author: "Mo",
+        draft: false,
+      }),
+    ).toBe(
+      '---\ntitle: "Origin Story"\ndescription: "How Inline came to be."\nauthor: "Mo"\n---',
+    )
   })
 })

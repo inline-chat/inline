@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Inline docs sidebar",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["groups"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "pages"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "pages": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["slug"],
+                  "properties": {
+                    "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$" },
+                    "label": { "type": "string", "minLength": 1 }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["label", "href"],
+                  "properties": {
+                    "label": { "type": "string", "minLength": 1 },
+                    "href": { "type": "string", "pattern": "^(\\/|https?:\\/\\/)" },
+                    "external": { "type": "boolean" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,7 @@
-# What's New
+---
+title: "What's New"
+description: "Release notes and exact app build links."
+---
 
 Release notes for Inline apps, developer tools, and integrations.
 

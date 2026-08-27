@@ -1,75 +1,65 @@
-# Agents
+---
+title: "Agents"
+description: "Connect coding agents and agent platforms to Inline."
+---
 
-Connect an agent to Inline as a private local bot, through MCP, or with an agent platform integration.
+## Setup Paths
 
-## Choose a setup
+| Path | Use |
+| --- | --- |
+| [Plugin or skill](/docs/add-inline) | Add Inline tools to ChatGPT, Codex, Claude, or another agent |
+| [Local agent](#local-coding-agents) | Run Codex, Claude, OpenCode, or Amp on your Mac from Inline chats |
+| [MCP](/docs/mcp) | Grant an MCP client access to approved Inline context through OAuth |
+| [OpenClaw](/docs/openclaw) | Add Inline as an OpenClaw channel |
+| [Hermes](/docs/hermes) | Run Hermes from Inline chats and reply threads |
 
-- **[Add Inline to your agent](/docs/add-inline)**
+## Local Coding Agents
 
-  Install the Inline plugin or skill for ChatGPT, Codex, Claude, and other agents.
-- **[Local coding agents](#local-coding-agents)**
+> **One-click setup on macOS**
+> Choose **Set Up an Agent…** from the app menu, or open **Settings → Bots → Set Up Agent…**. The wizard installs or updates the trusted CLI, signs in, detects local agents, creates or reuses the bot, installs the integration, and verifies it.
 
-  Run Codex, Claude, OpenCode, or Amp on your Mac and talk to it from Inline.
-- **[Inline MCP](/docs/mcp)**
-
-  Give an MCP client access to approved Inline spaces with OAuth consent.
-- **[OpenClaw](/docs/openclaw)**
-
-  Add Inline as an OpenClaw channel.
-- **[Hermes Agent](/docs/hermes)**
-
-  Run Hermes from Inline chats and reply threads.
-
-## Local coding agents
-
-On macOS, choose **Set Up an Agent…** from Inline's app menu or the Bots settings page. The wizard installs or updates the trusted Inline CLI, signs it in, finds every supported harness already installed on your Mac, and lets you choose which one to connect.
-
-You can run the same unified flow in Terminal:
+Terminal setup:
 
 ```bash
-# Detect installed harnesses and choose interactively
 inline agents setup
-
-# Prompt-free setup for an agent or script
-inline agents setup --target codex --non-interactive --json
-inline agents setup --target hermes --non-interactive --json
-inline agents setup --target openclaw --non-interactive --json
-
-# Equivalent gateway shortcuts
-inline setup hermes --non-interactive --json
-inline setup openclaw --non-interactive --json
 ```
 
-Supported harnesses are Codex, Claude, OpenCode, Amp, Hermes, and OpenClaw. Inline installs its own adapter or plugin, but it does not silently install those third-party runtimes. If a local coding harness needs no explicit folder, Inline uses your home directory; pass `--folder` to use a narrower workspace.
+Non-interactive setup:
+
+```bash
+inline agents setup --target codex --non-interactive --json
+```
+
+Supported targets: Codex, Claude, OpenCode, Amp, Hermes, and OpenClaw. Inline installs its adapter or plugin, not the third-party runtime. Local targets default to the home directory unless `--folder` selects a narrower workspace.
 
 ```bash
 inline agents setup --target codex --folder /path/to/project
 ```
 
-Read-only discovery is available for troubleshooting and app integrations:
+Detect installed targets without changing state:
 
 ```bash
 inline agents discover --json --compact
 ```
 
-The older `inline setup codex|opencode|claude|amp` commands remain supported. Codex is the primary local-bridge beta path; OpenCode, Claude, and Amp are experimental, while Hermes and OpenClaw use their own gateway integrations.
+Compatibility commands: `inline setup codex|opencode|claude|amp`. Gateway shortcuts: `inline setup hermes|openclaw`. Codex is the primary local-bridge beta path; Claude, OpenCode, and Amp are experimental.
 
-Check Codex, Claude, OpenCode, and Amp bridge health with:
+Local bridge status:
 
 ```bash
 inline bridge status
 ```
 
-Hermes and OpenClaw run as gateways and have separate health checks:
+Gateway status:
 
 ```bash
 hermes inline status --json --probe
 openclaw channels status --channel inline --probe --json
 ```
 
-### If setup cannot finish
+### Recovery
 
-After target setup begins, the app and `--json` output identify the failed phase, stable error code, retry command, documentation link, and any work completed before the failure. Earlier validation and authentication failures provide a stable code and message; the app adds guide and retry recovery where possible. Setup is safe to retry. Inline asks before using `--replace` to repair a conflicting Hermes or OpenClaw configuration.
+The app and JSON output report the failed phase, stable error code, retry command, documentation link, and confirmed changes. Setup is safe to retry. Conflicting Hermes or OpenClaw configurations require confirmation before `--replace`.
 
 | Error | What to do |
 | --- | --- |
@@ -77,20 +67,18 @@ After target setup begins, the app and `--json` output identify the failed phase
 | `target_not_installed` | Install the selected harness, or choose another detected harness. |
 | `setup_conflict` / `mapped_bot_missing` | Retry from the app with **Repair Existing Setup**, or rerun the command with `--replace`. |
 | `plugin_unavailable` | Allow Inline to install the integration, or install/update it manually. |
-| `agent_setup_failed` | Run the provided retry command in Terminal for bounded diagnostics; no token is printed. |
+| `agent_setup_failed` | Run the provided retry command in Terminal; diagnostics do not print the token. |
 
-If the app finds an outdated Homebrew CLI, the wizard installs a compatible signed copy in another safe location without overwriting the Homebrew file. The standalone CLI menu continues to respect Homebrew ownership. If a harness installed through Volta, nvm/fnm, asdf/mise, pnpm, Bun, or a similar version manager is still missing, run `inline agents discover --json --compact` in Terminal and use the setup command there.
+An outdated Homebrew CLI is preserved; the wizard installs a compatible signed copy elsewhere. If a runtime installed through Volta, nvm/fnm, asdf/mise, pnpm, or Bun is missing, run `inline agents discover --json --compact` in Terminal.
 
-If a run reports `status: "partial"`, it may have changed local or Inline-owned state; its `changes` array lists only work the CLI can confirm completed. Retry normally—the setup flow reconciles existing Inline-owned state instead of creating another bot.
+`status: "partial"` means some listed changes completed. Retry normally; setup reconciles Inline-owned state instead of creating another bot.
 
-For provider requirements, security boundaries, and current compatibility details, see the [local agent bridge source](https://github.com/inline-chat/inline/blob/main/docs/local-agent-bridge.md).
+[Local agent process and security boundaries](/docs/technical/local-agents)
 
-## Agent workflows
-
-Install the official Inline skill after the CLI is ready:
+## Agent Workflows
 
 ```bash
 inline skill install
 ```
 
-The skill adds focused workflows for Inline MCP, the CLI, and local agents. See [Add Inline to your agent](/docs/add-inline) for plugin, `npx skills`, and manual setup.
+For plugin, `npx skills`, and manual installation, see [Add Inline to Your Agent](/docs/add-inline).

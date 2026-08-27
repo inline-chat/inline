@@ -1,4 +1,7 @@
-# OpenClaw
+---
+title: "OpenClaw"
+description: "Configure the official Inline OpenClaw plugin."
+---
 
 Add Inline as an OpenClaw channel. You need an [Inline bot token](/docs/creating-a-bot) first.
 
@@ -23,10 +26,12 @@ channels:
 openclaw gateway
 ```
 
-Verify that the Inline channel is available:
+Verify:
 
 ```bash
-openclaw status --deep
+openclaw plugins list
+openclaw channels status
+openclaw plugins inspect inline --json
 ```
 
 ## Update
@@ -35,4 +40,4 @@ openclaw status --deep
 openclaw plugins update inline
 ```
 
-For access controls, troubleshooting, and the complete feature reference, see the [Inline OpenClaw plugin](https://github.com/inline-chat/inline/tree/main/openclaw).
+[Plugin source and reference](https://github.com/inline-chat/inline/tree/main/openclaw)

@@ -33,6 +33,7 @@ type DocsMarkdownProps = {
   metadata?: {
     author?: string
     date?: string
+    draft?: boolean
   }
 }
 
@@ -205,10 +206,16 @@ function isVideoHref(href: string) {
   return /\.mp4(?:[?#].*)?$/i.test(href)
 }
 
+function titleCaseLanguage(language: string) {
+  return language
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
 function PreWithCopy({ children, code, language, ...props }: { children?: ReactNode; code: string; language: string }) {
   const [copied, setCopied] = useState(false)
   const codeText = code.replace(/\n$/, "")
-  const label = LANGUAGE_LABELS[language] ?? language.toUpperCase()
+  const label = LANGUAGE_LABELS[language] ?? titleCaseLanguage(language)
 
   return (
     <div className="docs-codeblock">
@@ -328,7 +335,7 @@ export function DocsMarkdown({ markdown, className, renderVideoLinks = false, me
     }
 
   const renderH1 = heading("h1")
-  const hasMetadata = Boolean(metadata?.author || metadata?.date)
+  const hasMetadata = Boolean(metadata?.author || metadata?.date || metadata?.draft)
 
   const content = (
     <Markdown
@@ -340,6 +347,7 @@ export function DocsMarkdown({ markdown, className, renderVideoLinks = false, me
             {renderH1(props)}
             {hasMetadata ? (
               <div className="docs-article-meta" aria-label="Article details">
+                {metadata?.draft ? <span className="docs-article-draft">Draft</span> : null}
                 {metadata?.author ? <span>{metadata.author}</span> : null}
                 {metadata?.date ? <span>{metadata.date}</span> : null}
               </div>

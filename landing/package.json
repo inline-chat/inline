@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "bun run scripts/generate-llms-docs.ts && vite build && bun run scripts/copy-ssr-css-assets.ts",
-    "docs:llms": "bun run scripts/generate-llms-docs.ts",
+    "dev": "bun run docs:check && vite dev",
+    "build": "bun run docs:check && vite build && bun run scripts/copy-ssr-css-assets.ts",
+    "docs:check": "bun run scripts/check-docs.ts",
+    "docs:llms": "bun run docs:check",
     "start": "bun run .output/server/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint --ignore-path ../.oxlintignore src packages vite.config.ts vitest.config.ts",

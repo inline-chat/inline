@@ -1,23 +1,23 @@
-# Bot API
+---
+title: "Bot API"
+description: "HTTP API for bot integrations and automations."
+---
 
-Inline Bot API is an HTTP API for bots, serverless agents, and workflow runtimes that cannot keep a WebSocket process alive. It provides contextual reads, search, threads, files, actions, polling, and webhooks over the same bot identity used by Inline.
+Inline Bot API is an HTTP interface for bots, serverless agents, and webhook workflows.
 
-## Compatibility
+**Reference:** [Bot API methods and schemas](https://api.inline.chat/bot-api-reference) · [OpenAPI JSON](https://inline.chat/openapi.json)
 
-The current public contract is `0.1`. Pin the generated packages and review the changelog when upgrading.
-
-## Base URL
-
-- [Inline API](https://api.inline.chat)
+| Contract | Value |
+| --- | --- |
+| Version | `0.1` |
+| Base URL | `https://api.inline.chat` |
 
 ## Authentication
 
-Use either:
+- Header, recommended: `Authorization: Bearer <token>`
+- Telegram-compatible path: `/bot<token>/<method>`
 
-1. Header auth (recommended): `Authorization: Bearer <token>`
-2. Token in path: `/bot<token>/<method>`
-
-The client uses header authentication by default. Token-in-path mode exists for Telegram-style adapters.
+`@inline-chat/bot-client` uses header authentication by default. Set `authMode: "path"` only for a token-in-path adapter.
 
 ## TypeScript Client
 
@@ -29,40 +29,27 @@ npm install @inline-chat/bot-client@^0.1.0
 import { InlineBotClient } from "@inline-chat/bot-client"
 
 const bot = new InlineBotClient({ token: process.env.INLINE_BOT_TOKEN! })
-const history = await bot.getChatHistory({ chat_id: 42, limit: 50 })
-
-if (history.ok) {
-  await bot.sendMessage({ chat_id: 42, text: `Read ${history.result.messages.length} messages.` })
-}
+const result = await bot.sendMessage({ chat_id: 42, text: "hello" })
+if (!result.ok) throw new Error(result.description)
 ```
 
-Use `authMode: "path"` only when adapting a client that expects the token in the URL.
+## Common Methods
 
-## Core Methods
+| Area | Methods |
+| --- | --- |
+| Identity and chats | `getMe`, `getChat`, `getChatHistory`, `getMessages`, `searchMessages` |
+| Threads | `createThread`, `createReplyThread`, `addThreadParticipant`, `removeThreadParticipant` |
+| Messages | `sendMessage`, `editMessageText`, `deleteMessage`, `forwardMessage`, `sendReaction` |
+| Files | `uploadFile`, `getFile` |
+| Updates | `getUpdates`, `setWebhook`, `deleteWebhook`, `getWebhookInfo` |
 
-- `GET /bot/getMe`
-- `GET /bot/getChat`
-- `GET /bot/getChatHistory`
-- `POST /bot/getMessages`
-- `POST /bot/searchMessages`
-- `POST /bot/createThread`
-- `POST /bot/createReplyThread`
-- `POST /bot/addThreadParticipant`
-- `POST /bot/removeThreadParticipant`
-- `POST /bot/sendMessage`
-- `POST /bot/editMessageText`
-- `POST /bot/deleteMessage`
-- `POST /bot/forwardMessage`
-- `POST /bot/sendReaction`
-- `POST /bot/uploadFile`
-- `GET /bot/getUpdates`
-- `POST /bot/setWebhook`
+The [generated reference](https://api.inline.chat/bot-api-reference) lists every method, request, response, and entity.
 
 Chats have `type: "user" | "thread"`. A reply thread may contain `parent_chat_id` and `parent_message`. The embedded parent is a normal message encoded once; its chat does not recursively include another parent message.
 
 ## Create a Thread and Start the Conversation
 
-Thread creation is composable: create the thread, then send its first message. The complete creation contract is `title`, `emoji`, `space_id`, `is_public`, and `participants`. For a private thread, Inline automatically includes the authenticated bot alongside the requested user IDs. Public threads do not accept an explicit participant list.
+Create a thread, then send its first message. Inputs: `title`, `emoji`, `space_id`, `is_public`, and `participants`. Private threads include the authenticated bot; public threads do not accept an explicit participant list.
 
 ```ts
 const created = await bot.createThread({
@@ -76,11 +63,10 @@ if (created.ok) {
     chat_id: chatId,
     text: `Hello [@Mo](inline://user/${userId})`,
   })
-  await bot.addThreadParticipant({ chat_id: chatId, user_id: teammateId })
 }
 ```
 
-Markdown user links become structured mentions. A bot may add or remove users when it can manage the thread, but it cannot remove itself.
+Markdown user links become structured mentions. A bot with thread-management access may add or remove users, but cannot remove itself.
 
 ## Targeting Chats
 
@@ -89,7 +75,7 @@ Markdown user links become structured mentions. A bot may add or remove users wh
 
 ## Receiving Updates
 
-Use either long polling or a webhook for the same pending update queue. Enabling a webhook disables polling until `deleteWebhook` is called.
+Polling and webhooks consume the same pending queue. Enabling a webhook disables polling until `deleteWebhook`.
 
 ```ts
 await bot.setWebhook({
@@ -99,17 +85,24 @@ await bot.setWebhook({
 })
 ```
 
-Queued updates are retained for up to 24 hours. Their `update_id` values increase, but clients must tolerate gaps and slight reordering. With `getUpdates`, request 1–100 updates and pass an offset greater than the highest processed ID to confirm earlier updates. Only one long poll may be active per Bot; a newer poll replaces the older request.
+| Property | Contract |
+| --- | --- |
+| Retention | Up to 24 hours |
+| Ordering | Increasing `update_id`; tolerate gaps and slight reordering |
+| Polling | 1–100 updates; acknowledge with an offset above the highest processed ID; one active long poll per bot |
+| Queue limits | 100,000 updates, 128 MiB total, 512 KiB per update |
+| Response limit | `getUpdates` returns about 4 MiB at most |
+| Delivery | At least once; deduplicate with `update_id` |
 
-Each Bot may have at most 100,000 pending updates or 128 MiB of serialized pending payloads, and one update may be at most 512 KiB. A new update is dropped when a limit is reached; it never blocks later delivery, and `getWebhookInfo.dropped_update_count` reports the cumulative drops. A `getUpdates` response is capped near 4 MiB even when the requested item limit is higher.
+When a queue limit is reached, the new update is dropped without blocking later delivery. `getWebhookInfo.dropped_update_count` reports cumulative drops. Use `drop_pending_updates: true` only when intentionally discarding the backlog.
 
-The secret is optional. When set, verify the `x-inline-bot-api-secret-token` request header. Webhooks also include `x-inline-update-id` and `x-inline-attempt`. Queued delivery is at least once; use `update_id` to make processing safe to retry. Pass `drop_pending_updates: true` to `setWebhook` or `deleteWebhook` when intentionally discarding the current backlog.
+For webhooks, verify `x-inline-bot-api-secret-token` when configured. Inline also sends `x-inline-update-id` and `x-inline-attempt`.
 
-`getFile` and reuse of a `file_id` are allowed only for files uploaded by the Bot or files contained in a message the Bot can currently access.
+## Access Rules
 
-Bots never receive their own messages. With the default `mentions` trigger, humans activate a bot through user chats, resolved mentions, replies, commands, and message actions. Other bots activate it only through an explicit resolved mention.
-
-Use the Bot HTTP API for serverless agents and ordinary request/response integrations. Use the Realtime API when a continuously connected process needs live client state beyond the Bot contract.
+- `getFile` and `file_id` reuse are limited to files uploaded by the bot or visible in an accessible message.
+- Bots do not receive their own messages.
+- With the default `mentions` trigger, humans activate a bot through user chats, mentions, replies, commands, and message actions. Bots must use an explicit resolved mention.
 
 ## Quick Example
 
@@ -135,10 +128,8 @@ Error:
 { "ok": false, "error_code": 400, "description": "Invalid arguments was provided" }
 ```
 
-## SDK and Reference
+## Packages
 
-- Client package: `@inline-chat/bot-client`
-- Types package: `@inline-chat/bot-api-types`
-- [Developers overview](/docs/developers)
-- [Realtime API](/docs/realtime-api)
-- [API reference UI](https://api.inline.chat/bot-api-reference)
+- `@inline-chat/bot-client` — typed client and generated types
+- `@inline-chat/bot-api-types` — generated request, response, method, and entity types
+- [Realtime API](/docs/realtime-api) — connected clients and live state

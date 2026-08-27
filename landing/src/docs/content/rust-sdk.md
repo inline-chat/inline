@@ -1,26 +1,24 @@
-# Rust SDK
-
-The Rust SDK is the low-level Inline client library for Rust apps, agents, bridges, and command-line tools.
+---
+title: "Rust SDK"
+description: "Rust SDK quick start for API calls, uploads, and realtime RPC."
+---
 
 ## Packages
 
-- `inline-sdk`: API calls, uploads, client identity, and realtime RPC.
-- `inline-protocol`: generated protobuf types used by the SDK.
-
-The SDK does not own a durable cache or sync engine. That belongs in the future higher-level `inline-client` crate.
+| Package | Use |
+| --- | --- |
+| `inline-sdk` | API calls, uploads, client identity, and realtime RPC |
+| `inline-protocol` | Generated Protocol Buffer types and protocol support |
+| `inline-client` | Stateful client with local cache, sync cursors, pending transactions, and committed events |
 
 ## Install
 
-From the public repository workspace:
-
-```toml
-inline-sdk = { git = "https://github.com/inline-chat/inline", package = "inline-sdk" }
-```
-
-When using crates.io after release:
-
 ```bash
 cargo add inline-sdk
+```
+
+```bash
+cargo add inline-client
 ```
 
 ## Quick Start
@@ -37,8 +35,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .connect()
         .await?;
 
-    let me = realtime.call(proto::GetMeInput {}).await?;
-    let _user = me.user;
+    let _me = realtime.call(proto::GetMeInput {}).await?;
 
     Ok(())
 }
@@ -46,7 +43,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Notes
 
-- The SDK uses Rust's standard `log` facade and never initializes a logger.
-- Parent apps choose their own logger, such as `env_logger`, `tracing-log`, or a platform logger.
+- The SDK uses Rust's `log` facade; the parent app configures the logger.
 - Debug output redacts bearer tokens, auth challenges, URL credentials, query strings, and local upload paths.
-- Use [Realtime API](/docs/realtime-api) for the TypeScript SDK and raw WebSocket endpoint.
+- [Realtime API](/docs/realtime-api) · [`crates/sdk`](https://github.com/inline-chat/inline/tree/main/crates/sdk) · [`crates/client`](https://github.com/inline-chat/inline/tree/main/crates/client)

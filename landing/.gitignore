@@ -9,7 +9,8 @@
 routeTree.gen.ts
 .tanstack
 
-# Docs Markdown is served from src/docs/content via server routes.
+# Docs Markdown is served from src/docs/content via server routes. Keep static
+# copies out of public/ so a newly drafted page cannot survive as a stale asset.
 /public/docs/
 /public/llms.txt
 /public/llms-full.txt

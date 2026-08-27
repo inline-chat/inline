@@ -1,10 +1,11 @@
-# MCP
+---
+title: "MCP"
+description: "Connect MCP-compatible agents to Inline with OAuth consent."
+---
 
-Inline MCP lets agents read and write in approved Inline spaces with OAuth consent. Use it to find context, summarize conversations, create threads, and send messages or files.
+Inline MCP gives agents scoped read and write access through OAuth consent.
 
-## Connect an agent
-
-Choose your client, then complete Inline sign-in and consent in the browser.
+## Connect an Agent
 
 #### Codex
 
@@ -30,18 +31,18 @@ amp mcp add inline https://mcp.inline.chat/mcp/v2
 https://mcp.inline.chat/mcp/v2
 ```
 
-In ChatGPT Apps or another MCP client, add a remote Streamable HTTP server and paste the URL above. The client should discover OAuth automatically.
+Add the URL as a remote Streamable HTTP server. The client should discover OAuth automatically.
 
-## What agents can do
+## Capabilities
 
 - Find spaces, people, conversations, and messages.
 - Read recent, unread, or surrounding message context.
 - Create conversations and send text or media.
 - Inspect the current account, scopes, and allowed chat context.
 
-Agents only see spaces selected during consent. Access to DMs and home threads is granted separately, and read/write scopes are enforced on every call.
+Agents see only the spaces selected during consent. DMs and home threads require separate grants. Every call enforces read/write scopes and allowed chat context.
 
-## Common issues
+## Troubleshooting
 
 - **Sign-in expired:** reconnect the server and complete OAuth again.
 - **Missing conversations:** reconnect and expand the spaces or conversation types allowed during consent.

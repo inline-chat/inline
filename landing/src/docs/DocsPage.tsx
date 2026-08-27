@@ -1,14 +1,18 @@
 import { DocsMarkdown } from "~/docs/DocsMarkdown"
-import { type DocsPageSlug, requireDocsPage } from "~/docs/pages"
+import { requireDocsPage } from "~/docs/pages"
 
-export function docsPageHead(slug: DocsPageSlug) {
+export function docsPageHead(slug: string) {
   const page = requireDocsPage(slug)
   return {
-    meta: [{ title: `${page.title} - Inline Docs` }],
+    meta: [
+      { title: `${page.title} - Inline Docs` },
+      { name: "description", content: page.description },
+      ...(page.draft ? [{ name: "robots", content: "noindex,nofollow" }] : []),
+    ],
   }
 }
 
-export function DocsPage({ slug }: { slug: DocsPageSlug }) {
+export function DocsPage({ slug }: { slug: string }) {
   const page = requireDocsPage(slug)
   const isChangelog = slug === "changelog"
   const className = `page-content docs-content${isChangelog ? " changelog-content" : ""}`
@@ -17,7 +21,7 @@ export function DocsPage({ slug }: { slug: DocsPageSlug }) {
       markdown={page.markdown}
       className={className}
       renderVideoLinks={isChangelog}
-      metadata={page.frontMatter}
+      metadata={{ ...page.frontMatter, draft: page.draft }}
     />
   )
 }

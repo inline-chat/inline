@@ -1,6 +1,9 @@
-# Create a Bot
+---
+title: "Create a Bot"
+description: "Create or reveal an Inline bot token."
+---
 
-## macOS app
+## macOS App
 
 1. Open **Inline → Settings → Bots**.
 2. Enter a name and a username ending in `bot`.
@@ -12,7 +15,7 @@
 Sign in:
 
 ```bash
-inline auth login
+inline login
 ```
 
 Create the bot:

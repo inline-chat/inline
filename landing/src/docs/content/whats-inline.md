@@ -1,4 +1,7 @@
-# What's Inline
+---
+title: "What's Inline"
+description: "Product goals and design principles."
+---
 
 It's designed to be a calm, fast interface for coordination between humans, agents, and shared memory.
 

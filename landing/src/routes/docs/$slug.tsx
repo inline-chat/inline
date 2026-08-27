@@ -1,0 +1,17 @@
+import { createFileRoute } from "@tanstack/react-router"
+
+import { DocsPage, docsPageHead } from "~/docs/DocsPage"
+import { requireDocsPage } from "~/docs/pages"
+
+export const Route = createFileRoute("/docs/$slug")({
+  loader: ({ params }) => {
+    requireDocsPage(params.slug)
+    return params.slug
+  },
+  component: DiscoveredDocsPage,
+  head: ({ params }) => docsPageHead(params.slug),
+})
+
+function DiscoveredDocsPage() {
+  return <DocsPage slug={Route.useLoaderData()} />
+}

@@ -1,52 +1,51 @@
-# CLI
+---
+title: "CLI"
+description: "Install and authenticate the Inline command line tool."
+---
 
 Use the Inline CLI from a terminal, script, or coding agent.
 
 ## Install
 
-Choose one installation method.
-
-#### macOS · Homebrew
+#### macOS Homebrew
 
 ```bash
 brew tap inline-chat/homebrew-inline && brew install --cask inline
 ```
 
-#### macOS · Install script
+#### macOS or Linux
 
 ```bash
 curl -fsSL https://inline.chat/cli/install.sh | sh
 ```
 
-#### Linux · Install script
+Linux targets: x86_64 and ARM64, with glibc or musl.
+
+Verify:
 
 ```bash
-curl -fsSL https://inline.chat/cli/install.sh | sh
+inline --version
 ```
 
-The Linux installer supports x86_64 and ARM64 systems using glibc or musl.
-
-## Sign in
+## Sign In
 
 ```bash
-inline auth login
+inline login
 ```
 
-## Install the Inline skill
-
-Install the official skill for Codex and other compatible agent environments:
+## Install the Inline Skill
 
 ```bash
 inline skill install
 ```
 
-Restart your agent after installation so it discovers the skill.
+Restart the agent after installation.
 
-## Common commands
+## Common Commands
 
 - `inline chats list`
 - `inline messages send --chat-id <id> --text "hello"`
 - `inline search --chat-id <id> --query "<text>"`
 - `inline --help`
 
-For automation, full command coverage, and output formats, see the [CLI reference on GitHub](https://github.com/inline-chat/inline/tree/main/cli).
+Run `inline --help` for the command reference. [CLI source](https://github.com/inline-chat/inline/tree/main/cli)

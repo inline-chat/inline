@@ -1,0 +1,21 @@
+{
+  "$schema": "./sidebar.schema.json",
+  "groups": [
+    {
+      "title": "Technical Docs",
+      "pages": [
+        { "slug": "technical/index", "label": "Overview" },
+        "technical/protocol",
+        "technical/realtime",
+        "technical/sync",
+        "technical/files",
+        "technical/schema",
+        "technical/security"
+      ]
+    },
+    {
+      "title": "Inline Docs",
+      "pages": [{ "label": "Back to Docs", "href": "/docs" }]
+    }
+  ]
+}

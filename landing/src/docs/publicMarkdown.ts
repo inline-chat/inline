@@ -1,4 +1,5 @@
-import { DOCS_PAGES, getDocsPage, type DocsPage, type DocsPageSlug } from "~/docs/pages"
+import { DOCS_PUBLICATION_PAGES } from "~/docs/nav"
+import { getPublishedDocsPage, type DocsPage } from "~/docs/pages"
 import { serializeDocsFrontMatter } from "~/docs/frontMatter"
 
 const origin = "https://inline.chat"
@@ -29,7 +30,9 @@ export function publicDocsPageMarkdown(page: DocsPage): string {
 }
 
 function docsList(): string {
-  return DOCS_PAGES.map((page) => `- [${page.title}](${origin}${page.markdownPath}): ${page.summary}`).join("\n")
+  return DOCS_PUBLICATION_PAGES.map(
+    (page) => `- [${page.title}](${origin}${page.markdownPath}): ${page.description}`,
+  ).join("\n")
 }
 
 export function llmsTxtMarkdown(): string {
@@ -64,12 +67,12 @@ export function llmsFullTxtMarkdown(): string {
     "",
     docsList(),
     "",
-    ...DOCS_PAGES.flatMap((page) => [publicDocsPageMarkdown(page).trim(), ""]),
+    ...DOCS_PUBLICATION_PAGES.flatMap((page) => [publicDocsPageMarkdown(page).trim(), ""]),
   ].join("\n")
 }
 
 export function docsMarkdownResponse(slug: string): Response {
-  const page = getDocsPage(slug)
+  const page = getPublishedDocsPage(slug)
   if (!page) {
     return new Response("Not found\n", {
       status: 404,
@@ -83,14 +86,14 @@ export function docsMarkdownResponse(slug: string): Response {
 }
 
 export function docsMarkdownHeadResponse(slug: string): Response {
-  const page = getDocsPage(slug)
+  const page = getPublishedDocsPage(slug)
   return new Response(null, {
     status: page ? 200 : 404,
     headers: PUBLIC_MARKDOWN_HEADERS,
   })
 }
 
-export function docsMarkdownHandlers(slug: DocsPageSlug) {
+export function docsMarkdownHandlers(slug: string) {
   return {
     GET: async () => docsMarkdownResponse(slug),
     HEAD: async () => docsMarkdownHeadResponse(slug),

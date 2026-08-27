@@ -1,25 +1,17 @@
-import { DOCS_NAV_GROUPS, DOCS_PAGES } from "~/docs/pages"
+import sidebarConfig from "./sidebar.json"
+import technicalSidebarConfig from "./technical-sidebar.json"
+import { ALL_DOCS_PAGES, DOCS_INCLUDE_DRAFTS } from "./pages"
+import { docsPublicationOrder, resolveDocsSidebar, type DocsNavGroup } from "./sidebar"
 
-export type DocsNavGroup = {
-  title: string
-  items: Array<{
-    title: string
-    to: string
-    external?: boolean
-  }>
-}
+export type { DocsNavGroup }
 
-export const DOCS_NAV: DocsNavGroup[] = DOCS_NAV_GROUPS.map((group) => ({
-  title: group.title,
-  items: DOCS_PAGES.filter((page) => page.navGroup === group.id && !("navHidden" in page && page.navHidden)).map((page) => ({
-    title: ("navTitle" in page ? page.navTitle : undefined) ?? page.title,
-    to: page.route,
-  })),
-})).map((group) =>
-  group.title === "Policies"
-    ? {
-        ...group,
-        items: [...group.items, { title: "Legal", to: "/legal", external: true }],
-      }
-    : group,
+export const DOCS_NAV = resolveDocsSidebar(sidebarConfig, ALL_DOCS_PAGES, DOCS_INCLUDE_DRAFTS).groups
+export const TECHNICAL_DOCS_NAV = resolveDocsSidebar(
+  technicalSidebarConfig,
+  ALL_DOCS_PAGES,
+  DOCS_INCLUDE_DRAFTS,
+).groups
+export const DOCS_PUBLICATION_PAGES = docsPublicationOrder(
+  [sidebarConfig, technicalSidebarConfig],
+  ALL_DOCS_PAGES,
 )
