@@ -231,6 +231,7 @@ const intentionalCandidateOnly =
     "POST\t/bot{token}/forwardMessages",
     "POST\t/bot{token}/getSpace",
     "POST\t/email/unsubscribe/{token}",
+    "POST\t/v1/space-join/resolve",
     "PUT\t/admin/server-config",
   ])
 

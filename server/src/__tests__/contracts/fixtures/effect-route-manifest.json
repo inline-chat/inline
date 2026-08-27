@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "count": 289,
+  "count": 303,
   "methodCounts": {
-    "GET": 146,
-    "POST": 141,
+    "GET": 150,
+    "POST": 151,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "74d236dcd054e441cbf721099adced8bcace25fb66552eb81d09925245cb18b5",
+  "sha256": "7d644e14aa2755e50a5369e82c2737c836b2f3f3c2096f11964fdf9f74c25ebb",
   "routes": [
     {
       "method": "GET",
@@ -95,6 +95,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getAgent"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getChat"
     },
     {
@@ -119,6 +123,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getMyAgents"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getMyCommands"
     },
     {
@@ -128,6 +136,10 @@
     {
       "method": "GET",
       "path": "/bot/getWebhookInfo"
+    },
+    {
+      "method": "GET",
+      "path": "/bot{token}/getAgent"
     },
     {
       "method": "GET",
@@ -152,6 +164,10 @@
     {
       "method": "GET",
       "path": "/bot{token}/getMe"
+    },
+    {
+      "method": "GET",
+      "path": "/bot{token}/getMyAgents"
     },
     {
       "method": "GET",
@@ -679,11 +695,19 @@
     },
     {
       "method": "POST",
+      "path": "/bot/createAgent"
+    },
+    {
+      "method": "POST",
       "path": "/bot/createReplyThread"
     },
     {
       "method": "POST",
       "path": "/bot/createThread"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/deleteAgent"
     },
     {
       "method": "POST",
@@ -771,6 +795,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/updateAgent"
+    },
+    {
+      "method": "POST",
       "path": "/bot/uploadFile"
     },
     {
@@ -783,11 +811,19 @@
     },
     {
       "method": "POST",
+      "path": "/bot{token}/createAgent"
+    },
+    {
+      "method": "POST",
       "path": "/bot{token}/createReplyThread"
     },
     {
       "method": "POST",
       "path": "/bot{token}/createThread"
+    },
+    {
+      "method": "POST",
+      "path": "/bot{token}/deleteAgent"
     },
     {
       "method": "POST",
@@ -872,6 +908,10 @@
     {
       "method": "POST",
       "path": "/bot{token}/unpinMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot{token}/updateAgent"
     },
     {
       "method": "POST",
@@ -960,6 +1000,18 @@
     {
       "method": "POST",
       "path": "/v1/auth/provider/continue-invite"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/native/apple/complete"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/native/apple/continue-invite"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/provider/native/apple/start"
     },
     {
       "method": "POST",
@@ -1120,6 +1172,10 @@
     {
       "method": "POST",
       "path": "/v1/sendSmsCode"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/space-join/resolve"
     },
     {
       "method": "POST",

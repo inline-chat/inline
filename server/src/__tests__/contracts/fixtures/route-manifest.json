@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 247,
+  "count": 257,
   "methodCounts": {
     "ALL": 3,
-    "GET": 97,
+    "GET": 101,
     "OPTIONS": 18,
-    "POST": 128,
+    "POST": 134,
     "WS": 1
   },
-  "sha256": "72ca0ef46a01463db086b95d6b230621267cc9748143b8714bdd0a8c15a39f94",
+  "sha256": "32961d0d3158cbdd8d662a69bad2cd4b347c7ecf3f229054ebd1572e0cf9ed09",
   "routes": [
     {
       "method": "ALL",
@@ -92,6 +92,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getAgent"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getChat"
     },
     {
@@ -116,6 +120,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getMyAgents"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getMyCommands"
     },
     {
@@ -125,6 +133,10 @@
     {
       "method": "GET",
       "path": "/bot/getWebhookInfo"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getAgent"
     },
     {
       "method": "GET",
@@ -149,6 +161,10 @@
     {
       "method": "GET",
       "path": "/bot:token/getMe"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getMyAgents"
     },
     {
       "method": "GET",
@@ -540,11 +556,19 @@
     },
     {
       "method": "POST",
+      "path": "/bot/createAgent"
+    },
+    {
+      "method": "POST",
       "path": "/bot/createReplyThread"
     },
     {
       "method": "POST",
       "path": "/bot/createThread"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/deleteAgent"
     },
     {
       "method": "POST",
@@ -616,6 +640,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/updateAgent"
+    },
+    {
+      "method": "POST",
       "path": "/bot/uploadFile"
     },
     {
@@ -628,11 +656,19 @@
     },
     {
       "method": "POST",
+      "path": "/bot:token/createAgent"
+    },
+    {
+      "method": "POST",
       "path": "/bot:token/createReplyThread"
     },
     {
       "method": "POST",
       "path": "/bot:token/createThread"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/deleteAgent"
     },
     {
       "method": "POST",
@@ -701,6 +737,10 @@
     {
       "method": "POST",
       "path": "/bot:token/unpinMessage"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/updateAgent"
     },
     {
       "method": "POST",
