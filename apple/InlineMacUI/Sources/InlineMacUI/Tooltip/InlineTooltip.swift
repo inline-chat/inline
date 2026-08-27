@@ -65,39 +65,64 @@ public struct InlineTooltipContent {
   }
 
   private let textStorage: TextStorage
+  private let descriptionStorage: TextStorage?
   public let shortcut: InlineTooltipShortcut?
 
   public init(
     _ text: LocalizedStringResource,
+    description: LocalizedStringResource? = nil,
     shortcut: InlineTooltipShortcut? = nil
   ) {
     textStorage = .localized(text)
+    descriptionStorage = description.map(TextStorage.localized)
     self.shortcut = shortcut
   }
 
   public init(
     verbatim text: String,
+    description: String? = nil,
     shortcut: InlineTooltipShortcut? = nil
   ) {
     textStorage = .verbatim(text)
+    descriptionStorage = description.map(TextStorage.verbatim)
     self.shortcut = shortcut
   }
 
   var resolved: InlineTooltipResolvedContent {
-    let text = switch textStorage {
+    let text = Self.resolve(textStorage)
+    let description = descriptionStorage.map(Self.resolve)
+
+    return InlineTooltipResolvedContent(
+      text: text,
+      description: description,
+      shortcut: shortcut
+    )
+  }
+
+  private static func resolve(_ storage: TextStorage) -> String {
+    switch storage {
     case let .localized(resource):
       String(localized: resource)
     case let .verbatim(value):
       value
     }
-
-    return InlineTooltipResolvedContent(text: text, shortcut: shortcut)
   }
 }
 
 struct InlineTooltipResolvedContent: Equatable {
   let text: String
+  let description: String?
   let shortcut: InlineTooltipShortcut?
+
+  init(
+    text: String,
+    description: String? = nil,
+    shortcut: InlineTooltipShortcut?
+  ) {
+    self.text = text
+    self.description = description
+    self.shortcut = shortcut
+  }
 }
 
 enum InlineTooltipGeometry {

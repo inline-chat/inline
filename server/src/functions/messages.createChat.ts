@@ -37,9 +37,12 @@ type InitialAccessUpdate = {
   update: UpdateSeqAndDate
 }
 
+const PLACEHOLDER_TITLE_MAX_CHARACTERS = 60
+
 export async function createChat(
   input: {
     title?: string
+    placeholderTitle?: string
     spaceId?: bigint
     emoji?: string
     description?: string
@@ -129,11 +132,21 @@ export async function createChat(
     })
   }
 
-  const title = normalizeOptionalString(input.title)
+  const explicitTitle = normalizeOptionalString(input.title)
+  const placeholderTitle = normalizePlaceholderTitle(input.placeholderTitle)
+  if (explicitTitle && placeholderTitle) {
+    throw new RealtimeRpcError(
+      RealtimeRpcError.Code.BAD_REQUEST,
+      "A thread cannot have both an explicit title and a placeholder title",
+      400,
+    )
+  }
+  const storedTitle = explicitTitle ?? placeholderTitle
+
   // Only enforce title uniqueness within a space.
-  // Home threads are intentionally NOT unique.
-  if (title && hasSpaceId) {
-    const titleLower = title.toLowerCase()
+  // Home threads and server-owned placeholders are intentionally NOT unique.
+  if (explicitTitle && hasSpaceId) {
+    const titleLower = explicitTitle.toLowerCase()
     const duplicate = await db
       .select({ id: chats.id })
       .from(chats)
@@ -191,8 +204,8 @@ export async function createChat(
           id: reservedChatId,
           type: "thread",
           spaceId: hasSpaceId ? resolvedSpaceId : null,
-          title: title ?? null,
-          isUntitled: title ? null : true,
+          title: storedTitle ?? null,
+          isUntitled: explicitTitle ? null : true,
           publicThread: isPublic,
           date: new Date(),
           threadNumber: threadNumber,
@@ -285,8 +298,8 @@ export async function createChat(
         .values({
           type: "thread",
           spaceId: hasSpaceId ? resolvedSpaceId : null,
-          title: title ?? null,
-          isUntitled: title ? null : true,
+          title: storedTitle ?? null,
+          isUntitled: explicitTitle ? null : true,
           publicThread: isPublic,
           date: new Date(),
           threadNumber: threadNumber,
@@ -362,6 +375,14 @@ export async function createChat(
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed && trimmed.length > 0 ? trimmed : undefined
+}
+
+function normalizePlaceholderTitle(value: string | undefined): string | undefined {
+  const normalized = value?.trim().replace(/\s+/g, " ")
+  if (!normalized) {
+    return undefined
+  }
+  return Array.from(normalized).slice(0, PLACEHOLDER_TITLE_MAX_CHARACTERS).join("").trim()
 }
 
 async function enqueueInitialParticipantAdds(

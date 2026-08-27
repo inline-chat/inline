@@ -17,14 +17,27 @@ class GlassComposeAppKit: NSView {
 
   // MARK: - Props
 
-  private var peerId: InlineKit.Peer
+  private let usage: ComposeUsage
+  private let layout: GlassComposeLayout
+  private let capabilities: ComposeCapabilities
+  private let chatPeerID: InlineKit.Peer?
+  private var peerId: InlineKit.Peer {
+    guard let chatPeerID else {
+      preconditionFailure("Chat-only peer state was accessed by new-thread Compose")
+    }
+    return chatPeerID
+  }
+
   private var chat: InlineKit.Chat?
   private var peerUser: InlineKit.User?
-  private var chatId: Int64? { chat?.id }
+  private var chatId: Int64? {
+    chat?.id
+  }
+
   private var dependencies: AppDependencies
   private let mentionedParticipants: MentionedParticipantsAutoAddManager
 
-  // We load draft from the dialog passed from chat view model
+  /// We load draft from the dialog passed from chat view model
   private var dialog: InlineKit.Dialog?
 
   // MARK: - State
@@ -36,6 +49,31 @@ class GlassComposeAppKit: NSView {
     messageList?.viewModel
   }
 
+  private var overlayHostView: NSView? {
+    switch usage {
+      case .chat:
+        parentChatView?.view
+      case let .newThread(context):
+        context.overlayHostView()
+    }
+  }
+
+  private var composeSessionKey: String {
+    switch usage {
+      // Preserve every existing chat key exactly. The new namespace only
+      // exists for a composer that has no peer to identify it.
+      case .chat: "\(peerId)"
+      case let .newThread(context): "new_thread_\(context.sessionID.uuidString)"
+    }
+  }
+
+  private var textInputMonitorKey: String {
+    switch usage {
+      case .chat: "compose\(peerId)"
+      case .newThread: "compose_\(composeSessionKey)"
+    }
+  }
+
   private var isEmpty: Bool {
     textEditor.isAttributedTextEmpty
   }
@@ -44,20 +82,52 @@ class GlassComposeAppKit: NSView {
     textEditor.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
+  private var hasAnyAttachments: Bool {
+    switch usage {
+      case .chat:
+        !attachmentItems.isEmpty
+      case let .newThread(context):
+        !context.attachmentStore.attachments.isEmpty || context.attachmentStore.hasPendingAttachments
+    }
+  }
+
   private var canSend: Bool {
-    !drafts2.hasPendingAttachments(peer: peerId) &&
-      (!isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil)
+    switch usage {
+      case .chat:
+        !drafts2.hasPendingAttachments(peer: peerId) &&
+          (!isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil)
+      case let .newThread(context):
+        !context.attachmentStore.hasPendingAttachments &&
+          (!isEmptyTrimmed || !context.attachmentStore.attachments.isEmpty) &&
+          !isSubmittingNewThread
+    }
+  }
+
+  private var canMutateDraft: Bool {
+    if case .newThread = usage {
+      return !isSubmittingNewThread
+    }
+    return true
   }
 
   private var canStartVoiceRecording: Bool {
-    isVoiceRecordingAvailable(isVoiceActive: voiceViewModel.isActive)
+    guard capabilities.supportsVoiceMessages, case .chat = usage else { return false }
+    return isVoiceRecordingAvailable(isVoiceActive: voiceViewModel.isActive)
   }
 
   private var currentVoiceActive: Bool {
-    voiceViewModel.isActive
+    guard capabilities.supportsVoiceMessages else { return false }
+    return switch usage {
+      case .chat: voiceViewModel.isActive
+      case .newThread: false
+    }
   }
 
   private var placeholderText: String {
+    if case .newThread = usage {
+      return "New thread"
+    }
+
     if chat?.isReplyThread == true {
       return "Reply"
     }
@@ -74,8 +144,18 @@ class GlassComposeAppKit: NSView {
     return "Message \(firstName)"
   }
 
+  private var placeholderSymbolName: String? {
+    switch usage {
+      case .chat:
+        nil
+      case let .newThread(context):
+        context.placeholderSymbolName
+    }
+  }
+
   private func isVoiceRecordingAvailable(isVoiceActive: Bool) -> Bool {
-    !isVoiceActive &&
+    guard capabilities.supportsVoiceMessages, case .chat = usage else { return false }
+    return !isVoiceActive &&
       !drafts2.hasPendingAttachments(peer: peerId) &&
       isEmptyTrimmed &&
       attachmentItems.isEmpty &&
@@ -91,6 +171,7 @@ class GlassComposeAppKit: NSView {
   private var attachmentItems: [String: FileMediaItem] = [:] {
     didSet {
       updateSendButtonIfNeeded()
+      notifyNewThreadDraftChanged()
     }
   }
 
@@ -116,30 +197,44 @@ class GlassComposeAppKit: NSView {
   // Shared autocomplete
   private let threadLinkDetector = ThreadLinkDetector()
   private let emojiAutocompleteDetector = EmojiAutocompleteDetector()
-  private lazy var autocompleteViewModel = ComposeAutocompleteViewModel(
-    db: dependencies.database,
-    peer: peerId,
-    spaceId: chat?.spaceId,
-    limit: 24,
-    recentThreadChatIds: { [weak self] limit in
-      self?.recentThreadChatIds(limit: limit) ?? []
-    },
-    emojiItems: { query, limit in
-      ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
-    },
-    externalResourceItems: { [weak self] query, limit in
-      guard let peer = self?.peerId else { return [] }
-      return try await ExternalResourceSearchClient.search(
-        peer: peer,
-        query: query,
-        limit: limit
-      )
-    }
-  )
+  private lazy var autocompleteViewModel: ComposeAutocompleteViewModel = switch usage {
+    case .chat:
+    .init(
+      db: dependencies.database,
+      peer: peerId,
+      spaceId: chat?.spaceId,
+      limit: 24,
+      recentThreadChatIds: { [weak self] limit in
+        self?.recentThreadChatIds(limit: limit) ?? []
+      },
+      emojiItems: { query, limit in
+        ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
+      },
+      externalResourceItems: { [weak self] query, limit in
+        guard let self else { return [] }
+        return try await ExternalResourceSearchClient.search(
+          peer: peerId,
+          query: query,
+          limit: limit
+        )
+      }
+    )
+    case .newThread:
+    .init(
+      db: dependencies.database,
+      limit: 24,
+      emojiItems: { query, limit in
+        ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
+      }
+    )
+  }
+
   private var autocompleteMenu: ComposeAutocompleteMenu?
   private var autocompleteMenuConstraints: [NSLayoutConstraint] = []
   private var autocompleteMenuLeadingConstraint: NSLayoutConstraint?
+  private var autocompleteMenuTopConstraint: NSLayoutConstraint?
   private var autocompleteKeyMonitorEscUnsubscribe: (() -> Void)?
+  private var newThreadScrollObserver: NSObjectProtocol?
 
   private func recentThreadChatIds(limit: Int) -> [Int64] {
     var ids: [Int64] = []
@@ -182,14 +277,27 @@ class GlassComposeAppKit: NSView {
   private var draftEntitySaveTask: Task<Void, Never>?
   private var draftAttachmentObserverCancel: (@Sendable () -> Void)?
   private var pendingDraftVideoFallbackURLs: [String: URL] = [:]
+  private var isSubmittingNewThread = false
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
   private var textHeightConstraint: NSLayoutConstraint!
   private let controlMode: ComposeControlMode = .glass
-  private var minHeight: CGFloat { controlMode.wrapperMinHeight }
-  private var radius: CGFloat { round(controlMode.textMinHeight / 2) }
-  private var horizontalOuterSpacing: CGFloat { controlMode.viewportHorizontalInset }
+  private var minHeight: CGFloat {
+    controlMode.glassControlsMinHeight + layout.viewportBottomInset
+  }
+
+  private var radius: CGFloat {
+    round(controlMode.textMinHeight / 2)
+  }
+
+  private var horizontalOuterSpacing: CGFloat {
+    layout.viewportHorizontalInset
+  }
+
+  private var viewportBottomInset: CGFloat {
+    layout.viewportBottomInset
+  }
 
   // ---
   private var textViewContentHeight: CGFloat = 0.0
@@ -217,28 +325,30 @@ class GlassComposeAppKit: NSView {
     // legacy compose's single-line recentering inside a taller text field.
     let textEditor = ComposeTextEditor(initiallySingleLine: true, mode: controlMode)
     textEditor.placeholderText = placeholderText
+    textEditor.placeholderSymbolName = placeholderSymbolName
     textEditor.translatesAutoresizingMaskIntoConstraints = false
     return textEditor
   }()
 
-  private lazy var sendButton: ComposeSendButton = {
-    let view = ComposeSendButton(
-      frame: .zero,
-      mode: controlMode,
-      onSend: { [weak self] in
-        self?.send()
-      },
-      onToggleSendSilently: { [weak self] in
-        self?.state.toggleSendSilently()
-      }
-    )
-    return view
-  }()
+  private lazy var sendButton: ComposeSendButton = .init(
+    frame: .zero,
+    mode: controlMode,
+    presentation: layout == .accessoryBar ? .accessoryBar : .standard,
+    allowsSendSilently: capabilities.menu.contains(.sendSilently),
+    onSend: { [weak self] in
+      self?.send()
+    },
+    onToggleSendSilently: { [weak self] in
+      guard let self, case .chat = usage else { return }
+      state.toggleSendSilently()
+    }
+  )
 
   private lazy var silentModeButton: ComposeSilentModeButton = {
     let view = ComposeSilentModeButton(mode: controlMode)
     view.onClick = { [weak self] in
-      self?.state.setSendSilently(false)
+      guard let self, case .chat = usage else { return }
+      state.setSendSilently(false)
     }
     view.isHidden = true
     return view
@@ -284,25 +394,32 @@ class GlassComposeAppKit: NSView {
   }()
 
   private lazy var menuButton: ComposeMenuButton = {
-    let view = ComposeMenuButton(mode: controlMode)
+    let view = ComposeMenuButton(
+      mode: controlMode,
+      capabilities: capabilities.menu,
+      presentation: layout == .accessoryBar ? .accessoryBar : .standard
+    )
     view.delegate = self
     view.onToggleSendSilently = { [weak self] in
-      self?.state.toggleSendSilently()
+      guard let self, case .chat = usage else { return }
+      state.toggleSendSilently()
     }
     view.isSendSilentlyEnabledProvider = { [weak self] in
-      self?.state.sendSilently ?? false
+      guard let self, case .chat = usage else { return false }
+      return state.sendSilently
     }
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
-  // Reply/Edit
+  /// Reply/Edit
   private lazy var messageView: ComposeMessageView = {
     let view = ComposeMessageView(
       onClose: { [weak self] in
-        self?.state.clearReplyingToMsgId()
-        self?.state.clearEditingMsgId()
-        self?.state.clearForwarding()
+        guard let self, case .chat = usage else { return }
+        state.clearReplyingToMsgId()
+        state.clearEditingMsgId()
+        state.clearForwarding()
       }
     )
 
@@ -310,7 +427,7 @@ class GlassComposeAppKit: NSView {
     return view
   }()
 
-  // Add attachments view
+  /// Add attachments view
   private lazy var attachments: ComposeAttachments = {
     let view = ComposeAttachments(frame: .zero, compose: self)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -324,17 +441,31 @@ class GlassComposeAppKit: NSView {
   private var glassComposePillContentView: NSView?
   private var glassEditorRowView: NSView?
   private var glassTrailingView: NSView?
+  private var glassAccessoryBarView: NSView?
+  private var glassAccessoryHeightConstraint: NSLayoutConstraint?
+  private var glassSupplementaryToSendConstraint: NSLayoutConstraint?
+  private var glassSupplementaryToEdgeConstraint: NSLayoutConstraint?
+  private var isAccessoryBarExpanded = false
+  private var newThreadEscapeKeyUnsubscribe: (() -> Void)?
 
   // -------
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
 
-    guard window != nil else { return }
-    hydrateInitialDraftIfNeeded()
+    guard window != nil else {
+      removeNewThreadScrollObserver()
+      return
+    }
+    if case .chat = usage {
+      hydrateInitialDraftIfNeeded()
 
-    DispatchQueue.main.async { [weak self] in
-      self?.focus()
+      DispatchQueue.main.async { [weak self] in
+        self?.focus()
+      }
+    } else {
+      updateHeight(animate: false)
+      textEditor.showPlaceholder(isEmpty)
     }
 
     if mentionCompletionMenu != nil {
@@ -344,13 +475,17 @@ class GlassComposeAppKit: NSView {
     if commandCompletionMenu != nil {
       addCommandMenuToSuperview()
     }
+
+    installNewThreadScrollObserverIfNeeded()
   }
 
   override func viewWillMove(toSuperview newSuperview: NSView?) {
-    if newSuperview == nil {
-      requestImmediateDraftPersistenceIfNeeded()
-    } else {
-      didRequestFinalDraftPersistence = false
+    if case .chat = usage {
+      if newSuperview == nil {
+        requestImmediateDraftPersistenceIfNeeded()
+      } else {
+        didRequestFinalDraftPersistence = false
+      }
     }
     super.viewWillMove(toSuperview: newSuperview)
   }
@@ -365,9 +500,14 @@ class GlassComposeAppKit: NSView {
     dependencies: AppDependencies,
     toolbarState: ChatToolbarState? = nil,
     parentChatView: ChatViewAppKit? = nil,
-    dialog: InlineKit.Dialog?
+    dialog: InlineKit.Dialog?,
+    layout: GlassComposeLayout = .sideControls,
+    capabilities: ComposeCapabilities = .chatDefault
   ) {
-    self.peerId = peerId
+    usage = .chat
+    self.layout = layout
+    self.capabilities = capabilities
+    chatPeerID = peerId
     self.messageList = messageList
     self.chat = chat
     self.peerUser = peerUser
@@ -393,10 +533,36 @@ class GlassComposeAppKit: NSView {
     restorePendingDraftAttachmentPlaceholders()
   }
 
+  init(
+    newThread context: NewThreadComposeContext,
+    dependencies: AppDependencies,
+    layout: GlassComposeLayout = .accessoryBar,
+    capabilities: ComposeCapabilities = .allChatsNewThread
+  ) {
+    usage = .newThread(context)
+    self.layout = layout
+    self.capabilities = capabilities
+    chatPeerID = nil
+    chat = nil
+    peerUser = nil
+    self.dependencies = dependencies
+    mentionedParticipants = MentionedParticipantsAutoAddManager(
+      dependencies: dependencies,
+      toolbarState: nil
+    )
+    dialog = nil
+
+    super.init(frame: .zero)
+    setupView()
+    setupObservers()
+    setupKeyDownHandler()
+  }
+
   func setPeerUser(_ user: InlineKit.User?) {
     guard peerUser != user else { return }
     peerUser = user
     textEditor.placeholderText = placeholderText
+    textEditor.placeholderSymbolName = placeholderSymbolName
   }
 
   @available(*, unavailable)
@@ -412,9 +578,13 @@ class GlassComposeAppKit: NSView {
 
     setupGlassChromeViews()
 
-    setupReplyingView()
+    if case .chat = usage {
+      setupReplyingView()
+    }
     setUpConstraints()
-    updateSilentModeUI(animated: false, forceLayout: false)
+    if case .chat = usage {
+      updateSilentModeUI(animated: false, forceLayout: false)
+    }
     updateVoiceAvailability()
     setupTextEditor()
   }
@@ -432,9 +602,7 @@ class GlassComposeAppKit: NSView {
 
     addSubview(containerView)
 
-    let attachmentGlassControl = menuButton
     let composePillView = makeGlassEffectView(cornerRadius: radius)
-    let trailingGlassControl = voiceButton
     let pillContentView = NSView()
     pillContentView.translatesAutoresizingMaskIntoConstraints = false
     let editorRowView = NSView()
@@ -442,29 +610,58 @@ class GlassComposeAppKit: NSView {
 
     embed(pillContentView, in: composePillView)
 
-    contentView.addSubview(attachmentGlassControl)
     contentView.addSubview(composePillView)
-    contentView.addSubview(trailingGlassControl)
 
-    pillContentView.addSubview(messageView)
+    if case .chat = usage {
+      pillContentView.addSubview(messageView)
+    }
     pillContentView.addSubview(attachments)
     pillContentView.addSubview(editorRowView)
 
-    // Glass divergence: emoji lives inside the compose pill. The trailing
-    // glass circle is reserved for voice.
-    editorRowView.addSubview(emojiButton)
     editorRowView.addSubview(textEditor)
-    editorRowView.addSubview(sendButton)
-    editorRowView.addSubview(silentModeButton)
-    editorRowView.addSubview(voiceInputView)
+
+    switch layout {
+      case .sideControls:
+        contentView.addSubview(menuButton, positioned: .below, relativeTo: composePillView)
+        if capabilities.supportsVoiceMessages {
+          contentView.addSubview(voiceButton)
+        }
+
+        if capabilities.showsEmojiButton {
+          editorRowView.addSubview(emojiButton)
+        }
+        editorRowView.addSubview(sendButton)
+        editorRowView.addSubview(silentModeButton)
+        if capabilities.supportsVoiceMessages, case .chat = usage {
+          editorRowView.addSubview(voiceInputView)
+        }
+
+        glassAttachmentView = menuButton
+        glassTrailingView = capabilities.supportsVoiceMessages ? voiceButton : nil
+
+      case .accessoryBar:
+        let accessoryBarView = NSView()
+        accessoryBarView.translatesAutoresizingMaskIntoConstraints = false
+        accessoryBarView.alphaValue = 0
+        accessoryBarView.isHidden = true
+        pillContentView.addSubview(accessoryBarView)
+        accessoryBarView.addSubview(menuButton)
+
+        if case let .newThread(context) = usage {
+          let supplementaryView = context.supplementaryAccessoryView
+          supplementaryView.translatesAutoresizingMaskIntoConstraints = false
+          supplementaryView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+          accessoryBarView.addSubview(supplementaryView)
+        }
+        accessoryBarView.addSubview(sendButton)
+        glassAccessoryBarView = accessoryBarView
+    }
 
     glassContainerView = containerView
     glassContentView = contentView
-    glassAttachmentView = attachmentGlassControl
     glassComposePillView = composePillView
     glassComposePillContentView = pillContentView
     glassEditorRowView = editorRowView
-    glassTrailingView = trailingGlassControl
   }
 
   @available(macOS 26.0, *)
@@ -511,6 +708,15 @@ class GlassComposeAppKit: NSView {
   /// Draft hydration happens on window attachment so layout stays measurement-only.
   func didLayout() {
     updateHeightForTextLayoutWidthChange()
+    if mentionCompletionMenu?.isVisible == true {
+      updateMentionMenuPosition()
+    }
+    if let autocompleteMenu,
+       autocompleteMenu.isVisible,
+       let match = autocompleteViewModel.match
+    {
+      updateAutocompleteMenuPosition(menu: autocompleteMenu, match: match)
+    }
   }
 
   private func hydrateInitialDraftIfNeeded() {
@@ -538,112 +744,176 @@ class GlassComposeAppKit: NSView {
 
     guard let glassContainerView,
           let glassContentView,
-          let glassAttachmentView,
           let glassComposePillView,
           let glassComposePillContentView,
-          let glassEditorRowView,
-          let glassTrailingView
+          let glassEditorRowView
     else {
       return
     }
 
-    glassAttachmentWidthConstraint = glassAttachmentView.widthAnchor.constraint(equalToConstant: controlMode.sideButtonSize)
-    glassTrailingWidthConstraint = glassTrailingView.widthAnchor.constraint(equalToConstant: controlMode.sideButtonSize)
-    glassAttachmentToPillConstraint = glassComposePillView.leadingAnchor.constraint(
-      equalTo: glassAttachmentView.trailingAnchor,
-      constant: controlMode.glassSpacing
-    )
-    glassPillToTrailingConstraint = glassTrailingView.leadingAnchor.constraint(
-      equalTo: glassComposePillView.trailingAnchor,
-      constant: controlMode.glassSpacing
-    )
-    glassTextTrailingConstraint = textEditor.trailingAnchor.constraint(
-      equalTo: glassEditorRowView.trailingAnchor,
-      constant: -glassTrailingControlsReservedWidth(isVoiceActive: false)
-    )
-
     var constraints: [NSLayoutConstraint] = [
       heightConstraint,
 
-      // glass group
       glassContainerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
       glassContainerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
       glassContainerView.topAnchor.constraint(equalTo: topAnchor),
-      glassContainerView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -controlMode.viewportBottomInset),
+      glassContainerView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -viewportBottomInset),
 
-      // attachment glass circle
-      glassAttachmentView.leadingAnchor.constraint(equalTo: glassContentView.leadingAnchor),
-      glassAttachmentView.bottomAnchor.constraint(equalTo: glassComposePillView.bottomAnchor),
-      glassAttachmentWidthConstraint!,
-      glassAttachmentView.heightAnchor.constraint(equalToConstant: controlMode.sideButtonSize),
-
-      // compose glass pill
-      glassAttachmentToPillConstraint!,
       glassComposePillView.topAnchor.constraint(equalTo: glassContentView.topAnchor),
       glassComposePillView.bottomAnchor.constraint(equalTo: glassContentView.bottomAnchor),
-
-      // trailing voice glass circle
-      glassPillToTrailingConstraint!,
-      glassTrailingView.trailingAnchor.constraint(equalTo: glassContentView.trailingAnchor),
-      glassTrailingView.bottomAnchor.constraint(equalTo: glassComposePillView.bottomAnchor),
-      glassTrailingWidthConstraint!,
-      glassTrailingView.heightAnchor.constraint(equalToConstant: controlMode.sideButtonSize),
-
-      // reply (height handled internally)
-      messageView.leadingAnchor.constraint(equalTo: glassComposePillContentView.leadingAnchor, constant: textViewHorizontalPadding),
-      messageView.trailingAnchor.constraint(equalTo: glassComposePillContentView.trailingAnchor, constant: -textViewHorizontalPadding),
-      messageView.topAnchor.constraint(equalTo: glassComposePillContentView.topAnchor),
 
       // attachments
       attachments.leadingAnchor.constraint(equalTo: glassComposePillContentView.leadingAnchor),
       attachments.trailingAnchor.constraint(equalTo: glassComposePillContentView.trailingAnchor),
-      attachments.topAnchor.constraint(equalTo: messageView.bottomAnchor),
 
-      // editor row
       glassEditorRowView.leadingAnchor.constraint(equalTo: glassComposePillContentView.leadingAnchor),
       glassEditorRowView.trailingAnchor.constraint(equalTo: glassComposePillContentView.trailingAnchor),
       glassEditorRowView.topAnchor.constraint(equalTo: attachments.bottomAnchor),
-      glassEditorRowView.bottomAnchor.constraint(equalTo: glassComposePillContentView.bottomAnchor),
       glassEditorRowView.heightAnchor.constraint(greaterThanOrEqualToConstant: controlMode.glassControlsMinHeight),
 
-      // text editor
       textEditor.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor),
-      glassTextTrailingConstraint!,
       textHeightConstraint,
-      // Glass divergence: the text view uses an input-style explicit height.
-      // Center it in the row instead of pinning top/bottom like legacy compose.
       textEditor.centerYAnchor.constraint(equalTo: glassEditorRowView.centerYAnchor),
-
-      // emoji
-      emojiButton.trailingAnchor.constraint(equalTo: glassEditorRowView.trailingAnchor, constant: -controlMode.pillContentInset),
-      emojiButton.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor, constant: -controlMode.inlineButtonBottomInset),
-
-      // send
-      sendButton.trailingAnchor.constraint(
-        equalTo: glassEditorRowView.trailingAnchor,
-        constant: -controlMode.sendButtonTrailingInset
-      ),
-      sendButton.bottomAnchor.constraint(
-        equalTo: glassEditorRowView.bottomAnchor,
-        constant: -controlMode.sendButtonBottomInset
-      ),
-
-      // send silently indicator
-      silentModeButton.bottomAnchor.constraint(
-        equalTo: glassEditorRowView.bottomAnchor,
-        constant: -controlMode.sendButtonBottomInset
-      ),
-      silentModeButtonWidthConstraint!,
-      silentModeButton.heightAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
-      silentModeToSendConstraint!,
     ]
 
-    constraints.append(contentsOf: [
-      voiceInputView.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor),
-      voiceInputView.trailingAnchor.constraint(equalTo: glassEditorRowView.trailingAnchor),
-      voiceInputView.topAnchor.constraint(equalTo: glassEditorRowView.topAnchor),
-      voiceInputView.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor),
-    ])
+    switch usage {
+      case .chat:
+        constraints.append(contentsOf: [
+          messageView.leadingAnchor.constraint(
+            equalTo: glassComposePillContentView.leadingAnchor,
+            constant: textViewHorizontalPadding
+          ),
+          messageView.trailingAnchor.constraint(
+            equalTo: glassComposePillContentView.trailingAnchor,
+            constant: -textViewHorizontalPadding
+          ),
+          messageView.topAnchor.constraint(equalTo: glassComposePillContentView.topAnchor),
+          attachments.topAnchor.constraint(equalTo: messageView.bottomAnchor),
+        ])
+      case .newThread:
+        constraints.append(
+          attachments.topAnchor.constraint(equalTo: glassComposePillContentView.topAnchor)
+        )
+    }
+
+    switch layout {
+      case .sideControls:
+        guard let glassAttachmentView else { return }
+
+        glassAttachmentWidthConstraint = glassAttachmentView.widthAnchor
+          .constraint(equalToConstant: controlMode.sideButtonSize)
+        glassAttachmentToPillConstraint = glassComposePillView.leadingAnchor.constraint(
+          equalTo: glassAttachmentView.trailingAnchor,
+          constant: controlMode.glassSpacing
+        )
+        glassTextTrailingConstraint = textEditor.trailingAnchor.constraint(
+          equalTo: glassEditorRowView.trailingAnchor,
+          constant: -glassTrailingControlsReservedWidth(isVoiceActive: false)
+        )
+
+        constraints.append(contentsOf: [
+          glassAttachmentView.leadingAnchor.constraint(equalTo: glassContentView.leadingAnchor),
+          glassAttachmentView.bottomAnchor.constraint(equalTo: glassComposePillView.bottomAnchor),
+          glassAttachmentWidthConstraint!,
+          glassAttachmentView.heightAnchor.constraint(equalToConstant: controlMode.sideButtonSize),
+          glassAttachmentToPillConstraint!,
+          glassEditorRowView.bottomAnchor.constraint(equalTo: glassComposePillContentView.bottomAnchor),
+          glassTextTrailingConstraint!,
+          sendButton.trailingAnchor.constraint(
+            equalTo: glassEditorRowView.trailingAnchor,
+            constant: -controlMode.sendButtonTrailingInset
+          ),
+          sendButton.bottomAnchor.constraint(
+            equalTo: glassEditorRowView.bottomAnchor,
+            constant: -controlMode.sendButtonBottomInset
+          ),
+          silentModeButton.bottomAnchor.constraint(
+            equalTo: glassEditorRowView.bottomAnchor,
+            constant: -controlMode.sendButtonBottomInset
+          ),
+          silentModeButtonWidthConstraint!,
+          silentModeButton.heightAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
+          silentModeToSendConstraint!,
+        ])
+
+        if capabilities.showsEmojiButton {
+          constraints.append(contentsOf: [
+            emojiButton.trailingAnchor.constraint(
+              equalTo: glassEditorRowView.trailingAnchor,
+              constant: -controlMode.pillContentInset
+            ),
+            emojiButton.bottomAnchor.constraint(
+              equalTo: glassEditorRowView.bottomAnchor,
+              constant: -controlMode.inlineButtonBottomInset
+            ),
+          ])
+        }
+
+        if let glassTrailingView {
+          glassTrailingWidthConstraint = glassTrailingView.widthAnchor
+            .constraint(equalToConstant: controlMode.sideButtonSize)
+          glassPillToTrailingConstraint = glassTrailingView.leadingAnchor.constraint(
+            equalTo: glassComposePillView.trailingAnchor,
+            constant: controlMode.glassSpacing
+          )
+          constraints.append(contentsOf: [
+            glassPillToTrailingConstraint!,
+            glassTrailingView.trailingAnchor.constraint(equalTo: glassContentView.trailingAnchor),
+            glassTrailingView.bottomAnchor.constraint(equalTo: glassComposePillView.bottomAnchor),
+            glassTrailingWidthConstraint!,
+            glassTrailingView.heightAnchor.constraint(equalToConstant: controlMode.sideButtonSize),
+          ])
+        } else {
+          constraints.append(
+            glassComposePillView.trailingAnchor.constraint(equalTo: glassContentView.trailingAnchor)
+          )
+        }
+
+        if capabilities.supportsVoiceMessages, case .chat = usage {
+          constraints.append(contentsOf: [
+            voiceInputView.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor),
+            voiceInputView.trailingAnchor.constraint(equalTo: glassEditorRowView.trailingAnchor),
+            voiceInputView.topAnchor.constraint(equalTo: glassEditorRowView.topAnchor),
+            voiceInputView.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor),
+          ])
+        }
+
+      case .accessoryBar:
+        guard let glassAccessoryBarView else { return }
+        glassAccessoryHeightConstraint = glassAccessoryBarView.heightAnchor.constraint(equalToConstant: 0)
+        constraints.append(contentsOf: [
+          glassComposePillView.leadingAnchor.constraint(equalTo: glassContentView.leadingAnchor),
+          glassComposePillView.trailingAnchor.constraint(equalTo: glassContentView.trailingAnchor),
+          glassEditorRowView.bottomAnchor.constraint(equalTo: glassAccessoryBarView.topAnchor),
+          textEditor.trailingAnchor.constraint(equalTo: glassEditorRowView.trailingAnchor),
+          glassAccessoryBarView.leadingAnchor.constraint(equalTo: glassComposePillContentView.leadingAnchor),
+          glassAccessoryBarView.trailingAnchor.constraint(equalTo: glassComposePillContentView.trailingAnchor),
+          glassAccessoryBarView.bottomAnchor.constraint(equalTo: glassComposePillContentView.bottomAnchor),
+          glassAccessoryHeightConstraint!,
+          menuButton.leadingAnchor.constraint(equalTo: glassAccessoryBarView.leadingAnchor, constant: 6),
+          menuButton.centerYAnchor.constraint(equalTo: glassAccessoryBarView.centerYAnchor),
+          sendButton.trailingAnchor.constraint(equalTo: glassAccessoryBarView.trailingAnchor, constant: -6),
+          sendButton.centerYAnchor.constraint(equalTo: glassAccessoryBarView.centerYAnchor),
+        ])
+
+        if case let .newThread(context) = usage {
+          let supplementaryView = context.supplementaryAccessoryView
+          glassSupplementaryToSendConstraint = supplementaryView.trailingAnchor.constraint(
+            equalTo: sendButton.leadingAnchor,
+            constant: -6
+          )
+          glassSupplementaryToEdgeConstraint = supplementaryView.trailingAnchor.constraint(
+            equalTo: glassAccessoryBarView.trailingAnchor,
+            constant: -6
+          )
+          constraints.append(contentsOf: [
+            supplementaryView.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor, constant: 6),
+            glassSupplementaryToSendConstraint!,
+            supplementaryView.topAnchor.constraint(equalTo: glassAccessoryBarView.topAnchor),
+            supplementaryView.bottomAnchor.constraint(equalTo: glassAccessoryBarView.bottomAnchor),
+          ])
+        }
+    }
 
     NSLayoutConstraint.activate(constraints)
   }
@@ -654,6 +924,39 @@ class GlassComposeAppKit: NSView {
   }
 
   func setupObservers() {
+    if case .chat = usage {
+      setupChatObservers()
+    }
+
+    Publishers.CombineLatest4(
+      autocompleteViewModel.$items,
+      autocompleteViewModel.$selectedIndex,
+      autocompleteViewModel.$match,
+      autocompleteViewModel.$loadState
+    )
+    .sink { [weak self] items, selectedIndex, match, loadState in
+      Task { @MainActor [weak self] in
+        guard let self,
+              items == autocompleteViewModel.items,
+              selectedIndex == autocompleteViewModel.selectedIndex,
+              match == autocompleteViewModel.match,
+              loadState == autocompleteViewModel.loadState
+        else {
+          return
+        }
+
+        renderAutocompleteMenu(
+          items: items,
+          selectedIndex: selectedIndex,
+          match: match,
+          loadState: loadState
+        )
+      }
+    }
+    .store(in: &cancellables)
+  }
+
+  private func setupChatObservers() {
     state.replyingToMsgIdPublisher
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
@@ -693,41 +996,16 @@ class GlassComposeAppKit: NSView {
         )
       }.store(in: &cancellables)
 
-    voiceViewModel.$phase
-      .sink { [weak self] phase in
-        guard let self else { return }
-        updateVoiceAvailability(phase: phase)
-        updateVoiceKeyHandlers(phase: phase)
-        updateHeight(animate: true, voicePhase: phase)
-      }
-      .store(in: &cancellables)
-
-    Publishers.CombineLatest4(
-      autocompleteViewModel.$items,
-      autocompleteViewModel.$selectedIndex,
-      autocompleteViewModel.$match,
-      autocompleteViewModel.$loadState
-    )
-    .sink { [weak self] items, selectedIndex, match, loadState in
-      Task { @MainActor [weak self] in
-        guard let self,
-              items == autocompleteViewModel.items,
-              selectedIndex == autocompleteViewModel.selectedIndex,
-              match == autocompleteViewModel.match,
-              loadState == autocompleteViewModel.loadState
-        else {
-          return
+    if capabilities.supportsVoiceMessages {
+      voiceViewModel.$phase
+        .sink { [weak self] phase in
+          guard let self else { return }
+          updateVoiceAvailability(phase: phase)
+          updateVoiceKeyHandlers(phase: phase)
+          updateHeight(animate: true, voicePhase: phase)
         }
-
-        renderAutocompleteMenu(
-          items: items,
-          selectedIndex: selectedIndex,
-          match: match,
-          loadState: loadState
-        )
-      }
+        .store(in: &cancellables)
     }
-    .store(in: &cancellables)
   }
 
   private func updateSilentModeUI(
@@ -735,6 +1013,7 @@ class GlassComposeAppKit: NSView {
     forceLayout: Bool = true,
     isVoiceActive: Bool? = nil
   ) {
+    guard case .chat = usage else { return }
     let isEnabled = state.sendSilently
     let voiceActive = isVoiceActive ?? currentVoiceActive
     let shouldShow = isEnabled && !voiceActive && canSend
@@ -759,15 +1038,24 @@ class GlassComposeAppKit: NSView {
   }
 
   private func glassTrailingControlsReservedWidth(isVoiceActive: Bool? = nil) -> CGFloat {
+    guard layout == .sideControls else { return 0 }
     let voiceActive = isVoiceActive ?? currentVoiceActive
     guard !voiceActive else { return controlMode.pillContentInset }
 
     let showsSend = canSend
-    let buttonWidth = showsSend ? controlMode.sendButtonSize : controlMode.emojiButtonSize
+    let showsEmoji = capabilities.showsEmojiButton && !showsSend
+    let buttonWidth = showsSend
+      ? controlMode.sendButtonSize
+      : (showsEmoji ? controlMode.emojiButtonSize : 0)
     let trailingInset = showsSend ? controlMode.sendButtonTrailingInset : controlMode.pillContentInset
     var width = trailingInset + buttonWidth + rightButtonSpacing
 
-    if showsSend, state.sendSilently {
+    let sendsSilently = if case .chat = usage {
+      state.sendSilently
+    } else {
+      false
+    }
+    if showsSend, sendsSilently {
       width += controlMode.silentButtonSize + rightButtonSpacing
     }
 
@@ -779,6 +1067,7 @@ class GlassComposeAppKit: NSView {
   }
 
   private func updateGlassSideButtonsHidden(_ hidden: Bool) {
+    guard layout == .sideControls else { return }
     glassAttachmentView?.isHidden = hidden
     glassAttachmentWidthConstraint?.constant = hidden ? 0 : controlMode.sideButtonSize
     glassAttachmentToPillConstraint?.constant = hidden ? 0 : controlMode.glassSpacing
@@ -786,12 +1075,37 @@ class GlassComposeAppKit: NSView {
   }
 
   private func updateGlassTrailingButtonHidden(_ hidden: Bool) {
+    guard layout == .sideControls else { return }
     glassTrailingView?.isHidden = hidden
     glassTrailingWidthConstraint?.constant = hidden ? 0 : controlMode.sideButtonSize
     glassPillToTrailingConstraint?.constant = hidden ? 0 : controlMode.glassSpacing
   }
 
   private func updateVoiceAvailability(phase: ComposeVoiceRecordingPhase? = nil) {
+    if layout == .accessoryBar {
+      let showsSend = canSend
+      sendButton.isHidden = !showsSend
+      if showsSend {
+        glassSupplementaryToEdgeConstraint?.isActive = false
+        glassSupplementaryToSendConstraint?.isActive = true
+      } else {
+        glassSupplementaryToSendConstraint?.isActive = false
+        glassSupplementaryToEdgeConstraint?.isActive = true
+      }
+      return
+    }
+
+    if !capabilities.supportsVoiceMessages {
+      if capabilities.showsEmojiButton {
+        emojiButton.isHidden = canSend
+      }
+      sendButton.isHidden = !canSend
+      silentModeButton.isHidden = true
+      updateGlassTrailingButtonHidden(true)
+      updateGlassEditorTrailingSpace(isVoiceActive: false)
+      return
+    }
+
     let isVoiceActive = phase.map { $0 != .idle } ?? voiceViewModel.isActive
 
     if isVoiceActive {
@@ -803,7 +1117,9 @@ class GlassComposeAppKit: NSView {
     menuButton.isHidden = isVoiceActive
     // Glass divergence: emoji and send share the far-trailing slot. Emoji is
     // available only while the send button is not shown.
-    emojiButton.isHidden = isVoiceActive || canSend
+    if capabilities.showsEmojiButton {
+      emojiButton.isHidden = isVoiceActive || canSend
+    }
     attachments.isHidden = isVoiceActive
     attachments.setExternallyCollapsed(isVoiceActive)
     updateGlassSideButtonsHidden(isVoiceActive)
@@ -855,7 +1171,7 @@ class GlassComposeAppKit: NSView {
 
     voiceEscapeKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .escape,
-      key: "compose_voice_escape_\(peerId)",
+      key: "compose_voice_escape_\(composeSessionKey)",
       handler: { [weak self] _ in
         Task { @MainActor [weak self] in
           self?.cancelVoiceRecording()
@@ -865,7 +1181,7 @@ class GlassComposeAppKit: NSView {
 
     voiceSpaceKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .spaceKey,
-      key: "compose_voice_space_\(peerId)",
+      key: "compose_voice_space_\(composeSessionKey)",
       handler: { [weak self] _ in
         Task { @MainActor [weak self] in
           self?.handleVoiceSpaceKey()
@@ -949,14 +1265,22 @@ class GlassComposeAppKit: NSView {
   // MARK: - Mention Completion
 
   private func ensureMentionCompletion() {
-    guard mentionCompletionMenu == nil, let chatId else { return }
+    guard mentionCompletionMenu == nil else { return }
 
-    // Initialize chat participants view model
-    chatParticipantsViewModel = InlineKit.ChatParticipantsWithMembersViewModel(
-      db: dependencies.database,
-      chatId: chatId,
-      purpose: .mentionCandidates
-    )
+    let candidateUpdates: AnyPublisher<MentionCompletionCandidates, Never>
+    switch usage {
+      case .chat:
+        guard let chatId else { return }
+        let viewModel = InlineKit.ChatParticipantsWithMembersViewModel(
+          db: dependencies.database,
+          chatId: chatId,
+          purpose: .mentionCandidates
+        )
+        chatParticipantsViewModel = viewModel
+        candidateUpdates = viewModel.$mentionCandidates.eraseToAnyPublisher()
+      case let .newThread(context):
+        candidateUpdates = context.mentionSource.candidateUpdates
+    }
 
     // Create mention completion menu
     mentionCompletionMenu = MentionCompletionMenu()
@@ -964,7 +1288,7 @@ class GlassComposeAppKit: NSView {
     mentionCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
 
     // Subscribe to participants updates
-    chatParticipantsViewModel?.$mentionCandidates
+    candidateUpdates
       .sink { [weak self] candidates in
         guard let self else { return }
         log.trace("Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
@@ -978,48 +1302,49 @@ class GlassComposeAppKit: NSView {
         }
       }
       .store(in: &cancellables)
+
   }
 
   private func refetchMentionParticipantsIfNeeded() {
-    guard !didRequestMentionParticipants, let chatParticipantsViewModel else { return }
+    guard !didRequestMentionParticipants else { return }
     didRequestMentionParticipants = true
 
     mentionParticipantsTask?.cancel()
-    mentionParticipantsTask = Task { @MainActor [weak self, weak chatParticipantsViewModel] in
+    mentionParticipantsTask = Task { @MainActor [weak self] in
       await Task.yield()
-      guard !Task.isCancelled else { return }
-      self?.log.trace("Fetching chat participants from server")
-      await chatParticipantsViewModel?.refetchParticipants()
+      guard !Task.isCancelled, let self else { return }
+      log.trace("Fetching mention candidates from server")
+      switch usage {
+        case .chat:
+          await chatParticipantsViewModel?.refetchParticipants()
+        case let .newThread(context):
+          await context.mentionSource.refresh()
+      }
     }
   }
 
   private func addMentionMenuToSuperview() {
     guard let menu = mentionCompletionMenu,
           menu.superview == nil,
-          let parentView = parentChatView?.view
+          let parentView = overlayHostView
     else {
-      log.trace("addMentionMenuToSuperview: menu already has superview, is nil, or no parent chat view")
+      log.trace("addMentionMenuToSuperview: menu already has superview, is nil, or no overlay host view")
       return
     }
 
-    log.trace("addMentionMenuToSuperview: adding menu to ChatViewAppKit's view")
+    log.trace("addMentionMenuToSuperview: adding menu to overlay host view")
 
-    // Add menu to the parent chat view
+    // Add the menu to the usage-provided overlay host.
     parentView.addSubview(menu)
 
     // Remove any existing constraints
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
 
-    // Create new constraints to position above compose with full width
-    mentionMenuConstraints = [
-      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
-      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor),
-    ]
+    mentionMenuConstraints = completionMenuConstraints(for: menu, spacing: 8)
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
-    log.trace("addMentionMenuToSuperview: menu positioned above compose view")
+    log.trace("addMentionMenuToSuperview: menu positioned for compose usage")
   }
 
   private func ensureSlashCommandCompletion() {
@@ -1033,7 +1358,7 @@ class GlassComposeAppKit: NSView {
   private func addCommandMenuToSuperview() {
     guard let menu = commandCompletionMenu,
           menu.superview == nil,
-          let parentView = parentChatView?.view
+          let parentView = overlayHostView
     else {
       return
     }
@@ -1061,7 +1386,7 @@ class GlassComposeAppKit: NSView {
   private func addAutocompleteMenuToSuperview() {
     guard let menu = autocompleteMenu,
           menu.superview == nil,
-          let parentView = parentChatView?.view
+          let parentView = overlayHostView
     else {
       return
     }
@@ -1070,15 +1395,45 @@ class GlassComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(autocompleteMenuConstraints)
     autocompleteMenuConstraints.removeAll()
     autocompleteMenuLeadingConstraint = nil
+    autocompleteMenuTopConstraint = nil
 
-    let leadingConstraint = menu.leadingAnchor.constraint(equalTo: leadingAnchor)
+    let leadingConstraint: NSLayoutConstraint
+    switch usage {
+      case .chat:
+        leadingConstraint = menu.leadingAnchor.constraint(equalTo: leadingAnchor)
+        autocompleteMenuConstraints = [
+          leadingConstraint,
+          menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
+        ]
+      case .newThread:
+        leadingConstraint = menu.leadingAnchor.constraint(equalTo: parentView.leadingAnchor)
+        let topConstraint = menu.topAnchor.constraint(equalTo: parentView.topAnchor)
+        autocompleteMenuTopConstraint = topConstraint
+        autocompleteMenuConstraints = [leadingConstraint, topConstraint]
+    }
     autocompleteMenuLeadingConstraint = leadingConstraint
-    autocompleteMenuConstraints = [
-      leadingConstraint,
-      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
-    ]
 
     NSLayoutConstraint.activate(autocompleteMenuConstraints)
+  }
+
+  private func completionMenuConstraints(for menu: NSView, spacing: CGFloat) -> [NSLayoutConstraint] {
+    var constraints = [
+      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
+      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ]
+    switch usage {
+      case .chat:
+        constraints.append(menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -spacing))
+      case .newThread:
+        guard let parentView = menu.superview else { return [] }
+        let composeFrame = parentView.convert(bounds, from: self)
+        constraints = [
+          menu.leadingAnchor.constraint(equalTo: parentView.leadingAnchor, constant: composeFrame.minX),
+          menu.trailingAnchor.constraint(equalTo: parentView.leadingAnchor, constant: composeFrame.maxX),
+          menu.topAnchor.constraint(equalTo: parentView.topAnchor, constant: composeFrame.maxY + 4 + spacing),
+        ]
+    }
+    return constraints
   }
 
   private func renderAutocompleteMenu(
@@ -1101,16 +1456,16 @@ class GlassComposeAppKit: NSView {
     )
 
     switch action {
-    case .hide:
-      autocompleteMenu?.hide()
-      autocompleteKeyMonitorEscUnsubscribe?()
-      autocompleteKeyMonitorEscUnsubscribe = nil
-      return
-    case .retainVisibleContent:
-      _ = autocompleteMenu?.retainVisibleContentWhileLoading()
-      return
-    case .present:
-      break
+      case .hide:
+        autocompleteMenu?.hide()
+        autocompleteKeyMonitorEscUnsubscribe?()
+        autocompleteKeyMonitorEscUnsubscribe = nil
+        return
+      case .retainVisibleContent:
+        _ = autocompleteMenu?.retainVisibleContentWhileLoading()
+        return
+      case .present:
+        break
     }
 
     guard let match else { return }
@@ -1130,7 +1485,7 @@ class GlassComposeAppKit: NSView {
     autocompleteKeyMonitorEscUnsubscribe?()
     autocompleteKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .escape,
-      key: "compose_autocomplete_\(peerId)",
+      key: "compose_autocomplete_\(composeSessionKey)",
       handler: { [weak self] _ in
         self?.hideAutocomplete(suppressCurrentMatch: true)
       }
@@ -1139,7 +1494,15 @@ class GlassComposeAppKit: NSView {
 
   private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu, match: ComposeAutocompleteMatch) {
     layoutSubtreeIfNeeded()
-    autocompleteMenuLeadingConstraint?.constant = textEditor.frame.minX
+    switch usage {
+      case .chat:
+        autocompleteMenuLeadingConstraint?.constant = textEditor.frame.minX
+      case .newThread:
+        guard let parentView = menu.superview else { return }
+        let composeFrame = parentView.convert(bounds, from: self)
+        autocompleteMenuLeadingConstraint?.constant = composeFrame.minX + textEditor.frame.minX
+        autocompleteMenuTopConstraint?.constant = composeFrame.maxY + 4
+    }
   }
 
   private func autocompleteMenuWidth(for match: ComposeAutocompleteMatch) -> CGFloat? {
@@ -1165,7 +1528,7 @@ class GlassComposeAppKit: NSView {
     // Add escape handler for mention menu
     mentionKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .escape,
-      key: "compose_mention_\(peerId)",
+      key: "compose_mention_\(composeSessionKey)",
       handler: { [weak self] _ in
         self?.hideMentionCompletion()
       }
@@ -1203,7 +1566,7 @@ class GlassComposeAppKit: NSView {
       commandKeyMonitorEscUnsubscribe?()
       commandKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
         for: .escape,
-        key: "compose_command_\(peerId)",
+        key: "compose_command_\(composeSessionKey)",
         handler: { [weak self] _ in
           self?.hideCommandCompletion()
         }
@@ -1238,6 +1601,34 @@ class GlassComposeAppKit: NSView {
     mentionCompletionMenu?.isVisible == true ||
       commandCompletionMenu?.isVisible == true ||
       autocompleteMenu?.isVisible == true
+  }
+
+  private func installNewThreadScrollObserverIfNeeded() {
+    removeNewThreadScrollObserver()
+    guard case .newThread = usage,
+          let clipView = enclosingScrollView?.contentView
+    else {
+      return
+    }
+
+    clipView.postsBoundsChangedNotifications = true
+    newThreadScrollObserver = NotificationCenter.default.addObserver(
+      forName: NSView.boundsDidChangeNotification,
+      object: clipView,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        self?.hideMentionCompletion()
+        self?.hideCommandCompletion()
+        self?.hideAutocomplete()
+      }
+    }
+  }
+
+  private func removeNewThreadScrollObserver() {
+    guard let newThreadScrollObserver else { return }
+    NotificationCenter.default.removeObserver(newThreadScrollObserver)
+    self.newThreadScrollObserver = nil
   }
 
   private func detectMentionAtCursor() {
@@ -1282,7 +1673,10 @@ class GlassComposeAppKit: NSView {
     let cursorPosition = textEditor.textView.selectedRange().location
     let attributedText = textEditor.attributedString
 
-    if let emojiRange = emojiAutocompleteDetector.detectEmojiAutocompleteAt(cursorPosition: cursorPosition, in: attributedText) {
+    if let emojiRange = emojiAutocompleteDetector.detectEmojiAutocompleteAt(
+      cursorPosition: cursorPosition,
+      in: attributedText
+    ) {
       hideMentionCompletion()
       hideCommandCompletion()
       autocompleteViewModel.update(
@@ -1354,10 +1748,21 @@ class GlassComposeAppKit: NSView {
       return
     }
 
-    if trigger == .selectionChange, !hasVisibleCompletionMenu {
+    if trigger == .selectionChange,
+       !hasVisibleCompletionMenu,
+       autocompleteViewModel.match == nil
+    {
       hideMentionCompletion()
       hideCommandCompletion()
       hideAutocomplete()
+      return
+    }
+
+    if case .newThread = usage {
+      if detectEmojiAutocompleteAtCursor(trigger: trigger) {
+        return
+      }
+      detectMentionAtCursor()
       return
     }
 
@@ -1382,11 +1787,64 @@ class GlassComposeAppKit: NSView {
   }
 
   func focusEditor() {
-    guard !voiceViewModel.isActive else { return }
+    guard !currentVoiceActive else { return }
     textEditor.focus()
   }
 
   // MARK: - Height
+
+  private var currentAccessoryBarHeight: CGFloat {
+    isAccessoryBarExpanded ? layout.accessoryBarHeight : 0
+  }
+
+  private func setAccessoryBarExpanded(_ expanded: Bool) {
+    guard layout == .accessoryBar,
+          isAccessoryBarExpanded != expanded,
+          let glassAccessoryBarView
+    else {
+      return
+    }
+
+    isAccessoryBarExpanded = expanded
+    setNewThreadEscapeHandlerEnabled(expanded)
+    if expanded {
+      glassAccessoryBarView.isHidden = false
+      // Grow the outer Compose constraint before making the chin mandatory.
+      // Keeping this internal transition ordered avoids a transient
+      // unsatisfiable 42 = editor + chin + inset.
+      updateHeight(animate: false)
+    }
+    glassAccessoryHeightConstraint?.constant = currentAccessoryBarHeight
+    if !expanded {
+      // Remove the chin requirement before shrinking the outer constraint.
+      updateHeight(animate: false)
+    }
+    glassAccessoryBarView.alphaValue = expanded ? 1 : 0
+    glassAccessoryBarView.isHidden = !expanded
+  }
+
+  private func setNewThreadEscapeHandlerEnabled(_ enabled: Bool) {
+    newThreadEscapeKeyUnsubscribe?()
+    newThreadEscapeKeyUnsubscribe = nil
+    guard enabled, case .newThread = usage else { return }
+
+    newThreadEscapeKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .escape,
+      key: "compose_new_thread_\(composeSessionKey)",
+      handler: { [weak self] _ in
+        self?.collapseNewThreadComposeAndResignFocus()
+      }
+    )
+  }
+
+  private func collapseNewThreadComposeAndResignFocus() {
+    guard case .newThread = usage else { return }
+    hideMentionCompletion()
+    hideCommandCompletion()
+    hideAutocomplete()
+    window?.makeFirstResponder(nil)
+    setAccessoryBarExpanded(false)
+  }
 
   private func getTextViewHeight(isVoiceActive: Bool? = nil) -> CGFloat {
     if isVoiceActive ?? currentVoiceActive {
@@ -1430,18 +1888,22 @@ class GlassComposeAppKit: NSView {
   }
 
   private func getChromeHeight(textEditorHeight: CGFloat) -> CGFloat {
-    max(textEditorHeight, controlMode.glassControlsMinHeight) + controlMode.viewportBottomInset
+    max(textEditorHeight, controlMode.glassControlsMinHeight) +
+      currentAccessoryBarHeight +
+      viewportBottomInset
   }
 
-  // Get compose wrapper height
+  /// Get compose wrapper height
   private func getHeight(isVoiceActive: Bool? = nil) -> CGFloat {
     let voiceActive = isVoiceActive ?? currentVoiceActive
     let textEditorHeight = getTextViewHeight(isVoiceActive: voiceActive)
     var height = getChromeHeight(textEditorHeight: textEditorHeight)
 
     // Reply view
-    if state.replyingToMsgId != nil || state.editingMsgId != nil || state.forwardContext != nil {
-      height += Theme.embeddedMessageHeight
+    if case .chat = usage {
+      if state.replyingToMsgId != nil || state.editingMsgId != nil || state.forwardContext != nil {
+        height += Theme.embeddedMessageHeight
+      }
     }
 
     if !voiceActive {
@@ -1489,6 +1951,10 @@ class GlassComposeAppKit: NSView {
       messageList?.updateInsetForCompose(wrapperHeight)
     }
 
+    if case let .newThread(context) = usage {
+      context.didChangeHeight(wrapperHeight)
+    }
+
     // Update mention menu position if it's visible
     if mentionCompletionMenu?.isVisible == true {
       updateMentionMenuPosition()
@@ -1502,12 +1968,7 @@ class GlassComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
 
-    // Create new constraints with updated position
-    mentionMenuConstraints = [
-      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
-      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -8),
-    ]
+    mentionMenuConstraints = completionMenuConstraints(for: menu, spacing: 8)
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
   }
@@ -1544,7 +2005,7 @@ class GlassComposeAppKit: NSView {
   private func addReplyEscHandler() {
     keyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .escape,
-      key: "compose_reply_\(peerId)",
+      key: "compose_reply_\(composeSessionKey)",
       handler: { [weak self] _ in
         guard let self else { return }
         state.clearReplyingToMsgId()
@@ -1626,6 +2087,8 @@ class GlassComposeAppKit: NSView {
   }
 
   func addImage(_ image: NSImage, _ url: URL? = nil) {
+    guard canMutateDraft else { return }
+
     // Format
     let preferredImageFormat: ImageFormat? = if let url {
       url.pathExtension.lowercased() == "png" ? ImageFormat.png : ImageFormat.jpeg
@@ -1645,10 +2108,19 @@ class GlassComposeAppKit: NSView {
       return
     }
 
-    // Add a placeholder view immediately; Drafts2 owns file-cache persistence.
-    let pendingId = drafts2.addImage(peer: peerId, image: image, preferredFormat: preferredImageFormat)
+    let pendingId: String = switch usage {
+      case .chat:
+        drafts2.addImage(peer: peerId, image: image, preferredFormat: preferredImageFormat)
+      case let .newThread(context):
+        context.attachmentStore.addImage(
+          image,
+          preferredFormat: preferredImageFormat,
+          completion: { [weak self] result in self?.handleDraftAttachmentResult(result) }
+        )
+    }
     attachments.addImageView(image, id: pendingId)
     updateHeight(animate: true)
+    notifyNewThreadDraftChanged()
   }
 
   func removeImage(_ id: String) {
@@ -1658,7 +2130,7 @@ class GlassComposeAppKit: NSView {
 
     // Update state
     attachmentItems.removeValue(forKey: id)
-    drafts2.removeAttachment(peer: peerId, id: id)
+    removeStoredAttachment(id: id)
   }
 
   private func isVideoFile(_ url: URL) -> Bool {
@@ -1678,8 +2150,18 @@ class GlassComposeAppKit: NSView {
 
   @MainActor
   func addVideo(_ url: URL, thumbnail: NSImage? = nil) async {
-    // Show a placeholder immediately; Drafts2 owns file-cache persistence.
-    let pendingId = drafts2.addVideo(peer: peerId, url: url, thumbnail: thumbnail)
+    guard canMutateDraft else { return }
+
+    let pendingId: String = switch usage {
+      case .chat:
+        drafts2.addVideo(peer: peerId, url: url, thumbnail: thumbnail)
+      case let .newThread(context):
+        context.attachmentStore.addVideo(
+          url,
+          thumbnail: thumbnail,
+          completion: { [weak self] result in self?.handleDraftAttachmentResult(result) }
+        )
+    }
     pendingDraftVideoFallbackURLs[pendingId] = url
     attachments.addVideoView(thumbnail: thumbnail, videoURL: url, id: pendingId)
     updateHeight(animate: true)
@@ -1687,8 +2169,18 @@ class GlassComposeAppKit: NSView {
 
   @MainActor
   func addAnimatedImage(_ url: URL) async {
+    guard canMutateDraft else { return }
+
     let thumbnail = NSImage(contentsOf: url)
-    let pendingId = drafts2.addAnimatedImage(peer: peerId, url: url)
+    let pendingId: String = switch usage {
+      case .chat:
+        drafts2.addAnimatedImage(peer: peerId, url: url)
+      case let .newThread(context):
+        context.attachmentStore.addAnimatedImage(
+          url,
+          completion: { [weak self] result in self?.handleDraftAttachmentResult(result) }
+        )
+    }
     attachments.addVideoView(thumbnail: thumbnail, videoURL: nil, id: pendingId)
     updateHeight(animate: true)
   }
@@ -1697,13 +2189,23 @@ class GlassComposeAppKit: NSView {
     attachments.removeVideoView(id: id)
     attachmentItems.removeValue(forKey: id)
     pendingDraftVideoFallbackURLs.removeValue(forKey: id)
-    drafts2.removeAttachment(peer: peerId, id: id)
+    removeStoredAttachment(id: id)
     updateHeight(animate: true)
   }
 
   @discardableResult
   func addFile(_ url: URL) -> Bool {
-    let pendingId = drafts2.addFile(peer: peerId, url: url)
+    guard canMutateDraft else { return false }
+
+    let pendingId: String = switch usage {
+      case .chat:
+        drafts2.addFile(peer: peerId, url: url)
+      case let .newThread(context):
+        context.attachmentStore.addFile(
+          url,
+          completion: { [weak self] result in self?.handleDraftAttachmentResult(result) }
+        )
+    }
     attachments.addPendingDocument(url: url, id: pendingId)
     updateHeight(animate: true)
     return true
@@ -1718,7 +2220,17 @@ class GlassComposeAppKit: NSView {
 
     // Update state
     attachmentItems.removeValue(forKey: id)
-    drafts2.removeAttachment(peer: peerId, id: id)
+    removeStoredAttachment(id: id)
+  }
+
+  private func removeStoredAttachment(id: String) {
+    switch usage {
+      case .chat:
+        drafts2.removeAttachment(peer: peerId, id: id)
+      case let .newThread(context):
+        context.attachmentStore.remove(id: id)
+    }
+    notifyNewThreadDraftChanged()
   }
 
   func clearAttachments(updateHeights: Bool = false) {
@@ -1730,16 +2242,20 @@ class GlassComposeAppKit: NSView {
     }
   }
 
-  // Clear, reset height
+  /// Clear, reset height
   func clear() {
-    voiceViewModel.cancel()
-
-    // State
-    attachmentItems.removeAll()
-    state.clearReplyingToMsgId()
-    state.clearEditingMsgId()
-    state.clearForwarding()
-    clearDraft(flush: true)
+    switch usage {
+      case .chat:
+        voiceViewModel.cancel()
+        attachmentItems.removeAll()
+        state.clearReplyingToMsgId()
+        state.clearEditingMsgId()
+        state.clearForwarding()
+        clearDraft(flush: true)
+      case let .newThread(context):
+        attachmentItems.removeAll()
+        context.attachmentStore.clear()
+    }
 
     // Views
     attachments.clearViews()
@@ -1754,8 +2270,13 @@ class GlassComposeAppKit: NSView {
     updateHeight()
   }
 
-  // Send the message
+  /// Send the message
   func send(sendMode: MessageSendMode? = nil) {
+    if case let .newThread(context) = usage {
+      sendNewThread(using: context)
+      return
+    }
+
     if voiceViewModel.phase == .review {
       sendVoiceRecording()
       return
@@ -1793,7 +2314,8 @@ class GlassComposeAppKit: NSView {
        forwardContext == nil,
        !hasAttachments,
        !hasBotCommandEntity,
-       let action = InlineCommandRegistry.action(forStandaloneText: rawText) {
+       let action = InlineCommandRegistry.action(forStandaloneText: rawText)
+    {
       ignoreNextHeightChange = false
       performInlineCommand(action)
       return
@@ -1952,6 +2474,68 @@ class GlassComposeAppKit: NSView {
     // }
   }
 
+  private func sendNewThread(using context: NewThreadComposeContext) {
+    guard canSend, !isSubmittingNewThread else { return }
+    guard let authorUserID = dependencies.auth.currentUserId else {
+      ToastCenter.shared.showError("You're signed out. Please log in again.")
+      return
+    }
+
+    let attributedString = trimmedAttributedString(textEditor.attributedString)
+    let (rawText, entities) = ProcessEntities.fromAttributedString(
+      attributedString,
+      parseMarkdown: false,
+      threadLinkSpaceId: context.destination().spaceID
+    )
+    let draft = PreparedNewThreadDraft(
+      authorUserID: authorUserID,
+      text: rawText,
+      entities: entities,
+      attachments: context.attachmentStore.attachments,
+      destination: context.destination()
+    )
+    guard !draft.isEmpty else { return }
+
+    isSubmittingNewThread = true
+    setNewThreadAuthoringEnabled(false)
+    updateSendButtonIfNeeded()
+
+    Task { @MainActor [weak self] in
+      let result = await context.submit(draft)
+      // Submission feedback belongs to the host, not this view's lifetime.
+      // An early navigation may tear Compose down while the send is still
+      // finishing, but failures must still reach the user.
+      context.didFinishSubmission(result)
+      guard let self else { return }
+      isSubmittingNewThread = false
+      setNewThreadAuthoringEnabled(true)
+
+      switch result {
+        case .success:
+          clear()
+          collapseNewThreadComposeAndResignFocus()
+        case let .failure(failure) where failure.createdPeer != nil:
+          // The submission contract has installed the content as a real draft
+          // on that peer, so clearing here cannot lose the user's work.
+          clear()
+          collapseNewThreadComposeAndResignFocus()
+        case .failure:
+          updateSendButtonIfNeeded()
+      }
+    }
+  }
+
+  private func setNewThreadAuthoringEnabled(_ enabled: Bool) {
+    guard case .newThread = usage else { return }
+    textEditor.textView.isEditable = enabled
+    menuButton.isEnabled = enabled
+    if !enabled {
+      hideMentionCompletion()
+      hideCommandCompletion()
+      hideAutocomplete()
+    }
+  }
+
   private func performInlineCommand(_ action: InlineCommandAction) {
     let invocationPeerId = peerId
     let invocationText = textEditor.plainText
@@ -2067,7 +2651,7 @@ class GlassComposeAppKit: NSView {
   }
 
   func focus() {
-    guard !voiceViewModel.isActive else { return }
+    guard !currentVoiceActive else { return }
     textEditor.focus()
   }
 
@@ -2105,7 +2689,7 @@ class GlassComposeAppKit: NSView {
 
     smartLinkEscapeKeyUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .escape,
-      key: "compose_smart_link_\(peerId)",
+      key: "compose_smart_link_\(composeSessionKey)",
       handler: { [weak self] _ in
         self?.textEditor.textView.revertLatestSmartLink()
       }
@@ -2115,10 +2699,10 @@ class GlassComposeAppKit: NSView {
   private func setupKeyDownHandler() {
     keyMonitorUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .textInputCatchAll,
-      key: "compose\(peerId)",
+      key: textInputMonitorKey,
       handler: { [weak self] event in
         guard let self else { return }
-        guard !voiceViewModel.isActive else { return }
+        guard !currentVoiceActive else { return }
 
         // Only allow valid printable characters, not control/navigation keys
         guard let characters = event.characters,
@@ -2147,7 +2731,7 @@ class GlassComposeAppKit: NSView {
     // Add paste handler
     keyMonitorPasteUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .paste,
-      key: "compose_paste_\(peerId)",
+      key: "compose_paste_\(composeSessionKey)",
       handler: { [weak self] _ in
         self?.handleGlobalPaste()
       }
@@ -2155,7 +2739,7 @@ class GlassComposeAppKit: NSView {
   }
 
   private func handleGlobalPaste() {
-    guard !voiceViewModel.isActive else { return }
+    guard !currentVoiceActive, canMutateDraft else { return }
 
     let pasteboard = NSPasteboard.general
 
@@ -2171,7 +2755,9 @@ class GlassComposeAppKit: NSView {
   }
 
   deinit {
-    requestImmediateDraftPersistenceIfNeeded()
+    if case .chat = usage {
+      requestImmediateDraftPersistenceIfNeeded()
+    }
     draftAttachmentObserverCancel?()
     draftAttachmentObserverCancel = nil
     draftEntitySaveTask?.cancel()
@@ -2185,6 +2771,8 @@ class GlassComposeAppKit: NSView {
     keyMonitorPasteUnsubscribe = nil
     smartLinkEscapeKeyUnsubscribe?()
     smartLinkEscapeKeyUnsubscribe = nil
+    newThreadEscapeKeyUnsubscribe?()
+    newThreadEscapeKeyUnsubscribe = nil
     removeVoiceKeyHandlers()
 
     // Clean up mention resources
@@ -2196,6 +2784,15 @@ class GlassComposeAppKit: NSView {
     mentionParticipantsTask?.cancel()
     mentionParticipantsTask = nil
 
+    if case .newThread = usage {
+      autocompleteKeyMonitorEscUnsubscribe?()
+      autocompleteKeyMonitorEscUnsubscribe = nil
+      removeNewThreadScrollObserver()
+      NSLayoutConstraint.deactivate(autocompleteMenuConstraints)
+      autocompleteMenuConstraints.removeAll()
+      autocompleteMenu?.removeFromSuperview()
+    }
+
     log.trace("deinit")
   }
 }
@@ -2204,7 +2801,7 @@ class GlassComposeAppKit: NSView {
 
 extension GlassComposeAppKit {
   func handleFileDrop(_ urls: [URL]) {
-    guard !voiceViewModel.isActive else { return }
+    guard !currentVoiceActive, canMutateDraft else { return }
 
     for url in urls {
       if isAnimatedImageFile(url) {
@@ -2218,7 +2815,7 @@ extension GlassComposeAppKit {
   }
 
   func handleTextDropOrPaste(_ text: String) {
-    guard !voiceViewModel.isActive else { return }
+    guard !currentVoiceActive, canMutateDraft else { return }
 
     textEditor.insertText(text)
     focusWindowIfNeeded()
@@ -2226,7 +2823,7 @@ extension GlassComposeAppKit {
   }
 
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
-    guard !voiceViewModel.isActive else { return }
+    guard !currentVoiceActive, canMutateDraft else { return }
 
     addImage(image, url)
     focusWindowIfNeeded()
@@ -2242,7 +2839,7 @@ private enum ComposeAutocompleteArrowDirection {
 }
 
 extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
-  // Implement delegate methods as needed
+  /// Implement delegate methods as needed
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool {
     // Always send with command enter
     send()
@@ -2269,6 +2866,7 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     // only if empty
     guard textView.string.count == 0 else { return false }
+    guard case .chat = usage else { return false }
 
     // fetch last message of ours in this chat that isn't sending or failed
     let lastMsgId = try? dependencies.database.reader.read { db in
@@ -2293,7 +2891,8 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     if let commandCompletionMenu,
        commandCompletionMenu.isVisible,
-       commandCompletionMenu.selectCurrentItem(sendAfterInsertion: true) {
+       commandCompletionMenu.selectCurrentItem(sendAfterInsertion: true)
+    {
       return true
     }
 
@@ -2387,28 +2986,37 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     detectComposeCompletionsAtCursor(trigger: .textChange)
 
-    handleStickerDetectionIfNeeded(for: textView)
+    if case .chat = usage {
+      handleStickerDetectionIfNeeded(for: textView)
+    }
 
     if textEditor.isAttributedTextEmpty {
       // Handle empty text
       textEditor.showPlaceholder(true)
 
-      // Cancel typing
-      Task {
-        await ComposeActions.shared.stoppedTyping(for: self.peerId)
+      if case .chat = usage {
+        Task {
+          await ComposeActions.shared.stoppedTyping(for: self.peerId)
+        }
       }
     } else {
       // Handle non-empty text
       textEditor.showPlaceholder(false)
 
-      // Start typing
-      Task {
-        await ComposeActions.shared.startedTyping(for: self.peerId)
+      if case .chat = usage {
+        Task {
+          await ComposeActions.shared.startedTyping(for: self.peerId)
+        }
       }
     }
 
     updateSendButtonIfNeeded()
-    saveDraftWithDebounce()
+    switch usage {
+      case .chat:
+        saveDraftWithDebounce()
+      case .newThread:
+        notifyNewThreadDraftChanged()
+    }
   }
 
   private func handleStickerDetectionIfNeeded(for textView: NSTextView) {
@@ -2432,7 +3040,20 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
     textView.resetTypingAttributesToDefault()
     isHandlingStickerInsertion = false
+  }
 
+  private func notifyNewThreadDraftChanged() {
+    guard case let .newThread(context) = usage else { return }
+    let (rawText, entities) = ProcessEntities.fromAttributedString(
+      textEditor.attributedString,
+      parseMarkdown: false,
+      threadLinkSpaceId: context.destination().spaceID
+    )
+    let hasAttachments = !context.attachmentStore.attachments.isEmpty || context.attachmentStore.hasPendingAttachments
+    if !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAttachments {
+      setAccessoryBarExpanded(true)
+    }
+    context.didChangeDraft(rawText, entities, hasAttachments)
   }
 
   /// Reflect state changes in send button
@@ -2559,10 +3180,10 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     switch direction {
-    case .previous:
-      autocompleteViewModel.selectPrevious()
-    case .next:
-      autocompleteViewModel.selectNext()
+      case .previous:
+        autocompleteViewModel.selectPrevious()
+      case .next:
+        autocompleteViewModel.selectNext()
     }
 
     return true
@@ -2573,10 +3194,10 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     guard count > 0 else { return true }
 
     switch direction {
-    case .previous:
-      return autocompleteViewModel.selectedIndex <= 0
-    case .next:
-      return autocompleteViewModel.selectedIndex >= count - 1
+      case .previous:
+        return autocompleteViewModel.selectedIndex <= 0
+      case .next:
+        return autocompleteViewModel.selectedIndex >= count - 1
     }
   }
 
@@ -2628,18 +3249,18 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   private func handleAutocompleteCommitKey() -> Bool {
     switch autocompleteCommitKeyAction {
-    case .ignore:
-      return false
-    case .consume:
-      return true
-    case .select:
-      _ = autocompleteMenu?.selectCurrentItem()
-      return true
+      case .ignore:
+        return false
+      case .consume:
+        return true
+      case .select:
+        _ = autocompleteMenu?.selectCurrentItem()
+        return true
     }
   }
 
   func textViewDidChangeFormatting(_ textView: NSTextView) {
-    saveDraft()
+    persistDraftAfterProgrammaticChange()
   }
 
   func textView(_ textView: NSTextView, didDetectMentionWith query: String, at location: Int) {
@@ -2655,6 +3276,9 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textViewDidGainFocus(_ textView: NSTextView) {
     paragraphDirectionController.didGainFocus()
+    if case .newThread = usage {
+      setAccessoryBarExpanded(true)
+    }
   }
 
   func textViewDidLoseFocus(_ textView: NSTextView) {
@@ -2670,11 +3294,23 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
         return
       }
 
+      if firstResponderIsInsideCompose() {
+        return
+      }
+
       // Hide mention menu when text view loses focus
       hideMentionCompletion()
       hideCommandCompletion()
       hideAutocomplete()
+      if case .newThread = usage, isEmpty, !hasAnyAttachments {
+        setAccessoryBarExpanded(false)
+      }
     }
+  }
+
+  private func firstResponderIsInsideCompose() -> Bool {
+    guard let responderView = window?.firstResponder as? NSView else { return false }
+    return responderView === self || responderView.isDescendant(of: self)
   }
 
   private func autocompleteMenuContainsFirstResponder() -> Bool {
@@ -2698,7 +3334,11 @@ extension GlassComposeAppKit: ComposeEmojiButtonDelegate {
   }
 
   func composeEmojiButton(_ button: ComposeEmojiButton, didReceiveSticker image: NSImage) {
-    sendSticker(image)
+    if case .chat = usage {
+      sendSticker(image)
+    } else {
+      addImage(image)
+    }
     focus()
   }
 }
@@ -2732,24 +3372,24 @@ extension GlassComposeAppKit: MentionCompletionMenuDelegate {
 
     let currentAttributedText = textEditor.attributedString
     let result = switch item {
-    case let .user(user):
-      mentionDetector.replaceMention(
-        in: currentAttributedText,
-        range: mentionRange.range,
-        with: text,
-        userId: user.userInfo.user.id,
-        mentionAttributes: composeMentionAttributes,
-        trailingAttributes: composeBaseTextAttributes
-      )
-    case let .group(group):
-      mentionDetector.replaceGroupMention(
-        in: currentAttributedText,
-        range: mentionRange.range,
-        with: text,
-        groupId: group.id,
-        mentionAttributes: composeMentionAttributes,
-        trailingAttributes: composeBaseTextAttributes
-      )
+      case let .user(user):
+        mentionDetector.replaceMention(
+          in: currentAttributedText,
+          range: mentionRange.range,
+          with: text,
+          userId: user.userInfo.user.id,
+          mentionAttributes: composeMentionAttributes,
+          trailingAttributes: composeBaseTextAttributes
+        )
+      case let .group(group):
+        mentionDetector.replaceGroupMention(
+          in: currentAttributedText,
+          range: mentionRange.range,
+          with: text,
+          groupId: group.id,
+          mentionAttributes: composeMentionAttributes,
+          trailingAttributes: composeBaseTextAttributes
+        )
     }
 
     // Update attributed text and cursor position
@@ -2764,7 +3404,7 @@ extension GlassComposeAppKit: MentionCompletionMenuDelegate {
 
     // Update height if needed
     updateHeightIfNeeded(for: textEditor.textView)
-    saveDraft()
+    persistDraftAfterProgrammaticChange()
   }
 
   func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu) {
@@ -2814,8 +3454,7 @@ extension GlassComposeAppKit: CommandCompletionMenuDelegate {
       send()
     } else {
       updateHeightIfNeeded(for: textEditor.textView)
-      updateSendButtonIfNeeded()
-      saveDraft()
+      persistDraftAfterProgrammaticChange()
     }
   }
 
@@ -2831,7 +3470,8 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
     switch item.payload {
       case let .thread(chatId, _, title):
         let result = if match.kind == .threadNumber,
-                        let reference = item.threadReference {
+                        let reference = item.threadReference
+        {
           threadLinkDetector.replaceThreadNumberReference(
             in: textEditor.attributedString,
             range: match.range,
@@ -2858,7 +3498,7 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
 
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
-        saveDraft()
+        persistDraftAfterProgrammaticChange()
 
       case let .externalResource(resource):
         let result = ExternalResourceLinkEditing.replaceReference(
@@ -2877,8 +3517,7 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
 
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
-        updateSendButtonIfNeeded()
-        saveDraft()
+        persistDraftAfterProgrammaticChange()
 
       case let .emoji(value, _):
         let preferredValue = AppSettings.shared.preferredEmojiSkinTone.applying(to: value)
@@ -2895,6 +3534,7 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
 
         hideAutocomplete()
         updateHeightIfNeeded(for: textEditor.textView)
+        persistDraftAfterProgrammaticChange()
 
       case .mention, .command, .inlineCommand:
         assertionFailure("iOS-only autocomplete payload reached the glass macOS composer")
@@ -2926,7 +3566,7 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
 
 extension GlassComposeAppKit {
   func toAttributedString(text: String, entities: MessageEntities?) -> NSAttributedString {
-    let attributedString = ProcessEntities.toAttributedString(
+    ProcessEntities.toAttributedString(
       text: text,
       entities: entities,
       configuration: .init(
@@ -2936,8 +3576,6 @@ extension GlassComposeAppKit {
         convertMentionsToLink: false
       )
     )
-
-    return attributedString
   }
 
   func setMessage(text: String, entities: MessageEntities?) {
@@ -2975,6 +3613,16 @@ extension GlassComposeAppKit {
 // MARK: - Draft
 
 extension GlassComposeAppKit {
+  private func persistDraftAfterProgrammaticChange() {
+    updateSendButtonIfNeeded()
+    switch usage {
+      case .chat:
+        saveDraft()
+      case .newThread:
+        notifyNewThreadDraftChanged()
+    }
+  }
+
   /// Loads draft and if nothing found returns false
   func loadDraft() -> Bool {
     guard let draft = drafts2.load(peer: peerId, legacyDraftMessage: dialog?.draftMessage),
@@ -2985,14 +3633,13 @@ extension GlassComposeAppKit {
 
     // Convert to attributed string. Most drafts are plain text, so avoid entity
     // parsing work when protobuf entities are not present.
-    let attributedString: NSAttributedString
-    if let entities = draft.entities {
-      attributedString = toAttributedString(
+    let attributedString: NSAttributedString = if let entities = draft.entities {
+      toAttributedString(
         text: draft.text,
         entities: entities
       )
     } else {
-      attributedString = textEditor.createAttributedString(draft.text)
+      textEditor.createAttributedString(draft.text)
     }
 
     // `didLayout()` is called after layout in normal flow. Only force layout
@@ -3096,16 +3743,24 @@ extension GlassComposeAppKit {
           updateHeight(animate: true)
         }
         updateSendButtonIfNeeded()
+        notifyNewThreadDraftChanged()
       case let .success(pendingId, attachment):
         removeDraftAttachmentPlaceholder(id: pendingId)
         pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
-        guard drafts2.load(peer: peerId)?.attachments.contains(where: { $0.id == attachment.id }) == true else {
+        let ownsAttachment = switch usage {
+          case .chat:
+            drafts2.load(peer: peerId)?.attachments.contains(where: { $0.id == attachment.id }) == true
+          case let .newThread(context):
+            context.attachmentStore.contains(id: attachment.id)
+        }
+        guard ownsAttachment else {
           updateSendButtonIfNeeded()
           return
         }
         renderDraftAttachment(attachment)
         updateHeight(animate: true)
         updateSendButtonIfNeeded()
+        notifyNewThreadDraftChanged()
       case let .failure(pendingId, message):
         removeDraftAttachmentPlaceholder(id: pendingId)
         if let fallbackURL = pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId), addFile(fallbackURL) {
@@ -3114,13 +3769,18 @@ extension GlassComposeAppKit {
         }
 
         log.error("Failed to save draft attachment: \(message)")
+        if case .newThread = usage {
+          ToastCenter.shared.showError("Failed to add attachment")
+        }
         updateHeight(animate: true)
         updateSendButtonIfNeeded()
+        notifyNewThreadDraftChanged()
       case let .cancelled(pendingId):
         removeDraftAttachmentPlaceholder(id: pendingId)
         pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
         updateHeight(animate: true)
         updateSendButtonIfNeeded()
+        notifyNewThreadDraftChanged()
     }
   }
 
@@ -3179,6 +3839,7 @@ extension GlassComposeAppKit: ComposeImplementation, ComposeAttachmentOwner {
   }
 
   func hostWillMove(toSuperview newSuperview: NSView?) {
+    guard case .chat = usage else { return }
     if newSuperview == nil {
       requestImmediateDraftPersistenceIfNeeded()
     } else {

@@ -491,10 +491,12 @@ final class InlineTooltipBubbleView: NSView {
 private final class InlineTooltipContentView: NSView {
   private enum Layout {
     static let contentSpacing: CGFloat = 5
+    static let descriptionSpacing: CGFloat = 1
     static let maximumTextWidth: CGFloat = 280
   }
 
   private let textField = NSTextField(labelWithString: "")
+  private let descriptionField = NSTextField(wrappingLabelWithString: "")
   private let shortcutView = InlineTooltipShortcutView()
 
   override init(frame frameRect: NSRect) {
@@ -504,7 +506,14 @@ private final class InlineTooltipContentView: NSView {
     textField.textColor = .labelColor
     textField.lineBreakMode = .byTruncatingTail
     textField.maximumNumberOfLines = 1
+    descriptionField.font = .systemFont(ofSize: 10, weight: .regular)
+    descriptionField.textColor = .secondaryLabelColor
+    descriptionField.lineBreakMode = .byWordWrapping
+    descriptionField.maximumNumberOfLines = 3
+    descriptionField.preferredMaxLayoutWidth = Layout.maximumTextWidth
+    descriptionField.isHidden = true
     addSubview(textField)
+    addSubview(descriptionField)
     addSubview(shortcutView)
   }
 
@@ -515,36 +524,59 @@ private final class InlineTooltipContentView: NSView {
 
   override var intrinsicContentSize: NSSize {
     let textSize = measuredTextSize
+    let descriptionSize = measuredDescriptionSize
     let shortcutSize = shortcutView.intrinsicContentSize
     let hasShortcut = !shortcutView.isHidden
+    let hasDescription = !descriptionField.isHidden
+    let titleRowWidth = textSize.width + (hasShortcut ? Layout.contentSpacing + shortcutSize.width : 0)
+    let titleRowHeight = max(textSize.height, hasShortcut ? shortcutSize.height : 0)
     return NSSize(
-      width: textSize.width + (hasShortcut ? Layout.contentSpacing + shortcutSize.width : 0),
-      height: max(textSize.height, hasShortcut ? shortcutSize.height : 0)
+      width: max(titleRowWidth, hasDescription ? descriptionSize.width : 0),
+      height: titleRowHeight + (hasDescription ? Layout.descriptionSpacing + descriptionSize.height : 0)
     )
   }
 
   override func layout() {
     super.layout()
     let textSize = measuredTextSize
+    let descriptionSize = measuredDescriptionSize
+    let shortcutSize = shortcutView.intrinsicContentSize
+    let hasShortcut = !shortcutView.isHidden
+    let hasDescription = !descriptionField.isHidden
+    let titleRowHeight = max(textSize.height, hasShortcut ? shortcutSize.height : 0)
+    let titleRowY = hasDescription
+      ? descriptionSize.height + Layout.descriptionSpacing
+      : backingPixelAligned((bounds.height - titleRowHeight) / 2)
     textField.frame = NSRect(
       x: 0,
-      y: backingPixelAligned((bounds.height - textSize.height) / 2),
+      y: backingPixelAligned(titleRowY + (titleRowHeight - textSize.height) / 2),
       width: textSize.width,
       height: textSize.height
     )
 
-    guard !shortcutView.isHidden else { return }
-    let shortcutSize = shortcutView.intrinsicContentSize
-    shortcutView.frame = NSRect(
-      x: textSize.width + Layout.contentSpacing,
-      y: backingPixelAligned((bounds.height - shortcutSize.height) / 2),
-      width: shortcutSize.width,
-      height: shortcutSize.height
-    )
+    if hasShortcut {
+      shortcutView.frame = NSRect(
+        x: textSize.width + Layout.contentSpacing,
+        y: backingPixelAligned(titleRowY + (titleRowHeight - shortcutSize.height) / 2),
+        width: shortcutSize.width,
+        height: shortcutSize.height
+      )
+    }
+
+    if hasDescription {
+      descriptionField.frame = NSRect(
+        x: 0,
+        y: 0,
+        width: min(bounds.width, descriptionSize.width),
+        height: descriptionSize.height
+      )
+    }
   }
 
   func update(_ presentation: InlineTooltipResolvedContent) {
     textField.stringValue = presentation.text
+    descriptionField.stringValue = presentation.description ?? ""
+    descriptionField.isHidden = presentation.description?.isEmpty != false
     shortcutView.update(labels: presentation.shortcut?.keycapLabels ?? [])
     invalidateIntrinsicContentSize()
     needsLayout = true
@@ -556,6 +588,16 @@ private final class InlineTooltipContentView: NSView {
       width: min(ceil(rawSize.width), Layout.maximumTextWidth),
       height: ceil(rawSize.height)
     )
+  }
+
+  private var measuredDescriptionSize: NSSize {
+    guard !descriptionField.isHidden else { return .zero }
+    let naturalSize = descriptionField.intrinsicContentSize
+    let width = min(ceil(naturalSize.width), Layout.maximumTextWidth)
+    let rawSize = descriptionField.cell?.cellSize(
+      forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)
+    ) ?? naturalSize
+    return NSSize(width: width, height: ceil(rawSize.height))
   }
 }
 

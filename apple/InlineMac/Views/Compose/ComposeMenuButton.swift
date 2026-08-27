@@ -5,10 +5,31 @@ import UniformTypeIdentifiers
 
 class ComposeMenuButton: NSView {
   private let mode: ComposeControlMode
-  private var size: CGFloat { mode.sideButtonSize }
+  private let capabilities: ComposeMenuCapabilities
+  private let presentation: ComposeControlPresentation
+  private var size: CGFloat {
+    switch presentation {
+      case .standard: mode.sideButtonSize
+      case .accessoryBar: presentation.buttonSize(mode: mode)
+    }
+  }
+  private var usesCustomHoverFill: Bool {
+    mode.usesCustomHoverFill || presentation == .accessoryBar
+  }
   private let button: NSButton
   private var trackingArea: NSTrackingArea?
   private var isHovering = false
+
+  var isEnabled: Bool {
+    get { button.isEnabled }
+    set {
+      button.isEnabled = newValue
+      if !newValue {
+        isHovering = false
+      }
+      updateBackgroundColor()
+    }
+  }
 
   weak var delegate: ComposeMenuButtonDelegate?
   var isSendSilentlyEnabledProvider: (() -> Bool)?
@@ -18,9 +39,15 @@ class ComposeMenuButton: NSView {
 
   // MARK: - Initialization
 
-  init(mode: ComposeControlMode = .legacy) {
+  init(
+    mode: ComposeControlMode = .legacy,
+    capabilities: ComposeMenuCapabilities = .chatDefault,
+    presentation: ComposeControlPresentation = .standard
+  ) {
     self.mode = mode
-    button = Self.makeButton(mode: mode)
+    self.capabilities = capabilities
+    self.presentation = presentation
+    button = Self.makeButton(mode: mode, presentation: presentation)
 
     super.init(frame: .zero)
     setupView()
@@ -36,14 +63,14 @@ class ComposeMenuButton: NSView {
   private func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
 
-    if mode.usesCustomHoverFill {
+    if usesCustomHoverFill {
       wantsLayer = true
       layer?.cornerRadius = size / 2
     }
 
     addSubview(button)
 
-    if mode.usesCustomHoverFill {
+    if usesCustomHoverFill {
       NSLayoutConstraint.activate([
         widthAnchor.constraint(equalToConstant: size),
         heightAnchor.constraint(equalToConstant: size),
@@ -67,18 +94,27 @@ class ComposeMenuButton: NSView {
     button.action = #selector(handleClick)
   }
 
-  private static func makeButton(mode: ComposeControlMode) -> NSButton {
+  private static func makeButton(
+    mode: ComposeControlMode,
+    presentation: ComposeControlPresentation
+  ) -> NSButton {
     let button = NSButton(frame: .zero)
     button.translatesAutoresizingMaskIntoConstraints = false
     button.imagePosition = .imageOnly
     button.imageScaling = .scaleNone
+    let iconPointSize = presentation == .accessoryBar
+      ? presentation.iconPointSize(mode: mode)
+      : mode.sideIconPointSize
     button.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
-      .withSymbolConfiguration(.init(pointSize: mode.sideIconPointSize, weight: .medium))
-    button.toolTip = "Add attachment"
-    button.setAccessibilityLabel("Add attachment")
+      .withSymbolConfiguration(.init(pointSize: iconPointSize, weight: .medium))
+    button.toolTip = "Add"
+    button.setAccessibilityLabel("Add")
 
-    if mode.usesCustomHoverFill {
+    if mode.usesCustomHoverFill || presentation == .accessoryBar {
       configureLegacyButton(button)
+      if presentation == .accessoryBar {
+        button.contentTintColor = .secondaryLabelColor
+      }
     } else if #available(macOS 26.0, *) {
       button.bezelStyle = .glass
       button.borderShape = .circle
@@ -99,59 +135,66 @@ class ComposeMenuButton: NSView {
   private func makeMenu() -> NSMenu {
     let menu = NSMenu()
 
-    // Photo Library Item
-    let photoItem = NSMenuItem(
-      title: "Photo or Video",
-      action: #selector(openMediaPicker),
-      keyEquivalent: ""
-    )
-    photoItem.target = self
-    photoItem.image = NSImage(systemSymbolName: "photo.on.rectangle", accessibilityDescription: nil)
-    menu.addItem(photoItem)
+    if capabilities.contains(.mediaPicker) {
+      let photoItem = NSMenuItem(
+        title: "Photo or Video",
+        action: #selector(openMediaPicker),
+        keyEquivalent: ""
+      )
+      photoItem.target = self
+      photoItem.image = NSImage(systemSymbolName: "photo.on.rectangle", accessibilityDescription: nil)
+      menu.addItem(photoItem)
+    }
 
-    // Camera Item
-    let cameraItem = NSMenuItem(
-      title: "Camera",
-      action: #selector(openCamera),
-      keyEquivalent: ""
-    )
-    cameraItem.target = self
-    cameraItem.image = NSImage(systemSymbolName: "camera", accessibilityDescription: nil)
-    menu.addItem(cameraItem)
+    if capabilities.contains(.camera) {
+      let cameraItem = NSMenuItem(
+        title: "Camera",
+        action: #selector(openCamera),
+        keyEquivalent: ""
+      )
+      cameraItem.target = self
+      cameraItem.image = NSImage(systemSymbolName: "camera", accessibilityDescription: nil)
+      menu.addItem(cameraItem)
+    }
 
-    // Files Item
-    let fileItem = NSMenuItem(
-      title: "Files",
-      action: #selector(openFilePicker),
-      keyEquivalent: ""
-    )
-    fileItem.target = self
-    fileItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-    menu.addItem(fileItem)
+    if capabilities.contains(.files) {
+      let fileItem = NSMenuItem(
+        title: "Files",
+        action: #selector(openFilePicker),
+        keyEquivalent: ""
+      )
+      fileItem.target = self
+      fileItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+      menu.addItem(fileItem)
+    }
 
-    menu.addItem(.separator())
+    if capabilities.contains(.sendSilently) {
+      if !menu.items.isEmpty {
+        menu.addItem(.separator())
+      }
 
-    let sectionTitle = NSMenuItem(title: "Options", action: nil, keyEquivalent: "")
-    sectionTitle.isEnabled = false
-    sectionTitle.attributedTitle = NSAttributedString(
-      string: "Options",
-      attributes: [
-        .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-        .foregroundColor: NSColor.secondaryLabelColor,
-      ]
-    )
-    menu.addItem(sectionTitle)
+      let sectionTitle = NSMenuItem(title: "Options", action: nil, keyEquivalent: "")
+      sectionTitle.isEnabled = false
+      sectionTitle.attributedTitle = NSAttributedString(
+        string: "Options",
+        attributes: [
+          .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+          .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+      )
+      menu.addItem(sectionTitle)
 
-    let sendSilentlyEnabled = isSendSilentlyEnabledProvider?() ?? false
-    let silentItem = NSMenuItem(
-      title: "Send as Silent",
-      action: #selector(toggleSendSilently),
-      keyEquivalent: ""
-    )
-    silentItem.target = self
-    silentItem.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: nil)
-    silentItem.state = sendSilentlyEnabled ? .on : .off
-    menu.addItem(silentItem)
+      let sendSilentlyEnabled = isSendSilentlyEnabledProvider?() ?? false
+      let silentItem = NSMenuItem(
+        title: "Send as Silent",
+        action: #selector(toggleSendSilently),
+        keyEquivalent: ""
+      )
+      silentItem.target = self
+      silentItem.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: nil)
+      silentItem.state = sendSilentlyEnabled ? .on : .off
+      menu.addItem(silentItem)
+    }
 
     return menu
   }
@@ -222,7 +265,7 @@ class ComposeMenuButton: NSView {
       trackingArea = nil
     }
 
-    guard mode.usesCustomHoverFill else { return }
+    guard usesCustomHoverFill else { return }
 
     let options: NSTrackingArea.Options = [
       .mouseEnteredAndExited,
@@ -252,7 +295,12 @@ class ComposeMenuButton: NSView {
   }
 
   private func updateBackgroundColor() {
-    guard mode.usesCustomHoverFill else {
+    guard usesCustomHoverFill else {
+      layer?.backgroundColor = NSColor.clear.cgColor
+      return
+    }
+
+    guard button.isEnabled else {
       layer?.backgroundColor = NSColor.clear.cgColor
       return
     }

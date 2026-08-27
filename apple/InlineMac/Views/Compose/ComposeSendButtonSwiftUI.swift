@@ -4,12 +4,14 @@ struct ComposeSendButtonSwiftUI: View {
   @ObservedObject private var settings = AppSettings.shared
   @ObservedObject var state: ComposeSendButtonState
   let mode: ComposeControlMode
+  let presentation: ComposeControlPresentation
+  let allowsSendSilently: Bool
   var action: () -> Void
   var toggleSendSilently: () -> Void
   @State private var isHovering = false
   @Environment(\.colorScheme) private var colorScheme
 
-  private var size: CGFloat { mode.sendButtonSize }
+  private var size: CGFloat { presentation.buttonSize(mode: mode) }
   private let disabledBackgroundColor: Color = Color(nsColor: .quinaryLabelColor)
 
   private var enabledBackgroundColor: Color {
@@ -52,8 +54,8 @@ struct ComposeSendButtonSwiftUI: View {
           .animation(.easeInOut(duration: 0.15), value: isEnabled)
           .animation(.easeInOut(duration: 0.18), value: state.sendSilently)
 
-        Image(systemName: "arrow.up")
-          .font(.system(size: mode.sendIconPointSize, weight: .medium))
+        Image(systemName: presentation.sendSymbolName)
+          .font(.system(size: presentation.iconPointSize(mode: mode), weight: .medium))
           .foregroundStyle(iconForegroundColor)
           .frame(width: size, height: size)
           .opacity(isEnabled ? 1 : 0.7)
@@ -66,8 +68,10 @@ struct ComposeSendButtonSwiftUI: View {
     .buttonStyle(.plain)
     .opacity(1.0)
     .contextMenu {
-      Button(state.sendSilently ? "Disable Send Silently" : "Send as Silent") {
-        toggleSendSilently()
+      if allowsSendSilently {
+        Button(state.sendSilently ? "Disable Send Silently" : "Send as Silent") {
+          toggleSendSilently()
+        }
       }
     }
     .onHover { hovering in

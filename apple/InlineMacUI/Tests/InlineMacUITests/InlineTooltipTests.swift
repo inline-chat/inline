@@ -188,6 +188,34 @@ struct InlineTooltipTests {
     #expect(bubble.layer?.shadowPath != nil)
   }
 
+  @Test("Description content expands below the tooltip title")
+  @MainActor
+  func descriptionContentLayout() throws {
+    let content = InlineTooltipContent(
+      verbatim: "Private thread",
+      description: "Only you can access this thread. Mention people or groups to add them."
+    ).resolved
+    let bubble = InlineTooltipBubbleView(frame: .zero)
+    bubble.update(content)
+    bubble.frame.size = bubble.intrinsicContentSize
+    bubble.layoutSubtreeIfNeeded()
+
+    let titleField = try #require(bubble.descendantTextField(with: "Private thread"))
+    let descriptionField = try #require(
+      bubble.descendantTextField(
+        with: "Only you can access this thread. Mention people or groups to add them."
+      )
+    )
+    let titleFrame = titleField.convert(titleField.bounds, to: bubble)
+    let descriptionFrame = descriptionField.convert(descriptionField.bounds, to: bubble)
+
+    #expect(content.description != nil)
+    #expect(bubble.intrinsicContentSize.height > 48)
+    #expect(descriptionField.font == NSFont.systemFont(ofSize: 10, weight: .regular))
+    #expect(descriptionFrame.maxY < titleFrame.minY)
+    #expect(descriptionFrame.width <= 280)
+  }
+
   @Test("SwiftUI exposes the localized tooltip modifier")
   @MainActor
   func swiftUIModifierCompiles() {

@@ -118,6 +118,78 @@ describe("messages.createChat", () => {
     expect(saved?.isUntitled).toBe(true)
   })
 
+  test("stores a normalized placeholder as an untitled non-unique title", async () => {
+    const space = await testUtils.createSpace()
+    if (!space) throw new Error("Failed to create space")
+
+    const user = await testUtils.createUser("placeholder-thread-owner@example.com")
+    if (!user) throw new Error("Failed to create user")
+    await addSpaceMembers(space.id, [{ userId: user.id }])
+
+    const source = "  Please   review\nthis launch checklist before tomorrow morning because it contains extra detail.  "
+    const expected = Array.from(source.trim().replace(/\s+/g, " ")).slice(0, 60).join("").trim()
+    const handlerResult = await handler(
+      {
+        placeholderTitle: source,
+        spaceId: BigInt(space.id),
+        isPublic: true,
+      },
+      {
+        ...mockHandlerContext,
+        userId: user.id,
+      },
+    )
+    const functionResult = await createChat(
+      {
+        placeholderTitle: source,
+        spaceId: BigInt(space.id),
+        isPublic: true,
+      },
+      {
+        ...mockFunctionContext,
+        currentUserId: user.id,
+      },
+    )
+
+    expect(handlerResult.chat.title).toBe(expected)
+    expect(handlerResult.chat.untitled).toBe(true)
+    expect(functionResult.chat.title).toBe(expected)
+    expect(functionResult.chat.untitled).toBe(true)
+
+    const saved = await db
+      .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
+      .from(schema.chats)
+      .where(eq(schema.chats.spaceId, space.id))
+
+    expect(saved).toHaveLength(2)
+    expect(saved).toEqual([
+      { title: expected, isUntitled: true },
+      { title: expected, isUntitled: true },
+    ])
+  })
+
+  test("rejects simultaneous explicit and placeholder titles", async () => {
+    const space = await testUtils.createSpace()
+    if (!space) throw new Error("Failed to create space")
+
+    const user = await testUtils.createUser("ambiguous-placeholder-title@example.com")
+    if (!user) throw new Error("Failed to create user")
+    await addSpaceMembers(space.id, [{ userId: user.id }])
+
+    await expect(createChat(
+      {
+        title: "Explicit title",
+        placeholderTitle: "Temporary message prefix",
+        spaceId: BigInt(space.id),
+        isPublic: true,
+      },
+      {
+        ...mockFunctionContext,
+        currentUserId: user.id,
+      },
+    )).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
   test("should create private chat with participants", async () => {
     // Create a space first
     const space = await testUtils.createSpace()

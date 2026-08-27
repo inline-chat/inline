@@ -92,22 +92,21 @@ class ComposeTextEditor: NSView {
   var placeholderText: String = "Message" {
     didSet {
       guard placeholderText != oldValue else { return }
-      placeholder.stringValue = placeholderText
-      placeholder.invalidateIntrinsicContentSize()
+      placeholder.text = placeholderText
     }
   }
 
-  private lazy var placeholder: NonInteractiveTextField = {
-    let label = NonInteractiveTextField(label: placeholderText)
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = Theme.messageTextFont
-    label.lineBreakMode = .byTruncatingTail
-    label.textColor = .placeholderTextColor
-    label.isEditable = false
-    label.isSelectable = false
-    label.isEnabled = false
-    return label
-  }()
+  var placeholderSymbolName: String? {
+    didSet {
+      guard placeholderSymbolName != oldValue else { return }
+      placeholder.symbolName = placeholderSymbolName
+    }
+  }
+
+  private lazy var placeholder = ComposePlaceholderView(
+    text: placeholderText,
+    symbolName: placeholderSymbolName
+  )
 
   var initiallySingleLine: Bool
 
@@ -443,6 +442,90 @@ class ComposeTextEditor: NSView {
     }
 
     return mutable
+  }
+}
+
+private final class ComposePlaceholderView: NSView {
+  private let imageView = NSImageView()
+  private let label: NonInteractiveTextField
+  private var imageWidthConstraint: NSLayoutConstraint!
+  private var labelLeadingConstraint: NSLayoutConstraint!
+
+  var text: String {
+    didSet {
+      guard text != oldValue else { return }
+      label.stringValue = text
+      label.invalidateIntrinsicContentSize()
+    }
+  }
+
+  var symbolName: String? {
+    didSet {
+      guard symbolName != oldValue else { return }
+      updateSymbol()
+    }
+  }
+
+  init(text: String, symbolName: String?) {
+    self.text = text
+    self.symbolName = symbolName
+    label = NonInteractiveTextField(label: text)
+    super.init(frame: .zero)
+
+    translatesAutoresizingMaskIntoConstraints = false
+    wantsLayer = true
+
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.imageScaling = .scaleProportionallyDown
+    imageView.contentTintColor = .placeholderTextColor
+    imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+    imageView.setAccessibilityElement(false)
+
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = Theme.messageTextFont
+    label.lineBreakMode = .byTruncatingTail
+    label.textColor = .placeholderTextColor
+    label.isEditable = false
+    label.isSelectable = false
+    label.isEnabled = false
+
+    addSubview(imageView)
+    addSubview(label)
+
+    imageWidthConstraint = imageView.widthAnchor.constraint(equalToConstant: 16)
+    labelLeadingConstraint = label.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 5)
+    NSLayoutConstraint.activate([
+      imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      imageWidthConstraint,
+      imageView.heightAnchor.constraint(equalToConstant: 16),
+      labelLeadingConstraint,
+      label.trailingAnchor.constraint(equalTo: trailingAnchor),
+      label.topAnchor.constraint(equalTo: topAnchor),
+      label.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+
+    updateSymbol()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    nil
+  }
+
+  private func updateSymbol() {
+    let image = symbolName.flatMap {
+      NSImage(systemSymbolName: $0, accessibilityDescription: nil)
+    }
+    let hasSymbol = image != nil
+    imageView.image = image
+    imageView.isHidden = !hasSymbol
+    imageWidthConstraint.constant = hasSymbol ? 16 : 0
+    labelLeadingConstraint.constant = hasSymbol ? 5 : 0
   }
 }
 

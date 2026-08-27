@@ -1,5 +1,62 @@
 import AppKit
 
+/// Stable Glass Compose topologies. The layout describes where Compose-owned
+/// controls live; feature availability is configured separately.
+enum GlassComposeLayout {
+  /// Existing chat layout with detached Glass attachment and voice controls.
+  case sideControls
+
+  /// One end-to-end Glass surface with a compact internal accessory row.
+  case accessoryBar
+
+  var viewportHorizontalInset: CGFloat {
+    switch self {
+      case .sideControls: 14
+      case .accessoryBar: 0
+    }
+  }
+
+  var viewportBottomInset: CGFloat {
+    switch self {
+      case .sideControls: 14
+      case .accessoryBar: 8
+    }
+  }
+
+  var accessoryBarHeight: CGFloat {
+    switch self {
+      case .sideControls: 0
+      case .accessoryBar: 32
+    }
+  }
+}
+
+enum ComposeControlPresentation {
+  case standard
+  case accessoryBar
+
+  func buttonSize(mode: ComposeControlMode) -> CGFloat {
+    switch self {
+      case .standard: mode.inlineButtonSize
+      case .accessoryBar: 24
+    }
+  }
+
+  func iconPointSize(mode: ComposeControlMode) -> CGFloat {
+    switch self {
+      case .standard: mode.sendIconPointSize
+      case .accessoryBar: 13
+    }
+  }
+
+  var sendSymbolName: String {
+    switch self {
+      case .standard: "arrow.up"
+      case .accessoryBar: "arrow.right"
+    }
+  }
+}
+
 enum ComposeControlMode {
   case legacy
   case glass

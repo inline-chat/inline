@@ -126,18 +126,26 @@ public extension NSView {
 
   func setInlineTooltip(
     _ text: LocalizedStringResource,
+    description: LocalizedStringResource? = nil,
     shortcut: InlineTooltipShortcut? = nil,
     placement: InlineTooltipPlacement = .automatic
   ) {
-    setInlineTooltip(InlineTooltipContent(text, shortcut: shortcut), placement: placement)
+    setInlineTooltip(
+      InlineTooltipContent(text, description: description, shortcut: shortcut),
+      placement: placement
+    )
   }
 
   func setInlineTooltip(
     verbatim text: String,
+    description: String? = nil,
     shortcut: InlineTooltipShortcut? = nil,
     placement: InlineTooltipPlacement = .automatic
   ) {
-    setInlineTooltip(InlineTooltipContent(verbatim: text, shortcut: shortcut), placement: placement)
+    setInlineTooltip(
+      InlineTooltipContent(verbatim: text, description: description, shortcut: shortcut),
+      placement: placement
+    )
   }
 
   func showInlineTooltip() {
@@ -171,22 +179,24 @@ public extension NSView {
 public extension View {
   func inlineTooltip(
     _ text: LocalizedStringResource,
+    description: LocalizedStringResource? = nil,
     shortcut: InlineTooltipShortcut? = nil,
     placement: InlineTooltipPlacement = .automatic
   ) -> some View {
     modifier(InlineTooltipModifier(
-      tooltip: InlineTooltipContent(text, shortcut: shortcut),
+      tooltip: InlineTooltipContent(text, description: description, shortcut: shortcut),
       placement: placement
     ))
   }
 
   func inlineTooltip(
     verbatim text: String,
+    description: String? = nil,
     shortcut: InlineTooltipShortcut? = nil,
     placement: InlineTooltipPlacement = .automatic
   ) -> some View {
     modifier(InlineTooltipModifier(
-      tooltip: InlineTooltipContent(verbatim: text, shortcut: shortcut),
+      tooltip: InlineTooltipContent(verbatim: text, description: description, shortcut: shortcut),
       placement: placement
     ))
   }

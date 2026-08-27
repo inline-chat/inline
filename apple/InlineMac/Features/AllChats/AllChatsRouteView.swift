@@ -39,25 +39,49 @@ struct AllChatsRouteView: View {
       spaceId: nav.selectedSpaceId
     )
 
-    ZStack {
-      if viewModel.isLoading {
-        ProgressView()
-          .controlSize(.small)
-      } else if viewModel.errorText != nil || showsEmptyFilterState(presentation: presentation) {
-        RoutePlaceholderView(
-          title: viewModel.errorText ?? emptyTitle,
-          systemImage: viewModel.errorText == nil ? emptySystemImage : "exclamationmark.triangle"
-        )
-      } else {
-        chatList(presentation: presentation)
+    ScrollView {
+      VStack(spacing: 0) {
+        if showsAllChatsNewThreadCompose,
+           #available(macOS 26.0, *),
+           let dependencies
+        {
+          AllChatsNewThreadComposeHost(
+            dependencies: dependencies,
+            spaces: composeSpaces,
+            selectedSpaceID: nav.selectedSpaceId
+          )
+          .padding(.top, 10)
+        }
+
+        if viewModel.isLoading {
+          ProgressView()
+            .controlSize(.small)
+            .frame(maxWidth: .infinity, minHeight: 300)
+        } else if viewModel.errorText != nil || showsEmptyFilterState(presentation: presentation) {
+          RoutePlaceholderView(
+            title: viewModel.errorText ?? emptyTitle,
+            systemImage: viewModel.errorText == nil ? emptySystemImage : "exclamationmark.triangle"
+          )
+          .frame(maxWidth: .infinity, minHeight: 300)
+        } else {
+          chatList(presentation: presentation)
+        }
       }
+      .frame(maxWidth: .infinity)
     }
     .navigationTitle(title)
     .toolbar(removing: .title)
     .toolbar {
       let titleItem =
         MacToolbarItem(placement: .navigation, priority: .high, label: "") {
-          RouteToolbarTitleItem(title: title)
+          RouteToolbarSpacePickerTitleItem(
+            title: title,
+            selectedSpaceID: nav.selectedSpaceId,
+            homeTitle: "Home",
+            spaces: toolbarSpaces,
+            help: "Choose All Chats Space",
+            onSelect: selectAllChatsSpace
+          )
         }
 
       if #available(macOS 26.0, *) {
@@ -72,20 +96,20 @@ struct AllChatsRouteView: View {
 
       if filter == .chats {
         ToolbarItem {
-          listFilterMenu
+          ControlGroup {
+            listFilterMenu
+            archiveButton
+          }
+        }
+      } else {
+        ToolbarItem {
+          archiveButton
         }
       }
 
       // Keep the alternate row layout available in source, but do not expose
       // it in production while the toolbar is dedicated to chat filtering.
       // ToolbarItem { rowLayoutMenu }
-
-      ToolbarItem {
-        Button(action: toggleArchiveFilter) {
-          Label(filter.archiveButtonTitle, systemImage: filter.archiveButtonSystemImage)
-        }
-        .help(filter.archiveButtonTitle)
-      }
     }
     .onEscapeKey("all_chats_archive_escape", enabled: filter == .archived) {
       closeArchiveFilter()
@@ -97,12 +121,10 @@ struct AllChatsRouteView: View {
   }
 
   private func chatList(presentation: AllChatsPresentation) -> some View {
-    List {
-      if filter == .chats {
+    LazyVStack(alignment: .leading, spacing: 0) {
+      if filter == .chats, !showsAllChatsNewThreadCompose {
         NewThreadListRow(action: createNewThread)
-          .listRowInsets(EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5))
-          .listRowSeparator(.hidden)
-          .listRowBackground(Color.clear)
+          .padding(.horizontal, 5)
       }
 
       if !presentation.pinnedItems.isEmpty {
@@ -112,17 +134,12 @@ struct AllChatsRouteView: View {
       }
 
       ForEach(presentation.sections) { section in
-        Section {
-          chatRows(section.items)
-        } header: {
+        VStack(alignment: .leading, spacing: 0) {
           AllChatsSectionHeader(title: section.title)
+          chatRows(section.items)
         }
-        .listSectionSeparator(.hidden)
       }
     }
-    .listStyle(.inset)
-    .scrollContentBackground(.hidden)
-    .allChatsScrollEdgeEffect()
   }
 
   private func chatRows(_ items: [AllChatsItem]) -> some View {
@@ -138,9 +155,7 @@ struct AllChatsRouteView: View {
           open(item)
         }
       )
-      .listRowInsets(EdgeInsets(top: 0, leading: 5, bottom: 0, trailing: 5))
-      .listRowSeparator(.hidden)
-      .listRowBackground(Color.clear)
+      .padding(.horizontal, 5)
     }
   }
 
@@ -150,6 +165,36 @@ struct AllChatsRouteView: View {
 
   private var activeSpaceName: String? {
     viewModel.spaceName(id: nav.selectedSpaceId)
+  }
+
+  private var showsAllChatsNewThreadCompose: Bool {
+    guard filter == .chats, dependencies != nil else {
+      return false
+    }
+    if #available(macOS 26.0, *) {
+      return true
+    }
+    return false
+  }
+
+  private var composeSpaces: [AllChatsComposeSpace] {
+    viewModel.spacesById.values
+      .map { AllChatsComposeSpace(id: $0.id, title: $0.displayName) }
+      .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+  }
+
+  private var toolbarSpaces: [RouteToolbarSpacePickerItem] {
+    composeSpaces.map {
+      RouteToolbarSpacePickerItem(id: $0.id, name: $0.title)
+    }
+  }
+
+  private func selectAllChatsSpace(_ spaceID: Int64?) {
+    if let spaceID {
+      nav.selectSpace(spaceID)
+    } else {
+      nav.selectHome()
+    }
   }
 
   private func open(_ item: AllChatsItem) {
@@ -203,9 +248,25 @@ struct AllChatsRouteView: View {
       listFilterButton(.all, title: "All Chats")
       listFilterButton(.unread, title: "Unread")
     } label: {
-      Label("Filter", systemImage: "line.3.horizontal.decrease")
+      Label("Filter", systemImage: listFilterSystemImage)
+        .labelStyle(.iconOnly)
+        .foregroundStyle(listFilter == .all ? Color.primary : Color(nsColor: Theme.accentColor))
     }
     .help("Filter Chats")
+    .accessibilityValue(listFilter == .all ? "All Chats" : "Unread")
+  }
+
+  private var listFilterSystemImage: String {
+    listFilter == .all
+      ? "line.3.horizontal.decrease"
+      : "line.3.horizontal.decrease.circle.fill"
+  }
+
+  private var archiveButton: some View {
+    Button(action: toggleArchiveFilter) {
+      Label(filter.archiveButtonTitle, systemImage: filter.archiveButtonSystemImage)
+    }
+    .help(filter.archiveButtonTitle)
   }
 
   private func listFilterButton(
@@ -277,14 +338,12 @@ private struct AllChatsPinnedSection<Rows: View>: View {
   }
 
   var body: some View {
-    Section {
+    VStack(alignment: .leading, spacing: 0) {
+      AllChatsPinnedSectionHeader(isExpanded: isExpanded, action: toggle)
       if isExpanded {
         rows
       }
-    } header: {
-      AllChatsPinnedSectionHeader(isExpanded: isExpanded, action: toggle)
     }
-    .listSectionSeparator(.hidden)
   }
 
   private func toggle() {
@@ -318,7 +377,8 @@ private struct AllChatsPinnedSectionHeader: View {
     .foregroundStyle(.secondary)
     .lineLimit(1)
     .padding(.horizontal, 13)
-    .padding(.top, 2)
+    .padding(.top, 12)
+    .padding(.bottom, 2)
   }
 
   private var accessibilityValue: LocalizedStringKey {
@@ -421,17 +481,6 @@ private enum AllChatsFilter: Equatable {
   }
 }
 
-private extension View {
-  @ViewBuilder
-  func allChatsScrollEdgeEffect() -> some View {
-    if #available(macOS 26.0, *) {
-      scrollEdgeEffectStyle(.hard, for: .top)
-    } else {
-      self
-    }
-  }
-}
-
 private struct AllChatsSectionHeader: View {
   let title: String
 
@@ -442,8 +491,8 @@ private struct AllChatsSectionHeader: View {
       .lineLimit(1)
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, 13)
-      .padding(.top, 2)
-      .padding(.bottom, 0)
+      .padding(.top, 12)
+      .padding(.bottom, 2)
   }
 }
 
@@ -595,14 +644,13 @@ final class AllChatsViewModel: ObservableObject {
         && listFilter.includes(item)
         && (spaceId == nil || item.spaceId == spaceId)
     }
-    let pinnedItems = filter == .chats
-      ? filteredItems.filter(\.pinned).sorted(by: Self.pinnedOrdered)
-      : []
     let timelineItems = filter == .chats
       ? filteredItems.filter { !$0.pinned }
       : filteredItems
     return AllChatsPresentation(
-      pinnedItems: pinnedItems,
+      // macOS All Chats intentionally omits pinned chats. iOS owns its
+      // separate pinned projection and remains unchanged.
+      pinnedItems: [],
       sections: Self.makeSections(items: timelineItems)
     )
   }
@@ -671,6 +719,7 @@ struct AllChatsItem: Identifiable, Equatable {
   let id: Peer
   let peerId: Peer
   let chatId: Int64
+  let parentChatId: Int64?
   let title: String
   let subtitle: String
   let lastActivityDate: Date
@@ -696,6 +745,7 @@ struct AllChatsItem: Identifiable, Equatable {
     id = snapshot.peer
     peerId = snapshot.peer
     chatId = snapshot.chatID
+    parentChatId = snapshot.parentChatID
     title = snapshot.title
     let showsTranslation = TranslationState.shared.isTranslationEnabled(for: snapshot.peer)
     subtitle = (showsTranslation ? snapshot.translatedPreviewText : nil)
@@ -839,6 +889,7 @@ private struct ChatListRow: View {
   @Environment(\.colorScheme) private var colorScheme
   @State private var isHovered = false
   @State private var pendingConfirmation: AllChatsRowConfirmation?
+  @State private var showsRenameSheet = false
 
   private static let iconSize: CGFloat = 30
   private static let compactIconSize: CGFloat = 22
@@ -934,6 +985,20 @@ private struct ChatListRow: View {
       }
 
       Button {
+        ChatMenuActions.copyLink(for: peerId)
+      } label: {
+        Label("Copy Link", systemImage: "link")
+      }
+
+      if item.parentChatId != nil {
+        Button {
+          showsRenameSheet = true
+        } label: {
+          Label("Rename Thread…", systemImage: "pencil")
+        }
+      }
+
+      Button {
         openInSidebar()
       } label: {
         Label("Open in Sidebar", systemImage: "sidebar.left")
@@ -996,6 +1061,9 @@ private struct ChatListRow: View {
       }
     } message: { confirmation in
       Text(confirmation.message(chatTitle: item.title))
+    }
+    .sheet(isPresented: $showsRenameSheet) {
+      RenameChatSheet(peer: peerId, initialTitle: item.title)
     }
   }
 

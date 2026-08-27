@@ -13,6 +13,7 @@ public struct CreateChatTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     public var title: String?
+    public var placeholderTitle: String?
     public var emoji: String?
     public var isPublic: Bool
     public var spaceId: Int64?
@@ -28,6 +29,7 @@ public struct CreateChatTransaction: Transaction2 {
 
   public init(
     title: String?,
+    placeholderTitle: String? = nil,
     emoji: String?,
     isPublic: Bool,
     spaceId: Int64?,
@@ -36,6 +38,7 @@ public struct CreateChatTransaction: Transaction2 {
   ) {
     context = Context(
       title: title,
+      placeholderTitle: placeholderTitle,
       emoji: emoji,
       isPublic: isPublic,
       spaceId: spaceId,
@@ -48,6 +51,9 @@ public struct CreateChatTransaction: Transaction2 {
     .createChat(.with {
       if let title = Self.normalizedTitle(context.title) {
         $0.title = title
+      }
+      if let placeholderTitle = Self.normalizedTitle(context.placeholderTitle) {
+        $0.placeholderTitle = placeholderTitle
       }
       if let spaceId = context.spaceId { $0.spaceID = spaceId }
       if let emoji = context.emoji { $0.emoji = emoji }
@@ -68,7 +74,8 @@ public struct CreateChatTransaction: Transaction2 {
   public func optimistic() async {
     guard let reservedChatId = context.reservedChatId else { return }
 
-    let title = Self.normalizedTitle(context.title)
+    let explicitTitle = Self.normalizedTitle(context.title)
+    let title = explicitTitle ?? Self.normalizedTitle(context.placeholderTitle)
     let chat = Chat(
       id: reservedChatId,
       date: Date(),
@@ -78,7 +85,7 @@ public struct CreateChatTransaction: Transaction2 {
       emoji: context.emoji,
       isPublic: context.isPublic,
       createdBy: Auth.shared.getCurrentUserId(),
-      isUntitled: title == nil ? true : nil,
+      isUntitled: explicitTitle == nil ? true : nil,
       createState: .pending
     )
     let dialog = Dialog(optimisticForChat: chat)
@@ -151,6 +158,7 @@ public struct CreateChatTransaction: Transaction2 {
 public extension Transaction2 where Self == CreateChatTransaction {
   static func createChat(
     title: String?,
+    placeholderTitle: String? = nil,
     emoji: String?,
     isPublic: Bool,
     spaceId: Int64?,
@@ -159,6 +167,7 @@ public extension Transaction2 where Self == CreateChatTransaction {
   ) -> CreateChatTransaction {
     CreateChatTransaction(
       title: title,
+      placeholderTitle: placeholderTitle,
       emoji: emoji,
       isPublic: isPublic,
       spaceId: spaceId,
