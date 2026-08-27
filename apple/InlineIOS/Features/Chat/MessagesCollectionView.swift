@@ -2339,6 +2339,10 @@ private extension MessagesCollectionView {
           MessageBubbleLayoutV2
         ) -> Void)? = messageViewImplementation == .v2 ? makeV2GeometryChangeHandler() : nil
 
+        cell.grabOverlappingAvatar = { [weak self] sourceView in
+          self?.avatarOverlayController.grabAvatar(overlapping: sourceView)
+        }
+
         let configureCell = {
           cell.onV2GeometryChange = v2GeometryChangeHandler
           cell.configure(

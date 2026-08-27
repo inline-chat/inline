@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import UIKit
 
 enum MessageAvatarOverlayConfig {
@@ -81,6 +82,10 @@ final class MessageAvatarOverlayViewController: UIViewController {
 
   func sync(items: [MessageAvatarOverlayItem], animate: Bool) {
     overlayView.sync(items: items, animate: animate)
+  }
+
+  func grabAvatar(overlapping sourceView: UIView) -> UIView? {
+    overlayView.grabAvatar(overlapping: sourceView)
   }
 
   func clear() {
@@ -173,6 +178,19 @@ private final class MessageAvatarOverlayView: UIView {
     }
 
     CATransaction.commit()
+  }
+
+  func grabAvatar(overlapping sourceView: UIView) -> UIView? {
+    let messageFrame = sourceView.convert(sourceView.bounds, to: self)
+    let candidates = subviews.reversed().filter { !$0.isHidden && $0.alpha > 0.01 }
+    let frames = candidates.map(\.frame)
+    guard let index = MessageAvatarSwipeOverlap.firstOverlappingIndex(
+      messageFrame: messageFrame,
+      avatarFrames: frames
+    ) else {
+      return nil
+    }
+    return candidates[index]
   }
 
   func clearAvatars() {
@@ -275,6 +293,8 @@ private final class MessageAvatarOverlayView: UIView {
   private func recycle(_ entry: Entry) {
     entry.tapTarget.onTap = nil
     entry.frame = .null
+    entry.view.layer.removeAllAnimations()
+    entry.view.transform = .identity
     entry.view.removeFromSuperview()
 
     guard pooledViewCount < MessageAvatarOverlayConfig.maxPooledViews else { return }

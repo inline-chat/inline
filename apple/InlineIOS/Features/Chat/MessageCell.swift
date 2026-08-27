@@ -36,6 +36,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   weak var delegate: MessageCellDelegate?
   var onUserTap: ((Int64) -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
+  var grabOverlappingAvatar: ((UIView) -> UIView?)?
   var onV2GeometryChange: ((
     MessageCollectionViewCell,
     MessageBubbleLayoutV2,
@@ -44,6 +45,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var panGesture: UIPanGestureRecognizer!
   private var swipeActive = false
   private var initialTranslation: CGFloat = 0
+  private weak var swipedAvatarOverlayView: UIView?
   private var prevText: String?
   private var canReply: Bool = true
   private(set) var isPreparedForSendAnimationTarget = false
@@ -590,8 +592,6 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     contentView.transform = Self.contentTransform
     isPreparedForSendAnimationTarget = false
 
-    // Reset swipe state
-    resetSwipeState()
     resetCell()
     panGesture?.isEnabled = true
     canReply = true
@@ -612,6 +612,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // Reset delegate
     delegate = nil
     onPhotoTap = nil
+    grabOverlappingAvatar = nil
     onV2GeometryChange = nil
   }
 
@@ -808,6 +809,8 @@ extension MessageCollectionViewCell {
 
     switch gesture.state {
       case .began:
+        swipedAvatarOverlayView?.transform = .identity
+        swipedAvatarOverlayView = grabOverlappingAvatar?(contentView)
         initialTranslation = translation.x
         replyIndicator.isHidden = false
         replyIndicator.alpha = 1
@@ -826,7 +829,7 @@ extension MessageCollectionViewCell {
     let isTrailingSwipe = adjustedTranslation < 0
 
     guard isTrailingSwipe else {
-      resetSwipeState()
+      resetSwipeState(releaseAvatar: false)
       return
     }
 
@@ -837,6 +840,10 @@ extension MessageCollectionViewCell {
     messageView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
     nameLabel.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
     avatarView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
+    swipedAvatarOverlayView?.transform = CGAffineTransform(
+      translationX: boundedTranslation,
+      y: 0
+    )
 
     replyIndicator.isHidden = false
     replyIndicator.updateProgress(progress)
@@ -864,6 +871,7 @@ extension MessageCollectionViewCell {
         self.messageView?.transform = .identity
         self.nameLabel.transform = .identity
         self.avatarView?.transform = .identity
+        self.swipedAvatarOverlayView?.transform = .identity
       }
       resetSwipeState()
       return
@@ -880,6 +888,7 @@ extension MessageCollectionViewCell {
       self.messageView?.transform = .identity
       self.nameLabel.transform = .identity
       self.avatarView?.transform = .identity
+      self.swipedAvatarOverlayView?.transform = .identity
       self.replyIndicator.alpha = 0
     } completion: { _ in
       if shouldTrigger {
@@ -889,7 +898,7 @@ extension MessageCollectionViewCell {
     }
   }
 
-  private func resetSwipeState() {
+  private func resetSwipeState(releaseAvatar: Bool = true) {
     replyIndicator.isHidden = true
     replyIndicator.alpha = 1
     replyIndicator.reset()
@@ -899,6 +908,10 @@ extension MessageCollectionViewCell {
     messageView?.transform = .identity
     nameLabel.transform = .identity
     avatarView?.transform = .identity
+    swipedAvatarOverlayView?.transform = .identity
+    if releaseAvatar {
+      swipedAvatarOverlayView = nil
+    }
   }
 
   func setupReplyIndicator() {
@@ -1264,6 +1277,7 @@ extension MessageCollectionViewCell {
 
   /// Add avatar if we have user info
   func resetCell() {
+    resetSwipeState(releaseAvatar: true)
     cancelPendingV2Snapshot()
     (messageView as? UIMessageView2)?.cancelPendingGeometryTransitions()
     messageView?.stopShineAnimation()
