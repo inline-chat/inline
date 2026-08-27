@@ -13,7 +13,6 @@ use crate::{CodexLaunchConfig, CodexVersionProbe, probe_codex_version, spawn_cod
 const FIRST_STABLE_CATALOG_VERSION: (u64, u64, u64) = (0, 146, 0);
 #[cfg(target_os = "macos")]
 const OPENAI_TEAM_IDENTIFIER: &str = "2DC432GLL2";
-#[cfg(target_os = "macos")]
 const CHATGPT_CODEX_RELATIVE_PATH: &str = "ChatGPT.app/Contents/Resources/codex";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
