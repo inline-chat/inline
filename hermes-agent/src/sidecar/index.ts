@@ -44,6 +44,7 @@ import {
   normalizeError,
   normalizeUploadKind,
   parseOptionalInt,
+  parseUnsigned64Id,
   readInlineIdArray,
   readOptionalInlineId,
   readRequiredInlineId,
@@ -1049,7 +1050,10 @@ async function endpointAnswerAction(res: ServerResponse, body: unknown) {
 
 async function endpointAnswerBotSettings(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
-  const requestId = readRequiredInlineId(record, "requestId")
+  if (record.requestId == null || record.requestId === "") {
+    throw new SidecarError("missing requestId", "bad_format")
+  }
+  const requestId = parseUnsigned64Id(record.requestId, "requestId")
   const response = asRecord(record.response) as unknown as BotChatSettingsResponse
   await client.answerBotChatSettings({ requestId, response })
   writeJson(res, 200, { ok: true, result: {} })

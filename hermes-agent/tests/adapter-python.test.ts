@@ -1157,7 +1157,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.10",
+    "pluginVersion": "0.0.11",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1207,7 +1207,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.10"
+assert probe_payload["pluginVersion"] == "0.0.11"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1222,7 +1222,7 @@ credential_request = probe_requests[0]
 assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
 assert credential_request.get_method() == "GET"
 assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
-assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.10"
+assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.11"
 assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
 
 setup_saved_env.clear()
@@ -1255,7 +1255,7 @@ assert config_probe_payload["probe"]["ok"] is True
 assert len(config_probe_requests) == 1
 assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
 assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
-assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.10"
+assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.11"
 assert "yaml-config-secret" not in config_probe_stdout.getvalue()
 
 setup_saved_env.clear()
@@ -4238,12 +4238,20 @@ async def assert_bot_settings_document_and_mutation():
     }, context)
     assert calls[-1] == ("/follow-mode", {"target": {"chatId": "42"}, "mode": "unfollowed"})
 
-    context["chat_type"] = "dm"
-    await adapter._apply_bot_setting({
-        "itemId": "following",
-        "value": {"value": {"oneofKind": "boolValue", "boolValue": True}},
-    }, context)
-    assert calls[-1] == ("/follow-mode", {"target": {"userId": "7"}, "mode": "following"})
+    dm_context = {**context, "chat_type": "dm", "following": None}
+    dm_document = adapter._bot_settings_document(dm_context)
+    assert "following" not in {
+        item["id"] for section in dm_document["sections"] for item in section["items"]
+    }
+    try:
+        await adapter._apply_bot_setting({
+            "itemId": "following",
+            "value": {"value": {"oneofKind": "boolValue", "boolValue": True}},
+        }, dm_context)
+        raise AssertionError("DM following mutation should be unavailable")
+    except ValueError as exc:
+        assert str(exc) == "following unavailable"
+    assert calls[-1] == ("/follow-mode", {"target": {"chatId": "42"}, "mode": "unfollowed"})
 
 asyncio.run(assert_bot_settings_document_and_mutation())
 

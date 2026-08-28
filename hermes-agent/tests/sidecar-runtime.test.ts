@@ -343,7 +343,7 @@ describe("sidecar runtime", () => {
       expect(invalidFollowMode.body).toMatchObject({ ok: false, errorKind: "bad_format" })
 
       const answerBotSettings = await post(port, "/answer-bot-settings", {
-        requestId: "7001",
+        requestId: "18446744073709551615",
         response: {
           result: {
             oneofKind: "problem",
@@ -353,6 +353,18 @@ describe("sidecar runtime", () => {
       }, auth)
       expect(answerBotSettings.status).toBe(200)
       expect(resultOf(answerBotSettings.body)).toEqual({})
+
+      const oversizedBotSettingsRequestId = await post(port, "/answer-bot-settings", {
+        requestId: "18446744073709551616",
+        response: {
+          result: {
+            oneofKind: "problem",
+            problem: { code: 4, message: "test response" },
+          },
+        },
+      }, auth)
+      expect(oversizedBotSettingsRequestId.status).toBe(400)
+      expect(oversizedBotSettingsRequestId.body).toMatchObject({ ok: false, errorKind: "bad_format" })
 
       const messages = await post(port, "/messages", {
         target: { chatId: "123" },

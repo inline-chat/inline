@@ -43602,6 +43602,7 @@ var portableCoreV1Vector = {
 };
 // src/sidecar/contract.ts
 var MAX_INLINE_ID = 9223372036854775807n;
+var MAX_UINT64 = 18446744073709551615n;
 var sensitiveUrlParams = new Set([
   "access_token",
   "auth",
@@ -43902,6 +43903,25 @@ function parseInlineId(value, field) {
     return parsed;
   } catch {
     throw new SidecarError(`${field} must be a positive signed 64-bit integer`, "bad_format");
+  }
+}
+function parseUnsigned64Id(value, field) {
+  try {
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
+      throw new Error("unsafe number");
+    }
+    const raw = typeof value === "string" ? value.trim() : value;
+    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw))
+      throw new Error("invalid digits");
+    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
+      throw new Error("invalid type");
+    }
+    const parsed = BigInt(raw);
+    if (parsed <= 0n || parsed > MAX_UINT64)
+      throw new Error("out of range");
+    return parsed;
+  } catch {
+    throw new SidecarError(`${field} must be a positive unsigned 64-bit integer`, "bad_format");
   }
 }
 function defaultErrorText(error) {
@@ -44930,7 +44950,10 @@ async function endpointAnswerAction(res, body) {
 }
 async function endpointAnswerBotSettings(res, body) {
   const record2 = asRecord(body);
-  const requestId = readRequiredInlineId(record2, "requestId");
+  if (record2.requestId == null || record2.requestId === "") {
+    throw new SidecarError("missing requestId", "bad_format");
+  }
+  const requestId = parseUnsigned64Id(record2.requestId, "requestId");
   const response = asRecord(record2.response);
   await client.answerBotChatSettings({ requestId, response });
   writeJson(res, 200, { ok: true, result: {} });

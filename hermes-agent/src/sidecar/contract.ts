@@ -12,6 +12,7 @@ export type GenericSenderProfile = {
 export type SecretRedaction = { value: string | null | undefined; label: string }
 
 export const MAX_INLINE_ID = 9_223_372_036_854_775_807n
+export const MAX_UINT64 = 18_446_744_073_709_551_615n
 
 const sensitiveUrlParams = new Set([
   "access_token",
@@ -318,6 +319,24 @@ export function parseInlineId(value: unknown, field: string): bigint {
     return parsed
   } catch {
     throw new SidecarError(`${field} must be a positive signed 64-bit integer`, "bad_format")
+  }
+}
+
+export function parseUnsigned64Id(value: unknown, field: string): bigint {
+  try {
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) {
+      throw new Error("unsafe number")
+    }
+    const raw = typeof value === "string" ? value.trim() : value
+    if (typeof raw === "string" && !/^[1-9][0-9]*$/.test(raw)) throw new Error("invalid digits")
+    if (typeof raw !== "string" && typeof raw !== "bigint" && typeof raw !== "number") {
+      throw new Error("invalid type")
+    }
+    const parsed = BigInt(raw)
+    if (parsed <= 0n || parsed > MAX_UINT64) throw new Error("out of range")
+    return parsed
+  } catch {
+    throw new SidecarError(`${field} must be a positive unsigned 64-bit integer`, "bad_format")
   }
 }
 

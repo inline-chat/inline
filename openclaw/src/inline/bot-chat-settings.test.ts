@@ -58,11 +58,12 @@ describe("OpenClaw Bot Chat Settings", () => {
     const document = buildOpenClawBotChatSettingsDocument({
       ...context,
       scopeId: "dm:9",
-      following: false,
+      following: undefined,
     })
 
-    expect(document.sections.flatMap((section) => section.items).map((item) => item.id))
-      .toContain("reply-threads")
+    const itemIds = document.sections.flatMap((section) => section.items).map((item) => item.id)
+    expect(itemIds).toContain("reply-threads")
+    expect(itemIds).not.toContain("following")
   })
 
   it("keeps the selected primary in the picker while describing an active backup", () => {

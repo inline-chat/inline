@@ -6548,6 +6548,11 @@ export async function monitorInlineProvider(params: {
     options: OpenClawBotChatSettingsOption[]
     didLoad: boolean
   }
+  // Provider auth discovery can invoke host-specific credential paths. Keep
+  // repeated panel opens and unrelated mutations off that slow path while the
+  // live current model is still injected into every document below.
+  const botSettingsModelCatalogSuccessCacheMs = 5 * 60_000
+  const botSettingsModelCatalogFailureCacheMs = 5_000
   const botSettingsModelCatalogCache = new Map<string, {
     expiresAt: number
     catalog: OpenClawBotSettingsModelCatalog
@@ -6659,7 +6664,11 @@ export async function monitorInlineProvider(params: {
       }
       catalog = await load
       botSettingsModelCatalogCache.set(params.agentId, {
-        expiresAt: Date.now() + (catalog.options.length > 0 ? 60_000 : 5_000),
+        expiresAt: Date.now() + (
+          catalog.options.length > 0
+            ? botSettingsModelCatalogSuccessCacheMs
+            : botSettingsModelCatalogFailureCacheMs
+        ),
         catalog,
       })
     }
@@ -6795,7 +6804,9 @@ export async function monitorInlineProvider(params: {
           model,
           currentLevel: reasoningLevel,
         }),
-        following: isInlineDialogFollowing(ingress.chatInfo.dialogFollowMode),
+        ...(ingress.chatInfo.kind === "direct"
+          ? {}
+          : { following: isInlineDialogFollowing(ingress.chatInfo.dialogFollowMode) }),
         replyThreads: params.replyThreads ?? (
           replyMode === "thread" ? "on" : replyMode === "main" ? "off" : "auto"
         ),

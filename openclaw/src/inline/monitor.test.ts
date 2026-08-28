@@ -1284,6 +1284,9 @@ describe("inline/monitor", () => {
         }),
       )
     })
+    const response = harness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    expect(response?.result.document.sections.flatMap((section) => section.items).map((item) => item.id))
+      .not.toContain("following")
 
     await handle.stop()
   })

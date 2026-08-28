@@ -67,7 +67,10 @@ _DEDUP_WINDOW_SECONDS = 48 * 3600
 _CHAT_INFO_CACHE_SECONDS = 10 * 60
 _CHAT_INFO_CACHE_MAX_SIZE = 512
 _BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS = 2.0
-_BOT_SETTINGS_MODEL_CATALOG_CACHE_SECONDS = 60
+# Provider discovery may invoke host CLIs. Keep repeated panel opens and
+# unrelated mutations off that slow path while always injecting the live
+# current/default model into the document below.
+_BOT_SETTINGS_MODEL_CATALOG_CACHE_SECONDS = 5 * 60
 _DEFAULT_CONTEXT_BACKFILL = "selective"
 _CONTEXT_BACKFILL_MODES = {"off", "selective", "always"}
 _DEFAULT_THREAD_CONTEXT_LIMIT = 30
@@ -1058,7 +1061,7 @@ class InlineAdapter(BasePlatformAdapter):
             "actor_id": actor_id,
             "chat_type": chat_type,
             "is_reply_thread": is_reply_thread,
-            "following": self._chat_follow_mode_following(info),
+            "following": None if chat_type == "dm" else self._chat_follow_mode_following(info),
             "reply_threads": self._reply_thread_mode_for_chat(scope_chat_id),
             "can_set_default_model": can_modify,
             "source": source,
@@ -1250,13 +1253,13 @@ class InlineAdapter(BasePlatformAdapter):
                 }},
             })
 
-        sections: List[Dict[str, Any]] = [
-            {"id": "runtime", "items": runtime_items},
-            {"id": "attention", "items": [{
+        sections: List[Dict[str, Any]] = [{"id": "runtime", "items": runtime_items}]
+        if context.get("following") is not None:
+            sections.append({"id": "attention", "items": [{
                 "id": "following", "label": "Following", "description": "Wake on eligible activity.", **common,
                 "control": {"oneofKind": "toggle", "toggle": {"value": bool(context.get("following"))}},
-            }]},
-            {"id": "replies", "items": [{
+            }]})
+        sections.append({"id": "replies", "items": [{
                 "id": "reply-threads", "label": "Reply in threads", **common,
                 "control": {"oneofKind": "select", "select": {
                     "value": context.get("reply_threads") or "auto",
@@ -1266,8 +1269,7 @@ class InlineAdapter(BasePlatformAdapter):
                         {"value": "off", "label": "Off", "description": "Stay in chat.", "disabled": False},
                     ],
                 }},
-            }]},
-        ]
+            }]})
         if disabled:
             sections.append({"id": "access", "items": [{
                 "id": "read-only", "label": "Read-only", "disabled": False,
@@ -1351,14 +1353,11 @@ class InlineAdapter(BasePlatformAdapter):
         runner = context.get("runner")
         source = context.get("source")
         if item_id == "following" and value_body.get("oneofKind") == "boolValue":
+            if context.get("following") is None:
+                raise ValueError("following unavailable")
             enabled = bool(value_body.get("boolValue"))
-            target = (
-                {"userId": context["actor_id"]}
-                if context.get("chat_type") == "dm"
-                else {"chatId": context["chat_id"]}
-            )
             await self._sidecar_call("/follow-mode", {
-                "target": target,
+                "target": {"chatId": context["chat_id"]},
                 "mode": "following" if enabled else "unfollowed",
             })
             self._invalidate_chat_info(context["chat_id"])

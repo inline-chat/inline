@@ -6,6 +6,7 @@ import {
   normalizeError,
   normalizeUploadKind,
   parseInlineId,
+  parseUnsigned64Id,
   parseOptionalInt,
   parseTarget,
   redactText,
@@ -78,6 +79,15 @@ describe("sidecar contract helpers", () => {
     expect(() => readInlineIdArray({ messageIds: [] }, "messageIds", 100, true)).toThrow(SidecarError)
     expect(() => readInlineIdArray({ messageIds: Array.from({ length: 101 }, () => "1") }, "messageIds", 100, true))
       .toThrow("messageIds supports at most 100 items")
+  })
+
+  it("accepts the full unsigned 64-bit request ID contract", () => {
+    expect(parseUnsigned64Id("9223372036854775808", "requestId")).toBe(9_223_372_036_854_775_808n)
+    expect(parseUnsigned64Id("18446744073709551615", "requestId")).toBe(18_446_744_073_709_551_615n)
+
+    for (const value of ["0", "-1", "+1", "1.5", "18446744073709551616", Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => parseUnsigned64Id(value, "requestId")).toThrow(SidecarError)
+    }
   })
 
   it("normalizes upload kind from explicit values and file extensions", () => {
