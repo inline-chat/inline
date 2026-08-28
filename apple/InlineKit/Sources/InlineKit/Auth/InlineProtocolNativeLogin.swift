@@ -5,17 +5,42 @@ import InlineProtocol
 import Logger
 import RealtimeV2
 
-public enum InlineProtocolNativeLoginError: Error, Sendable {
+public enum InlineProtocolNativeLoginError: Error, Equatable, LocalizedError, Sendable,
+  PrivacySafeErrorCategoryProviding
+{
   case unavailable
   case noPendingChallenge
   case inviteRequired
   case invalidResponse
+
+  public var errorDescription: String? {
+    switch self {
+    case .unavailable:
+      "Secure Inline Protocol sign-in is unavailable. Please try again."
+    case .noPendingChallenge:
+      "This confirmation code session expired. Go back and request a new code."
+    case .inviteRequired:
+      "An invite code is required to continue."
+    case .invalidResponse:
+      "Sign-in is already being completed. Please wait or request a new code."
+    }
+  }
+
+  public var privacySafeErrorCategory: String {
+    switch self {
+    case .unavailable: "native_login:unavailable"
+    case .noPendingChallenge: "native_login:no_pending_challenge"
+    case .inviteRequired: "native_login:invite_required"
+    case .invalidResponse: "native_login:completion_in_progress"
+    }
+  }
 }
 
 public struct InlineProtocolNativeLoginResult: Sendable {
   public let user: InlineProtocol.User
   public let userId: Int64
   public let accountSessionId: Int64
+  public let accountMutationToken: AuthAccountMutationToken
 }
 
 protocol InlineProtocolNativeLoginConnection: Sendable {
@@ -42,7 +67,35 @@ extension InlineProtocolV3Connection: InlineProtocolNativeLoginConnection {
 typealias NativeLoginConnectionFactory = @Sendable (
   InlineProtocolV3Options
 ) async throws -> any InlineProtocolNativeLoginConnection
-typealias NativeLoginCredentialStoragePreparation = @Sendable () async throws -> Void
+typealias NativeLoginStateCommit = @Sendable (
+  InlineProtocol.User,
+  InlineProtocolSessionCredentials,
+  AuthLoginAttempt,
+  Int64?
+) async throws -> AuthAccountMutationToken
+
+private enum NativeLoginSetupPhase: String, Sendable {
+  case temporaryConnection = "temporary_connection"
+  case temporaryBinding = "temporary_binding"
+  case temporaryVerification = "temporary_verification"
+  case localStatePreparation = "local_state_preparation"
+  case credentialCommit = "credential_commit"
+}
+
+private struct NativeLoginSetupDiagnosticError: Error, LocalizedError, Sendable,
+  PrivacySafeErrorCategoryProviding
+{
+  let phase: NativeLoginSetupPhase
+  let reason: String
+
+  init(phase: NativeLoginSetupPhase, error: any Error) {
+    self.phase = phase
+    reason = error.localizedDescription
+  }
+
+  var errorDescription: String? { reason }
+  var privacySafeErrorCategory: String { "native_login_setup:\(phase.rawValue)" }
+}
 
 public actor InlineProtocolNativeLogin {
   public static let shared = InlineProtocolNativeLogin()
@@ -52,6 +105,8 @@ public actor InlineProtocolNativeLogin {
     let challengeID: Data
     let rsaPublicKeys: [InlineProtocolRSAPublicKey]
     let connection: any InlineProtocolNativeLoginConnection
+    let loginAttempt: AuthLoginAttempt
+    let existingAuthenticatedUserID: Int64?
   }
 
   private struct CompletionTask {
@@ -65,7 +120,7 @@ public actor InlineProtocolNativeLogin {
   private let rsaPublicKeys: [InlineProtocolRSAPublicKey]
   private let localDebugTrustHost: String?
   private let connect: NativeLoginConnectionFactory
-  private let prepareCredentialStorage: NativeLoginCredentialStoragePreparation
+  private let commitLoginState: NativeLoginStateCommit
   private var pending: Pending?
   private var completionTask: CompletionTask?
   private var generation: UInt64 = 0
@@ -94,7 +149,23 @@ public actor InlineProtocolNativeLogin {
     localDebugTrustHost = nil
     #endif
     connect = { try await InlineProtocolV3Connection.connect($0) }
-    prepareCredentialStorage = { try await AppDatabase.authenticated() }
+    commitLoginState = { user, credentials, loginAttempt, existingAuthenticatedUserID in
+      let commit = try await LoginStatePreparation.commit(
+        auth: auth,
+        loginAttempt: loginAttempt,
+        targetUserID: user.id,
+        existingAuthenticatedUserID: existingAuthenticatedUserID,
+        persistCredentials: {
+          try await auth.saveInlineProtocolCredentials(
+            credentials,
+            loginAttempt: loginAttempt
+          )
+        }
+      ) { db in
+        try User.save(db, user: user)
+      }
+      return commit.accountMutationToken
+    }
   }
 
   init(
@@ -102,14 +173,17 @@ public actor InlineProtocolNativeLogin {
     url: URL,
     rsaPublicKeys: [InlineProtocolRSAPublicKey],
     connect: @escaping NativeLoginConnectionFactory,
-    prepareCredentialStorage: @escaping NativeLoginCredentialStoragePreparation = {}
+    commitLoginState: NativeLoginStateCommit? = nil
   ) {
     self.auth = auth
     self.url = url
     self.rsaPublicKeys = rsaPublicKeys
     localDebugTrustHost = nil
     self.connect = connect
-    self.prepareCredentialStorage = prepareCredentialStorage
+    self.commitLoginState = commitLoginState ?? { _, credentials, loginAttempt, _ in
+      try await auth.saveInlineProtocolCredentials(credentials, loginAttempt: loginAttempt)
+      return try await auth.finalizeCredentialsCommittedByLoginAttempt(loginAttempt)
+    }
   }
 
   @discardableResult
@@ -161,7 +235,9 @@ public actor InlineProtocolNativeLogin {
     pending: Pending,
     generation: UInt64
   ) async throws -> InlineProtocolNativeLoginResult {
-    log.info("Native login challenge completion started")
+    log.info(
+      "Native login challenge completion started transition_id=\(pending.loginAttempt.correlationID.uuidString)"
+    )
     let result = try await pending.connection.authComplete(request)
     try requireCurrent(generation)
     guard case let .authorized(authorized) = result.state else {
@@ -172,6 +248,7 @@ public actor InlineProtocolNativeLogin {
     try requireCurrent(generation)
     log.info("Creating temporary application authorization")
     var temporaryConnection: (any InlineProtocolNativeLoginConnection)?
+    var setupPhase = NativeLoginSetupPhase.temporaryConnection
     do {
       let connection = try await connect(.init(
         url: url,
@@ -180,44 +257,60 @@ public actor InlineProtocolNativeLogin {
       ))
       temporaryConnection = connection
       try requireCurrent(generation)
+      setupPhase = .temporaryBinding
       try await connection.bindNativeLoginTemporary(to: permanent)
       try requireCurrent(generation)
+      setupPhase = .temporaryVerification
       try await connection.verifyNativeLoginAuthorization()
       try requireCurrent(generation)
       log.info("Temporary application authorization bound")
       let temporary = await connection.nativeLoginAuthorization()
       try requireCurrent(generation)
 
-      // Rotate the already-open account database away from a legacy bearer passphrase before
-      // V3 credential persistence deletes that bearer authority. Either side of a crash now has
-      // enough key material to reopen the same database.
-      try await prepareCredentialStorage()
-      try requireCurrent(generation)
-
-      // Credential persistence is the authority commit point. Once it starts, cancellation no
-      // longer tears down a session whose authority may already be stored by AuthStore.
-      self.pending = nil
-      try await auth.saveInlineProtocolCredentials(.init(
+      let credentials = InlineProtocolSessionCredentials(
         userId: authorized.user.id,
         accountSessionId: authorized.accountSessionID,
         permanent: permanent,
         temporary: temporary
-      ))
+      )
+
+      // Clear and verify old projection, commit keychain authority, then add the new user's
+      // minimum projection through the shared fenced login boundary.
+      setupPhase = .localStatePreparation
+      let accountMutationToken = try await commitLoginState(
+        authorized.user,
+        credentials,
+        pending.loginAttempt,
+        pending.existingAuthenticatedUserID
+      )
+      setupPhase = .credentialCommit
+      self.pending = nil
       log.info("Native login credentials stored")
-      await connection.close()
-      await pending.connection.close()
-      log.info("Native login connections closed")
+      // The DB/authority commit is the linearization point. UI cancellation after it must not
+      // turn a committed account into a failed login, and temporary connection teardown must not
+      // keep the success path spinning behind an uncooperative socket writer.
+      _ = Task { [connection, pendingConnection = pending.connection] in
+        await connection.close()
+        await pendingConnection.close()
+      }
       return InlineProtocolNativeLoginResult(
         user: authorized.user,
         userId: authorized.user.id,
-        accountSessionId: authorized.accountSessionID
+        accountSessionId: authorized.accountSessionID,
+        accountMutationToken: accountMutationToken
       )
     } catch {
       if error is CancellationError {
-        log.info("Native login credential setup cancelled")
+        log.info(
+          "Native login credential setup cancelled transition_id=\(pending.loginAttempt.correlationID.uuidString)"
+        )
       } else {
-        log.error("Native login credential setup failed", error: error)
+        log.error(
+          "Native login credential setup failed transition_id=\(pending.loginAttempt.correlationID.uuidString) phase=\(setupPhase.rawValue)",
+          error: NativeLoginSetupDiagnosticError(phase: setupPhase, error: error)
+        )
       }
+      _ = auth.cancelLoginAttempt(pending.loginAttempt)
       if let temporaryConnection { await temporaryConnection.close() }
       await pending.connection.close()
       if self.pending?.generation == generation { self.pending = nil }
@@ -234,6 +327,9 @@ public actor InlineProtocolNativeLogin {
       completionTask?.task.cancel()
       completionTask = nil
     }
+    if let cancelled {
+      _ = auth.cancelLoginAttempt(cancelled.loginAttempt)
+    }
     if let cancelled { await cancelled.connection.close() }
   }
 
@@ -243,6 +339,8 @@ public actor InlineProtocolNativeLogin {
   ) async throws -> AuthBeginResult {
     guard isAvailable else { throw InlineProtocolNativeLoginError.unavailable }
     await cancel()
+    let existingAuthenticatedUserID = auth.isLoggedIn() ? auth.userId() : nil
+    let loginAttempt = try await auth.beginLoginAttempt(allowAuthenticated: true)
     let generation = self.generation
     try requireGeneration(generation)
     let resolvedRsaPublicKeys = try await resolveRsaPublicKeys()
@@ -260,12 +358,14 @@ public actor InlineProtocolNativeLogin {
         rsaPublicKeys: resolvedRsaPublicKeys
       ))
     } catch {
+      _ = auth.cancelLoginAttempt(loginAttempt)
       log.error("Native login permanent authorization handshake failed", error: error)
       throw Self.presentationError(error)
     }
     do {
       try requireGeneration(generation)
     } catch {
+      _ = auth.cancelLoginAttempt(loginAttempt)
       await connection.close()
       throw error
     }
@@ -280,11 +380,14 @@ public actor InlineProtocolNativeLogin {
         generation: generation,
         challengeID: result.challengeID,
         rsaPublicKeys: resolvedRsaPublicKeys,
-        connection: connection
+        connection: connection,
+        loginAttempt: loginAttempt,
+        existingAuthenticatedUserID: existingAuthenticatedUserID
       )
       log.info("Native login challenge accepted")
       return result
     } catch {
+      _ = auth.cancelLoginAttempt(loginAttempt)
       log.error("Native login challenge start failed", error: error)
       await connection.close()
       throw Self.presentationError(error)
@@ -327,6 +430,8 @@ public actor InlineProtocolNativeLogin {
   static func presentationError(_ error: any Error) -> any Error {
     if error is CancellationError ||
       error is InlineProtocolNativeLoginError ||
+      error is AuthStorageError ||
+      error is LoginStatePreparationError ||
       error is RealtimeDirectRpcError {
       return error
     }

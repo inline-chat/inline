@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import Logger
@@ -87,6 +88,7 @@ public final class UnreadManager: Sendable {
   // Useful in context menu to mark all messages as read
   public func readAll(_ peerId: Peer, chatId: Int64) {
     log.trace("readAll")
+    guard let mutationToken = try? Auth.shared.handle.beginAccountMutation() else { return }
     let localDialogId = Dialog.getDialogId(peerId: peerId)
 
     Task(priority: .userInitiated) {
@@ -101,6 +103,7 @@ public final class UnreadManager: Sendable {
       if shouldWriteLocal {
         do {
           try await db.dbWriter.write { db in
+            try Auth.shared.handle.validateAccountMutation(mutationToken)
             let before = try Dialog.fetchOne(db, id: localDialogId)
             let hasUnread = (Column("unreadCount") > 0) || (Column("unreadMark") == true)
             try Dialog
@@ -133,7 +136,9 @@ public final class UnreadManager: Sendable {
       }
 
       if shouldSendRemote {
-        await sendReadMessagesToServer(peerId: peerId, maxId: nil)
+        if (try? Auth.shared.handle.validateAccountMutation(mutationToken)) != nil {
+          await sendReadMessagesToServer(peerId: peerId, maxId: nil)
+        }
         await readAllGate.completeRemote(dialogId: localDialogId)
       }
     }

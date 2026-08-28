@@ -1,14 +1,23 @@
-import Auth
+@_spi(LogoutCoordinator) import Auth
 import Foundation
 import GRDB
 import InlineConfig
 import Logger
 
-enum DatabaseCredentialPreparationError: Error, Equatable {
+enum DatabaseCredentialPreparationError: Error, Equatable, PrivacySafeErrorCategoryProviding {
   case keychainLocked
   case keyUnavailable
   case keychainFailure(Int32)
   case persistentDatabaseUnavailable
+
+  var privacySafeErrorCategory: String {
+    switch self {
+    case .keychainLocked: "database_credentials:keychain_locked"
+    case .keyUnavailable: "database_credentials:key_unavailable"
+    case .keychainFailure: "database_credentials:keychain_failure"
+    case .persistentDatabaseUnavailable: "database_credentials:persistent_unavailable"
+    }
+  }
 }
 
 // MARK: - DB main class
@@ -1106,8 +1115,9 @@ extension AppDatabase {
 // MARK: - Database Configuration
 
 public extension AppDatabase {
-  struct LogoutCleanupError: Error, LocalizedError, Sendable {
+  struct LogoutCleanupError: Error, LocalizedError, Sendable, PrivacySafeErrorCategoryProviding {
     enum Phase: String, Equatable, Sendable {
+      case openPersistent = "open_persistent"
       case discoverTables = "discover_tables"
       case deleteRows = "delete_rows"
       case resetSequence = "reset_sequence"
@@ -1125,6 +1135,10 @@ public extension AppDatabase {
         details += " table=\(table)"
       }
       return "Database logout cleanup failed \(details) reason=\(reason)"
+    }
+
+    public var privacySafeErrorCategory: String {
+      "database_cleanup:\(phase.rawValue)"
     }
   }
 
@@ -1174,6 +1188,64 @@ public extension AppDatabase {
 
     try AppDatabase.changePassphrase(key)
     AppDatabase.shared.markCredentialStoragePrepared(for: key)
+  }
+
+  /// Establishes durable database authority and removes stale account projection before credential
+  /// authority changes. The post-key and in-transaction generation checks fence a logout that
+  /// starts while passphrase preparation is suspended.
+  @concurrent
+  static func prepareForLogin(
+    auth: AuthHandle,
+    loginAttempt: AuthLoginAttempt
+  ) async throws {
+    try await authenticated()
+    guard auth.isLoginAttemptCurrent(loginAttempt) else {
+      throw AuthStorageError.loginSuperseded
+    }
+    try await AppDatabase.shared.dbWriter.write { db in
+      try prepareLoginDatabase(db, isCurrent: { auth.isLoginAttemptCurrent(loginAttempt) })
+    }
+    log.info("Database prepared for login.")
+  }
+
+  /// Adds the new user's minimum projection only after credential authority was durably committed.
+  /// A failed projection transaction leaves the already-cleared database empty for safe recovery.
+  @concurrent
+  static func commitLoginProjection<Result: Sendable>(
+    auth: AuthHandle,
+    loginAttempt: AuthLoginAttempt,
+    writeProjection: @escaping @Sendable (Database) throws -> Result
+  ) async throws -> Result {
+    try await AppDatabase.shared.dbWriter.write { db in
+      try writeLoginProjection(
+        db,
+        isCurrent: { auth.isLoginAttemptCurrent(loginAttempt) },
+        reserveCommit: { auth.reserveLoginCommit(loginAttempt) },
+        writeProjection: writeProjection
+      )
+    }
+  }
+
+  internal static func prepareLoginDatabase(
+    _ db: Database,
+    isCurrent: () -> Bool
+  ) throws {
+    guard isCurrent() else { throw AuthStorageError.loginSuperseded }
+    try clearTables(db)
+    guard isCurrent() else { throw AuthStorageError.loginSuperseded }
+  }
+
+  internal static func writeLoginProjection<Result>(
+    _ db: Database,
+    isCurrent: () -> Bool,
+    reserveCommit: () -> Bool,
+    writeProjection: (Database) throws -> Result
+  ) throws -> Result {
+    guard isCurrent() else { throw AuthStorageError.loginSuperseded }
+    let result = try writeProjection(db)
+    guard isCurrent() else { throw AuthStorageError.loginSuperseded }
+    guard reserveCommit() else { throw AuthStorageError.loginSuperseded }
+    return result
   }
 
   static func requiredDatabaseKey(
@@ -1307,6 +1379,13 @@ public extension AppDatabase {
 
   static func loggedOut() throws {
     do {
+      guard AppDatabase.shared.isPersistent else {
+        throw LogoutCleanupError(
+          phase: .openPersistent,
+          table: nil,
+          reason: "persistent database unavailable"
+        )
+      }
       try clearDB()
 
       do {
@@ -1333,7 +1412,38 @@ public extension AppDatabase {
   /// awaited, fail-closed completion point for callers.
   @concurrent
   static func loggedOutAsync() async throws {
+    try await requirePersistentStorageForLogout()
     try loggedOut()
+  }
+
+  /// Returns an opaque proof only after table discovery, deletion, empty verification, and
+  /// passphrase rotation have all succeeded for the authoritative logout fence.
+  @concurrent
+  static func loggedOutAsync(fence: AuthLogoutFence) async throws -> AuthDatabaseCleanupProof {
+    try await requirePersistentStorageForLogout()
+    try loggedOut()
+    return AuthDatabaseCleanupProof(fence: fence)
+  }
+
+  /// A logout proof must apply to the on-disk account store, never only to the process-local
+  /// fallback used while protected keychain authority is unavailable. If promotion cannot open the
+  /// persistent store, fail closed and retain the durable logout marker for a later recovery retry.
+  @concurrent
+  internal static func requirePersistentStorageForLogout(
+    _ database: AppDatabase = AppDatabase.shared,
+    promote: @escaping @Sendable () async -> Bool = {
+      await AppDatabase.promoteSharedToPersistentIfPossible()
+    }
+  ) async throws {
+    guard database.isPersistent == false else { return }
+    _ = await promote()
+    guard database.isPersistent else {
+      throw LogoutCleanupError(
+        phase: .openPersistent,
+        table: nil,
+        reason: "persistent database unavailable"
+      )
+    }
   }
 
   internal static func changePassphrase(_ passphrase: String) throws {

@@ -51,7 +51,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
   @MainActor private var terminationTask: Task<Void, Never>?
-  @MainActor private var isLoggingOut = false
+  @MainActor var isLoggingOut = false
+  @MainActor private var isResettingLocalData = false
+  @MainActor private var pendingLogoutAfterLocalDataReset: Bool?
+  @MainActor var logoutAttempt: MacLogoutAttempt?
   @MainActor private var pendingSpaceJoin: SpaceJoinReference?
   @MainActor private var spaceJoinTask: Task<Void, Never>?
   @MainActor private var spaceJoinGeneration: UInt64 = 0
@@ -94,6 +97,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     registerMainWindowCoordinator()
     setupRealtimeConnectionFailureObserver()
     setupRealtimeAuthInvalidatedObserver()
+    setupAuthAccountRecoveryObserver()
     dependencies.viewModel.$topLevelRoute
       .receive(on: RunLoop.main)
       .sink { [weak self] route in
@@ -529,7 +533,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  @MainActor private func cancelPendingSpaceJoin() {
+  @MainActor func cancelPendingSpaceJoin() {
     spaceJoinGeneration &+= 1
     spaceJoinTask?.cancel()
     spaceJoinTask = nil
@@ -636,9 +640,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor
   func resetLocalDataAndReload() async throws {
+    guard !isLoggingOut, !isResettingLocalData,
+          Auth.shared.getHasPendingAccountTransition() == false,
+          Auth.shared.getStatus().isAuthenticated
+    else { throw AuthStorageError.logoutInProgress }
+    isResettingLocalData = true
+    defer {
+      isResettingLocalData = false
+      if let notifyServer = pendingLogoutAfterLocalDataReset {
+        pendingLogoutAfterLocalDataReset = nil
+        Task { @MainActor [weak self] in
+          await self?.performLogOut(notifyServer: notifyServer)
+        }
+      }
+    }
+    Auth.shared.invalidateLoginAttemptsSynchronously()
     let restoreRoute = TopLevelRoute.initial(for: Auth.shared.getStatus())
 
-    dependencies.session.reset()
+    await dependencies.session.resetAndWait()
+    try requireLocalDataResetMayContinue()
     dependencies.viewModel.navigate(.loading)
     MainWindowController.resetAllNavigation()
 
@@ -646,7 +666,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     do {
       await Api.realtime.loggedOut()
+      try requireLocalDataResetMayContinue()
       await dependencies.realtime.loggedOut()
+      try requireLocalDataResetMayContinue()
       await FileUploader.shared.cancelAll()
       await FileCache.shared.cancelAllDownloads()
       await FileDownloader.shared.resetSession()
@@ -654,19 +676,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await Drafts2.shared.resetForAccountChange()
       await QuickSearchUsageStore.shared.clearCurrentAccount()
       await Transactions.shared.clearAllAndWait()
+      try requireLocalDataResetMayContinue()
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()
       await dependencies.commandBarCatalog.reset()
       try AppDatabase.clearDB()
     } catch {
+      guard Auth.shared.getHasPendingAccountTransition() == false, !isLoggingOut else {
+        dependencies.viewModel.navigate(.loading)
+        throw AuthStorageError.logoutInProgress
+      }
       await Api.realtime.resumeAfterLocalDataReset()
       await dependencies.realtime.start()
       dependencies.viewModel.navigate(restoreRoute)
       throw error
     }
 
+    try requireLocalDataResetMayContinue()
     await Api.realtime.resumeAfterLocalDataReset()
+    try requireLocalDataResetMayContinue()
     await dependencies.realtime.start()
+    try requireLocalDataResetMayContinue()
     dependencies.appUndo.clear()
 
     dependencies.navigation.reset()
@@ -677,6 +707,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     dependencies.viewModel.navigate(restoreRoute)
     setupMainWindow()
+  }
+
+  @MainActor
+  private func requireLocalDataResetMayContinue() throws {
+    guard !isLoggingOut, Auth.shared.getHasPendingAccountTransition() == false,
+          Auth.shared.getStatus().isAuthenticated
+    else { throw AuthStorageError.logoutInProgress }
+  }
+
+  /// Serializes the two destructive account teardown owners. A logout requested during local-data
+  /// reset starts immediately after that reset returns (successfully or otherwise), never midway
+  /// through its realtime/database phases.
+  @MainActor
+  func deferLogoutUntilLocalDataResetFinishes(notifyServer: Bool) -> Bool {
+    guard isResettingLocalData else { return false }
+    pendingLogoutAfterLocalDataReset = (pendingLogoutAfterLocalDataReset ?? false) || notifyServer
+    return true
   }
 
   private func initializeServices() {
@@ -696,6 +743,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     )
   }
 
+  private func setupAuthAccountRecoveryObserver() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAuthAccountRecoveryRequiredNotification),
+      name: .authAccountRecoveryRequired,
+      object: nil
+    )
+  }
+
   private func setupRealtimeAuthInvalidatedObserver() {
     NotificationCenter.default.addObserver(
       self,
@@ -703,6 +759,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       name: .realtimeV2AuthInvalidated,
       object: nil
     )
+  }
+
+  @objc private func handleAuthAccountRecoveryRequiredNotification() {
+    Task { [weak self] in
+      await self?.performLogOut(notifyServer: false)
+    }
   }
 
   @objc private func handleRealtimeAuthInvalidatedNotification() {
@@ -977,112 +1039,7 @@ extension AppDelegate {
     AppMenu.shared.setupMainMenu(dependencies: dependencies)
   }
 
-  @MainActor
-  func performLogOut(notifyServer: Bool = true) async {
-    guard !isLoggingOut else { return }
-    isLoggingOut = true
-    defer {
-      LoggingOutWindowController.dismiss()
-      isLoggingOut = false
-    }
-
-    let mediaShutdown = await dependencies.gridRuntime.prepareForLogout()
-    guard mediaShutdown.isLocallyQuiescent else {
-      log.error(
-        "Logout stopped because Grid local media shutdown could not be proven: active_rooms=\(mediaShutdown.locallyActiveRoomCount) rtc_media_mutations=\(mediaShutdown.rtcLocalMediaMutationCount) microphone_publications=\(mediaShutdown.microphonePublicationCount) screen_publications=\(mediaShutdown.screenSharePublicationCount) failures=\(mediaShutdown.failures.joined(separator: ", "))"
-      )
-      let alert = NSAlert()
-      alert.alertStyle = .critical
-      alert.messageText = "Inline could not safely stop Grid audio"
-      alert.informativeText =
-        "Logout was cancelled because microphone or playback shutdown could not be verified. Please leave Grid and try again."
-      alert.addButton(withTitle: "OK")
-      alert.runModal()
-      return
-    }
-
-    cancelPendingSpaceJoin()
-    await Auth.shared.beginLogout()
-    LoggingOutWindowController.show()
-    await Task.yield()
-
-    if notifyServer {
-      await notifyServerLogout()
-    }
-
-    Analytics.logout()
-
-    // Stop every account-owned producer before clearing credentials or the database.
-    await Api.realtime.loggedOut()
-    await dependencies.realtime.loggedOut()
-    await FileUploader.shared.cancelAll()
-    await FileCache.shared.cancelAllDownloads()
-    await FileDownloader.shared.resetSession()
-    NotionTaskService.shared.resetSession()
-    await Drafts2.shared.resetForAccountChange()
-
-    await QuickSearchUsageStore.shared.clearCurrentAccount()
-    await dependencies.commandBarCatalog.reset()
-
-    await Transactions.shared.clearAllAndWait()
-    ObjectCache.shared.clear()
-    dependencies.session.reset()
-
-    do {
-      try await AppDatabase.loggedOutAsync()
-    } catch {
-      log.error(
-        "Logout stopped because local database cleanup failed profile=\(ProjectConfig.userProfile ?? "default") reason=\(error.localizedDescription)",
-        error: error
-      )
-      LoggingOutWindowController.dismiss()
-      presentLogoutCleanupFailureAlert()
-      return
-    }
-
-    dependencies.appUndo.clear()
-    await Auth.shared.logOut()
-
-    SettingsWindowController.closeIfOpen()
-    dependencies.navigation.reset()
-    dependencies.nav.reset()
-    dependencies.viewModel.navigate(.onboarding)
-    MainWindowOpenCoordinator.shared.openOnboarding()
-  }
-
-  private func notifyServerLogout() async {
-    do {
-      try await withThrowingTaskGroup(of: Void.self) { group in
-        group.addTask {
-          try await InlineRPCClient.shared.logout()
-        }
-        group.addTask {
-          try await Task.sleep(for: .seconds(2))
-          throw LogoutNotificationTimeoutError()
-        }
-
-        _ = try await group.next()
-        group.cancelAll()
-      }
-    } catch {
-      log.warning(
-        "Server logout notification did not complete; continuing local logout reason=\(type(of: error))"
-      )
-    }
-  }
-
-  private func presentLogoutCleanupFailureAlert() {
-    let alert = NSAlert()
-    alert.alertStyle = .critical
-    alert.messageText = "Inline couldn’t finish logging out"
-    alert.informativeText =
-      "Your local data could not be cleared, so Inline kept this logout pending. Quit and reopen Inline to try again safely."
-    alert.addButton(withTitle: "OK")
-    alert.runModal()
-  }
 }
-
-private struct LogoutNotificationTimeoutError: Error {}
 
 // MARK: - URL Scheme Handling
 

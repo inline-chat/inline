@@ -83,11 +83,16 @@ struct RealtimeV3OutboundWriterTests {
     let queued = Task { try await writer.send([5, 6, 7, 8]) }
     try await waitUntil { await writer.queuedWriteCount == 1 }
 
-    await writer.close(with: InlineProtocolV3ConnectionError.closed)
+    let closeTask = Task {
+      await writer.close(with: InlineProtocolV3ConnectionError.closed)
+    }
 
     await #expect(throws: InlineProtocolV3ConnectionError.closed) { try await active.value }
     await #expect(throws: InlineProtocolV3ConnectionError.closed) { try await queued.value }
+    // Close now proves the admitted wire write has quiesced, so release the deliberately
+    // cancellation-uncooperative test wire before awaiting that proof.
     await wire.releaseCurrent()
+    await closeTask.value
   }
 
   @Test("rejects excess queued writes without advancing the carrier")

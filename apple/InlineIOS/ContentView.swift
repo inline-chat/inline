@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineUI
 import Invite
@@ -42,6 +43,17 @@ struct ContentView2: View {
         )
       }
     }
+    .onReceive(NotificationCenter.default.publisher(for: .authAccountRecoveryRequired)) { _ in
+      Task {
+        await LogoutPerformer.perform(
+          notifyServer: false,
+          mainRouter: mainViewRouter,
+          navigation: navigation,
+          onboardingNavigation: onboardingNav,
+          router: router
+        )
+      }
+    }
     .task {
       guard await auth.hasPendingLogout() else { return }
       await LogoutPerformer.perform(
@@ -61,7 +73,9 @@ struct ContentView2: View {
     case .loading:
       VStack(spacing: 12) {
         ProgressView()
-        Text("Unlocking...")
+        Text(Auth.shared.getHasPendingAccountTransition()
+          ? "Finishing account recovery… Restart Inline if this does not complete."
+          : "Unlocking...")
           .font(.headline)
           .foregroundStyle(.secondary)
       }

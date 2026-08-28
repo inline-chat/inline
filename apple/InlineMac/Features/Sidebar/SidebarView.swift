@@ -225,6 +225,11 @@ struct SidebarView: View {
       appKitExternalDropGeneration = UUID()
       syncAppKitPresentationState(userID: userID)
     }
+    .onChange(of: auth.status) { _, status in
+      if case .loggingOut = status {
+        cancelSidebarDropImports()
+      }
+    }
     .onChange(of: settings.includeSpaceChatsInHomeSidebar, initial: true) { _, includeSpaceChats in
       syncUnreadCountsScope(spaceId: nav.selectedSpaceId, includeSpaceChatsInHome: includeSpaceChats)
       viewModel.setIncludeSpaceChatsInHome(includeSpaceChats)
@@ -282,6 +287,7 @@ struct SidebarView: View {
       isArchiveVisible = false
     }
     .onDisappear {
+      cancelSidebarDropImports()
       sidebarDrag.cancel()
       hideConnectedTask?.cancel()
       hideConnectedTask = nil
@@ -2391,7 +2397,9 @@ struct SidebarView: View {
 
   private func isSidebarDropImportCurrent(_ importID: UUID) -> Bool {
     guard let job = activeDropImportJobs[importID] else { return false }
-    return job.userID == auth.currentUserId && !Task.isCancelled
+    return job.userID == auth.currentUserId
+      && !Auth.shared.handle.hasPendingAccountTransition()
+      && !Task.isCancelled
   }
 
   private func cancelSidebarDropImports() {

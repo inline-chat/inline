@@ -3,10 +3,31 @@ import InlineProtocol
 import Security
 import Testing
 
-@testable import Auth
+@_spi(LogoutCoordinator) @testable import Auth
 
 @Suite("Auth2 Store")
 final class Auth2StoreTests {
+  private final class AttemptBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: AuthLoginAttempt?
+
+    func set(_ attempt: AuthLoginAttempt) {
+      lock.withLock { value = attempt }
+    }
+
+    func get() -> AuthLoginAttempt? {
+      lock.withLock { value }
+    }
+  }
+
+  private final class BoolProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    func set() { lock.withLock { value = true } }
+    func get() -> Bool { lock.withLock { value } }
+  }
+
   private final class FakeKeychain: KeychainClient, @unchecked Sendable {
     private let lock = NSLock()
     private var dataByKey: [String: Data]
@@ -87,12 +108,16 @@ final class Auth2StoreTests {
     let namespace: String
     let userDefaultsKey: String
     let logoutPendingKey: String
+    let logoutAttemptIDKey: String
+    let loginCommitPendingKey: String
 
     init() {
       namespace = UUID().uuidString
       let prefix = AuthKeychainConfig.userDefaultsPrefix(mocked: true, namespace: namespace)
       userDefaultsKey = "\(prefix)userId"
       logoutPendingKey = "\(prefix)logoutPending"
+      logoutAttemptIDKey = "\(prefix)logoutAttemptID"
+      loginCommitPendingKey = "\(prefix)loginCommitPendingAttemptID"
     }
 
     func resetStorage() {
@@ -102,11 +127,30 @@ final class Auth2StoreTests {
       DatabaseKeyStore.delete(mocked: true, namespace: namespace)
       UserDefaults.standard.removeObject(forKey: userDefaultsKey)
       UserDefaults.standard.removeObject(forKey: logoutPendingKey)
+      UserDefaults.standard.removeObject(forKey: logoutAttemptIDKey)
+      UserDefaults.standard.removeObject(forKey: loginCommitPendingKey)
     }
 
-    func makeStore() -> (cache: AuthSnapshotCache, store: AuthStore) {
+    func makeStore(
+      credentialDeletionOverride: (@Sendable () -> Bool)? = nil,
+      authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)? = nil,
+      authorityRestoreOverride: (@Sendable () -> Bool)? = nil,
+      logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)? = nil,
+      credentialWriteInterleavingHook: (@Sendable () -> Void)? = nil,
+      authorityFinalizationInterleavingHook: (@Sendable () -> Void)? = nil
+    ) -> (cache: AuthSnapshotCache, store: AuthStore) {
       let cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
-      let store = AuthStore(cache: cache, mocked: true, namespace: namespace)
+      let store = AuthStore(
+        cache: cache,
+        mocked: true,
+        namespace: namespace,
+        credentialDeletionOverride: credentialDeletionOverride,
+        authorityReplacementDeletionOverride: authorityReplacementDeletionOverride,
+        authorityRestoreOverride: authorityRestoreOverride,
+        logoutFencePersistenceOverride: logoutFencePersistenceOverride,
+        credentialWriteInterleavingHook: credentialWriteInterleavingHook,
+        authorityFinalizationInterleavingHook: authorityFinalizationInterleavingHook
+      )
       return (cache: cache, store: store)
     }
   }
@@ -124,6 +168,19 @@ final class Auth2StoreTests {
       userId: userID,
       accountSessionId: 84,
       permanent: authorization
+    )
+  }
+
+  private func completeLogoutForTest(_ store: AuthStore) async throws -> Bool {
+    let fence = try store.beginLogoutSynchronously()
+    guard let credentialProof = await store.destroyCredentialsForPendingLogout(fence: fence) else {
+      return false
+    }
+    return await store.completePendingLogout(
+      fence: fence,
+      databaseProof: AuthDatabaseCleanupProof(fence: fence),
+      credentialProof: credentialProof,
+      completionPermit: AuthLogoutCompletionPermit(fence: fence)
     )
   }
 
@@ -147,8 +204,7 @@ final class Auth2StoreTests {
       #expect(Bool(false), "Expected authenticated status")
     }
 
-    let writtenBack = UserDefaults.standard.object(forKey: h.userDefaultsKey) as? NSNumber
-    #expect(writtenBack?.int64Value == 42)
+    #expect(UserDefaults.standard.object(forKey: h.userDefaultsKey) == nil)
   }
 
   @Test("saving V3 credentials removes bearer authority")
@@ -186,8 +242,71 @@ final class Auth2StoreTests {
     #expect(cache.snapshot().inlineProtocol == nil)
   }
 
-  @Test("hydration prefers V3 and repairs mixed stored authority")
-  func hydrationRepairsMixedAuthority() async throws {
+  @Test("V2 to V2 authority replacement keeps only the latest bearer across relaunch")
+  func bearerToBearerReplacementIsRestartStable() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let (cache, store) = h.makeStore()
+    try await store.saveCredentials(token: "7:old", userId: 7)
+    let existingAccountToken = try cache.makeAccountMutationToken()
+    let pendingInteractiveLogin = try await store.beginLoginAttempt(allowAuthenticated: true)
+    try await store.saveCredentials(token: "7:new", userId: 7)
+    try cache.validateAccountMutationToken(existingAccountToken)
+    try await store.validateLoginAttempt(pendingInteractiveLogin)
+
+    let (relaunchedCache, _) = h.makeStore()
+    #expect(relaunchedCache.snapshot().token == "7:new")
+    #expect(relaunchedCache.snapshot().currentUserId == 7)
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
+  }
+
+  @Test("reauth-required and mixed stale authority can recover through one submitted login attempt")
+  func submittedLoginRecoversStaleAuthority() async throws {
+    let missing = Harness()
+    missing.resetStorage()
+    defer { missing.resetStorage() }
+    UserDefaults.standard.set(NSNumber(value: Int64(7)), forKey: missing.userDefaultsKey)
+    let (missingCache, missingStore) = missing.makeStore()
+    #expect(missingCache.snapshot().status == .reauthRequired(userIdHint: 7))
+    let missingAttempt = try await missingStore.beginLoginAttempt(allowAuthenticated: false)
+    try await missingStore.saveCredentials(
+      token: "7:recovered",
+      userId: 7,
+      loginAttempt: missingAttempt
+    )
+    _ = try await missingStore.finalizeCredentialsCommittedByLoginAttempt(missingAttempt)
+    #expect(missingCache.snapshot().token == "7:recovered")
+
+    let mixed = Harness()
+    mixed.resetStorage()
+    defer { mixed.resetStorage() }
+    AuthKeychainConfig.mockSet("8:stale", forKey: "token", namespace: mixed.namespace)
+    AuthKeychainConfig.mockSet(
+      try JSONEncoder().encode(AuthCredentials(userId: 8, token: "8:stale")),
+      forKey: "credentials_v2",
+      namespace: mixed.namespace
+    )
+    AuthKeychainConfig.mockSet(
+      try JSONEncoder().encode(v3Credentials(userID: 8)),
+      forKey: "inline_protocol_credentials_v1",
+      namespace: mixed.namespace
+    )
+    let (mixedCache, mixedStore) = mixed.makeStore()
+    #expect(mixedCache.snapshot().status == .reauthRequired(userIdHint: nil))
+    let mixedAttempt = try await mixedStore.beginLoginAttempt(allowAuthenticated: false)
+    try await mixedStore.saveCredentials(
+      token: "8:recovered",
+      userId: 8,
+      loginAttempt: mixedAttempt
+    )
+    _ = try await mixedStore.finalizeCredentialsCommittedByLoginAttempt(mixedAttempt)
+    #expect(mixedCache.snapshot().token == "8:recovered")
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: mixed.namespace) == nil)
+  }
+
+  @Test("hydration fails closed without mutating mixed stored authority")
+  func hydrationFailsClosedForMixedAuthority() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
@@ -199,14 +318,15 @@ final class Auth2StoreTests {
     AuthKeychainConfig.mockSet(v3, forKey: "inline_protocol_credentials_v1", namespace: h.namespace)
 
     let (cache, _) = h.makeStore()
-    #expect(cache.snapshot().status == .authenticatedV3(userId: 42))
-    #expect(cache.snapshot().inlineProtocol?.userId == 42)
-    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
-    #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: h.namespace) == nil)
+    #expect(cache.snapshot().status == .reauthRequired(userIdHint: nil))
+    #expect(cache.snapshot().inlineProtocol == nil)
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == "7:legacy")
+    #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: h.namespace) == v2)
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == v3)
   }
 
-  @Test("launch repair fills missing userId hint from cached credentials")
-  func launchRepairFillsMissingUserIdHintFromCache() async {
+  @Test("launch repair remains read-only when the userId hint is missing")
+  func launchRepairDoesNotPersistMissingUserIdHint() async {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
@@ -226,8 +346,7 @@ final class Auth2StoreTests {
 
     await store.repairUserIdHint()
 
-    let writtenBack = UserDefaults.standard.object(forKey: h.userDefaultsKey) as? NSNumber
-    #expect(writtenBack?.int64Value == 77)
+    #expect(UserDefaults.standard.object(forKey: h.userDefaultsKey) == nil)
   }
 
   @Test("loads authenticated snapshot from legacy token + userId hint")
@@ -272,8 +391,7 @@ final class Auth2StoreTests {
     #expect(creds.userId == 99)
     #expect(creds.token == token)
 
-    let writtenBack = UserDefaults.standard.object(forKey: h.userDefaultsKey) as? NSNumber
-    #expect(writtenBack?.int64Value == 99)
+    #expect(UserDefaults.standard.object(forKey: h.userDefaultsKey) == nil)
   }
 
   @Test("returns reauthRequired when userId hint exists but token is missing")
@@ -303,34 +421,92 @@ final class Auth2StoreTests {
     let e1 = await it.next()
     #expect(e1 == .login(userId: 1, token: "1:eventTok"))
 
-    await store.logOut()
+    #expect(try await completeLogoutForTest(store))
     let e2 = await it.next()
     #expect(e2 == .logout)
   }
 
-  @Test("pending logout blocks restart authentication until app cleanup completes")
-  func pendingLogoutBlocksRestartAndDestroysCredentials() async throws {
+  @Test("pending logout keeps restart in recovery until app cleanup completes")
+  func pendingLogoutBlocksRestartUntilAppCleanup() async throws {
     let h = Harness()
     h.resetStorage()
     defer { h.resetStorage() }
 
     let (_, store) = h.makeStore()
     try await store.saveInlineProtocolCredentials(v3Credentials())
-    await store.beginLogout()
+    _ = try await store.beginLogout()
 
     let recoveredCache = AuthSnapshotCache(
       initial: AuthSnapshot(status: .hydrating, didHydrate: false)
     )
     let recovered = AuthStore(cache: recoveredCache, mocked: true, namespace: h.namespace)
-    #expect(recoveredCache.snapshot().status == .unauthenticated)
-
-    await recovered.recoverInterruptedLogoutIfNeeded()
-
-    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
+    #expect(recoveredCache.snapshot().status == .loggingOut(userIdHint: 42))
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) != nil)
     #expect(await recovered.hasPendingLogout() == true)
 
-    await recovered.logOut()
+    #expect(try await completeLogoutForTest(recovered))
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
     #expect(await recovered.hasPendingLogout() == false)
+    #expect(recoveredCache.snapshot().status == .unauthenticated)
+  }
+
+  @Test("pending logout rejects login preparation before network redemption")
+  func pendingLogoutRejectsLoginPreparation() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    _ = try await store.beginLogout()
+    await store.publishLogoutInProgress()
+
+    do {
+      try await store.requireLoginAllowed()
+      Issue.record("Expected login preparation to remain fenced by logout")
+    } catch AuthStorageError.logoutInProgress {
+      // The app-owned cleanup is the only operation allowed to remove this fence.
+    } catch {
+      Issue.record("Unexpected login preparation error: \(error)")
+    }
+
+    #expect(cache.snapshot().status == .loggingOut(userIdHint: nil))
+    #expect(await store.hasPendingLogout())
+  }
+
+  @Test("synchronous logout fence rejects a pre-existing completion before an actor hop")
+  func synchronousLogoutFenceBeatsQueuedLoginCommit() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    let loginAttempt = try await store.beginLoginAttempt(allowAuthenticated: false)
+    let (gate, continuation) = AsyncStream.makeStream(of: Void.self)
+    let queuedCommit = Task {
+      var iterator = gate.makeAsyncIterator()
+      _ = await iterator.next()
+      try await store.saveCredentials(
+        token: "42:queued",
+        userId: 42,
+        loginAttempt: loginAttempt
+      )
+    }
+
+    // No await: the durable marker and cache generation close before the queued actor call runs.
+    _ = try store.beginLogoutSynchronously()
+    #expect(cache.hasPendingLogout())
+    continuation.yield(())
+    continuation.finish()
+
+    do {
+      try await queuedCommit.value
+      Issue.record("Expected the synchronously fenced commit to be rejected")
+    } catch AuthStorageError.logoutInProgress {
+      // This is the release invariant: UI routing is not the credential-write fence.
+    } catch {
+      Issue.record("Unexpected queued credential error: \(error)")
+    }
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
   }
 
   @Test("pending logout rejects stale bearer and V3 credential writers")
@@ -340,7 +516,7 @@ final class Auth2StoreTests {
     defer { h.resetStorage() }
 
     let (cache, store) = h.makeStore()
-    await store.beginLogout()
+    _ = try await store.beginLogout()
     do {
       try await store.saveCredentials(token: "42:stale", userId: 42)
       Issue.record("Expected pending logout to reject bearer credential persistence")
@@ -365,6 +541,75 @@ final class Auth2StoreTests {
     #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
   }
 
+  @Test("credential destruction cannot remove the logout fence before the final commit")
+  func credentialDestructionPreservesFenceUntilCompletion() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    try await store.saveCredentials(token: "42:legacy", userId: 42)
+    let fence = try await store.beginLogout()
+    await store.publishLogoutInProgress()
+
+    let credentialProof = await store.destroyCredentialsForPendingLogout(fence: fence)
+    #expect(credentialProof != nil)
+    #expect(await store.hasPendingLogout())
+    if case .loggingOut = cache.snapshot().status {
+      // Exact account hints are not required for the recovery surface.
+    } else {
+      Issue.record("Expected non-loginable recovery status")
+    }
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
+
+    guard let credentialProof else {
+      Issue.record("Expected credential destruction proof")
+      return
+    }
+    #expect(await store.completePendingLogout(
+      fence: fence,
+      databaseProof: AuthDatabaseCleanupProof(fence: fence),
+      credentialProof: credentialProof,
+      completionPermit: AuthLogoutCompletionPermit(fence: fence)
+    ))
+    #expect(await store.hasPendingLogout() == false)
+    #expect(cache.snapshot().status == .unauthenticated)
+  }
+
+  @Test("logout permanently invalidates login work started by the previous UI generation")
+  func logoutInvalidatesEarlierLoginGeneration() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (_, store) = h.makeStore()
+    let staleAttempt = try await store.beginLoginAttempt(allowAuthenticated: false)
+    _ = try await store.beginLogout()
+    #expect(try await completeLogoutForTest(store))
+
+    do {
+      try await store.validateLoginAttempt(staleAttempt)
+      Issue.record("Expected an attempt created before logout to remain invalid after cleanup")
+    } catch AuthStorageError.loginSuperseded {
+      // Marker removal permits a fresh login, never resumption of old onboarding work.
+    } catch {
+      Issue.record("Unexpected stale-attempt error: \(error)")
+    }
+
+    do {
+      try await store.saveCredentials(
+        token: "42:stale",
+        userId: 42,
+        loginAttempt: staleAttempt
+      )
+      Issue.record("Expected stale credentials to remain rejected after marker removal")
+    } catch AuthStorageError.loginSuperseded {
+      // Credential persistence shares the same generation fence.
+    } catch {
+      Issue.record("Unexpected stale credential error: \(error)")
+    }
+  }
+
   @Test("broadcasts login and logout events to every subscriber")
   func broadcastsAuthEventsToEverySubscriber() async throws {
     let h = Harness()
@@ -379,7 +624,7 @@ final class Auth2StoreTests {
     #expect(await first.next() == .login(userId: 1, token: "1:eventTok"))
     #expect(await second.next() == .login(userId: 1, token: "1:eventTok"))
 
-    await store.logOut()
+    #expect(try await completeLogoutForTest(store))
     #expect(await first.next() == .logout)
     #expect(await second.next() == .logout)
   }
@@ -399,7 +644,7 @@ final class Auth2StoreTests {
     #expect(await first.next() == authenticated)
     #expect(await second.next() == authenticated)
 
-    await store.logOut()
+    #expect(try await completeLogoutForTest(store))
     #expect(await first.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
     #expect(await second.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
   }
@@ -415,7 +660,7 @@ final class Auth2StoreTests {
     var snapshots = store.snapshots().makeAsyncIterator()
     #expect(await snapshots.next() == cache.snapshot())
 
-    await store.logOut()
+    #expect(try await completeLogoutForTest(store))
     try await store.saveCredentials(token: "2:secondToken", userId: 2)
 
     #expect(await snapshots.next() == AuthSnapshot(status: .unauthenticated, didHydrate: true))
@@ -436,7 +681,7 @@ final class Auth2StoreTests {
 
     // Creating the stream is the subscription boundary used by task-based observers.
     let snapshots = store.snapshots()
-    await store.logOut()
+    #expect(try await completeLogoutForTest(store))
     try await store.saveCredentials(token: "2:secondToken", userId: 2)
 
     var iterator = snapshots.makeAsyncIterator()
@@ -456,6 +701,332 @@ final class Auth2StoreTests {
     var events = store.events().makeAsyncIterator()
 
     #expect(await events.next() == .login(userId: 1, token: "1:eventTok"))
+  }
+
+  @Test("staged authority remains non-loginable until the exact attempt finalizes")
+  func stagedAuthorityPublishesOnlyAtFinalize() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore()
+    let attempt = try await store.beginLoginAttempt(allowAuthenticated: false)
+    try await store.saveCredentials(token: "42:staged", userId: 42, loginAttempt: attempt)
+
+    #expect(cache.snapshot().status == .unauthenticated)
+    #expect(cache.hasPendingLoginCommit())
+    #expect(UserDefaults.standard.string(forKey: h.loginCommitPendingKey) == attempt.correlationID.uuidString)
+    do {
+      _ = try await store.beginLoginAttempt(allowAuthenticated: false)
+      Issue.record("Expected a second login attempt to be rejected during authority staging")
+    } catch AuthStorageError.loginUnavailable {
+      // One staged authority owner is the beta-sized linearization contract.
+    } catch {
+      Issue.record("Unexpected duplicate login error: \(error)")
+    }
+
+    let accountMutationToken = try await store.finalizeCredentialsCommittedByLoginAttempt(attempt)
+    #expect(cache.snapshot().token == "42:staged")
+    #expect(cache.hasPendingAccountTransition() == false)
+    #expect(UserDefaults.standard.object(forKey: h.loginCommitPendingKey) == nil)
+    #expect(cache.invalidateLoginAttempt(attempt) == false)
+    do {
+      try cache.validateAccountMutationToken(accountMutationToken)
+    } catch {
+      Issue.record("Finalized login cancellation must not invalidate the committed account token")
+    }
+
+    // Merely opening another login flow supersedes stale login callbacks, not the current account.
+    // Existing account work remains valid until a replacement authority actually commits or logout
+    // installs its synchronous fence.
+    _ = cache.makeLoginAttempt()
+    do {
+      try cache.validateAccountMutationToken(accountMutationToken)
+    } catch {
+      Issue.record("A new uncommitted login attempt must not invalidate the current account token")
+    }
+  }
+
+  @Test("projection commit reserves finalization against stale cancellation")
+  func projectionCommitReservesAuthorityFinalization() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
+    let box = AttemptBox()
+    let cancellationWon = BoolProbe()
+    let store = AuthStore(
+      cache: cache,
+      mocked: true,
+      namespace: h.namespace,
+      authorityFinalizationInterleavingHook: {
+        if let attempt = box.get(), cache.invalidateLoginAttempt(attempt) {
+          cancellationWon.set()
+        }
+      }
+    )
+    let attempt = try await store.beginLoginAttempt(allowAuthenticated: false)
+    box.set(attempt)
+    try await store.saveCredentials(token: "42:committed", userId: 42, loginAttempt: attempt)
+
+    // The production caller reaches this only after its minimum DB projection commits. From that
+    // linearization point, a stale UI cancellation may not turn a complete account into a failure.
+    _ = try await store.finalizeCredentialsCommittedByLoginAttempt(attempt)
+
+    #expect(cancellationWon.get() == false)
+    #expect(cache.snapshot().token == "42:committed")
+    #expect(cache.hasPendingAccountTransition() == false)
+    #expect(UserDefaults.standard.object(forKey: h.loginCommitPendingKey) == nil)
+  }
+
+  @Test("canceling an attempt during credential persistence restores authority and user hint")
+  func cancellationDuringCredentialPersistenceRestoresBaseline() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
+    let box = AttemptBox()
+    let store = AuthStore(
+      cache: cache,
+      mocked: true,
+      namespace: h.namespace,
+      credentialWriteInterleavingHook: {
+        if let attempt = box.get() {
+          _ = cache.invalidateLoginAttempt(attempt)
+        }
+      }
+    )
+    let attempt = try await store.beginLoginAttempt(allowAuthenticated: false)
+    box.set(attempt)
+
+    do {
+      try await store.saveCredentials(token: "99:canceled", userId: 99, loginAttempt: attempt)
+      Issue.record("Expected the canceled authority stage to be rejected")
+    } catch AuthStorageError.loginSuperseded {
+      // The baseline is restored below; no rejected account hint may remain durable.
+    } catch AuthStorageError.loginUnavailable {
+      // The generation fence may surface as unavailable once staging has been aborted.
+    } catch {
+      Issue.record("Unexpected canceled stage error: \(error)")
+    }
+
+    #expect(cache.snapshot().status == .unauthenticated)
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == nil)
+    #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: h.namespace) == nil)
+    #expect(UserDefaults.standard.object(forKey: h.userDefaultsKey) == nil)
+    #expect(UserDefaults.standard.object(forKey: h.loginCommitPendingKey) == nil)
+  }
+
+  @Test("logout fence persistence failure aborts before cleanup and preserves signed-in authority")
+  func logoutFencePersistenceFailureAbortsCleanly() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+
+    let (cache, store) = h.makeStore(logoutFencePersistenceOverride: { _ in false })
+    try await store.saveCredentials(token: "42:still-signed-in", userId: 42)
+    do {
+      _ = try store.beginLogoutSynchronously()
+      Issue.record("Expected durable logout fence persistence to fail")
+    } catch AuthStorageError.logoutFencePersistenceFailed {
+      // No destructive operation has started and the in-memory fence is aborted.
+    } catch {
+      Issue.record("Unexpected persistence error: \(error)")
+    }
+
+    #expect(cache.snapshot().token == "42:still-signed-in")
+    #expect(store.hasPendingLogout() == false)
+    #expect(UserDefaults.standard.object(forKey: h.logoutPendingKey) == nil)
+    #expect(UserDefaults.standard.object(forKey: h.logoutAttemptIDKey) == nil)
+  }
+
+  @Test("failed staged-authority restore with fence persistence failure signals platform recovery")
+  func failedAuthorityRestoreSignalsActionableRecovery() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let probe = BoolProbe()
+    let observer = NotificationCenter.default.addObserver(
+      forName: .authAccountRecoveryRequired,
+      object: nil,
+      queue: nil
+    ) { _ in
+      probe.set()
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+    let (cache, store) = h.makeStore(
+      authorityReplacementDeletionOverride: { _ in false },
+      authorityRestoreOverride: { false },
+      logoutFencePersistenceOverride: { _ in false }
+    )
+    let attempt = try await store.beginLoginAttempt(allowAuthenticated: false)
+
+    do {
+      try await store.saveCredentials(
+        token: "42:ambiguous",
+        userId: 42,
+        loginAttempt: attempt
+      )
+      Issue.record("Expected staged-authority persistence failure")
+    } catch AuthStorageError.keychainDeleteFailed {
+      // Restore then fence persistence both fail; the platform receives an actionable signal.
+    }
+
+    #expect(probe.get())
+    if case .loggingOut = cache.snapshot().status {
+      // The platform recovery signal, not an account hint, is the actionable contract.
+    } else {
+      Issue.record("Expected non-loginable recovery status")
+    }
+    #expect(cache.hasPendingAccountTransition())
+    #expect(UserDefaults.standard.object(forKey: h.loginCommitPendingKey) != nil)
+  }
+
+  @Test("malformed logout marker and orphan attempt ID both recover fail closed")
+  func malformedAndOrphanLogoutMarkersRecoverFailClosed() async {
+    let malformed = Harness()
+    malformed.resetStorage()
+    UserDefaults.standard.set("not-a-boolean", forKey: malformed.logoutPendingKey)
+    let (malformedCache, malformedStore) = malformed.makeStore()
+    #expect(malformedCache.snapshot().status == .loggingOut(userIdHint: nil))
+    #expect(malformedStore.hasPendingLogout())
+    #expect(UUID(uuidString: UserDefaults.standard.string(forKey: malformed.logoutAttemptIDKey) ?? "") != nil)
+    malformed.resetStorage()
+
+    let orphan = Harness()
+    orphan.resetStorage()
+    defer { orphan.resetStorage() }
+    let orphanID = UUID()
+    UserDefaults.standard.set(orphanID.uuidString, forKey: orphan.logoutAttemptIDKey)
+    let (orphanCache, orphanStore) = orphan.makeStore()
+    #expect(orphanCache.snapshot().status == .loggingOut(userIdHint: nil))
+    #expect(orphanStore.currentLogoutFence()?.correlationID == orphanID)
+    #expect(orphanStore.hasPendingLogout())
+  }
+
+  @Test("corrupt staged-login marker promotes launch into logout recovery")
+  func corruptStagedLoginMarkerRecoversFailClosed() async {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    UserDefaults.standard.set("corrupt", forKey: h.loginCommitPendingKey)
+
+    let (cache, store) = h.makeStore()
+    #expect(cache.snapshot().status == .loggingOut(userIdHint: nil))
+    #expect(store.hasPendingLogout())
+    #expect(UUID(uuidString: UserDefaults.standard.string(forKey: h.logoutAttemptIDKey) ?? "") != nil)
+  }
+
+  @Test("repeated logout begin reuses one proof identity and leaves no marker after completion")
+  func repeatedLogoutBeginIsIdempotent() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let (cache, store) = h.makeStore()
+    try await store.saveCredentials(token: "42:logout", userId: 42)
+
+    let first = try store.beginLogoutSynchronously()
+    let second = try store.beginLogoutSynchronously()
+    #expect(first == second)
+    #expect(cache.currentLogoutFence() == first)
+    guard let credentialProof = await store.destroyCredentialsForPendingLogout(fence: first) else {
+      Issue.record("Expected verified credential destruction")
+      return
+    }
+    #expect(await store.completePendingLogout(
+      fence: first,
+      databaseProof: AuthDatabaseCleanupProof(fence: first),
+      credentialProof: credentialProof,
+      completionPermit: AuthLogoutCompletionPermit(fence: first)
+    ))
+    #expect(UserDefaults.standard.object(forKey: h.logoutPendingKey) == nil)
+    #expect(UserDefaults.standard.object(forKey: h.logoutAttemptIDKey) == nil)
+    #expect(cache.snapshot().status == .unauthenticated)
+  }
+
+  @Test("credential deletion failure retains marker and relaunch retry completes")
+  func credentialDeletionFailureRetainsMarkerForRetry() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let (_, failingStore) = h.makeStore(credentialDeletionOverride: { false })
+    try await failingStore.saveCredentials(token: "42:retry", userId: 42)
+    let fence = try failingStore.beginLogoutSynchronously()
+    #expect(await failingStore.destroyCredentialsForPendingLogout(fence: fence) == nil)
+    #expect(failingStore.hasPendingLogout())
+    #expect(UserDefaults.standard.string(forKey: h.logoutAttemptIDKey) == fence.correlationID.uuidString)
+
+    let (recoveredCache, recoveredStore) = h.makeStore()
+    #expect(recoveredStore.currentLogoutFence()?.correlationID == fence.correlationID)
+    #expect(try await completeLogoutForTest(recoveredStore))
+    #expect(recoveredCache.snapshot().status == .unauthenticated)
+    #expect(UserDefaults.standard.object(forKey: h.logoutPendingKey) == nil)
+  }
+
+  @Test("revoked finalization permit cannot remove the durable logout marker")
+  func revokedCompletionPermitRetainsMarker() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let (cache, store) = h.makeStore()
+    try await store.saveCredentials(token: "42:deadline", userId: 42)
+    let fence = try store.beginLogoutSynchronously()
+    await store.publishLogoutInProgress()
+    guard let credentialProof = await store.destroyCredentialsForPendingLogout(fence: fence) else {
+      Issue.record("Expected verified credential destruction")
+      return
+    }
+    let permit = AuthLogoutCompletionPermit(fence: fence)
+    #expect(permit.revoke())
+    #expect(await store.completePendingLogout(
+      fence: fence,
+      databaseProof: AuthDatabaseCleanupProof(fence: fence),
+      credentialProof: credentialProof,
+      completionPermit: permit
+    ) == false)
+    #expect(cache.snapshot().status == .loggingOut(userIdHint: 42))
+    #expect(store.hasPendingLogout())
+    #expect(UserDefaults.standard.string(forKey: h.logoutAttemptIDKey) == fence.correlationID.uuidString)
+  }
+
+  @Test("authority replacement deletion failure restores the previously valid authority")
+  func authorityReplacementFailureRestoresBaselineInBothDirections() async throws {
+    let bearerHarness = Harness()
+    bearerHarness.resetStorage()
+    defer { bearerHarness.resetStorage() }
+    let (_, bearerSeed) = bearerHarness.makeStore()
+    try await bearerSeed.saveCredentials(token: "7:bearer", userId: 7)
+    let (bearerCache, bearerToV3) = bearerHarness.makeStore(
+      authorityReplacementDeletionOverride: { label in label == "bearer" ? false : nil }
+    )
+    do {
+      try await bearerToV3.saveInlineProtocolCredentials(v3Credentials(userID: 7))
+      Issue.record("Expected bearer-to-V3 old-authority deletion failure")
+    } catch AuthStorageError.keychainDeleteFailed {
+      // Newly written V3 authority is rolled back and the bearer baseline remains restart-safe.
+    }
+    #expect(bearerCache.snapshot().token == "7:bearer")
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: bearerHarness.namespace) == nil)
+
+    let v3Harness = Harness()
+    v3Harness.resetStorage()
+    defer { v3Harness.resetStorage() }
+    let (_, v3Seed) = v3Harness.makeStore()
+    try await v3Seed.saveInlineProtocolCredentials(v3Credentials(userID: 9))
+    let (v3Cache, v3ToBearer) = v3Harness.makeStore(
+      authorityReplacementDeletionOverride: { label in label == "inline_protocol" ? false : nil }
+    )
+    do {
+      try await v3ToBearer.saveCredentials(token: "9:bearer", userId: 9)
+      Issue.record("Expected V3-to-bearer old-authority deletion failure")
+    } catch AuthStorageError.keychainDeleteFailed {
+      // Newly written bearer authority is rolled back and the V3 baseline remains restart-safe.
+    }
+    #expect(v3Cache.snapshot().status == .authenticatedV3(userId: 9))
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: v3Harness.namespace) == nil)
+    #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: v3Harness.namespace) == nil)
   }
 
   @Test("DatabaseKeyStore getOrCreate is stable and deletable (mocked)")

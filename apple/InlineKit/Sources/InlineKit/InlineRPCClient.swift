@@ -196,8 +196,12 @@ public actor InlineRPCClient {
     guard case .leaveSpace? = response else { throw InlineRPCClientError.unexpectedResponse }
   }
 
-  public func logout() async throws {
-    let response = try await Api.realtime.callRpcDirect(method: .logOut, input: .logOut(.init()))
+  public func logout(timeout: Duration? = .seconds(15)) async throws {
+    let response = try await Api.realtime.callRpcDirect(
+      method: .logOut,
+      input: .logOut(.init()),
+      timeout: timeout
+    )
     guard case let .logOut(result)? = response, result.loggedOut else {
       throw InlineRPCClientError.unexpectedResponse
     }

@@ -4,6 +4,7 @@ import InlineProtocol
 import Testing
 
 @testable import RealtimeV2
+@testable import InlineKit
 
 @Suite("Auth + RealtimeV2 Integration", .serialized)
 final class AuthRealtimeIntegrationTests {
@@ -55,7 +56,23 @@ final class AuthRealtimeIntegrationTests {
     }
     #expect(initialHandshake)
 
-    await auth.logOut()
+    let fence = try auth.beginLogoutSynchronously()
+    await auth.publishLogoutInProgress()
+    // This suite owns only the auth-snapshot/realtime handshake boundary. Persistent database
+    // cleanup is covered separately; using the process-global test fallback here would now (and
+    // correctly) fail the production logout proof because it is not an on-disk DatabasePool.
+    let databaseProof = AuthDatabaseCleanupProof(fence: fence)
+    guard let credentialProof = await auth.destroyCredentialsForPendingLogout(fence: fence) else {
+      Issue.record("Expected credential destruction proof")
+      return
+    }
+    #expect(await LogoutCompletionCoordinator.complete(
+      fence: fence,
+      databaseProof: databaseProof,
+      credentialProof: credentialProof,
+      completionPermit: AuthLogoutCompletionPermit(fence: fence),
+      auth: auth
+    ))
     try await auth.saveCredentials(token: "2:reloginToken", userId: 2)
 
     let reloginHandshake = await waitForCondition {

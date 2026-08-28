@@ -54,6 +54,11 @@ public final actor RealtimeDirectSession {
   ) async throws -> RpcResult.OneOf_Result? {
     guard !finished else { throw RealtimeDirectRpcError.notConnected }
     guard auth.isLoggedIn() else { throw RealtimeDirectRpcError.notAuthorized }
+    do {
+      try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
+    } catch {
+      throw RealtimeDirectRpcError.notAuthorized
+    }
 
     await connectIfNeeded()
     // Admission is bounded before execution. Once admitted, the RPC's own timeout owns
@@ -61,6 +66,12 @@ public final actor RealtimeDirectSession {
     guard await waitUntilOpen(timeout: connectionAdmissionTimeout) else {
       try Task.checkCancellation()
       throw RealtimeDirectRpcError.notConnected
+    }
+
+    do {
+      try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
+    } catch {
+      throw RealtimeDirectRpcError.notAuthorized
     }
 
     do {

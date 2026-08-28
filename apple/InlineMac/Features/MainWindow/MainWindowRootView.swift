@@ -183,8 +183,10 @@ struct MainWindowRootView: View {
     guard topLevelRoute != route else { return }
 
     topLevelRoute = route
-    if route == .onboarding {
+    if route != .main {
       chatOpenPreloader.cancelPendingOpen()
+    }
+    if route == .onboarding {
       nav3.reset()
     }
   }

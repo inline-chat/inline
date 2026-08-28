@@ -90,7 +90,7 @@ public actor InlineProtocolV3Transport: Transport {
   }
 
   public func start() async {
-    guard connection == nil, !starting else { return }
+    guard connection == nil, !starting, auth.hasPendingAccountTransition() == false else { return }
     starting = true
     startGeneration = startGeneration &+ 1
     let generation = startGeneration
@@ -225,7 +225,9 @@ public actor InlineProtocolV3Transport: Transport {
   }
 
   private func requireCurrentStart(_ generation: UInt64) throws {
-    guard generation == startGeneration, starting, !Task.isCancelled else {
+    guard generation == startGeneration, starting, !Task.isCancelled,
+          auth.hasPendingAccountTransition() == false
+    else {
       throw CancellationError()
     }
   }

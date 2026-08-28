@@ -187,15 +187,22 @@ actor InlineProtocolOutboundWriter {
     }
   }
 
-  func close(with error: any Error = InlineProtocolV3ConnectionError.closed) {
+  func close(with error: any Error = InlineProtocolV3ConnectionError.closed) async {
     guard terminalError == nil else { return }
     terminalError = error
-    drainTask?.cancel()
+    let closingDrainTask = drainTask
+    closingDrainTask?.cancel()
     if let activeWrite {
       self.activeWrite = nil
       activeWrite.continuation.resume(throwing: error)
     }
     failQueued(with: error)
+    // A continuation being failed is not proof that the underlying WebSocket send stopped.
+    // Await the structured drain task so transport stop cannot report quiescence while wire I/O
+    // admitted by the old account remains live. The platform logout deadline stays fail-closed if
+    // a system send ignores cancellation.
+    await closingDrainTask?.value
+    drainTask = nil
   }
 
   var queuedWriteCount: Int { queue.count }

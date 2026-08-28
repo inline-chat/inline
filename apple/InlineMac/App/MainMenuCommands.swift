@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import InlineKit
 import Translation
 
@@ -188,6 +189,10 @@ enum ChatMenuActions {
 @MainActor
 enum AppRecoveryActions {
   static func clearCache(confirming: Bool) {
+    guard Auth.shared.getHasPendingAccountTransition() == false else {
+      ToastCenter.shared.showError("Finish signing out before resetting local data")
+      return
+    }
     if confirming {
       let alert = NSAlert()
       alert.messageText = "Reset Local Data"
@@ -201,6 +206,10 @@ enum AppRecoveryActions {
     }
 
     Task { @MainActor in
+      guard Auth.shared.getHasPendingAccountTransition() == false else {
+        ToastCenter.shared.showError("Finish signing out before resetting local data")
+        return
+      }
       guard let appDelegate = NSApp.delegate as? AppDelegate else {
         ToastCenter.shared.showError("Failed to reset local data")
         return

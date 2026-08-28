@@ -84,22 +84,43 @@ extension PhoneNumberCode {
     Task {
       do {
         formState.startLoading()
+        let bearerLoginAttempt = InlineProtocolNativeLogin.shared.isAvailable
+          ? nil
+          : try await auth.beginLoginAttempt()
         let result = try await api.verifySmsCode(code: code, phoneNumber: phoneNumber, inviteCode: inviteCode)
 
+        let accountMutationToken: AuthAccountMutationToken
         if let token = result.token {
-          try await auth.saveCredentials(token: token, userId: result.userId)
+          do {
+            guard let loginAttempt = bearerLoginAttempt else {
+              throw AuthStorageError.loginSuperseded
+            }
+            let commit = try await LoginStatePreparation.commit(
+              auth: auth.handle,
+              loginAttempt: loginAttempt,
+              targetUserID: result.userId,
+              persistCredentials: {
+                try await auth.saveCredentials(
+                  token: token,
+                  userId: result.userId,
+                  loginAttempt: loginAttempt
+                )
+              }
+            ) { db in
+              try result.user.saveFull(db)
+            }
+            accountMutationToken = commit.accountMutationToken
+          } catch {
+            _ = try? await ApiClient.shared.logout(bearerToken: token)
+            throw error
+          }
+        } else if let nativeToken = result.accountMutationToken {
+          accountMutationToken = nativeToken
+        } else {
+          throw AuthStorageError.loginSuperseded
         }
 
-        do {
-          try await AppDatabase.authenticated()
-        } catch {
-          Log.shared.error("Failed to setup database or save user", error: error)
-        }
-
-        let _ = try await database.dbWriter.write { db in
-          try result.user.saveFull(db)
-        }
-
+        try auth.handle.validateAccountMutation(accountMutationToken)
         // Register Sentry
         Analytics.identify(
           userId: result.userId,
@@ -109,6 +130,7 @@ extension PhoneNumberCode {
         )
 
         formState.reset()
+        try auth.handle.validateAccountMutation(accountMutationToken)
         if result.user.firstName == nil || result.user.firstName?.isEmpty == true || result.user.pendingSetup == true {
           nav.push(.profile(userId: result.userId))
         } else {

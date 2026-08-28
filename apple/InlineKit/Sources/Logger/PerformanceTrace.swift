@@ -68,6 +68,7 @@ public enum PerformanceTrace {
     "Grid.State",
     "Navigation",
     "PointsOfInterest",
+    "auth.logout",
     "ios.home.commit",
     "ios.home.diff",
     "ios.home.navigation.back",
@@ -142,6 +143,7 @@ public enum PerformanceTrace {
     "requested",
     "success",
   ]
+  private static let breadcrumbOpaqueIdentifierKeys: Set<String> = ["transition_id"]
   private static let maxBreadcrumbMetricMagnitude = 1_000_000_000_000.0
   private static let maxBreadcrumbMetricCount = 16
 
@@ -207,6 +209,14 @@ public enum PerformanceTrace {
          let number = value as? NSNumber,
          CFGetTypeID(number) == CFBooleanGetTypeID() {
         projectedData[key] = number.boolValue
+        continue
+      }
+
+      if breadcrumbOpaqueIdentifierKeys.contains(key),
+         let identifier = value as? String,
+         UUID(uuidString: identifier) != nil
+      {
+        projectedData[key] = identifier
         continue
       }
 

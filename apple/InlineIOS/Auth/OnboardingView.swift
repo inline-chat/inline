@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import SwiftUI
 
@@ -49,6 +50,9 @@ struct OnboardingView: View {
       guard let completionID,
         let completion = providerSignIn.consumeCompletion(id: completionID)
       else { return }
+      guard (try? Auth.shared.handle.validateAccountMutation(completion.accountMutationToken)) != nil else {
+        return
+      }
       if completion.pendingSetup {
         navigation.push(.profile(userId: completion.userId))
       } else {

@@ -96,13 +96,21 @@ public enum Path: String {
 public final class ApiClient: ObservableObject, @unchecked Sendable {
   public static let shared = ApiClient()
   private let urlSession: URLSession
+  private let auth: AuthHandle
+  private let nativeLoginAvailable: Bool
 
   public convenience init() {
     self.init(urlSession: .shared)
   }
 
-  init(urlSession: URLSession) {
+  init(
+    urlSession: URLSession,
+    auth: AuthHandle = Auth.shared.handle,
+    nativeLoginAvailable: Bool = InlineProtocolNativeLogin.shared.isAvailable
+  ) {
     self.urlSession = urlSession
+    self.auth = auth
+    self.nativeLoginAvailable = nativeLoginAvailable
   }
 
   private let log = Log.scoped("ApiClient", level: .trace)
@@ -230,7 +238,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     _ path: Path,
     queryItems: [URLQueryItem] = [],
     includeToken: Bool = false,
-    authorizationToken: String? = nil
+    authorizationToken: String? = nil,
+    timeoutInterval: TimeInterval? = nil
   ) async throws -> T {
     guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
@@ -244,8 +253,11 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
+    if let timeoutInterval {
+      request.timeoutInterval = timeoutInterval
+    }
 
-    if let token = authorizationToken ?? (includeToken ? Auth.shared.getToken() : nil) {
+    if let token = authorizationToken ?? (includeToken ? auth.token() : nil) {
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
@@ -311,13 +323,15 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   private func postRequest<T: Decodable & Sendable>(
     _ path: Path,
     body: [String: Any],
-    includeToken: Bool = true
+    includeToken: Bool = true,
+    timeoutInterval: TimeInterval? = nil
   ) async throws -> T {
     do {
       let request = try Self.makeJSONPostRequest(
         path,
         body: body,
-        authorizationToken: includeToken ? Auth.shared.getToken() : nil
+        authorizationToken: includeToken ? auth.token() : nil,
+        timeoutInterval: timeoutInterval
       )
 
       let (data, response) = try await urlSession.data(for: request)
@@ -382,13 +396,17 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     _ path: Path,
     body: [String: Any],
     baseURL: String = ApiClient.baseURL,
-    authorizationToken: String? = nil
+    authorizationToken: String? = nil,
+    timeoutInterval: TimeInterval? = nil
   ) throws -> URLRequest {
     guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
       throw APIError.invalidURL
     }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
+    if let timeoutInterval {
+      request.timeoutInterval = timeoutInterval
+    }
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
     if let authorizationToken {
@@ -400,7 +418,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   // MARK: AUTH
 
   public func sendCode(email: String) async throws -> SendCode {
-    if InlineProtocolNativeLogin.shared.isAvailable {
+    try await auth.requireLoginAllowed()
+    if nativeLoginAvailable {
       _ = try await InlineProtocolNativeLogin.shared.beginEmail(
         email,
         client: try await Self.inlineProtocolClientInfo()
@@ -415,7 +434,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   }
 
   public func sendSmsCode(phoneNumber: String) async throws -> SendSmsCode {
-    if InlineProtocolNativeLogin.shared.isAvailable {
+    try await auth.requireLoginAllowed()
+    if nativeLoginAvailable {
       _ = try await InlineProtocolNativeLogin.shared.beginPhoneNumber(
         phoneNumber,
         client: try await Self.inlineProtocolClientInfo()
@@ -454,7 +474,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         inviteCode: inviteCode,
         timeZone: TimeZone.current.identifier
       )
-      return VerifyCode(user: ApiUser(from: result.user))
+      return VerifyCode(
+        user: ApiUser(from: result.user),
+        accountMutationToken: result.accountMutationToken
+      )
     }
     let sessionInfo = await SessionInfo.get()
     let deviceId = try await DeviceIdentifier.shared.getIdentifier()
@@ -517,7 +540,10 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         inviteCode: inviteCode,
         timeZone: TimeZone.current.identifier
       )
-      return VerifyCode(user: ApiUser(from: result.user))
+      return VerifyCode(
+        user: ApiUser(from: result.user),
+        accountMutationToken: result.accountMutationToken
+      )
     }
     var body: [String: Any] = [
       "code": code,
@@ -550,7 +576,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await postRequest(
       .providerAuthRedeem,
       body: ["ticket": ticket, "code_verifier": codeVerifier],
-      includeToken: false
+      includeToken: false,
+      timeoutInterval: 15
     )
   }
 
@@ -877,8 +904,15 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(.logout, includeToken: true)
   }
 
-  public func logout(bearerToken: String) async throws -> EmptyPayload {
-    try await request(.logout, authorizationToken: bearerToken)
+  public func logout(
+    bearerToken: String,
+    timeoutInterval: TimeInterval = 2
+  ) async throws -> EmptyPayload {
+    try await request(
+      .logout,
+      authorizationToken: bearerToken,
+      timeoutInterval: timeoutInterval
+    )
   }
 
   public func addReaction(messageId: Int64, chatId: Int64, emoji: String) async throws
@@ -1123,7 +1157,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     request.httpMethod = "POST"
     request.setValue(body.contentType, forHTTPHeaderField: "Content-Type")
 
-    if let token = Auth.shared.getToken() {
+    if let token = auth.token() {
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
@@ -1328,7 +1362,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     request.httpMethod = "POST"
     request.setValue(multipartFormData.contentType, forHTTPHeaderField: "Content-Type")
 
-    if let token = Auth.shared.getToken() {
+    if let token = auth.token() {
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
@@ -1775,11 +1809,23 @@ public struct VerifyCode: Codable, Sendable {
   public let userId: Int64
   public let token: String?
   public let user: ApiUser
+  public var accountMutationToken: AuthAccountMutationToken? = nil
 
-  public init(user: ApiUser, token: String? = nil) {
+  enum CodingKeys: String, CodingKey {
+    case userId
+    case token
+    case user
+  }
+
+  public init(
+    user: ApiUser,
+    token: String? = nil,
+    accountMutationToken: AuthAccountMutationToken? = nil
+  ) {
     userId = user.id
     self.token = token
     self.user = user
+    self.accountMutationToken = accountMutationToken
   }
 }
 

@@ -118,4 +118,14 @@ final class DatabasePromotionTests {
     let didPromoteAgain = await AppDatabase.promoteToPersistentIfPossible(db) { nil }
     #expect(didPromoteAgain == false)
   }
+
+  @Test("logout cleanup refuses to prove an in-memory fallback is the persistent store")
+  func logoutCleanupRequiresPersistentStorage() async {
+    let db = AppDatabase.empty()
+    #expect(db.isPersistent == false)
+
+    await #expect(throws: AppDatabase.LogoutCleanupError.self) {
+      try await AppDatabase.requirePersistentStorageForLogout(db) { false }
+    }
+  }
 }

@@ -37,10 +37,20 @@ public final actor Realtime: Sendable {
   }
 
   /// Apply updates as a result of an operation
-  public func applyUpdates(_ updates: [InlineProtocol.Update]) {
-    // TODO: connect to sync client
-    Task {
-      await api.sync.handle(updates: updates)
+  public func applyUpdates(
+    _ updates: [InlineProtocol.Update],
+    mutationToken: AuthAccountMutationToken
+  ) async {
+    await api.sync.handle(updates: updates, mutationToken: mutationToken)
+  }
+
+  private func writeAccountProjection<Result: Sendable>(
+    token: AuthAccountMutationToken,
+    _ operation: @escaping @Sendable (Database) throws -> Result
+  ) async throws -> Result {
+    try await db.dbWriter.write { database in
+      try Auth.shared.handle.validateAccountMutation(token)
+      return try operation(database)
     }
   }
 
@@ -190,51 +200,52 @@ public extension Realtime {
     .OneOf_Result?
   {
     do {
+      let mutationToken = try Auth.shared.handle.beginAccountMutation()
       log.trace("calling \(method)")
       let response = try await invoke(method, input: input)
 
       switch response {
         case let .getMe(result):
-          try handleResult_getMe(result)
+          try handleResult_getMe(result, mutationToken: mutationToken)
 
         case let .deleteMessages(result):
-          try handleResult_deleteMessages(result)
+          await handleResult_deleteMessages(result, mutationToken: mutationToken)
 
         case let .getChatHistory(result):
-          try handleResult_getChatHistory(input!, result)
+          try handleResult_getChatHistory(input!, result, mutationToken: mutationToken)
 
         case let .createChat(result):
-          try handleResult_createChat(result)
+          try handleResult_createChat(result, mutationToken: mutationToken)
 
         case let .getSpaceMembers(result):
-          try await handleResult_getSpaceMembers(input!, result)
+          try await handleResult_getSpaceMembers(input!, result, mutationToken: mutationToken)
 
         case let .inviteToSpace(result):
-          try await handleResult_inviteToSpace(result)
+          try await handleResult_inviteToSpace(result, mutationToken: mutationToken)
 
         case .deleteChat:
           try await handleResult_deleteChat()
 
         case let .getChatParticipants(result):
-          try await handleResult_getChatParticipants(input!, result)
+          try await handleResult_getChatParticipants(input!, result, mutationToken: mutationToken)
 
         case let .addChatParticipant(result):
-          try await handleResult_addChatParticipant(result, input: input!)
+          try await handleResult_addChatParticipant(result, input: input!, mutationToken: mutationToken)
 
         case let .removeChatParticipant(result):
-          try await handleResult_removeChatParticipant(result, input: input!)
+          try await handleResult_removeChatParticipant(result, input: input!, mutationToken: mutationToken)
 
         case let .translateMessages(result):
-          try await handleResult_translateMessages(result, input: input!)
+          try await handleResult_translateMessages(result, input: input!, mutationToken: mutationToken)
 
         case let .getChats(result):
-          try await handleResult_getChats(result)
+          try await handleResult_getChats(result, mutationToken: mutationToken)
 
         case let .updateUserSettings(result):
-          try await handleResult_updateUserSettings(result)
+          await handleResult_updateUserSettings(result, mutationToken: mutationToken)
 
         case let .markAsUnread(result):
-          try await handleResult_markAsUnread(result)
+          await handleResult_markAsUnread(result, mutationToken: mutationToken)
 
         default:
           break
@@ -247,24 +258,35 @@ public extension Realtime {
     }
   }
 
-  private func handleResult_getMe(_ result: GetMeResult) throws {
+  private func handleResult_getMe(
+    _ result: GetMeResult,
+    mutationToken: AuthAccountMutationToken
+  ) throws {
     log.trace("getMe result: \(result)")
     guard result.hasUser else { return }
 
     _ = try db.dbWriter.write { db in
+      try Auth.shared.handle.validateAccountMutation(mutationToken)
       try User.save(db, user: result.user)
     }
 
     log.trace("getMe saved")
   }
 
-  private func handleResult_deleteMessages(_ result: DeleteMessagesResult) throws {
+  private func handleResult_deleteMessages(
+    _ result: DeleteMessagesResult,
+    mutationToken: AuthAccountMutationToken
+  ) async {
     log.trace("deleteMessages result: \(result)")
 
-    applyUpdates(result.updates)
+    await applyUpdates(result.updates, mutationToken: mutationToken)
   }
 
-  private func handleResult_getChatHistory(_ input: RpcCall.OneOf_Input, _ result: GetChatHistoryResult) throws {
+  private func handleResult_getChatHistory(
+    _ input: RpcCall.OneOf_Input,
+    _ result: GetChatHistoryResult,
+    mutationToken: AuthAccountMutationToken
+  ) throws {
     log.trace("saving getChatHistory result")
 
     // need to extract peer id from input
@@ -290,6 +312,7 @@ public extension Realtime {
     Task.detached(priority: .userInitiated) {
       do {
         _ = try await self.db.dbWriter.write { db in
+          try Auth.shared.handle.validateAccountMutation(mutationToken)
           try GetChatHistoryTransaction.apply(result, context: context, db: db)
         }
 
@@ -302,12 +325,16 @@ public extension Realtime {
     }
   }
 
-  private func handleResult_createChat(_ result: CreateChatResult) throws {
+  private func handleResult_createChat(
+    _ result: CreateChatResult,
+    mutationToken: AuthAccountMutationToken
+  ) throws {
     log.trace("createChat result: \(result)")
 
     do {
       // Save chat and dialog to database
       try AppDatabase.shared.dbWriter.write { db in
+        try Auth.shared.handle.validateAccountMutation(mutationToken)
         do {
           let chat = Chat(from: result.chat)
           _ = try chat.saveFull(db)
@@ -331,13 +358,14 @@ public extension Realtime {
 
   private func handleResult_getSpaceMembers(
     _ input: RpcCall.OneOf_Input,
-    _ result: GetSpaceMembersResult
+    _ result: GetSpaceMembersResult,
+    mutationToken: AuthAccountMutationToken
   ) async throws {
     log.trace("getSpaceMembers")
     guard case let .getSpaceMembers(getSpaceMembersInput) = input else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    try await db.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       try Member
         .filter(Member.Columns.spaceId == getSpaceMembersInput.spaceID)
         .deleteAll(db)
@@ -355,9 +383,12 @@ public extension Realtime {
     log.trace("getSpaceMembers saved")
   }
 
-  private func handleResult_inviteToSpace(_ result: InviteToSpaceResult) async throws {
+  private func handleResult_inviteToSpace(
+    _ result: InviteToSpaceResult,
+    mutationToken: AuthAccountMutationToken
+  ) async throws {
     log.trace("inviteToSpace result: \(result)")
-    try await db.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       do {
         let user = User(from: result.user)
         try user.save(db)
@@ -392,7 +423,8 @@ public extension Realtime {
 
   private func handleResult_getChatParticipants(
     _ input: RpcCall.OneOf_Input,
-    _ result: GetChatParticipantsResult
+    _ result: GetChatParticipantsResult,
+    mutationToken: AuthAccountMutationToken
   ) async throws {
     log.trace("getChatParticipants result: \(result)")
 
@@ -401,7 +433,7 @@ public extension Realtime {
       return
     }
 
-    try await db.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       try ChatParticipant.filter(Column("chatId") == getChatParticipantsInput.chatID).deleteAll(db)
       try ChatParticipantGroup.filter(ChatParticipantGroup.Columns.chatId == getChatParticipantsInput.chatID)
         .deleteAll(db)
@@ -428,7 +460,8 @@ public extension Realtime {
 
   private func handleResult_addChatParticipant(
     _ result: AddChatParticipantResult,
-    input: RpcCall.OneOf_Input
+    input: RpcCall.OneOf_Input,
+    mutationToken: AuthAccountMutationToken
   ) async throws {
     log.trace("addChatParticipant result: \(result)")
 
@@ -437,7 +470,7 @@ public extension Realtime {
       return
     }
 
-    try await db.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       for user in result.users {
         _ = try User.save(db, user: user)
       }
@@ -458,7 +491,8 @@ public extension Realtime {
 
   private func handleResult_removeChatParticipant(
     _ result: RemoveChatParticipantResult,
-    input: RpcCall.OneOf_Input
+    input: RpcCall.OneOf_Input,
+    mutationToken: AuthAccountMutationToken
   ) async throws {
     log.trace("removeChatParticipant result: \(result)")
 
@@ -467,7 +501,7 @@ public extension Realtime {
       return
     }
 
-    try await db.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       _ = try ChatParticipant
         .filter(Column("chatId") == removeInput.chatID)
         .filter(Column("userId") == removeInput.userID)
@@ -481,7 +515,8 @@ public extension Realtime {
 
   private func handleResult_translateMessages(
     _ result: InlineProtocol.TranslateMessagesResult,
-    input: RpcCall.OneOf_Input
+    input: RpcCall.OneOf_Input,
+    mutationToken: AuthAccountMutationToken
   ) async throws {
     log.trace("translate result: \(result)")
 
@@ -492,7 +527,7 @@ public extension Realtime {
 
     let peerID = input.peerID
 
-    try await db.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       guard let chat = try Chat.getByPeerId(db: db, peerId: peerID.toPeer()) else {
         self.log.error("could not find chat")
         return
@@ -512,10 +547,11 @@ public extension Realtime {
 
   private func handleResult_getChats(
     _ result: InlineProtocol.GetChatsResult,
+    mutationToken: AuthAccountMutationToken
   ) async throws {
     log.trace("getChats result: \(result)")
 
-    try await db.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       // Save spaces
       for space in result.spaces {
         do {
@@ -585,17 +621,19 @@ public extension Realtime {
 
   private func handleResult_updateUserSettings(
     _ result: InlineProtocol.UpdateUserSettingsResult,
-  ) async throws {
+    mutationToken: AuthAccountMutationToken
+  ) async {
     log.trace("updateNotificationSettings result: \(result)")
 
-    applyUpdates(result.updates)
+    await applyUpdates(result.updates, mutationToken: mutationToken)
   }
 
   private func handleResult_markAsUnread(
-    _ result: InlineProtocol.MarkAsUnreadResult
-  ) async throws {
+    _ result: InlineProtocol.MarkAsUnreadResult,
+    mutationToken: AuthAccountMutationToken
+  ) async {
     log.trace("markAsUnread result: \(result)")
 
-    applyUpdates(result.updates)
+    await applyUpdates(result.updates, mutationToken: mutationToken)
   }
 }

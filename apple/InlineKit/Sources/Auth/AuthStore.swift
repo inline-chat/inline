@@ -115,6 +115,13 @@ private final class BufferedAsyncStreamBroadcaster<Element: Sendable>: @unchecke
   }
 }
 
+private struct StoredAuthorityBackup {
+  var primary: [String: Data]
+  var fallback: [String: Data]
+  var mocked: [String: Data]
+  var userIDHint: Int64?
+}
+
 actor AuthStore {
   private let log = Log.scoped("AuthStore")
 
@@ -125,12 +132,21 @@ actor AuthStore {
   private let primaryKeychain: KeychainStore
   private let fallbackKeychain: KeychainStore?
   private let userDefaultsKey: String
-  private let logoutPendingKey: String
+  private nonisolated let logoutPendingKey: String
+  private nonisolated let logoutAttemptIDKey: String
+  private nonisolated let loginCommitPendingKey: String
   private let readSnapshot: (KeychainStore, KeychainStore?, String) -> AuthSnapshot
+  private let credentialDeletionOverride: (@Sendable () -> Bool)?
+  private let authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)?
+  private let authorityRestoreOverride: (@Sendable () -> Bool)?
+  private let logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)?
+  private let credentialWriteInterleavingHook: (@Sendable () -> Void)?
+  private let authorityFinalizationInterleavingHook: (@Sendable () -> Void)?
   private let mocked: Bool
   private let namespace: String?
+  private nonisolated let logoutMarkerLock = NSLock()
 
-  private let cache: AuthSnapshotCache
+  private nonisolated let cache: AuthSnapshotCache
 
   private nonisolated let snapshotPipe = AuthSnapshotPipe()
   private nonisolated let eventBroadcaster = BufferedAsyncStreamBroadcaster<AuthEvent>(
@@ -140,12 +156,19 @@ actor AuthStore {
 
   private var lastStatus: AuthStatus
   private var lockedRetryTask: Task<Void, Never>?
+  private var stagedAuthorityBaseline: StoredAuthorityBackup?
 
   init(
     cache: AuthSnapshotCache,
     mocked: Bool,
     namespace: String? = nil,
-    readSnapshot: ((KeychainStore, KeychainStore?, String) -> AuthSnapshot)? = nil
+    readSnapshot: ((KeychainStore, KeychainStore?, String) -> AuthSnapshot)? = nil,
+    credentialDeletionOverride: (@Sendable () -> Bool)? = nil,
+    authorityReplacementDeletionOverride: (@Sendable (String) -> Bool?)? = nil,
+    authorityRestoreOverride: (@Sendable () -> Bool)? = nil,
+    logoutFencePersistenceOverride: (@Sendable (UUID) -> Bool)? = nil,
+    credentialWriteInterleavingHook: (@Sendable () -> Void)? = nil,
+    authorityFinalizationInterleavingHook: (@Sendable () -> Void)? = nil
   ) {
     self.cache = cache
     self.mocked = mocked
@@ -154,9 +177,21 @@ actor AuthStore {
     fallbackKeychain = AuthKeychainConfig.makeFallbackKeychainIfNeeded(mocked: mocked, namespace: namespace)
 
     let prefix = AuthKeychainConfig.userDefaultsPrefix(mocked: mocked, namespace: namespace)
-    userDefaultsKey = "\(prefix)userId"
-    logoutPendingKey = "\(prefix)logoutPending"
-    self.readSnapshot = readSnapshot ?? { primaryKeychain, fallbackKeychain, userDefaultsKey in
+    let resolvedUserDefaultsKey = "\(prefix)userId"
+    let resolvedLogoutPendingKey = "\(prefix)logoutPending"
+    let resolvedLogoutAttemptIDKey = "\(prefix)logoutAttemptID"
+    let resolvedLoginCommitPendingKey = "\(prefix)loginCommitPendingAttemptID"
+    userDefaultsKey = resolvedUserDefaultsKey
+    logoutPendingKey = resolvedLogoutPendingKey
+    logoutAttemptIDKey = resolvedLogoutAttemptIDKey
+    loginCommitPendingKey = resolvedLoginCommitPendingKey
+    self.credentialDeletionOverride = credentialDeletionOverride
+    self.authorityReplacementDeletionOverride = authorityReplacementDeletionOverride
+    self.authorityRestoreOverride = authorityRestoreOverride
+    self.logoutFencePersistenceOverride = logoutFencePersistenceOverride
+    self.credentialWriteInterleavingHook = credentialWriteInterleavingHook
+    self.authorityFinalizationInterleavingHook = authorityFinalizationInterleavingHook
+    let snapshotReader = readSnapshot ?? { primaryKeychain, fallbackKeychain, userDefaultsKey in
       Self.readSnapshot(
         primaryKeychain: primaryKeychain,
         fallbackKeychain: fallbackKeychain,
@@ -165,34 +200,47 @@ actor AuthStore {
         namespace: namespace
       )
     }
+    self.readSnapshot = snapshotReader
 
     // Seed from storage immediately so sync callers (DB init) see the best answer we have.
-    let logoutPending = UserDefaults.standard.bool(forKey: logoutPendingKey)
-    let initial = logoutPending
-      ? AuthSnapshot(status: .unauthenticated, didHydrate: true)
-      : self.readSnapshot(primaryKeychain, fallbackKeychain, userDefaultsKey)
-    cache.update(initial)
+    let loginCommitMarkerPresent = UserDefaults.standard.object(forKey: resolvedLoginCommitPendingKey) != nil
+    let logoutMarkerPresent = UserDefaults.standard.object(forKey: resolvedLogoutPendingKey) != nil
+    let logoutAttemptMarkerPresent = UserDefaults.standard.object(forKey: resolvedLogoutAttemptIDKey) != nil
+    let loginCommitPendingID = UserDefaults.standard.string(forKey: resolvedLoginCommitPendingKey)
+      .flatMap(UUID.init(uuidString:))
+    let storedLogoutAttemptID = UserDefaults.standard.string(forKey: resolvedLogoutAttemptIDKey)
+      .flatMap(UUID.init(uuidString:))
+    let recoveredTransitionID = storedLogoutAttemptID ?? loginCommitPendingID ?? UUID()
+    let effectiveLogoutPending = logoutMarkerPresent || logoutAttemptMarkerPresent || loginCommitMarkerPresent
+    if effectiveLogoutPending {
+      // A partial/corrupt logout marker or a crash during staged login cannot safely reconstruct
+      // authority. Promote every marker presence to the same platform-owned recovery transition.
+      UserDefaults.standard.set(recoveredTransitionID.uuidString, forKey: resolvedLogoutAttemptIDKey)
+      UserDefaults.standard.set(true, forKey: resolvedLogoutPendingKey)
+      _ = UserDefaults.standard.synchronize()
+    }
+    let initial = effectiveLogoutPending
+      ? AuthSnapshot(
+        status: .loggingOut(userIdHint: Self.readUserId(key: resolvedUserDefaultsKey)),
+        didHydrate: true
+      )
+      : snapshotReader(primaryKeychain, fallbackKeychain, resolvedUserDefaultsKey)
     lastStatus = initial.status
 
-    snapshotPipe.yield(initial)
-
-    if let fallback = fallbackKeychain {
-      // Migrate legacy macOS keychain items (no access-group) to the primary access group.
-      Self.migrateKeyIfFoundInFallback(Self.legacyTokenKey, primary: primaryKeychain, fallback: fallback)
-      Self.migrateKeyIfFoundInFallback(Self.credentialsV2Key, primary: primaryKeychain, fallback: fallback)
-      Self.migrateKeyIfFoundInFallback(
-        Self.inlineProtocolCredentialsKey, primary: primaryKeychain, fallback: fallback
-      )
+    cache.seedLoginCommitPending(loginCommitMarkerPresent)
+    cache.seedLogoutPending(effectiveLogoutPending, correlationID: recoveredTransitionID)
+    if effectiveLogoutPending, storedLogoutAttemptID == nil,
+      let recoveredFence = cache.currentLogoutFence()
+    {
+      UserDefaults.standard.set(recoveredFence.correlationID.uuidString, forKey: resolvedLogoutAttemptIDKey)
     }
+    cache.update(initial)
+
+    snapshotPipe.yield(initial)
 
     if case .locked = initial.status {
       Task { [weak self] in
         await self?.startLockedRetryLoopIfNeeded()
-      }
-    }
-    if logoutPending {
-      Task { [weak self] in
-        await self?.recoverInterruptedLogoutIfNeeded()
       }
     }
   }
@@ -211,7 +259,14 @@ actor AuthStore {
     eventBroadcaster.stream()
   }
 
-  func saveCredentials(token: String, userId: Int64) async throws {
+  func saveCredentials(
+    token: String,
+    userId: Int64,
+    loginAttempt: AuthLoginAttempt? = nil
+  ) async throws {
+    if let loginAttempt {
+      try validateLoginAttempt(loginAttempt)
+    }
     guard !hasPendingLogout() else {
       log.warning("AUTH2_SAVE rejected while logout cleanup is pending")
       throw AuthStorageError.logoutInProgress
@@ -226,97 +281,30 @@ actor AuthStore {
       throw AuthStorageError.encodingFailed
     }
 
-    if mocked {
-      AuthKeychainConfig.mockSet(token, forKey: Self.legacyTokenKey, namespace: namespace)
-      AuthKeychainConfig.mockSet(encodedRecord, forKey: Self.credentialsV2Key, namespace: namespace)
-      AuthKeychainConfig.mockDelete(Self.inlineProtocolCredentialsKey, namespace: namespace)
-      UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
-      UserDefaults.standard.removeObject(forKey: logoutPendingKey)
-
-      log.info("AUTH2_SAVE mocked userId=\(userId)")
-      await update(AuthSnapshot(
-        status: .authenticated(record),
-        didHydrate: true
-      ))
-      return
-    }
-
-    // Persist legacy token for backward compatibility with older builds.
-    let legacySavedPrimary = primaryKeychain.set(
-      token,
-      forKey: Self.legacyTokenKey,
-      withAccess: .accessibleAfterFirstUnlock
-    )
-    let legacyPrimaryStatus = primaryKeychain.lastResultCode
-
-    // Persist v2 record (token + userId together).
-    var v2SavedPrimary = false
-    var v2PrimaryStatus = errSecSuccess
-    v2SavedPrimary = primaryKeychain.set(
-      encodedRecord,
-      forKey: Self.credentialsV2Key,
-      withAccess: .accessibleAfterFirstUnlock
-    )
-    v2PrimaryStatus = primaryKeychain.lastResultCode
-
-    // Best-effort macOS fallback write if the primary access-group isn't working.
-    var legacySavedFallback = false
-    var legacyFallbackStatus = errSecSuccess
-    var v2SavedFallback = false
-    var v2FallbackStatus = errSecSuccess
-    if let fallbackKeychain {
-      if legacySavedPrimary == false {
-        legacySavedFallback = fallbackKeychain.set(
-          token,
-          forKey: Self.legacyTokenKey,
-          withAccess: .accessibleAfterFirstUnlock
-        )
-        legacyFallbackStatus = fallbackKeychain.lastResultCode
-      }
-      if v2SavedPrimary == false {
-        v2SavedFallback = fallbackKeychain.set(
-          encodedRecord,
-          forKey: Self.credentialsV2Key,
-          withAccess: .accessibleAfterFirstUnlock
-        )
-        v2FallbackStatus = fallbackKeychain.lastResultCode
-      }
-    }
-
-    let legacySaved = legacySavedPrimary || legacySavedFallback
-    let v2Saved = v2SavedPrimary || v2SavedFallback
-
-    guard legacySaved || v2Saved else {
-      log.error("AUTH2_SAVE failed to persist bearer credentials; retaining current session authority")
-      throw AuthStorageError.keychainWriteFailed
-    }
-
-    _ = primaryKeychain.delete(Self.inlineProtocolCredentialsKey)
-    if let fallbackKeychain {
-      _ = fallbackKeychain.delete(Self.inlineProtocolCredentialsKey)
-    }
-
-    // Persist userId hint for routing + recovery.
-    UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: logoutPendingKey)
-
-    log.info(
-      "AUTH2_SAVE userId=\(userId)" +
-        " legacySaved=\(legacySaved ? 1 : 0) v2Saved=\(v2Saved ? 1 : 0)" +
-        " legacyPrimary=\(legacySavedPrimary ? 1 : 0) legacyPrimaryStatus=\(legacyPrimaryStatus)" +
-        " v2Primary=\(v2SavedPrimary ? 1 : 0) v2PrimaryStatus=\(v2PrimaryStatus)" +
-        " legacyFallback=\(legacySavedFallback ? 1 : 0) legacyFallbackStatus=\(legacyFallbackStatus)" +
-        " v2Fallback=\(v2SavedFallback ? 1 : 0) v2FallbackStatus=\(v2FallbackStatus)"
-    )
-
     let snapshot = AuthSnapshot(
       status: .authenticated(record),
       didHydrate: true
     )
-    await update(snapshot)
+    try persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
+      try self.replaceStoredAuthority(
+        with: [
+          Self.legacyTokenKey: Data(token.utf8),
+          Self.credentialsV2Key: encodedRecord,
+        ],
+        replacing: [Self.inlineProtocolCredentialsKey],
+        replacementLabel: "inline_protocol"
+      )
+    }
+    log.info("AUTH2_SAVE bearer authority persisted staged=\(loginAttempt == nil ? 0 : 1)")
   }
 
-  func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {
+  func saveInlineProtocolCredentials(
+    _ credentials: InlineProtocolSessionCredentials,
+    loginAttempt: AuthLoginAttempt? = nil
+  ) async throws {
+    if let loginAttempt {
+      try validateLoginAttempt(loginAttempt)
+    }
     guard !hasPendingLogout() else {
       throw AuthStorageError.logoutInProgress
     }
@@ -327,101 +315,301 @@ actor AuthStore {
     } catch {
       throw AuthStorageError.encodingFailed
     }
-    let saved: Bool
-    if mocked {
-      AuthKeychainConfig.mockSet(data, forKey: Self.inlineProtocolCredentialsKey, namespace: namespace)
-      AuthKeychainConfig.mockDelete(Self.legacyTokenKey, namespace: namespace)
-      AuthKeychainConfig.mockDelete(Self.credentialsV2Key, namespace: namespace)
-      saved = true
-    } else {
-      let primarySaved = primaryKeychain.set(
-        data,
-        forKey: Self.inlineProtocolCredentialsKey,
-        withAccess: .accessibleAfterFirstUnlock
-      )
-      let fallbackSaved = if !primarySaved, let fallbackKeychain {
-        fallbackKeychain.set(
-          data,
-          forKey: Self.inlineProtocolCredentialsKey,
-          withAccess: .accessibleAfterFirstUnlock
-        )
-      } else { false }
-      saved = primarySaved || fallbackSaved
-    }
-    guard saved else { throw AuthStorageError.keychainWriteFailed }
-    if !mocked {
-      _ = primaryKeychain.delete(Self.legacyTokenKey)
-      _ = primaryKeychain.delete(Self.credentialsV2Key)
-      if let fallbackKeychain {
-        _ = fallbackKeychain.delete(Self.legacyTokenKey)
-        _ = fallbackKeychain.delete(Self.credentialsV2Key)
-      }
-    }
-    UserDefaults.standard.set(NSNumber(value: credentials.userId), forKey: userDefaultsKey)
-    UserDefaults.standard.removeObject(forKey: logoutPendingKey)
-    await update(AuthSnapshot(
+    let snapshot = AuthSnapshot(
       status: .authenticatedV3(userId: credentials.userId),
       didHydrate: true,
       inlineProtocol: credentials
+    )
+    try persistCredentialAuthority(snapshot: snapshot, loginAttempt: loginAttempt) {
+      try self.replaceStoredAuthority(
+        with: [Self.inlineProtocolCredentialsKey: data],
+        replacing: [Self.legacyTokenKey, Self.credentialsV2Key],
+        replacementLabel: "bearer"
+      )
+    }
+    log.info("AUTH2_SAVE inline protocol authority persisted staged=\(loginAttempt == nil ? 0 : 1)")
+  }
+
+  nonisolated func beginLogoutSynchronously() throws -> AuthLogoutFence {
+    let storedID = UserDefaults.standard.string(forKey: logoutAttemptIDKey)
+      .flatMap(UUID.init(uuidString:))
+    let fence = cache.beginLogout(correlationID: storedID ?? UUID())
+    do {
+      try logoutMarkerLock.withLock {
+        // Completion may have won after this caller observed an existing fence. Never recreate a
+        // durable marker for a fence that is no longer the in-memory authority.
+        guard cache.isLogoutFenceCurrent(fence) else {
+          throw AuthStorageError.logoutFencePersistenceFailed
+        }
+        if let logoutFencePersistenceOverride,
+           logoutFencePersistenceOverride(fence.correlationID) == false
+        {
+          throw AuthStorageError.logoutFencePersistenceFailed
+        }
+        UserDefaults.standard.set(fence.correlationID.uuidString, forKey: logoutAttemptIDKey)
+        UserDefaults.standard.set(true, forKey: logoutPendingKey)
+        guard UserDefaults.standard.synchronize(),
+              UserDefaults.standard.bool(forKey: logoutPendingKey),
+              UserDefaults.standard.string(forKey: logoutAttemptIDKey) == fence.correlationID.uuidString
+        else { throw AuthStorageError.logoutFencePersistenceFailed }
+      }
+      return fence
+    } catch {
+      let durableMarkerIsAbsent = UserDefaults.standard.object(forKey: logoutPendingKey) == nil
+        && UserDefaults.standard.object(forKey: logoutAttemptIDKey) == nil
+      let aborted = cache.abortUnpersistedLogoutFence(
+        durableMarkerIsAbsent: durableMarkerIsAbsent
+      )
+      if aborted {
+        UserDefaults.standard.removeObject(forKey: logoutAttemptIDKey)
+        _ = UserDefaults.standard.synchronize()
+      }
+      throw error
+    }
+  }
+
+  func beginLogout() throws -> AuthLogoutFence {
+    try beginLogoutSynchronously()
+  }
+
+  func publishLogoutInProgress() async {
+    let userIdHint = cache.snapshot().currentUserId ?? Self.readUserId(key: userDefaultsKey)
+    await update(AuthSnapshot(
+      status: .loggingOut(userIdHint: userIdHint),
+      didHydrate: true
     ))
   }
 
-  func beginLogout() {
-    UserDefaults.standard.set(true, forKey: logoutPendingKey)
+  nonisolated func hasPendingLogout() -> Bool {
+    let durablePending = UserDefaults.standard.object(forKey: logoutPendingKey) != nil
+      || UserDefaults.standard.object(forKey: logoutAttemptIDKey) != nil
+    if durablePending, cache.hasPendingLogout() == false {
+      let storedID = UserDefaults.standard.string(forKey: logoutAttemptIDKey)
+        .flatMap(UUID.init(uuidString:))
+      cache.seedLogoutPending(true, correlationID: storedID)
+    }
+    return durablePending || cache.hasPendingLogout()
   }
 
-  func hasPendingLogout() -> Bool {
-    UserDefaults.standard.bool(forKey: logoutPendingKey)
+  nonisolated func currentLogoutFence() -> AuthLogoutFence? {
+    cache.currentLogoutFence()
   }
 
-  func recoverInterruptedLogoutIfNeeded() async {
-    guard hasPendingLogout() else { return }
-    await destroyCredentials(completingPendingLogout: false)
+  nonisolated func hasPendingAccountTransition() -> Bool {
+    hasPendingLogout() || cache.hasPendingAccountTransition()
   }
 
-  func logOut() async {
-    await destroyCredentials(completingPendingLogout: true)
-  }
-
-  private func destroyCredentials(completingPendingLogout: Bool) async {
-    beginLogout()
-    if mocked {
-      AuthKeychainConfig.mockDelete(Self.legacyTokenKey, namespace: namespace)
-      AuthKeychainConfig.mockDelete(Self.credentialsV2Key, namespace: namespace)
-      AuthKeychainConfig.mockDelete(Self.inlineProtocolCredentialsKey, namespace: namespace)
-      UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-      if completingPendingLogout {
-        UserDefaults.standard.removeObject(forKey: logoutPendingKey)
-      }
-
-      log.info("AUTH2_LOGOUT mocked")
-      await update(AuthSnapshot(status: .unauthenticated, didHydrate: true))
+  func requireLoginAllowed() throws {
+    guard !hasPendingLogout() else {
+      throw AuthStorageError.logoutInProgress
+    }
+    guard cache.hasPendingLoginCommit() == false else {
+      throw AuthStorageError.loginUnavailable
+    }
+    switch lastStatus {
+    case .unauthenticated, .reauthRequired:
       return
+    case .loggingOut:
+      throw AuthStorageError.logoutInProgress
+    case .hydrating, .locked:
+      throw AuthStorageError.loginUnavailable
+    case .authenticated, .authenticatedV3:
+      throw AuthStorageError.alreadyAuthenticated
     }
+  }
 
-    let primaryDeleted = Self.deleteCredentials(from: primaryKeychain)
-    var fallbackDeleted = true
-    if let fallbackKeychain {
-      fallbackDeleted = Self.deleteCredentials(from: fallbackKeychain)
+  func beginLoginAttempt(allowAuthenticated: Bool) throws -> AuthLoginAttempt {
+    guard !hasPendingLogout(), !cache.hasPendingLogout() else {
+      throw AuthStorageError.logoutInProgress
     }
-    UserDefaults.standard.removeObject(forKey: userDefaultsKey)
-    if primaryDeleted, fallbackDeleted, completingPendingLogout {
-      UserDefaults.standard.removeObject(forKey: logoutPendingKey)
-    } else {
-      if !primaryDeleted || !fallbackDeleted {
-        log.error("AUTH2_LOGOUT credential deletion incomplete; retaining logout marker")
+    guard cache.hasPendingLoginCommit() == false else {
+      throw AuthStorageError.loginUnavailable
+    }
+    switch lastStatus {
+    case .unauthenticated, .reauthRequired:
+      return cache.makeLoginAttempt()
+    case .loggingOut:
+      throw AuthStorageError.logoutInProgress
+    case .hydrating, .locked:
+      throw AuthStorageError.loginUnavailable
+    case .authenticated, .authenticatedV3:
+      guard allowAuthenticated else {
+        throw AuthStorageError.alreadyAuthenticated
       }
+      return cache.makeLoginAttempt()
     }
+  }
 
-    log.info("AUTH2_LOGOUT")
+  func validateLoginAttempt(_ attempt: AuthLoginAttempt) throws {
+    guard cache.isLoginAttemptCurrent(attempt) else {
+      if hasPendingLogout() || cache.hasPendingLogout() {
+        throw AuthStorageError.logoutInProgress
+      }
+      throw AuthStorageError.loginSuperseded
+    }
+  }
+
+  func destroyCredentialsForPendingLogout(
+    fence: AuthLogoutFence
+  ) async -> AuthCredentialDestructionProof? {
+    guard hasPendingLogout(), cache.isLogoutFenceCurrent(fence) else {
+      log.error("AUTH2_LOGOUT rejected credential destruction for a stale logout fence")
+      return nil
+    }
+    if let credentialDeletionOverride, credentialDeletionOverride() == false {
+      await preserveLogoutAfterCredentialDeletionFailure()
+      return nil
+    }
+    let userIdHint = cache.snapshot().currentUserId ?? Self.readUserId(key: userDefaultsKey)
+    guard deleteAllStoredAuthority() else {
+      log.error(
+        "AUTH2_LOGOUT credential deletion incomplete; retaining logout marker",
+        error: AuthStorageError.keychainDeleteFailed
+      )
+      await preserveLogoutAfterCredentialDeletionFailure(userIdHint: userIdHint)
+      return nil
+    }
+    log.info("AUTH2_LOGOUT credentials destroyed verified_absent=1")
+    return cache.isLogoutFenceCurrent(fence)
+      ? AuthCredentialDestructionProof(fence: fence)
+      : nil
+  }
+
+  private func preserveLogoutAfterCredentialDeletionFailure(userIdHint: Int64? = nil) async {
+    log.error(
+      "AUTH2_LOGOUT credential deletion incomplete; retaining logout marker",
+      error: AuthStorageError.keychainDeleteFailed
+    )
+    await update(AuthSnapshot(
+      status: .loggingOut(
+        userIdHint: userIdHint ?? cache.snapshot().currentUserId ?? Self.readUserId(key: userDefaultsKey)
+      ),
+      didHydrate: true
+    ))
+  }
+
+  func finalizeCredentialsCommittedByLoginAttempt(
+    _ attempt: AuthLoginAttempt
+  ) throws -> AuthAccountMutationToken {
+    guard cache.prepareStagedAuthorityFinalization(attempt) else {
+      throw credentialCommitFenceError(for: attempt)
+    }
+    UserDefaults.standard.removeObject(forKey: loginCommitPendingKey)
+    guard UserDefaults.standard.synchronize(),
+          UserDefaults.standard.object(forKey: loginCommitPendingKey) == nil
+    else { throw AuthStorageError.loginUnavailable }
+    authorityFinalizationInterleavingHook?()
+    let accountMutationToken = cache.finalizeStagedAuthority(
+      attempt,
+      publish: { snapshot in
+        self.publishAuthenticatedSnapshot(snapshot)
+      }
+    )
+    guard let accountMutationToken else { throw credentialCommitFenceError(for: attempt) }
+    stagedAuthorityBaseline = nil
+    updateLockedRetryLoop(for: cache.snapshot().status)
+    return accountMutationToken
+  }
+
+  func rollbackCredentialsCommittedByLoginAttempt(_ attempt: AuthLoginAttempt) async {
+    guard cache.isStagedAuthorityOwned(by: attempt), hasPendingLogout() == false,
+          let baseline = stagedAuthorityBaseline
+    else { return }
+    do {
+      try restoreStoredAuthority(baseline)
+      UserDefaults.standard.removeObject(forKey: loginCommitPendingKey)
+      guard UserDefaults.standard.synchronize(),
+            UserDefaults.standard.object(forKey: loginCommitPendingKey) == nil
+      else { throw AuthStorageError.loginUnavailable }
+      let aborted = cache.abortAuthorityStaging(attempt)
+      guard aborted else { return }
+      stagedAuthorityBaseline = nil
+      if let userID = cache.snapshot().currentUserId {
+        UserDefaults.standard.set(NSNumber(value: userID), forKey: userDefaultsKey)
+      } else {
+        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+      }
+    } catch {
+      log.error(
+        "AUTH2_LOGIN rollback failed; retaining pending login authority fence",
+        error: error
+      )
+      promoteFailedLoginToRecovery(correlationID: attempt.correlationID)
+    }
+  }
+
+  /// The minimum database projection is already committed, so restoring the previous credential
+  /// authority would create a cross-account half-state. Retain the staged authority behind a
+  /// durable recovery transition and let the platform logout owner clear both sides together.
+  func promoteProjectedLoginToRecovery(_ attempt: AuthLoginAttempt) {
+    guard cache.isStagedAuthorityOwned(by: attempt) || hasPendingLogout() else { return }
+    promoteFailedLoginToRecovery(correlationID: attempt.correlationID)
+  }
+
+  func completePendingLogout(
+    fence: AuthLogoutFence,
+    databaseProof: AuthDatabaseCleanupProof,
+    credentialProof: AuthCredentialDestructionProof,
+    completionPermit: AuthLogoutCompletionPermit
+  ) async -> Bool {
+    guard databaseProof.fence == fence, credentialProof.fence == fence,
+          completionPermit.fence == fence,
+          hasPendingLogout(), cache.isLogoutFenceCurrent(fence)
+    else {
+      log.error("AUTH2_LOGOUT refused completion without matching cleanup proofs")
+      return false
+    }
 
     let snapshot = AuthSnapshot(status: .unauthenticated, didHydrate: true)
-    await update(snapshot)
+    let previousStatus = lastStatus
+    let completed = logoutMarkerLock.withLock {
+      guard cache.isLogoutFenceCurrent(fence) else { return false }
+      UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+      UserDefaults.standard.removeObject(forKey: logoutPendingKey)
+      UserDefaults.standard.removeObject(forKey: logoutAttemptIDKey)
+      UserDefaults.standard.removeObject(forKey: loginCommitPendingKey)
+      let markersRemoved = UserDefaults.standard.synchronize()
+        && UserDefaults.standard.object(forKey: logoutPendingKey) == nil
+        && UserDefaults.standard.object(forKey: logoutAttemptIDKey) == nil
+        && UserDefaults.standard.object(forKey: loginCommitPendingKey) == nil
+      let didComplete = markersRemoved && completionPermit.completeIfActive {
+        cache.completeLogout(
+          fence,
+          snapshot: snapshot,
+          publish: {
+            self.lastStatus = snapshot.status
+            _ = self.snapshotPipe.yield(snapshot)
+            if previousStatus.isAuthenticated {
+              self.eventBroadcaster.yield(.logout)
+            }
+          }
+        )
+      }
+      if didComplete == false, cache.isLogoutFenceCurrent(fence) {
+        // Deadline revocation, persistence failure, or a mismatched fence is fail-closed. Restore
+        // the exact durable pair before another begin call can cross this marker transaction.
+        UserDefaults.standard.set(fence.correlationID.uuidString, forKey: logoutAttemptIDKey)
+        UserDefaults.standard.set(true, forKey: logoutPendingKey)
+        _ = UserDefaults.standard.synchronize()
+      }
+      return didComplete
+    }
+    guard completed else {
+      log.error(
+        "AUTH2_LOGOUT refused completion or could not durably remove transition marker",
+        error: AuthStorageError.logoutFencePersistenceFailed
+      )
+      return false
+    }
+    updateLockedRetryLoop(for: snapshot.status)
+    stagedAuthorityBaseline = nil
+    log.info("AUTH2_LOGOUT completed transition_id=\(fence.correlationID.uuidString)")
+    return true
   }
 
   func refreshFromStorage() async {
-    if hasPendingLogout() {
-      log.warning("AUTH2_REFRESH skipped while logout credential destruction is pending")
+    guard cache.hasPendingAccountTransition() == false else {
+      log.warning("AUTH2_REFRESH skipped while an account transition is pending")
       return
     }
     let snapshot = readSnapshot(primaryKeychain, fallbackKeychain, userDefaultsKey)
@@ -434,76 +622,314 @@ actor AuthStore {
       }
     }
 
-    // If we recovered via macOS fallback keychain, re-save into primary access group.
-    if mocked == false, case let .authenticated(creds) = snapshot.status {
-      let legacySavedPrimary = primaryKeychain.set(
-        creds.token,
-        forKey: Self.legacyTokenKey,
-        withAccess: .accessibleAfterFirstUnlock
-      )
-      let legacyPrimaryStatus = primaryKeychain.lastResultCode
-
-      var v2SavedPrimary = false
-      var v2PrimaryStatus = errSecSuccess
-      do {
-        let data = try JSONEncoder().encode(creds)
-        v2SavedPrimary = primaryKeychain.set(
-          data,
-          forKey: Self.credentialsV2Key,
-          withAccess: .accessibleAfterFirstUnlock
-        )
-        v2PrimaryStatus = primaryKeychain.lastResultCode
-      } catch {
-        log.error("AUTH2 encode credentials failed during refresh", error: error)
-      }
-      if let fallbackKeychain {
-        // Only delete legacy items from the fallback if we successfully persisted them to primary.
-        if legacySavedPrimary {
-          _ = fallbackKeychain.delete(Self.legacyTokenKey)
-        }
-        if v2SavedPrimary {
-          _ = fallbackKeychain.delete(Self.credentialsV2Key)
-        }
-
-        if legacySavedPrimary == false || v2SavedPrimary == false {
-          log.warning(
-            "AUTH2 refresh could not migrate credentials to primary; keeping fallback " +
-              "legacySavedPrimary=\(legacySavedPrimary ? 1 : 0) legacyPrimaryStatus=\(legacyPrimaryStatus) " +
-              "v2SavedPrimary=\(v2SavedPrimary ? 1 : 0) v2PrimaryStatus=\(v2PrimaryStatus)"
-          )
-        }
-      }
-      UserDefaults.standard.set(NSNumber(value: creds.userId), forKey: userDefaultsKey)
-    }
-
+    // Refresh is deliberately read-only. Opportunistic keychain migration used to write old
+    // fallback credentials after this read, which could resurrect authority across a concurrent
+    // synchronous logout fence. Authority changes now happen only in the staged login/logout paths.
     await update(snapshot)
   }
 
   func repairUserIdHint() async {
     guard Self.readUserId(key: userDefaultsKey) == nil else { return }
-
-    if let userId = cache.snapshot().currentUserId {
-      UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
-      log.info("AUTH2_REPAIR_USER_ID_HINT source=cache")
-      return
-    }
-
+    // Keep launch repair read-only for the same reason as refreshFromStorage. The in-memory
+    // snapshot can derive its user ID from V2/V3 credentials without repopulating logout-owned
+    // UserDefaults after the transition begins.
     await refreshFromStorage()
-
-    guard Self.readUserId(key: userDefaultsKey) == nil, let userId = cache.snapshot().currentUserId else {
-      return
+    if cache.snapshot().currentUserId != nil {
+      log.info("AUTH2_REPAIR_USER_ID_HINT source=credential_snapshot persistence=skipped")
     }
-
-    UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
-    log.info("AUTH2_REPAIR_USER_ID_HINT source=refresh")
   }
 
   // MARK: - Internals
 
-  private func update(_ snapshot: AuthSnapshot) async {
+  private static let authorityKeys = [
+    legacyTokenKey,
+    credentialsV2Key,
+    inlineProtocolCredentialsKey,
+  ]
+
+  private func persistCredentialAuthority(
+    snapshot: AuthSnapshot,
+    loginAttempt: AuthLoginAttempt?,
+    writeAuthority: () throws -> Void
+  ) throws {
+    let finalizeImmediately = loginAttempt == nil
+    let currentSnapshot = cache.snapshot()
+    let preservesAccountMutationGeneration = finalizeImmediately &&
+      currentSnapshot.isLoggedIn &&
+      currentSnapshot.currentUserId == snapshot.currentUserId
+    let authorityAttempt: AuthLoginAttempt
+    if let loginAttempt {
+      authorityAttempt = loginAttempt
+    } else if preservesAccountMutationGeneration {
+      guard let replacementAttempt = cache.makeSameAccountAuthorityReplacementAttempt() else {
+        throw AuthStorageError.loginUnavailable
+      }
+      authorityAttempt = replacementAttempt
+    } else {
+      authorityAttempt = cache.makeLoginAttempt()
+    }
+    let baseline = try stagedAuthorityBaseline ?? captureStoredAuthority()
+    guard cache.beginAuthorityStaging(
+      authorityAttempt,
+      preservesAccountMutationGeneration: preservesAccountMutationGeneration
+    ) else {
+      throw credentialCommitFenceError(for: loginAttempt)
+    }
+    do {
+      UserDefaults.standard.set(
+        authorityAttempt.correlationID.uuidString,
+        forKey: self.loginCommitPendingKey
+      )
+      guard UserDefaults.standard.synchronize(),
+            UserDefaults.standard.string(forKey: self.loginCommitPendingKey)
+              == authorityAttempt.correlationID.uuidString
+      else { throw AuthStorageError.loginUnavailable }
+    } catch {
+      let markerIsAbsent = UserDefaults.standard.object(forKey: loginCommitPendingKey) == nil
+      if markerIsAbsent {
+        _ = cache.cancelAuthorityStagingReservation(authorityAttempt)
+      } else {
+        promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID)
+      }
+      throw error
+    }
+    stagedAuthorityBaseline = baseline
+
+    do {
+      try writeAuthority()
+      if let userID = snapshot.currentUserId {
+        UserDefaults.standard.set(NSNumber(value: userID), forKey: userDefaultsKey)
+      }
+      credentialWriteInterleavingHook?()
+      guard cache.finishAuthorityStaging(snapshot, owner: authorityAttempt) else {
+        // Logout owns all credential destruction once its synchronous fence is installed.
+        if hasPendingLogout() {
+          _ = deleteAllStoredAuthority()
+        }
+        throw credentialCommitFenceError(for: loginAttempt)
+      }
+      if finalizeImmediately {
+        _ = try finalizeCredentialsCommittedByLoginAttempt(authorityAttempt)
+      }
+    } catch {
+      if hasPendingLogout() == false {
+        do {
+          try restoreStoredAuthority(baseline)
+          UserDefaults.standard.removeObject(forKey: loginCommitPendingKey)
+          guard UserDefaults.standard.synchronize(),
+                UserDefaults.standard.object(forKey: loginCommitPendingKey) == nil
+          else { throw AuthStorageError.loginUnavailable }
+          let aborted = cache.abortAuthorityStaging(authorityAttempt)
+          if aborted {
+            stagedAuthorityBaseline = nil
+          }
+        } catch {
+          log.error(
+            "AUTH2_LOGIN failed to restore prior authority; retaining transition fence",
+            error: error
+          )
+          promoteFailedLoginToRecovery(correlationID: authorityAttempt.correlationID)
+        }
+      }
+      throw error
+    }
+  }
+
+  private func captureStoredAuthority() throws -> StoredAuthorityBackup {
+    let userIDHint = Self.readUserId(key: userDefaultsKey)
+    if mocked {
+      var values: [String: Data] = [:]
+      for key in Self.authorityKeys {
+        values[key] = AuthKeychainConfig.mockGetData(key, namespace: namespace)
+      }
+      return StoredAuthorityBackup(
+        primary: [:],
+        fallback: [:],
+        mocked: values,
+        userIDHint: userIDHint
+      )
+    }
+
+    func read(_ key: String, from keychain: KeychainStore) throws -> Data? {
+      if let value = keychain.getData(key) { return value }
+      guard keychain.lastResultCode == errSecItemNotFound else {
+        throw AuthStorageError.keychainWriteFailed
+      }
+      return nil
+    }
+
+    var primary: [String: Data] = [:]
+    var fallback: [String: Data] = [:]
+    for key in Self.authorityKeys {
+      primary[key] = try read(key, from: primaryKeychain)
+      if let fallbackKeychain {
+        fallback[key] = try read(key, from: fallbackKeychain)
+      }
+    }
+    return StoredAuthorityBackup(
+      primary: primary,
+      fallback: fallback,
+      mocked: [:],
+      userIDHint: userIDHint
+    )
+  }
+
+  private func restoreStoredAuthority(_ backup: StoredAuthorityBackup) throws {
+    if let authorityRestoreOverride, authorityRestoreOverride() == false {
+      throw AuthStorageError.keychainWriteFailed
+    }
+    guard deleteAllStoredAuthority() else { throw AuthStorageError.keychainDeleteFailed }
+    if mocked {
+      for (key, value) in backup.mocked {
+        AuthKeychainConfig.mockSet(value, forKey: key, namespace: namespace)
+      }
+    } else {
+      for (key, value) in backup.primary {
+        guard primaryKeychain.set(value, forKey: key, withAccess: .accessibleAfterFirstUnlock) else {
+          throw AuthStorageError.keychainWriteFailed
+        }
+      }
+      if let fallbackKeychain {
+        for (key, value) in backup.fallback {
+          guard fallbackKeychain.set(value, forKey: key, withAccess: .accessibleAfterFirstUnlock) else {
+            throw AuthStorageError.keychainWriteFailed
+          }
+        }
+      }
+    }
+    let restored = try captureStoredAuthority()
+    guard restored.primary == backup.primary,
+          restored.fallback == backup.fallback,
+          restored.mocked == backup.mocked
+    else { throw AuthStorageError.keychainWriteFailed }
+    if let userIDHint = backup.userIDHint {
+      UserDefaults.standard.set(NSNumber(value: userIDHint), forKey: userDefaultsKey)
+    } else {
+      UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+    }
+    guard UserDefaults.standard.synchronize(),
+          Self.readUserId(key: userDefaultsKey) == backup.userIDHint
+    else { throw AuthStorageError.keychainWriteFailed }
+  }
+
+  private func promoteFailedLoginToRecovery(correlationID: UUID = UUID()) {
+    UserDefaults.standard.set(correlationID.uuidString, forKey: loginCommitPendingKey)
+    _ = UserDefaults.standard.synchronize()
+    cache.seedLoginCommitPending(true)
+    _ = try? beginLogoutSynchronously()
+    let snapshot = AuthSnapshot(
+      status: .loggingOut(userIdHint: cache.snapshot().currentUserId ?? Self.readUserId(key: userDefaultsKey)),
+      didHydrate: true
+    )
+    if cache.update(snapshot) {
+      lastStatus = snapshot.status
+      _ = snapshotPipe.yield(snapshot)
+    }
+    NotificationCenter.default.post(name: .authAccountRecoveryRequired, object: nil)
+  }
+
+  private func replaceStoredAuthority(
+    with values: [String: Data],
+    replacing keys: [String],
+    replacementLabel: String
+  ) throws {
+    if mocked {
+      for (key, value) in values {
+        AuthKeychainConfig.mockSet(value, forKey: key, namespace: namespace)
+      }
+    } else {
+      for (key, value) in values {
+        let primarySaved = primaryKeychain.set(
+          value,
+          forKey: key,
+          withAccess: .accessibleAfterFirstUnlock
+        )
+        let fallbackSaved = if !primarySaved, let fallbackKeychain {
+          fallbackKeychain.set(value, forKey: key, withAccess: .accessibleAfterFirstUnlock)
+        } else { false }
+        guard primarySaved || fallbackSaved else {
+          throw AuthStorageError.keychainWriteFailed
+        }
+      }
+    }
+
+    if let override = authorityReplacementDeletionOverride?(replacementLabel), override == false {
+      throw AuthStorageError.keychainDeleteFailed
+    }
+    guard deleteStoredKeys(keys) else { throw AuthStorageError.keychainDeleteFailed }
+  }
+
+  private func deleteStoredKeys(_ keys: [String]) -> Bool {
+    if mocked {
+      for key in keys {
+        AuthKeychainConfig.mockDelete(key, namespace: namespace)
+      }
+      return keys.allSatisfy {
+        AuthKeychainConfig.mockGetData($0, namespace: namespace) == nil
+      }
+    }
+
+    func delete(_ key: String, from keychain: KeychainStore) -> Bool {
+      let deleted = keychain.delete(key)
+      let absent = keychain.lastResultCode == errSecItemNotFound
+      guard deleted || absent else { return false }
+      let value = keychain.getData(key)
+      return value == nil && keychain.lastResultCode == errSecItemNotFound
+    }
+
+    var removed = true
+    for key in keys {
+      removed = delete(key, from: primaryKeychain) && removed
+      if let fallbackKeychain {
+        removed = delete(key, from: fallbackKeychain) && removed
+      }
+    }
+    return removed
+  }
+
+  @discardableResult
+  private func deleteAllStoredAuthority() -> Bool {
+    deleteStoredKeys(Self.authorityKeys)
+  }
+
+  private func credentialCommitFenceError(for loginAttempt: AuthLoginAttempt?) -> AuthStorageError {
+    if hasPendingLogout() { return .logoutInProgress }
+    if let loginAttempt, cache.isLoginAttemptCurrent(loginAttempt) == false {
+      return .loginSuperseded
+    }
+    return .loginUnavailable
+  }
+
+  private func publishAuthenticatedSnapshot(_ snapshot: AuthSnapshot) {
     let previousStatus = lastStatus
     lastStatus = snapshot.status
-    cache.update(snapshot)
+    let revision = snapshotPipe.yield(snapshot)
+    if let revision {
+      log.info(
+        "AUTH2_STATE_CHANGE revision=\(revision)" +
+          " from=\(Self.diagnosticName(for: previousStatus))" +
+          " to=\(Self.diagnosticName(for: snapshot.status))" +
+          " hydrated=\(snapshot.didHydrate ? 1 : 0)"
+      )
+    }
+    if previousStatus.isAuthenticated == false {
+      if case let .authenticated(credentials) = snapshot.status {
+        eventBroadcaster.yield(.login(userId: credentials.userId, token: credentials.token))
+      } else if case let .authenticatedV3(userId) = snapshot.status {
+        eventBroadcaster.yield(.loginV3(userId: userId))
+      }
+    }
+  }
+
+  private func update(_ snapshot: AuthSnapshot) async {
+    guard cache.update(snapshot) else {
+      log.warning(
+        "AUTH2_STATE_CHANGE suppressed non-logout projection while logout fence is active"
+      )
+      return
+    }
+    let previousStatus = lastStatus
+    lastStatus = snapshot.status
     let revision = snapshotPipe.yield(snapshot)
     if let revision {
       log.info(
@@ -574,33 +1000,6 @@ actor AuthStore {
     log.warning("AUTH2 keychain remained locked after retry loop; waiting for external refresh trigger")
   }
 
-  private static func migrateKeyIfFoundInFallback(_ key: String, primary: KeychainStore, fallback: KeychainStore) {
-    // Already present in primary.
-    if primary.getData(key) != nil {
-      return
-    }
-    if primary.lastResultCode != errSecItemNotFound {
-      // Keychain locked or other error; skip migration.
-      return
-    }
-
-    if let data = fallback.getData(key) {
-      if primary.set(data, forKey: key, withAccess: .accessibleAfterFirstUnlock) {
-        _ = fallback.delete(key)
-      }
-    }
-  }
-
-  private static func deleteCredentials(from keychain: KeychainClient) -> Bool {
-    var deletedAll = true
-    for key in [legacyTokenKey, credentialsV2Key, inlineProtocolCredentialsKey] {
-      let deleted = keychain.delete(key)
-      let absent = keychain.lastResultCode == errSecItemNotFound
-      deletedAll = (deleted || absent) && deletedAll
-    }
-    return deletedAll
-  }
-
   static func readSnapshot(
     primaryKeychain: any KeychainClient,
     fallbackKeychain: (any KeychainClient)?,
@@ -630,18 +1029,32 @@ actor AuthStore {
     }
 
     if let inlineProtocol {
-      if mocked {
-        AuthKeychainConfig.mockDelete(legacyTokenKey, namespace: namespace)
-        AuthKeychainConfig.mockDelete(credentialsV2Key, namespace: namespace)
+      let hasBearerAuthority: Bool = if mocked {
+        AuthKeychainConfig.mockGetData(credentialsV2Key, namespace: namespace) != nil
+          || AuthKeychainConfig.mockGetData(legacyTokenKey, namespace: namespace) != nil
       } else {
-        _ = primaryKeychain.delete(legacyTokenKey)
-        _ = primaryKeychain.delete(credentialsV2Key)
-        if let fallbackKeychain {
-          _ = fallbackKeychain.delete(legacyTokenKey)
-          _ = fallbackKeychain.delete(credentialsV2Key)
+        switch AuthKeychainConfig.readData(
+          credentialsV2Key,
+          primary: primaryKeychain,
+          fallback: fallbackKeychain
+        ) {
+        case .success: true
+        case .notFound, .interactionNotAllowed, .error:
+          switch AuthKeychainConfig.readData(
+            legacyTokenKey,
+            primary: primaryKeychain,
+            fallback: fallbackKeychain
+          ) {
+          case .success: true
+          case .notFound, .interactionNotAllowed, .error: false
+          }
         }
       }
-      UserDefaults.standard.set(NSNumber(value: inlineProtocol.userId), forKey: userDefaultsKey)
+      guard hasBearerAuthority == false else {
+        // Mixed durable authorities are never silently prioritized. A staged-login marker handles
+        // expected crash recovery; without one, require an explicit reauthentication replacement.
+        return AuthSnapshot(status: .reauthRequired(userIdHint: userIdHint), didHydrate: true)
+      }
       return AuthSnapshot(
         status: .authenticatedV3(userId: inlineProtocol.userId),
         didHydrate: true,
@@ -663,7 +1076,6 @@ actor AuthStore {
     switch credentialsOutcome {
     case .success(let data, _):
       if let creds = try? JSONDecoder().decode(AuthCredentials.self, from: data) {
-        UserDefaults.standard.set(NSNumber(value: creds.userId), forKey: userDefaultsKey)
         return AuthSnapshot(status: .authenticated(creds), didHydrate: true)
       }
       // Corrupt record; fall back to legacy pieces.
@@ -695,9 +1107,6 @@ actor AuthStore {
     var userId = userIdHint
     if userId == nil, let token {
       userId = parseUserId(fromToken: token)
-      if let userId {
-        UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
-      }
     }
 
     if let token, let userId {
@@ -753,6 +1162,7 @@ actor AuthStore {
     case .unauthenticated: "unauthenticated"
     case .locked: "locked"
     case .reauthRequired: "reauth_required"
+    case .loggingOut: "logging_out"
     case .authenticated: "authenticated"
     case .authenticatedV3: "authenticated_v3"
     }

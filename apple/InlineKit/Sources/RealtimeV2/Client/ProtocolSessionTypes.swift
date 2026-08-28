@@ -89,4 +89,10 @@ protocol ProtocolSessionType: AnyObject, Sendable {
     input: RpcCall.OneOf_Input?,
     timeout: Duration?
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result?
+
+  func waitForDirectDispatches() async
+}
+
+extension ProtocolSessionType {
+  func waitForDirectDispatches() async {}
 }

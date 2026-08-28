@@ -22,6 +22,8 @@ private struct LoadingView: View {
       "Unlocking..."
     case .hydrating:
       "Loading..."
+    case .loggingOut:
+      "Logging out..."
     case .authenticated, .authenticatedV3, .unauthenticated, .reauthRequired:
       "Loading..."
     }

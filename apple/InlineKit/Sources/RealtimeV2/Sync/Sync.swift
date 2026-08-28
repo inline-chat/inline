@@ -1,4 +1,5 @@
 import Foundation
+import Auth
 import InlineProtocol
 import Logger
 
@@ -287,6 +288,7 @@ actor Sync {
 
   private var applyUpdates: ApplyUpdates
   private var syncStorage: SyncStorage
+  private let auth: AuthHandle?
   // Must be a strong reference: Sync/BucketActor schedule async Tasks that can easily outlive
   // the caller's local reference. A weak ref here makes sync silently stop working.
   private var client: ProtocolClientType?
@@ -310,16 +312,19 @@ actor Sync {
   private var rootTasks: [UUID: Task<Void, Never>] = [:]
   private var operationsInProgress = 0
   private var operationDrainWaiters: [CheckedContinuation<Void, Never>] = []
+  private var accountMutationToken: AuthAccountMutationToken?
 
   init(
     applyUpdates: ApplyUpdates,
     syncStorage: SyncStorage,
     client: ProtocolClientType,
     config: SyncConfig,
-    acceptsWork: Bool = true
+    acceptsWork: Bool = true,
+    auth: AuthHandle? = nil
   ) {
     self.applyUpdates = applyUpdates
     self.syncStorage = syncStorage
+    self.auth = auth
     self.client = client
     self.config = config
     self.acceptsWork = acceptsWork
@@ -329,7 +334,10 @@ actor Sync {
   // MARK: - Public API
 
   /// Process incoming updates (pushed from server)
-  func process(updates: [InlineProtocol.Update]) async {
+  func process(
+    updates: [InlineProtocol.Update],
+    mutationToken: AuthAccountMutationToken? = nil
+  ) async {
     guard let expectedGeneration = beginOperation() else { return }
     defer { endOperation() }
 
@@ -386,7 +394,13 @@ actor Sync {
 
     // Apply the direct updates
     if !applyingUpdates.isEmpty {
-      let result = await applyUpdates.apply(updates: applyingUpdates, source: .realtime)
+      let result = await applyUpdates.apply(
+        updates: applyingUpdates,
+        source: .realtime,
+        sidecars: nil,
+        bucketCommit: nil,
+        mutationToken: mutationToken
+      )
       guard isCurrent(expectedGeneration) else { return }
       recordDirectApply(count: result.appliedCount)
       if result.succeeded {
@@ -407,7 +421,7 @@ actor Sync {
     if !bucketedUpdates.isEmpty {
       for (key, updates) in bucketedUpdates {
         guard let actor = await getBucketActor(key: key, generation: expectedGeneration) else { return }
-        await actor.processRealtimeUpdates(updates)
+        await actor.processRealtimeUpdates(updates, mutationToken: mutationToken)
         guard isCurrent(expectedGeneration) else { return }
       }
     }
@@ -468,26 +482,30 @@ actor Sync {
   func applyUpdatesFromBucket(
     _ updates: [InlineProtocol.Update],
     sidecars: InlineProtocol.UpdateSidecars? = nil,
-    bucketCommit: UpdateBucketCommit? = nil
+    bucketCommit: UpdateBucketCommit? = nil,
+    mutationToken: AuthAccountMutationToken? = nil
   ) async -> UpdateApplyResult {
     await applyUpdates.apply(
       updates: updates,
       source: .syncCatchup,
       sidecars: sidecars,
-      bucketCommit: bucketCommit
+      bucketCommit: bucketCommit,
+      mutationToken: mutationToken
     )
   }
 
   /// Apply sequenced realtime updates through the same engine, but with realtime side effects.
   func applyUpdatesFromRealtime(
     _ updates: [InlineProtocol.Update],
-    bucketCommit: UpdateBucketCommit? = nil
+    bucketCommit: UpdateBucketCommit? = nil,
+    mutationToken: AuthAccountMutationToken? = nil
   ) async -> UpdateApplyResult {
     await applyUpdates.apply(
       updates: updates,
       source: .realtime,
       sidecars: nil,
-      bucketCommit: bucketCommit
+      bucketCommit: bucketCommit,
+      mutationToken: mutationToken
     )
   }
 
@@ -677,6 +695,7 @@ actor Sync {
 
   func activateGeneration() {
     generation &+= 1
+    accountMutationToken = try? auth?.beginAccountMutation()
     acceptsWork = true
   }
 
@@ -691,6 +710,7 @@ actor Sync {
   private func resetSyncState(clearPersistentState: Bool, acceptNewWork: Bool) async {
     log.debug("resetting sync runtime and bucket cache")
     generation &+= 1
+    accountMutationToken = nil
     acceptsWork = false
     isResetting = true
     let tasks = Array(rootTasks.values)
@@ -989,7 +1009,8 @@ actor Sync {
       date: bucketState.date,
       client: client,
       sync: self,
-      fetchLimiter: bucketFetchLimiter
+      fetchLimiter: bucketFetchLimiter,
+      accountMutationToken: accountMutationToken
     )
     buckets[key] = bucketActor
     return bucketActor
@@ -1666,6 +1687,7 @@ actor BucketActor {
   private var client: ProtocolClientType?
   private weak var sync: Sync?
   private let fetchLimiter: FetchLimiter
+  private let accountMutationToken: AuthAccountMutationToken?
 
   var key: BucketKey
   var seq: Int64
@@ -1693,6 +1715,7 @@ actor BucketActor {
   private struct BufferedRealtimeUpdate {
     let update: InlineProtocol.Update
     let bytes: Int
+    let mutationToken: AuthAccountMutationToken?
   }
 
   /// Buffer for out-of-order realtime updates. We only apply contiguous seqs starting at (seq + 1).
@@ -1705,7 +1728,8 @@ actor BucketActor {
     date: Int64,
     client: ProtocolClientType?,
     sync: Sync?,
-    fetchLimiter: FetchLimiter
+    fetchLimiter: FetchLimiter,
+    accountMutationToken: AuthAccountMutationToken?
   ) {
     self.key = key
     self.seq = seq
@@ -1713,6 +1737,7 @@ actor BucketActor {
     self.client = client
     self.sync = sync
     self.fetchLimiter = fetchLimiter
+    self.accountMutationToken = accountMutationToken
   }
 
   /// Advances an already-created actor when an authoritative account snapshot
@@ -1819,7 +1844,10 @@ actor BucketActor {
   /// - Apply only when the next expected seq is available.
   /// - Buffer out-of-order updates.
   /// - Trigger a catch-up fetch to fill gaps.
-  func processRealtimeUpdates(_ updates: [InlineProtocol.Update]) async {
+  func processRealtimeUpdates(
+    _ updates: [InlineProtocol.Update],
+    mutationToken: AuthAccountMutationToken? = nil
+  ) async {
     guard !isInvalidated else { return }
     beginOperation()
     defer { endOperation() }
@@ -1830,7 +1858,11 @@ actor BucketActor {
       let incomingSeq = Int64(update.seq)
       // Skip duplicates/outdated updates.
       guard incomingSeq > seq else { continue }
-      bufferRealtimeUpdate(update, at: incomingSeq)
+      bufferRealtimeUpdate(
+        update,
+        at: incomingSeq,
+        mutationToken: mutationToken ?? accountMutationToken
+      )
     }
 
     let exceededRealtimeBufferLimit = bufferedRealtimeUpdates.count > Self.maxBufferedRealtimeUpdates ||
@@ -1934,18 +1966,25 @@ actor BucketActor {
       retainBufferedRealtimeUpdates(after: seq)
     }
 
-    var contiguous: [InlineProtocol.Update] = []
+    var contiguousEntries: [BufferedRealtimeUpdate] = []
     var nextSeq = seq
     var nextDate = date
 
     // Drain a contiguous run starting at the next expected seq.
-    while let next = bufferedRealtimeUpdates[nextSeq + 1]?.update {
-      contiguous.append(next)
-      nextSeq = Int64(next.seq)
-      nextDate = next.date
+    while let next = bufferedRealtimeUpdates[nextSeq + 1] {
+      contiguousEntries.append(next)
+      nextSeq = Int64(next.update.seq)
+      nextDate = next.update.date
     }
 
-    guard !contiguous.isEmpty else { return true }
+    guard !contiguousEntries.isEmpty else { return true }
+    let contiguous = contiguousEntries.map(\.update)
+    let mutationToken = contiguousEntries.first?.mutationToken ?? accountMutationToken
+    guard contiguousEntries.allSatisfy({ ($0.mutationToken ?? accountMutationToken) == mutationToken }) else {
+      log.warning("mixed account generations in realtime bucket buffer; deferring to catch-up")
+      needsFetch = true
+      return false
+    }
 
     log.debug("applying \(contiguous.count) realtime updates for bucket \(key) (new seq=\(nextSeq))")
     let span = PerformanceTrace.begin(
@@ -1957,7 +1996,8 @@ actor BucketActor {
     let targetState = BucketState(date: nextDate, seq: nextSeq)
     let result = await sync.applyUpdatesFromRealtime(
       contiguous,
-      bucketCommit: UpdateBucketCommit(key: key, state: targetState)
+      bucketCommit: UpdateBucketCommit(key: key, state: targetState),
+      mutationToken: mutationToken
     )
     let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
     span.end(
@@ -2444,6 +2484,14 @@ actor BucketActor {
         }
         .sorted { $0.key < $1.key }
       let bufferedUpdates = bufferedEntries.map(\.value.update)
+      let bufferedMutationToken = bufferedEntries.first?.value.mutationToken ?? accountMutationToken
+      guard bufferedEntries.allSatisfy({
+        ($0.value.mutationToken ?? accountMutationToken) == bufferedMutationToken
+      }) else {
+        log.warning("mixed account generations in catch-up buffer; refusing projection")
+        resultLabel = "mixed_account_generation"
+        return false
+      }
       let bufferedMaxDate = maxUpdateDate(in: bufferedUpdates)
       let committedSeq = max(seq, finalSeq)
       // A final empty response at the existing sequence disproves a stale push
@@ -2469,7 +2517,8 @@ actor BucketActor {
         let result = await sync.applyUpdatesFromBucket(
           orderedUpdates,
           sidecars: hasPendingSidecars ? pendingSidecars : nil,
-          bucketCommit: bufferedUpdates.isEmpty ? bucketCommit : nil
+          bucketCommit: bufferedUpdates.isEmpty ? bucketCommit : nil,
+          mutationToken: accountMutationToken
         )
         let durationMs = PerformanceTrace.elapsedMilliseconds(since: applyStartedAt)
         applySpan.end(
@@ -2525,7 +2574,8 @@ actor BucketActor {
       if !bufferedUpdates.isEmpty || orderedUpdates.isEmpty {
         let result = await sync.applyUpdatesFromRealtime(
           bufferedUpdates,
-          bucketCommit: bucketCommit
+          bucketCommit: bucketCommit,
+          mutationToken: bufferedMutationToken
         )
         guard result.succeeded else {
           log.error(
@@ -2908,7 +2958,12 @@ actor BucketActor {
     guard !entries.isEmpty else { return 0 }
 
     let updates = entries.map(\.value.update)
-    let result = await sync.applyUpdatesFromRealtime(updates)
+    let mutationToken = entries.first?.value.mutationToken ?? accountMutationToken
+    guard entries.allSatisfy({ ($0.value.mutationToken ?? accountMutationToken) == mutationToken }) else {
+      log.warning("mixed account generations in trusted realtime buffer; refusing projection")
+      return nil
+    }
+    let result = await sync.applyUpdatesFromRealtime(updates, mutationToken: mutationToken)
     if !result.succeeded {
       PerformanceTrace.breadcrumb(
         "trusted pointer buffered realtime apply failed",
@@ -2930,10 +2985,14 @@ actor BucketActor {
     return maxUpdateDate(in: updates)
   }
 
-  private func bufferRealtimeUpdate(_ update: InlineProtocol.Update, at sequence: Int64) {
+  private func bufferRealtimeUpdate(
+    _ update: InlineProtocol.Update,
+    at sequence: Int64,
+    mutationToken: AuthAccountMutationToken?
+  ) {
     let bytes = (try? update.serializedData().count) ?? (Self.maxBufferedRealtimeBytes + 1)
     if let existing = bufferedRealtimeUpdates.updateValue(
-      BufferedRealtimeUpdate(update: update, bytes: bytes),
+      BufferedRealtimeUpdate(update: update, bytes: bytes, mutationToken: mutationToken),
       forKey: sequence
     ) {
       bufferedRealtimeBytes -= existing.bytes

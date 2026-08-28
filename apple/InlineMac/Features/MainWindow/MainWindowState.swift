@@ -14,7 +14,7 @@ enum TopLevelRoute {
       return .main
     case .unauthenticated, .reauthRequired:
       return .onboarding
-    case .hydrating, .locked:
+    case .hydrating, .locked, .loggingOut:
       return .loading
     }
   }
@@ -46,11 +46,19 @@ class MainWindowViewModel: ObservableObject {
     transitionTask?.cancel()
     transitionTask = nil
     onboardingInitialRoute = .welcome
-    topLevelRoute = route
+    topLevelRoute = Auth.shared.getHasPendingAccountTransition() ? .loading : route
   }
 
 #if DEBUG || DEBUG_BUILD
   func openOnboardingForDebug() {
+    guard Auth.shared.getHasPendingAccountTransition() == false else {
+      topLevelRoute = .loading
+      return
+    }
+    if case .loggingOut = Auth.shared.getStatus() {
+      topLevelRoute = .loading
+      return
+    }
     transitionTask?.cancel()
     transitionTask = nil
     onboardingInitialRoute = .profile
@@ -59,17 +67,26 @@ class MainWindowViewModel: ObservableObject {
 #endif
 
   private func handle(status: AuthStatus) {
+    if Auth.shared.getHasPendingAccountTransition() {
+      transitionTask?.cancel()
+      transitionTask = nil
+      topLevelRoute = .loading
+      return
+    }
     switch topLevelRoute {
     case .loading:
       switch status {
-      case .hydrating, .locked:
+      case .hydrating, .locked, .loggingOut:
         break
 
       case .authenticated, .authenticatedV3:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
           _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          guard !Task.isCancelled else { return }
+          guard !Task.isCancelled,
+                Auth.shared.getHasPendingAccountTransition() == false,
+                Auth.shared.getStatus().isAuthenticated
+          else { return }
           self?.topLevelRoute = .main
         }
 
@@ -77,7 +94,15 @@ class MainWindowViewModel: ObservableObject {
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
           _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          guard !Task.isCancelled else { return }
+          guard !Task.isCancelled,
+                Auth.shared.getHasPendingAccountTransition() == false
+          else { return }
+          switch Auth.shared.getStatus() {
+          case .unauthenticated, .reauthRequired:
+            break
+          case .authenticated, .authenticatedV3, .hydrating, .locked, .loggingOut:
+            return
+          }
           self?.topLevelRoute = .onboarding
         }
       }
@@ -89,14 +114,21 @@ class MainWindowViewModel: ObservableObject {
         transitionTask?.cancel()
         transitionTask = nil
         topLevelRoute = .onboarding
+      case .loggingOut:
+        transitionTask?.cancel()
+        transitionTask = nil
+        topLevelRoute = .loading
       case .authenticated, .authenticatedV3, .hydrating, .locked:
         break
       }
 
     case .onboarding:
-      // Onboarding drives navigation to `.main` after login/profile completion.
       transitionTask?.cancel()
       transitionTask = nil
+      if case .loggingOut = status {
+        topLevelRoute = .loading
+      }
+      // Otherwise onboarding drives navigation to `.main` after login/profile completion.
       break
     }
   }

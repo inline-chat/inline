@@ -81,6 +81,7 @@ struct OnboardingEnterCode: View {
             .scaleEffect(0.5)
         }
       }
+      .disabled(formState.isLoading)
     }
     .padding()
   }
@@ -99,10 +100,14 @@ struct OnboardingEnterCode: View {
   }
 
   func submit() {
+    guard !formState.isLoading else { return }
     formState.startLoading()
 
     Task {
       do {
+        let bearerLoginAttempt = InlineProtocolNativeLogin.shared.isAvailable
+          ? nil
+          : try await Auth.shared.beginLoginAttempt()
         let result = if !onboardingViewModel.email.isEmpty {
           try await ApiClient.shared.verifyCode(
             code: code,
@@ -120,11 +125,37 @@ struct OnboardingEnterCode: View {
           throw APIError.error(error: "INVALID_REQUEST", errorCode: 401, description: "Email and phone empty")
         }
 
-        // Save creds
+        let accountMutationToken: AuthAccountMutationToken
         if let token = result.token {
-          try await Auth.shared.saveCredentials(token: token, userId: result.userId)
+          do {
+            guard let loginAttempt = bearerLoginAttempt else {
+              throw AuthStorageError.loginSuperseded
+            }
+            let commit = try await LoginStatePreparation.commit(
+              loginAttempt: loginAttempt,
+              targetUserID: result.userId,
+              persistCredentials: {
+                try await Auth.shared.saveCredentials(
+                  token: token,
+                  userId: result.userId,
+                  loginAttempt: loginAttempt
+                )
+              }
+            ) { db in
+              try result.user.saveFull(db)
+            }
+            accountMutationToken = commit.accountMutationToken
+          } catch {
+            _ = try? await ApiClient.shared.logout(bearerToken: token)
+            throw error
+          }
+        } else if let nativeToken = result.accountMutationToken {
+          accountMutationToken = nativeToken
+        } else {
+          throw AuthStorageError.loginSuperseded
         }
 
+        try Auth.shared.handle.validateAccountMutation(accountMutationToken)
         // Register Sentry
         Analytics.identify(
           userId: result.userId,
@@ -133,25 +164,19 @@ struct OnboardingEnterCode: View {
           username: result.user.username
         )
 
-        // Change passphrase of database
-        try await AppDatabase.authenticated()
-
-        // Save user
-        do {
-          _ = try await AppDatabase.shared.dbWriter.write { db in
-            try result.user.saveFull(db)
-          }
-        } catch {
-          Log.shared.error("Failed to save user", error: error)
-        }
-
         await MainActor.run {
+          guard (try? Auth.shared.handle.validateAccountMutation(accountMutationToken)) != nil else {
+            return
+          }
           AppSettings.shared.resolveSidebarModeForAccount(
             createdAt: Date(timeIntervalSince1970: TimeInterval(result.user.date))
           )
         }
 
         DispatchQueue.main.async {
+          guard (try? Auth.shared.handle.validateAccountMutation(accountMutationToken)) != nil else {
+            return
+          }
           onboardingViewModel.navigateAfterLogin(pendingSetup: result.user.pendingSetup == true)
         }
       } catch InlineProtocolNativeLoginError.inviteRequired {
@@ -161,7 +186,7 @@ struct OnboardingEnterCode: View {
         formState.reset()
       } catch {
         formState.failed(error: error.localizedDescription)
-        Log.shared.error("Failed to send code", error: error)
+        Log.shared.error("Failed to complete sign-in", error: error)
       }
     }
   }

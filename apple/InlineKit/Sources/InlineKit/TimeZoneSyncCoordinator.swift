@@ -11,6 +11,7 @@ public final class TimeZoneSyncCoordinator {
   private var didAttemptStartupSync = false
   private var lastAttemptedTimeZone: String?
   private var authTask: Task<Void, Never>?
+  private var syncTask: Task<Void, Never>?
   private var systemTimeZoneObserver: NSObjectProtocol?
 
   private init() {}
@@ -37,6 +38,8 @@ public final class TimeZoneSyncCoordinator {
           didAttemptStartupSync = true
           syncIfNeeded(reason: "startup")
         } else if snapshot.didHydrate {
+          syncTask?.cancel()
+          syncTask = nil
           didAttemptStartupSync = false
           lastAttemptedTimeZone = nil
         }
@@ -45,19 +48,26 @@ public final class TimeZoneSyncCoordinator {
   }
 
   private func syncIfNeeded(reason: String) {
-    guard Auth.shared.getIsLoggedIn() else { return }
+    guard Auth.shared.getIsLoggedIn(), !Auth.shared.getHasPendingAccountTransition() else { return }
 
     let timeZone = TimeZone.autoupdatingCurrent.identifier
     guard timeZone != lastAttemptedTimeZone else { return }
     lastAttemptedTimeZone = timeZone
 
-    Task {
+    syncTask?.cancel()
+    let auth = Auth.shared.handle
+    syncTask = Task { [weak self] in
       do {
+        try Task.checkCancellation()
+        try auth.requireAccountMutationAllowed()
         try await DataManager.shared.updateTimezone()
-        log.debug("Synced time zone reason=\(reason)")
+        try Task.checkCancellation()
+        self?.log.debug("Synced time zone reason=\(reason)")
       } catch {
-        log.error("Failed to sync time zone reason=\(reason)", error: error)
+        if error is CancellationError { return }
+        self?.log.error("Failed to sync time zone reason=\(reason)", error: error)
       }
+      await MainActor.run { self?.syncTask = nil }
     }
   }
 }

@@ -125,6 +125,33 @@ private actor CredentialStorageProbe {
   func wasPrepared() -> Bool { prepared }
 }
 
+private actor NativeLoginPostCommitGate {
+  private var committed = false
+  private var committedWaiters: [CheckedContinuation<Void, Never>] = []
+  private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+  func suspendAfterCommit() async {
+    committed = true
+    for waiter in committedWaiters { waiter.resume() }
+    committedWaiters.removeAll()
+    await withCheckedContinuation { continuation in
+      releaseContinuation = continuation
+    }
+  }
+
+  func waitUntilCommitted() async {
+    if committed { return }
+    await withCheckedContinuation { continuation in
+      committedWaiters.append(continuation)
+    }
+  }
+
+  func release() {
+    releaseContinuation?.resume()
+    releaseContinuation = nil
+  }
+}
+
 private enum CredentialStoragePreparationTestError: Error {
   case unavailable
 }
@@ -166,8 +193,8 @@ struct InlineProtocolNativeLoginTests {
     }
   }
 
-  @Test("prepares durable database authority before bearer credentials are replaced")
-  func preparesDatabaseBeforeCredentialCommit() async throws {
+  @Test("native completion invokes the injected local commit boundary before returning")
+  func invokesInjectedCommitBoundary() async throws {
     let auth = Auth.mocked(authenticated: false)
     try await auth.saveCredentials(token: "42:legacy", userId: 42)
     let permanent = SuccessfulNativeLoginConnection(
@@ -183,10 +210,11 @@ struct InlineProtocolNativeLoginTests {
       url: URL(string: "ws://inline.test/realtime/v3")!,
       rsaPublicKeys: [try publicKey()],
       connect: { options in try await factory.connect(options) },
-      prepareCredentialStorage: {
+      commitLoginState: { _, _, _, _ in
         #expect(auth.handle.token() == "42:legacy")
         #expect(auth.handle.inlineProtocolCredentials() == nil)
         await probe.markPrepared()
+        return try auth.handle.beginAccountMutation()
       }
     )
 
@@ -194,8 +222,47 @@ struct InlineProtocolNativeLoginTests {
     _ = try await login.complete(code: "123456")
 
     #expect(await probe.wasPrepared())
-    #expect(auth.handle.token() == nil)
+    #expect(auth.handle.token() == "42:legacy")
+    #expect(auth.handle.inlineProtocolCredentials() == nil)
+  }
+
+  @Test("native cancellation after durable commit preserves the successful account")
+  func cancellationAfterDurableCommitPreservesSuccess() async throws {
+    let auth = Auth.mocked(authenticated: false)
+    let permanent = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: false)
+    )
+    let temporary = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: true)
+    )
+    let factory = SuccessfulNativeLoginConnectionFactory([permanent, temporary])
+    let gate = NativeLoginPostCommitGate()
+    let login = InlineProtocolNativeLogin(
+      auth: auth.handle,
+      url: URL(string: "ws://inline.test/realtime/v3")!,
+      rsaPublicKeys: [try publicKey()],
+      connect: { options in try await factory.connect(options) },
+      commitLoginState: { _, credentials, loginAttempt, _ in
+        try await auth.saveInlineProtocolCredentials(
+          credentials,
+          loginAttempt: loginAttempt
+        )
+        let token = try await auth.handle.finalizeCredentialsCommittedByLoginAttempt(loginAttempt)
+        await gate.suspendAfterCommit()
+        return token
+      }
+    )
+
+    _ = try await login.beginEmail("test@example.com")
+    let completion = Task { try await login.complete(code: "123456") }
+    await gate.waitUntilCommitted()
+    await login.cancel()
+    await gate.release()
+
+    let result = try await completion.value
+    #expect(result.userId == 42)
     #expect(auth.handle.inlineProtocolCredentials()?.userId == 42)
+    try auth.handle.validateAccountMutation(result.accountMutationToken)
   }
 
   @Test("preserves bearer credentials when durable database preparation fails")
@@ -214,7 +281,7 @@ struct InlineProtocolNativeLoginTests {
       url: URL(string: "ws://inline.test/realtime/v3")!,
       rsaPublicKeys: [try publicKey()],
       connect: { options in try await factory.connect(options) },
-      prepareCredentialStorage: {
+      commitLoginState: { _, _, _, _ in
         throw CredentialStoragePreparationTestError.unavailable
       }
     )
@@ -231,6 +298,48 @@ struct InlineProtocolNativeLoginTests {
 
     #expect(auth.handle.token() == "42:legacy")
     #expect(auth.handle.inlineProtocolCredentials() == nil)
+  }
+
+  @Test("logout fence remains typed when native credential commit is rejected")
+  func logoutFenceRejectsNativeCredentialCommit() async throws {
+    let auth = Auth.mocked(authenticated: false)
+    let permanent = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: false)
+    )
+    let temporary = SuccessfulNativeLoginConnection(
+      authorization: try authorization(temporary: true)
+    )
+    let factory = SuccessfulNativeLoginConnectionFactory([permanent, temporary])
+    let login = InlineProtocolNativeLogin(
+      auth: auth.handle,
+      url: URL(string: "ws://inline.test/realtime/v3")!,
+      rsaPublicKeys: [try publicKey()],
+      connect: { options in try await factory.connect(options) }
+    )
+
+    _ = try await login.beginEmail("test@example.com")
+    _ = try await auth.beginLogout()
+
+    do {
+      _ = try await login.complete(code: "123456")
+      Issue.record("Expected the logout fence to reject native credential persistence")
+    } catch AuthStorageError.logoutInProgress {
+      // Preserve the actionable transition error instead of wrapping it as unknown.
+    } catch {
+      Issue.record("Unexpected native credential commit error: \(error)")
+    }
+
+    #expect(auth.handle.inlineProtocolCredentials() == nil)
+
+    do {
+      _ = try await login.complete(code: "123456")
+      Issue.record("Expected the completed challenge to be explicitly expired")
+    } catch let error as InlineProtocolNativeLoginError {
+      #expect(error == .noPendingChallenge)
+      #expect(error.localizedDescription.contains("request a new code"))
+    } catch {
+      Issue.record("Expected an actionable expired-challenge error")
+    }
   }
 
   @Test("temporary authorization rotation uses the exact authenticated 80 percent boundary")

@@ -14,6 +14,7 @@ public struct ProviderSignInCompletion: Equatable, Sendable {
   public let userId: Int64
   public let pendingSetup: Bool
   public let userCreatedAt: Date
+  public let accountMutationToken: AuthAccountMutationToken
 }
 
 public struct NativeAppleAuthorizationRequest: Equatable, Sendable {
@@ -31,16 +32,22 @@ struct ProviderSignInPendingAttempt: Equatable, Sendable {
   let codeChallenge: String
   let generation: UUID
   let nativeAppleState: String?
+  let authAttempt: AuthLoginAttempt?
 }
 
 struct ProviderSignInAttemptState: Sendable {
   private(set) var pending: ProviderSignInPendingAttempt?
   private(set) var nativePreparationGeneration: UUID?
+  private(set) var nativePreparationAuthAttempt: AuthLoginAttempt?
 
   @discardableResult
-  mutating func beginNativePreparation(generation: UUID = UUID()) -> UUID {
+  mutating func beginNativePreparation(
+    generation: UUID = UUID(),
+    authAttempt: AuthLoginAttempt? = nil
+  ) -> UUID {
     pending = nil
     nativePreparationGeneration = generation
+    nativePreparationAuthAttempt = authAttempt
     return generation
   }
 
@@ -56,11 +63,14 @@ struct ProviderSignInAttemptState: Sendable {
   ) -> ProviderSignInPendingAttempt? {
     guard isCurrentNativePreparation(generation: generation) else { return nil }
     nativePreparationGeneration = nil
+    let authAttempt = nativePreparationAuthAttempt
+    nativePreparationAuthAttempt = nil
     return store(
       provider: .apple,
       codeVerifier: codeVerifier,
       codeChallenge: codeChallenge,
       nativeAppleState: state,
+      authAttempt: authAttempt,
       generation: generation
     )
   }
@@ -70,14 +80,17 @@ struct ProviderSignInAttemptState: Sendable {
     codeVerifier: String,
     codeChallenge: String,
     nativeAppleState: String? = nil,
+    authAttempt: AuthLoginAttempt? = nil,
     generation: UUID = UUID()
   ) -> ProviderSignInPendingAttempt {
     nativePreparationGeneration = nil
+    nativePreparationAuthAttempt = nil
     return store(
       provider: provider,
       codeVerifier: codeVerifier,
       codeChallenge: codeChallenge,
       nativeAppleState: nativeAppleState,
+      authAttempt: authAttempt,
       generation: generation
     )
   }
@@ -87,6 +100,7 @@ struct ProviderSignInAttemptState: Sendable {
     codeVerifier: String,
     codeChallenge: String,
     nativeAppleState: String?,
+    authAttempt: AuthLoginAttempt?,
     generation: UUID
   ) -> ProviderSignInPendingAttempt {
     let attempt = ProviderSignInPendingAttempt(
@@ -94,7 +108,8 @@ struct ProviderSignInAttemptState: Sendable {
       codeVerifier: codeVerifier,
       codeChallenge: codeChallenge,
       generation: generation,
-      nativeAppleState: nativeAppleState
+      nativeAppleState: nativeAppleState,
+      authAttempt: authAttempt
     )
     pending = attempt
     return attempt
@@ -127,6 +142,7 @@ struct ProviderSignInAttemptState: Sendable {
   mutating func cancel() {
     pending = nil
     nativePreparationGeneration = nil
+    nativePreparationAuthAttempt = nil
   }
 }
 
@@ -142,18 +158,21 @@ public final class ProviderSignInCoordinator: ObservableObject {
   private let log = Log.scoped("ProviderSignIn")
   private var attemptState = ProviderSignInAttemptState()
   private var redeemingGeneration: UUID?
+  private var redeemingAuthAttempt: AuthLoginAttempt?
   private var nativeAppleInvite: (attemptId: String, continuation: String)?
 
   private init() {}
 
   public func startURL(for provider: ProviderSignInProvider) async throws -> URL {
+    let authAttempt = try await Auth.shared.beginLoginAttempt()
     completion = nil
     errorMessage = nil
     let codeVerifier = Self.randomCodeVerifier()
     let attempt = attemptState.begin(
       provider: provider,
       codeVerifier: codeVerifier,
-      codeChallenge: Self.codeChallenge(for: codeVerifier)
+      codeChallenge: Self.codeChallenge(for: codeVerifier),
+      authAttempt: authAttempt
     )
 
     do {
@@ -178,6 +197,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
     } catch {
       guard attemptState.current(generation: attempt.generation) else { throw error }
       attemptState.cancel(generation: attempt.generation)
+      _ = Auth.shared.cancelLoginAttempt(authAttempt)
       if !(error is CancellationError) {
         log.error("Failed to start provider sign-in", error: error)
         errorMessage = Self.userFacingMessage(for: error)
@@ -187,11 +207,12 @@ public final class ProviderSignInCoordinator: ObservableObject {
   }
 
   public func prepareNativeAppleAuthorization() async throws -> NativeAppleAuthorizationRequest {
+    let authAttempt = try await Auth.shared.beginLoginAttempt()
     completion = nil
     errorMessage = nil
     nativeAppleInviteRequest = nil
     nativeAppleInvite = nil
-    let generation = attemptState.beginNativePreparation()
+    let generation = attemptState.beginNativePreparation(authAttempt: authAttempt)
     let codeVerifier = Self.randomCodeVerifier()
     let codeChallenge = Self.codeChallenge(for: codeVerifier)
 
@@ -207,6 +228,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
     } catch {
       guard attemptState.isCurrentNativePreparation(generation: generation) else { throw error }
       attemptState.cancel()
+      _ = Auth.shared.cancelLoginAttempt(authAttempt)
       if !(error is CancellationError) {
         log.error("Failed to prepare native Apple sign-in", error: error)
         errorMessage = Self.userFacingMessage(for: error)
@@ -238,11 +260,13 @@ public final class ProviderSignInCoordinator: ObservableObject {
 
     isRedeeming = true
     redeemingGeneration = attempt.generation
+    redeemingAuthAttempt = attempt.authAttempt
     errorMessage = nil
     var serverAcceptedProfile = false
     defer {
       if redeemingGeneration == attempt.generation {
         redeemingGeneration = nil
+        redeemingAuthAttempt = nil
         isRedeeming = false
       }
     }
@@ -291,10 +315,12 @@ public final class ProviderSignInCoordinator: ObservableObject {
     }
     isRedeeming = true
     redeemingGeneration = attempt.generation
+    redeemingAuthAttempt = attempt.authAttempt
     errorMessage = nil
     defer {
       if redeemingGeneration == attempt.generation {
         redeemingGeneration = nil
+        redeemingAuthAttempt = nil
         isRedeeming = false
       }
     }
@@ -317,13 +343,17 @@ public final class ProviderSignInCoordinator: ObservableObject {
   }
 
   public func recordNativeAppleAuthorizationFailure(_ error: Error) {
+    let authAttempt = attemptState.pending?.authAttempt ?? attemptState.nativePreparationAuthAttempt
     attemptState.cancel()
+    if let authAttempt { _ = Auth.shared.cancelLoginAttempt(authAttempt) }
     log.error("Native Apple authorization failed", error: error)
     errorMessage = Self.userFacingMessage(for: error)
   }
 
   public func cancelNativeAppleAuthorization() {
+    let authAttempt = attemptState.pending?.authAttempt ?? attemptState.nativePreparationAuthAttempt
     attemptState.cancel()
+    if let authAttempt { _ = Auth.shared.cancelLoginAttempt(authAttempt) }
     nativeAppleInvite = nil
     nativeAppleInviteRequest = nil
   }
@@ -349,6 +379,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
 
     if let callbackError = queryItems?.first(where: { $0.name == "error" })?.value {
       attemptState.cancel(codeChallenge: callbackChallenge)
+      if let authAttempt = attempt.authAttempt { _ = Auth.shared.cancelLoginAttempt(authAttempt) }
       errorMessage = callbackError == "cancelled"
         ? String(localized: "Sign-in was cancelled. No changes were made.")
         : String(localized: "Inline could not finish signing you in. Please try again.")
@@ -358,6 +389,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
       !ticket.isEmpty
     else {
       attemptState.cancel(codeChallenge: callbackChallenge)
+      if let authAttempt = attempt.authAttempt { _ = Auth.shared.cancelLoginAttempt(authAttempt) }
       errorMessage = String(localized: "Sign-in could not finish. Return to Inline and try again.")
       return
     }
@@ -365,10 +397,12 @@ public final class ProviderSignInCoordinator: ObservableObject {
 
     isRedeeming = true
     redeemingGeneration = attempt.generation
+    redeemingAuthAttempt = attempt.authAttempt
     errorMessage = nil
     defer {
       if redeemingGeneration == attempt.generation {
         redeemingGeneration = nil
+        redeemingAuthAttempt = nil
         isRedeeming = false
       }
     }
@@ -376,6 +410,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
       try await redeemProviderAuth(ticket: ticket, attempt: attempt)
     } catch {
       guard redeemingGeneration == attempt.generation else { return }
+      if let authAttempt = attempt.authAttempt { _ = Auth.shared.cancelLoginAttempt(authAttempt) }
       log.error("Failed to redeem provider sign-in", error: error)
       errorMessage = Self.userFacingMessage(for: error)
     }
@@ -384,9 +419,12 @@ public final class ProviderSignInCoordinator: ObservableObject {
   public func recordBrowserOpenFailure(_ error: Error, for url: URL) {
     let challenge = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
       .first(where: { $0.name == "code_challenge" })?.value
-    guard let challenge, attemptState.matching(codeChallenge: challenge) != nil else { return }
+    guard let challenge, let attempt = attemptState.matching(codeChallenge: challenge) else { return }
     log.error("Failed to open provider sign-in", error: error)
     attemptState.cancel(codeChallenge: challenge)
+    if let authAttempt = attempt.authAttempt {
+      _ = Auth.shared.cancelLoginAttempt(authAttempt)
+    }
     errorMessage = Self.userFacingMessage(for: error)
   }
 
@@ -407,28 +445,56 @@ public final class ProviderSignInCoordinator: ObservableObject {
   }
 
   public func cancelPendingAttempt() {
+    let attempts = [
+      attemptState.pending?.authAttempt,
+      attemptState.nativePreparationAuthAttempt,
+      redeemingAuthAttempt,
+    ].compactMap { $0 }
     attemptState.cancel()
+    redeemingGeneration = nil
+    redeemingAuthAttempt = nil
+    isRedeeming = false
     nativeAppleInvite = nil
     nativeAppleInviteRequest = nil
+    for attempt in attempts {
+      _ = Auth.shared.cancelLoginAttempt(attempt)
+    }
   }
 
   private func redeemProviderAuth(
     ticket: String,
     attempt: ProviderSignInPendingAttempt
   ) async throws {
+    guard let authAttempt = attempt.authAttempt else {
+      throw AuthStorageError.loginSuperseded
+    }
     var redeemedToken: String?
+    var committedLocally = false
     do {
-      try await AppDatabase.authenticated()
+      try await Auth.shared.validateLoginAttempt(authAttempt)
       let result = try await ApiClient.shared.redeemProviderAuth(
         ticket: ticket,
         codeVerifier: attempt.codeVerifier
       )
       redeemedToken = result.token
-      _ = try await AppDatabase.shared.dbWriter.write { db in
+      let commit = try await LoginStatePreparation.commit(
+        loginAttempt: authAttempt,
+        targetUserID: result.userId,
+        persistCredentials: {
+          try await Auth.shared.saveCredentials(
+            token: result.token,
+            userId: result.userId,
+            loginAttempt: authAttempt
+          )
+        }
+      ) { db in
         try result.user.saveFull(db)
       }
-      try await Auth.shared.saveCredentials(token: result.token, userId: result.userId)
-      guard redeemingGeneration == attempt.generation else { return }
+      committedLocally = true
+      // The DB/authority commit is the linearization point. A view disappearing after it may
+      // cancel UI ownership, but it must not suppress the completion that routes the committed
+      // account out of onboarding. Likewise, a newer login attempt may not reinterpret this
+      // completed server authority as a failed redemption and revoke it remotely.
       Analytics.identify(
         userId: result.userId,
         email: result.user.email,
@@ -439,10 +505,11 @@ public final class ProviderSignInCoordinator: ObservableObject {
         id: UUID(),
         userId: result.userId,
         pendingSetup: result.user.pendingSetup == true || result.user.firstName?.isEmpty != false,
-        userCreatedAt: Date(timeIntervalSince1970: TimeInterval(result.user.date))
+        userCreatedAt: Date(timeIntervalSince1970: TimeInterval(result.user.date)),
+        accountMutationToken: commit.accountMutationToken
       )
     } catch {
-      if let redeemedToken {
+      if let redeemedToken, committedLocally == false {
         _ = try? await ApiClient.shared.logout(bearerToken: redeemedToken)
       }
       throw error
@@ -457,6 +524,10 @@ public final class ProviderSignInCoordinator: ObservableObject {
       String(localized: "Inline could not connect. Check your connection and try again.")
     case let APIError.error(_, _, description):
       description ?? String(localized: "Inline could not finish signing you in. Please try again.")
+    case let error as AuthStorageError:
+      error.localizedDescription
+    case let error as LoginStatePreparationError:
+      error.localizedDescription
     default:
       String(localized: "Inline could not finish signing you in. Please try again.")
     }

@@ -245,9 +245,10 @@ public actor UpdatesEngine: Sendable {
     updates: [InlineProtocol.Update],
     source: UpdateApplySource,
     sidecars: InlineProtocol.UpdateSidecars? = nil,
-    bucketCommit: UpdateBucketCommit? = nil
+    bucketCommit: UpdateBucketCommit? = nil,
+    mutationToken: AuthAccountMutationToken? = nil
   ) async -> UpdateApplyResult {
-    let receivingUserID = Auth.shared.getCurrentUserId()
+    let receivingUserID = mutationToken?.userID ?? Auth.shared.getCurrentUserId()
     let batchStartedAt = Date()
     let batchSpan = PerformanceTrace.begin(
       "UpdateApplyBatch",
@@ -294,6 +295,9 @@ public actor UpdatesEngine: Sendable {
 
       do {
         let chunkResult = try await database.dbWriter.write { db in
+          if let mutationToken {
+            try Auth.shared.handle.validateAccountMutation(mutationToken)
+          }
           if applySidecarsInChunk, let sidecars, hasSidecars(sidecars) {
             let sidecarSpan = PerformanceTrace.begin(
               "UpdateApplySidecars",
@@ -358,6 +362,9 @@ public actor UpdatesEngine: Sendable {
         failedCount += chunkFailed
         for update in chunk {
           if case let .updateUserSettings(userSettings) = update.update {
+            if let mutationToken {
+              try Auth.shared.handle.validateAccountMutation(mutationToken)
+            }
             await userSettings.apply(receivingUserID: receivingUserID)
           }
         }
@@ -392,7 +399,10 @@ public actor UpdatesEngine: Sendable {
     if updates.isEmpty, let bucketCommit {
       do {
         committedBucketState = try await database.dbWriter.write { db in
-          try GRDBSyncStorage.advanceBucketState(
+          if let mutationToken {
+            try Auth.shared.handle.validateAccountMutation(mutationToken)
+          }
+          return try GRDBSyncStorage.advanceBucketState(
             for: bucketCommit.key,
             state: bucketCommit.state,
             in: db

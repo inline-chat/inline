@@ -120,26 +120,104 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
   // MARK: - Mutations
 
-  public func saveCredentials(token: String, userId: Int64) async throws {
+  public func saveCredentials(
+    token: String,
+    userId: Int64,
+    loginAttempt: AuthLoginAttempt? = nil
+  ) async throws {
     log.info("AUTH2 saveCredentials called userId=\(userId)")
-    try await store.saveCredentials(token: token, userId: userId)
+    try await store.saveCredentials(
+      token: token,
+      userId: userId,
+      loginAttempt: loginAttempt
+    )
   }
 
-  public func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {
-    try await store.saveInlineProtocolCredentials(credentials)
+  public func saveInlineProtocolCredentials(
+    _ credentials: InlineProtocolSessionCredentials,
+    loginAttempt: AuthLoginAttempt? = nil
+  ) async throws {
+    try await store.saveInlineProtocolCredentials(credentials, loginAttempt: loginAttempt)
   }
 
-  public func logOut() async {
-    log.info("AUTH2 logout called")
-    await store.logOut()
+  public func destroyCredentialsForPendingLogout(
+    fence: AuthLogoutFence
+  ) async -> AuthCredentialDestructionProof? {
+    await store.destroyCredentialsForPendingLogout(fence: fence)
   }
 
-  public func beginLogout() async {
-    await store.beginLogout()
+  public func beginLogout() async throws -> AuthLogoutFence {
+    try await store.beginLogout()
+  }
+
+  /// Writes the durable marker and invalidates in-process login attempts without an actor hop.
+  /// Platform logout owners call this before their first suspension point.
+  public func beginLogoutSynchronously() throws -> AuthLogoutFence {
+    try store.beginLogoutSynchronously()
+  }
+
+  public func publishLogoutInProgress() async {
+    await store.publishLogoutInProgress()
   }
 
   public func hasPendingLogout() async -> Bool {
-    await store.hasPendingLogout()
+    store.hasPendingLogout()
+  }
+
+  public func requireLoginAllowed() async throws {
+    try await store.requireLoginAllowed()
+  }
+
+  public func beginLoginAttempt(allowAuthenticated: Bool = false) async throws -> AuthLoginAttempt {
+    try await store.beginLoginAttempt(allowAuthenticated: allowAuthenticated)
+  }
+
+  public func validateLoginAttempt(_ attempt: AuthLoginAttempt) async throws {
+    try await store.validateLoginAttempt(attempt)
+  }
+
+  public func isLoginAttemptCurrent(_ attempt: AuthLoginAttempt) -> Bool {
+    cache.isLoginAttemptCurrent(attempt)
+  }
+
+  @discardableResult
+  public func cancelLoginAttempt(_ attempt: AuthLoginAttempt) -> Bool {
+    cache.invalidateLoginAttempt(attempt)
+  }
+
+  public func invalidateLoginAttemptsSynchronously() {
+    cache.invalidateLoginAttempts()
+  }
+
+  public func getHasPendingLogout() -> Bool {
+    store.hasPendingLogout()
+  }
+
+  public func getCurrentLogoutFence() -> AuthLogoutFence? {
+    store.currentLogoutFence()
+  }
+
+  public func getHasPendingAccountTransition() -> Bool {
+    store.hasPendingAccountTransition()
+  }
+
+  public func rollbackCredentialsCommittedByLoginAttempt(_ attempt: AuthLoginAttempt) async {
+    await store.rollbackCredentialsCommittedByLoginAttempt(attempt)
+  }
+
+  @_spi(LogoutCoordinator)
+  public func completePendingLogout(
+    fence: AuthLogoutFence,
+    databaseProof: AuthDatabaseCleanupProof,
+    credentialProof: AuthCredentialDestructionProof,
+    completionPermit: AuthLogoutCompletionPermit
+  ) async -> Bool {
+    await store.completePendingLogout(
+      fence: fence,
+      databaseProof: databaseProof,
+      credentialProof: credentialProof,
+      completionPermit: completionPermit
+    )
   }
 
   public func refreshFromStorage() async {

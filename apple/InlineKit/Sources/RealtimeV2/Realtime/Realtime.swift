@@ -155,6 +155,8 @@ public actor RealtimeV2 {
   private var transactionRetryTask: Task<Void, Never>?
   private var transactionOperationsInProgress = 0
   private var transactionDrainWaiters: [CheckedContinuation<Void, Never>] = []
+  private var directRPCOperationsInProgress = 0
+  private var directRPCDrainWaiters: [CheckedContinuation<Void, Never>] = []
 
   // Transaction execution
   private var transactionContinuations: [TransactionId: PendingTransactionContinuation] = [:]
@@ -170,7 +172,7 @@ public actor RealtimeV2 {
     blockerResolver: (any TransactionBlockerResolver)? = nil,
   ) {
     self.auth = auth
-    acceptsTransactions = auth.userId() != nil
+    acceptsTransactions = auth.userId() != nil && auth.hasPendingAccountTransition() == false
     authDiagnosticSnapshots = auth.snapshots
     session = ProtocolSession(transport: transport, auth: auth)
     #if canImport(UIKit)
@@ -192,7 +194,8 @@ public actor RealtimeV2 {
       syncStorage: syncStorage,
       client: session,
       config: syncConfig,
-      acceptsWork: false
+      acceptsWork: false,
+      auth: auth
     )
     transactions = Transactions(persistenceHandler: persistenceHandler, blockerResolver: blockerResolver)
     stateObject = RealtimeState()
@@ -232,7 +235,9 @@ public actor RealtimeV2 {
 
   /// Start core components, register listeners and start run loops.
   private func start() async {
-    _ = await ensureTransactionOwnerIfNeeded()
+    if auth.hasPendingAccountTransition() == false {
+      _ = await ensureTransactionOwnerIfNeeded()
+    }
     await sync.setSyncActivityListener { [weak self] isActive in
       await self?.syncActivityChanged(isActive)
     }
@@ -244,7 +249,7 @@ public actor RealtimeV2 {
     lifecycleAdapter?.start()
     networkAdapter?.start()
     authAdapter?.start()
-    if auth.snapshot().isLoggedIn {
+    if auth.snapshot().isLoggedIn, auth.hasPendingAccountTransition() == false {
       await connectionManager.setAuthAvailable(true)
       await connectionManager.connectNow()
     }
@@ -270,8 +275,10 @@ public actor RealtimeV2 {
     resumeAllTransactionContinuations(throwing: CancellationError())
 
     await connectionManager.stop()
+    await session.waitForDirectDispatches()
     await retryTask?.value
     await waitForTransactionOperationsToFinish()
+    await waitForDirectRPCOperationsToFinish()
 
     if let endingOwner {
       await transactions.reset(owner: endingOwner, deletePersisted: true)
@@ -283,13 +290,22 @@ public actor RealtimeV2 {
 
   /// Restarts account work after an in-place local-data reset that preserved authentication.
   public func resumeAfterLocalDataReset() async {
-    guard let accountID = auth.userId() else {
+    guard let mutationToken = try? auth.beginAccountMutation() else {
+      log.warning("Local-data reset resume skipped because authentication is unavailable")
+      return
+    }
+    guard let accountID = auth.userId(), accountID == mutationToken.userID
+    else {
       log.warning("Local-data reset resume skipped because authentication is unavailable")
       return
     }
 
     acceptsTransactions = true
     await transitionTransactionOwner(to: accountID)
+    guard (try? auth.validateAccountMutation(mutationToken)) != nil else {
+      acceptsTransactions = false
+      return
+    }
     await connectionManager.setAuthAvailable(true)
     await startTransport()
     log.info("Resumed realtime account generation after local-data reset")
@@ -424,7 +440,17 @@ public actor RealtimeV2 {
 
         case let .updates(updates):
           self.log.trace("Received updates \(updates)")
-          await self.sync.process(updates: updates.updates)
+          // The connection snapshot stream is independent from the ordered session-event stream.
+          // Consult the manager-owned generation directly so the first update after protocolOpen
+          // cannot be dropped merely because the UI snapshot listener has not caught up yet.
+          let currentSessionID = await self.connectionManager.currentSnapshot().sessionID
+          guard envelope.originatingSessionID == currentSessionID,
+                let mutationToken = try? self.auth.beginAccountMutation()
+          else { break }
+          await self.sync.process(
+            updates: updates.updates,
+            mutationToken: mutationToken
+          )
 
         case let .grid(event):
           self.publishGridEvent(event)
@@ -493,6 +519,13 @@ public actor RealtimeV2 {
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
 
+    guard auth.hasPendingAccountTransition() == false,
+          auth.snapshot() == snapshot
+    else {
+      acceptsTransactions = false
+      return
+    }
+
     guard snapshot.isLoggedIn else {
       acceptsTransactions = false
       return
@@ -552,8 +585,17 @@ public actor RealtimeV2 {
   }
 
   private func startTransport() async {
+    guard let mutationToken = try? auth.beginAccountMutation() else {
+      await connectionManager.setAuthAvailable(false)
+      return
+    }
     await updateTransportConnectionState(.connecting)
     await connectionManager.start()
+    guard (try? auth.validateAccountMutation(mutationToken)) != nil else {
+      await connectionManager.setAuthAvailable(false)
+      await connectionManager.stop()
+      return
+    }
     await connectionManager.connectNow()
   }
 
@@ -564,10 +606,13 @@ public actor RealtimeV2 {
   /// Ensure the transport is started when credentials are available.
   /// This is intentionally light-weight so callers can pre-warm the connection without using transactions.
   public func connectIfNeeded() async {
-    if auth.snapshot().isLoggedIn {
-      await connectionManager.setAuthAvailable(true)
-      await startTransport()
+    guard let mutationToken = try? auth.beginAccountMutation() else { return }
+    await connectionManager.setAuthAvailable(true)
+    guard (try? auth.validateAccountMutation(mutationToken)) != nil else {
+      await connectionManager.setAuthAvailable(false)
+      return
     }
+    await startTransport()
   }
 
   private func runTransaction(
@@ -984,7 +1029,10 @@ public actor RealtimeV2 {
   }
 
   private func ensureTransactionOwnerIfNeeded() async -> TransactionOwner? {
-    guard acceptsTransactions, let accountID = auth.userId() else { return nil }
+    guard acceptsTransactions,
+          auth.hasPendingAccountTransition() == false,
+          let accountID = auth.userId()
+    else { return nil }
 
     if let transactionOwner, transactionOwner.accountID == accountID {
       return transactionOwner
@@ -993,6 +1041,7 @@ public actor RealtimeV2 {
     if let transactionOwnerTransitionTask {
       await transactionOwnerTransitionTask.value
       guard acceptsTransactions,
+            auth.hasPendingAccountTransition() == false,
             auth.userId() == accountID,
             let transactionOwner,
             transactionOwner.accountID == accountID
@@ -1014,6 +1063,7 @@ public actor RealtimeV2 {
     }
 
     guard acceptsTransactions,
+          auth.hasPendingAccountTransition() == false,
           auth.userId() == accountID,
           let transactionOwner,
           transactionOwner.accountID == accountID
@@ -1022,7 +1072,10 @@ public actor RealtimeV2 {
   }
 
   private func transitionTransactionOwner(to accountID: Int64) async {
-    guard acceptsTransactions, auth.userId() == accountID else { return }
+    guard acceptsTransactions,
+          auth.hasPendingAccountTransition() == false,
+          auth.userId() == accountID
+    else { return }
 
     if let previousOwner = transactionOwner {
       transactionOwner = nil
@@ -1036,7 +1089,11 @@ public actor RealtimeV2 {
       await sync.clearSyncState(acceptNewWork: false)
     }
 
-    guard acceptsTransactions, auth.userId() == accountID, transactionOwner == nil else { return }
+    guard acceptsTransactions,
+          auth.hasPendingAccountTransition() == false,
+          auth.userId() == accountID,
+          transactionOwner == nil
+    else { return }
 
     transactionGeneration = transactionGeneration &+ 1
     let newOwner = TransactionOwner(accountID: accountID, generation: transactionGeneration)
@@ -1044,7 +1101,11 @@ public actor RealtimeV2 {
     await transactions.activate(owner: newOwner)
     await sync.activateGeneration()
 
-    guard acceptsTransactions, auth.userId() == accountID, transactionOwner == newOwner else {
+    guard acceptsTransactions,
+          auth.hasPendingAccountTransition() == false,
+          auth.userId() == accountID,
+          transactionOwner == newOwner
+    else {
       if transactionOwner == newOwner {
         transactionOwner = nil
       }
@@ -1055,7 +1116,11 @@ public actor RealtimeV2 {
   }
 
   private func beginTransactionSubmission() async -> TransactionOwner? {
-    guard let owner = await ensureTransactionOwnerIfNeeded(), isCurrentTransactionOwner(owner) else {
+    guard auth.hasPendingAccountTransition() == false,
+          let owner = await ensureTransactionOwnerIfNeeded(),
+          auth.hasPendingAccountTransition() == false,
+          isCurrentTransactionOwner(owner)
+    else {
       return nil
     }
     beginTransactionOperation()
@@ -1063,7 +1128,10 @@ public actor RealtimeV2 {
   }
 
   private func isCurrentTransactionOwner(_ owner: TransactionOwner) -> Bool {
-    acceptsTransactions && transactionOwner == owner && auth.userId() == owner.accountID
+    acceptsTransactions
+      && auth.hasPendingAccountTransition() == false
+      && transactionOwner == owner
+      && auth.userId() == owner.accountID
   }
 
   private func shouldPreserveAdmittedTransactionDuringTermination(
@@ -1100,6 +1168,25 @@ public actor RealtimeV2 {
     guard transactionOperationsInProgress > 0 else { return }
     await withCheckedContinuation { continuation in
       transactionDrainWaiters.append(continuation)
+    }
+  }
+
+  private func beginDirectRPCOperation() {
+    directRPCOperationsInProgress += 1
+  }
+
+  private func endDirectRPCOperation() {
+    directRPCOperationsInProgress = max(0, directRPCOperationsInProgress - 1)
+    guard directRPCOperationsInProgress == 0 else { return }
+    let waiters = directRPCDrainWaiters
+    directRPCDrainWaiters.removeAll()
+    for waiter in waiters { waiter.resume() }
+  }
+
+  private func waitForDirectRPCOperationsToFinish() async {
+    guard directRPCOperationsInProgress > 0 else { return }
+    await withCheckedContinuation { continuation in
+      directRPCDrainWaiters.append(continuation)
     }
   }
 
@@ -1309,13 +1396,21 @@ public actor RealtimeV2 {
   }
 
   public func applyUpdates(_ updates: [InlineProtocol.Update]) {
-    Task { await sync.process(updates: updates) }
+    guard let mutationToken = try? auth.beginAccountMutation() else {
+      log.warning("Rejected direct-result update projection during account transition")
+      return
+    }
+    Task { await sync.process(updates: updates, mutationToken: mutationToken) }
   }
 
   /// Applies transaction-result updates before returning when subsequent
   /// reconciliation depends on their database state.
   public func applyUpdatesAndWait(_ updates: [InlineProtocol.Update]) async {
-    await sync.process(updates: updates)
+    guard let mutationToken = try? auth.beginAccountMutation() else {
+      log.warning("Rejected direct-result update projection during account transition")
+      return
+    }
+    await sync.process(updates: updates, mutationToken: mutationToken)
   }
 
   public func satisfyTransactionBlockers(_ blockers: [TransactionBlocker]) async {
@@ -1329,6 +1424,9 @@ public actor RealtimeV2 {
     input: RpcCall.OneOf_Input?,
     timeout: Duration? = .seconds(15)
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
+    beginDirectRPCOperation()
+    defer { endDirectRPCOperation() }
     do {
       return try await session.callRpc(method: method, input: input, timeout: timeout)
     } catch let error as ProtocolSessionError {
@@ -1501,6 +1599,7 @@ public actor RealtimeV2 {
     peer: InlineProtocol.InputPeer,
     maxID: Int64?
   ) async throws -> Int64? {
+    let mutationToken = try auth.beginAccountMutation()
     let result = try await callRpcDirect(
       method: .collapseHistory,
       input: .collapseHistory(.with {
@@ -1521,7 +1620,8 @@ public actor RealtimeV2 {
       throw RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: nil, code: 500)
     }
 
-    await sync.process(updates: collapseResult.updates)
+    try auth.validateAccountMutation(mutationToken)
+    await sync.process(updates: collapseResult.updates, mutationToken: mutationToken)
     return boundary.hasMaxID ? boundary.maxID : nil
   }
 
@@ -1782,7 +1882,7 @@ public actor RealtimeV2 {
       return true
     case .authenticated(let credentials):
       return credentials.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    case .hydrating, .unauthenticated, .locked, .authenticatedV3:
+    case .hydrating, .unauthenticated, .locked, .loggingOut, .authenticatedV3:
       return false
     }
   }

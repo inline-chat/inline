@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -126,30 +127,37 @@ struct Drafts2Row: Codable, FetchableRecord, PersistableRecord, TableRecord, Sen
 }
 
 private enum Drafts2PersistenceOperation: Sendable {
-  case save(Drafts2Row)
-  case clear(peerKey: String, revision: Int64)
+  case save(Drafts2Row, AuthAccountMutationToken?)
+  case clear(peerKey: String, revision: Int64, AuthAccountMutationToken?)
 
   var peerKey: String {
     switch self {
-      case let .save(row):
+      case let .save(row, _):
         row.peerKey
-      case let .clear(peerKey, _):
+      case let .clear(peerKey, _, _):
         peerKey
     }
   }
 
   var revision: Int64 {
     switch self {
-      case let .save(row):
+      case let .save(row, _):
         row.revision
-      case let .clear(_, revision):
+      case let .clear(_, revision, _):
         revision
+    }
+  }
+
+  var mutationToken: AuthAccountMutationToken? {
+    switch self {
+      case let .save(_, token), let .clear(_, _, token): token
     }
   }
 }
 
 private final class Drafts2PersistenceWriter: @unchecked Sendable {
   private let database: AppDatabase
+  private let auth: AuthHandle?
   private let log = Log.scoped("Drafts2PersistenceWriter")
   private let lock = NSLock()
   private let queue = DispatchQueue(label: "chat.inline.Drafts2.persistence", qos: .utility)
@@ -157,16 +165,19 @@ private final class Drafts2PersistenceWriter: @unchecked Sendable {
   private var pending: [String: Drafts2PersistenceOperation] = [:]
   private var isDraining = false
 
-  init(database: AppDatabase) {
+  init(database: AppDatabase, auth: AuthHandle?) {
     self.database = database
+    self.auth = auth
   }
 
   func save(_ row: Drafts2Row) {
-    enqueue(.save(row))
+    guard let token = mutationTokenIfAllowed() else { return }
+    enqueue(.save(row, token))
   }
 
   func clear(peerKey: String, revision: Int64) {
-    enqueue(.clear(peerKey: peerKey, revision: revision))
+    guard let token = mutationTokenIfAllowed() else { return }
+    enqueue(.clear(peerKey: peerKey, revision: revision, token))
   }
 
   func flushBlocking() {
@@ -232,13 +243,16 @@ private final class Drafts2PersistenceWriter: @unchecked Sendable {
     do {
       try database.dbWriter.write { db in
         for operation in operations {
+          if let token = operation.mutationToken {
+            try auth?.validateAccountMutation(token)
+          }
           let existing = try Drafts2Row.fetchOne(db, key: operation.peerKey)
           guard (existing?.revision ?? 0) <= operation.revision else { continue }
 
           switch operation {
-            case let .save(row):
+            case let .save(row, _):
               try row.save(db)
-            case let .clear(peerKey, _):
+            case let .clear(peerKey, _, _):
               try Drafts2Row.filter(Drafts2Row.Columns.peerKey == peerKey).deleteAll(db)
           }
         }
@@ -247,11 +261,19 @@ private final class Drafts2PersistenceWriter: @unchecked Sendable {
       log.error("Failed to persist Drafts2 batch", error: error)
     }
   }
+
+  /// Outer optional distinguishes test/no-auth operation admission from rejected production work.
+  private func mutationTokenIfAllowed() -> AuthAccountMutationToken?? {
+    guard let auth else { return .some(nil) }
+    guard let token = try? auth.beginAccountMutation() else { return nil }
+    return .some(token)
+  }
 }
 
 public final class Drafts2: @unchecked Sendable {
   private let database: AppDatabase
   private let writer: Drafts2PersistenceWriter
+  private let auth: AuthHandle?
   private let log = Log.scoped("Drafts2")
   private let stateQueue = DispatchQueue(label: "chat.inline.Drafts2.state")
   private var loadedPeerKeys: Set<String> = []
@@ -261,11 +283,12 @@ public final class Drafts2: @unchecked Sendable {
   private var pendingAttachmentTasks: [String: Task<Void, Never>] = [:]
   private var attachmentObservers: [String: [UUID: Drafts2AttachmentCompletion]] = [:]
 
-  public static let shared = Drafts2()
+  public static let shared = Drafts2(auth: Auth.shared.handle)
 
-  public init(database: AppDatabase = .shared) {
+  public init(database: AppDatabase = .shared, auth: AuthHandle? = nil) {
     self.database = database
-    self.writer = Drafts2PersistenceWriter(database: database)
+    self.auth = auth
+    self.writer = Drafts2PersistenceWriter(database: database, auth: auth)
   }
 
   public static func nowSeconds() -> Int64 {
@@ -370,8 +393,29 @@ public final class Drafts2: @unchecked Sendable {
     preferredFormat: ImageFormat? = nil,
     onComplete: Drafts2AttachmentCompletion? = nil
   ) -> String {
+    addImage(
+      peer: peer,
+      image: image,
+      preferredFormat: preferredFormat,
+      fallbackURL: nil,
+      onComplete: onComplete
+    )
+  }
+
+  @discardableResult
+  public func addImage(
+    peer: Peer,
+    image: PlatformImage,
+    preferredFormat: ImageFormat? = nil,
+    fallbackURL: URL?,
+    onComplete: Drafts2AttachmentCompletion? = nil
+  ) -> String {
     startMaterialization(peer: peer, prefix: "pending_photo") {
-      .photo(try FileCache.savePhoto(image: image, preferredFormat: preferredFormat))
+      try await AttachmentMediaMaterializer.image(
+        image,
+        preferredFormat: preferredFormat,
+        sourceURL: fallbackURL
+      )
     } onComplete: { result in
       onComplete?(result)
     }
@@ -385,7 +429,7 @@ public final class Drafts2: @unchecked Sendable {
     onComplete: Drafts2AttachmentCompletion? = nil
   ) -> String {
     startMaterialization(peer: peer, prefix: "pending_video") {
-      .video(try await FileCache.saveVideo(url: url, thumbnail: thumbnail))
+      try await AttachmentMediaMaterializer.video(url, thumbnail: thumbnail)
     } onComplete: { result in
       onComplete?(result)
     }
@@ -398,7 +442,7 @@ public final class Drafts2: @unchecked Sendable {
     onComplete: Drafts2AttachmentCompletion? = nil
   ) -> String {
     startMaterialization(peer: peer, prefix: "pending_animated_image") {
-      .video(try await FileCache.saveAnimatedImageAsVideo(url: url))
+      try await AttachmentMediaMaterializer.animatedImage(url)
     } onComplete: { result in
       onComplete?(result)
     }
@@ -411,7 +455,7 @@ public final class Drafts2: @unchecked Sendable {
     onComplete: Drafts2AttachmentCompletion? = nil
   ) -> String {
     startMaterialization(peer: peer, prefix: "pending_document") {
-      .document(try await FileCache.saveDocumentWithThumbnail(url: url))
+      try await AttachmentMediaMaterializer.file(url)
     } onComplete: { result in
       onComplete?(result)
     }
@@ -460,10 +504,23 @@ public final class Drafts2: @unchecked Sendable {
     pendingTasks.forEach { $0.cancel() }
   }
 
+  public func cancelAllPendingAttachmentsAndWait() async {
+    let pendingTasks = stateQueue.sync { () -> [Task<Void, Never>] in
+      pendingAttachmentIdsByPeerKey.removeAll()
+      let tasks = Array(pendingAttachmentTasks.values)
+      pendingAttachmentTasks.removeAll()
+      return tasks
+    }
+    pendingTasks.forEach { $0.cancel() }
+    for task in pendingTasks {
+      await task.value
+    }
+  }
+
   /// Clears account-owned in-memory draft state after draining writes that
   /// were accepted by the old account. Call this before clearing its database.
   public func resetForAccountChange() async {
-    cancelAllPendingAttachments()
+    await cancelAllPendingAttachmentsAndWait()
     await writer.flush()
     stateQueue.sync {
       loadedPeerKeys.removeAll()
@@ -534,6 +591,18 @@ public final class Drafts2: @unchecked Sendable {
   ) -> String {
     let peerKey = peer.toString()
     let pendingId = "\(prefix)_\(UUID().uuidString)"
+    let mutationToken: AuthAccountMutationToken?
+    if let auth {
+      do {
+        mutationToken = try auth.beginAccountMutation()
+      } catch {
+        let result = Drafts2AttachmentResult.cancelled(pendingId: pendingId)
+        Task { @MainActor in onComplete?(result) }
+        return pendingId
+      }
+    } else {
+      mutationToken = nil
+    }
     let taskKey = Self.pendingTaskKey(peerKey: peerKey, id: pendingId)
     _ = stateQueue.sync {
       pendingAttachmentIdsByPeerKey[peerKey, default: []].insert(pendingId)
@@ -554,6 +623,18 @@ public final class Drafts2: @unchecked Sendable {
           emitAttachmentResult(peerKey: peerKey, result: result)
           await MainActor.run { onComplete?(result) }
           return
+        }
+        if let mutationToken {
+          do {
+            try auth?.validateAccountMutation(mutationToken)
+          } catch {
+            await discardMedia(media)
+            finishFailedMaterialization(peerKey: peerKey, pendingId: pendingId)
+            let result = Drafts2AttachmentResult.cancelled(pendingId: pendingId)
+            emitAttachmentResult(peerKey: peerKey, result: result)
+            await MainActor.run { onComplete?(result) }
+            return
+          }
         }
         guard let attachment = finishMaterialization(peer: peer, pendingId: pendingId, media: media) else {
           await discardMedia(media)

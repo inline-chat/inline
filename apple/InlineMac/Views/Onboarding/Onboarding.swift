@@ -1,5 +1,6 @@
-import SwiftUI
+import Auth
 import InlineKit
+import SwiftUI
 
 struct Onboarding: View {
   @EnvironmentObject private var windowViewModel: MainWindowViewModel
@@ -92,6 +93,9 @@ struct Onboarding: View {
       guard let completionID,
         let completion = providerSignIn.consumeCompletion(id: completionID)
       else { return }
+      guard (try? Auth.shared.handle.validateAccountMutation(completion.accountMutationToken)) != nil else {
+        return
+      }
       AppSettings.shared.resolveSidebarModeForAccount(createdAt: completion.userCreatedAt)
       viewModel.navigateAfterLogin(pendingSetup: completion.pendingSetup)
     }

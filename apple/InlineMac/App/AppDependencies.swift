@@ -376,6 +376,13 @@ final class MainWindowSessionRefresher {
   @ObservationIgnored private var didFetchInitialData = false
   @ObservationIgnored private var initialTask: Task<Void, Never>?
   @ObservationIgnored private var chatsTask: Task<Void, Never>?
+  @ObservationIgnored private var generation: UInt64 = 0
+
+  private func canContinue(generation: UInt64, accountID: Int64) -> Bool {
+    self.generation == generation
+      && Auth.shared.getHasPendingAccountTransition() == false
+      && Auth.shared.getCurrentUserId() == accountID
+  }
 
   private func beginSidebarFetch() {
     sidebarFetchCount += 1
@@ -389,13 +396,16 @@ final class MainWindowSessionRefresher {
 
   func fetchInitialDataIfNeeded(dependencies: AppDependencies) {
     guard didFetchInitialData == false else { return }
-    guard Auth.shared.getIsLoggedIn() else { return }
+    guard Auth.shared.getIsLoggedIn(), Auth.shared.getHasPendingAccountTransition() == false,
+          let accountID = Auth.shared.getCurrentUserId()
+    else { return }
 
     didFetchInitialData = true
     initialTask?.cancel()
 
     let realtime = dependencies.realtimeV2
     let data = dependencies.data
+    let taskGeneration = generation
 
     beginSidebarFetch()
     initialTask = Task { @MainActor [weak self] in
@@ -406,6 +416,9 @@ final class MainWindowSessionRefresher {
 
       do {
         try await realtime.send(.getMe())
+        guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+          return
+        }
         AppSettings.shared.resolveSidebarModeForCurrentAccount()
       } catch is CancellationError {
         return
@@ -415,22 +428,34 @@ final class MainWindowSessionRefresher {
 
       do {
         try Task.checkCancellation()
+        guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+          return
+        }
         try await data.getSpaces()
+        guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+          return
+        }
       } catch is CancellationError {
         return
       } catch {
         Log.shared.error("Error fetching spaces", error: error)
       }
 
+      guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+        return
+      }
       self?.refetchChats(dependencies: dependencies)
     }
   }
 
   func refetchChats(dependencies: AppDependencies) {
-    guard let accountID = Auth.shared.getCurrentUserId() else { return }
+    guard Auth.shared.getHasPendingAccountTransition() == false,
+          let accountID = Auth.shared.getCurrentUserId()
+    else { return }
     guard chatsTask == nil else { return }
 
     let realtime = dependencies.realtimeV2
+    let taskGeneration = generation
     beginSidebarFetch()
     chatsTask = Task { @MainActor [weak self] in
       defer {
@@ -440,11 +465,15 @@ final class MainWindowSessionRefresher {
 
       let maxAttempts = Self.chatsRetryDelays.count + 1
       for attempt in 1 ... maxAttempts {
-        guard Auth.shared.getCurrentUserId() == accountID else { return }
+        guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+          return
+        }
         do {
           try Task.checkCancellation()
           try await realtime.send(.getChats())
-          guard Auth.shared.getCurrentUserId() == accountID else { return }
+          guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+            return
+          }
           self?.hasFetchedSidebarChats = true
           return
         } catch is CancellationError {
@@ -463,6 +492,7 @@ final class MainWindowSessionRefresher {
   }
 
   func reset() {
+    generation &+= 1
     didFetchInitialData = false
     initialTask?.cancel()
     chatsTask?.cancel()
@@ -471,6 +501,14 @@ final class MainWindowSessionRefresher {
     sidebarFetchCount = 0
     isFetchingSidebarChats = false
     hasFetchedSidebarChats = false
+  }
+
+  func resetAndWait() async {
+    let pendingInitialTask = initialTask
+    let pendingChatsTask = chatsTask
+    reset()
+    await pendingInitialTask?.value
+    await pendingChatsTask?.value
   }
 }
 
@@ -538,7 +576,7 @@ final class Nav3ChatOpenPreloadBridge {
           targetMessageId: targetMessageId,
           database: database
         )
-        guard self.requestID == id else {
+        guard self.requestID == id, Auth.shared.getHasPendingAccountTransition() == false else {
           os_signpost(
             .end,
             log: self.signpostLog,
@@ -568,7 +606,7 @@ final class Nav3ChatOpenPreloadBridge {
         )
         nav.open(.chat(peer: peer), tracksChatNavigation: false)
       } catch is CancellationError {
-        guard self.requestID == id else {
+        guard self.requestID == id, Auth.shared.getHasPendingAccountTransition() == false else {
           os_signpost(
             .end,
             log: self.signpostLog,
@@ -637,6 +675,12 @@ final class Nav3ChatOpenPreloadBridge {
 
   func cancelPendingOpen() {
     clearPending()
+  }
+
+  func cancelPendingOpenAndWait() async {
+    let task = pendingTask
+    clearPending()
+    await task?.value
   }
 
   private func scrollOpenChat(peer: Peer, targetMessageId: Int64, database: AppDatabase) {

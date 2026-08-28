@@ -8,6 +8,26 @@ import Testing
 
 @Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
+  @Test("first update after protocol open uses the manager session generation")
+  func testImmediateFirstSessionUpdateIsApplied() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = ImmediateOpenUpdateTransport()
+    let apply = ImmediateUpdateApplyRecorder()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: apply,
+      syncStorage: SendTestSyncStorage()
+    )
+
+    let applied = await waitForCondition(timeout: .seconds(10)) {
+      await apply.count > 0
+    }
+    #expect(applied)
+
+    await realtime.loggedOut()
+  }
+
   @Test("local-data reset resumes the authenticated transaction owner")
   func testLocalDataResetResume() async throws {
     await SendTestRecorder.shared.reset()
@@ -24,8 +44,16 @@ final class RealtimeSendTests {
     await realtime.loggedOut()
 
     let blockedID = UUID()
+    let rpcCallsBeforeBlockedTransaction = await transport.sentMessages.count { message in
+      if case .rpcCall = message.body { return true }
+      return false
+    }
     _ = await realtime.sendQueued(SendTestTransaction(id: blockedID))
-    #expect(await transport.sentMessages.isEmpty)
+    let rpcCallsAfterBlockedTransaction = await transport.sentMessages.count { message in
+      if case .rpcCall = message.body { return true }
+      return false
+    }
+    #expect(rpcCallsAfterBlockedTransaction == rpcCallsBeforeBlockedTransaction)
 
     await realtime.resumeAfterLocalDataReset()
 
@@ -101,7 +129,10 @@ final class RealtimeSendTests {
     #expect(transactionID == nil)
     #expect(await OptimisticValidationRecorder.shared.optimisticCount() == 1)
     #expect(await OptimisticValidationRecorder.shared.cancelledCount() == 1)
-    #expect(await transport.sentMessages.isEmpty)
+    #expect(await transport.sentMessages.contains { message in
+      if case .rpcCall = message.body { return true }
+      return false
+    } == false)
     withExtendedLifetime(realtime) {}
   }
 
@@ -1397,6 +1428,63 @@ final class RealtimeSendTests {
     }
   }
 
+  @Test("direct RPC drain waits for a blocked transport send after caller timeout")
+  func testDirectRPCDrainWaitsForBlockedTransportSend() async throws {
+    let transport = BlockingDirectDispatchTransport()
+    let session = ProtocolSession(
+      transport: transport,
+      auth: Auth.mocked(authenticated: true).handle
+    )
+    let rpc = Task {
+      try await session.callRpc(
+        method: .deleteChat,
+        input: nil,
+        timeout: .milliseconds(10)
+      )
+    }
+    try #require(await waitForCondition { await transport.isBlocked() })
+    do {
+      _ = try await rpc.value
+      Issue.record("Expected caller timeout while transport dispatch remains blocked")
+    } catch ProtocolSessionError.commitOutcomeUnknown {
+      // The transport dispatch lease must nevertheless remain registered.
+    }
+
+    let drained = SendTestFlag()
+    let drain = Task {
+      await session.waitForDirectDispatches()
+      await drained.set()
+    }
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await drained.get() == false)
+    await transport.release()
+    await drain.value
+    #expect(await drained.get())
+  }
+
+  @Test("direct dispatch finalizes its drain lease for both pre-write transport errors")
+  func testDirectRPCDrainFinalizesForTransportErrors() async {
+    for transportError in [TransportError.notConnected, .capacityExceeded] {
+      let transport = DirectDispatchFailureTransport(error: transportError)
+      let session = ProtocolSession(
+        transport: transport,
+        auth: Auth.mocked(authenticated: true).handle
+      )
+      do {
+        _ = try await session.callRpc(method: .deleteChat, input: nil, timeout: .seconds(1))
+        Issue.record("Expected direct dispatch transport error")
+      } catch ProtocolSessionError.notConnected where transportError == .notConnected {
+        // Known-unsent and fully drained.
+      } catch ProtocolSessionError.capacityExceeded where transportError == .capacityExceeded {
+        // Known-unsent and fully drained.
+      } catch {
+        Issue.record("Unexpected direct dispatch error: \(error)")
+      }
+      await session.waitForDirectDispatches()
+      #expect(await transport.sendCount() == 1)
+    }
+  }
+
   @Test("direct RPC admission rejects request 65 without a transport write")
   func testDirectRPCCapacityRejectsBeforeWrite() async throws {
     let transport = MockTransport()
@@ -2337,6 +2425,53 @@ private actor HangingRpcTransport: Transport {
   func didDispatchRpc() -> Bool {
     dispatchedRpc
   }
+}
+
+private actor BlockingDirectDispatchTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+
+  private var blocked = false
+  private var continuation: CheckedContinuation<Void, Never>?
+
+  func start() async {}
+  func stop() async {}
+
+  func send(_ message: ClientMessage) async throws {
+    guard case .rpcCall = message.body else { return }
+    blocked = true
+    await withCheckedContinuation { continuation in
+      self.continuation = continuation
+    }
+  }
+
+  func isBlocked() -> Bool { blocked }
+
+  func release() {
+    continuation?.resume()
+    continuation = nil
+  }
+}
+
+private actor DirectDispatchFailureTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+
+  private let error: TransportError
+  private var count = 0
+
+  init(error: TransportError) {
+    self.error = error
+  }
+
+  func start() async {}
+  func stop() async {}
+
+  func send(_ message: ClientMessage) async throws {
+    guard case .rpcCall = message.body else { return }
+    count += 1
+    throw error
+  }
+
+  func sendCount() -> Int { count }
 }
 
 private final class AuthSnapshotDriver: @unchecked Sendable {
@@ -3329,6 +3464,61 @@ private actor SendTestApplyUpdates: ApplyUpdates {
     sidecars: InlineProtocol.UpdateSidecars?
   ) async -> UpdateApplyResult {
     .success(count: updates.count)
+  }
+}
+
+private actor ImmediateUpdateApplyRecorder: ApplyUpdates {
+  private(set) var count = 0
+
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?
+  ) async -> UpdateApplyResult {
+    count += updates.count
+    return .success(count: updates.count)
+  }
+}
+
+private actor ImmediateOpenUpdateTransport: Transport {
+  nonisolated let events = AsyncChannel<TransportEvent>()
+  private var started = false
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await events.send(.connecting)
+    await events.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await events.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    guard case .connectionInit = message.body else { return }
+
+    var open = ServerProtocolMessage()
+    open.id = message.id
+    open.body = .connectionOpen(.init())
+    await events.send(.message(open))
+
+    var status = InlineProtocol.UpdateUserStatus()
+    status.userID = 1
+    var userStatus = InlineProtocol.UserStatus()
+    userStatus.online = .online
+    status.status = userStatus
+    var update = InlineProtocol.Update()
+    update.update = .updateUserStatus(status)
+    var payload = InlineProtocol.UpdatesPayload()
+    payload.updates = [update]
+    var serverMessage = InlineProtocol.ServerMessage()
+    serverMessage.payload = .update(payload)
+    var updateEnvelope = ServerProtocolMessage()
+    updateEnvelope.body = .message(serverMessage)
+    await events.send(.message(updateEnvelope))
   }
 }
 

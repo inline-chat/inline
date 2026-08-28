@@ -32,14 +32,14 @@ public class MainViewRouter: ObservableObject {
   }
 
   public func setRoute(route: MainRoutes) {
-    self.route = route
+    self.route = Auth.shared.getHasPendingAccountTransition() ? .loading : route
   }
 
   private static func initialRoute(for status: AuthStatus) -> MainRoutes {
     switch status {
     case .authenticated, .authenticatedV3:
       return .main
-    case .hydrating, .locked:
+    case .hydrating, .locked, .loggingOut:
       return .loading
     case .unauthenticated, .reauthRequired:
       return .onboarding
@@ -47,6 +47,12 @@ public class MainViewRouter: ObservableObject {
   }
 
   private func handle(status: AuthStatus) {
+    if Auth.shared.getHasPendingAccountTransition() {
+      transitionTask?.cancel()
+      transitionTask = nil
+      route = .loading
+      return
+    }
     // Only auto-route while we're still resolving early-launch / protected-data timing issues.
     switch route {
     case .loading:
@@ -56,17 +62,28 @@ public class MainViewRouter: ObservableObject {
         transitionTask = Task { @MainActor [weak self] in
           // Ensure `AppDatabase.shared` isn't stuck on an in-memory fallback from pre-unlock startup.
           _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          guard !Task.isCancelled else { return }
+          guard !Task.isCancelled,
+                Auth.shared.getHasPendingAccountTransition() == false,
+                Auth.shared.getStatus().isAuthenticated
+          else { return }
           self?.route = .main
         }
       case .unauthenticated, .reauthRequired:
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
           _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          guard !Task.isCancelled else { return }
+          guard !Task.isCancelled,
+                Auth.shared.getHasPendingAccountTransition() == false
+          else { return }
+          switch Auth.shared.getStatus() {
+          case .unauthenticated, .reauthRequired:
+            break
+          case .authenticated, .authenticatedV3, .hydrating, .locked, .loggingOut:
+            return
+          }
           self?.route = .onboarding
         }
-      case .hydrating, .locked:
+      case .hydrating, .locked, .loggingOut:
         break
       }
 
@@ -76,6 +93,10 @@ public class MainViewRouter: ObservableObject {
         transitionTask?.cancel()
         transitionTask = nil
         route = .onboarding
+      case .loggingOut:
+        transitionTask?.cancel()
+        transitionTask = nil
+        route = .loading
       case .authenticated, .authenticatedV3, .hydrating, .locked:
         break
       }
@@ -83,6 +104,9 @@ public class MainViewRouter: ObservableObject {
     case .onboarding:
       transitionTask?.cancel()
       transitionTask = nil
+      if case .loggingOut = status {
+        route = .loading
+      }
       // Do not auto-switch to `.main` on login: onboarding may still need to finish profile/setup.
       break
     }

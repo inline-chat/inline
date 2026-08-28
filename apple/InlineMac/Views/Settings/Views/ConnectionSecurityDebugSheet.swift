@@ -80,6 +80,7 @@ struct ConnectionSecurityDebugSheet: View {
     case .hydrating: "Loading"
     case .locked: "Credentials locked"
     case .reauthRequired: "Authentication required"
+    case .loggingOut: "Logging out"
     case .unauthenticated: "Signed out"
     }
   }

@@ -17,6 +17,22 @@ struct InlineApplyUpdates: ApplyUpdates {
     updates: [InlineProtocol.Update],
     source: UpdateApplySource,
     sidecars: InlineProtocol.UpdateSidecars?,
+    bucketCommit: UpdateBucketCommit?,
+    mutationToken: AuthAccountMutationToken?
+  ) async -> UpdateApplyResult {
+    await UpdatesEngine.shared.applyBatch(
+      updates: updates,
+      source: source,
+      sidecars: sidecars,
+      bucketCommit: bucketCommit,
+      mutationToken: mutationToken
+    )
+  }
+
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?,
     bucketCommit: UpdateBucketCommit?
   ) async -> UpdateApplyResult {
     await UpdatesEngine.shared.applyBatch(

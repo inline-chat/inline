@@ -1,3 +1,4 @@
+import Auth
 import InlineProtocol
 
 public enum UpdateApplySource: Sendable, Equatable {
@@ -131,6 +132,14 @@ public protocol ApplyUpdates: Sendable {
     bucketCommit: UpdateBucketCommit?
   ) async -> UpdateApplyResult
 
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?,
+    bucketCommit: UpdateBucketCommit?,
+    mutationToken: AuthAccountMutationToken?
+  ) async -> UpdateApplyResult
+
   /// Apply a bounded current-state repair for a chat bucket.
   func repairChat(_ snapshot: ChatRepairSnapshot) async -> BucketState?
   /// Apply a bounded current-state repair for a space bucket.
@@ -164,5 +173,20 @@ public extension ApplyUpdates {
     bucketCommit: UpdateBucketCommit?
   ) async -> UpdateApplyResult {
     await apply(updates: updates, source: source, sidecars: sidecars)
+  }
+
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?,
+    bucketCommit: UpdateBucketCommit?,
+    mutationToken: AuthAccountMutationToken?
+  ) async -> UpdateApplyResult {
+    await apply(
+      updates: updates,
+      source: source,
+      sidecars: sidecars,
+      bucketCommit: bucketCommit
+    )
   }
 }

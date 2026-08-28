@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 @testable import InlineKit
 import Testing
@@ -12,7 +13,11 @@ struct ApiClientReleaseSafetyTests {
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
 
-    _ = try await ApiClient(urlSession: session).sendCode(email: "release-sentinel@example.com")
+    _ = try await ApiClient(
+      urlSession: session,
+      auth: Auth.mocked(authenticated: false).handle,
+      nativeLoginAvailable: false
+    ).sendCode(email: "release-sentinel@example.com")
     let capturedRequest = await SuccessfulRequestProbe.shared.capturedRequest()
     let request = try #require(capturedRequest)
 
@@ -88,6 +93,27 @@ struct ApiClientReleaseSafetyTests {
     #expect(Set(decoded.keys) == ["code", "email", "deviceId"])
   }
 
+  @Test("provider redemption and compensating bearer logout have explicit deadlines")
+  func loginNetworkDeadlines() async throws {
+    let providerRequest = try ApiClient.makeJSONPostRequest(
+      .providerAuthRedeem,
+      body: ["ticket": "ticket", "code_verifier": "verifier"],
+      baseURL: "https://release.invalid/v1",
+      timeoutInterval: 15
+    )
+    #expect(providerRequest.timeoutInterval == 15)
+
+    await SuccessfulRequestProbe.shared.reset()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [SuccessfulURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    _ = try await ApiClient(urlSession: session).logout(bearerToken: "cleanup-token")
+    let cleanupRequest = try #require(await SuccessfulRequestProbe.shared.capturedRequest())
+    #expect(cleanupRequest.timeoutInterval == 2)
+    #expect(cleanupRequest.value(forHTTPHeaderField: "Authorization") == "Bearer cleanup-token")
+  }
+
   @Test("transport cancellation remains structured cancellation")
   func cancellationMapping() throws {
     #expect(ApiClient.normalizeTransportError(CancellationError()) is CancellationError)
@@ -107,7 +133,11 @@ struct ApiClientReleaseSafetyTests {
     configuration.protocolClasses = [SuspendedURLProtocol.self]
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
-    let client = ApiClient(urlSession: session)
+    let client = ApiClient(
+      urlSession: session,
+      auth: Auth.mocked(authenticated: false).handle,
+      nativeLoginAvailable: false
+    )
 
     let requestTask = Task {
       try await client.sendCode(email: "cancel@example.com")

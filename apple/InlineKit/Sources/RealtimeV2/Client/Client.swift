@@ -24,6 +24,7 @@ actor ProtocolSession: ProtocolSessionType {
   }
 
   private var rpcContinuations: [UInt64: PendingDirectRpcContinuation] = [:]
+  private var directDispatchTasks: [UInt64: Task<Void, Never>] = [:]
   private static let maxPendingDirectRPCs = 64
   private static let capacityDiagnosticInterval: TimeInterval = 60
   private var directCapacityRejections = 0
@@ -134,7 +135,7 @@ actor ProtocolSession: ProtocolSessionType {
     let eventID = nextAccountEventID
     let envelope = ProtocolSessionEventEnvelope.account(
       event,
-      originatingSessionID: originatingSessionID
+      originatingSessionID: originatingSessionID ?? transportSessionID
     )
     pendingAccountEvents[eventID] = envelope
     await events.send(envelope)
@@ -441,29 +442,8 @@ extension ProtocolSession {
           return
         }
 
-        Task {
-          // Admission is the irreversible boundary for direct RPCs. Mark it on
-          // this actor before awaiting the transport so cancellation can never
-          // race a send that has already begun and report a false not-sent
-          // cancellation.
-          guard self.beginRpcDispatch(for: message.id) else { return }
-          do {
-            do {
-              try await self.transport.send(message)
-            } catch let error as TransportError {
-              switch error {
-              case .notConnected:
-                await self.failRpcContinuation(for: message.id, error: ProtocolSessionError.notConnected)
-                return
-              case .capacityExceeded:
-                await self.failRpcContinuation(for: message.id, error: ProtocolSessionError.capacityExceeded)
-                return
-              }
-            }
-          } catch {
-            await self.failRpcContinuation(for: message.id, error: error)
-          }
-        }
+        let dispatchTask = Task { await self.performDirectRpcDispatch(message) }
+        directDispatchTasks[message.id] = dispatchTask
 
         if let timeout {
           Task { [weak self] in
@@ -494,6 +474,38 @@ extension ProtocolSession {
     )
     directCapacityRejections = 0
     lastDirectCapacityDiagnosticAt = now
+  }
+
+  func waitForDirectDispatches() async {
+    while directDispatchTasks.isEmpty == false {
+      let tasks = Array(directDispatchTasks.values)
+      for task in tasks {
+        await task.value
+      }
+    }
+  }
+
+  private func directDispatchFinished(_ msgID: UInt64) {
+    directDispatchTasks.removeValue(forKey: msgID)
+  }
+
+  private func performDirectRpcDispatch(_ message: ClientMessage) async {
+    defer { directDispatchFinished(message.id) }
+    // Admission is the irreversible boundary for direct RPCs. Mark it on this actor before
+    // awaiting transport so timeout/cancellation cannot report a false not-sent classification.
+    guard beginRpcDispatch(for: message.id) else { return }
+    do {
+      try await transport.send(message)
+    } catch let error as TransportError {
+      switch error {
+      case .notConnected:
+        await failRpcContinuation(for: message.id, error: ProtocolSessionError.notConnected)
+      case .capacityExceeded:
+        await failRpcContinuation(for: message.id, error: ProtocolSessionError.capacityExceeded)
+      }
+    } catch {
+      await failRpcContinuation(for: message.id, error: error)
+    }
   }
 
   private func timeOutRpcContinuation(after timeout: Duration, msgId: UInt64) async {

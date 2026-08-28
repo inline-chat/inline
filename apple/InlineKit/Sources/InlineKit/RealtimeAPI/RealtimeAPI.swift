@@ -43,6 +43,7 @@ public actor RealtimeAPI: Sendable {
   var stateChannel = AsyncChannel<Void>()
   var messageChannel = AsyncChannel<Void>()
   var started: Bool = false
+  private var lifecycleGeneration: UInt64 = 0
 
   var sync: Sync
 
@@ -76,15 +77,19 @@ public actor RealtimeAPI: Sendable {
 
     log.info("Starting realtime API")
 
-    guard let _ = Auth.shared.getToken() else {
+    guard Auth.shared.getHasPendingAccountTransition() == false,
+          let _ = Auth.shared.getToken()
+    else {
       log.error("No token available")
       throw RealtimeAPIError.notAuthorized
     }
 
     started = true
+    lifecycleGeneration &+= 1
+    let generation = lifecycleGeneration
 
     // Start transport
-    await setUpTransport()
+    await setUpTransport(generation: generation)
     await transport.start()
 
     // Start the run loop
@@ -94,6 +99,7 @@ public actor RealtimeAPI: Sendable {
   // MARK: - Stop (used for logout)
 
   public func stopAndReset() async {
+    lifecycleGeneration &+= 1
     guard started else { return }
     log.info("Stopping and clearing realtime API")
     started = false
@@ -138,6 +144,7 @@ public actor RealtimeAPI: Sendable {
 
   private func startRunLoop() {
     runTask?.cancel()
+    let generation = lifecycleGeneration
     runTask = Task {
       let merged = merge(
         self.stateChannel,
@@ -145,7 +152,7 @@ public actor RealtimeAPI: Sendable {
       )
 
       for await _ in merged {
-        guard !Task.isCancelled else { break }
+        guard !Task.isCancelled, self.started, self.lifecycleGeneration == generation else { break }
 
         switch self.state {
           case .flowing:
@@ -192,7 +199,11 @@ public actor RealtimeAPI: Sendable {
     log.trace("flowing")
   }
 
-  private func authenticate() async {
+  private func authenticate(generation: UInt64) async {
+    guard started, lifecycleGeneration == generation,
+          Auth.shared.getHasPendingAccountTransition() == false,
+          let mutationToken = try? Auth.shared.handle.beginAccountMutation()
+    else { return }
     log.trace("authenticating")
     addRealtimeBreadcrumb("Sending connection init", stage: "connection_init_start")
     // Send connection init
@@ -210,6 +221,9 @@ public actor RealtimeAPI: Sendable {
         $0.osVersion = getOSVersion()
         #endif
       }))
+      guard started, lifecycleGeneration == generation,
+            (try? Auth.shared.handle.validateAccountMutation(mutationToken)) != nil
+      else { return }
       try await transport.send(msg)
       var breadcrumbData: [String: Any] = [
         "build_number": getBuildNumber(),
@@ -252,6 +266,9 @@ extension RealtimeAPI {
   ) async throws -> RpcResult
     .OneOf_Result?
   {
+    guard started, Auth.shared.getHasPendingAccountTransition() == false else {
+      throw RealtimeAPIError.stopped
+    }
     if state == .paused, discardIfNotConnected {
     log.trace("flowing paused, discarding")
       throw RealtimeAPIError.notConnected
@@ -307,22 +324,33 @@ extension RealtimeAPI {
 // MARK: - Transport Integration
 
 extension RealtimeAPI {
-  private func setUpTransport() async {
+  private func setUpTransport(generation: UInt64) async {
     log.trace("setting up transport")
     await transport.addStateObserver { [weak self] state, networkAvailable in
       Task { [weak self] in
-        await self?.transportStateChanged(state: state, networkAvailable: networkAvailable)
+        await self?.transportStateChanged(
+          state: state,
+          networkAvailable: networkAvailable,
+          generation: generation
+        )
       }
     }
 
     await transport.addMessageHandler { message in
       Task {
-        await self.transportMessageReceived(message: message)
+        await self.transportMessageReceived(message: message, generation: generation)
       }
     }
   }
 
-  private func transportStateChanged(state: TransportConnectionState, networkAvailable: Bool) async {
+  private func transportStateChanged(
+    state: TransportConnectionState,
+    networkAvailable: Bool,
+    generation: UInt64
+  ) async {
+    guard started, lifecycleGeneration == generation,
+          Auth.shared.getHasPendingAccountTransition() == false
+    else { return }
     // TODO: make this more accurate by taking authenticating step into account
     let apiState: RealtimeAPIState = switch state {
       case .connected:
@@ -334,7 +362,7 @@ extension RealtimeAPI {
 
     switch state {
       case .connected:
-        await authenticate()
+        await authenticate(generation: generation)
       case .disconnected:
         await pauseDelivery()
       default:
@@ -342,7 +370,13 @@ extension RealtimeAPI {
     }
   }
 
-  private func transportMessageReceived(message: ServerProtocolMessage) async {
+  private func transportMessageReceived(
+    message: ServerProtocolMessage,
+    generation: UInt64
+  ) async {
+    guard started, lifecycleGeneration == generation,
+          Auth.shared.getHasPendingAccountTransition() == false
+    else { return }
     log.trace("received message")
     switch message.body {
       case .connectionOpen:
@@ -373,8 +407,9 @@ extension RealtimeAPI {
   }
 
   private func handleUpdate(_ updates: UpdatesPayload) {
+    guard let mutationToken = try? Auth.shared.handle.beginAccountMutation() else { return }
     Task {
-      await sync.handle(updates: updates.updates)
+      await sync.handle(updates: updates.updates, mutationToken: mutationToken)
     }
   }
 }

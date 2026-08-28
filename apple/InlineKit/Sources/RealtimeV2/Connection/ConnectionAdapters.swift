@@ -11,11 +11,13 @@ import UIKit
 import AppKit
 #endif
 
-final class AuthConnectionAdapter {
+final class AuthConnectionAdapter: @unchecked Sendable {
   private let log = Log.scoped("RealtimeV2.AuthConnectionAdapter")
   private let auth: AuthHandle
   private let manager: ConnectionManager
   private let observationProbe: AuthObservationProbe
+  private let generationLock = NSLock()
+  private var generation: UInt64 = 0
   private var task: Task<Void, Never>?
 
   init(auth: AuthHandle, manager: ConnectionManager, observationProbe: AuthObservationProbe) {
@@ -26,6 +28,10 @@ final class AuthConnectionAdapter {
 
   func start() {
     task?.cancel()
+    let taskGeneration = generationLock.withLock { () -> UInt64 in
+      generation &+= 1
+      return generation
+    }
     let auth = self.auth
     let log = self.log
     let manager = self.manager
@@ -64,6 +70,21 @@ final class AuthConnectionAdapter {
           continue
         }
 
+        let isCurrentGeneration = self.generationLock.withLock {
+          self.generation == taskGeneration
+        }
+        let currentSnapshot = auth.snapshot()
+        guard isCurrentGeneration,
+              auth.hasPendingAccountTransition() == false,
+              currentSnapshot == snapshot
+        else {
+          await manager.setAuthAvailable(false)
+          await manager.stop()
+          authAvailable = false
+          appliedSnapshot = currentSnapshot
+          continue
+        }
+
         if nextAuthAvailable {
           if authAvailable, transition.requiresReconnect {
             await manager.stop()
@@ -86,6 +107,7 @@ final class AuthConnectionAdapter {
   }
 
   func stop() {
+    generationLock.withLock { generation &+= 1 }
     task?.cancel()
     task = nil
   }
@@ -116,7 +138,7 @@ enum RealtimeAuthAuthority: Equatable {
         accountSessionId: snapshot.inlineProtocol?.accountSessionId,
         permanentKey: snapshot.inlineProtocol?.permanent.key
       )
-    case .hydrating, .unauthenticated, .locked, .reauthRequired:
+    case .hydrating, .unauthenticated, .locked, .reauthRequired, .loggingOut:
       self = .unavailable
     }
   }
@@ -269,6 +291,7 @@ private func diagnosticName(for status: AuthStatus) -> String {
   case .unauthenticated: "unauthenticated"
   case .locked: "locked"
   case .reauthRequired: "reauth_required"
+  case .loggingOut: "logging_out"
   case .authenticated: "authenticated"
   case .authenticatedV3: "authenticated_v3"
   }

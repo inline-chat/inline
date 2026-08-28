@@ -120,6 +120,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     all.forEach { $0.resetNavigation() }
   }
 
+  static func cancelAccountTasksAndWait() async {
+    for controller in all {
+      await controller.chatOpenPreloader.cancelPendingOpenAndWait()
+    }
+  }
+
   static func closeAll() {
     let controllers = all
     controllers.forEach { $0.close() }

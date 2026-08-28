@@ -3,6 +3,8 @@ import AppKit
 @MainActor
 final class LoggingOutWindowController: NSWindowController {
   private static var shared: LoggingOutWindowController?
+  private let label: NSTextField
+  private let quitButton: NSButton
 
   static func show() {
     guard shared == nil else { return }
@@ -16,13 +18,29 @@ final class LoggingOutWindowController: NSWindowController {
     shared = nil
   }
 
+  static func showRecoveryRequired() {
+    if shared == nil { show() }
+    shared?.showRecoveryRequired()
+  }
+
   private init() {
-    let panel = NSPanel(
+    let panel = LogoutPanel(
       contentRect: NSRect(x: 0, y: 0, width: 164, height: 54),
       styleMask: [.borderless],
       backing: .buffered,
       defer: false
     )
+    label = NSTextField(labelWithString: "Logging out…")
+    label.font = .systemFont(ofSize: 13, weight: .medium)
+    label.alignment = .center
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.setAccessibilityLabel("Logging out")
+
+    quitButton = NSButton(title: "Quit Inline", target: nil, action: nil)
+    quitButton.bezelStyle = .rounded
+    quitButton.isHidden = true
+    quitButton.translatesAutoresizingMaskIntoConstraints = false
+
     super.init(window: panel)
 
     panel.isReleasedWhenClosed = false
@@ -33,19 +51,19 @@ final class LoggingOutWindowController: NSWindowController {
     panel.backgroundColor = .windowBackgroundColor
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-    let label = NSTextField(labelWithString: "Logging out…")
-    label.font = .systemFont(ofSize: 13, weight: .medium)
-    label.alignment = .center
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.setAccessibilityLabel("Logging out")
+    quitButton.target = self
+    quitButton.action = #selector(quitInline)
 
     let contentView = NSView()
     contentView.addSubview(label)
+    contentView.addSubview(quitButton)
     NSLayoutConstraint.activate([
       label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
       label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
       label.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 16),
       label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
+      quitButton.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+      quitButton.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 16),
     ])
     panel.contentView = contentView
   }
@@ -69,4 +87,27 @@ final class LoggingOutWindowController: NSWindowController {
     super.showWindow(sender)
     window.orderFrontRegardless()
   }
+
+  private func showRecoveryRequired() {
+    guard let window else { return }
+    label.stringValue =
+      "Inline couldn’t finish logging out. Quit and reopen Inline to complete recovery safely."
+    label.maximumNumberOfLines = 3
+    label.lineBreakMode = .byWordWrapping
+    label.setAccessibilityLabel(
+      "Inline couldn’t finish logging out. Quit and reopen Inline to complete recovery safely."
+    )
+    quitButton.isHidden = false
+    window.setContentSize(NSSize(width: 380, height: 150))
+    window.center()
+    window.makeKeyAndOrderFront(nil)
+  }
+
+  @objc private func quitInline() {
+    NSApp.terminate(nil)
+  }
+}
+
+private final class LogoutPanel: NSPanel {
+  override var canBecomeKey: Bool { true }
 }

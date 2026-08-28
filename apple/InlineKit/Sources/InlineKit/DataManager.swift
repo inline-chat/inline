@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -17,20 +18,38 @@ enum DataManagerError: Error {
 @MainActor
 public class DataManager: ObservableObject {
   private var database: AppDatabase
+  private let auth: AuthHandle
   private var log = Log.scoped("DataManager")
 
-  public init(database: AppDatabase) {
+  public init(database: AppDatabase, auth: AuthHandle = Auth.shared.handle) {
     self.database = database
+    self.auth = auth
   }
 
-  public static let shared = DataManager(database: AppDatabase.shared)
+  public static let shared = DataManager(database: AppDatabase.shared, auth: Auth.shared.handle)
+
+  private func beginAccountMutation() throws -> AuthAccountMutationToken {
+    try auth.beginAccountMutation()
+  }
+
+  private func writeAccountProjection<Result: Sendable>(
+    token: AuthAccountMutationToken,
+    _ updates: @escaping @Sendable (Database) throws -> Result
+  ) async throws -> Result {
+    let auth = self.auth
+    return try await database.dbWriter.write { db in
+      try auth.validateAccountMutation(token)
+      return try updates(db)
+    }
+  }
 
   public func fetchMe() async throws -> User {
     log.trace("fetchMe")
+    let mutationToken = try beginAccountMutation()
     do {
       let result = try await InlineRPCClient.shared.getMe()
 
-      let user = try await database.dbWriter.write { db in
+      let user = try await writeAccountProjection(token: mutationToken) { db in
         try User.save(db, user: result.user)
       }
 
@@ -43,11 +62,12 @@ public class DataManager: ObservableObject {
 
   public func createSpace(name: String) async throws -> Int64? {
     log.trace("createSpace")
+    let mutationToken = try beginAccountMutation()
     do {
       let result = try await InlineRPCClient.shared.createSpace(name: name)
       let space = Space(from: result.space)
       let log = self.log
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         do {
           try space.save(db)
         } catch {
@@ -74,11 +94,12 @@ public class DataManager: ObservableObject {
 
   public func createThread(spaceId: Int64, title: String, emoji: String? = nil) async throws -> Int64? {
     log.trace("createThread")
+    let mutationToken = try beginAccountMutation()
     do {
       let result = try await InlineRPCClient.shared.createThread(title: title, spaceID: spaceId, emoji: emoji)
       // Create the chat
       let chat = Chat(from: result.chat)
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         _ = try chat.saveFull(db)
       }
       return chat.id
@@ -91,12 +112,13 @@ public class DataManager: ObservableObject {
 
   public func createPrivateChat(userId: Int64) async throws -> Peer {
     log.trace("createPrivateChat")
+    let mutationToken = try beginAccountMutation()
     do {
       let result = try await InlineRPCClient.shared.createPrivateChat(userID: userId)
       let chatState = try await InlineRPCClient.shared.getChat(peerID: .user(id: userId))
       guard chatState.hasUser else { throw InlineRPCClientError.unexpectedResponse }
 
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         _ = try User.save(db, user: chatState.user)
 
         var chat = Chat(from: result.chat)
@@ -114,9 +136,10 @@ public class DataManager: ObservableObject {
 
   public func createPrivateChatWithOptimistic(user: ApiUser) async throws {
     log.trace("createPrivateChat with optimistic")
+    let mutationToken = try beginAccountMutation()
 
     // Optimistic
-    try await database.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       try user.saveFull(db)
       let dialog = Dialog(optimisticForUserId: user.id)
       try dialog.save(db, onConflict: .ignore)
@@ -131,7 +154,7 @@ public class DataManager: ObservableObject {
     do {
       // Remote call
       let result = try await InlineRPCClient.shared.createPrivateChat(userID: userId)
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         var chat = Chat(from: result.chat)
         try chat.saveWithValidLastMsg(db)
 
@@ -150,18 +173,24 @@ public class DataManager: ObservableObject {
   @discardableResult
   public func getSpaces() async throws -> [Space] {
     log.trace("getSpaces")
+    let mutationToken = try beginAccountMutation()
     do {
+      try auth.validateAccountMutation(mutationToken)
       let result = try await InlineRPCClient.shared.getChats()
+      let auth = self.auth
       let memberResults = try await withThrowingTaskGroup(of: InlineProtocol.GetSpaceMembersResult.self) { group in
         for space in result.spaces {
-          group.addTask { try await InlineRPCClient.shared.getSpaceMembers(spaceID: space.id) }
+          group.addTask {
+            try auth.validateAccountMutation(mutationToken)
+            return try await InlineRPCClient.shared.getSpaceMembers(spaceID: space.id)
+          }
         }
         var values: [InlineProtocol.GetSpaceMembersResult] = []
         for try await value in group { values.append(value) }
         return values
       }
 
-      let spaces = try await database.dbWriter.write { db in
+      let spaces = try await writeAccountProjection(token: mutationToken) { db in
         let spaces = result.spaces.map { space in
           Space(from: space)
         }
@@ -185,11 +214,12 @@ public class DataManager: ObservableObject {
   /// Get one user
   public func getUser(id: Int64) async throws {
     log.trace("getUser")
+    let mutationToken = try beginAccountMutation()
     do {
       let result = try await InlineRPCClient.shared.getChat(peerID: .user(id: id))
       guard result.hasUser else { throw InlineRPCClientError.unexpectedResponse }
 
-      let _ = try await database.dbWriter.write { db in
+      let _ = try await writeAccountProjection(token: mutationToken) { db in
         try User.save(db, user: result.user)
       }
     } catch {
@@ -199,8 +229,9 @@ public class DataManager: ObservableObject {
 
   public func deleteSpace(spaceId: Int64) async throws {
     log.trace("deleteSpace")
+    let mutationToken = try beginAccountMutation()
     do {
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         try Space.deleteOne(db, id: spaceId)
 
         try Member
@@ -225,8 +256,9 @@ public class DataManager: ObservableObject {
 
   public func leaveSpace(spaceId: Int64) async throws {
     log.trace("leaveSpace")
+    let mutationToken = try beginAccountMutation()
     do {
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         try Space.deleteOne(db, id: spaceId)
 
         try Member
@@ -248,10 +280,12 @@ public class DataManager: ObservableObject {
   @discardableResult
   public func getPrivateChats() async throws -> [Chat] {
     log.trace("getPrivateChats")
+    let mutationToken = try beginAccountMutation()
     do {
+      try auth.validateAccountMutation(mutationToken)
       let result = try await InlineRPCClient.shared.getChats()
 
-      let chats = try await database.dbWriter.write { db in
+      let chats = try await writeAccountProjection(token: mutationToken) { db in
         // First save peer users if they exist
         try result.users.forEach { user in
           _ = try User.save(db, user: user)
@@ -305,6 +339,7 @@ public class DataManager: ObservableObject {
 
   public func getDialogs(spaceId: Int64) async throws {
     log.trace("get dialogs")
+    let mutationToken = try beginAccountMutation()
     do {
       // Fetch
       let result = try await InlineRPCClient.shared.getChats()
@@ -312,7 +347,7 @@ public class DataManager: ObservableObject {
       // log.debug("fetched dialogs \(result)")
 
       // Save
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         // Save users
         try result.users.forEach { user in
           _ = try User.save(db, user: user)
@@ -371,6 +406,7 @@ public class DataManager: ObservableObject {
     peerThreadId: Int64?,
     peerId: Peer?
   ) async throws {
+    let mutationToken = try beginAccountMutation()
     let finalPeerUserId: Int64?
     let finalPeerThreadId: Int64?
     var peerId_: Peer
@@ -414,7 +450,7 @@ public class DataManager: ObservableObject {
       limit: 100
     )
 
-    try await database.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       try GetChatHistoryTransaction.apply(historyResult, context: transaction.context, db: db)
     }
 
@@ -450,8 +486,9 @@ public class DataManager: ObservableObject {
     pinnedOrder: String? = nil,
     deleteEmptyThreadIfArchiving: Bool = true
   ) async throws {
+    let mutationToken = try beginAccountMutation()
     if archived == true, deleteEmptyThreadIfArchiving, case .thread = peerId {
-      if try await deleteThreadIfUntitledAndEmpty(peerId: peerId) {
+      if try await deleteThreadIfUntitledAndEmpty(peerId: peerId, mutationToken: mutationToken) {
         return
       }
     }
@@ -460,7 +497,7 @@ public class DataManager: ObservableObject {
       try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
     }
 
-    let requestOrder = try await database.dbWriter.write { db -> (order: String?, pinnedOrder: String?) in
+    let requestOrder = try await writeAccountProjection(token: mutationToken) { db -> (order: String?, pinnedOrder: String?) in
       var orderForRequest: String?
       var pinnedOrderForRequest: String?
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
@@ -551,7 +588,7 @@ public class DataManager: ObservableObject {
           order: requestOrder.order,
           pinnedOrder: requestOrder.pinnedOrder
         )
-        try await database.dbWriter.write { db in
+        try await writeAccountProjection(token: mutationToken) { db in
           try Dialog(from: response.dialog).save(db, onConflict: .replace)
         }
       }
@@ -559,6 +596,7 @@ public class DataManager: ObservableObject {
       await rollbackDialogUpdate(
         original: originalDialog,
         peerId: peerId,
+        mutationToken: mutationToken,
         fields: DialogUpdateRollbackFields(
           pinned: pinned != nil,
           draft: draft != nil,
@@ -581,9 +619,14 @@ public class DataManager: ObservableObject {
     let pinnedOrder: Bool
   }
 
-  private func rollbackDialogUpdate(original: Dialog?, peerId: Peer, fields: DialogUpdateRollbackFields) async {
+  private func rollbackDialogUpdate(
+    original: Dialog?,
+    peerId: Peer,
+    mutationToken: AuthAccountMutationToken,
+    fields: DialogUpdateRollbackFields
+  ) async {
     do {
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         guard let original else {
           try Dialog.deleteOne(db, key: Dialog.getDialogId(peerId: peerId))
           return
@@ -627,8 +670,12 @@ public class DataManager: ObservableObject {
   /// Deletes a thread only when it is untitled and has no messages.
   /// - Returns: `true` when deletion was performed; otherwise `false`.
   @discardableResult
-  public func deleteThreadIfUntitledAndEmpty(peerId: Peer) async throws -> Bool {
+  public func deleteThreadIfUntitledAndEmpty(
+    peerId: Peer,
+    mutationToken suppliedMutationToken: AuthAccountMutationToken? = nil
+  ) async throws -> Bool {
     guard case let .thread(threadId) = peerId else { return false }
+    let mutationToken = try suppliedMutationToken ?? beginAccountMutation()
 
     let shouldDelete = try await database.reader.read { db in
       guard let chat = try Chat.fetchOne(db, id: threadId), chat.type == .thread else { return false }
@@ -642,7 +689,7 @@ public class DataManager: ObservableObject {
 
     do {
       _ = try await Api.realtime.send(.deleteChat(peerId: peerId))
-      try await database.dbWriter.write { db in
+      try await writeAccountProjection(token: mutationToken) { db in
         do {
           try Message.filter(Column("chatId") == threadId).deleteAll(db)
         } catch {
@@ -684,11 +731,12 @@ public class DataManager: ObservableObject {
   }
 
   public func getSpace(spaceId: Int64) async throws {
+    let mutationToken = try beginAccountMutation()
     let result = try await InlineRPCClient.shared.getChats()
     guard let protocolSpace = result.spaces.first(where: { $0.id == spaceId }) else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    try await database.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       let space = Space(from: protocolSpace)
       try space.save(db, onConflict: .replace)
 
@@ -715,8 +763,9 @@ public class DataManager: ObservableObject {
   }
 
   public func addMember(spaceId: Int64, userId: Int64) async throws {
+    let mutationToken = try beginAccountMutation()
     let result = try await InlineRPCClient.shared.inviteToSpace(spaceID: spaceId, userID: userId)
-    try await database.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
       let member = Member(from: result.member)
       try member.save(db, onConflict: .replace)
       if result.hasUser { _ = try User.save(db, user: result.user) }
@@ -726,9 +775,10 @@ public class DataManager: ObservableObject {
   public func deleteMessage(
     messageId: Int64, chatId: Int64, peerId: Peer
   ) async throws {
+    let mutationToken = try beginAccountMutation()
     try await InlineRPCClient.shared.deleteMessage(peerID: peerId, messageID: messageId)
 
-    try await database.dbWriter.write { db in
+    try await writeAccountProjection(token: mutationToken) { db in
 
       if var chat = try Chat.fetchOne(db, id: chatId) {
         if chat.lastMsgId == messageId {
@@ -757,9 +807,11 @@ public class DataManager: ObservableObject {
   public func updateTimezone() async throws {
     log.trace("updateTimezone")
     let timeZone = TimeZone.autoupdatingCurrent.identifier
+    let mutationToken = try beginAccountMutation()
 
     do {
       // Update on server
+      try auth.validateAccountMutation(mutationToken)
       _ = try await InlineRPCClient.shared.updateSession(timeZone: timeZone)
     } catch {
       log.error("Failed to update timezone", error: error)

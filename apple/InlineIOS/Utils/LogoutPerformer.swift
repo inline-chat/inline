@@ -6,6 +6,7 @@ import UIKit
 enum LogoutPerformer {
   @MainActor private static var isRunning = false
 
+  @MainActor
   static func perform(
     notifyServer: Bool,
     mainRouter: MainViewRouter,
@@ -13,24 +14,24 @@ enum LogoutPerformer {
     onboardingNavigation: OnboardingNavigation,
     router: Router
   ) async {
-    let shouldRun = await MainActor.run {
-      guard !isRunning else { return false }
-      isRunning = true
-      return true
-    }
-    guard shouldRun else { return }
+    guard !isRunning else { return }
+    isRunning = true
+    defer { isRunning = false }
 
-    await MainActor.run {
-      (UIApplication.shared.delegate as? AppDelegate)?.cancelPendingSpaceJoin()
+    let logoutFence: AuthLogoutFence
+    do {
+      // Exact first-suspension invariant shared with macOS.
+      logoutFence = try Auth.shared.beginLogoutSynchronously()
+    } catch {
+      Log.shared.error("iOS logout durable fence failed", error: error)
+      return
     }
 
-    await Auth.shared.beginLogout()
+    (UIApplication.shared.delegate as? AppDelegate)?.cancelPendingSpaceJoin()
+    ProviderSignInCoordinator.shared.cancelPendingAttempt()
 
-    defer {
-      Task { @MainActor in
-        isRunning = false
-      }
-    }
+    await Auth.shared.publishLogoutInProgress()
+    await InlineProtocolNativeLogin.shared.cancel()
 
     if notifyServer {
       await notifyServerLogout()
@@ -50,54 +51,49 @@ enum LogoutPerformer {
     await FileUploader.shared.cancelAll()
     await FileCache.shared.cancelAllDownloads()
     await FileDownloader.shared.resetSession()
-    await MainActor.run {
-      NotionTaskService.shared.resetSession()
-    }
+    NotionTaskService.shared.resetSession()
     await Transactions.shared.clearAllAndWait()
 
-    await MainActor.run {
-      BotAgentDirectory.shared.clear()
-      TabsManager.shared.reset()
-      TabsManager.shared.clearActiveSpaceId()
-      ChatState.shared.reset()
-    }
+    BotAgentDirectory.shared.clear()
+    TabsManager.shared.reset()
+    TabsManager.shared.clearActiveSpaceId()
+    ChatState.shared.reset()
 
+    let databaseProof: AuthDatabaseCleanupProof
     do {
-      try AppDatabase.loggedOut()
+      databaseProof = try await AppDatabase.loggedOutAsync(fence: logoutFence)
     } catch {
       Log.shared.error("Local database logout cleanup failed: \(error.localizedDescription)")
       return
     }
 
-    await Auth.shared.logOut()
-
-    await MainActor.run {
-      navigation.reset()
-      onboardingNavigation.reset()
-      router.reset()
-      mainRouter.setRoute(route: .onboarding)
+    guard let credentialProof = await Auth.shared.destroyCredentialsForPendingLogout(
+      fence: logoutFence
+    ) else {
+      Log.shared.error("iOS logout credential destruction failed")
+      return
     }
+    guard await LogoutCompletionCoordinator.complete(
+      fence: logoutFence,
+      databaseProof: databaseProof,
+      credentialProof: credentialProof,
+      completionPermit: AuthLogoutCompletionPermit(fence: logoutFence)
+    ) else {
+      Log.shared.error("iOS logout completion proof validation failed")
+      return
+    }
+
+    navigation.reset()
+    onboardingNavigation.reset()
+    router.reset()
+    mainRouter.setRoute(route: .onboarding)
   }
 
   private static func notifyServerLogout() async {
     do {
-      try await withThrowingTaskGroup(of: Void.self) { group in
-        group.addTask {
-          try await InlineRPCClient.shared.logout()
-        }
-
-        group.addTask {
-          try await Task.sleep(nanoseconds: 2 * 1_000_000_000)
-          throw LogoutTimeoutError()
-        }
-
-        _ = try await group.next()
-        group.cancelAll()
-      }
+      try await InlineRPCClient.shared.logout(timeout: .seconds(2))
     } catch {
       Log.shared.error("Logout API call failed: \(error.localizedDescription)")
     }
   }
 }
-
-private struct LogoutTimeoutError: Error {}

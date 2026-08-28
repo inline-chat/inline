@@ -1,5 +1,14 @@
 import Foundation
 import InlineProtocol
+import Logger
+
+public extension Notification.Name {
+  /// A staged credential transition could not be safely rolled back and now requires the
+  /// platform-owned logout recovery flow. Carries no account data.
+  static let authAccountRecoveryRequired = Notification.Name(
+    "inline.auth.accountRecoveryRequired"
+  )
+}
 
 public struct InlineProtocolSessionCredentials: Sendable, Codable, Equatable {
   public var userId: Int64
@@ -23,10 +32,134 @@ public struct InlineProtocolSessionCredentials: Sendable, Codable, Equatable {
   }
 }
 
-public enum AuthStorageError: Error, Sendable {
+public enum AuthStorageError: Error, LocalizedError, Sendable, PrivacySafeErrorCategoryProviding {
   case encodingFailed
   case keychainWriteFailed
+  case keychainDeleteFailed
   case logoutInProgress
+  case logoutFencePersistenceFailed
+  case loginUnavailable
+  case loginSuperseded
+  case alreadyAuthenticated
+
+  public var errorDescription: String? {
+    switch self {
+    case .encodingFailed, .keychainWriteFailed:
+      "Inline couldn’t securely save your session. Please try again."
+    case .keychainDeleteFailed:
+      "Inline couldn’t finish signing out. Quit and reopen Inline to try again safely."
+    case .logoutInProgress:
+      "Inline is still finishing sign out. Quit and reopen Inline, then try again."
+    case .logoutFencePersistenceFailed:
+      "Inline couldn’t safely begin signing out. Quit and reopen Inline, then try again."
+    case .loginUnavailable:
+      "Inline is still preparing secure account storage. Quit and reopen Inline, then try again."
+    case .loginSuperseded:
+      "This sign-in attempt expired while Inline changed accounts. Please try again."
+    case .alreadyAuthenticated:
+      "Inline is already signed in."
+    }
+  }
+
+  public var privacySafeErrorCategory: String {
+    switch self {
+    case .encodingFailed: "auth_storage:encoding_failed"
+    case .keychainWriteFailed: "auth_storage:keychain_write_failed"
+    case .keychainDeleteFailed: "auth_storage:keychain_delete_failed"
+    case .logoutInProgress: "auth_storage:logout_in_progress"
+    case .logoutFencePersistenceFailed: "auth_storage:logout_fence_persistence_failed"
+    case .loginUnavailable: "auth_storage:login_unavailable"
+    case .loginSuperseded: "auth_storage:login_superseded"
+    case .alreadyAuthenticated: "auth_storage:already_authenticated"
+    }
+  }
+}
+
+/// Identifies one in-process login attempt. A newer login or logout advances the generation, so
+/// work begun by an older onboarding screen cannot commit after the owning UI has been superseded.
+public struct AuthLoginAttempt: Sendable, Equatable {
+  let generation: UInt64
+  public let correlationID: UUID
+
+  init(generation: UInt64, correlationID: UUID = UUID()) {
+    self.generation = generation
+    self.correlationID = correlationID
+  }
+}
+
+/// A synchronous lease for one authenticated account generation. Work admitted before an
+/// account transition must revalidate this immediately before every account-owned DB projection.
+public struct AuthAccountMutationToken: Sendable, Equatable {
+  let generation: UInt64
+  public let userID: Int64
+
+  init(generation: UInt64, userID: Int64) {
+    self.generation = generation
+    self.userID = userID
+  }
+}
+
+/// One durable logout transition. Repeated begin calls and launch recovery reuse the same opaque
+/// identifier so cleanup proofs and privacy-safe diagnostics cannot be mixed across attempts.
+public struct AuthLogoutFence: Sendable, Equatable {
+  let generation: UInt64
+  public let correlationID: UUID
+
+  init(generation: UInt64, correlationID: UUID) {
+    self.generation = generation
+    self.correlationID = correlationID
+  }
+}
+
+/// Opaque evidence that every credential authority was removed for one exact logout fence.
+/// Only Auth can construct this value.
+public struct AuthCredentialDestructionProof: Sendable {
+  let fence: AuthLogoutFence
+
+  init(fence: AuthLogoutFence) {
+    self.fence = fence
+  }
+}
+
+/// Opaque evidence that account database cleanup completed for one exact logout fence.
+/// InlineKit is the only production module allowed to construct this value after clear/verify/rekey.
+public struct AuthDatabaseCleanupProof: Sendable {
+  let fence: AuthLogoutFence
+
+  public init(fence: AuthLogoutFence) {
+    self.fence = fence
+  }
+}
+
+/// A platform-owned terminal gate for the final marker-removal commit. A UI deadline can revoke
+/// it without an actor hop; Auth marks it completed atomically with in-memory logout completion.
+public final class AuthLogoutCompletionPermit: @unchecked Sendable {
+  private enum State { case active, revoked, completed }
+  private let lock = NSLock()
+  let fence: AuthLogoutFence
+  private var state = State.active
+
+  public init(fence: AuthLogoutFence) {
+    self.fence = fence
+  }
+
+  @discardableResult
+  public func revoke() -> Bool {
+    lock.withLock {
+      guard state == .active else { return false }
+      state = .revoked
+      return true
+    }
+  }
+
+  func completeIfActive(_ operation: () -> Bool) -> Bool {
+    lock.withLock {
+      guard state == .active else { return false }
+      let completed = operation()
+      if completed { state = .completed }
+      return completed
+    }
+  }
 }
 
 public struct AuthCredentials: Sendable, Codable, Equatable {
@@ -51,6 +184,9 @@ public enum AuthStatus: Sendable, Equatable {
   /// We have a userId hint, but the token is missing (keychain item not found / access-group mismatch / wiped).
   /// The app should treat this as logged out, but avoid destructive local recovery (DB deletion).
   case reauthRequired(userIdHint: Int64?)
+  /// Durable logout recovery owns the account until app-level cleanup, credential destruction,
+  /// and marker removal have all completed. Login must never be presented in this state.
+  case loggingOut(userIdHint: Int64?)
   /// Credentials are present and usable.
   case authenticated(AuthCredentials)
   /// V3-native account session authenticated by a permanent Inline Protocol authorization key.
@@ -69,6 +205,7 @@ public enum AuthStatus: Sendable, Equatable {
     case .authenticatedV3(let userId): userId
     case .locked(let hint): hint
     case .reauthRequired(let hint): hint
+    case .loggingOut(let hint): hint
     case .hydrating, .unauthenticated: nil
     }
   }
@@ -76,7 +213,7 @@ public enum AuthStatus: Sendable, Equatable {
   public var token: String? {
     switch self {
     case .authenticated(let c): c.token
-    case .hydrating, .unauthenticated, .locked, .reauthRequired, .authenticatedV3: nil
+    case .hydrating, .unauthenticated, .locked, .reauthRequired, .loggingOut, .authenticatedV3: nil
     }
   }
 }
@@ -139,7 +276,74 @@ public struct AuthHandle: Sendable {
     await store.refreshFromStorage()
   }
 
-  public func saveInlineProtocolCredentials(_ credentials: InlineProtocolSessionCredentials) async throws {
-    try await store.saveInlineProtocolCredentials(credentials)
+  public func requireLoginAllowed() async throws {
+    try await store.requireLoginAllowed()
+  }
+
+  public func beginLoginAttempt(allowAuthenticated: Bool = false) async throws -> AuthLoginAttempt {
+    try await store.beginLoginAttempt(allowAuthenticated: allowAuthenticated)
+  }
+
+  public func validateLoginAttempt(_ attempt: AuthLoginAttempt) async throws {
+    try await store.validateLoginAttempt(attempt)
+  }
+
+  public func isLoginAttemptCurrent(_ attempt: AuthLoginAttempt) -> Bool {
+    cache.isLoginAttemptCurrent(attempt)
+  }
+
+  public func hasPendingLogout() -> Bool {
+    store.hasPendingLogout()
+  }
+
+  public func hasPendingAccountTransition() -> Bool {
+    store.hasPendingAccountTransition()
+  }
+
+  public func requireAccountMutationAllowed(allowDuringLogout: Bool = false) throws {
+    if allowDuringLogout { return }
+    _ = try cache.makeAccountMutationToken()
+  }
+
+  public func beginAccountMutation() throws -> AuthAccountMutationToken {
+    try cache.makeAccountMutationToken()
+  }
+
+  public func validateAccountMutation(_ token: AuthAccountMutationToken) throws {
+    try cache.validateAccountMutationToken(token)
+  }
+
+  @discardableResult
+  public func cancelLoginAttempt(_ attempt: AuthLoginAttempt) -> Bool {
+    cache.invalidateLoginAttempt(attempt)
+  }
+
+  public func invalidateLoginAttempts() {
+    cache.invalidateLoginAttempts()
+  }
+
+  public func reserveLoginCommit(_ attempt: AuthLoginAttempt) -> Bool {
+    cache.prepareStagedAuthorityFinalization(attempt)
+  }
+
+  public func finalizeCredentialsCommittedByLoginAttempt(
+    _ attempt: AuthLoginAttempt
+  ) async throws -> AuthAccountMutationToken {
+    try await store.finalizeCredentialsCommittedByLoginAttempt(attempt)
+  }
+
+  public func saveInlineProtocolCredentials(
+    _ credentials: InlineProtocolSessionCredentials,
+    loginAttempt: AuthLoginAttempt? = nil
+  ) async throws {
+    try await store.saveInlineProtocolCredentials(credentials, loginAttempt: loginAttempt)
+  }
+
+  public func rollbackCredentialsCommittedByLoginAttempt(_ attempt: AuthLoginAttempt) async {
+    await store.rollbackCredentialsCommittedByLoginAttempt(attempt)
+  }
+
+  public func promoteProjectedLoginToRecovery(_ attempt: AuthLoginAttempt) async {
+    await store.promoteProjectedLoginToRecovery(attempt)
   }
 }

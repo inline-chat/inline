@@ -674,7 +674,9 @@ actor Transactions {
 
   func cancel(transactionId: TransactionId) async {
     let candidate = _queue[transactionId] ?? inFlight[transactionId] ?? sent[transactionId]
-    if let candidate, candidate.dispatchPhase == .mayHaveExecuted {
+    if let candidate,
+       candidate.dispatchPhase == .mayHaveExecuted || ownsExecutionKey(candidate)
+    {
       log.trace("Detaching caller from dispatched transaction \(transactionId)")
       return
     }

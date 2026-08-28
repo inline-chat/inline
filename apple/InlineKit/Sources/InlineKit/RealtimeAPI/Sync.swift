@@ -1,3 +1,4 @@
+import Auth
 import InlineProtocol
 import Logger
 
@@ -12,11 +13,15 @@ public actor Sync: Sendable {
     self.realtime = realtime
   }
 
-  public func handle(updates: [InlineProtocol.Update]) {
+  public func handle(
+    updates: [InlineProtocol.Update],
+    mutationToken: AuthAccountMutationToken
+  ) async {
     Log.shared.warning("handle updates using realtime V1, this is deprecated and will be removed soon")
-    // Handle the updates payload
-    Task {
-      await engine.applyBatch(updates: updates)
-    }
+    await engine.applyBatch(
+      updates: updates,
+      source: .realtime,
+      mutationToken: mutationToken
+    )
   }
 }

@@ -1,4 +1,5 @@
 import AsyncAlgorithms
+import Auth
 import Foundation
 import InlineProtocol
 import Testing
@@ -66,6 +67,67 @@ final class SyncTests {
 
     let state = await storage.getState()
     #expect(state.lastSyncDate == 0)
+  }
+
+  @Test("account mutation token reaches direct, sequenced, and catch-up apply boundaries")
+  func testAccountMutationTokenPropagation() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let token = try auth.handle.beginAccountMutation()
+
+    let directRecorder = RecordingApplyUpdates()
+    let directSync = Sync(
+      applyUpdates: directRecorder,
+      syncStorage: InMemorySyncStorage(),
+      client: FakeProtocolClient(responses: []),
+      config: .default,
+      auth: auth.handle
+    )
+    await directSync.process(
+      updates: [makeNewMessageUpdate(seq: 0, date: 100)],
+      mutationToken: token
+    )
+    #expect(await directRecorder.receivedMutationTokens().contains(token))
+
+    let sequencedRecorder = RecordingApplyUpdates()
+    let sequencedSync = Sync(
+      applyUpdates: sequencedRecorder,
+      syncStorage: InMemorySyncStorage(),
+      client: FakeProtocolClient(responses: []),
+      config: .default,
+      auth: auth.handle
+    )
+    await sequencedSync.process(
+      updates: [makeChatInfoUpdate(seq: 1, date: 101)],
+      mutationToken: token
+    )
+    #expect(await sequencedRecorder.receivedMutationTokens().contains(token))
+
+    let catchupRecorder = RecordingApplyUpdates()
+    let catchupUpdate = makeChatInfoUpdate(seq: 1, date: 102)
+    let catchupClient = FakeProtocolClient(responses: [
+      makeGetUpdatesResult(
+        seq: 1,
+        date: 102,
+        updates: [catchupUpdate],
+        final: true,
+        resultType: .slice
+      ),
+    ])
+    let catchupSync = Sync(
+      applyUpdates: catchupRecorder,
+      syncStorage: InMemorySyncStorage(),
+      client: catchupClient,
+      config: .default,
+      auth: auth.handle
+    )
+    await catchupSync.activateGeneration()
+    await catchupSync.process(
+      updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)]
+    )
+    _ = await waitForCondition {
+      await catchupRecorder.appliedUpdates.isEmpty == false
+    }
+    #expect(await catchupRecorder.receivedMutationTokens().contains(token))
   }
 
   @Test("coalesces bucket fetches while in-flight")
@@ -3090,6 +3152,7 @@ actor RecordingApplyUpdates: ApplyUpdates {
   private(set) var repairedChats: [ChatRepairSnapshot] = []
   private(set) var repairedSpaces: [SpaceRepairSnapshot] = []
   private(set) var repairedUsers: [UserRepairSnapshot] = []
+  private var mutationTokens: [AuthAccountMutationToken] = []
   var result = UpdateApplyResult.success(count: 0)
   var repairResult = true
   var repairStorage: InMemorySyncStorage?
@@ -3120,6 +3183,25 @@ actor RecordingApplyUpdates: ApplyUpdates {
       return .success(count: updates.count)
     }
     return result
+  }
+
+  func apply(
+    updates: [InlineProtocol.Update],
+    source: UpdateApplySource,
+    sidecars: InlineProtocol.UpdateSidecars?,
+    bucketCommit: UpdateBucketCommit?,
+    mutationToken: AuthAccountMutationToken?
+  ) async -> UpdateApplyResult {
+    if let mutationToken {
+      mutationTokens.append(mutationToken)
+    }
+    // This recorder does not own the SyncStorage transaction. Preserve the production fallback
+    // by leaving committedBucketState nil while still observing the tokenized overload.
+    return await apply(updates: updates, source: source, sidecars: sidecars)
+  }
+
+  func receivedMutationTokens() -> [AuthAccountMutationToken] {
+    mutationTokens
   }
 
   func repairChat(_ snapshot: ChatRepairSnapshot) async -> BucketState? {

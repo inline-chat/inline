@@ -45,8 +45,13 @@ actor QuickSearchUsageStore {
   }
 
   func clearCurrentAccount() {
+    guard let userID = currentUserID() else { return }
+    clear(accountID: userID)
+  }
+
+  func clear(accountID: Int64) {
     loadIfNeeded()
-    guard let accountKey = currentAccountKey else { return }
+    let accountKey = String(accountID)
     guard history.clear(accountID: accountKey) else { return }
     scheduleSave()
   }
