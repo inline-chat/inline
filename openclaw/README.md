@@ -40,12 +40,12 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.62` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Current | Keeps the thread-only Following control out of direct-message agent settings, where the server does not support it. |
+| `0.0.63` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Current | Applies live-safe settings writes without restarting the Inline channel before it can answer. |
+| `0.0.62` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Keeps the thread-only Following control out of direct-message agent settings, where the server does not support it. |
 | `0.0.61` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Bounds model discovery through provider authentication so agent settings return a fallback instead of hanging indefinitely. |
 | `0.0.60` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Uses the plugin index's supported force-install path for exact updates on current OpenClaw hosts. |
 | `0.0.59` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Adds mentionable Agent specialization, exact Agent activation, and fail-closed bot-message provenance. |
 | `0.0.57` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Previous | Hardens exact CLI-managed upgrades, deterministic channel listing, default/help consistency, and packed-artifact validation. |
-| `0.0.56` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Stable | Finalizes unified Inline CLI setup compatibility while preserving the separately installed OpenClaw plugin boundary. |
 
 From npm:
 

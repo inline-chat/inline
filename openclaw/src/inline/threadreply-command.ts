@@ -33,6 +33,11 @@ const MODE_LABELS: Record<InlineReplyThreadMode, string> = {
 }
 const INLINE_THREADREPLY_NATIVE_NAME = "threadreply"
 
+export const INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE = {
+  mode: "none",
+  reason: "Inline reads the refreshed runtime config in-process.",
+} as const
+
 type InlineThreadReplyCommandConfigRuntime = Pick<
   OpenClawPluginApi["runtime"]["config"],
   "current" | "mutateConfigFile"
@@ -316,7 +321,7 @@ export async function handleInlineThreadReplyCommandWithConfigRuntime(
   }
 
   const committed = await configRuntime.mutateConfigFile({
-    afterWrite: { mode: "auto" },
+    afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
     mutate: (draft) => {
       setGroupMode({
         draft,

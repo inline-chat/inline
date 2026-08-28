@@ -85,6 +85,7 @@ type MonitorHarness = {
     enqueueSystemEvent: ReturnType<typeof vi.fn>
     answerMessageAction: ReturnType<typeof vi.fn>
     answerBotChatSettings: ReturnType<typeof vi.fn>
+    mutateConfigFile: ReturnType<typeof vi.fn>
     setMyBotCapabilities: ReturnType<typeof vi.fn>
     closeClient: ReturnType<typeof vi.fn>
     triggerAuthenticationError: ReturnType<typeof vi.fn>
@@ -1234,6 +1235,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       enqueueSystemEvent,
       answerMessageAction,
       answerBotChatSettings: answerBotChatSettingsMock,
+      mutateConfigFile,
       setMyBotCapabilities: setMyBotCapabilitiesMock,
       closeClient,
       triggerAuthenticationError,
@@ -1289,6 +1291,89 @@ describe("inline/monitor", () => {
       .not.toContain("following")
 
     await handle.stop()
+  })
+
+  it("persists reply mode without restarting the channel that must answer", async () => {
+    const runtimeConfig = {
+      agents: { defaults: { model: "openai/gpt-5" } },
+      channels: {
+        inline: {
+          groups: { "7": { replyThreadMode: "auto" } },
+        },
+      },
+    }
+    const chats = {
+      "7": { kind: "direct" as const, title: "Alice", peerUserId: 42n },
+    }
+    const requestHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.request",
+        requestId: 811n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+      }],
+      chats,
+      runtimeConfig,
+    })
+    const requestHandle = await requestHarness.monitorInlineProvider({
+      cfg: runtimeConfig as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => {
+      expect(requestHarness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    const revision = requestHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]
+      ?.response?.result?.document?.revision
+    expect(revision).toBeTypeOf("string")
+    await requestHandle.stop()
+
+    const mutationHarness = await setupMonitorHarness({
+      events: [{
+        kind: "bot.chatSettings.item.invoke",
+        requestId: 812n,
+        chatId: 7n,
+        actorUserId: 42n,
+        version: 1,
+        itemId: "reply-threads",
+        value: {
+          value: { oneofKind: "stringValue", stringValue: "on" },
+        },
+        documentRevision: revision as string,
+      }],
+      chats,
+      runtimeConfig,
+    })
+    const mutationHandle = await mutationHarness.monitorInlineProvider({
+      cfg: runtimeConfig as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(mutationHarness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+    })
+    expect(mutationHarness.calls.mutateConfigFile).toHaveBeenCalledWith(expect.objectContaining({
+      afterWrite: {
+        mode: "none",
+        reason: "Inline reads the refreshed runtime config in-process.",
+      },
+    }))
+    const response = mutationHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
+    const replyThreads = response?.result.document.sections
+      .flatMap((section: any) => section.items)
+      .find((item: any) => item.id === "reply-threads")
+    expect(replyThreads?.control).toMatchObject({
+      oneofKind: "select",
+      select: { value: "on" },
+    })
+
+    await mutationHandle.stop()
   })
 
   it("shows the selected primary and active automatic fallback in settings", async () => {

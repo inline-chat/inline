@@ -135,6 +135,12 @@ describe("inline/threadreply-command", () => {
     const result = await handleInlineThreadReplyCommand(api, commandCtx({ args: "thread" }))
 
     expect(mutateConfigFile).toHaveBeenCalledTimes(1)
+    expect(mutateConfigFile).toHaveBeenCalledWith(expect.objectContaining({
+      afterWrite: {
+        mode: "none",
+        reason: "Inline reads the refreshed runtime config in-process.",
+      },
+    }))
     expect(result.text).toContain("Thread reply mode for chat 123: thread.")
     expect(inlineConfig(current()).groups?.["123"]).toEqual({
       requireMention: true,

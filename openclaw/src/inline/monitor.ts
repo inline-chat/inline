@@ -171,6 +171,7 @@ import {
 } from "./bot-commands-sync.js"
 import {
   handleInlineThreadReplyCommandWithConfigRuntime,
+  INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
   listInlineBuiltinCommandSpecs,
   resolveCurrentMode as resolveInlineThreadReplyMode,
   setGroupMode as setInlineThreadReplyMode,
@@ -3265,7 +3266,8 @@ export async function monitorInlineProvider(params: {
   log?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void; debug?: (msg: string) => void }
   statusSink?: StatusSink
 }): Promise<InlineMonitorHandle> {
-  const { cfg, account, runtime, abortSignal, log, statusSink } = params
+  let { cfg } = params
+  const { account, runtime, abortSignal, log, statusSink } = params
   const core = getInlineRuntime()
 
   if (!account.configured || !account.baseUrl) {
@@ -4406,6 +4408,7 @@ export async function monitorInlineProvider(params: {
             getCurrentConversationBinding: async () => null,
           } satisfies PluginCommandContext,
         )
+        cfg = configRuntime.current() as OpenClawConfig
         const resultRecord = result as Record<string, unknown>
         const actions = resolveInlineReplyActions(resultRecord, { owner: "system" })
         const text =
@@ -6945,8 +6948,8 @@ export async function monitorInlineProvider(params: {
     ingress: InlineSystemEventContext,
     selection: string,
   ): Promise<void> => {
-    await core.config.mutateConfigFile({
-      afterWrite: { mode: "auto" },
+    const committed = await core.config.mutateConfigFile({
+      afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
       mutate: (draft: OpenClawConfig) => {
         const agents = draft.agents ?? {}
         draft.agents = agents
@@ -6960,6 +6963,7 @@ export async function monitorInlineProvider(params: {
         }
       },
     })
+    cfg = committed.nextConfig as OpenClawConfig
   }
 
   const answerOpenClawBotSettingsRequest = async (event: {
@@ -7072,8 +7076,8 @@ export async function monitorInlineProvider(params: {
               }
             },
             setReplyThreads: async (value) => {
-              await core.config.mutateConfigFile({
-                afterWrite: { mode: "auto" },
+              const committed = await core.config.mutateConfigFile({
+                afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
                 mutate: (draft: OpenClawConfig) => setInlineThreadReplyMode({
                   draft,
                   accountId: account.accountId,
@@ -7081,6 +7085,7 @@ export async function monitorInlineProvider(params: {
                   mode: value === "on" ? "thread" : value === "off" ? "main" : "auto",
                 }),
               })
+              cfg = committed.nextConfig as OpenClawConfig
               appliedReplyThreads = value
             },
             resolveContext: async () => (await resolveOpenClawBotSettings({
