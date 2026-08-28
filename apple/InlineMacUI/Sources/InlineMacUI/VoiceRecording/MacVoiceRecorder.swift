@@ -37,6 +37,8 @@ public enum MacVoiceRecorderError: LocalizedError, Equatable {
   case busy
   case startFailed
   case sessionEnded
+  case recordingInterrupted
+  case encodingFailed
   case emptyRecording
   case unsupportedInputFormat
   case processingFailed
@@ -49,6 +51,10 @@ public enum MacVoiceRecorderError: LocalizedError, Equatable {
       "Could not start voice recording."
     case .sessionEnded:
       "The voice recording has already ended."
+    case .recordingInterrupted:
+      "Voice recording stopped unexpectedly."
+    case .encodingFailed:
+      "Voice recording failed while writing audio."
     case .emptyRecording:
       "Voice recording is empty."
     case .unsupportedInputFormat:
@@ -62,16 +68,22 @@ public enum MacVoiceRecorderError: LocalizedError, Equatable {
 /// The only public handle for one active recording. AVFoundation ownership,
 /// temporary files, metering, and post-processing remain inside the recorder.
 public final class MacVoiceRecordingSession: @unchecked Sendable {
-  public let updates: AsyncStream<MacVoiceRecordingUpdate>
+  public let updates: AsyncThrowingStream<MacVoiceRecordingUpdate, any Error>
+
+  private enum State: Equatable {
+    case active
+    case finishing
+    case ended
+  }
 
   private let lock = NSLock()
   private let id: UUID
   private let recorder: MacVoiceRecorder
-  private var isEnded = false
+  private var state = State.active
 
   fileprivate init(
     id: UUID,
-    updates: AsyncStream<MacVoiceRecordingUpdate>,
+    updates: AsyncThrowingStream<MacVoiceRecordingUpdate, any Error>,
     recorder: MacVoiceRecorder
   ) {
     self.id = id
@@ -80,26 +92,41 @@ public final class MacVoiceRecordingSession: @unchecked Sendable {
   }
 
   deinit {
-    guard claimEnd() else { return }
+    guard claimCancellation() else { return }
     recorder.scheduleCancel(id: id)
   }
 
   public func finish() async throws -> MacVoiceRecording {
-    guard claimEnd() else { throw MacVoiceRecorderError.sessionEnded }
+    guard claimFinish() else { throw MacVoiceRecorderError.sessionEnded }
+    defer { markEnded() }
     return try await recorder.finish(id: id)
   }
 
   public func cancel() async {
-    guard claimEnd() else { return }
+    guard claimCancellation() else { return }
     await recorder.cancel(id: id)
   }
 
-  private func claimEnd() -> Bool {
+  private func claimFinish() -> Bool {
     lock.lock()
     defer { lock.unlock() }
-    guard !isEnded else { return false }
-    isEnded = true
+    guard state == .active else { return false }
+    state = .finishing
     return true
+  }
+
+  private func claimCancellation() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard state != .ended else { return false }
+    state = .ended
+    return true
+  }
+
+  private func markEnded() {
+    lock.lock()
+    state = .ended
+    lock.unlock()
   }
 }
 
@@ -116,7 +143,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     let rawURL: URL
     let finalURL: URL
     let recorder: any MacVoiceRecordingBackend
-    let continuation: AsyncStream<MacVoiceRecordingUpdate>.Continuation
+    let continuation: AsyncThrowingStream<MacVoiceRecordingUpdate, any Error>.Continuation
     let requestedAt: UInt64
     let acceptedAt: UInt64
     let signpostID: OSSignpostID
@@ -126,14 +153,24 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     var didPublishFirstProgress = false
   }
 
+  private struct ProcessingRecording {
+    let id: UUID
+    let output: MacVoiceCaptureOutput
+    let cancellation: MacVoiceProcessingCancellation
+  }
+
   typealias MakeBackend = (URL, [String: Any]) throws -> any MacVoiceRecordingBackend
-  typealias ProcessCapture = (MacVoiceCaptureOutput) throws -> MacVoiceRecording
+  typealias ProcessCapture = (
+    MacVoiceCaptureOutput,
+    MacVoiceProcessingCancellation
+  ) throws -> MacVoiceRecording
 
   private let captureQueue: DispatchQueue
   private let processingQueue: DispatchQueue
   private let makeBackend: MakeBackend
   private let processCapture: ProcessCapture
   private var active: ActiveRecording?
+  private var processing: [UUID: ProcessingRecording] = [:]
 
   private init() {
     captureQueue = DispatchQueue(
@@ -145,7 +182,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
       qos: .userInitiated
     )
     makeBackend = { url, settings in
-      try AVAudioRecorder(url: url, settings: settings)
+      try AVAudioRecorderBackend(url: url, settings: settings)
     }
     processCapture = MacVoiceRecordingProcessor.process
   }
@@ -188,7 +225,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
   }
 
   fileprivate func finish(id: UUID) async throws -> MacVoiceRecording {
-    let output = try await withCheckedThrowingContinuation { continuation in
+    let processing = try await withCheckedThrowingContinuation { continuation in
       captureQueue.async { [self] in
         do {
           continuation.resume(returning: try finishCaptureOnQueue(id: id))
@@ -198,15 +235,22 @@ public final class MacVoiceRecorder: @unchecked Sendable {
       }
     }
 
-    return try await withCheckedThrowingContinuation { continuation in
-      processingQueue.async { [self] in
-        do {
-          continuation.resume(returning: try processCapture(output))
-        } catch {
-          Self.removeFiles(output.rawURL, output.finalURL)
-          continuation.resume(throwing: error)
+    return try await withTaskCancellationHandler {
+      do {
+        try Task.checkCancellation()
+        let recording = try await process(processing)
+        guard await completeProcessing(processing) else {
+          Self.removeFiles(processing.output.rawURL, processing.output.finalURL)
+          throw CancellationError()
         }
+        return recording
+      } catch {
+        await abandonProcessing(processing)
+        throw error
       }
+    } onCancel: { [self] in
+      processing.cancellation.cancel()
+      scheduleCancel(id: id)
     }
   }
 
@@ -222,6 +266,47 @@ public final class MacVoiceRecorder: @unchecked Sendable {
   fileprivate func scheduleCancel(id: UUID) {
     captureQueue.async { [self] in
       cancelOnQueue(id: id)
+    }
+  }
+
+  private func process(
+    _ processing: ProcessingRecording
+  ) async throws -> MacVoiceRecording {
+    try await withCheckedThrowingContinuation { continuation in
+      processingQueue.async { [self] in
+        do {
+          try processing.cancellation.checkCancellation()
+          let recording = try processCapture(processing.output, processing.cancellation)
+          try processing.cancellation.checkCancellation()
+          continuation.resume(returning: recording)
+        } catch {
+          continuation.resume(throwing: error)
+        }
+      }
+    }
+  }
+
+  private func completeProcessing(_ recording: ProcessingRecording) async -> Bool {
+    await withCheckedContinuation { continuation in
+      captureQueue.async { [self] in
+        let isCurrent = processing[recording.id]?.cancellation === recording.cancellation
+        if isCurrent {
+          processing[recording.id] = nil
+        }
+        continuation.resume(returning: isCurrent && !recording.cancellation.isCancelled)
+      }
+    }
+  }
+
+  private func abandonProcessing(_ recording: ProcessingRecording) async {
+    await withCheckedContinuation { continuation in
+      captureQueue.async { [self] in
+        if processing[recording.id]?.cancellation === recording.cancellation {
+          processing[recording.id] = nil
+        }
+        Self.removeFiles(recording.output.rawURL, recording.output.finalURL)
+        continuation.resume()
+      }
     }
   }
 
@@ -243,13 +328,16 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     do {
       let recorder = try makeBackend(rawURL, Self.makeRecordingSettings())
       backend = recorder
+      recorder.terminationHandler = { [weak self] termination in
+        self?.scheduleBackendTermination(id: id, termination: termination)
+      }
       recorder.isMeteringEnabled = true
       guard recorder.prepareToRecord(), recorder.record() else {
         throw MacVoiceRecorderError.startFailed
       }
       let acceptedAt = DispatchTime.now().uptimeNanoseconds
 
-      let stream = AsyncStream.makeStream(
+      let stream = AsyncThrowingStream<MacVoiceRecordingUpdate, any Error>.makeStream(
         of: MacVoiceRecordingUpdate.self,
         bufferingPolicy: .bufferingNewest(1)
       )
@@ -275,7 +363,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     }
   }
 
-  private func finishCaptureOnQueue(id: UUID) throws -> MacVoiceCaptureOutput {
+  private func finishCaptureOnQueue(id: UUID) throws -> ProcessingRecording {
     dispatchPrecondition(condition: .onQueue(captureQueue))
     guard let recording = takeActiveOnQueue(id: id) else {
       throw MacVoiceRecorderError.sessionEnded
@@ -285,7 +373,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     recording.recorder.stop()
     recording.continuation.finish()
 
-    return MacVoiceCaptureOutput(
+    let output = MacVoiceCaptureOutput(
       rawURL: recording.rawURL,
       finalURL: recording.finalURL,
       duration: max(
@@ -294,14 +382,27 @@ public final class MacVoiceRecorder: @unchecked Sendable {
       ),
       samples: recording.samples
     )
+    let processing = ProcessingRecording(
+      id: id,
+      output: output,
+      cancellation: MacVoiceProcessingCancellation()
+    )
+    self.processing[id] = processing
+    return processing
   }
 
   private func cancelOnQueue(id: UUID) {
     dispatchPrecondition(condition: .onQueue(captureQueue))
-    guard let recording = takeActiveOnQueue(id: id) else { return }
-    recording.recorder.stop()
-    recording.continuation.finish()
-    Self.removeFiles(recording.rawURL, recording.finalURL)
+    if let recording = takeActiveOnQueue(id: id) {
+      recording.recorder.stop()
+      recording.continuation.finish()
+      Self.removeFiles(recording.rawURL, recording.finalURL)
+      return
+    }
+
+    guard let processing = processing.removeValue(forKey: id) else { return }
+    processing.cancellation.cancel()
+    Self.removeFiles(processing.output.rawURL, processing.output.finalURL)
   }
 
   private func takeActiveOnQueue(id: UUID) -> ActiveRecording? {
@@ -309,6 +410,7 @@ public final class MacVoiceRecorder: @unchecked Sendable {
     recording.meterTimer?.setEventHandler {}
     recording.meterTimer?.cancel()
     recording.meterTimer = nil
+    recording.recorder.terminationHandler = nil
     active = nil
     return recording
   }
@@ -327,7 +429,11 @@ public final class MacVoiceRecorder: @unchecked Sendable {
 
   private func publishMeterOnQueue() {
     dispatchPrecondition(condition: .onQueue(captureQueue))
-    guard var recording = active, recording.recorder.isRecording else { return }
+    guard var recording = active else { return }
+    guard recording.recorder.isRecording else {
+      terminateRecordingOnQueue(id: recording.id, termination: .stoppedUnexpectedly)
+      return
+    }
 
     recording.recorder.updateMeters()
     let sample = Self.meterSample(
@@ -356,6 +462,26 @@ public final class MacVoiceRecorder: @unchecked Sendable {
       )
     )
     active = recording
+  }
+
+  private func scheduleBackendTermination(
+    id: UUID,
+    termination: MacVoiceRecordingBackendTermination
+  ) {
+    captureQueue.async { [self] in
+      terminateRecordingOnQueue(id: id, termination: termination)
+    }
+  }
+
+  private func terminateRecordingOnQueue(
+    id: UUID,
+    termination: MacVoiceRecordingBackendTermination
+  ) {
+    dispatchPrecondition(condition: .onQueue(captureQueue))
+    guard let recording = takeActiveOnQueue(id: id) else { return }
+    recording.recorder.stop()
+    recording.continuation.finish(throwing: termination.error)
+    Self.removeFiles(recording.rawURL, recording.finalURL)
   }
 
   private static func meterSample(fromAveragePower power: Float) -> UInt8 {
@@ -440,10 +566,48 @@ public final class MacVoiceRecorder: @unchecked Sendable {
   private static let meterRelease: Float = 0.28
 }
 
+final class MacVoiceProcessingCancellation: @unchecked Sendable {
+  private let lock = NSLock()
+  private var cancelled = false
+
+  var isCancelled: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return cancelled
+  }
+
+  func cancel() {
+    lock.lock()
+    cancelled = true
+    lock.unlock()
+  }
+
+  func checkCancellation() throws {
+    if isCancelled {
+      throw CancellationError()
+    }
+  }
+}
+
+enum MacVoiceRecordingBackendTermination: Sendable {
+  case stoppedUnexpectedly
+  case encodingFailed
+
+  var error: MacVoiceRecorderError {
+    switch self {
+    case .stoppedUnexpectedly:
+      .recordingInterrupted
+    case .encodingFailed:
+      .encodingFailed
+    }
+  }
+}
+
 protocol MacVoiceRecordingBackend: AnyObject {
   var isRecording: Bool { get }
   var currentTime: TimeInterval { get }
   var isMeteringEnabled: Bool { get set }
+  var terminationHandler: (@Sendable (MacVoiceRecordingBackendTermination) -> Void)? { get set }
 
   func prepareToRecord() -> Bool
   func record() -> Bool
@@ -452,4 +616,64 @@ protocol MacVoiceRecordingBackend: AnyObject {
   func averagePower(forChannel channelNumber: Int) -> Float
 }
 
-extension AVAudioRecorder: MacVoiceRecordingBackend {}
+private final class AVAudioRecorderBackend: NSObject, MacVoiceRecordingBackend,
+  AVAudioRecorderDelegate, @unchecked Sendable {
+  private let recorder: AVAudioRecorder
+  private let handlerLock = NSLock()
+  private var storedTerminationHandler:
+    (@Sendable (MacVoiceRecordingBackendTermination) -> Void)?
+
+  var terminationHandler: (@Sendable (MacVoiceRecordingBackendTermination) -> Void)? {
+    get {
+      handlerLock.lock()
+      defer { handlerLock.unlock() }
+      return storedTerminationHandler
+    }
+    set {
+      handlerLock.lock()
+      storedTerminationHandler = newValue
+      handlerLock.unlock()
+    }
+  }
+
+  var isRecording: Bool { recorder.isRecording }
+  var currentTime: TimeInterval { recorder.currentTime }
+  var isMeteringEnabled: Bool {
+    get { recorder.isMeteringEnabled }
+    set { recorder.isMeteringEnabled = newValue }
+  }
+
+  init(url: URL, settings: [String: Any]) throws {
+    recorder = try AVAudioRecorder(url: url, settings: settings)
+    super.init()
+    recorder.delegate = self
+  }
+
+  func prepareToRecord() -> Bool {
+    recorder.prepareToRecord()
+  }
+
+  func record() -> Bool {
+    recorder.record()
+  }
+
+  func stop() {
+    recorder.stop()
+  }
+
+  func updateMeters() {
+    recorder.updateMeters()
+  }
+
+  func averagePower(forChannel channelNumber: Int) -> Float {
+    recorder.averagePower(forChannel: channelNumber)
+  }
+
+  func audioRecorderDidFinishRecording(_: AVAudioRecorder, successfully _: Bool) {
+    terminationHandler?(.stoppedUnexpectedly)
+  }
+
+  func audioRecorderEncodeErrorDidOccur(_: AVAudioRecorder, error _: (any Error)?) {
+    terminationHandler?(.encodingFailed)
+  }
+}

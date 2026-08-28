@@ -109,6 +109,59 @@ if git_grep --quiet --fixed-strings 'Not Loaded Title' -- 'apple/**/*.swift'; th
   failures=1
 fi
 
+require_ordered_fragments() {
+  local path="$1"
+  shift
+  local source
+  source="$(read_source "$path" 2>/dev/null || true)"
+  local prior_line=0
+  local fragment
+  for fragment in "$@"; do
+    local line
+    line="$(
+      printf '%s\n' "$source" |
+        grep -n -F -m 1 "$fragment" |
+        cut -d: -f1 || true
+    )"
+    if [[ -z "$line" || "$line" -le "$prior_line" ]]; then
+      printf 'error: %s must contain ordered lifecycle fragment: %s\n' "$path" "$fragment" >&2
+      failures=1
+      return
+    fi
+    prior_line="$line"
+  done
+}
+
+voice_view_model_path="apple/InlineMac/Views/Compose/ComposeVoiceRecordingViewModel.swift"
+voice_view_model_source="$(read_source "$voice_view_model_path" 2>/dev/null || true)"
+if [[ -n "$voice_view_model_source" ]]; then
+  if ! printf '%s\n' "$voice_view_model_source" | grep -F 'let preservesFinishing = finishingLifetime.isPreserving' >/dev/null ||
+     ! printf '%s\n' "$voice_view_model_source" | grep -F 'let session = preservesFinishing ? nil : session' >/dev/null; then
+    printf 'error: %s must let user-paused finishing survive view-model teardown\n' "$voice_view_model_path" >&2
+    failures=1
+  fi
+  require_ordered_fragments \
+    "$voice_view_model_path" \
+    'let recording = try await session.finish()' \
+    'let persistedMediaItem = try persistFinishedRecording?(recording)' \
+    'guard let self else {' \
+    'acceptFinishedRecording(recording, persistedMediaItem: persistedMediaItem)'
+fi
+
+for voice_host_path in \
+  "apple/InlineMac/Views/Compose/GlassComposeAppKit.swift" \
+  "apple/InlineMac/Views/Compose/LegacyComposeAppKit.swift"; do
+  require_ordered_fragments \
+    "$voice_host_path" \
+    'let drafts2 = drafts2' \
+    'let peerId = peerId' \
+    'voiceViewModel.pauseRecording { [weak self] recording in' \
+    'let mediaItem = try makeComposeVoiceMediaItem(from: recording)' \
+    'let attachment = drafts2.appendAttachment(peer: peerId, media: mediaItem)' \
+    'self?.attachmentItems[attachment.id] = mediaItem' \
+    'return mediaItem'
+done
+
 if [[ "$failures" -ne 0 ]]; then
   exit 1
 fi

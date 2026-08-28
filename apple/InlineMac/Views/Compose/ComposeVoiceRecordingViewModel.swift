@@ -36,6 +36,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   private var finishTask: Task<Bool, Never>?
   private var recorderUpdatesTask: Task<Void, Never>?
   private var operationId = UUID()
+  nonisolated private let finishingLifetime = ComposeVoiceFinishingLifetime()
 
   var isActive: Bool {
     phase != .idle
@@ -52,14 +53,17 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   deinit {
+    let preservesFinishing = finishingLifetime.isPreserving
     startTask?.cancel()
-    finishTask?.cancel()
+    if !preservesFinishing {
+      finishTask?.cancel()
+    }
     recorderUpdatesTask?.cancel()
     playbackTimer?.invalidate()
     player?.stop()
     stopRecordingAction?()
 
-    let session = session
+    let session = preservesFinishing ? nil : session
     let recordingURL = recording?.fileURL
     let draftRecordingURL = draftVoice.flatMap {
       FileMediaItem.voice($0).localFileURL()
@@ -126,28 +130,58 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
-  func pauseRecording(onFinished: (@MainActor () -> Void)? = nil) {
+  func pauseRecording(
+    persistFinishedRecording: (@MainActor (MacVoiceRecording) throws -> FileMediaItem)? = nil
+  ) {
     guard phase == .recording, let session else { return }
 
     let operationId = UUID()
     self.operationId = operationId
-    self.session = nil
     recorderUpdatesTask?.cancel()
     recorderUpdatesTask = nil
     stopRecordingAction?()
     stopRecordingAction = nil
+    finishingLifetime.begin()
     phase = .finishing
 
     finishTask = Task { [weak self] in
-      guard let self else { return false }
-      let finished = await finish(
-        session: session,
-        operationId: operationId
-      )
-      if finished {
-        onFinished?()
+      var completedRecording: MacVoiceRecording?
+      do {
+        let recording = try await session.finish()
+        completedRecording = recording
+        try Task.checkCancellation()
+
+        if let self, self.operationId != operationId || self.phase != .finishing {
+          try? FileManager.default.removeItem(at: recording.fileURL)
+          return false
+        }
+
+        let persistedMediaItem = try persistFinishedRecording?(recording)
+        guard let self else {
+          try? FileManager.default.removeItem(at: recording.fileURL)
+          return false
+        }
+        guard self.operationId == operationId, self.phase == .finishing else {
+          try? FileManager.default.removeItem(at: recording.fileURL)
+          return false
+        }
+
+        acceptFinishedRecording(recording, persistedMediaItem: persistedMediaItem)
+        return true
+      } catch {
+        if let completedRecording {
+          try? FileManager.default.removeItem(at: completedRecording.fileURL)
+        }
+        guard let self,
+              self.operationId == operationId,
+              self.phase == .finishing
+        else { return false }
+        self.session = nil
+        log.error("Failed to finish voice recording", error: error)
+        ToastCenter.shared.showError(error.localizedDescription)
+        reset()
+        return false
       }
-      return finished
     }
   }
 
@@ -189,49 +223,55 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     reset()
   }
 
-  private func finish(
-    session: MacVoiceRecordingSession,
-    operationId: UUID
-  ) async -> Bool {
-    do {
-      let recording = try await session.finish()
-      guard self.operationId == operationId, phase == .finishing else {
-        try? FileManager.default.removeItem(at: recording.fileURL)
-        return false
-      }
-
-      self.recording = recording
+  private func acceptFinishedRecording(
+    _ recording: MacVoiceRecording,
+    persistedMediaItem: FileMediaItem?
+  ) {
+    finishingLifetime.end()
+    self.session = nil
+    self.recording = recording
+    if case let .some(.voice(voice)) = persistedMediaItem {
+      draftVoice = voice
+    } else {
       draftVoice = nil
-      duration = recording.duration
-      samples = Array(recording.waveform)
-      playbackProgress = 0
-      isPlaying = false
-      finishTask = nil
-      phase = .review
-      return true
-    } catch {
-      guard self.operationId == operationId else { return false }
-      log.error("Failed to finish voice recording", error: error)
-      ToastCenter.shared.showError(error.localizedDescription)
-      reset()
-      return false
     }
+    duration = recording.duration
+    samples = Array(recording.waveform)
+    playbackProgress = 0
+    isPlaying = false
+    finishTask = nil
+    phase = .review
   }
 
   private func observe(
-    _ updates: AsyncStream<MacVoiceRecordingUpdate>,
+    _ updates: AsyncThrowingStream<MacVoiceRecordingUpdate, any Error>,
     operationId: UUID
   ) {
     recorderUpdatesTask?.cancel()
     recorderUpdatesTask = Task { [weak self] in
-      for await update in updates {
-        guard !Task.isCancelled else { return }
+      do {
+        for try await update in updates {
+          guard !Task.isCancelled else { return }
+          guard let self,
+                self.operationId == operationId,
+                self.phase == .recording
+          else { return }
+          duration = update.duration
+          samples = update.samples
+        }
+      } catch is CancellationError {
+        return
+      } catch {
         guard let self,
               self.operationId == operationId,
               self.phase == .recording
         else { return }
-        duration = update.duration
-        samples = update.samples
+        log.error("Voice recording ended unexpectedly", error: error)
+        ToastCenter.shared.showError(error.localizedDescription)
+        self.session = nil
+        stopRecordingAction?()
+        stopRecordingAction = nil
+        reset()
       }
     }
   }
@@ -323,15 +363,11 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
       return .voice(draftVoice)
     }
 
-    let voice = try FileCache.saveVoice(
-      data: recording.data,
-      duration: Int(max(1, recording.duration.rounded(.up))),
-      waveform: recording.waveform,
-      mimeType: recording.mimeType,
-      fileExtension: recording.fileExtension
-    )
-    draftVoice = voice
-    return .voice(voice)
+    let mediaItem = try makeComposeVoiceMediaItem(from: recording)
+    if case let .voice(voice) = mediaItem {
+      draftVoice = voice
+    }
+    return mediaItem
   }
 
   func loadDraftVoice(_ voice: Client_MessageVoiceContent) -> Bool {
@@ -348,6 +384,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     startTask = nil
     finishTask?.cancel()
     finishTask = nil
+    finishingLifetime.end()
     recorderUpdatesTask?.cancel()
     recorderUpdatesTask = nil
     let session = session
@@ -469,6 +506,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func reset() {
+    finishingLifetime.end()
     startTask = nil
     finishTask = nil
     duration = 0
@@ -489,4 +527,39 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
 private enum MicrophoneAccessGrant: Equatable {
   case authorized
   case newlyAuthorized
+}
+
+private final class ComposeVoiceFinishingLifetime: @unchecked Sendable {
+  private let lock = NSLock()
+  private var preserving = false
+
+  var isPreserving: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return preserving
+  }
+
+  func begin() {
+    lock.lock()
+    preserving = true
+    lock.unlock()
+  }
+
+  func end() {
+    lock.lock()
+    preserving = false
+    lock.unlock()
+  }
+}
+
+func makeComposeVoiceMediaItem(from recording: MacVoiceRecording) throws -> FileMediaItem {
+  .voice(
+    try FileCache.saveVoice(
+      data: recording.data,
+      duration: Int(max(1, recording.duration.rounded(.up))),
+      waveform: recording.waveform,
+      mimeType: recording.mimeType,
+      fileExtension: recording.fileExtension
+    )
+  )
 }

@@ -9,12 +9,23 @@ struct MacVoiceCaptureOutput {
 }
 
 enum MacVoiceRecordingProcessor {
-  static func process(_ capture: MacVoiceCaptureOutput) throws -> MacVoiceRecording {
+  static func process(
+    _ capture: MacVoiceCaptureOutput,
+    cancellation: MacVoiceProcessingCancellation
+  ) throws -> MacVoiceRecording {
     do {
-      try renderVoiceMessage(from: capture.rawURL, to: capture.finalURL)
+      try cancellation.checkCancellation()
+      try renderVoiceMessage(
+        from: capture.rawURL,
+        to: capture.finalURL,
+        cancellation: cancellation
+      )
+      try cancellation.checkCancellation()
       try? FileManager.default.removeItem(at: capture.rawURL)
 
+      try cancellation.checkCancellation()
       let data = try Data(contentsOf: capture.finalURL)
+      try cancellation.checkCancellation()
       guard !data.isEmpty else {
         try? FileManager.default.removeItem(at: capture.finalURL)
         throw MacVoiceRecorderError.emptyRecording
@@ -47,10 +58,16 @@ enum MacVoiceRecordingProcessor {
     })
   }
 
-  private static func renderVoiceMessage(from rawURL: URL, to finalURL: URL) throws {
-    let analysis = try analyze(rawURL: rawURL)
+  private static func renderVoiceMessage(
+    from rawURL: URL,
+    to finalURL: URL,
+    cancellation: MacVoiceProcessingCancellation
+  ) throws {
+    try cancellation.checkCancellation()
+    let analysis = try analyze(rawURL: rawURL, cancellation: cancellation)
     guard analysis.frameCount > 0 else { throw MacVoiceRecorderError.emptyRecording }
 
+    try cancellation.checkCancellation()
     let source = try AVAudioFile(forReading: rawURL)
     let sourceFormat = source.processingFormat
     guard let monoFormat = AVAudioFormat(
@@ -77,15 +94,21 @@ enum MacVoiceRecordingProcessor {
     }
 
     while source.framePosition < source.length {
+      try cancellation.checkCancellation()
       let remaining = AVAudioFrameCount(source.length - source.framePosition)
       try source.read(into: inputBuffer, frameCount: min(capacity, remaining))
       guard inputBuffer.frameLength > 0 else { break }
       try fillMonoBuffer(outputBuffer, from: inputBuffer, channel: analysis.channel, gain: gain)
+      try cancellation.checkCancellation()
       try output.write(from: outputBuffer)
     }
+    try cancellation.checkCancellation()
   }
 
-  private static func analyze(rawURL: URL) throws -> VoiceAnalysis {
+  private static func analyze(
+    rawURL: URL,
+    cancellation: MacVoiceProcessingCancellation
+  ) throws -> VoiceAnalysis {
     let file = try AVAudioFile(forReading: rawURL)
     let format = file.processingFormat
     let channelCount = Int(format.channelCount)
@@ -99,6 +122,7 @@ enum MacVoiceRecordingProcessor {
     var energy = Array(repeating: Double(0), count: channelCount)
     var peaks = Array(repeating: Float(0), count: channelCount)
     while file.framePosition < file.length {
+      try cancellation.checkCancellation()
       let remaining = AVAudioFrameCount(file.length - file.framePosition)
       try file.read(into: buffer, frameCount: min(capacity, remaining))
       guard buffer.frameLength > 0 else { break }
@@ -114,6 +138,7 @@ enum MacVoiceRecordingProcessor {
         }
       }
     }
+    try cancellation.checkCancellation()
 
     let channel = energy.indices.max { energy[$0] < energy[$1] } ?? 0
     return VoiceAnalysis(channel: channel, peak: peaks[channel], frameCount: file.length)

@@ -1146,8 +1146,13 @@ class GlassComposeAppKit: NSView {
   }
 
   private func pauseVoiceRecording() {
-    voiceViewModel.pauseRecording { [weak self] in
-      self?.persistVoiceDraftIfNeeded()
+    let drafts2 = drafts2
+    let peerId = peerId
+    voiceViewModel.pauseRecording { [weak self] recording in
+      let mediaItem = try makeComposeVoiceMediaItem(from: recording)
+      let attachment = drafts2.appendAttachment(peer: peerId, media: mediaItem)
+      self?.attachmentItems[attachment.id] = mediaItem
+      return mediaItem
     }
   }
 
@@ -3938,17 +3943,6 @@ extension GlassComposeAppKit {
         }
         attachmentItems[attachment.id] = attachment.media
         updateVoiceAvailability(phase: .review)
-    }
-  }
-
-  private func persistVoiceDraftIfNeeded() {
-    do {
-      guard let mediaItem = try voiceViewModel.draftVoiceMediaItem() else { return }
-      let attachment = drafts2.appendAttachment(peer: peerId, media: mediaItem)
-      attachmentItems[attachment.id] = mediaItem
-      updateSendButtonIfNeeded()
-    } catch {
-      log.error("Failed to persist voice draft", error: error)
     }
   }
 
