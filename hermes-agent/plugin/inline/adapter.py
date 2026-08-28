@@ -62,6 +62,8 @@ _DEFAULT_SIDECAR_PORT = 8794
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_MESSAGE_LENGTH = 4000
 _MODEL_PAGE_SIZE = 8
+_CHOICE_PICKER_TTL_SECONDS = 2 * 60
+_UPDATE_PROMPT_TTL_SECONDS = 5 * 60
 _DEDUP_MAX_SIZE = 5000
 _DEDUP_WINDOW_SECONDS = 48 * 3600
 _CHAT_INFO_CACHE_SECONDS = 10 * 60
@@ -878,6 +880,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._choice_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._update_prompt_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._model_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._status_message_ids: "OrderedDict[tuple[str, str, str], str]" = OrderedDict()
         self._thread_action_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
@@ -3588,6 +3591,10 @@ class InlineAdapter(BasePlatformAdapter):
             if not await self._action_allowed(event):
                 return True
             return await self._handle_choice_picker_action(event)
+        if action_id.startswith("up:"):
+            if not await self._action_allowed(event):
+                return True
+            return await self._handle_update_prompt_action(event)
         if action_id.startswith("cl:"):
             if not await self._action_allowed(event):
                 return True
@@ -3822,6 +3829,14 @@ class InlineAdapter(BasePlatformAdapter):
         if not state:
             await self._answer_action(interaction_id, "Picker expired")
             return True
+        expected_message_id = str(state.get("message_id") or "")
+        if expected_message_id and expected_message_id != str(event.get("messageId") or ""):
+            await self._answer_action(interaction_id, "Picker expired")
+            return True
+        if time.monotonic() - float(state.get("created_at") or 0) > _CHOICE_PICKER_TTL_SECONDS:
+            self._choice_picker_sessions.pop(picker_id, None)
+            await self._finish_action(event, "Picker expired", "Selection expired; no change was made.")
+            return True
         try:
             index = int(index_raw)
             state_choices = state["choices"]
@@ -3855,6 +3870,49 @@ class InlineAdapter(BasePlatformAdapter):
             event,
             "Selection failed" if failed else "Selection applied",
             result_text,
+        )
+        return True
+
+    async def _handle_update_prompt_action(self, event: Dict[str, Any]) -> bool:
+        action_id = str(event.get("actionId") or "")
+        parts = action_id.split(":", 2)
+        if len(parts) != 3 or parts[0] != "up":
+            return False
+        _, prompt_id, answer = parts
+        interaction_id = str(event.get("interactionId") or "")
+        state = self._update_prompt_sessions.get(prompt_id)
+        if not state:
+            await self._answer_action(interaction_id, "Prompt expired")
+            return True
+        expected_message_id = str(state.get("message_id") or "")
+        if expected_message_id and expected_message_id != str(event.get("messageId") or ""):
+            await self._answer_action(interaction_id, "Prompt expired")
+            return True
+        if time.monotonic() - float(state.get("created_at") or 0) > _UPDATE_PROMPT_TTL_SECONDS:
+            self._update_prompt_sessions.pop(prompt_id, None)
+            await self._finish_action(event, "Prompt expired", "Update prompt expired; no response was sent.")
+            return True
+        if answer not in {"y", "n"}:
+            await self._answer_action(interaction_id, "Invalid response")
+            return True
+
+        try:
+            from hermes_constants import get_hermes_home
+            response_path = Path(get_hermes_home()) / ".update_response"
+            tmp_path = response_path.with_suffix(".tmp")
+            tmp_path.write_text(answer, encoding="utf-8")
+            tmp_path.replace(response_path)
+        except Exception:
+            logger.exception("[inline] failed to write Hermes update response")
+            await self._answer_action(interaction_id, "Response failed; try again")
+            return True
+
+        self._update_prompt_sessions.pop(prompt_id, None)
+        label = "Yes" if answer == "y" else "No"
+        await self._finish_action(
+            event,
+            f"Update response: {label}",
+            f"Hermes update prompt answered: {label}.",
         )
         return True
 
@@ -4509,7 +4567,39 @@ class InlineAdapter(BasePlatformAdapter):
                 "session_key": str(session_key),
                 "on_choice_selected": on_choice_selected,
                 "message_id": result.message_id,
+                "created_at": time.monotonic(),
             })
+        return result
+
+    async def send_update_prompt(
+        self,
+        chat_id: str,
+        prompt: str,
+        default: str = "",
+        session_key: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        prompt_id = secrets.token_hex(6)
+        default_hint = f" (default: {default})" if default else ""
+        result = await self._send_sidecar("/send", {
+            "target": self._target_for(chat_id, metadata),
+            "text": f"Hermes update needs your input\n\n{prompt}{default_hint}",
+            "parseMarkdown": self._parse_markdown,
+            "actions": {"rows": [{"actions": [
+                self._action(f"up:{prompt_id}:y", "✓ Yes"),
+                self._action(f"up:{prompt_id}:n", "✗ No"),
+            ]}]},
+        })
+        if not result.success:
+            # Hermes 0.20.6 treats any non-raising hook call as delivered and
+            # otherwise suppresses its plaintext /approve and /deny fallback.
+            raise RuntimeError(result.error or "failed to send Inline update prompt")
+        self._remember(self._update_prompt_sessions, prompt_id, {
+            "chat_id": str(chat_id),
+            "session_key": str(session_key),
+            "message_id": result.message_id,
+            "created_at": time.monotonic(),
+        })
         return result
 
     def _model_picker_text(self, current_model: str, current_provider: str) -> str:

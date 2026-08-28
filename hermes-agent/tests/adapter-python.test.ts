@@ -164,6 +164,8 @@ def resolve_channel_skills(extra, channel_id, parent_id=None):
 base.resolve_channel_skills = resolve_channel_skills
 hermes_constants.find_node_executable = lambda command: f"/hermes/{command}"
 hermes_constants.with_hermes_node_path = lambda env=None: {**(env or {}), "PATH": "/hermes/bin"}
+test_hermes_home = Path(tempfile.mkdtemp(prefix="inline-hermes-home-"))
+hermes_constants.get_hermes_home = lambda: test_hermes_home
 commands.telegram_menu_commands = lambda max_commands=100: ([
     ("help", "Show help"),
     ("threads", "Duplicate Inline command"),
@@ -3305,6 +3307,17 @@ async def assert_choice_picker_flow():
 
     assert await adapter._handle_action({
         "chatId": "99",
+        "messageId": "different-message",
+        "interactionId": "choice-wrong-message",
+        "actorUserId": "u1",
+        "actionId": second_action,
+    })
+    assert answers[-1] == ("choice-wrong-message", "Picker expired")
+    assert picker_id in adapter._choice_picker_sessions
+    assert selected == []
+
+    assert await adapter._handle_action({
+        "chatId": "99",
         "messageId": "choice-message",
         "interactionId": "choice-invalid",
         "actorUserId": "u1",
@@ -3356,6 +3369,31 @@ async def assert_choice_picker_flow():
     assert answers[-1] == ("choice-expired", "Picker expired")
     assert selected == [("chat:10", "high")]
 
+    expiring = await adapter.send_choice_picker(
+        "chat:10",
+        "Choose again",
+        [{"value": "medium", "label": "Medium"}],
+        "session-expiring",
+        on_selected,
+        metadata={"thread_id": "chat:99"},
+    )
+    assert expiring.success
+    expiring_id = next(iter(adapter._choice_picker_sessions))
+    adapter._choice_picker_sessions[expiring_id]["created_at"] -= 121
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "choice-message",
+        "interactionId": "choice-timed-out",
+        "actorUserId": "u1",
+        "actionId": f"system:cp:{expiring_id}:0",
+    })
+    assert answers[-1] == ("choice-timed-out", "Picker expired")
+    assert expiring_id not in adapter._choice_picker_sessions
+    assert calls[-1][0] == "/edit"
+    assert calls[-1][1]["text"] == "Selection expired; no change was made."
+    assert calls[-1][1]["actions"] == {"rows": []}
+    assert selected == [("chat:10", "high")]
+
     failed = InlineAdapter(PlatformConfig(extra=base_extra))
 
     async def failed_send_sidecar(path, body):
@@ -3376,6 +3414,143 @@ async def assert_choice_picker_flow():
     assert empty_result.error == "No choices"
 
 asyncio.run(assert_choice_picker_flow())
+
+async def assert_update_prompt_flow():
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "allow_all": True}))
+    calls = []
+    answers = []
+
+    async def fake_send_sidecar(path, body):
+        calls.append((path, body))
+        return SendResult(success=True, message_id=body.get("messageId") or "update-message", raw_response=body)
+
+    async def fake_fetch_message(chat_id, message_id):
+        return {"peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}}}
+
+    async def fake_answer_action(interaction_id, toast):
+        answers.append((interaction_id, toast))
+
+    adapter._send_sidecar = fake_send_sidecar
+    adapter._fetch_message = fake_fetch_message
+    adapter._answer_action = fake_answer_action
+    result = await adapter.send_update_prompt(
+        "chat:10",
+        "Restore the saved configuration?",
+        default="n",
+        session_key="session-update",
+        metadata={"thread_id": "chat:99"},
+    )
+    assert result.success
+    assert calls[0][0] == "/send"
+    assert calls[0][1]["target"] == {"chatId": "99"}
+    assert calls[0][1]["text"] == "Hermes update needs your input\n\nRestore the saved configuration? (default: n)"
+    prompt_actions = calls[0][1]["actions"]["rows"][0]["actions"]
+    assert [action["text"] for action in prompt_actions] == ["✓ Yes", "✗ No"]
+    assert all(action["id"].startswith("system:up:") for action in prompt_actions)
+    prompt_id = next(iter(adapter._update_prompt_sessions))
+
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "different-message",
+        "interactionId": "update-wrong-message",
+        "actorUserId": "u1",
+        "actionId": prompt_actions[0]["id"],
+    })
+    assert answers[-1] == ("update-wrong-message", "Prompt expired")
+    assert prompt_id in adapter._update_prompt_sessions
+
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "update-message",
+        "interactionId": "update-invalid",
+        "actorUserId": "u1",
+        "actionId": f"system:up:{prompt_id}:maybe",
+    })
+    assert answers[-1] == ("update-invalid", "Invalid response")
+    assert prompt_id in adapter._update_prompt_sessions
+
+    adapter._allow_all = False
+    adapter._group_policy = "allowlist"
+    adapter._group_allow_from = {"u1"}
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "update-message",
+        "interactionId": "update-denied",
+        "actorUserId": "u2",
+        "actionId": prompt_actions[0]["id"],
+    })
+    assert answers[-1] == ("update-denied", "Not authorized")
+    assert prompt_id in adapter._update_prompt_sessions
+
+    response_path = test_hermes_home / ".update_response"
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "update-message",
+        "interactionId": "update-yes",
+        "actorUserId": "u1",
+        "actionId": prompt_actions[0]["id"],
+    })
+    assert response_path.read_text(encoding="utf-8") == "y"
+    assert not (test_hermes_home / ".update_response.tmp").exists()
+    assert prompt_id not in adapter._update_prompt_sessions
+    assert calls[-1] == ("/edit", {
+        "target": {"chatId": "99"},
+        "messageId": "update-message",
+        "text": "Hermes update prompt answered: Yes.",
+        "parseMarkdown": True,
+        "actions": {"rows": []},
+    })
+    assert answers[-1] == ("update-yes", "Update response: Yes")
+
+    expiring = await adapter.send_update_prompt("chat:10", "Continue?", session_key="session-expiring")
+    assert expiring.success
+    expiring_id = next(iter(adapter._update_prompt_sessions))
+    adapter._update_prompt_sessions[expiring_id]["created_at"] -= 301
+    assert await adapter._handle_action({
+        "chatId": "10",
+        "messageId": "update-message",
+        "interactionId": "update-timed-out",
+        "actorUserId": "u1",
+        "actionId": f"system:up:{expiring_id}:n",
+    })
+    assert expiring_id not in adapter._update_prompt_sessions
+    assert calls[-1][1]["text"] == "Update prompt expired; no response was sent."
+    assert answers[-1] == ("update-timed-out", "Prompt expired")
+
+    failing_home = test_hermes_home / "not-a-directory"
+    failing_home.write_text("file", encoding="utf-8")
+    original_get_hermes_home = hermes_constants.get_hermes_home
+    hermes_constants.get_hermes_home = lambda: failing_home
+    try:
+        retryable = await adapter.send_update_prompt("chat:10", "Retry write?", session_key="session-retry")
+        retryable_id = next(iter(adapter._update_prompt_sessions))
+        assert await adapter._handle_action({
+            "chatId": "10",
+            "messageId": "update-message",
+            "interactionId": "update-write-failed",
+            "actorUserId": "u1",
+            "actionId": f"system:up:{retryable_id}:y",
+        })
+        assert retryable.success
+        assert retryable_id in adapter._update_prompt_sessions
+        assert answers[-1] == ("update-write-failed", "Response failed; try again")
+    finally:
+        hermes_constants.get_hermes_home = original_get_hermes_home
+
+    failed = InlineAdapter(PlatformConfig(extra=base_extra))
+
+    async def failed_send_sidecar(path, body):
+        return SendResult(success=False, error="prompt delivery failed")
+
+    failed._send_sidecar = failed_send_sidecar
+    try:
+        await failed.send_update_prompt("chat:10", "Continue?")
+        raise AssertionError("failed native update prompt must preserve Hermes text fallback")
+    except RuntimeError as exc:
+        assert str(exc) == "prompt delivery failed"
+    assert failed._update_prompt_sessions == {}
+
+asyncio.run(assert_update_prompt_flow())
 
 async def assert_transport_helpers():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
