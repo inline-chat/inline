@@ -72,8 +72,8 @@ describe("packed artifact", () => {
       install: { npmSpec: "@inline-chat/hermes-agent-adapter" },
       machineSetupProtocol: 1,
       minHermesVersion: "0.17.0",
-      testedHermesVersion: "0.20.0",
-      testedHermesCommit: "3c27eb6",
+      testedHermesVersion: "0.20.6",
+      testedHermesCommit: "31e41eed",
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")
@@ -155,7 +155,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.9")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.10")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

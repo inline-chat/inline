@@ -26,7 +26,7 @@ _CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
 _MAX_TOKEN_BYTES = 16 * 1024
 _MAX_PROBE_RESPONSE_BYTES = 64 * 1024
 _MACHINE_SETUP_PROTOCOL_VERSION = 1
-_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.9"
+_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.10"
 _ENV_REFERENCE_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 

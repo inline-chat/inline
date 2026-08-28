@@ -40,12 +40,12 @@ Requires OpenClaw `2026.6.11` or newer.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.60` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Current | Uses the plugin index's supported force-install path for exact updates on current OpenClaw hosts. |
+| `0.0.61` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Current | Bounds model discovery through provider authentication so agent settings return a fallback instead of hanging indefinitely. |
+| `0.0.60` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Uses the plugin index's supported force-install path for exact updates on current OpenClaw hosts. |
 | `0.0.59` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Adds mentionable Agent specialization, exact Agent activation, and fail-closed bot-message provenance. |
 | `0.0.58` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.15` | Previous | Promotes the stable realtime v3 SDK; hardens terminal authentication, model settings, recovered replies and joins, rich streaming delivery, and monitor failure reporting. |
 | `0.0.57` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Previous | Hardens exact CLI-managed upgrades, deterministic channel listing, default/help consistency, and packed-artifact validation. |
 | `0.0.56` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Stable | Finalizes unified Inline CLI setup compatibility while preserving the separately installed OpenClaw plugin boundary. |
-| `0.0.55` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Stable | Enforces empty-payload nudges, canonical visible-text sanitizing, hard access-before-mention policy, explicit auto-threading, and clearer formatting guidance; explicitly admits npm's `2026.7.1-2` stable host version. |
 
 From npm:
 

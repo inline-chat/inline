@@ -14,7 +14,7 @@
     },
     "hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.9",
+      "version": "0.0.10",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
@@ -48,7 +48,7 @@
     },
     "openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.59",
+      "version": "0.0.61",
       "dependencies": {
         "@inline-chat/realtime-sdk": "0.0.16",
         "zod": "4.4.3",
