@@ -62,6 +62,7 @@ _DEFAULT_SIDECAR_PORT = 8794
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_MESSAGE_LENGTH = 4000
 _MODEL_PAGE_SIZE = 8
+_CHOICE_PICKER_MAX_CHOICES = 16
 _CHOICE_PICKER_TTL_SECONDS = 2 * 60
 _UPDATE_PROMPT_TTL_SECONDS = 5 * 60
 _DEDUP_MAX_SIZE = 5000
@@ -4691,7 +4692,9 @@ class InlineAdapter(BasePlatformAdapter):
                 "label": label,
                 "is_current": bool(choice.get("is_current")),
             })
-            if len(clean_choices) >= 24:
+            # Inline accepts at most eight action rows. Picker actions use two
+            # buttons per row, so keep the native card within that hard limit.
+            if len(clean_choices) >= _CHOICE_PICKER_MAX_CHOICES:
                 break
         if not clean_choices:
             return _send_result(success=False, error="No choices")

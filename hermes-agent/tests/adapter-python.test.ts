@@ -3406,6 +3406,22 @@ async def assert_choice_picker_flow():
     assert answers[-1] == ("choice-expired", "Picker expired")
     assert selected == [("chat:10", "high")]
 
+    calls.clear()
+    bounded_result = await adapter.send_choice_picker(
+        "chat:10",
+        "Bounded choices",
+        [
+            {"value": f"value-{index}", "label": f"Choice {index}"}
+            for index in range(18)
+        ],
+        "session-bounded",
+        on_selected,
+    )
+    assert bounded_result.success
+    bounded_rows = calls[-1][1]["actions"]["rows"]
+    assert len(bounded_rows) == 8
+    assert sum(len(row["actions"]) for row in bounded_rows) == 16
+
     expiring = await adapter.send_choice_picker(
         "chat:10",
         "Choose again",
@@ -3415,7 +3431,7 @@ async def assert_choice_picker_flow():
         metadata={"thread_id": "chat:99"},
     )
     assert expiring.success
-    expiring_id = next(iter(adapter._choice_picker_sessions))
+    expiring_id = next(reversed(adapter._choice_picker_sessions))
     adapter._choice_picker_sessions[expiring_id]["created_at"] -= 121
     assert await adapter._handle_action({
         "chatId": "99",
