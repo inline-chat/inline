@@ -2003,6 +2003,8 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   private var configuration: SidebarNativeRowConfiguration.Chat?
   private var displayedDisclosureExpanded: Bool?
   private var hierarchyAnimationToken: UUID?
+  private var titleNaturalWidth: CGFloat = 0
+  private var installedTooltipTitle: String?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -2033,6 +2035,11 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
   func configure(_ configuration: SidebarNativeRowConfiguration.Chat) {
     let previousConfiguration = self.configuration
+    if let previousPresentation = previousConfiguration?.presentation,
+       previousPresentation.peerID != configuration.presentation.peerID
+       || previousPresentation.title != configuration.presentation.title {
+      clearTitleTooltip()
+    }
     let hierarchyChanged = previousConfiguration.map {
       $0.presentation.peerID == configuration.presentation.peerID
         && ($0.indentationLevel != configuration.indentationLevel
@@ -2075,6 +2082,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     titleField.font = configuration.isTemporary
       ? NSFontManager.shared.convert(titleFont, toHaveTrait: .italicFontMask)
       : titleFont
+    titleNaturalWidth = ceil(titleField.intrinsicContentSize.width)
     titleField.textColor = configuration.titleDimmed ? .secondaryLabelColor : .labelColor
 
     if configuration.showsIcon {
@@ -2311,6 +2319,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       previewView.frame = .zero
       previewView.isHidden = true
     }
+    updateTitleTooltip()
   }
 
   private var hierarchyViews: [NSView] {
@@ -2551,9 +2560,11 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    clearTitleTooltip()
     cancelHierarchyAnimations()
     configuration = nil
     displayedDisclosureExpanded = nil
+    titleNaturalWidth = 0
     primaryAction = nil
     doubleClickAction = nil
     identityView.prepareForReuse()
@@ -2564,6 +2575,15 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     closeView.prepareForReuse()
     disclosureView.prepareForReuse()
     setAccessibilityCustomActions([])
+  }
+
+  override func setLayoutVisibility(_ isVisible: Bool) {
+    super.setLayoutVisibility(isVisible)
+    if isVisible {
+      needsLayout = true
+    } else {
+      clearTitleTooltip()
+    }
   }
 
   override func interactionTarget(at point: NSPoint) -> InteractionTarget {
@@ -2774,6 +2794,31 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
           && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
       )
     }
+  }
+
+  private func updateTitleTooltip() {
+    // The existing attachment adds tracking only. This label remains outside
+    // hit testing, so the row keeps exclusive click, menu, and drag ownership.
+    guard isLayoutVisible,
+          let title = configuration?.presentation.title,
+          !title.isEmpty,
+          titleField.bounds.width > 0,
+          titleNaturalWidth > titleField.bounds.width + 0.5
+    else {
+      clearTitleTooltip()
+      return
+    }
+    guard installedTooltipTitle != title else { return }
+
+    clearTitleTooltip()
+    installedTooltipTitle = title
+    titleField.setInlineTooltip(verbatim: title, placement: .right)
+  }
+
+  private func clearTitleTooltip() {
+    guard installedTooltipTitle != nil else { return }
+    titleField.removeInlineTooltip()
+    installedTooltipTitle = nil
   }
 }
 
