@@ -285,15 +285,15 @@ final class ReactionChipButton: NSButton {
     }
     if neutralStyle {
       let base = Theme.accentColor
-      return base.withAlphaComponent(weReacted ? 0.22 : 0.12)
+      return base.withAlphaComponent(weReacted ? 1.0 : 0.12)
     }
     if forceIncomingStyle {
       let base = Theme.accentColor
-      return weReacted ? base.withAlphaComponent(0.9) : base.withAlphaComponent(0.2)
+      return base.withAlphaComponent(weReacted ? 1.0 : 0.2)
     }
     let base: NSColor = isOutgoing ? .white : Theme.accentColor
 
-    return weReacted ? base.withAlphaComponent(0.9) : base.withAlphaComponent(0.2)
+    return base.withAlphaComponent(weReacted ? 1.0 : 0.2)
   }
 
   private var foregroundColor: NSColor {
@@ -301,7 +301,7 @@ final class ReactionChipButton: NSButton {
       return override
     }
     if neutralStyle {
-      return weReacted ? .labelColor : Theme.accentColor
+      return weReacted ? .white : Theme.accentColor
     }
     if forceIncomingStyle {
       return weReacted ? .white : Theme.accentColor

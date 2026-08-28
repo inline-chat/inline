@@ -2369,9 +2369,11 @@ class UIMessageView: UIView {
     }
 
     messageLabel.attributedText = attributedMessageText()
+    updateReactionBackgroundOverridesForCurrentMessage()
   }
 
   func updateReactionBackgroundOverridesForCurrentMessage() {
+    guard !fullMessage.reactions.isEmpty else { return }
     let overrides = shouldUseTransparentOutgoingReactions ? transparentOutgoingReactionOverrides : nil
     reactionsFlowView.reactionBackgroundPrimaryOverride = overrides?.primary
     reactionsFlowView.reactionBackgroundSecondaryOverride = overrides?.secondary

@@ -200,11 +200,6 @@ final class UIMessageView2: UIMessageView {
     invalidateMeasuredContent()
   }
 
-  override func setupAppearance() {
-    super.setupAppearance()
-    updateReactionBackgroundOverridesForCurrentMessage()
-  }
-
   override func attributedMessageText() -> NSAttributedString? {
     guard let text = fullMessage.displayText else { return nil }
     let entities = fullMessage.translationEntities ?? message.entities

@@ -181,9 +181,9 @@ struct SharedThemeConfig: ThemeConfig {
   var failedBubbleBackground: UIColor { .systemRed }
   var primaryTextColor: UIColor? { dynamicColor(\.incomingText) }
   var secondaryTextColor: UIColor? { dynamicColor(\.incomingSecondaryText) }
-  var reactionOutgoingPrimary: UIColor? { UIColor.white.withAlphaComponent(0.2) }
+  var reactionOutgoingPrimary: UIColor? { .white }
   var reactionOutgoingSecoundry: UIColor? { UIColor.white.withAlphaComponent(0.12) }
-  var reactionIncomingPrimary: UIColor? { accent.withAlphaComponent(0.18) }
+  var reactionIncomingPrimary: UIColor? { accent }
   var reactionIncomingSecoundry: UIColor? { incomingBubbleBackground }
   var documentIconBackground: UIColor? { accent.withAlphaComponent(0.16) }
   var listRowBackground: UIColor? { nil }
