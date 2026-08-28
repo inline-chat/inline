@@ -2530,6 +2530,20 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
             action: removeFromFolder
           ))
         }
+      } else {
+        menu.addItem(.separator())
+        let newFolderItem = NSMenuItem(
+          title: "New Folder with Chat",
+          action: nil,
+          keyEquivalent: ""
+        )
+        newFolderItem.subtitle = "Available from Home"
+        newFolderItem.image = NSImage(
+          systemSymbolName: "folder.badge.plus",
+          accessibilityDescription: nil
+        )
+        newFolderItem.isEnabled = false
+        menu.addItem(newFolderItem)
       }
     }
     return menu

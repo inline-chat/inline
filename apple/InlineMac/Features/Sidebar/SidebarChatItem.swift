@@ -413,6 +413,14 @@ struct SidebarChatItemView: Equatable, View {
               removeFromFolder()
             }
           }
+        } else {
+          Divider()
+
+          Button {} label: {
+            Label("New Folder with Chat", systemImage: "folder.badge.plus")
+            Text("Available from Home")
+          }
+          .disabled(true)
         }
 
         // Note(mo): Having archive is confusing

@@ -1,3 +1,4 @@
+import Foundation
 import InlineMacUI
 import SwiftUI
 
@@ -116,6 +117,13 @@ struct SidebarFooterView: View {
           Button(action: onOpenStatus) {
             Label("Status", systemImage: "antenna.radiowaves.left.and.right")
           }
+
+          if let versionSummary = SidebarHelpVersionSummary.current {
+            Divider()
+
+            Button(versionSummary, action: {})
+              .disabled(true)
+          }
         }
       }
 
@@ -153,11 +161,13 @@ struct SidebarFooterView: View {
             Label("Create Space", systemImage: "square.grid.2x2")
           }
 
-          if let onNewFolder {
-            Button(action: onNewFolder) {
-              Label("New Folder", systemImage: "folder.badge.plus")
+          Button(action: { onNewFolder?() }, label: {
+            Label("New Folder", systemImage: "folder.badge.plus")
+            if onNewFolder == nil {
+              Text("Available from Home")
             }
-          }
+          })
+          .disabled(onNewFolder == nil)
 
           Button(action: onNewThread) {
             Label("New Thread", systemImage: "square.and.pencil")
@@ -178,6 +188,47 @@ struct SidebarFooterView: View {
   private func slot<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
     content()
       .frame(maxWidth: .infinity, alignment: .center)
+  }
+}
+
+private enum SidebarHelpVersionSummary {
+  private static let version = bundleValue(for: "CFBundleShortVersionString")
+  private static let buildNumber = bundleValue(for: "CFBundleVersion")
+  private static let buildDate = Bundle.main.executableURL.flatMap { executableURL in
+    try? executableURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+  }
+
+  static var current: String? {
+    guard let version, let buildNumber, let buildDate else { return nil }
+
+    return [
+      "Version \(version)",
+      "Build \(buildNumber)",
+      ageDescription(since: buildDate, now: .now),
+    ].joined(separator: " • ")
+  }
+
+  private static func bundleValue(for key: String) -> String? {
+    guard
+      let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+      !value.isEmpty
+    else { return nil }
+
+    return value
+  }
+
+  private static func ageDescription(since date: Date, now: Date) -> String {
+    let totalHours = max(0, Int(now.timeIntervalSince(date) / 3_600))
+    let days = totalHours / 24
+    let hours = totalHours % 24
+
+    if days == 0 {
+      return "\(hours) \(hours == 1 ? "hour" : "hours") ago"
+    }
+
+    let dayUnit = days == 1 ? "day" : "days"
+    let hourUnit = hours == 1 ? "hour" : "hours"
+    return "\(days) \(dayUnit), \(hours) \(hourUnit) ago"
   }
 }
 
