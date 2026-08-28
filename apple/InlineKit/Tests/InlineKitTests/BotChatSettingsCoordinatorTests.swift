@@ -341,6 +341,116 @@ struct BotChatSettingsCoordinatorTests {
     #expect(reopened.selectedState.surfaceStatus == nil)
   }
 
+  @Test("keeps a cached document when revalidation is unreachable")
+  func cachedDocumentSurvivesFailedRevalidation() async throws {
+    let cache = BotChatSettingsDocumentCache()
+    let storedAt = Date()
+    cache.store(
+      try settingsDocument(revision: "cached"),
+      accountID: 900,
+      peer: .thread(id: 77),
+      botID: 20,
+      updatedAt: storedAt
+    )
+    let request = SettingsRequestGate()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in await request.wait() },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "mutation") },
+      retryDelays: [],
+      transientMutationRetryDelay: .milliseconds(0),
+      documentCache: cache,
+      accountID: 900
+    )
+
+    await coordinator.warmUp()
+    await waitUntilAsync { await request.count == 1 }
+    await request.resolve(with: .with {
+      $0.result = .problem(.with {
+        $0.code = .unreachable
+        $0.message = "Bot unreachable"
+      })
+    })
+    await waitUntil { coordinator.selectedState.problem == .unreachable }
+
+    #expect(coordinator.selectedState.document?.revision == "cached")
+    #expect(coordinator.selectedState.surfaceStatus == .problem(.unreachable))
+  }
+
+  @Test("hydrates a cached empty document as authoritative no-settings state")
+  func cachedEmptyDocumentHydrates() async throws {
+    let cache = BotChatSettingsDocumentCache()
+    let document = try emptySettingsDocument(revision: "empty")
+    cache.store(document, accountID: 900, peer: .thread(id: 77), botID: 20)
+    let request = SettingsRequestGate()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in await request.wait() },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "mutation") },
+      retryDelays: [],
+      transientMutationRetryDelay: .milliseconds(0),
+      documentCache: cache,
+      accountID: 900
+    )
+
+    await coordinator.warmUp()
+    await waitUntilAsync { await request.count == 1 }
+
+    #expect(coordinator.selectedState.document == document)
+    #expect(coordinator.selectedState.surfaceStatus == .refreshing)
+
+    await request.resolve(with: .with {
+      $0.result = .document(.with { $0.revision = "fresh-empty" })
+    })
+    await waitUntil { coordinator.selectedState.document?.revision == "fresh-empty" }
+
+    #expect(coordinator.selectedState.document?.sections.isEmpty == true)
+    #expect(coordinator.selectedState.surfaceStatus == nil)
+  }
+
+  @Test("rejects older cache responses that arrive after a newer response")
+  func cacheRejectsOutOfOrderResponses() throws {
+    let cache = BotChatSettingsDocumentCache()
+    let peer = Peer.thread(id: 77)
+    let older = cache.beginWrite(accountID: 900, peer: peer, botID: 20)
+    let newer = cache.beginWrite(accountID: 900, peer: peer, botID: 20)
+    cache.store(
+      try settingsDocument(revision: "newer"),
+      accountID: 900,
+      peer: peer,
+      botID: 20,
+      writeToken: newer
+    )
+    cache.store(
+      try settingsDocument(revision: "older"),
+      accountID: 900,
+      peer: peer,
+      botID: 20,
+      writeToken: older
+    )
+
+    #expect(cache.snapshot(accountID: 900, peer: peer, botID: 20)?.document.revision == "newer")
+  }
+
+  @Test("cache removal invalidates active writes")
+  func cacheRemovalInvalidatesActiveWrite() throws {
+    let cache = BotChatSettingsDocumentCache()
+    let peer = Peer.thread(id: 77)
+    let write = cache.beginWrite(accountID: 900, peer: peer, botID: 20)
+    cache.remove(accountID: 900, peer: peer, botID: 20)
+    cache.store(
+      try settingsDocument(revision: "removed"),
+      accountID: 900,
+      peer: peer,
+      botID: 20,
+      writeToken: write
+    )
+
+    #expect(cache.snapshot(accountID: 900, peer: peer, botID: 20) == nil)
+  }
+
   @Test("isolates cached documents by account, peer, and bot")
   func cacheScopeIsolation() throws {
     let cache = BotChatSettingsDocumentCache()
@@ -673,6 +783,10 @@ private func settingsDocument(revision: String) throws -> BotChatSettingsModel.D
     throw SettingsDocumentFixtureError.missingDocument
   }
   return try BotChatSettingsModel.Document(protocolDocument: document)
+}
+
+private func emptySettingsDocument(revision: String) throws -> BotChatSettingsModel.Document {
+  try BotChatSettingsModel.Document(protocolDocument: .with { $0.revision = revision })
 }
 
 private enum SettingsDocumentFixtureError: Error {

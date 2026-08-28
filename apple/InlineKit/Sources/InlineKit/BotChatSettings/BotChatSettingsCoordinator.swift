@@ -78,6 +78,10 @@ final class BotChatSettingsDocumentCache {
     let updatedAt: Date
   }
 
+  struct WriteToken: Hashable, Sendable {
+    fileprivate let value: UInt64
+  }
+
   private struct Key: Hashable {
     let accountID: Int64
     let peer: Peer
@@ -90,9 +94,16 @@ final class BotChatSettingsDocumentCache {
     var lastAccessedAt: Date
   }
 
+  private struct WriteState {
+    var nextValue: UInt64 = 0
+    var latestAcceptedValue: UInt64 = 0
+    var activeValues: Set<UInt64> = []
+  }
+
   private let maximumEntryCount: Int
   private let retentionInterval: TimeInterval
   private var entries: [Key: Entry] = [:]
+  private var writeStates: [Key: WriteState] = [:]
 
   init(maximumEntryCount: Int = 64, retentionInterval: TimeInterval = 10 * 60) {
     self.maximumEntryCount = max(1, maximumEntryCount)
@@ -119,21 +130,73 @@ final class BotChatSettingsDocumentCache {
     accountID: Int64?,
     peer: Peer,
     botID: Int64,
-    updatedAt: Date = Date()
+    updatedAt: Date = Date(),
+    writeToken: WriteToken? = nil
   ) {
     guard let accountID else { return }
     pruneExpired(now: updatedAt)
-    entries[Key(accountID: accountID, peer: peer, botID: botID)] = Entry(
+    let key = Key(accountID: accountID, peer: peer, botID: botID)
+    var writeState = writeStates[key] ?? .init()
+    let acceptedValue: UInt64
+    if let writeToken {
+      guard writeState.activeValues.remove(writeToken.value) != nil else { return }
+      guard writeToken.value >= writeState.latestAcceptedValue else {
+        finishWriteState(writeState, for: key)
+        return
+      }
+      acceptedValue = writeToken.value
+    } else {
+      writeState.nextValue &+= 1
+      acceptedValue = writeState.nextValue
+    }
+    writeState.latestAcceptedValue = acceptedValue
+    entries[key] = Entry(
       document: document,
       updatedAt: updatedAt,
       lastAccessedAt: updatedAt
     )
+    finishWriteState(writeState, for: key)
     trimToLimit()
+  }
+
+  func beginWrite(accountID: Int64?, peer: Peer, botID: Int64) -> WriteToken? {
+    guard let accountID else { return nil }
+    let key = Key(accountID: accountID, peer: peer, botID: botID)
+    var writeState = writeStates[key] ?? .init()
+    writeState.nextValue &+= 1
+    writeState.activeValues.insert(writeState.nextValue)
+    writeStates[key] = writeState
+    return WriteToken(value: writeState.nextValue)
+  }
+
+  func finishWrite(
+    _ writeToken: WriteToken?,
+    accountID: Int64?,
+    peer: Peer,
+    botID: Int64
+  ) {
+    guard let accountID, let writeToken else { return }
+    let key = Key(accountID: accountID, peer: peer, botID: botID)
+    guard var writeState = writeStates[key] else { return }
+    writeState.activeValues.remove(writeToken.value)
+    finishWriteState(writeState, for: key)
   }
 
   func remove(accountID: Int64?, peer: Peer, botID: Int64) {
     guard let accountID else { return }
-    entries[Key(accountID: accountID, peer: peer, botID: botID)] = nil
+    let key = Key(accountID: accountID, peer: peer, botID: botID)
+    entries[key] = nil
+    guard var writeState = writeStates[key], !writeState.activeValues.isEmpty else {
+      writeStates[key] = nil
+      return
+    }
+    writeState.nextValue &+= 1
+    writeState.latestAcceptedValue = writeState.nextValue
+    writeStates[key] = writeState
+  }
+
+  private func finishWriteState(_ writeState: WriteState, for key: Key) {
+    writeStates[key] = writeState.activeValues.isEmpty ? nil : writeState
   }
 
   private func pruneExpired(now: Date) {
@@ -382,11 +445,22 @@ public final class BotChatSettingsCoordinator {
     let peer = peer
     let invoker = itemInvoker
     let startedAt = Date()
+    let cache = documentCache
+    let cacheAccountID = accountID
+    let cacheWriteToken = cache?.beginWrite(accountID: cacheAccountID, peer: peer, botID: mutation.botID)
     log.debug(
       "BOT_SETTINGS_TRACE trace=\(mutation.traceID) phase=mutation_start peer=\(peerTrace) " +
         "bot=\(mutation.botID) item=\(mutation.itemID) retry=\(mutation.staleRetryCount)"
     )
     mutationTask = Task { [weak self] in
+      defer {
+        cache?.finishWrite(
+          cacheWriteToken,
+          accountID: cacheAccountID,
+          peer: peer,
+          botID: mutation.botID
+        )
+      }
       guard let self else { return }
       do {
         let response = try await invoker(
@@ -404,7 +478,7 @@ public final class BotChatSettingsCoordinator {
         )
         self.mutationTask = nil
         self.activeMutation = nil
-        self.applyMutationResponse(response, mutation: mutation)
+        self.applyMutationResponse(response, mutation: mutation, cacheWriteToken: cacheWriteToken)
       } catch is CancellationError {
       } catch {
         guard currentGeneration == self.generation else { return }
@@ -527,6 +601,9 @@ public final class BotChatSettingsCoordinator {
       self.activeMutation = nil
     }
     for removedID in removedIDs {
+      if requestBotID == removedID {
+        cancelActiveRequest()
+      }
       stateByBotID[removedID] = nil
       confirmedDocumentByBotID[removedID] = nil
       documentCache?.remove(accountID: accountID, peer: peer, botID: removedID)
@@ -568,7 +645,7 @@ public final class BotChatSettingsCoordinator {
     if state.document == nil,
        let cached = documentCache?.snapshot(accountID: accountID, peer: peer, botID: botID) {
       confirmedDocumentByBotID[botID] = cached.document
-      state.document = cached.document.sections.isEmpty ? nil : cached.document
+      state.document = cached.document
       state.lastUpdatedAt = cached.updatedAt
       didRestoreCachedDocument = true
     }
@@ -580,6 +657,9 @@ public final class BotChatSettingsCoordinator {
     let peer = peer
     let requester = settingsRequester
     let traceID = makeTraceID()
+    let cache = documentCache
+    let cacheAccountID = accountID
+    let cacheWriteToken = cache?.beginWrite(accountID: cacheAccountID, peer: peer, botID: botID)
     requestBotID = botID
     requestTraceID = traceID
     let startedAt = Date()
@@ -588,6 +668,14 @@ public final class BotChatSettingsCoordinator {
         "has_snapshot=\(state.document == nil ? 0 : 1) cache_hit=\(didRestoreCachedDocument ? 1 : 0)"
     )
     requestTask = Task { [weak self] in
+      defer {
+        cache?.finishWrite(
+          cacheWriteToken,
+          accountID: cacheAccountID,
+          peer: peer,
+          botID: botID
+        )
+      }
       guard let self else { return }
       do {
         let response = try await requester(peer, botID)
@@ -602,7 +690,7 @@ public final class BotChatSettingsCoordinator {
         self.requestTask = nil
         self.requestBotID = nil
         self.requestTraceID = nil
-        self.applyRequestResponse(response, botID: botID)
+        self.applyRequestResponse(response, botID: botID, cacheWriteToken: cacheWriteToken)
       } catch is CancellationError {
         self.finishCancelledRequest(botID: botID, traceID: traceID)
       } catch {
@@ -624,21 +712,25 @@ public final class BotChatSettingsCoordinator {
     }
   }
 
-  private func applyRequestResponse(_ response: InlineProtocol.BotChatSettingsResponse, botID: Int64) {
+  private func applyRequestResponse(
+    _ response: InlineProtocol.BotChatSettingsResponse,
+    botID: Int64,
+    cacheWriteToken: BotChatSettingsDocumentCache.WriteToken?
+  ) {
     var state = stateByBotID[botID] ?? .init()
     state.isRefreshing = false
 
     switch response.result {
     case let .document(protocolDocument):
       if let document = parseDocument(protocolDocument) {
-        state.lastUpdatedAt = acceptConfirmedDocument(document, botID: botID)
+        state.lastUpdatedAt = acceptConfirmedDocument(document, botID: botID, cacheWriteToken: cacheWriteToken)
         state.problem = nil
       } else {
         state.problem = .failed("Bot returned invalid settings")
       }
     case let .problem(problem):
       if problem.hasCurrentDocument, let document = parseDocument(problem.currentDocument) {
-        state.lastUpdatedAt = acceptConfirmedDocument(document, botID: botID)
+        state.lastUpdatedAt = acceptConfirmedDocument(document, botID: botID, cacheWriteToken: cacheWriteToken)
       }
       switch problem.code {
       case .unreachable:
@@ -658,7 +750,8 @@ public final class BotChatSettingsCoordinator {
 
   private func applyMutationResponse(
     _ response: InlineProtocol.BotChatSettingsResponse,
-    mutation: BotChatSettingsQueuedMutation
+    mutation: BotChatSettingsQueuedMutation,
+    cacheWriteToken: BotChatSettingsDocumentCache.WriteToken?
   ) {
     var state = stateByBotID[mutation.botID] ?? .init()
     var responseProblem: BotChatSettingsProblem?
@@ -666,7 +759,11 @@ public final class BotChatSettingsCoordinator {
     switch response.result {
     case let .document(protocolDocument):
       if let document = parseDocument(protocolDocument) {
-        state.lastUpdatedAt = acceptConfirmedDocument(document, botID: mutation.botID)
+        state.lastUpdatedAt = acceptConfirmedDocument(
+          document,
+          botID: mutation.botID,
+          cacheWriteToken: cacheWriteToken
+        )
         state.problem = nil
       } else {
         responseProblem = .failed("Bot returned invalid settings")
@@ -674,7 +771,11 @@ public final class BotChatSettingsCoordinator {
     case let .problem(problem):
       var hasCurrentDocument = false
       if problem.hasCurrentDocument, let document = parseDocument(problem.currentDocument) {
-        state.lastUpdatedAt = acceptConfirmedDocument(document, botID: mutation.botID)
+        state.lastUpdatedAt = acceptConfirmedDocument(
+          document,
+          botID: mutation.botID,
+          cacheWriteToken: cacheWriteToken
+        )
         hasCurrentDocument = true
       }
       if problem.code == .stale, hasCurrentDocument, mutation.staleRetryCount == 0 {
@@ -712,7 +813,11 @@ public final class BotChatSettingsCoordinator {
   }
 
   @discardableResult
-  private func acceptConfirmedDocument(_ document: BotChatSettingsModel.Document, botID: Int64) -> Date {
+  private func acceptConfirmedDocument(
+    _ document: BotChatSettingsModel.Document,
+    botID: Int64,
+    cacheWriteToken: BotChatSettingsDocumentCache.WriteToken?
+  ) -> Date {
     let updatedAt = Date()
     confirmedDocumentByBotID[botID] = document
     documentCache?.store(
@@ -720,7 +825,8 @@ public final class BotChatSettingsCoordinator {
       accountID: accountID,
       peer: peer,
       botID: botID,
-      updatedAt: updatedAt
+      updatedAt: updatedAt,
+      writeToken: cacheWriteToken
     )
     return updatedAt
   }
@@ -746,7 +852,7 @@ public final class BotChatSettingsCoordinator {
       ) else { continue }
       document = nextDocument
     }
-    state.document = document.flatMap { $0.sections.isEmpty ? nil : $0 }
+    state.document = document
     state.phase = state.document == nil ? .unavailable : .loaded
     state.pendingItemIDs = Set(botMutations.map(\.itemID))
     state.pendingItemID = botMutations.first?.itemID
