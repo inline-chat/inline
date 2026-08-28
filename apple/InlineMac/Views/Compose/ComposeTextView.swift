@@ -50,6 +50,7 @@ class ComposeNSTextView: NSTextView {
 
   override func keyDown(with event: NSEvent) {
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    let actionModifiers = modifiers.intersection([.command, .control, .option, .shift])
     if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "b" {
       toggleBold(self)
       return
@@ -65,7 +66,7 @@ class ComposeNSTextView: NSTextView {
 
     // Handle return key
     if event.keyCode == 36 {
-      if modifiers == [.option] {
+      if actionModifiers == [.option] {
         if let delegate = delegate as? ComposeTextViewDelegate,
            delegate.textViewDidPressOptionReturn(self) {
           return
