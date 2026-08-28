@@ -130,7 +130,8 @@ export async function updateDialogOrder(input: Input, context: FunctionContext):
           const lastChildOrder = childOrders[childOrders.length - 1]
           updateSet.folderId = folder.id
           updateSet.order = input.order ?? FractionalIndex.between(lastChildOrder ?? folder.order, right)
-          updateSet.pinned = false
+          // Folder membership never creates a child pin; a pinned folder only preserves one.
+          updateSet.pinned = folder.pinnedOrder != null && existingDialog.pinned === true
           Object.assign(updateSet, dialogOpenFieldsForOpen(existingDialog, updateSet.order))
           updateSet.archived = false
           updateSet.chatListHidden = null

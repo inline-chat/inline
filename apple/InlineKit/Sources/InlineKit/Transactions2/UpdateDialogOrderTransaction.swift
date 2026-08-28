@@ -165,7 +165,7 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
     return [.chatCreated(chatId: chatId)]
   }
 
-  private func applyLocalOrder(_ dialog: inout Dialog, db: Database) throws {
+  func applyLocalOrder(_ dialog: inout Dialog, db: Database) throws {
     if let order = context.order {
       dialog.order = order
     }
@@ -174,19 +174,25 @@ public struct UpdateDialogOrderTransaction: Transaction2 {
       dialog.pinnedOrder = pinnedOrder
     }
 
+    var movedIntoFolder = false
     if let destination = context.destination {
       switch destination {
       case .root:
         dialog.folderId = nil
       case let .folder(folderId):
+        // Mirror the server: folder membership never creates a child pin; it can only preserve one.
+        let folderIsPinned = try DialogFolder.fetchOne(db, key: folderId)?.isPinned == true
+        let preservesExistingPin = dialog.pinned == true && folderIsPinned
         dialog.folderId = folderId
-        dialog.pinned = false
+        dialog.pinned = preservesExistingPin
+        movedIntoFolder = true
       }
       dialog.open = true
       dialog.archived = false
       dialog.chatListHidden = nil
     }
 
+    guard movedIntoFolder == false else { return }
     guard let pinned = context.pinned else { return }
 
     dialog.pinned = pinned

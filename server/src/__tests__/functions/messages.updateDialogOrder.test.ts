@@ -259,6 +259,64 @@ describe("messages.updateDialogOrder", () => {
     expect(stored?.folderId).toBeNull()
   })
 
+  test("preserves an existing pin only when entering a pinned folder", async () => {
+    const userA = await testUtils.createUser("dialog-order-pinned-folder-a@example.com")
+    const userB = await testUtils.createUser("dialog-order-pinned-folder-b@example.com")
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: false,
+    })
+    const [folder] = await db
+      .insert(dialogFolders)
+      .values({ userId: userA.id, title: null, order: "a", pinnedOrder: "f" })
+      .returning()
+    if (!folder) throw new Error("Failed to create pinned folder")
+
+    const whereDialog = and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, userA.id))
+    await db.update(dialogs).set({ pinned: true, pinnedOrder: "p" }).where(whereDialog)
+
+    const preserved = await updateDialogOrder(
+      {
+        peerId: peerUser(userB.id),
+        pinned: false,
+        destination: { destination: { oneofKind: "folderId", folderId: BigInt(folder.id) } },
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+    expect(preserved.dialog.folderId).toBe(BigInt(folder.id))
+    expect(preserved.dialog.pinned).toBe(true)
+
+    await db
+      .update(dialogs)
+      .set({ folderId: null, pinned: false, pinnedOrder: null })
+      .where(whereDialog)
+    const notPromoted = await updateDialogOrder(
+      {
+        peerId: peerUser(userB.id),
+        pinned: true,
+        destination: { destination: { oneofKind: "folderId", folderId: BigInt(folder.id) } },
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+    expect(notPromoted.dialog.pinned).toBe(false)
+
+    await db.update(dialogFolders).set({ pinnedOrder: null }).where(eq(dialogFolders.id, folder.id))
+    await db
+      .update(dialogs)
+      .set({ folderId: null, pinned: true, pinnedOrder: "p" })
+      .where(whereDialog)
+    const unpinnedForNormalFolder = await updateDialogOrder(
+      {
+        peerId: peerUser(userB.id),
+        destination: { destination: { oneofKind: "folderId", folderId: BigInt(folder.id) } },
+      },
+      testUtils.functionContext({ userId: userA.id, sessionId: 11 }),
+    )
+    expect(unpinnedForNormalFolder.dialog.pinned).toBe(false)
+  })
+
   test("moves accessible threads into a folder with serialized derived orders", async () => {
     const owner = await testUtils.createUser("dialog-order-thread-folder-owner@example.com")
     const threads = []

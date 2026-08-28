@@ -1756,11 +1756,16 @@ struct SidebarView: View {
     destination: DialogOrderDestination
   ) {
     guard let dependencies else { return }
+    let pinned: Bool?
+    switch destination {
+    case .root: pinned = false
+    case .folder: pinned = nil
+    }
     Task(priority: .userInitiated) {
       do {
         _ = try await dependencies.realtimeV2.send(.updateDialogOrder(
           peerId: item.peerId,
-          pinned: false,
+          pinned: pinned,
           destination: destination
         ))
       } catch {

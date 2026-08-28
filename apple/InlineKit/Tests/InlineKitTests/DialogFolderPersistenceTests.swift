@@ -178,6 +178,48 @@ struct DialogFolderPersistenceTests {
     #expect(input.destination.folderID == 7)
   }
 
+  @Test("folder move preserves only an existing pin in a pinned folder")
+  func folderMovePinPreservation() throws {
+    let queue = try makeDatabase()
+    try queue.write { db in
+      var folder = DialogFolder(id: 7, title: nil, order: "a", pinnedOrder: "f")
+      try folder.insert(db)
+
+      var pinnedDialog = Dialog(optimisticForChat: makeLocalChat(id: 44))
+      pinnedDialog.pinned = true
+      pinnedDialog.pinnedOrder = "p"
+      let preserve = UpdateDialogOrderTransaction(
+        peerId: .thread(id: 44),
+        pinned: false,
+        destination: .folder(7)
+      )
+      try preserve.applyLocalOrder(&pinnedDialog, db: db)
+      #expect(pinnedDialog.folderId == 7)
+      #expect(pinnedDialog.pinned == true)
+
+      var unpinnedDialog = Dialog(optimisticForChat: makeLocalChat(id: 45))
+      unpinnedDialog.pinned = false
+      let doNotPromote = UpdateDialogOrderTransaction(
+        peerId: .thread(id: 45),
+        pinned: true,
+        destination: .folder(7)
+      )
+      try doNotPromote.applyLocalOrder(&unpinnedDialog, db: db)
+      #expect(unpinnedDialog.pinned == false)
+
+      folder.pinnedOrder = nil
+      try folder.update(db)
+      var normalFolderDialog = Dialog(optimisticForChat: makeLocalChat(id: 46))
+      normalFolderDialog.pinned = true
+      let unpin = UpdateDialogOrderTransaction(
+        peerId: .thread(id: 46),
+        destination: .folder(7)
+      )
+      try unpin.applyLocalOrder(&normalFolderDialog, db: db)
+      #expect(normalFolderDialog.pinned == false)
+    }
+  }
+
   private func makeDialog(
     chatID: Int64,
     folderID: Int64?,
@@ -199,6 +241,10 @@ struct DialogFolderPersistenceTests {
     chat.peerID = .with { $0.chat.chatID = id }
     chat.seq = 1
     return chat
+  }
+
+  private func makeLocalChat(id: Int64) -> InlineKit.Chat {
+    InlineKit.Chat(id: id, date: Date(), type: .thread, title: "Test", spaceId: nil)
   }
 }
 
