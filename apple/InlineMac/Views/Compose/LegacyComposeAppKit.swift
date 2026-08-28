@@ -2088,7 +2088,10 @@ class LegacyComposeAppKit: NSView {
               characters.allSatisfy({ char in
                 // Check if character is printable (not a control character)
                 if let scalar = char.unicodeScalars.first {
-                  return scalar.properties.isAlphabetic || scalar.properties.isMath
+                  return scalar.properties.isAlphabetic ||
+                    scalar.properties.isMath ||
+                    char == "@" ||
+                    char == "/"
                 }
                 return false
               })
