@@ -220,17 +220,6 @@ private struct AgentSetupRemoteScreen: View {
           )
         }
         .buttonStyle(.plain)
-
-        DisclosureGroup {
-          Text(prompt)
-            .font(.caption.monospaced())
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-            .padding(.vertical, 8)
-        } label: {
-          Label("Setup Prompt", systemImage: "text.quote")
-            .font(.body.weight(.medium))
-        }
       }
       .listStyle(.inset)
       .scrollContentBackground(.hidden)
@@ -283,10 +272,10 @@ private struct AgentSetupHarnessRow: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: target.family == .gateway ? "network" : "terminal")
-        .frame(width: 24)
-        .foregroundStyle(.secondary)
-        .accessibilityHidden(true)
+      AgentSetupHarnessIcon(
+        targetID: target.id,
+        fallbackSystemImage: target.family == .gateway ? "network" : "terminal"
+      )
       VStack(alignment: .leading, spacing: 2) {
         Text(target.displayName)
         Text(target.family == .gateway ? "Gateway integration" : "Local coding harness")
@@ -296,6 +285,45 @@ private struct AgentSetupHarnessRow: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.vertical, 5)
+  }
+}
+
+private struct AgentSetupHarnessIcon: View {
+  let targetID: String
+  let fallbackSystemImage: String
+
+  var body: some View {
+    ZStack {
+      Color(red: 0.969, green: 0.969, blue: 0.957)
+      if let assetName {
+        Image(assetName)
+          .resizable()
+          .scaledToFit()
+      } else {
+        Image(systemName: fallbackSystemImage)
+          .imageScale(.medium)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .frame(width: 40, height: 40)
+    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .strokeBorder(.black.opacity(0.08), lineWidth: 0.5)
+    }
+    .accessibilityHidden(true)
+  }
+
+  private var assetName: String? {
+    switch targetID {
+    case "openclaw": "AgentHarnessOpenClaw"
+    case "hermes": "AgentHarnessHermes"
+    case "codex": "AgentHarnessCodex"
+    case "opencode": "AgentHarnessOpenCode"
+    case "claude": "AgentHarnessClaude"
+    case "amp": "AgentHarnessAmp"
+    default: nil
+    }
   }
 }
 
