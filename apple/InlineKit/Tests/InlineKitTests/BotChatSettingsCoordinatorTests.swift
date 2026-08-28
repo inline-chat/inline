@@ -298,6 +298,43 @@ struct BotChatSettingsCoordinatorTests {
     #expect(coordinator.selectedState.document?.revision == "one")
     #expect(replyThreadsValue(in: coordinator.selectedState.document) == "auto")
   }
+
+  @Test("a cancelled request cannot clear a newer bot request")
+  func cancelledRequestDoesNotClobberNewerRequest() async {
+    let requests = SwitchingRequestGate()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, botID in try await requests.request(botID: botID) },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "mutation") }
+    )
+
+    await coordinator.warmUp()
+    await waitUntil { coordinator.selectedState.document?.revision == "initial-20" }
+    coordinator.selectBot(10)
+    await waitUntil { coordinator.selectedState.document?.revision == "initial-10" }
+
+    coordinator.selectBot(20)
+    coordinator.refreshSelected()
+    await waitUntilAsync { await requests.count(for: 20) == 2 }
+    #expect(coordinator.selectedState.isRefreshing)
+
+    coordinator.selectBot(10)
+    coordinator.refreshSelected()
+    await waitUntilAsync { await requests.count(for: 10) == 2 }
+    await requests.failNext(botID: 20)
+    try? await Task.sleep(for: .milliseconds(5))
+
+    coordinator.refreshSelected()
+    try? await Task.sleep(for: .milliseconds(5))
+    #expect(await requests.count(for: 10) == 2)
+    #expect(coordinator.selectedState.isRefreshing)
+    #expect(coordinator.selectedState.problem == nil)
+
+    await requests.resolveNext(botID: 10, with: documentResponse(revision: "fresh-10"))
+    await waitUntil { coordinator.selectedState.document?.revision == "fresh-10" }
+    #expect(coordinator.selectedState.isRefreshing == false)
+  }
 }
 
 private actor InvocationCounter {
@@ -400,6 +437,37 @@ private actor SettingsResponseSequence {
 
   func next() -> InlineProtocol.BotChatSettingsResponse {
     responses.isEmpty ? .init() : responses.removeFirst()
+  }
+}
+
+private actor SwitchingRequestGate {
+  enum Failure: Error { case staleRequestFailed }
+
+  private var counts: [Int64: Int] = [:]
+  private var continuations: [Int64: [CheckedContinuation<InlineProtocol.BotChatSettingsResponse, any Error>]] = [:]
+
+  func count(for botID: Int64) -> Int {
+    counts[botID, default: 0]
+  }
+
+  func request(botID: Int64) async throws -> InlineProtocol.BotChatSettingsResponse {
+    counts[botID, default: 0] += 1
+    if counts[botID] == 1 {
+      return documentResponse(revision: "initial-\(botID)")
+    }
+    return try await withCheckedThrowingContinuation { continuation in
+      continuations[botID, default: []].append(continuation)
+    }
+  }
+
+  func failNext(botID: Int64) {
+    guard continuations[botID]?.isEmpty == false else { return }
+    continuations[botID]?.removeFirst().resume(throwing: Failure.staleRequestFailed)
+  }
+
+  func resolveNext(botID: Int64, with response: InlineProtocol.BotChatSettingsResponse) {
+    guard continuations[botID]?.isEmpty == false else { return }
+    continuations[botID]?.removeFirst().resume(returning: response)
   }
 }
 

@@ -27,26 +27,38 @@ export async function invokeBotChatSettingsItem(
     botUserId: target.botUserId,
     actorUserId: context.currentUserId,
     chatId: target.chatId,
+    operation: "mutation",
   })
-  const recipientCount = await sendMessageToRealtimeBot(target.botUserId, {
-    oneofKind: "bot",
-    bot: {
-      event: {
-        oneofKind: "chatSettingsItemInvoked",
-        chatSettingsItemInvoked: {
-          requestId: pending.requestId,
-          chatId: BigInt(target.chatId),
-          actorUserId: BigInt(context.currentUserId),
-          version: input.version,
-          itemId,
-          value,
-          documentRevision,
+  let recipientCount: number
+  try {
+    recipientCount = await sendMessageToRealtimeBot(target.botUserId, {
+      oneofKind: "bot",
+      bot: {
+        event: {
+          oneofKind: "chatSettingsItemInvoked",
+          chatSettingsItemInvoked: {
+            requestId: pending.requestId,
+            chatId: BigInt(target.chatId),
+            actorUserId: BigInt(context.currentUserId),
+            version: input.version,
+            itemId,
+            value,
+            documentRevision,
+          },
         },
       },
-    },
-  })
+    })
+  } catch (error) {
+    botChatSettingsBroker.resolveSystem(
+      pending.requestId,
+      unreachableBotChatSettingsResponse(),
+      "dispatch_failure",
+    )
+    throw error
+  }
+  botChatSettingsBroker.markDispatched(pending.requestId, recipientCount)
   if (recipientCount === 0) {
-    botChatSettingsBroker.resolveSystem(pending.requestId, unreachableBotChatSettingsResponse())
+    botChatSettingsBroker.resolveSystem(pending.requestId, unreachableBotChatSettingsResponse(), "no_recipient")
   }
   return { response: await pending.response }
 }

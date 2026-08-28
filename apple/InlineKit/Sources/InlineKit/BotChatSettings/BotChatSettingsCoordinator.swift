@@ -99,6 +99,7 @@ public final class BotChatSettingsCoordinator {
   @ObservationIgnored private var retryTask: Task<Void, Never>?
   @ObservationIgnored private var requestTask: Task<Void, Never>?
   @ObservationIgnored private var requestBotID: Int64?
+  @ObservationIgnored private var requestTraceID: Int?
   @ObservationIgnored private var mutationTask: Task<Void, Never>?
   @ObservationIgnored private var activeMutation: BotChatSettingsQueuedMutation?
   @ObservationIgnored private var mutationQueue: [BotChatSettingsQueuedMutation] = []
@@ -210,9 +211,7 @@ public final class BotChatSettingsCoordinator {
     else { return }
 
     if requestBotID == botID {
-      requestTask?.cancel()
-      requestTask = nil
-      requestBotID = nil
+      cancelActiveRequest()
     }
     state.document = optimisticDocument
     state.isRefreshing = false
@@ -315,6 +314,7 @@ public final class BotChatSettingsCoordinator {
           "BOT_SETTINGS_TRACE trace=\(mutation.traceID) phase=mutation_error " +
             "bot=\(mutation.botID) item=\(mutation.itemID) elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
         )
+        self.log.error("Bot settings mutation transport failed", error: error)
         self.mutationTask = nil
         self.activeMutation = nil
         self.finishQueuedMutation(
@@ -338,6 +338,7 @@ public final class BotChatSettingsCoordinator {
     retryTask = nil
     requestTask = nil
     requestBotID = nil
+    requestTraceID = nil
     mutationTask = nil
     activeMutation = nil
     mutationQueue = []
@@ -347,6 +348,7 @@ public final class BotChatSettingsCoordinator {
         stateByBotID[botID]?.document = confirmedDocument
       }
       stateByBotID[botID]?.isMutating = false
+      stateByBotID[botID]?.isRefreshing = false
       stateByBotID[botID]?.pendingItemID = nil
       stateByBotID[botID]?.pendingItemIDs = []
     }
@@ -435,8 +437,7 @@ public final class BotChatSettingsCoordinator {
   private func startRequest(botID: Int64) {
     guard bots.contains(where: { $0.id == botID }) else { return }
     guard requestTask == nil || requestBotID != botID else { return }
-    requestTask?.cancel()
-    requestBotID = botID
+    cancelActiveRequest()
     var state = stateByBotID[botID] ?? .init()
     state.phase = state.document == nil ? .loading : .loaded
     state.isRefreshing = state.document != nil
@@ -446,6 +447,8 @@ public final class BotChatSettingsCoordinator {
     let peer = peer
     let requester = settingsRequester
     let traceID = makeTraceID()
+    requestBotID = botID
+    requestTraceID = traceID
     let startedAt = Date()
     log.debug(
       "BOT_SETTINGS_TRACE trace=\(traceID) phase=request_start peer=\(peerTrace) bot=\(botID) " +
@@ -455,23 +458,33 @@ public final class BotChatSettingsCoordinator {
       guard let self else { return }
       do {
         let response = try await requester(peer, botID)
-        guard currentGeneration == self.generation, !Task.isCancelled else { return }
+        guard currentGeneration == self.generation,
+              !Task.isCancelled,
+              self.isActiveRequest(botID: botID, traceID: traceID)
+        else { return }
         self.log.debug(
           "BOT_SETTINGS_TRACE trace=\(traceID) phase=request_response bot=\(botID) " +
             "result=\(Self.traceResult(response)) elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
         )
         self.requestTask = nil
         self.requestBotID = nil
+        self.requestTraceID = nil
         self.applyRequestResponse(response, botID: botID)
       } catch is CancellationError {
+        self.finishCancelledRequest(botID: botID, traceID: traceID)
       } catch {
-        guard currentGeneration == self.generation else { return }
+        guard currentGeneration == self.generation,
+              !Task.isCancelled,
+              self.isActiveRequest(botID: botID, traceID: traceID)
+        else { return }
         self.log.debug(
           "BOT_SETTINGS_TRACE trace=\(traceID) phase=request_error bot=\(botID) " +
             "elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
         )
+        self.log.error("Bot settings request transport failed", error: error)
         self.finishRequest(
           botID: botID,
+          traceID: traceID,
           problem: .failed(Self.presentedErrorMessage(error, fallback: "Couldn’t load bot settings"))
         )
       }
@@ -498,11 +511,14 @@ public final class BotChatSettingsCoordinator {
       }
       switch problem.code {
       case .unreachable:
+        log.warning("Bot settings request returned unreachable")
         state.problem = .unreachable
       default:
+        log.warning("Bot settings request returned a problem")
         state.problem = .failed(problem.message.nilIfEmpty ?? "Bot settings request failed")
       }
     case nil:
+      log.warning("Bot settings request returned an invalid response")
       state.problem = .failed("Bot returned an invalid response")
     }
     stateByBotID[botID] = state
@@ -541,11 +557,14 @@ public final class BotChatSettingsCoordinator {
             "bot=\(mutation.botID) item=\(mutation.itemID) retry=\(retry.staleRetryCount)"
         )
       } else if problem.code == .unreachable {
+        log.warning("Bot settings mutation returned unreachable")
         responseProblem = .unreachable
       } else {
+        log.warning("Bot settings mutation returned a problem")
         responseProblem = .failed(problem.message.nilIfEmpty ?? "Couldn’t update bot settings")
       }
     case nil:
+      log.warning("Bot settings mutation returned an invalid response")
       responseProblem = .failed("Bot returned an invalid response")
     }
     stateByBotID[mutation.botID] = state
@@ -632,9 +651,40 @@ public final class BotChatSettingsCoordinator {
     }
   }
 
-  private func finishRequest(botID: Int64, problem: BotChatSettingsProblem) {
+  private func isActiveRequest(botID: Int64, traceID: Int) -> Bool {
+    requestBotID == botID && requestTraceID == traceID
+  }
+
+  private func cancelActiveRequest() {
+    let botID = requestBotID
+    requestTask?.cancel()
     requestTask = nil
     requestBotID = nil
+    requestTraceID = nil
+    guard let botID else { return }
+    finishCancelledRequestPresentation(botID: botID)
+  }
+
+  private func finishCancelledRequest(botID: Int64, traceID: Int) {
+    guard isActiveRequest(botID: botID, traceID: traceID) else { return }
+    requestTask = nil
+    requestBotID = nil
+    requestTraceID = nil
+    finishCancelledRequestPresentation(botID: botID)
+  }
+
+  private func finishCancelledRequestPresentation(botID: Int64) {
+    var state = stateByBotID[botID] ?? .init()
+    state.isRefreshing = false
+    state.phase = state.document == nil ? .idle : .loaded
+    stateByBotID[botID] = state
+  }
+
+  private func finishRequest(botID: Int64, traceID: Int, problem: BotChatSettingsProblem) {
+    guard isActiveRequest(botID: botID, traceID: traceID) else { return }
+    requestTask = nil
+    requestBotID = nil
+    requestTraceID = nil
     var state = stateByBotID[botID] ?? .init()
     state.isRefreshing = false
     state.phase = state.document == nil ? .unavailable : .loaded
