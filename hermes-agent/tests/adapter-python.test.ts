@@ -3527,6 +3527,95 @@ async def assert_transport_helpers():
 
 asyncio.run(assert_transport_helpers())
 
+async def assert_status_message_coalescing():
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    calls = []
+    next_message_id = 1
+    fail_next_edit = False
+
+    async def fake_send_sidecar(path, body):
+        nonlocal next_message_id, fail_next_edit
+        calls.append((path, body))
+        if path == "/edit" and fail_next_edit:
+            fail_next_edit = False
+            return SendResult(success=False, error="message no longer editable")
+        if path == "/send":
+            message_id = f"status-{next_message_id}"
+            next_message_id += 1
+            return SendResult(success=True, message_id=message_id, raw_response=body)
+        return SendResult(success=True, message_id=body.get("messageId"), raw_response=body)
+
+    adapter._send_sidecar = fake_send_sidecar
+    first = await adapter.send_or_update_status(
+        "chat:10",
+        "compression",
+        "Compressing context",
+        metadata={"thread_id": "chat:99"},
+    )
+    assert first.success
+    assert first.message_id == "status-1"
+    assert calls[-1] == ("/send", {
+        "target": {"chatId": "99"},
+        "text": "Compressing context",
+        "parseMarkdown": True,
+    })
+
+    updated = await adapter.send_or_update_status(
+        "chat:10",
+        "compression",
+        "Context compressed",
+        metadata={"thread_id": "chat:99"},
+    )
+    assert updated.success
+    assert calls[-1] == ("/edit", {
+        "target": {"chatId": "99"},
+        "messageId": "status-1",
+        "text": "Context compressed",
+        "parseMarkdown": True,
+    })
+    assert list(adapter._status_message_ids.values()) == ["status-1"]
+
+    other_thread = await adapter.send_or_update_status(
+        "chat:10",
+        "compression",
+        "Compressing elsewhere",
+        metadata={"thread_id": "chat:100"},
+    )
+    assert other_thread.success
+    assert other_thread.message_id == "status-2"
+    assert calls[-1][0] == "/send"
+    assert calls[-1][1]["target"] == {"chatId": "100"}
+    assert len(adapter._status_message_ids) == 2
+
+    fail_next_edit = True
+    replacement = await adapter.send_or_update_status(
+        "chat:10",
+        "compression",
+        "Retrying compression",
+        metadata={"thread_id": "chat:99"},
+    )
+    assert replacement.success
+    assert replacement.message_id == "status-3"
+    assert calls[-2][0] == "/edit"
+    assert calls[-2][1]["messageId"] == "status-1"
+    assert calls[-1] == ("/send", {
+        "target": {"chatId": "99"},
+        "text": "Retrying compression",
+        "parseMarkdown": True,
+    })
+    assert adapter._status_message_ids[("chatId", "99", "compression")] == "status-3"
+
+    bounded = InlineAdapter(PlatformConfig(extra=base_extra))
+    bounded._send_sidecar = fake_send_sidecar
+    for index in range(513):
+        result = await bounded.send_or_update_status("chat:10", f"status-{index}", f"Status {index}")
+        assert result.success
+    assert len(bounded._status_message_ids) == 512
+    assert ("chatId", "10", "status-0") not in bounded._status_message_ids
+    assert ("chatId", "10", "status-512") in bounded._status_message_ids
+
+asyncio.run(assert_status_message_coalescing())
+
 async def assert_action_authorization():
     os.environ.pop("GATEWAY_ALLOWED_USERS", None)
     os.environ.pop("GATEWAY_ALLOW_ALL_USERS", None)

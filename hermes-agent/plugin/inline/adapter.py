@@ -879,6 +879,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._choice_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._model_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._status_message_ids: "OrderedDict[tuple[str, str, str], str]" = OrderedDict()
         self._thread_action_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._chat_info_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
         self._bot_agent_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
@@ -4146,6 +4147,35 @@ class InlineAdapter(BasePlatformAdapter):
     ) -> bool:
         return False
 
+    async def send_or_update_status(
+        self,
+        chat_id: str,
+        status_key: str,
+        content: str,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        target = self._target_for(chat_id, metadata)
+        target_kind = "userId" if "userId" in target else "chatId"
+        key = (target_kind, str(target.get(target_kind) or ""), str(status_key))
+        cached_id = self._status_message_ids.get(key)
+        if cached_id:
+            result = await self.edit_message(
+                chat_id,
+                cached_id,
+                content,
+                metadata=metadata,
+            )
+            if result.success:
+                self._remember(self._status_message_ids, key, str(result.message_id or cached_id))
+                return result
+            self._status_message_ids.pop(key, None)
+
+        result = await self.send(chat_id, content, metadata=metadata)
+        if result.success and result.message_id:
+            self._remember(self._status_message_ids, key, str(result.message_id))
+        return result
+
     async def edit_message(
         self,
         chat_id: str,
@@ -4682,7 +4712,7 @@ class InlineAdapter(BasePlatformAdapter):
         return self._target_for(chat_id, metadata)
 
     @staticmethod
-    def _remember(mapping: OrderedDict, key: str, value: Any, limit: int = 512) -> None:
+    def _remember(mapping: OrderedDict, key: Any, value: Any, limit: int = 512) -> None:
         if key in mapping:
             del mapping[key]
         mapping[key] = value
