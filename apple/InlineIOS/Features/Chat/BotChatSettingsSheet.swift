@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct BotChatSettingsSheet: View {
@@ -47,19 +48,11 @@ private struct BotChatSettingsSheetContent: View {
             onInvoke: coordinator.invoke(itemID:value:)
           )
         }
-        if let problem = state.problem {
-          BotChatSettingsIOSProblemSection(problem: problem, onRetry: coordinator.refreshSelected)
+        if let status = state.surfaceStatus {
+          BotChatSettingsIOSStatusSection(status: status, onRetry: coordinator.refreshSelected)
         }
       }
       .refreshable { coordinator.refreshSelected() }
-      .overlay(alignment: .topTrailing) {
-        if state.isRefreshing {
-          ProgressView()
-            .controlSize(.small)
-            .padding()
-            .accessibilityLabel("Refreshing agent settings")
-        }
-      }
     } else if let problem = state.problem {
       ContentUnavailableView {
         Label(problem.message, systemImage: "exclamationmark.triangle")
@@ -81,27 +74,67 @@ private struct BotChatSettingsAgentSection: View {
 
   var body: some View {
     Section("Agent") {
-      Picker("Agent", selection: Binding(
-        get: { coordinator.selectedBotID ?? 0 },
-        set: coordinator.selectBot
-      )) {
-        ForEach(coordinator.bots) { bot in
-          Text(bot.displayName).tag(bot.id)
+      if let selectedBot = coordinator.selectedBot {
+        Menu {
+          ForEach(coordinator.bots) { bot in
+            Button {
+              coordinator.selectBot(bot.id)
+            } label: {
+              if bot.id == selectedBot.id {
+                Label(bot.displayName, systemImage: "checkmark")
+              } else {
+                Text(bot.displayName)
+              }
+            }
+          }
+        } label: {
+          LabeledContent("Agent") {
+            BotChatSettingsIOSAgentLabel(bot: selectedBot)
+          }
         }
+        .accessibilityLabel("Choose agent")
+        .accessibilityValue(selectedBot.displayName)
       }
     }
   }
 }
 
-private struct BotChatSettingsIOSProblemSection: View {
-  let problem: BotChatSettingsProblem
+private struct BotChatSettingsIOSAgentLabel: View {
+  let bot: BotChatSettingsBot
+
+  var body: some View {
+    HStack(spacing: 8) {
+      UserAvatar(user: User(from: bot.user), size: 24)
+      Text(bot.displayName)
+        .lineLimit(1)
+    }
+    .accessibilityElement(children: .combine)
+  }
+}
+
+private struct BotChatSettingsIOSStatusSection: View {
+  let status: BotChatSettingsSurfaceStatus
   let onRetry: () -> Void
 
   var body: some View {
     Section {
-      Label(problem.message, systemImage: "exclamationmark.triangle")
-        .foregroundStyle(.orange)
-      Button("Retry", action: onRetry)
+      HStack(spacing: 10) {
+        switch status {
+        case .refreshing:
+          ProgressView()
+            .accessibilityHidden(true)
+          Text("Refreshing settings…")
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case let .problem(problem):
+          Image(systemName: "exclamationmark.triangle")
+            .foregroundStyle(.orange)
+            .accessibilityHidden(true)
+          Text(problem.message)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          Button("Retry", action: onRetry)
+        }
+      }
     }
   }
 }

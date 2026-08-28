@@ -71,56 +71,35 @@ private struct BotChatSettingsPopoverHeader: View {
   let coordinator: BotChatSettingsCoordinator
 
   var body: some View {
-    VStack(spacing: 8) {
-      HStack(spacing: 10) {
-        Text("Agent settings")
-          .font(.headline)
-          .frame(maxWidth: .infinity, alignment: .leading)
+    HStack(spacing: 10) {
+      Text("Agent settings")
+        .font(.headline)
+        .frame(maxWidth: .infinity, alignment: .leading)
 
-        if let selectedBot = coordinator.selectedBot {
-          if coordinator.bots.count > 3 {
-            Menu {
-              ForEach(coordinator.bots) { bot in
-                Button {
-                  coordinator.selectBot(bot.id)
-                } label: {
-                  Label(bot.displayName, systemImage: bot.id == selectedBot.id ? "checkmark" : "circle")
+      if let selectedBot = coordinator.selectedBot {
+        if coordinator.bots.count > 1 {
+          Menu {
+            ForEach(coordinator.bots) { bot in
+              Button {
+                coordinator.selectBot(bot.id)
+              } label: {
+                if bot.id == selectedBot.id {
+                  Label(bot.displayName, systemImage: "checkmark")
+                } else {
+                  Text(bot.displayName)
                 }
               }
-            } label: {
-              BotChatSettingsBotLabel(bot: selectedBot, includesAvatar: true)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("Choose agent")
-          } else if coordinator.bots.count == 1 {
-            BotChatSettingsBotLabel(bot: selectedBot, includesAvatar: true)
+          } label: {
+            BotChatSettingsBotLabel(bot: selectedBot)
           }
+          .menuStyle(.borderlessButton)
+          .fixedSize()
+          .accessibilityLabel("Choose agent")
+          .accessibilityValue(selectedBot.displayName)
+        } else {
+          BotChatSettingsBotLabel(bot: selectedBot)
         }
-
-        ProgressView()
-          .controlSize(.small)
-          .opacity(coordinator.selectedState.isRefreshing ? 1 : 0)
-          .frame(width: 14, height: 14)
-          .accessibilityLabel("Refreshing agent settings")
-          .accessibilityHidden(!coordinator.selectedState.isRefreshing)
-      }
-
-      if (2 ... 3).contains(coordinator.bots.count), let selectedBot = coordinator.selectedBot {
-        Picker("Agent", selection: Binding(
-          get: { selectedBot.id },
-          set: coordinator.selectBot
-        )) {
-          ForEach(coordinator.bots) { bot in
-            Text(bot.displayName)
-              .lineLimit(1)
-              .tag(bot.id)
-          }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .controlSize(.small)
-        .accessibilityLabel("Choose agent")
       }
     }
     .padding(.horizontal, 14)
@@ -130,13 +109,10 @@ private struct BotChatSettingsPopoverHeader: View {
 
 private struct BotChatSettingsBotLabel: View {
   let bot: BotChatSettingsBot
-  let includesAvatar: Bool
 
   var body: some View {
     HStack(spacing: 6) {
-      if includesAvatar {
-        UserAvatar(user: User(from: bot.user), size: 20)
-      }
+      UserAvatar(user: User(from: bot.user), size: 20)
       Text(bot.displayName)
         .font(.callout)
         .lineLimit(1)
@@ -174,8 +150,8 @@ private struct BotChatSettingsPopoverContent: View {
         }
       }
       .overlay(alignment: .bottom) {
-        if let problem = state.problem {
-          BotChatSettingsProblemBanner(problem: problem, onRetry: coordinator.refreshSelected)
+        if let status = state.surfaceStatus {
+          BotChatSettingsStatusBanner(status: status, onRetry: coordinator.refreshSelected)
             .padding(8)
         }
       }
@@ -213,25 +189,36 @@ private struct BotChatSettingsCenteredState<Content: View>: View {
   }
 }
 
-private struct BotChatSettingsProblemBanner: View {
-  let problem: BotChatSettingsProblem
+private struct BotChatSettingsStatusBanner: View {
+  let status: BotChatSettingsSurfaceStatus
   let onRetry: () -> Void
 
   var body: some View {
     HStack(spacing: 8) {
-      Image(systemName: "exclamationmark.triangle")
-        .foregroundStyle(.orange)
-      Text(problem.message)
-        .font(.caption)
-        .frame(maxWidth: .infinity, alignment: .leading)
-      Button("Retry", action: onRetry)
-        .controlSize(.mini)
+      switch status {
+      case .refreshing:
+        ProgressView()
+          .controlSize(.mini)
+          .accessibilityHidden(true)
+        Text("Refreshing settings…")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      case let .problem(problem):
+        Image(systemName: "exclamationmark.triangle")
+          .foregroundStyle(.orange)
+          .accessibilityHidden(true)
+        Text(problem.message)
+          .font(.caption)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Button("Retry", action: onRetry)
+          .controlSize(.mini)
+      }
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 7)
     .background(.background, in: RoundedRectangle(cornerRadius: 8))
     .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
-    .accessibilityElement(children: .combine)
   }
 }
 

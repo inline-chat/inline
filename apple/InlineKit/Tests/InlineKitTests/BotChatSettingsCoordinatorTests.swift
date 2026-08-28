@@ -299,6 +299,114 @@ struct BotChatSettingsCoordinatorTests {
     #expect(replyThreadsValue(in: coordinator.selectedState.document) == "auto")
   }
 
+  @Test("hydrates a cached document while a replacement request is in flight")
+  func staleWhileRevalidateAcrossCoordinators() async {
+    let cache = BotChatSettingsDocumentCache()
+    let first = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in documentResponse(revision: "cached") },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "mutation") },
+      retryDelays: [],
+      transientMutationRetryDelay: .milliseconds(0),
+      documentCache: cache,
+      accountID: 900
+    )
+
+    await first.warmUp()
+    await waitUntil { first.selectedState.document?.revision == "cached" }
+    first.cancel()
+
+    let request = SettingsRequestGate()
+    let reopened = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in await request.wait() },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "mutation") },
+      retryDelays: [],
+      transientMutationRetryDelay: .milliseconds(0),
+      documentCache: cache,
+      accountID: 900
+    )
+
+    await reopened.warmUp()
+    await waitUntilAsync { await request.count == 1 }
+
+    #expect(reopened.selectedState.document?.revision == "cached")
+    #expect(reopened.selectedState.surfaceStatus == .refreshing)
+
+    await request.resolve(with: documentResponse(revision: "fresh"))
+    await waitUntil { reopened.selectedState.document?.revision == "fresh" }
+
+    #expect(reopened.selectedState.surfaceStatus == nil)
+  }
+
+  @Test("isolates cached documents by account, peer, and bot")
+  func cacheScopeIsolation() throws {
+    let cache = BotChatSettingsDocumentCache()
+    let document = try settingsDocument(revision: "scoped")
+    let storedAt = Date(timeIntervalSince1970: 100)
+    cache.store(document, accountID: 900, peer: .thread(id: 77), botID: 20, updatedAt: storedAt)
+
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 20, now: storedAt)?.document == document)
+    #expect(cache.snapshot(accountID: 901, peer: .thread(id: 77), botID: 20, now: storedAt) == nil)
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 78), botID: 20, now: storedAt) == nil)
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 10, now: storedAt) == nil)
+    #expect(cache.snapshot(accountID: nil, peer: .thread(id: 77), botID: 20, now: storedAt) == nil)
+  }
+
+  @Test("advances the cached document after a successful mutation")
+  func mutationAdvancesCache() async {
+    let cache = BotChatSettingsDocumentCache()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in documentResponse(revision: "initial", replyThreads: "auto") },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "mutated", replyThreads: "on") },
+      retryDelays: [],
+      transientMutationRetryDelay: .milliseconds(0),
+      documentCache: cache,
+      accountID: 900
+    )
+
+    await coordinator.warmUp()
+    await waitUntil { coordinator.selectedState.document?.revision == "initial" }
+    coordinator.invoke(itemID: "reply-threads", value: .string("on"))
+    await waitUntil { coordinator.selectedState.document?.revision == "mutated" }
+
+    let cached = cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 20)
+    #expect(cached?.document.revision == "mutated")
+    #expect(replyThreadsValue(in: cached?.document) == "on")
+  }
+
+  @Test("bounds cached documents by recency and age")
+  func cacheBounds() throws {
+    let cache = BotChatSettingsDocumentCache(maximumEntryCount: 2, retentionInterval: 60)
+    let base = Date(timeIntervalSince1970: 100)
+    cache.store(try settingsDocument(revision: "one"), accountID: 900, peer: .thread(id: 77), botID: 1, updatedAt: base)
+    cache.store(
+      try settingsDocument(revision: "two"),
+      accountID: 900,
+      peer: .thread(id: 77),
+      botID: 2,
+      updatedAt: base.addingTimeInterval(1)
+    )
+    _ = cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 1, now: base.addingTimeInterval(2))
+    cache.store(
+      try settingsDocument(revision: "three"),
+      accountID: 900,
+      peer: .thread(id: 77),
+      botID: 3,
+      updatedAt: base.addingTimeInterval(3)
+    )
+
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 1, now: base.addingTimeInterval(3)) != nil)
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 2, now: base.addingTimeInterval(3)) == nil)
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 3, now: base.addingTimeInterval(3)) != nil)
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 1, now: base.addingTimeInterval(61)) == nil)
+    #expect(cache.snapshot(accountID: 900, peer: .thread(id: 77), botID: 3, now: base.addingTimeInterval(61)) != nil)
+  }
+
   @Test("a cancelled request cannot clear a newer bot request")
   func cancelledRequestDoesNotClobberNewerRequest() async {
     let requests = SwitchingRequestGate()
@@ -340,6 +448,21 @@ struct BotChatSettingsCoordinatorTests {
 private actor InvocationCounter {
   private(set) var count = 0
   func increment() { count += 1 }
+}
+
+private actor SettingsRequestGate {
+  private(set) var count = 0
+  private var continuation: CheckedContinuation<InlineProtocol.BotChatSettingsResponse, Never>?
+
+  func wait() async -> InlineProtocol.BotChatSettingsResponse {
+    count += 1
+    return await withCheckedContinuation { continuation = $0 }
+  }
+
+  func resolve(with response: InlineProtocol.BotChatSettingsResponse) {
+    continuation?.resume(returning: response)
+    continuation = nil
+  }
 }
 
 private actor TransientMutationSequence {
@@ -543,6 +666,17 @@ private func documentResponse(
       }]
     })
   }
+}
+
+private func settingsDocument(revision: String) throws -> BotChatSettingsModel.Document {
+  guard case let .document(document)? = documentResponse(revision: revision).result else {
+    throw SettingsDocumentFixtureError.missingDocument
+  }
+  return try BotChatSettingsModel.Document(protocolDocument: document)
+}
+
+private enum SettingsDocumentFixtureError: Error {
+  case missingDocument
 }
 
 private func staleResponse(
