@@ -306,6 +306,8 @@ assert _parse_inline_target_ref("room-name") is None
 assert _parse_inline_target_ref("chat:not-an-id") == ("not-an-id", None)
 assert _parse_inline_target_ref("chat:user:123") is None
 assert _parse_inline_target_ref("thread:user:123") is None
+assert _parse_inline_target_ref("user:²") == ("user:²", None)
+assert _parse_inline_target_ref("²") is None
 assert _validate_inline_target_ref("123") is True
 assert _validate_inline_target_ref("user:123") is True
 assert _validate_inline_target_ref("0") == "Inline targets must use a positive signed 64-bit integer ID"
@@ -313,6 +315,7 @@ assert _validate_inline_target_ref("-1") == "Inline targets must use a positive 
 assert _validate_inline_target_ref("9223372036854775808") == "Inline targets must use a positive signed 64-bit integer ID"
 assert _validate_inline_target_ref("space:123") == "Use a bare Inline ID or a chat:, thread:, or user: target"
 assert _validate_inline_target_ref("chat:user:123") == "Inline targets must use a positive signed 64-bit integer ID"
+assert _validate_inline_target_ref("²") == "Inline targets must use a positive signed 64-bit integer ID"
 assert _target_from_chat_id("thread:123") == {"chatId": "123"}
 assert _target_from_chat_id("inline:user:123") == {"userId": "123"}
 assert "visible label is their first name, falling back to username" in inline_tools.INLINE_PLATFORM_GUIDANCE
@@ -3249,6 +3252,25 @@ async def assert_model_picker_flow():
     assert calls[0][1]["target"] == {"chatId": "99"}
     assert calls[0][1]["actions"]["rows"][0]["actions"][0]["id"].startswith("system:mp:")
     picker_id = next(iter(adapter._model_picker_sessions.keys()))
+    assert adapter._model_picker_sessions[picker_id]["target"] == {"chatId": "99"}
+
+    await adapter._handle_model_picker_action({
+        "chatId": "100",
+        "messageId": "42",
+        "interactionId": "interaction-model-wrong-chat",
+        "actionId": f"mp:{picker_id}:openrouter",
+    })
+    assert answers[-1] == ("interaction-model-wrong-chat", "Picker expired")
+    assert picker_id in adapter._model_picker_sessions
+
+    await adapter._handle_model_picker_action({
+        "chatId": "99",
+        "messageId": "different-message",
+        "interactionId": "interaction-model-wrong-message",
+        "actionId": f"mp:{picker_id}:openrouter",
+    })
+    assert answers[-1] == ("interaction-model-wrong-message", "Picker expired")
+    assert picker_id in adapter._model_picker_sessions
 
     await adapter._handle_model_picker_action({
         "chatId": "99",
@@ -3302,6 +3324,8 @@ async def assert_model_picker_flow():
     adapter._model_picker_sessions[failed_picker_id] = {
         "chat_id": "chat:10",
         "on_model_selected": failing_model_selection,
+        "target": {"chatId": "99"},
+        "message_id": "42",
     }
     await adapter._complete_model_selection(
         {
@@ -3445,6 +3469,27 @@ async def assert_choice_picker_flow():
     assert answers[-1] == ("choice-expired", "Picker expired")
     assert selected == [("chat:10", "high")]
 
+    adapter._allow_all = True
+    direct_user = await adapter.send_choice_picker(
+        "user:123",
+        "Choose directly",
+        [{"value": "medium", "label": "Medium"}],
+        "session-direct-user",
+        on_selected,
+    )
+    assert direct_user.success
+    direct_user_id = next(reversed(adapter._choice_picker_sessions))
+    assert adapter._choice_picker_sessions[direct_user_id]["target"] == {"userId": "123"}
+    assert await adapter._handle_action({
+        "chatId": "9001",
+        "messageId": "choice-message",
+        "interactionId": "choice-direct-user",
+        "actorUserId": "123",
+        "actionId": f"system:cp:{direct_user_id}:0",
+    })
+    assert selected[-1] == ("user:123", "medium")
+    assert answers[-1] == ("choice-direct-user", "Selection applied")
+
     def failing_choice(chat_id, value):
         raise RuntimeError("secret=/private/provider-token")
 
@@ -3508,7 +3553,7 @@ async def assert_choice_picker_flow():
     assert calls[-1][0] == "/edit"
     assert calls[-1][1]["text"] == "Selection expired; no change was made."
     assert calls[-1][1]["actions"] == {"rows": []}
-    assert selected == [("chat:10", "high")]
+    assert selected == [("chat:10", "high"), ("user:123", "medium")]
 
     failed = InlineAdapter(PlatformConfig(extra=base_extra))
 
@@ -4007,16 +4052,65 @@ async def assert_processing_reactions():
     assert len(failed_calls) == 1
     assert transport_failure._processing_reaction_messages == {}
 
+    uncertain = InlineAdapter(PlatformConfig(extra={**base_extra, "reactions": True}))
+    uncertain_calls = []
+
+    async def cancelled_after_add(path, body):
+        uncertain_calls.append((path, body))
+        raise asyncio.CancelledError
+
+    uncertain._sidecar_call = cancelled_after_add
+    uncertain_event = processing_event("27")
+    try:
+        await uncertain.on_processing_start(uncertain_event)
+    except asyncio.CancelledError:
+        pass
+    assert ("chatId", "10", "27") in uncertain._processing_reaction_messages
+    uncertain._sidecar_call = fake_sidecar
+    calls.clear()
+    await uncertain.on_processing_complete(uncertain_event, "cancelled")
+    assert calls == [
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "27", "emoji": "👀", "remove": True}),
+    ]
+
     bounded = InlineAdapter(PlatformConfig(extra={**base_extra, "reactions": True}))
+    bounded_calls = []
+
+    async def bounded_sidecar(path, body):
+        bounded_calls.append((path, body))
+        return {"ok": True, "result": {}}
+
+    bounded._sidecar_call = bounded_sidecar
     for index in range(513):
-        bounded._remember(
-            bounded._processing_reaction_messages,
-            ("chatId", "10", str(index)),
-            {"chatId": "10"},
-        )
+        await bounded.on_processing_start(processing_event(str(index)))
     assert len(bounded._processing_reaction_messages) == 512
     assert ("chatId", "10", "0") not in bounded._processing_reaction_messages
     assert ("chatId", "10", "512") in bounded._processing_reaction_messages
+    assert bounded_calls[-2:] == [
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "0", "emoji": "👀", "remove": True}),
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "512", "emoji": "👀"}),
+    ]
+
+    cancelled_eviction = InlineAdapter(PlatformConfig(extra={**base_extra, "reactions": True}))
+    for index in range(512):
+        cancelled_eviction._remember(
+            cancelled_eviction._processing_reaction_messages,
+            ("chatId", "10", str(index)),
+            {"chatId": "10"},
+        )
+
+    async def cancel_eviction(path, body):
+        assert body == {"target": {"chatId": "10"}, "messageId": "0", "emoji": "👀", "remove": True}
+        raise asyncio.CancelledError
+
+    cancelled_eviction._sidecar_call = cancel_eviction
+    try:
+        await cancelled_eviction.on_processing_start(processing_event("512"))
+    except asyncio.CancelledError:
+        pass
+    assert len(cancelled_eviction._processing_reaction_messages) == 512
+    assert ("chatId", "10", "0") in cancelled_eviction._processing_reaction_messages
+    assert ("chatId", "10", "512") not in cancelled_eviction._processing_reaction_messages
 
 asyncio.run(assert_processing_reactions())
 

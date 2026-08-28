@@ -364,7 +364,7 @@ def _target_from_chat_id(chat_id: str) -> Dict[str, str]:
 
 def _normalize_inline_target_id(value: Any) -> Optional[str]:
     text = str(value or "").strip()
-    if not text.isdigit():
+    if not re.fullmatch(r"[0-9]+", text):
         return None
     parsed = int(text)
     if parsed <= 0 or parsed > _MAX_INLINE_ID:
@@ -3898,13 +3898,17 @@ class InlineAdapter(BasePlatformAdapter):
         target = state.get("target")
         if not isinstance(target, dict):
             return False
-        expected_target_id = str(target.get("chatId") or target.get("userId") or "").strip()
-        actual_target_id = self._chat_key(event.get("chatId"))
+        expected_chat_id = str(target.get("chatId") or "").strip()
+        expected_user_id = str(target.get("userId") or "").strip()
+        target_matches = (
+            bool(expected_chat_id) and expected_chat_id == self._chat_key(event.get("chatId"))
+        ) or (
+            bool(expected_user_id) and expected_user_id == str(event.get("actorUserId") or "").strip()
+        )
         expected_message_id = str(state.get("message_id") or "").strip()
         actual_message_id = str(event.get("messageId") or "").strip()
         return bool(
-            expected_target_id
-            and expected_target_id == actual_target_id
+            target_matches
             and expected_message_id
             and expected_message_id == actual_message_id
         )
@@ -4031,6 +4035,9 @@ class InlineAdapter(BasePlatformAdapter):
         if not state:
             await self._answer_action(interaction_id, "Picker expired")
             return True
+        if not self._action_matches_state_target(event, state):
+            await self._answer_action(interaction_id, "Picker expired")
+            return True
 
         if kind == "mp":
             return await self._select_model_provider(event, picker_id, state, value)
@@ -4153,6 +4160,10 @@ class InlineAdapter(BasePlatformAdapter):
             self._model_picker_sessions.pop(picker_id, None)
             await self._answer_action(interaction_id, "Picker expired")
             return True
+        # Claim the picker before awaiting provider work. The sidecar currently
+        # dispatches serially, but this keeps the callback single-use if that
+        # delivery contract changes.
+        self._model_picker_sessions.pop(picker_id, None)
         failed = False
         try:
             result_text = callback(str(state.get("chat_id") or event.get("chatId") or ""), model_id, provider_slug)
@@ -4163,7 +4174,6 @@ class InlineAdapter(BasePlatformAdapter):
             logger.error("[inline] model picker switch failed (%s)", type(exc).__name__)
             result_text = "Model switch failed; try again."
             failed = True
-        self._model_picker_sessions.pop(picker_id, None)
         await self._edit_action_message(event, result_text, {"rows": []})
         await self._answer_action(interaction_id, "Switch failed" if failed else "Model switched")
         return True
@@ -4493,8 +4503,16 @@ class InlineAdapter(BasePlatformAdapter):
         if not reaction_target:
             return
         key, target, message_id = reaction_target
-        if await self._set_processing_reaction(target, message_id, "👀"):
-            self._remember(self._processing_reaction_messages, key, target)
+        if key not in self._processing_reaction_messages and len(self._processing_reaction_messages) >= 512:
+            evicted_key = next(iter(self._processing_reaction_messages))
+            evicted_target = self._processing_reaction_messages[evicted_key]
+            await self._set_processing_reaction(evicted_target, evicted_key[2], "👀", remove=True)
+            self._processing_reaction_messages.pop(evicted_key, None)
+        # Record cleanup ownership before awaiting the add. Cancellation or a
+        # lost acknowledgement can otherwise strand a bot-owned marker.
+        self._remember(self._processing_reaction_messages, key, target)
+        if not await self._set_processing_reaction(target, message_id, "👀"):
+            self._processing_reaction_messages.pop(key, None)
 
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         """Replace the processing marker without affecting response delivery."""
@@ -4664,8 +4682,9 @@ class InlineAdapter(BasePlatformAdapter):
         if not clean_providers:
             return await self.send(chat_id, "No authenticated models are available for this session.", metadata=metadata)
         picker_id = secrets.token_hex(6)
+        target = self._target_for(chat_id, metadata)
         result = await self._send_sidecar("/send", {
-            "target": self._target_for(chat_id, metadata),
+            "target": target,
             "text": self._model_picker_text(current_model, current_provider),
             "parseMarkdown": self._parse_markdown,
             "actions": self._build_provider_actions(picker_id, clean_providers),
@@ -4680,6 +4699,7 @@ class InlineAdapter(BasePlatformAdapter):
             "current_model": str(current_model or ""),
             "current_provider": str(current_provider or ""),
             "message_id": result.message_id,
+            "target": target,
         })
         return result
 
