@@ -3255,6 +3255,128 @@ async def assert_model_picker_flow():
 
 asyncio.run(assert_model_picker_flow())
 
+async def assert_choice_picker_flow():
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "allow_all": True}))
+    calls = []
+    answers = []
+    selected = []
+
+    async def fake_send_sidecar(path, body):
+        calls.append((path, body))
+        return SendResult(success=True, message_id=body.get("messageId") or "choice-message", raw_response=body)
+
+    async def fake_fetch_message(chat_id, message_id):
+        return {"peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}}}
+
+    async def fake_answer_action(interaction_id, toast):
+        answers.append((interaction_id, toast))
+
+    async def on_selected(chat_id, value):
+        selected.append((chat_id, value))
+        return f"reasoning set to {value}"
+
+    adapter._send_sidecar = fake_send_sidecar
+    adapter._fetch_message = fake_fetch_message
+    adapter._answer_action = fake_answer_action
+    result = await adapter.send_choice_picker(
+        "chat:10",
+        "Choose reasoning",
+        [
+            {"value": "low", "label": "Low", "is_current": True},
+            {"value": "high", "label": "High"},
+            {"value": "", "label": "Ignored"},
+            "invalid",
+        ],
+        "session-choice",
+        on_selected,
+        metadata={"thread_id": "chat:99"},
+    )
+
+    assert result.success
+    assert calls[0][0] == "/send"
+    assert calls[0][1]["target"] == {"chatId": "99"}
+    assert calls[0][1]["text"] == "Choose reasoning"
+    rows = calls[0][1]["actions"]["rows"]
+    assert [[action["text"] for action in row["actions"]] for row in rows] == [["✓ Low", "High"]]
+    first_action = rows[0]["actions"][0]["id"]
+    second_action = rows[0]["actions"][1]["id"]
+    assert first_action.startswith("system:cp:")
+    picker_id = next(iter(adapter._choice_picker_sessions))
+
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "choice-message",
+        "interactionId": "choice-invalid",
+        "actorUserId": "u1",
+        "actionId": f"system:cp:{picker_id}:-1",
+    })
+    assert answers[-1] == ("choice-invalid", "Invalid selection")
+    assert picker_id in adapter._choice_picker_sessions
+    assert selected == []
+
+    adapter._allow_all = False
+    adapter._group_policy = "allowlist"
+    adapter._group_allow_from = {"u1"}
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "choice-message",
+        "interactionId": "choice-denied",
+        "actorUserId": "u2",
+        "actionId": second_action,
+    })
+    assert answers[-1] == ("choice-denied", "Not authorized")
+    assert picker_id in adapter._choice_picker_sessions
+    assert selected == []
+
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "choice-message",
+        "interactionId": "choice-selected",
+        "actorUserId": "u1",
+        "actionId": second_action,
+    })
+    assert selected == [("chat:10", "high")]
+    assert picker_id not in adapter._choice_picker_sessions
+    assert calls[-1] == ("/edit", {
+        "target": {"chatId": "99"},
+        "messageId": "choice-message",
+        "text": "reasoning set to high",
+        "parseMarkdown": True,
+        "actions": {"rows": []},
+    })
+    assert answers[-1] == ("choice-selected", "Selection applied")
+
+    assert await adapter._handle_action({
+        "chatId": "99",
+        "messageId": "choice-message",
+        "interactionId": "choice-expired",
+        "actorUserId": "u1",
+        "actionId": first_action,
+    })
+    assert answers[-1] == ("choice-expired", "Picker expired")
+    assert selected == [("chat:10", "high")]
+
+    failed = InlineAdapter(PlatformConfig(extra=base_extra))
+
+    async def failed_send_sidecar(path, body):
+        return SendResult(success=False, error="send failed")
+
+    failed._send_sidecar = failed_send_sidecar
+    failed_result = await failed.send_choice_picker(
+        "chat:10",
+        "Choose",
+        [{"value": "one", "label": "One"}],
+        "session-failed",
+        on_selected,
+    )
+    assert failed_result.success is False
+    assert failed._choice_picker_sessions == {}
+    empty_result = await failed.send_choice_picker("chat:10", "Choose", [], "session-empty", on_selected)
+    assert empty_result.success is False
+    assert empty_result.error == "No choices"
+
+asyncio.run(assert_choice_picker_flow())
+
 async def assert_transport_helpers():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
     assert adapter.prefers_fresh_final_streaming("preview", metadata={"expect_edits": True}) is False

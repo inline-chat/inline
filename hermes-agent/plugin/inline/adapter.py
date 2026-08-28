@@ -877,6 +877,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._clarify_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
+        self._choice_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._model_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._thread_action_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._chat_info_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
@@ -3582,6 +3583,10 @@ class InlineAdapter(BasePlatformAdapter):
             if not await self._action_allowed(event):
                 return True
             return await self._handle_model_picker_action(event)
+        if action_id.startswith("cp:"):
+            if not await self._action_allowed(event):
+                return True
+            return await self._handle_choice_picker_action(event)
         if action_id.startswith("cl:"):
             if not await self._action_allowed(event):
                 return True
@@ -3804,6 +3809,53 @@ class InlineAdapter(BasePlatformAdapter):
     @staticmethod
     def _is_model_picker_action(action_id: str) -> bool:
         return action_id.startswith(("mp:", "mpg:", "mm:", "mc:", "mg:", "mb:", "mx:"))
+
+    async def _handle_choice_picker_action(self, event: Dict[str, Any]) -> bool:
+        action_id = str(event.get("actionId") or "")
+        parts = action_id.split(":", 2)
+        if len(parts) != 3 or parts[0] != "cp":
+            return False
+        _, picker_id, index_raw = parts
+        interaction_id = str(event.get("interactionId") or "")
+        state = self._choice_picker_sessions.get(picker_id)
+        if not state:
+            await self._answer_action(interaction_id, "Picker expired")
+            return True
+        try:
+            index = int(index_raw)
+            state_choices = state["choices"]
+            if index < 0 or index >= len(state_choices):
+                raise IndexError
+            choice = state_choices[index]
+        except (KeyError, TypeError, ValueError, IndexError):
+            await self._answer_action(interaction_id, "Invalid selection")
+            return True
+
+        callback = state.get("on_choice_selected")
+        if not callable(callback):
+            self._choice_picker_sessions.pop(picker_id, None)
+            await self._finish_action(event, "Picker expired", "Selection expired; no change was made.")
+            return True
+
+        # Claim the picker before awaiting the callback so concurrent taps cannot
+        # apply the same setting more than once.
+        self._choice_picker_sessions.pop(picker_id, None)
+        failed = False
+        try:
+            result_text = callback(str(state.get("chat_id") or event.get("chatId") or ""), str(choice.get("value") or ""))
+            if asyncio.iscoroutine(result_text):
+                result_text = await result_text
+            result_text = str(result_text or "Selection applied.")
+        except Exception as exc:
+            logger.exception("[inline] choice picker selection failed")
+            result_text = f"Error applying selection: {exc}"
+            failed = True
+        await self._finish_action(
+            event,
+            "Selection failed" if failed else "Selection applied",
+            result_text,
+        )
+        return True
 
     @staticmethod
     def _split_model_picker_action(action_id: str) -> Optional[tuple[str, str, str]]:
@@ -4378,6 +4430,56 @@ class InlineAdapter(BasePlatformAdapter):
             "current_provider": str(current_provider or ""),
             "message_id": result.message_id,
         })
+        return result
+
+    async def send_choice_picker(
+        self,
+        chat_id: str,
+        title: str,
+        choices: list,
+        session_key: str,
+        on_choice_selected,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        clean_choices: list[Dict[str, Any]] = []
+        for choice in choices or []:
+            if not isinstance(choice, dict):
+                continue
+            value = str(choice.get("value") or "").strip()
+            label = str(choice.get("label") or value).strip()
+            if not value or not label:
+                continue
+            clean_choices.append({
+                "value": value,
+                "label": label,
+                "is_current": bool(choice.get("is_current")),
+            })
+            if len(clean_choices) >= 24:
+                break
+        if not clean_choices:
+            return _send_result(success=False, error="No choices")
+
+        picker_id = secrets.token_hex(6)
+        actions = []
+        for index, choice in enumerate(clean_choices):
+            label = str(choice["label"])
+            if choice["is_current"]:
+                label = f"✓ {label}"
+            actions.append(self._action(f"cp:{picker_id}:{index}", self._short_label(label)))
+        result = await self._send_sidecar("/send", {
+            "target": self._target_for(chat_id, metadata),
+            "text": str(title or "Choose an option"),
+            "parseMarkdown": self._parse_markdown,
+            "actions": {"rows": self._action_rows(actions)},
+        })
+        if result.success:
+            self._remember(self._choice_picker_sessions, picker_id, {
+                "chat_id": str(chat_id),
+                "choices": clean_choices,
+                "session_key": str(session_key),
+                "on_choice_selected": on_choice_selected,
+                "message_id": result.message_id,
+            })
         return result
 
     def _model_picker_text(self, current_model: str, current_provider: str) -> str:
