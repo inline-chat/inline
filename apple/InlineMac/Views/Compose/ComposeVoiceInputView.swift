@@ -31,15 +31,38 @@ struct ComposeVoiceInputView: View {
   var body: some View {
     HStack(alignment: rowAlignment, spacing: rowSpacing) {
       switch viewModel.phase {
+      case .starting:
+        ProgressView()
+          .controlSize(.small)
+          .frame(width: mode.voiceInputButtonSize, height: mode.voiceInputButtonSize)
+          .accessibilityLabel("Starting voice recording")
+        Text("Starting…")
+          .font((isGlass ? Font.caption2 : Font.caption))
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        iconButton("xmark", title: "Cancel", action: onCancel)
+
       case .recording:
+        iconButton("xmark", title: "Discard recording", action: onCancel)
         recordingIndicator
         waveform(progress: 0)
         durationLabel
         iconButton("stop.fill", title: "Stop recording", action: onPause)
         iconButton("arrow.up", title: "Send voice message", isPrimary: true, action: onSend)
 
+      case .finishing:
+        ProgressView()
+          .controlSize(.small)
+          .frame(width: mode.voiceInputButtonSize, height: mode.voiceInputButtonSize)
+          .accessibilityLabel("Preparing voice message")
+        Text("Preparing…")
+          .font((isGlass ? Font.caption2 : Font.caption))
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        iconButton("xmark", title: "Discard recording", action: onCancel)
+
       case .review:
-        iconButton("xmark", title: "Cancel", action: onCancel)
+        iconButton("xmark", title: "Discard recording", action: onCancel)
         waveform(progress: viewModel.playbackProgress) { progress in
           viewModel.seekPlayback(to: progress)
         }
@@ -216,7 +239,7 @@ private struct VoiceIconButtonStyle: ButtonStyle {
       return Color(nsColor: .separatorColor).opacity(isHovering ? 0.5 : 0.32)
     }
 
-    return Color(nsColor: .quinaryLabel).opacity(isHovering ? 0.82 : 1)
+    return Color(nsColor: .quinaryLabelColor).opacity(isHovering ? 0.82 : 1)
   }
 
   private func opacity(isPressed: Bool) -> Double {

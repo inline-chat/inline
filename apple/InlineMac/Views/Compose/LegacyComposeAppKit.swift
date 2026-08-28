@@ -686,16 +686,13 @@ class LegacyComposeAppKit: NSView {
   private func startVoiceRecording() {
     guard canStartVoiceRecording else { return }
     focusWindowIfNeeded()
-
-    Task { @MainActor [weak self] in
-      guard let self else { return }
-      await voiceViewModel.start()
-    }
+    voiceViewModel.requestStart()
   }
 
   private func pauseVoiceRecording() {
-    voiceViewModel.pauseRecording()
-    persistVoiceDraftIfNeeded()
+    voiceViewModel.pauseRecording { [weak self] in
+      self?.persistVoiceDraftIfNeeded()
+    }
   }
 
   private func toggleVoicePlayback() {
@@ -754,15 +751,22 @@ class LegacyComposeAppKit: NSView {
         pauseVoiceRecording()
       case .review:
         voiceViewModel.togglePlayback()
-      case .idle:
+      case .idle, .starting, .finishing:
         break
     }
   }
 
   private func sendVoiceRecording() {
     guard !drafts2.hasPendingAttachments(peer: peerId) else { return }
-    guard voiceViewModel.finalizeRecordingForSend() else { return }
+    Task { @MainActor [weak self] in
+      guard let self,
+            await voiceViewModel.finalizeRecordingForSend()
+      else { return }
+      sendFinalizedVoiceRecording()
+    }
+  }
 
+  private func sendFinalizedVoiceRecording() {
     do {
       guard let mediaItem = try voiceViewModel.takeVoiceMediaItem() else { return }
 

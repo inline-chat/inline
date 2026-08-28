@@ -2,12 +2,15 @@ import AVFoundation
 import Combine
 import Foundation
 import InlineKit
+import InlineMacUI
 import InlineProtocol
 import Logger
 
-enum ComposeVoiceRecordingPhase {
+enum ComposeVoiceRecordingPhase: Equatable {
   case idle
+  case starting
   case recording
+  case finishing
   case review
 }
 
@@ -22,14 +25,17 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   private let peerId: InlineKit.Peer
   private let log = Log.scoped("ComposeVoiceRecordingViewModel")
 
-  private var recorder: ComposeVoiceRecorder?
-  private var recording: ComposeVoiceRecording?
+  private let recorder: MacVoiceRecorder
+  private var session: MacVoiceRecordingSession?
+  private var recording: MacVoiceRecording?
   private var player: AVAudioPlayer?
   private var playbackTimer: Timer?
   private var stopRecordingAction: (@Sendable () -> Void)?
   private var draftVoice: Client_MessageVoiceContent?
-  private var isStarting = false
-  private var startId = UUID()
+  private var startTask: Task<Void, Never>?
+  private var finishTask: Task<Bool, Never>?
+  private var recorderUpdatesTask: Task<Void, Never>?
+  private var operationId = UUID()
 
   var isActive: Bool {
     phase != .idle
@@ -40,56 +46,72 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     return FileMediaItem.voice(draftVoice).getItemUniqueId()
   }
 
-  init(peerId: InlineKit.Peer) {
+  init(peerId: InlineKit.Peer, recorder: MacVoiceRecorder = .shared) {
     self.peerId = peerId
+    self.recorder = recorder
   }
 
   deinit {
+    startTask?.cancel()
+    finishTask?.cancel()
+    recorderUpdatesTask?.cancel()
     playbackTimer?.invalidate()
     player?.stop()
     stopRecordingAction?()
 
-    let recorder = recorder
+    let session = session
     let recordingURL = recording?.fileURL
-    let shouldRemoveRecording = recording.map(shouldRemoveRecordingFile) ?? false
-    Task { @MainActor in
-      recorder?.cancel()
+    let draftRecordingURL = draftVoice.flatMap {
+      FileMediaItem.voice($0).localFileURL()
+    }
+    let shouldRemoveRecording = recordingURL.map {
+      draftRecordingURL?.standardizedFileURL != $0.standardizedFileURL
+    } ?? false
+    Task {
+      await session?.cancel()
       if shouldRemoveRecording, let recordingURL {
         try? FileManager.default.removeItem(at: recordingURL)
       }
     }
   }
 
-  func start() async {
-    guard phase == .idle, !isStarting else { return }
+  func requestStart() {
+    guard phase == .idle else { return }
 
-    let startId = UUID()
-    self.startId = startId
-    isStarting = true
-    defer {
-      if self.startId == startId {
-        isStarting = false
-      }
+    let operationId = UUID()
+    self.operationId = operationId
+    duration = 0
+    samples = []
+    playbackProgress = 0
+    isPlaying = false
+    phase = .starting
+    startTask = Task { [weak self] in
+      await self?.performStart(operationId: operationId)
     }
+  }
 
-    guard let access = await ensureMicrophoneAccess() else { return }
-    guard await settleMicrophoneAccessIfNeeded(access, startId: startId) else { return }
-    guard self.startId == startId, phase == .idle else { return }
+  private func performStart(operationId: UUID) async {
+    guard let access = await ensureMicrophoneAccess() else {
+      resetIfCurrent(operationId)
+      return
+    }
+    guard await settleMicrophoneAccessIfNeeded(access, operationId: operationId) else {
+      resetIfCurrent(operationId)
+      return
+    }
+    guard self.operationId == operationId, phase == .starting else { return }
 
     do {
-      let recorder = ComposeVoiceRecorder()
-      recorder.onUpdate = { [weak self] duration, samples in
-        self?.duration = duration
-        self?.samples = samples
-      }
-      try recorder.start()
+      let session = try await recorder.start()
 
-      guard self.startId == startId, phase == .idle else {
-        recorder.cancel()
+      guard self.operationId == operationId, phase == .starting else {
+        await session.cancel()
         return
       }
 
-      self.recorder = recorder
+      self.session = session
+      observe(session.updates, operationId: operationId)
+      startTask = nil
       draftVoice = nil
       duration = 0
       samples = []
@@ -100,46 +122,60 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     } catch {
       log.error("Failed to start voice recording", error: error)
       ToastCenter.shared.showError(error.localizedDescription)
-      reset()
+      resetIfCurrent(operationId)
     }
   }
 
-  func pauseRecording() {
-    guard phase == .recording, let recorder else { return }
+  func pauseRecording(onFinished: (@MainActor () -> Void)? = nil) {
+    guard phase == .recording, let session else { return }
 
-    do {
-      let recording = try recorder.finish()
-      self.recorder = nil
-      self.recording = recording
-      draftVoice = nil
-      stopRecordingAction?()
-      stopRecordingAction = nil
+    let operationId = UUID()
+    self.operationId = operationId
+    self.session = nil
+    recorderUpdatesTask?.cancel()
+    recorderUpdatesTask = nil
+    stopRecordingAction?()
+    stopRecordingAction = nil
+    phase = .finishing
 
-      duration = recording.duration
-      samples = Array(recording.waveform)
-      playbackProgress = 0
-      isPlaying = false
-      phase = .review
-    } catch {
-      log.error("Failed to finish voice recording", error: error)
-      ToastCenter.shared.showError(error.localizedDescription)
-      cancel()
+    finishTask = Task { [weak self] in
+      guard let self else { return false }
+      let finished = await finish(
+        session: session,
+        operationId: operationId
+      )
+      if finished {
+        onFinished?()
+      }
+      return finished
     }
   }
 
-  func finalizeRecordingForSend() -> Bool {
+  func finalizeRecordingForSend() async -> Bool {
     if phase == .recording {
       pauseRecording()
+    }
+
+    if phase == .finishing, let finishTask {
+      _ = await finishTask.value
     }
 
     return phase == .review && recording != nil
   }
 
   func cancel() {
-    startId = UUID()
-    isStarting = false
-    recorder?.cancel()
-    recorder = nil
+    operationId = UUID()
+    startTask?.cancel()
+    startTask = nil
+    finishTask?.cancel()
+    finishTask = nil
+    recorderUpdatesTask?.cancel()
+    recorderUpdatesTask = nil
+    let session = session
+    self.session = nil
+    if let session {
+      Task { await session.cancel() }
+    }
     stopRecordingAction?()
     stopRecordingAction = nil
     stopPlayback(resetProgress: true)
@@ -151,6 +187,53 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     draftVoice = nil
 
     reset()
+  }
+
+  private func finish(
+    session: MacVoiceRecordingSession,
+    operationId: UUID
+  ) async -> Bool {
+    do {
+      let recording = try await session.finish()
+      guard self.operationId == operationId, phase == .finishing else {
+        try? FileManager.default.removeItem(at: recording.fileURL)
+        return false
+      }
+
+      self.recording = recording
+      draftVoice = nil
+      duration = recording.duration
+      samples = Array(recording.waveform)
+      playbackProgress = 0
+      isPlaying = false
+      finishTask = nil
+      phase = .review
+      return true
+    } catch {
+      guard self.operationId == operationId else { return false }
+      log.error("Failed to finish voice recording", error: error)
+      ToastCenter.shared.showError(error.localizedDescription)
+      reset()
+      return false
+    }
+  }
+
+  private func observe(
+    _ updates: AsyncStream<MacVoiceRecordingUpdate>,
+    operationId: UUID
+  ) {
+    recorderUpdatesTask?.cancel()
+    recorderUpdatesTask = Task { [weak self] in
+      for await update in updates {
+        guard !Task.isCancelled else { return }
+        guard let self,
+              self.operationId == operationId,
+              self.phase == .recording
+        else { return }
+        duration = update.duration
+        samples = update.samples
+      }
+    }
   }
 
   func togglePlayback() {
@@ -260,13 +343,23 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
 
     stopPlayback(resetProgress: true)
-    recorder?.cancel()
-    recorder = nil
+    operationId = UUID()
+    startTask?.cancel()
+    startTask = nil
+    finishTask?.cancel()
+    finishTask = nil
+    recorderUpdatesTask?.cancel()
+    recorderUpdatesTask = nil
+    let session = session
+    self.session = nil
+    if let session {
+      Task { await session.cancel() }
+    }
     stopRecordingAction?()
     stopRecordingAction = nil
 
     draftVoice = voice
-    recording = ComposeVoiceRecording(
+    recording = MacVoiceRecording(
       fileURL: url,
       data: data,
       duration: TimeInterval(max(1, voice.duration)),
@@ -303,12 +396,15 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
-  private func settleMicrophoneAccessIfNeeded(_ access: MicrophoneAccessGrant, startId: UUID) async -> Bool {
+  private func settleMicrophoneAccessIfNeeded(
+    _ access: MicrophoneAccessGrant,
+    operationId: UUID
+  ) async -> Bool {
     guard access == .newlyAuthorized else { return true }
 
     await Task.yield()
     try? await Task.sleep(nanoseconds: Self.microphonePermissionSettleDelay)
-    guard self.startId == startId else { return false }
+    guard self.operationId == operationId else { return false }
 
     if MacPermissions.mediaStatus(for: .audio) == .authorized {
       return true
@@ -362,7 +458,7 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
     }
   }
 
-  private func shouldRemoveRecordingFile(_ recording: ComposeVoiceRecording) -> Bool {
+  private func shouldRemoveRecordingFile(_ recording: MacVoiceRecording) -> Bool {
     guard let draftVoice,
           let draftURL = FileMediaItem.voice(draftVoice).localFileURL()
     else {
@@ -373,11 +469,18 @@ final class ComposeVoiceRecordingViewModel: ObservableObject {
   }
 
   private func reset() {
+    startTask = nil
+    finishTask = nil
     duration = 0
     samples = []
     playbackProgress = 0
     isPlaying = false
     phase = .idle
+  }
+
+  private func resetIfCurrent(_ operationId: UUID) {
+    guard self.operationId == operationId else { return }
+    reset()
   }
 
   private static let microphonePermissionSettleDelay: UInt64 = 120_000_000
