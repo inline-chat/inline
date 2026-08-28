@@ -66,6 +66,7 @@ _DEDUP_MAX_SIZE = 5000
 _DEDUP_WINDOW_SECONDS = 48 * 3600
 _CHAT_INFO_CACHE_SECONDS = 10 * 60
 _CHAT_INFO_CACHE_MAX_SIZE = 512
+_BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS = 2.0
 _BOT_SETTINGS_MODEL_CATALOG_CACHE_SECONDS = 60
 _DEFAULT_CONTEXT_BACKFILL = "selective"
 _CONTEXT_BACKFILL_MODES = {"off", "selective", "always"}
@@ -1013,7 +1014,14 @@ class InlineAdapter(BasePlatformAdapter):
         if not chat_id or not actor_id:
             return {"access": "guideOnly", "scope_id": chat_id or "unknown", "reply_threads": "auto"}
 
-        info = await self._get_chat_info(chat_id)
+        try:
+            info = await asyncio.wait_for(
+                self._get_chat_info(chat_id),
+                timeout=_BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[inline] agent settings chat metadata timed out")
+            info = {}
         if not info:
             return {
                 "access": "guideOnly",

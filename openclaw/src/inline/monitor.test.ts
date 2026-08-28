@@ -1399,6 +1399,52 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("bounds provider authentication checks inside the settings model-list deadline", async () => {
+    vi.useFakeTimers()
+    let handle: Awaited<ReturnType<MonitorHarness["monitorInlineProvider"]>> | undefined
+    try {
+      const harness = await setupMonitorHarness({
+        events: [{
+          kind: "bot.chatSettings.request",
+          requestId: 823n,
+          chatId: 7n,
+          actorUserId: 42n,
+          version: 1,
+        }],
+        chats: {
+          "7": { kind: "direct", title: "Alice", peerUserId: 42n },
+        },
+        runtimeConfig: {
+          agents: { defaults: { model: "openai/gpt-5.5" } },
+        },
+      })
+      modelRuntimeMocks.hasAvailableAuthForProvider.mockImplementation(
+        () => new Promise<boolean>(() => {}),
+      )
+      const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+
+      handle = await harness.monitorInlineProvider({
+        cfg: {} as any,
+        account: buildAccount({ dmPolicy: "open" }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+        log,
+      })
+
+      for (let attempt = 0; attempt < 20 && modelRuntimeMocks.hasAvailableAuthForProvider.mock.calls.length === 0; attempt += 1) {
+        await Promise.resolve()
+      }
+      expect(modelRuntimeMocks.hasAvailableAuthForProvider).toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(harness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("model list timed out"))
+    } finally {
+      await handle?.stop()
+      vi.useRealTimers()
+    }
+  })
+
   it("includes Codex-routable OpenAI models when OAuth is available through Codex", async () => {
     const harness = await setupMonitorHarness({
       events: [{

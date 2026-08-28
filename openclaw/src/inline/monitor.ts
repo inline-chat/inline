@@ -6561,17 +6561,11 @@ export async function monitorInlineProvider(params: {
     cfg: OpenClawConfig
     agentId: string
   }): Promise<OpenClawBotSettingsModelCatalog> => {
-    const options = new Map<string, OpenClawBotChatSettingsOption>()
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    try {
-      const [{ byProvider, providers }, catalog] = await Promise.race([
-        Promise.all([
-          buildModelsProviderData(params.cfg, params.agentId),
-          loadModelCatalog({ config: params.cfg, readOnly: true }),
-        ]),
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => reject(new Error("model list timed out")), 5_000)
-        }),
+    const loadCatalog = async (): Promise<OpenClawBotSettingsModelCatalog> => {
+      const options = new Map<string, OpenClawBotChatSettingsOption>()
+      const [{ byProvider, providers }, catalog] = await Promise.all([
+        buildModelsProviderData(params.cfg, params.agentId),
+        loadModelCatalog({ config: params.cfg, readOnly: true }),
       ])
       const modelApiByRef = new Map<string, string | undefined>(
         catalog.map((entry) => [`${entry.provider}/${entry.id}`, entry.api] as const),
@@ -6619,6 +6613,16 @@ export async function monitorInlineProvider(params: {
         }
       }
       return { options: [...options.values()], didLoad: true }
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        loadCatalog(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("model list timed out")), 5_000)
+        }),
+      ])
     } catch (error) {
       log?.warn(`inline agent settings model list unavailable: ${String(error)}`)
       return { options: [], didLoad: false }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   SidecarError,
+  inboundEventNeedsSenderResolution,
   normalizeInboundEvent,
   normalizeError,
   normalizeUploadKind,
@@ -17,6 +18,13 @@ import {
 } from "../src/sidecar/contract.js"
 
 describe("sidecar contract helpers", () => {
+  it("delivers bot settings events without unused sender hydration", () => {
+    expect(inboundEventNeedsSenderResolution({ kind: "bot.chatSettings.request" })).toBe(false)
+    expect(inboundEventNeedsSenderResolution({ kind: "bot.chatSettings.item.invoke" })).toBe(false)
+    expect(inboundEventNeedsSenderResolution({ kind: "message.new" })).toBe(true)
+    expect(inboundEventNeedsSenderResolution({ kind: "message.action.invoke" })).toBe(true)
+  })
+
   it("serializes bigint, binary, arrays, and objects into JSON-safe values", () => {
     expect(safeJson({
       id: 123n,

@@ -43609,6 +43609,13 @@ var sensitiveUrlParams = new Set([
   "key",
   "token"
 ]);
+var botSettingsEventKinds = new Set([
+  "bot.chatSettings.request",
+  "bot.chatSettings.item.invoke"
+]);
+function inboundEventNeedsSenderResolution(event) {
+  return !botSettingsEventKinds.has(event.kind ?? "");
+}
 
 class SidecarError extends Error {
   errorKind;
@@ -44179,7 +44186,7 @@ async function connectClientLoop() {
 async function consumeEvents() {
   try {
     for await (const event of client.events()) {
-      const senderResolution = await resolveInboundSender(event);
+      const senderResolution = inboundEventNeedsSenderResolution(event) ? await resolveInboundSender(event) : { provenanceVerified: true };
       const normalized = normalizeInboundEvent(event, meId, senderResolution.profile, meUsername);
       await deliver(senderResolution.provenanceVerified ? normalized : { ...asRecord(normalized), _inlineSenderProvenanceVerified: false });
     }

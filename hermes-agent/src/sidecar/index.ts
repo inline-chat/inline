@@ -39,6 +39,7 @@ import {
   SidecarError,
   asOptionalRecord,
   asRecord,
+  inboundEventNeedsSenderResolution,
   normalizeInboundEvent,
   normalizeError,
   normalizeUploadKind,
@@ -189,7 +190,9 @@ async function connectClientLoop() {
 async function consumeEvents() {
   try {
     for await (const event of client.events()) {
-      const senderResolution = await resolveInboundSender(event)
+      const senderResolution = inboundEventNeedsSenderResolution(event)
+        ? await resolveInboundSender(event)
+        : { provenanceVerified: true }
       const normalized = normalizeInboundEvent(event, meId, senderResolution.profile, meUsername)
       await deliver(senderResolution.provenanceVerified
         ? normalized

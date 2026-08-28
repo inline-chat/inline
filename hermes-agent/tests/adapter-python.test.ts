@@ -4250,6 +4250,22 @@ asyncio.run(assert_bot_settings_document_and_mutation())
 async def assert_bot_settings_fail_closed_and_serialized():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
 
+    async def slow_chat_info(chat_id):
+        await asyncio.sleep(30)
+        return {"id": chat_id}
+
+    original_timeout = inline_adapter_module._BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS
+    inline_adapter_module._BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS = 0.01
+    try:
+        adapter._get_chat_info = slow_chat_info
+        started_at = time.monotonic()
+        context = await adapter._bot_settings_context({"chatId": "42", "actorUserId": "u1"})
+        assert time.monotonic() - started_at < 0.5
+        assert context["access"] == "guideOnly"
+        assert context["unavailable_reason"] == "chat_metadata"
+    finally:
+        inline_adapter_module._BOT_SETTINGS_CHAT_INFO_TIMEOUT_SECONDS = original_timeout
+
     async def missing_chat_info(chat_id):
         return {}
 

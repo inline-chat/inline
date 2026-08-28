@@ -21,6 +21,15 @@ const sensitiveUrlParams = new Set([
   "token",
 ])
 
+const botSettingsEventKinds = new Set([
+  "bot.chatSettings.request",
+  "bot.chatSettings.item.invoke",
+])
+
+export function inboundEventNeedsSenderResolution(event: GenericInboundEvent): boolean {
+  return !botSettingsEventKinds.has(event.kind ?? "")
+}
+
 export class SidecarError extends Error {
   readonly errorKind: ErrorKind
 
