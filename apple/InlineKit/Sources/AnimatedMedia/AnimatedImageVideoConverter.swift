@@ -53,7 +53,7 @@ public struct AnimatedImageVideoConversionOptions: Sendable {
     maxInputBytes: Int64 = 20_000_000,
     maxOutputBytes: Int64 = 5_000_000,
     maxFrames: Int = 600,
-    maxDurationSeconds: Double = 15,
+    maxDurationSeconds: Double = 60,
     minFrameDelaySeconds: Double = 0.02,
     defaultFrameDelaySeconds: Double = 0.10,
     targetBitrate: Int = 650_000,

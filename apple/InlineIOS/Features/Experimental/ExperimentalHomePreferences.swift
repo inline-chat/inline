@@ -16,6 +16,10 @@ enum ExperimentalHomePreferenceKeys {
   ) -> String {
     "ios.home.pinnedExpanded.\(surface.rawValue).\(userID.map(String.init) ?? "signed-out")"
   }
+
+  static func excludedHomeSpaceIDs(userID: Int64?) -> String {
+    "ios.home.excludedSpaceIDs.\(userID.map(String.init) ?? "signed-out")"
+  }
 }
 
 enum ExperimentalHomePinnedSurface: String {

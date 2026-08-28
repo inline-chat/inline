@@ -6,6 +6,7 @@ import TextProcessing
 
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
+  func textViewDidPressOptionReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool
   func textViewDidPressArrowUp(_ textView: NSTextView, event: NSEvent) -> Bool
   func textViewDidPressArrowDown(_ textView: NSTextView, event: NSEvent) -> Bool
@@ -18,6 +19,7 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL?)
   func textView(_ textView: NSTextView, didReceiveFile url: URL)
   func textView(_ textView: NSTextView, didReceiveVideo url: URL)
+  func textView(_ textView: NSTextView, didReceiveAnimatedImage url: URL)
   func textView(_ textView: NSTextView, didFailToPasteAttachment failure: PasteboardAttachmentFailure)
   // Mention handling
   func textView(_ textView: NSTextView, didDetectMentionWith query: String, at location: Int)
@@ -25,6 +27,12 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   // Focus handling
   func textViewDidGainFocus(_ textView: NSTextView)
   func textViewDidLoseFocus(_ textView: NSTextView)
+}
+
+extension ComposeTextViewDelegate {
+  func textViewDidPressOptionReturn(_ textView: NSTextView) -> Bool {
+    false
+  }
 }
 
 class ComposeNSTextView: NSTextView {
@@ -57,7 +65,12 @@ class ComposeNSTextView: NSTextView {
 
     // Handle return key
     if event.keyCode == 36 {
-      if event.modifierFlags.contains(.command) {
+      if modifiers == [.option] {
+        if let delegate = delegate as? ComposeTextViewDelegate,
+           delegate.textViewDidPressOptionReturn(self) {
+          return
+        }
+      } else if event.modifierFlags.contains(.command) {
         if let delegate = delegate as? ComposeTextViewDelegate {
           if delegate.textViewDidPressCommandReturn(self) {
             return
@@ -247,7 +260,7 @@ class ComposeNSTextView: NSTextView {
     let result = InlinePasteboard.findAttachmentsResult(from: pasteboard, includeText: includeText)
     let attachments = result.attachments
 
-    if attachments.isEmpty, let failure = preferredFailure(from: result.failures) {
+    if let failure = preferredFailure(from: result.failures) {
       (delegate as? ComposeTextViewDelegate)?.textView(self, didFailToPasteAttachment: failure)
     }
 
@@ -256,7 +269,7 @@ class ComposeNSTextView: NSTextView {
         case let .image(image, url):
           notifyDelegateAboutImage(image, url)
         case let .animatedImage(url):
-          notifyDelegateAboutVideo(url)
+          notifyDelegateAboutAnimatedImage(url)
         case let .video(url, _):
           notifyDelegateAboutVideo(url)
         case let .file(url, _):
@@ -304,6 +317,10 @@ class ComposeNSTextView: NSTextView {
 
   private func notifyDelegateAboutVideo(_ url: URL) {
     (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveVideo: url)
+  }
+
+  private func notifyDelegateAboutAnimatedImage(_ url: URL) {
+    (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveAnimatedImage: url)
   }
 
   private func notifyDelegateAboutFormattingChange() {

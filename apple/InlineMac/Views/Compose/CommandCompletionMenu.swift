@@ -10,25 +10,30 @@ protocol CommandCompletionMenuDelegate: AnyObject {
   func commandMenuDidRequestClose(_ menu: CommandCompletionMenu)
 }
 
-final class CommandCompletionMenu: NSView {
+final class CommandCompletionMenu: ComposeCompletionMenuView {
   weak var delegate: CommandCompletionMenuDelegate?
 
   private let scrollView = NSScrollView()
   private let tableView = NSTableView()
-  private let backgroundView = NSVisualEffectView()
+  private let surfaceView: ComposeCompletionSurfaceView
 
   private var suggestions: [ComposeCommandSuggestion] = []
   private var selectedIndex = 0
-  private(set) var isVisible = false
+  var isVisible: Bool { isPresented }
   private var heightConstraint: NSLayoutConstraint!
 
   enum Layout {
     static let maxHeight: CGFloat = 184
     static let rowHeight: CGFloat = 40
+    static let cornerRadius: CGFloat = 16
   }
 
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
+  init(surfaceStyle: ComposeCompletionSurfaceStyle) {
+    surfaceView = ComposeCompletionSurfaceView(
+      style: surfaceStyle,
+      cornerRadius: Layout.cornerRadius
+    )
+    super.init(frame: .zero)
     setupView()
   }
 
@@ -37,22 +42,23 @@ final class CommandCompletionMenu: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override var acceptsFirstResponder: Bool { false }
-
   private func setupView() {
     wantsLayer = true
-
-    backgroundView.material = .popover
-    backgroundView.blendingMode = .withinWindow
-    backgroundView.state = .active
-    backgroundView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(backgroundView)
+    layer?.cornerRadius = Layout.cornerRadius
+    layer?.cornerCurve = .continuous
+    layer?.shadowColor = NSColor.black.cgColor
+    layer?.shadowOffset = NSSize(width: 0, height: -6)
+    layer?.shadowRadius = 14
+    layer?.shadowOpacity = 0.12
+    layer?.masksToBounds = false
+    addSubview(surfaceView)
 
     scrollView.hasVerticalScroller = true
     scrollView.hasHorizontalScroller = false
     scrollView.autohidesScrollers = true
     scrollView.scrollerStyle = .overlay
     scrollView.borderType = .noBorder
+    scrollView.drawsBackground = false
     scrollView.translatesAutoresizingMaskIntoConstraints = false
 
     tableView.headerView = nil
@@ -70,6 +76,7 @@ final class CommandCompletionMenu: NSView {
 
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("command"))
     column.width = 340
+    column.resizingMask = .autoresizingMask
     tableView.addTableColumn(column)
 
     scrollView.documentView = tableView
@@ -78,18 +85,28 @@ final class CommandCompletionMenu: NSView {
     heightConstraint = heightAnchor.constraint(equalToConstant: 0)
     NSLayoutConstraint.activate([
       heightConstraint,
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      surfaceView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      surfaceView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      surfaceView.topAnchor.constraint(equalTo: topAnchor),
+      surfaceView.bottomAnchor.constraint(equalTo: bottomAnchor),
       scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       scrollView.topAnchor.constraint(equalTo: topAnchor),
       scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+  }
 
-    alphaValue = 0
-    isHidden = true
+  override func layout() {
+    super.layout()
+    if bounds.width > 1 {
+      tableView.tableColumns.first?.width = bounds.width
+    }
+    layer?.shadowPath = CGPath(
+      roundedRect: bounds,
+      cornerWidth: Layout.cornerRadius,
+      cornerHeight: Layout.cornerRadius,
+      transform: nil
+    )
   }
 
   func updateSuggestions(_ suggestions: [ComposeCommandSuggestion]) {
@@ -104,41 +121,11 @@ final class CommandCompletionMenu: NSView {
       return
     }
 
-    guard !isVisible else {
-      isHidden = false
-      return
-    }
-    isVisible = true
-    isHidden = false
-
-    if animated {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.15
-        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        animator().alphaValue = 1.0
-      }
-    } else {
-      alphaValue = 1.0
-    }
+    present(animated: animated)
   }
 
   func hide(animated: Bool = true) {
-    guard isVisible || !isHidden else { return }
-    isVisible = false
-
-    if animated {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.1
-        context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        animator().alphaValue = 0.0
-      } completionHandler: { [weak self] in
-        guard let self, !isVisible else { return }
-        isHidden = true
-      }
-    } else {
-      alphaValue = 0.0
-      isHidden = true
-    }
+    dismiss(animated: animated)
   }
 
   func selectNext() {
@@ -168,11 +155,7 @@ final class CommandCompletionMenu: NSView {
     let contentHeight = CGFloat(suggestions.count) * Layout.rowHeight
     let newHeight = min(contentHeight, Layout.maxHeight)
 
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.2
-      context.timingFunction = ModernTimingFunctions.snappy
-      heightConstraint.animator().constant = newHeight
-    }
+    setHeight(newHeight, constraint: heightConstraint)
 
     tableView.reloadData()
     updateSelection()

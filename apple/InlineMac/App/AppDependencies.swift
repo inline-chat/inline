@@ -288,37 +288,22 @@ extension AppDependencies {
   }
 
   /// Direct navigation for a thread whose optimistic Chat/Dialog projection is
-  /// already installed locally. Existing-chat opens keep using the preload path.
+  /// already installed locally. Preserve the caller's Home/space context rather
+  /// than selecting the thread's creation destination. Existing-chat opens keep
+  /// using the preload path.
   @MainActor
-  func openNewlyCreatedChat(
-    peer: Peer,
-    spaceId: Int64?,
-    spaceName: String?
-  ) {
+  func openNewlyCreatedChatInCurrentContext(peer: Peer) {
     if let nav2 {
-      let space = spaceId.map {
-        Space(id: $0, name: spaceName ?? "Space", date: Date())
-      }
-      nav2.openNewlyCreatedChat(peer: peer, space: space)
+      nav2.navigate(to: .chat(peer: peer))
       return
     }
 
     if let nav3 {
       nav3ChatOpenPreloader?.cancelPendingOpen()
-      if let spaceId {
-        nav3.selectSpace(spaceId)
-      } else {
-        nav3.selectHome()
-      }
       nav3.open(.chat(peer: peer))
       return
     }
 
-    if let spaceId {
-      nav.openSpace(spaceId)
-    } else {
-      nav.openHome()
-    }
     nav.open(.chat(peer: peer))
   }
 

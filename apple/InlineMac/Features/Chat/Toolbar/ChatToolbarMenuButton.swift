@@ -75,11 +75,12 @@ struct ChatToolbarMenuButton: View {
         }
       }
 
-      if loadHistoryTask == nil {
-        Button("Load chat history", systemImage: "arrow.down.circle") {
-          loadLast1000Messages()
-        }
-      }
+      // Temporarily hidden while manual history loading is not part of the chat menu.
+      // if loadHistoryTask == nil {
+      //   Button("Load chat history", systemImage: "arrow.down.circle") {
+      //     loadLast1000Messages()
+      //   }
+      // }
 
       Divider()
 

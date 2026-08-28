@@ -80,6 +80,7 @@ struct RouteToolbarSpacePickerTitleItem: View {
   let selectedSpaceID: Int64?
   var homeTitle: String? = nil
   let spaces: [RouteToolbarSpacePickerItem]
+  var showsIndicator = true
   let help: String
   let onSelect: (Int64?) -> Void
 
@@ -106,9 +107,11 @@ struct RouteToolbarSpacePickerTitleItem: View {
             .foregroundStyle(.primary)
             .lineLimit(1)
 
-          Image(systemName: "chevron.down")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundStyle(.secondary)
+          if showsIndicator {
+            Image(systemName: "chevron.down")
+              .font(.system(size: 8, weight: .semibold))
+              .foregroundStyle(.secondary)
+          }
 
           Color.clear
             .frame(minWidth: 0, maxWidth: .infinity)

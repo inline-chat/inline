@@ -1,17 +1,41 @@
 import AppKit
+import InlineKit
 import SwiftUI
 
 struct EmptyRouteView: View {
+  @Environment(\.dependencies) private var dependencies
   @Environment(\.nav) private var nav
+  @Environment(SidebarViewModel.self) private var sidebar
 
   var body: some View {
-    EmptyRouteLogoButton {
-      nav.openCommandBar()
+    ZStack {
+      EmptyRouteLogoButton {
+        nav.openCommandBar()
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+      if #available(macOS 26.0, *), let dependencies {
+        AllChatsNewThreadComposeHost(
+          dependencies: dependencies,
+          spaces: composeSpaces,
+          selectedSpaceID: nav.selectedSpaceId,
+          placement: .bottom
+        )
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .routeContentBackground(.translucentPage)
     .emptyRouteWindowDragArea()
     .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+  }
+
+  private var composeSpaces: [AllChatsComposeSpace] {
+    sidebar.spaces
+      .map { AllChatsComposeSpace(id: $0.id, title: $0.displayName) }
+      .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
   }
 }
 

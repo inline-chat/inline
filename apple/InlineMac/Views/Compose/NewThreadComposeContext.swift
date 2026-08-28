@@ -55,10 +55,15 @@ final class NewThreadComposeAttachmentStore {
   func addImage(
     _ image: NSImage,
     preferredFormat: ImageFormat?,
+    fallbackURL: URL?,
     completion: @escaping Drafts2AttachmentCompletion
   ) -> String {
     materialize(prefix: "pending_photo", completion: completion) {
-      try .photo(FileCache.savePhoto(image: image, preferredFormat: preferredFormat))
+      try await AttachmentMediaMaterializer.image(
+        image,
+        preferredFormat: preferredFormat,
+        sourceURL: fallbackURL
+      )
     }
   }
 
@@ -69,7 +74,7 @@ final class NewThreadComposeAttachmentStore {
     completion: @escaping Drafts2AttachmentCompletion
   ) -> String {
     materialize(prefix: "pending_video", completion: completion) {
-      try await .video(FileCache.saveVideo(url: url, thumbnail: thumbnail))
+      try await AttachmentMediaMaterializer.video(url, thumbnail: thumbnail)
     }
   }
 
@@ -79,7 +84,7 @@ final class NewThreadComposeAttachmentStore {
     completion: @escaping Drafts2AttachmentCompletion
   ) -> String {
     materialize(prefix: "pending_animated_image", completion: completion) {
-      try await .video(FileCache.saveAnimatedImageAsVideo(url: url))
+      try await AttachmentMediaMaterializer.animatedImage(url)
     }
   }
 
@@ -89,7 +94,7 @@ final class NewThreadComposeAttachmentStore {
     completion: @escaping Drafts2AttachmentCompletion
   ) -> String {
     materialize(prefix: "pending_document", completion: completion) {
-      try await .document(FileCache.saveDocumentWithThumbnail(url: url))
+      try await AttachmentMediaMaterializer.file(url)
     }
   }
 
@@ -251,12 +256,17 @@ struct NewThreadComposeSubmissionFailure: LocalizedError {
   }
 }
 
+enum NewThreadComposeSubmissionIntent {
+  case openThread
+  case stayInCurrentView
+}
+
 /// Everything the real Glass composer needs from a pre-chat host. The host
 /// supplies one opaque accessory view; Compose owns its placement without
 /// learning what the contextual controls mean.
 @MainActor
 struct NewThreadComposeContext {
-  typealias Submit = @MainActor (PreparedNewThreadDraft) async
+  typealias Submit = @MainActor (PreparedNewThreadDraft, NewThreadComposeSubmissionIntent) async
     -> Result<InlineKit.Peer, NewThreadComposeSubmissionFailure>
 
   let sessionID: UUID

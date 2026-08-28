@@ -88,6 +88,17 @@ struct ExperimentalRootView: View {
         )
       }
     }
+    .onReceive(NotificationCenter.default.publisher(for: .authAccountRecoveryRequired)) { _ in
+      Task {
+        await LogoutPerformer.perform(
+          notifyServer: false,
+          mainRouter: mainViewRouter,
+          navigation: navigation,
+          onboardingNavigation: onboardingNavigation,
+          router: router
+        )
+      }
+    }
     .task {
       guard await Auth.shared.hasPendingLogout() else { return }
       await LogoutPerformer.perform(
@@ -104,7 +115,9 @@ struct ExperimentalRootView: View {
   private var loadingView: some View {
     VStack(spacing: 12) {
       ProgressView()
-      Text("Unlocking...")
+      Text(Auth.shared.getHasPendingAccountTransition()
+        ? "Finishing account recovery… Restart Inline if this does not complete."
+        : "Unlocking...")
         .font(.headline)
         .foregroundStyle(.secondary)
     }
@@ -142,6 +155,7 @@ private struct ExperimentalAuthedRootView: View {
   private var chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.sortMode)
   private var sortModeRaw = ExperimentalHomeSortMode.recentActivity.rawValue
+  @AppStorage private var excludedHomeSpaceIDsRaw: String
 
   @Environment(Router.self) private var router
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -163,9 +177,16 @@ private struct ExperimentalAuthedRootView: View {
     let sortMode = ExperimentalHomeSortMode(
       rawValue: defaults.string(forKey: ExperimentalHomePreferenceKeys.sortMode) ?? ""
     ) ?? .recentActivity
+    let userID = Auth.shared.getCurrentUserId()
+    let exclusionsKey = ExperimentalHomePreferenceKeys.excludedHomeSpaceIDs(userID: userID)
+    let homeSpaceExclusions = HomeSpaceExclusions(
+      rawValue: defaults.string(forKey: exclusionsKey) ?? ""
+    )
+    _excludedHomeSpaceIDsRaw = AppStorage(wrappedValue: "", exclusionsKey)
     let initialHomeConfiguration = ExperimentalHomeListConfiguration(
       spaceID: nil,
       includeSpaceChatsInHome: homeScope == .all,
+      homeSpaceExclusions: homeSpaceExclusions,
       inboxSort: sortMode.chatListSort,
       allChatsFilter: .all
     )
@@ -359,6 +380,9 @@ private struct ExperimentalAuthedRootView: View {
       configureHomeList()
     }
     .onChange(of: allChatsFilterRaw) { _, _ in
+      configureHomeList()
+    }
+    .onChange(of: excludedHomeSpaceIDsRaw) { _, _ in
       configureHomeList()
     }
   }
@@ -566,6 +590,7 @@ private struct ExperimentalAuthedRootView: View {
     homeListStore.setConfiguration(ExperimentalHomeListConfiguration(
       spaceID: nav.activeSpaceId,
       includeSpaceChatsInHome: homeScope == .all,
+      homeSpaceExclusions: homeSpaceExclusions,
       inboxSort: sortMode.chatListSort,
       allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all
     ))
@@ -1037,6 +1062,7 @@ private struct ExperimentalAuthedRootView: View {
       allChatsFilter: showsAllChatsFilter
         ? (ChatListFilter(rawValue: allChatsFilterRaw) ?? .all)
         : nil,
+      homeSpaceExclusionMenu: homeSpaceExclusionMenu,
       activeSpaceName: activeSpace?.displayName,
       onNotifications: {
         isNotificationSettingsPresented = true
@@ -1053,6 +1079,7 @@ private struct ExperimentalAuthedRootView: View {
       onSelectAllChatsFilter: { filter in
         allChatsFilterRaw = filter.rawValue
       },
+      onToggleHomeSpaceExclusion: toggleHomeSpaceExclusion,
       onCleanup: showsOpenChatsCleanup ? cleanUpOpenChats : nil,
       onInvite: {
         if let activeSpace {
@@ -1083,6 +1110,26 @@ private struct ExperimentalAuthedRootView: View {
   private var selectedChatItemRenderMode: ExperimentalHomeChatItemRenderMode {
     let mode = ExperimentalHomeChatItemRenderMode(rawValue: chatItemRenderModeRaw) ?? .twoLineLastMessage
     return mode == .oneLineLastMessage ? .twoLineLastMessage : mode
+  }
+
+  private var homeSpaceExclusions: HomeSpaceExclusions {
+    HomeSpaceExclusions(rawValue: excludedHomeSpaceIDsRaw)
+  }
+
+  private var homeSpaceExclusionMenu: ExperimentalHomeSpaceExclusionMenu? {
+    guard showsAllChatsFilter, nav.activeSpaceId == nil else { return nil }
+    let spaces = compactSpaceList.spaces
+      .map { ExperimentalHomeSpaceExclusionOption(id: $0.id, title: $0.displayName) }
+      .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    guard spaces.isEmpty == false else { return nil }
+    return ExperimentalHomeSpaceExclusionMenu(
+      spaces: spaces,
+      excludedSpaceIDs: homeSpaceExclusions.spaceIDs
+    )
+  }
+
+  private func toggleHomeSpaceExclusion(_ spaceID: Int64) {
+    excludedHomeSpaceIDsRaw = homeSpaceExclusions.toggling(spaceID).rawValue
   }
 
   private var activeSpace: Space? {
@@ -1212,18 +1259,30 @@ private final class ExperimentalConnectionSpinnerView: UIView {
   }
 }
 
+private struct ExperimentalHomeSpaceExclusionOption: Equatable, Identifiable {
+  let id: Int64
+  let title: String
+}
+
+private struct ExperimentalHomeSpaceExclusionMenu: Equatable {
+  let spaces: [ExperimentalHomeSpaceExclusionOption]
+  let excludedSpaceIDs: Set<Int64>
+}
+
 private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let notificationSubtitle: String
   let notificationSystemImage: String
   let itemSize: ExperimentalHomeChatItemRenderMode
   let sortMode: ExperimentalHomeSortMode
   let allChatsFilter: ChatListFilter?
+  let homeSpaceExclusionMenu: ExperimentalHomeSpaceExclusionMenu?
   let activeSpaceName: String?
   let onNotifications: () -> Void
   let onArchive: () -> Void
   let onSelectItemSize: (ExperimentalHomeChatItemRenderMode) -> Void
   let onSelectSortMode: (ExperimentalHomeSortMode) -> Void
   let onSelectAllChatsFilter: (ChatListFilter) -> Void
+  let onToggleHomeSpaceExclusion: (Int64) -> Void
   let onCleanup: (() -> Void)?
   let onInvite: () -> Void
   let onMembers: (() -> Void)?
@@ -1304,10 +1363,33 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
         }
       )
     }
+    let excludedSpacesMenu = homeSpaceExclusionMenu.map { configuration in
+      let excludedCount = configuration.spaces.filter {
+        configuration.excludedSpaceIDs.contains($0.id)
+      }.count
+      let excludedSubtitle = switch excludedCount {
+      case 0: "All spaces shown"
+      case 1: "1 space excluded"
+      default: "\(excludedCount) spaces excluded"
+      }
+      return UIMenu(
+        title: "Exclude Spaces from Home",
+        subtitle: excludedSubtitle,
+        image: UIImage(systemName: "eye.slash"),
+        children: configuration.spaces.map { space in
+          UIAction(
+            title: space.title,
+            state: configuration.excludedSpaceIDs.contains(space.id) ? .on : .off
+          ) { _ in
+            onToggleHomeSpaceExclusion(space.id)
+          }
+        }
+      )
+    }
     let viewOptions = UIMenu(
       title: "View Options",
       image: UIImage(systemName: "slider.horizontal.3"),
-      children: [itemSizeMenu, sortMenu]
+      children: [itemSizeMenu, sortMenu] + (excludedSpacesMenu.map { [$0] } ?? [])
     )
 
     let viewSection = UIMenu(

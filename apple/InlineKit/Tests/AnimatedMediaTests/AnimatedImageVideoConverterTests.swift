@@ -8,6 +8,25 @@ import UniformTypeIdentifiers
 
 @Suite("Animated image video converter")
 struct AnimatedImageVideoConverterTests {
+  @Test("upload conversion allows animated images up to 60 seconds")
+  func uploadConversionDurationPolicy() async throws {
+    #expect(AnimatedImageVideoConversionOptions.uploadDefault.maxDurationSeconds == 60)
+
+    let gifURL = try makeTestGIF(frameCount: 4, frameDelay: 15)
+    let result = try await AnimatedImageVideoConverter.convertGIF(at: gifURL)
+
+    #expect(result.duration >= 59)
+  }
+
+  @Test("upload conversion rejects animated images over 60 seconds")
+  func uploadConversionRejectsOverDurationPolicy() async throws {
+    let gifURL = try makeTestGIF(frameCount: 4, frameDelay: 16)
+
+    await #expect(throws: AnimatedImageVideoConversionError.durationTooLong) {
+      _ = try await AnimatedImageVideoConverter.convertGIF(at: gifURL)
+    }
+  }
+
   @Test("converts an animated GIF to a silent MP4")
   func convertsAnimatedGIFToSilentMP4() async throws {
     let gifURL = try makeTestGIF(frameCount: 3)
@@ -85,7 +104,7 @@ struct AnimatedImageVideoConverterTests {
   }
 }
 
-private func makeTestGIF(frameCount: Int) throws -> URL {
+private func makeTestGIF(frameCount: Int, frameDelay: Double = 0.12) throws -> URL {
   let url = FileManager.default.temporaryDirectory
     .appendingPathComponent("animated-media-test-\(UUID().uuidString).gif")
   let destination = try #require(CGImageDestinationCreateWithURL(
@@ -102,8 +121,8 @@ private func makeTestGIF(frameCount: Int) throws -> URL {
 
   let frameProperties = [
     kCGImagePropertyGIFDictionary: [
-      kCGImagePropertyGIFDelayTime: 0.12,
-      kCGImagePropertyGIFUnclampedDelayTime: 0.12,
+      kCGImagePropertyGIFDelayTime: frameDelay,
+      kCGImagePropertyGIFUnclampedDelayTime: frameDelay,
     ],
   ] as CFDictionary
 

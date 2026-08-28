@@ -1,14 +1,13 @@
 import AppKit
 import InlineKit
 import InlineMacUI
-import SwiftUI
 
 protocol ComposeAutocompleteMenuDelegate: AnyObject {
   func autocompleteMenu(_ menu: ComposeAutocompleteMenu, didSelect item: ComposeAutocompleteItem)
   func autocompleteMenuDidRequestClose(_ menu: ComposeAutocompleteMenu)
 }
 
-final class ComposeAutocompleteMenu: NSView {
+final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
   weak var delegate: ComposeAutocompleteMenuDelegate?
 
   private let scrollView = ComposeAutocompleteScrollView()
@@ -16,23 +15,16 @@ final class ComposeAutocompleteMenu: NSView {
   private let paletteScrollView = ComposeAutocompleteScrollView()
   private let paletteLayout = NSCollectionViewFlowLayout()
   private let collectionView = ComposeAutocompleteCollectionView()
-  private let backgroundView = NSVisualEffectView()
-  private let backgroundFillView = NSView()
-  private var glassBackgroundView: NSView?
+  private let surfaceView: ComposeCompletionSurfaceView
 
   private var items: [ComposeAutocompleteItem] = []
   private var selectedIndex = 0
   private var availableWidth: CGFloat?
   private var style: Style = .list
-  private(set) var isVisible = false
   private(set) var canSelectItems = true
   private(set) var presentationSession: ComposeAutocompletePresentationSession?
   private var heightConstraint: NSLayoutConstraint!
   private var widthConstraint: NSLayoutConstraint!
-
-  var preferredWidth: CGFloat {
-    widthConstraint?.constant ?? Layout.listWidth
-  }
 
   var isShowingEmojiPalette: Bool {
     style == .emojiPalette
@@ -45,10 +37,9 @@ final class ComposeAutocompleteMenu: NSView {
 
   enum Layout {
     static let listWidth: CGFloat = 340
-    static let listMinWidth: CGFloat = 280
     static let maxHeight: CGFloat = 184
     static let rowHeight: CGFloat = 36
-    static let cornerRadius: CGFloat = 12
+    static let cornerRadius: CGFloat = 16
     static let paletteItemSize: CGFloat = 34
     static let paletteHeight: CGFloat = 42
     static let paletteSpacing: CGFloat = 0
@@ -58,8 +49,12 @@ final class ComposeAutocompleteMenu: NSView {
     static let paletteMaxVisibleItems = 7
   }
 
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
+  init(surfaceStyle: ComposeCompletionSurfaceStyle) {
+    surfaceView = ComposeCompletionSurfaceView(
+      style: surfaceStyle,
+      cornerRadius: Layout.cornerRadius
+    )
+    super.init(frame: .zero)
     setupView()
   }
 
@@ -68,10 +63,13 @@ final class ComposeAutocompleteMenu: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override var acceptsFirstResponder: Bool { false }
+  var isVisible: Bool { isPresented }
 
   override func layout() {
     super.layout()
+    if style == .list, bounds.width > 1 {
+      tableView.tableColumns.first?.width = bounds.width
+    }
     updateLayerGeometry()
   }
 
@@ -113,6 +111,12 @@ final class ComposeAutocompleteMenu: NSView {
     updateSelection()
   }
 
+  func setAvailableWidth(_ availableWidth: CGFloat) {
+    guard availableWidth > 1, self.availableWidth != availableWidth else { return }
+    self.availableWidth = availableWidth
+    updateSize()
+  }
+
   @discardableResult
   func retainVisibleContentWhileLoading() -> Bool {
     guard isVisible, !items.isEmpty
@@ -130,43 +134,13 @@ final class ComposeAutocompleteMenu: NSView {
       return
     }
 
-    guard !isVisible else {
-      isHidden = false
-      return
-    }
-    isVisible = true
-    isHidden = false
-
-    if animated {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.15
-        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        animator().alphaValue = 1.0
-      }
-    } else {
-      alphaValue = 1.0
-    }
+    present(animated: animated)
   }
 
   func hide(animated: Bool = true) {
     presentationSession = nil
     setContentInteractionEnabled(true)
-    guard isVisible || !isHidden else { return }
-    isVisible = false
-
-    if animated {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.1
-        context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        animator().alphaValue = 0.0
-      } completionHandler: { [weak self] in
-        guard let self, !isVisible else { return }
-        isHidden = true
-      }
-    } else {
-      alphaValue = 0.0
-      isHidden = true
-    }
+    dismiss(animated: animated)
   }
 
   @discardableResult
@@ -184,30 +158,10 @@ final class ComposeAutocompleteMenu: NSView {
 
   private func setupView() {
     wantsLayer = true
-    layer?.borderWidth = 1
     layer?.shadowOffset = NSSize(width: 0, height: -8)
     layer?.shadowRadius = 22
     layer?.masksToBounds = false
-
-    if #available(macOS 26.0, *) {
-      let glassBackgroundView = ComposeAutocompletePaletteGlassBackgroundView()
-      glassBackgroundView.translatesAutoresizingMaskIntoConstraints = false
-      self.glassBackgroundView = glassBackgroundView
-      addSubview(glassBackgroundView)
-    }
-
-    backgroundView.material = .menu
-    backgroundView.blendingMode = .withinWindow
-    backgroundView.state = .active
-    backgroundView.wantsLayer = true
-    backgroundView.layer?.masksToBounds = true
-    backgroundView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(backgroundView)
-
-    backgroundFillView.wantsLayer = true
-    backgroundFillView.layer?.masksToBounds = true
-    backgroundFillView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(backgroundFillView)
+    addSubview(surfaceView)
 
     scrollView.hasVerticalScroller = false
     scrollView.hasHorizontalScroller = false
@@ -235,6 +189,7 @@ final class ComposeAutocompleteMenu: NSView {
 
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("autocomplete"))
     column.width = Layout.listWidth
+    column.resizingMask = .autoresizingMask
     tableView.addTableColumn(column)
 
     scrollView.documentView = tableView
@@ -278,17 +233,14 @@ final class ComposeAutocompleteMenu: NSView {
 
     heightConstraint = heightAnchor.constraint(equalToConstant: 0)
     widthConstraint = widthAnchor.constraint(equalToConstant: Layout.listWidth)
-    var constraints: [NSLayoutConstraint] = [
+    widthConstraint.priority = .defaultHigh
+    let constraints: [NSLayoutConstraint] = [
       heightConstraint,
       widthConstraint,
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      backgroundFillView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundFillView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundFillView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundFillView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      surfaceView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      surfaceView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      surfaceView.topAnchor.constraint(equalTo: topAnchor),
+      surfaceView.bottomAnchor.constraint(equalTo: bottomAnchor),
       scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       scrollView.topAnchor.constraint(equalTo: topAnchor),
@@ -299,19 +251,8 @@ final class ComposeAutocompleteMenu: NSView {
       paletteScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ]
 
-    if let glassBackgroundView {
-      constraints.append(contentsOf: [
-        glassBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-        glassBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-        glassBackgroundView.topAnchor.constraint(equalTo: topAnchor),
-        glassBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      ])
-    }
-
     NSLayoutConstraint.activate(constraints)
 
-    alphaValue = 0
-    isHidden = true
     updateLayerGeometry()
     updateBackdropAppearance()
     updateVisibleContent()
@@ -335,21 +276,9 @@ final class ComposeAutocompleteMenu: NSView {
     case .list:
       scrollView.isHidden = false
       paletteScrollView.isHidden = true
-      glassBackgroundView?.isHidden = true
-      backgroundView.isHidden = false
-      backgroundFillView.isHidden = false
     case .emojiPalette:
       scrollView.isHidden = true
       paletteScrollView.isHidden = false
-      if #available(macOS 26.0, *) {
-        glassBackgroundView?.isHidden = false
-        backgroundView.isHidden = true
-        backgroundFillView.isHidden = true
-      } else {
-        glassBackgroundView?.isHidden = true
-        backgroundView.isHidden = false
-        backgroundFillView.isHidden = false
-      }
     }
     updateLayerGeometry()
     updateBackdropAppearance()
@@ -362,19 +291,15 @@ final class ComposeAutocompleteMenu: NSView {
     switch style {
     case .list:
       newHeight = min(CGFloat(items.count) * Layout.rowHeight, Layout.maxHeight)
-      newWidth = availableWidth.flatMap { $0 > 0 ? max($0, Layout.listMinWidth) : nil } ?? Layout.listWidth
+      newWidth = availableWidth.flatMap { $0 > 0 ? $0 : nil } ?? Layout.listWidth
       tableView.tableColumns.first?.width = newWidth
     case .emojiPalette:
       newHeight = Layout.paletteHeight
       newWidth = availableWidth.flatMap { $0 > 0 ? $0 : nil } ?? naturalPaletteWidth()
     }
 
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.16
-      context.timingFunction = ModernTimingFunctions.snappy
-      heightConstraint.animator().constant = newHeight
-      widthConstraint.animator().constant = newWidth
-    }
+    setHeight(newHeight, constraint: heightConstraint)
+    widthConstraint.constant = newWidth
   }
 
   private func naturalPaletteWidth() -> CGFloat {
@@ -415,24 +340,6 @@ final class ComposeAutocompleteMenu: NSView {
 
   private func updateBackdropAppearance() {
     let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let fillColor: NSColor
-    let borderColor: NSColor
-
-    switch style {
-    case .list:
-      fillColor = isDark
-        ? NSColor(calibratedWhite: 0.16, alpha: 0.70)
-        : NSColor(calibratedWhite: 1.00, alpha: 0.78)
-      borderColor = .clear
-    case .emojiPalette:
-      fillColor = isDark
-        ? NSColor(calibratedWhite: 0.16, alpha: 0.55)
-        : NSColor(calibratedWhite: 1.00, alpha: 0.62)
-      borderColor = .clear
-    }
-
-    backgroundFillView.layer?.backgroundColor = resolvedCGColor(fillColor)
-    layer?.borderColor = resolvedCGColor(borderColor)
     layer?.shadowColor = NSColor.black.cgColor
     switch style {
     case .list:
@@ -450,7 +357,8 @@ final class ComposeAutocompleteMenu: NSView {
     let cornerRadius = currentCornerRadius
 
     layer?.cornerRadius = cornerRadius
-    layer?.borderWidth = 0
+    layer?.cornerCurve = .continuous
+    surfaceView.cornerRadius = cornerRadius
     layer?.shadowPath = CGPath(
       roundedRect: bounds,
       cornerWidth: cornerRadius,
@@ -458,8 +366,6 @@ final class ComposeAutocompleteMenu: NSView {
       transform: nil
     )
 
-    backgroundView.layer?.cornerRadius = cornerRadius
-    backgroundFillView.layer?.cornerRadius = cornerRadius
     scrollView.layer?.cornerRadius = cornerRadius
     paletteScrollView.layer?.cornerRadius = cornerRadius
     paletteLayout.itemSize = NSSize(width: Layout.paletteItemSize, height: Layout.paletteItemSize)
@@ -478,10 +384,6 @@ final class ComposeAutocompleteMenu: NSView {
     case .emojiPalette:
       max(bounds.height / 2, Layout.paletteHeight / 2)
     }
-  }
-
-  private func resolvedCGColor(_ color: NSColor) -> CGColor {
-    color.resolvedColor(with: effectiveAppearance).cgColor
   }
 
   @objc private func tableViewClicked() {
@@ -586,8 +488,7 @@ extension ComposeAutocompleteMenu: NSCollectionViewDataSource {
     )
 
     if let paletteItem = itemView as? ComposeEmojiAutocompletePaletteItem,
-       items.indices.contains(indexPath.item)
-    {
+       items.indices.contains(indexPath.item) {
       paletteItem.configure(with: items[indexPath.item], selected: indexPath.item == selectedIndex)
     }
 
@@ -607,43 +508,5 @@ extension ComposeAutocompleteMenu: NSCollectionViewDelegate {
     DispatchQueue.main.async { [weak self] in
       _ = self?.selectCurrentItem()
     }
-  }
-}
-
-@available(macOS 26.0, *)
-private final class ComposeAutocompletePaletteGlassBackgroundView: NSView {
-  private let hostingView = NSHostingView(rootView: ComposeAutocompletePaletteGlassBackground())
-
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-
-    hostingView.translatesAutoresizingMaskIntoConstraints = false
-    hostingView.wantsLayer = true
-    hostingView.layer?.backgroundColor = NSColor.clear.cgColor
-
-    addSubview(hostingView)
-    NSLayoutConstraint.activate([
-      hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      hostingView.topAnchor.constraint(equalTo: topAnchor),
-      hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-}
-
-@available(macOS 26.0, *)
-private struct ComposeAutocompletePaletteGlassBackground: View {
-  var body: some View {
-    GlassEffectContainer(spacing: 0) {
-      Color.clear
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .glassEffect(.regular.interactive(), in: Capsule())
-    }
-    .allowsHitTesting(false)
   }
 }

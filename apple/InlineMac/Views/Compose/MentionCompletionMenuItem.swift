@@ -22,6 +22,7 @@ class MentionTableCellView: NSTableCellView {
     set {
       guard _isSelected != newValue else { return }
       _isSelected = newValue
+      setAccessibilitySelected(newValue)
       updateAppearance()
     }
   }
@@ -39,7 +40,8 @@ class MentionTableCellView: NSTableCellView {
   private func setupView() {
     // Container for hover effect
     containerView.wantsLayer = true
-    containerView.layer?.cornerRadius = 0
+    containerView.layer?.cornerRadius = 8
+    containerView.layer?.cornerCurve = .continuous
     containerView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(containerView)
 
@@ -64,10 +66,10 @@ class MentionTableCellView: NSTableCellView {
     containerView.addSubview(usernameLabel)
 
     NSLayoutConstraint.activate([
-      containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      containerView.topAnchor.constraint(equalTo: topAnchor),
-      containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      containerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+      containerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+      containerView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+      containerView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
     ])
   }
 
@@ -78,6 +80,7 @@ class MentionTableCellView: NSTableCellView {
     nameLabel.stringValue = item.title
     usernameLabel.stringValue = item.subtitle ?? ""
     usernameLabel.isHidden = item.subtitle == nil
+    setAccessibilityLabel([item.title, item.subtitle].compactMap { $0 }.joined(separator: ", "))
 
     // Remove existing avatar if any
     avatarView?.removeFromSuperview()
@@ -87,32 +90,32 @@ class MentionTableCellView: NSTableCellView {
 
     let iconView: NSView
     switch item {
-      case let .user(user):
-        let newAvatarView = ChatIconSwiftUIBridge(.user(user.userInfo), size: MentionCompletionMenu.Layout.avatarSize)
-        newAvatarView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.addSubview(newAvatarView)
-        avatarView = newAvatarView
-        iconView = newAvatarView
+    case let .user(user):
+      let newAvatarView = ChatIconSwiftUIBridge(.user(user.userInfo), size: MentionCompletionMenu.Layout.avatarSize)
+      newAvatarView.translatesAutoresizingMaskIntoConstraints = false
+      containerView.addSubview(newAvatarView)
+      avatarView = newAvatarView
+      iconView = newAvatarView
 
-      case .group:
-        let imageView = NSImageView()
-        imageView.image = NSImage(systemSymbolName: "person.2.fill", accessibilityDescription: nil)
-        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-        imageView.contentTintColor = .secondaryLabelColor
-        imageView.wantsLayer = true
-        imageView.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.2).cgColor
-        imageView.layer?.cornerRadius = MentionCompletionMenu.Layout.avatarSize / 2
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.addSubview(imageView)
-        groupIconView = imageView
-        iconView = imageView
+    case .group:
+      let imageView = NSImageView()
+      imageView.image = NSImage(systemSymbolName: "person.2.fill", accessibilityDescription: nil)
+      imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+      imageView.contentTintColor = .secondaryLabelColor
+      imageView.wantsLayer = true
+      imageView.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.2).cgColor
+      imageView.layer?.cornerRadius = MentionCompletionMenu.Layout.avatarSize / 2
+      imageView.translatesAutoresizingMaskIntoConstraints = false
+      containerView.addSubview(imageView)
+      groupIconView = imageView
+      iconView = imageView
 
-      case let .agent(agent):
-        let newAvatarView = ChatIconSwiftUIBridge(.user(agent.botUserInfo), size: MentionCompletionMenu.Layout.avatarSize)
-        newAvatarView.translatesAutoresizingMaskIntoConstraints = false
-        containerView.addSubview(newAvatarView)
-        avatarView = newAvatarView
-        iconView = newAvatarView
+    case let .agent(agent):
+      let newAvatarView = ChatIconSwiftUIBridge(.user(agent.botUserInfo), size: MentionCompletionMenu.Layout.avatarSize)
+      newAvatarView.translatesAutoresizingMaskIntoConstraints = false
+      containerView.addSubview(newAvatarView)
+      avatarView = newAvatarView
+      iconView = newAvatarView
     }
 
     // Vertical layout - name and username stacked vertically
@@ -157,9 +160,11 @@ class MentionTableCellView: NSTableCellView {
   private func updateAppearance() {
     if isSelected {
       // Selected state: accent background with white text
-      containerView.layer?.backgroundColor = NSColor.accent.cgColor
-      nameLabel.textColor = .white
-      usernameLabel.textColor = NSColor.white.withAlphaComponent(0.9)
+      containerView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor
+        .resolvedColor(with: effectiveAppearance)
+        .cgColor
+      nameLabel.textColor = .alternateSelectedControlTextColor
+      usernameLabel.textColor = NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.9)
     } else {
       // Normal state: clear background with standard text colors
       containerView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -171,5 +176,10 @@ class MentionTableCellView: NSTableCellView {
   override func draw(_ dirtyRect: NSRect) {
     // Don't call super.draw to prevent any native background drawing
     // Our custom styling in updateAppearance handles all background drawing
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateAppearance()
   }
 }

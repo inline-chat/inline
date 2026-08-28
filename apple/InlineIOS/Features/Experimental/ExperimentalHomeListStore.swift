@@ -10,8 +10,19 @@ import Translation
 struct ExperimentalHomeListConfiguration: Equatable, Sendable {
   let spaceID: Int64?
   let includeSpaceChatsInHome: Bool
+  let homeSpaceExclusions: HomeSpaceExclusions
   let inboxSort: ChatListSort
   let allChatsFilter: ChatListFilter
+
+  func visibleSnapshots(_ snapshots: [ChatListItemSnapshot]) -> [ChatListItemSnapshot] {
+    guard spaceID == nil, homeSpaceExclusions.isEmpty == false else {
+      return snapshots
+    }
+
+    return snapshots.filter {
+      homeSpaceExclusions.includesInHome(spaceID: $0.spaceID)
+    }
+  }
 }
 
 struct ExperimentalHomeListState: Equatable, Sendable {
@@ -60,6 +71,7 @@ final class ExperimentalHomeListStore: ObservableObject {
     let scopeChanged = configuration.map {
       $0.spaceID != newConfiguration.spaceID
         || $0.includeSpaceChatsInHome != newConfiguration.includeSpaceChatsInHome
+        || $0.homeSpaceExclusions != newConfiguration.homeSpaceExclusions
     } ?? true
     configuration = newConfiguration
     if scopeChanged {
@@ -146,7 +158,7 @@ final class ExperimentalHomeListStore: ObservableObject {
       }
       return ExperimentalHomeListState(
         presentation: ChatListPresentation.make(
-          from: snapshots,
+          from: configuration.visibleSnapshots(snapshots),
           inboxSort: configuration.inboxSort,
           allChatsFilter: configuration.allChatsFilter
         ),
@@ -323,8 +335,9 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
       category: .home,
       "rows=\(snapshots.count)"
     )
+    let visibleSnapshots = configuration.visibleSnapshots(snapshots)
     let presentation = ChatListPresentation.make(
-      from: snapshots,
+      from: visibleSnapshots,
       inboxSort: configuration.inboxSort,
       allChatsFilter: configuration.allChatsFilter
     )
@@ -335,7 +348,7 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
       category: "ios.home.prepare",
       durationMs: durationMs,
       thresholdMs: 25,
-      data: ["rows": snapshots.count]
+      data: ["rows": visibleSnapshots.count]
     )
 
     var immediate: ExperimentalHomeListPreparedUpdate?

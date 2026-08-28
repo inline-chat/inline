@@ -10,16 +10,16 @@ protocol MentionCompletionMenuDelegate: AnyObject {
   func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu)
 }
 
-class MentionCompletionMenu: NSView {
+class MentionCompletionMenu: ComposeCompletionMenuView {
   weak var delegate: MentionCompletionMenuDelegate?
 
   private let scrollView = NSScrollView()
   private let tableView = NSTableView()
-  private let backgroundView = NSVisualEffectView()
+  private let surfaceView: ComposeCompletionSurfaceView
   private let log = Log.scoped("MentionCompletionMenu")
   private let model = MentionCompletionViewModel()
 
-  private(set) var isVisible: Bool = false
+  var isVisible: Bool { isPresented }
 
   private var heightConstraint: NSLayoutConstraint!
   private var filteredItems: [MentionCompletionItem] {
@@ -38,7 +38,7 @@ class MentionCompletionMenu: NSView {
   public enum Layout {
     static let maxHeight: CGFloat = 144
     static let rowHeight: CGFloat = 36
-    static let cornerRadius: CGFloat = 0
+    static let cornerRadius: CGFloat = 16
     static let avatarSize: CGFloat = 28
     static let horizontalPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 2
@@ -46,8 +46,12 @@ class MentionCompletionMenu: NSView {
     static let nameUsernameSpacing: CGFloat = 0
   }
 
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
+  init(surfaceStyle: ComposeCompletionSurfaceStyle) {
+    surfaceView = ComposeCompletionSurfaceView(
+      style: surfaceStyle,
+      cornerRadius: Layout.cornerRadius
+    )
+    super.init(frame: .zero)
     setupView()
   }
 
@@ -56,22 +60,16 @@ class MentionCompletionMenu: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override var acceptsFirstResponder: Bool {
-    // Don't steal focus from compose view
-    false
-  }
-
   private func setupView() {
     wantsLayer = true
-
-    // Background with vibrancy
-    backgroundView.material = .popover
-    backgroundView.blendingMode = .withinWindow
-    backgroundView.state = .active
-    backgroundView.wantsLayer = true
-    backgroundView.layer?.cornerRadius = Layout.cornerRadius
-    backgroundView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(backgroundView)
+    layer?.cornerRadius = Layout.cornerRadius
+    layer?.cornerCurve = .continuous
+    layer?.shadowColor = NSColor.black.cgColor
+    layer?.shadowOffset = NSSize(width: 0, height: -6)
+    layer?.shadowRadius = 14
+    layer?.shadowOpacity = 0.12
+    layer?.masksToBounds = false
+    addSubview(surfaceView)
 
     // Scroll view setup
     scrollView.hasVerticalScroller = true
@@ -79,6 +77,7 @@ class MentionCompletionMenu: NSView {
     scrollView.autohidesScrollers = true
     scrollView.scrollerStyle = .overlay
     scrollView.borderType = .noBorder
+    scrollView.drawsBackground = false
     scrollView.wantsLayer = true
     scrollView.layer?.cornerRadius = Layout.cornerRadius
     scrollView.layer?.masksToBounds = true
@@ -106,6 +105,7 @@ class MentionCompletionMenu: NSView {
     // Create column
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("participant"))
     column.width = 300
+    column.resizingMask = .autoresizingMask
     tableView.addTableColumn(column)
 
     scrollView.documentView = tableView
@@ -120,20 +120,29 @@ class MentionCompletionMenu: NSView {
     NSLayoutConstraint.activate([
       heightConstraint,
 
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      backgroundView.topAnchor.constraint(equalTo: topAnchor),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      surfaceView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      surfaceView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      surfaceView.topAnchor.constraint(equalTo: topAnchor),
+      surfaceView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       scrollView.topAnchor.constraint(equalTo: topAnchor),
       scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+  }
 
-    // Initially hidden
-    alphaValue = 0
-    isHidden = true
+  override func layout() {
+    super.layout()
+    if bounds.width > 1 {
+      tableView.tableColumns.first?.width = bounds.width
+    }
+    layer?.shadowPath = CGPath(
+      roundedRect: bounds,
+      cornerWidth: Layout.cornerRadius,
+      cornerHeight: Layout.cornerRadius,
+      transform: nil
+    )
   }
 
   func updateParticipants(_ participants: [UserInfo]) {
@@ -183,12 +192,7 @@ class MentionCompletionMenu: NSView {
         "🔍 MentionMenu updateTableViewAndHeight: itemCount=\(itemCount), contentHeight=\(contentHeight), finalHeight=\(newHeight)"
       )
 
-    // Animate height change
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.2
-      context.timingFunction = ModernTimingFunctions.snappy
-      heightConstraint.animator().constant = newHeight
-    }
+    setHeight(newHeight, constraint: heightConstraint)
 
     // Update selection if needed
     if selectedIndex < itemCount {
@@ -204,46 +208,14 @@ class MentionCompletionMenu: NSView {
       return
     }
 
-    guard !isVisible else {
-      log.trace("MentionMenu show: already visible")
-      isHidden = false
-      return
-    }
-
     log.trace("MentionMenu show: showing menu with \(filteredItems.count) participants")
-    isVisible = true
-    isHidden = false
-
-    if animated {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.15
-        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        animator().alphaValue = 1.0
-      }
-    } else {
-      alphaValue = 1.0
-    }
+    present(animated: animated)
 
     log.trace("MentionMenu show: menu should now be visible, alphaValue=\(alphaValue), isHidden=\(isHidden)")
   }
 
   func hide(animated: Bool = true) {
-    guard isVisible else { return }
-    isVisible = false
-
-    if animated {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.1
-        context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        animator().alphaValue = 0.0
-      } completionHandler: { [weak self] in
-        guard let self, !isVisible else { return }
-        isHidden = true
-      }
-    } else {
-      alphaValue = 0.0
-      isHidden = true
-    }
+    dismiss(animated: animated)
   }
 
   func selectNext() {

@@ -11,6 +11,8 @@ protocol ComposeImplementation: AnyObject {
   func handleFileDrop(_ urls: [URL])
   func handleTextDropOrPaste(_ text: String)
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL?)
+  func handleVideoDropOrPaste(_ url: URL, thumbnail: NSImage?)
+  func handleAnimatedImageDropOrPaste(_ url: URL)
 }
 
 protocol ComposeAttachmentOwner: AnyObject {
@@ -102,6 +104,14 @@ final class ComposeAppKit: NSView {
 
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
     implementation.handleImageDropOrPaste(image, url)
+  }
+
+  func handleVideoDropOrPaste(_ url: URL, thumbnail: NSImage? = nil) {
+    implementation.handleVideoDropOrPaste(url, thumbnail: thumbnail)
+  }
+
+  func handleAnimatedImageDropOrPaste(_ url: URL) {
+    implementation.handleAnimatedImageDropOrPaste(url)
   }
 
   private func setupView() {

@@ -235,8 +235,6 @@ class GlassComposeAppKit: NSView {
 
   private var autocompleteMenu: ComposeAutocompleteMenu?
   private var autocompleteMenuConstraints: [NSLayoutConstraint] = []
-  private var autocompleteMenuLeadingConstraint: NSLayoutConstraint?
-  private var autocompleteMenuTopConstraint: NSLayoutConstraint?
   private var autocompleteKeyMonitorEscUnsubscribe: (() -> Void)?
   private var newThreadScrollObserver: NSObjectProtocol?
 
@@ -280,7 +278,6 @@ class GlassComposeAppKit: NSView {
   private var didRequestFinalDraftPersistence = false
   private var draftEntitySaveTask: Task<Void, Never>?
   private var draftAttachmentObserverCancel: (@Sendable () -> Void)?
-  private var pendingDraftVideoFallbackURLs: [String: URL] = [:]
   private var isSubmittingNewThread = false
 
   // Internal
@@ -718,11 +715,8 @@ class GlassComposeAppKit: NSView {
     if mentionCompletionMenu?.isVisible == true {
       updateMentionMenuPosition()
     }
-    if let autocompleteMenu,
-       autocompleteMenu.isVisible,
-       let match = autocompleteViewModel.match
-    {
-      updateAutocompleteMenuPosition(menu: autocompleteMenu, match: match)
+    if let autocompleteMenu, autocompleteMenu.isVisible {
+      updateAutocompleteMenuPosition(menu: autocompleteMenu)
     }
   }
 
@@ -1299,7 +1293,7 @@ class GlassComposeAppKit: NSView {
     }
 
     // Create mention completion menu
-    mentionCompletionMenu = MentionCompletionMenu()
+    mentionCompletionMenu = MentionCompletionMenu(surfaceStyle: .glass)
     mentionCompletionMenu?.delegate = self
     mentionCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
 
@@ -1397,7 +1391,7 @@ class GlassComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
 
-    mentionMenuConstraints = completionMenuConstraints(for: menu, spacing: 8)
+    mentionMenuConstraints = completionMenuConstraints(for: menu, spacing: 12)
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
     log.trace("addMentionMenuToSuperview: menu positioned for compose usage")
@@ -1406,7 +1400,7 @@ class GlassComposeAppKit: NSView {
   private func ensureSlashCommandCompletion() {
     guard peerBotCommandsViewModel == nil else { return }
     peerBotCommandsViewModel = PeerBotCommandsViewModel(peer: peerId)
-    commandCompletionMenu = CommandCompletionMenu()
+    commandCompletionMenu = CommandCompletionMenu(surfaceStyle: .glass)
     commandCompletionMenu?.delegate = self
     commandCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
   }
@@ -1423,18 +1417,14 @@ class GlassComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(commandMenuConstraints)
     commandMenuConstraints.removeAll()
 
-    commandMenuConstraints = [
-      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
-      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor),
-    ]
+    commandMenuConstraints = completionMenuConstraints(for: menu, spacing: 12)
 
     NSLayoutConstraint.activate(commandMenuConstraints)
   }
 
   private func ensureAutocompleteMenu() {
     guard autocompleteMenu == nil else { return }
-    autocompleteMenu = ComposeAutocompleteMenu()
+    autocompleteMenu = ComposeAutocompleteMenu(surfaceStyle: .glass)
     autocompleteMenu?.delegate = self
     autocompleteMenu?.translatesAutoresizingMaskIntoConstraints = false
   }
@@ -1450,46 +1440,18 @@ class GlassComposeAppKit: NSView {
     parentView.addSubview(menu)
     NSLayoutConstraint.deactivate(autocompleteMenuConstraints)
     autocompleteMenuConstraints.removeAll()
-    autocompleteMenuLeadingConstraint = nil
-    autocompleteMenuTopConstraint = nil
-
-    let leadingConstraint: NSLayoutConstraint
-    switch usage {
-      case .chat:
-        leadingConstraint = menu.leadingAnchor.constraint(equalTo: leadingAnchor)
-        autocompleteMenuConstraints = [
-          leadingConstraint,
-          menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
-        ]
-      case .newThread:
-        leadingConstraint = menu.leadingAnchor.constraint(equalTo: parentView.leadingAnchor)
-        let topConstraint = menu.topAnchor.constraint(equalTo: parentView.topAnchor)
-        autocompleteMenuTopConstraint = topConstraint
-        autocompleteMenuConstraints = [leadingConstraint, topConstraint]
-    }
-    autocompleteMenuLeadingConstraint = leadingConstraint
+    autocompleteMenuConstraints = completionMenuConstraints(for: menu, spacing: 12)
 
     NSLayoutConstraint.activate(autocompleteMenuConstraints)
   }
 
   private func completionMenuConstraints(for menu: NSView, spacing: CGFloat) -> [NSLayoutConstraint] {
-    var constraints = [
-      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
-      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
+    let anchorView = glassComposePillView ?? self
+    return [
+      menu.leadingAnchor.constraint(equalTo: anchorView.leadingAnchor),
+      menu.trailingAnchor.constraint(equalTo: anchorView.trailingAnchor),
+      menu.bottomAnchor.constraint(equalTo: anchorView.topAnchor, constant: -spacing),
     ]
-    switch usage {
-      case .chat:
-        constraints.append(menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -spacing))
-      case .newThread:
-        guard let parentView = menu.superview else { return [] }
-        let composeFrame = parentView.convert(bounds, from: self)
-        constraints = [
-          menu.leadingAnchor.constraint(equalTo: parentView.leadingAnchor, constant: composeFrame.minX),
-          menu.trailingAnchor.constraint(equalTo: parentView.leadingAnchor, constant: composeFrame.maxX),
-          menu.topAnchor.constraint(equalTo: parentView.topAnchor, constant: composeFrame.maxY + 4 + spacing),
-        ]
-    }
-    return constraints
   }
 
   private func renderAutocompleteMenu(
@@ -1531,10 +1493,10 @@ class GlassComposeAppKit: NSView {
       items: items,
       selectedIndex: selectedIndex,
       match: match,
-      availableWidth: autocompleteMenuWidth(for: match)
+      availableWidth: autocompleteMenuWidth()
     )
     if let autocompleteMenu {
-      updateAutocompleteMenuPosition(menu: autocompleteMenu, match: match)
+      updateAutocompleteMenuPosition(menu: autocompleteMenu)
     }
     autocompleteMenu?.show()
 
@@ -1548,22 +1510,16 @@ class GlassComposeAppKit: NSView {
     )
   }
 
-  private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu, match: ComposeAutocompleteMatch) {
+  private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu) {
     layoutSubtreeIfNeeded()
-    switch usage {
-      case .chat:
-        autocompleteMenuLeadingConstraint?.constant = textEditor.frame.minX
-      case .newThread:
-        guard let parentView = menu.superview else { return }
-        let composeFrame = parentView.convert(bounds, from: self)
-        autocompleteMenuLeadingConstraint?.constant = composeFrame.minX + textEditor.frame.minX
-        autocompleteMenuTopConstraint?.constant = composeFrame.maxY + 4
+    if let width = autocompleteMenuWidth() {
+      menu.setAvailableWidth(width)
     }
   }
 
-  private func autocompleteMenuWidth(for match: ComposeAutocompleteMatch) -> CGFloat? {
+  private func autocompleteMenuWidth() -> CGFloat? {
     layoutSubtreeIfNeeded()
-    let width = textEditor.frame.width
+    let width = (glassComposePillView ?? self).bounds.width
     return width > 1 ? width : nil
   }
 
@@ -2024,7 +1980,7 @@ class GlassComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
 
-    mentionMenuConstraints = completionMenuConstraints(for: menu, spacing: 8)
+    mentionMenuConstraints = completionMenuConstraints(for: menu, spacing: 12)
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
   }
@@ -2152,25 +2108,38 @@ class GlassComposeAppKit: NSView {
 
     // Check aspect ratio
     if shouldSendAsFile(image) {
+      if let url {
+        addFile(url)
+        return
+      }
+
       let tempDir = FileHelpers.getTrueTemporaryDirectory()
       let result = try? image.save(
         to: tempDir,
-        withName: url?.pathComponents.last ?? "image\(preferredImageFormat?.toExt() ?? ".jpg")",
+        withName: "image\(preferredImageFormat?.toExt() ?? ".jpg")",
         format: preferredImageFormat ?? .jpeg
       )
       if let (_, url) = result {
         addFile(url)
+      } else {
+        ToastCenter.shared.showError("Couldn’t add attachment as media or a file.")
       }
       return
     }
 
     let pendingId: String = switch usage {
       case .chat:
-        drafts2.addImage(peer: peerId, image: image, preferredFormat: preferredImageFormat)
+        drafts2.addImage(
+          peer: peerId,
+          image: image,
+          preferredFormat: preferredImageFormat,
+          fallbackURL: url
+        )
       case let .newThread(context):
         context.attachmentStore.addImage(
           image,
           preferredFormat: preferredImageFormat,
+          fallbackURL: url,
           completion: { [weak self] result in self?.handleDraftAttachmentResult(result) }
         )
     }
@@ -2218,7 +2187,6 @@ class GlassComposeAppKit: NSView {
           completion: { [weak self] result in self?.handleDraftAttachmentResult(result) }
         )
     }
-    pendingDraftVideoFallbackURLs[pendingId] = url
     attachments.addVideoView(thumbnail: thumbnail, videoURL: url, id: pendingId)
     updateHeight(animate: true)
   }
@@ -2244,7 +2212,6 @@ class GlassComposeAppKit: NSView {
   func removeVideo(_ id: String) {
     attachments.removeVideoView(id: id)
     attachmentItems.removeValue(forKey: id)
-    pendingDraftVideoFallbackURLs.removeValue(forKey: id)
     removeStoredAttachment(id: id)
     updateHeight(animate: true)
   }
@@ -2290,7 +2257,6 @@ class GlassComposeAppKit: NSView {
   }
 
   func clearAttachments(updateHeights: Bool = false) {
-    pendingDraftVideoFallbackURLs.removeAll()
     attachmentItems.removeAll()
     attachments.clearViews()
     if updateHeights {
@@ -2329,7 +2295,7 @@ class GlassComposeAppKit: NSView {
   /// Send the message
   func send(sendMode: MessageSendMode? = nil) {
     if case let .newThread(context) = usage {
-      sendNewThread(using: context)
+      sendNewThread(using: context, intent: .openThread)
       return
     }
 
@@ -2530,7 +2496,20 @@ class GlassComposeAppKit: NSView {
     // }
   }
 
-  private func sendNewThread(using context: NewThreadComposeContext) {
+  func configureNewThreadSendTooltip(placement: InlineTooltipPlacement) {
+    guard case .newThread = usage else { return }
+    sendButton.setInlineTooltip(
+      "Create and open thread",
+      description: "Option-Return creates and sends without opening it.",
+      shortcut: InlineTooltipShortcut("\r"),
+      placement: placement
+    )
+  }
+
+  private func sendNewThread(
+    using context: NewThreadComposeContext,
+    intent: NewThreadComposeSubmissionIntent
+  ) {
     guard canSend, !isSubmittingNewThread else { return }
     guard let authorUserID = dependencies.auth.currentUserId else {
       ToastCenter.shared.showError("You're signed out. Please log in again.")
@@ -2557,7 +2536,7 @@ class GlassComposeAppKit: NSView {
     updateSendButtonIfNeeded()
 
     Task { @MainActor [weak self] in
-      let result = await context.submit(draft)
+      let result = await context.submit(draft, intent)
       // Submission feedback belongs to the host, not this view's lifetime.
       // An early navigation may tear Compose down while the send is still
       // finishing, but failures must still reach the user.
@@ -2931,9 +2910,9 @@ extension GlassComposeAppKit {
 
     for url in urls {
       if isAnimatedImageFile(url) {
-        Task { [weak self] in await self?.addAnimatedImage(url) }
+        handleAnimatedImageDropOrPaste(url)
       } else if isVideoFile(url) {
-        Task { [weak self] in await self?.addVideo(url) }
+        handleVideoDropOrPaste(url)
       } else {
         addFile(url)
       }
@@ -2955,6 +2934,16 @@ extension GlassComposeAppKit {
     focusWindowIfNeeded()
     focus()
   }
+
+  func handleVideoDropOrPaste(_ url: URL, thumbnail: NSImage? = nil) {
+    guard !currentVoiceActive, canMutateDraft else { return }
+    Task { [weak self] in await self?.addVideo(url, thumbnail: thumbnail) }
+  }
+
+  func handleAnimatedImageDropOrPaste(_ url: URL) {
+    guard !currentVoiceActive, canMutateDraft else { return }
+    Task { [weak self] in await self?.addAnimatedImage(url) }
+  }
 }
 
 // MARK: Delegate
@@ -2970,6 +2959,12 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // Always send with command enter
     send()
     return true // handled
+  }
+
+  func textViewDidPressOptionReturn(_ textView: NSTextView) -> Bool {
+    guard case let .newThread(context) = usage else { return false }
+    sendNewThread(using: context, intent: .stayInCurrentView)
+    return true
   }
 
   func textViewDidPressArrowUp(_ textView: NSTextView, event: NSEvent) -> Bool {
@@ -3029,6 +3024,11 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       }
     }
 
+    if case .newThread = usage {
+      send()
+      return true
+    }
+
     if !AppSettings.shared.sendsWithCmdEnter {
       // Send
       send()
@@ -3047,7 +3047,11 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textView(_ textView: NSTextView, didReceiveVideo url: URL) {
-    Task { [weak self] in await self?.addVideo(url) }
+    handleVideoDropOrPaste(url)
+  }
+
+  func textView(_ textView: NSTextView, didReceiveAnimatedImage url: URL) {
+    handleAnimatedImageDropOrPaste(url)
   }
 
   func textView(_ textView: NSTextView, didFailToPasteAttachment failure: PasteboardAttachmentFailure) {
@@ -3481,7 +3485,7 @@ extension GlassComposeAppKit: ComposeMenuButtonDelegate {
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectVideo url: URL) {
-    Task { [weak self] in await self?.addVideo(url) }
+    handleVideoDropOrPaste(url)
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL]) {
@@ -3865,8 +3869,6 @@ extension GlassComposeAppKit {
 
     attachmentItems.removeAll()
     attachments.clearViews()
-    pendingDraftVideoFallbackURLs.removeAll()
-
     for attachment in draftAttachments {
       renderDraftAttachment(attachment)
     }
@@ -3886,7 +3888,6 @@ extension GlassComposeAppKit {
         notifyNewThreadDraftChanged()
       case let .success(pendingId, attachment):
         removeDraftAttachmentPlaceholder(id: pendingId)
-        pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
         let ownsAttachment = switch usage {
           case .chat:
             drafts2.load(peer: peerId)?.attachments.contains(where: { $0.id == attachment.id }) == true
@@ -3903,21 +3904,13 @@ extension GlassComposeAppKit {
         notifyNewThreadDraftChanged()
       case let .failure(pendingId, message):
         removeDraftAttachmentPlaceholder(id: pendingId)
-        if let fallbackURL = pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId), addFile(fallbackURL) {
-          log.warning("Failed to save video in attachments; sending as file instead")
-          return
-        }
-
         log.error("Failed to save draft attachment: \(message)")
-        if case .newThread = usage {
-          ToastCenter.shared.showError("Failed to add attachment")
-        }
+        ToastCenter.shared.showError("Couldn’t add attachment as media or a file.")
         updateHeight(animate: true)
         updateSendButtonIfNeeded()
         notifyNewThreadDraftChanged()
       case let .cancelled(pendingId):
         removeDraftAttachmentPlaceholder(id: pendingId)
-        pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
         updateHeight(animate: true)
         updateSendButtonIfNeeded()
         notifyNewThreadDraftChanged()

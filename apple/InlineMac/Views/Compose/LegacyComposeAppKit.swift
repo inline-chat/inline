@@ -142,7 +142,6 @@ class LegacyComposeAppKit: NSView {
   )
   private var autocompleteMenu: ComposeAutocompleteMenu?
   private var autocompleteMenuConstraints: [NSLayoutConstraint] = []
-  private var autocompleteMenuLeadingConstraint: NSLayoutConstraint?
   private var autocompleteKeyMonitorEscUnsubscribe: (() -> Void)?
 
   private func recentThreadChatIds(limit: Int) -> [Int64] {
@@ -185,7 +184,6 @@ class LegacyComposeAppKit: NSView {
   private var didRequestFinalDraftPersistence = false
   private var draftEntitySaveTask: Task<Void, Never>?
   private var draftAttachmentObserverCancel: (@Sendable () -> Void)?
-  private var pendingDraftVideoFallbackURLs: [String: URL] = [:]
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -835,7 +833,7 @@ class LegacyComposeAppKit: NSView {
     )
 
     // Create mention completion menu
-    mentionCompletionMenu = MentionCompletionMenu()
+    mentionCompletionMenu = MentionCompletionMenu(surfaceStyle: .material)
     mentionCompletionMenu?.delegate = self
     mentionCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
 
@@ -928,7 +926,7 @@ class LegacyComposeAppKit: NSView {
     mentionMenuConstraints = [
       menu.leadingAnchor.constraint(equalTo: leadingAnchor),
       menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor),
+      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -12),
     ]
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
@@ -938,7 +936,7 @@ class LegacyComposeAppKit: NSView {
   private func ensureSlashCommandCompletion() {
     guard peerBotCommandsViewModel == nil else { return }
     peerBotCommandsViewModel = PeerBotCommandsViewModel(peer: peerId)
-    commandCompletionMenu = CommandCompletionMenu()
+    commandCompletionMenu = CommandCompletionMenu(surfaceStyle: .material)
     commandCompletionMenu?.delegate = self
     commandCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
   }
@@ -958,7 +956,7 @@ class LegacyComposeAppKit: NSView {
     commandMenuConstraints = [
       menu.leadingAnchor.constraint(equalTo: leadingAnchor),
       menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor),
+      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -12),
     ]
 
     NSLayoutConstraint.activate(commandMenuConstraints)
@@ -966,7 +964,7 @@ class LegacyComposeAppKit: NSView {
 
   private func ensureAutocompleteMenu() {
     guard autocompleteMenu == nil else { return }
-    autocompleteMenu = ComposeAutocompleteMenu()
+    autocompleteMenu = ComposeAutocompleteMenu(surfaceStyle: .material)
     autocompleteMenu?.delegate = self
     autocompleteMenu?.translatesAutoresizingMaskIntoConstraints = false
   }
@@ -982,13 +980,10 @@ class LegacyComposeAppKit: NSView {
     parentView.addSubview(menu)
     NSLayoutConstraint.deactivate(autocompleteMenuConstraints)
     autocompleteMenuConstraints.removeAll()
-    autocompleteMenuLeadingConstraint = nil
-
-    let leadingConstraint = menu.leadingAnchor.constraint(equalTo: leadingAnchor)
-    autocompleteMenuLeadingConstraint = leadingConstraint
     autocompleteMenuConstraints = [
-      leadingConstraint,
-      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -6),
+      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
+      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
+      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -12),
     ]
 
     NSLayoutConstraint.activate(autocompleteMenuConstraints)
@@ -1033,10 +1028,10 @@ class LegacyComposeAppKit: NSView {
       items: items,
       selectedIndex: selectedIndex,
       match: match,
-      availableWidth: autocompleteMenuWidth(for: match)
+      availableWidth: autocompleteMenuWidth()
     )
     if let autocompleteMenu {
-      updateAutocompleteMenuPosition(menu: autocompleteMenu, match: match)
+      updateAutocompleteMenuPosition(menu: autocompleteMenu)
     }
     autocompleteMenu?.show()
 
@@ -1050,14 +1045,16 @@ class LegacyComposeAppKit: NSView {
     )
   }
 
-  private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu, match: ComposeAutocompleteMatch) {
+  private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu) {
     layoutSubtreeIfNeeded()
-    autocompleteMenuLeadingConstraint?.constant = textEditor.frame.minX
+    if let width = autocompleteMenuWidth() {
+      menu.setAvailableWidth(width)
+    }
   }
 
-  private func autocompleteMenuWidth(for match: ComposeAutocompleteMatch) -> CGFloat? {
+  private func autocompleteMenuWidth() -> CGFloat? {
     layoutSubtreeIfNeeded()
-    let width = textEditor.frame.width
+    let width = bounds.width
     return width > 1 ? width : nil
   }
 
@@ -1404,7 +1401,7 @@ class LegacyComposeAppKit: NSView {
     mentionMenuConstraints = [
       menu.leadingAnchor.constraint(equalTo: leadingAnchor),
       menu.trailingAnchor.constraint(equalTo: trailingAnchor),
-      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -8),
+      menu.bottomAnchor.constraint(equalTo: topAnchor, constant: -12),
     ]
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
@@ -1531,20 +1528,32 @@ class LegacyComposeAppKit: NSView {
 
     // Check aspect ratio
     if shouldSendAsFile(image) {
+      if let url {
+        addFile(url)
+        return
+      }
+
       let tempDir = FileHelpers.getTrueTemporaryDirectory()
       let result = try? image.save(
         to: tempDir,
-        withName: url?.pathComponents.last ?? "image\(preferredImageFormat?.toExt() ?? ".jpg")",
+        withName: "image\(preferredImageFormat?.toExt() ?? ".jpg")",
         format: preferredImageFormat ?? .jpeg
       )
       if let (_, url) = result {
         addFile(url)
+      } else {
+        ToastCenter.shared.showError("Couldn’t add attachment as media or a file.")
       }
       return
     }
 
     // Add a placeholder view immediately; Drafts2 owns file-cache persistence.
-    let pendingId = drafts2.addImage(peer: peerId, image: image, preferredFormat: preferredImageFormat)
+    let pendingId = drafts2.addImage(
+      peer: peerId,
+      image: image,
+      preferredFormat: preferredImageFormat,
+      fallbackURL: url
+    )
     attachments.addImageView(image, id: pendingId)
     updateHeight(animate: true)
   }
@@ -1578,7 +1587,6 @@ class LegacyComposeAppKit: NSView {
   func addVideo(_ url: URL, thumbnail: NSImage? = nil) async {
     // Show a placeholder immediately; Drafts2 owns file-cache persistence.
     let pendingId = drafts2.addVideo(peer: peerId, url: url, thumbnail: thumbnail)
-    pendingDraftVideoFallbackURLs[pendingId] = url
     attachments.addVideoView(thumbnail: thumbnail, videoURL: url, id: pendingId)
     updateHeight(animate: true)
   }
@@ -1594,7 +1602,6 @@ class LegacyComposeAppKit: NSView {
   func removeVideo(_ id: String) {
     attachments.removeVideoView(id: id)
     attachmentItems.removeValue(forKey: id)
-    pendingDraftVideoFallbackURLs.removeValue(forKey: id)
     drafts2.removeAttachment(peer: peerId, id: id)
     updateHeight(animate: true)
   }
@@ -1620,7 +1627,6 @@ class LegacyComposeAppKit: NSView {
   }
 
   func clearAttachments(updateHeights: Bool = false) {
-    pendingDraftVideoFallbackURLs.removeAll()
     attachmentItems.removeAll()
     attachments.clearViews()
     if updateHeights {
@@ -2175,9 +2181,9 @@ extension LegacyComposeAppKit {
 
     for url in urls {
       if isAnimatedImageFile(url) {
-        Task { [weak self] in await self?.addAnimatedImage(url) }
+        handleAnimatedImageDropOrPaste(url)
       } else if isVideoFile(url) {
-        Task { [weak self] in await self?.addVideo(url) }
+        handleVideoDropOrPaste(url)
       } else {
         addFile(url)
       }
@@ -2198,6 +2204,16 @@ extension LegacyComposeAppKit {
     addImage(image, url)
     focusWindowIfNeeded()
     focus()
+  }
+
+  func handleVideoDropOrPaste(_ url: URL, thumbnail: NSImage? = nil) {
+    guard !voiceViewModel.isActive else { return }
+    Task { [weak self] in await self?.addVideo(url, thumbnail: thumbnail) }
+  }
+
+  func handleAnimatedImageDropOrPaste(_ url: URL) {
+    guard !voiceViewModel.isActive else { return }
+    Task { [weak self] in await self?.addAnimatedImage(url) }
   }
 }
 
@@ -2289,7 +2305,11 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textView(_ textView: NSTextView, didReceiveVideo url: URL) {
-    Task { [weak self] in await self?.addVideo(url) }
+    handleVideoDropOrPaste(url)
+  }
+
+  func textView(_ textView: NSTextView, didReceiveAnimatedImage url: URL) {
+    handleAnimatedImageDropOrPaste(url)
   }
 
   func textView(_ textView: NSTextView, didFailToPasteAttachment failure: PasteboardAttachmentFailure) {
@@ -2685,7 +2705,7 @@ extension LegacyComposeAppKit: ComposeMenuButtonDelegate {
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectVideo url: URL) {
-    Task { [weak self] in await self?.addVideo(url) }
+    handleVideoDropOrPaste(url)
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL]) {
@@ -3062,8 +3082,6 @@ extension LegacyComposeAppKit {
 
     attachmentItems.removeAll()
     attachments.clearViews()
-    pendingDraftVideoFallbackURLs.removeAll()
-
     for attachment in draftAttachments {
       renderDraftAttachment(attachment)
     }
@@ -3082,7 +3100,6 @@ extension LegacyComposeAppKit {
         updateSendButtonIfNeeded()
       case let .success(pendingId, attachment):
         removeDraftAttachmentPlaceholder(id: pendingId)
-        pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
         guard drafts2.load(peer: peerId)?.attachments.contains(where: { $0.id == attachment.id }) == true else {
           updateSendButtonIfNeeded()
           return
@@ -3092,17 +3109,12 @@ extension LegacyComposeAppKit {
         updateSendButtonIfNeeded()
       case let .failure(pendingId, message):
         removeDraftAttachmentPlaceholder(id: pendingId)
-        if let fallbackURL = pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId), addFile(fallbackURL) {
-          log.warning("Failed to save video in attachments; sending as file instead")
-          return
-        }
-
         log.error("Failed to save draft attachment: \(message)")
+        ToastCenter.shared.showError("Couldn’t add attachment as media or a file.")
         updateHeight(animate: true)
         updateSendButtonIfNeeded()
       case let .cancelled(pendingId):
         removeDraftAttachmentPlaceholder(id: pendingId)
-        pendingDraftVideoFallbackURLs.removeValue(forKey: pendingId)
         updateHeight(animate: true)
         updateSendButtonIfNeeded()
     }

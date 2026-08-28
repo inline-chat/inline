@@ -18,6 +18,7 @@ struct AllChatsRouteView: View {
   @State private var listFilter: AllChatsListFilter = .all
   @AppStorage private var pinnedExpanded: Bool
   @AppStorage private var selectedSpaceIDValue: String
+  @AppStorage private var excludedHomeSpaceIDsValue: String
 
   private let filter: AllChatsFilter
 
@@ -32,6 +33,10 @@ struct AllChatsRouteView: View {
       wrappedValue: "",
       "macos.allChats.selectedSpaceID.\(account)"
     )
+    _excludedHomeSpaceIDsValue = AppStorage(
+      wrappedValue: "",
+      "macos.allChats.excludedHomeSpaceIDs.\(account)"
+    )
     _viewModel = EnvironmentStateObject { env in
       AllChatsViewModel(db: env.appDatabase)
     }
@@ -42,7 +47,8 @@ struct AllChatsRouteView: View {
     let presentation = viewModel.presentation(
       for: filter,
       listFilter: listFilter,
-      spaceId: selectedSpaceID
+      spaceId: selectedSpaceID,
+      homeSpaceExclusions: homeSpaceExclusions
     )
 
     ScrollView {
@@ -54,7 +60,8 @@ struct AllChatsRouteView: View {
           AllChatsNewThreadComposeHost(
             dependencies: dependencies,
             spaces: composeSpaces,
-            selectedSpaceID: selectedSpaceID
+            selectedSpaceID: selectedSpaceID,
+            placement: .top
           )
           .padding(.top, 10)
         }
@@ -74,6 +81,7 @@ struct AllChatsRouteView: View {
         }
       }
       .frame(maxWidth: .infinity)
+      .padding(.horizontal, 12)
     }
     .navigationTitle(title)
     .toolbar(removing: .title)
@@ -85,6 +93,7 @@ struct AllChatsRouteView: View {
             selectedSpaceID: selectedSpaceID,
             homeTitle: "Home",
             spaces: toolbarSpaces,
+            showsIndicator: false,
             help: "Choose All Chats Space",
             onSelect: selectAllChatsSpace
           )
@@ -103,7 +112,12 @@ struct AllChatsRouteView: View {
       if filter == .chats {
         ToolbarItem {
           ControlGroup {
-            listFilterMenu
+            AllChatsViewOptionsMenu(
+              listFilter: $listFilter,
+              spaces: selectedSpaceID == nil ? toolbarSpaces : [],
+              homeSpaceExclusions: homeSpaceExclusions,
+              onToggleHomeSpaceExclusion: toggleHomeSpaceExclusion
+            )
             archiveButton
           }
           .controlGroupStyle(.navigation)
@@ -131,7 +145,6 @@ struct AllChatsRouteView: View {
     LazyVStack(alignment: .leading, spacing: 0) {
       if filter == .chats, !showsAllChatsNewThreadCompose {
         NewThreadListRow(action: createNewThread)
-          .padding(.horizontal, 5)
       }
 
       if !presentation.pinnedItems.isEmpty {
@@ -162,7 +175,6 @@ struct AllChatsRouteView: View {
           open(item)
         }
       )
-      .padding(.horizontal, 5)
     }
   }
 
@@ -176,6 +188,10 @@ struct AllChatsRouteView: View {
 
   private var selectedSpaceID: Int64? {
     Int64(selectedSpaceIDValue)
+  }
+
+  private var homeSpaceExclusions: HomeSpaceExclusions {
+    HomeSpaceExclusions(rawValue: excludedHomeSpaceIDsValue)
   }
 
   private var showsAllChatsNewThreadCompose: Bool {
@@ -250,27 +266,8 @@ struct AllChatsRouteView: View {
     .help("View Options")
   }
 
-  private var listFilterMenu: some View {
-    Menu {
-      Picker("Filter Chats", selection: $listFilter) {
-        Text("All Chats").tag(AllChatsListFilter.all)
-        Text("Unread").tag(AllChatsListFilter.unread)
-      }
-      .labelsHidden()
-      .pickerStyle(.inline)
-    } label: {
-      Label("Filter", systemImage: listFilterSystemImage)
-        .labelStyle(.iconOnly)
-    }
-    .tint(listFilter == .all ? Color.primary : Color(nsColor: .systemBlue))
-    .help("Filter Chats")
-    .accessibilityValue(listFilter == .all ? "All Chats" : "Unread")
-  }
-
-  private var listFilterSystemImage: String {
-    listFilter == .all
-      ? "line.3.horizontal.decrease"
-      : "line.3.horizontal.decrease.circle.fill"
+  private func toggleHomeSpaceExclusion(_ spaceID: Int64) {
+    excludedHomeSpaceIDsValue = homeSpaceExclusions.toggling(spaceID).rawValue
   }
 
   private var archiveButton: some View {
@@ -320,6 +317,80 @@ struct AllChatsRouteView: View {
     guard nav.history.indices.contains(index) else { return nil }
     return nav.history[index].route
   }
+}
+
+private struct AllChatsViewOptionsMenu: View {
+  @Binding var listFilter: AllChatsListFilter
+  let spaces: [RouteToolbarSpacePickerItem]
+  let homeSpaceExclusions: HomeSpaceExclusions
+  let onToggleHomeSpaceExclusion: (Int64) -> Void
+
+  var body: some View {
+    Menu {
+      Picker("Filter Chats", selection: $listFilter) {
+        Text("All Chats").tag(AllChatsListFilter.all)
+        Text("Unread").tag(AllChatsListFilter.unread)
+      }
+      .labelsHidden()
+      .pickerStyle(.inline)
+
+      if spaces.isEmpty == false {
+        Divider()
+
+        Menu {
+          ForEach(spaces) { space in
+            Button {
+              onToggleHomeSpaceExclusion(space.id)
+            } label: {
+              if homeSpaceExclusions.contains(space.id) {
+                Label(space.name, systemImage: "checkmark")
+              } else {
+                Text(space.name)
+              }
+            }
+          }
+        } label: {
+          Label("Exclude Spaces from Home", systemImage: "eye.slash")
+        }
+      }
+    } label: {
+      Label("View Options", systemImage: listFilterSystemImage)
+        .labelStyle(.iconOnly)
+    }
+    .tint(hasActiveViewFilter ? Color(nsColor: .systemBlue) : Color.primary)
+    .help("View Options")
+    .accessibilityValue(listFilterAccessibilityValue)
+  }
+
+  private var listFilterSystemImage: String {
+    hasActiveViewFilter == false
+      ? "line.3.horizontal.decrease"
+      : "line.3.horizontal.decrease.circle.fill"
+  }
+
+  private var hasActiveViewFilter: Bool {
+    listFilter == .unread
+      || (spaces.isEmpty == false && homeSpaceExclusions.isEmpty == false)
+  }
+
+  private var listFilterAccessibilityValue: String {
+    let excludedCount = spaces.isEmpty ? 0 : homeSpaceExclusions.spaceIDs.count
+    return switch (listFilter, excludedCount) {
+    case (.all, 0):
+      "All Chats"
+    case (.unread, 0):
+      "Unread"
+    case (.all, 1):
+      "All Chats, 1 space excluded"
+    case (.unread, 1):
+      "Unread, 1 space excluded"
+    case (.all, let count):
+      "All Chats, \(count) spaces excluded"
+    case (.unread, let count):
+      "Unread, \(count) spaces excluded"
+    }
+  }
+
 }
 
 private struct AllChatsPinnedSection<Rows: View>: View {
@@ -372,7 +443,7 @@ private struct AllChatsPinnedSectionHeader: View {
     .font(.system(size: 12, weight: .semibold))
     .foregroundStyle(.secondary)
     .lineLimit(1)
-    .padding(.horizontal, 13)
+    .padding(.horizontal, 8)
     .padding(.top, 12)
     .padding(.bottom, 2)
   }
@@ -486,7 +557,7 @@ private struct AllChatsSectionHeader: View {
       .foregroundStyle(.secondary)
       .lineLimit(1)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 13)
+      .padding(.horizontal, 8)
       .padding(.top, 12)
       .padding(.bottom, 2)
   }
@@ -632,13 +703,20 @@ final class AllChatsViewModel: ObservableObject {
   fileprivate func presentation(
     for filter: AllChatsFilter,
     listFilter: AllChatsListFilter,
-    spaceId: Int64?
+    spaceId: Int64?,
+    homeSpaceExclusions: HomeSpaceExclusions
   ) -> AllChatsPresentation {
     let filteredItems = items.filter { item in
-      item.chatListHidden == false
+      let isInSpaceScope = if let spaceId {
+        item.spaceId == spaceId
+      } else {
+        homeSpaceExclusions.includesInHome(spaceID: item.spaceId)
+      }
+
+      return item.chatListHidden == false
         && filter.includes(item)
         && listFilter.includes(item)
-        && (spaceId == nil || item.spaceId == spaceId)
+        && isInSpaceScope
     }
     let timelineItems = filter == .chats
       ? filteredItems.filter { !$0.pinned }
@@ -1539,10 +1617,6 @@ private enum AllChatsDateFormatter {
     guard date != Date.distantPast else { return nil }
 
     let now = Date()
-    if now.timeIntervalSince(date) < 60 {
-      return "just now"
-    }
-
     if calendar.isDateInToday(date) {
       return rowTimeFormatter.string(from: date)
     }

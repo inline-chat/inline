@@ -570,16 +570,21 @@ class ChatViewAppKit: NSViewController {
   private func handleAttachments(from pasteboard: NSPasteboard) -> Bool {
     Log.shared.debug("Handling attachments from pasteboard")
 
-    let attachments = InlinePasteboard.findAttachments(from: pasteboard)
+    let result = InlinePasteboard.findAttachmentsResult(from: pasteboard)
+    let attachments = result.attachments
+
+    if let failure = result.failures.first(where: { $0.isTelegramSource }) ?? result.failures.first {
+      ToastCenter.shared.showError(failure.userFacingMessage)
+    }
 
     for attachment in attachments {
       switch attachment {
-        case let .image(image, _):
-          handleDroppedImage(image)
+        case let .image(image, url):
+          handleDroppedImage(image, sourceURL: url)
         case let .animatedImage(url):
           handleDroppedAnimatedImage(url)
-        case let .video(url, _):
-          handleDroppedVideo(url)
+        case let .video(url, thumbnail):
+          handleDroppedVideo(url, thumbnail: thumbnail)
         case let .file(url, _):
           handleDroppedFile(url)
         case let .text(text):
@@ -604,17 +609,17 @@ class ChatViewAppKit: NSViewController {
     compose?.handleTextDropOrPaste(text)
   }
 
-  private func handleDroppedVideo(_ url: URL) {
-    compose?.handleFileDrop([url])
+  private func handleDroppedVideo(_ url: URL, thumbnail: NSImage?) {
+    compose?.handleVideoDropOrPaste(url, thumbnail: thumbnail)
   }
 
   private func handleDroppedAnimatedImage(_ url: URL) {
-    compose?.handleFileDrop([url])
+    compose?.handleAnimatedImageDropOrPaste(url)
   }
 
   // IMAGE DROPPED
-  private func handleDroppedImage(_ image: NSImage) {
-    compose?.handleImageDropOrPaste(image)
+  private func handleDroppedImage(_ image: NSImage, sourceURL: URL?) {
+    compose?.handleImageDropOrPaste(image, sourceURL)
   }
 
   // MARK: - Helper Methods

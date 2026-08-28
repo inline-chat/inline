@@ -24,6 +24,7 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
     set {
       guard _isSelected != newValue else { return }
       _isSelected = newValue
+      setAccessibilitySelected(newValue)
       updateAppearance()
     }
   }
@@ -45,6 +46,7 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
     titleLabel.stringValue = item.title
     subtitleLabel.stringValue = item.subtitle ?? ""
     subtitleLabel.isHidden = item.subtitle?.isEmpty != false
+    setAccessibilityLabel([item.title, item.subtitle].compactMap { $0 }.joined(separator: ", "))
 
     switch item.payload {
     case .thread:
@@ -79,7 +81,8 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
 
   private func setupView() {
     containerView.wantsLayer = true
-    containerView.layer?.cornerRadius = 7
+    containerView.layer?.cornerRadius = 8
+    containerView.layer?.cornerCurve = .continuous
     containerView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(containerView)
 
@@ -119,8 +122,8 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
     containerView.addSubview(subtitleLabel)
 
     NSLayoutConstraint.activate([
-      containerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-      containerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+      containerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+      containerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
       containerView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
       containerView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
 
@@ -193,18 +196,15 @@ final class ComposeAutocompleteMenuItem: NSTableCellView {
   }
 
   private func updateAppearance() {
-    let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-
     if isSelected {
-      containerView.layer?.backgroundColor = NSColor.tertiaryLabelColor
-        .withAlphaComponent(isDark ? 0.22 : 0.10)
+      containerView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor
         .resolvedColor(with: effectiveAppearance)
         .cgColor
       iconContainer.layer?.backgroundColor = NSColor.clear.cgColor
-      iconLabel.textColor = .labelColor
-      iconImageView.contentTintColor = .labelColor
-      titleLabel.textColor = .labelColor
-      subtitleLabel.textColor = .secondaryLabelColor
+      iconLabel.textColor = .alternateSelectedControlTextColor
+      iconImageView.contentTintColor = .alternateSelectedControlTextColor
+      titleLabel.textColor = .alternateSelectedControlTextColor
+      subtitleLabel.textColor = NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.9)
     } else {
       containerView.layer?.backgroundColor = NSColor.clear.cgColor
       iconContainer.layer?.backgroundColor = NSColor.clear.cgColor

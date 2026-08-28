@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import GRDB
 import InlineKit
+import InlineMacUI
 import InlineProtocol
 import InlineUI
 import Logger
@@ -11,6 +12,18 @@ import SwiftUI
 struct AllChatsComposeSpace: Identifiable, Equatable {
   let id: Int64
   let title: String
+}
+
+enum AllChatsNewThreadComposePlacement {
+  case top
+  case bottom
+
+  var tooltipPlacement: InlineTooltipPlacement {
+    switch self {
+      case .top: .below
+      case .bottom: .above
+    }
+  }
 }
 
 private struct AllChatsComposePreferences {
@@ -97,6 +110,7 @@ private struct AllChatsComposeAccessMentions: Equatable {
 final class AllChatsNewThreadComposeModel: ObservableObject {
   @Published private(set) var destination: NewThreadComposeDestination
   @Published private(set) var spaces: [AllChatsComposeSpace]
+  @Published private(set) var lockedSpaceID: Int64?
   @Published private(set) var visibilityTooltipTitle = String(localized: "Private thread")
   @Published private(set) var visibilityTooltipDescription = String(
     localized: "Only you can access this thread. Mention people or groups to add them."
@@ -122,6 +136,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   ) {
     self.dependencies = dependencies
     self.spaces = spaces
+    lockedSpaceID = initialSpaceID
     let preferences = AllChatsComposePreferences(userID: dependencies.auth.currentUserId)
     self.preferences = preferences
     lastSpaceVisibility = preferences.visibility
@@ -150,6 +165,20 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     return spaces.first(where: { $0.id == spaceID })?.title ?? "Space"
   }
 
+  var isDestinationLocked: Bool {
+    lockedSpaceID != nil
+  }
+
+  var destinationTooltipDescription: String {
+    if isDestinationLocked {
+      return String(
+        localized: "All Chats is filtered to \(destinationTitle). Change the All Chats view or go Home to choose another destination.",
+        comment: "Tooltip for a new-thread destination locked to the currently filtered All Chats space. The variable is a space name."
+      )
+    }
+    return String(localized: "Choose Home or a space for the new thread.")
+  }
+
   var showsVisibility: Bool {
     destination.spaceID != nil
   }
@@ -160,6 +189,11 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   func updateSpaces(_ spaces: [AllChatsComposeSpace]) {
     self.spaces = spaces
+    if let lockedSpaceID {
+      setDestination(.space(id: lockedSpaceID, visibility: lastSpaceVisibility))
+      updateVisibilityTooltip()
+      return
+    }
     if let spaceID = destination.spaceID,
        !spaces.contains(where: { $0.id == spaceID })
     {
@@ -170,6 +204,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   func followSelectedSpace(_ spaceID: Int64?) {
+    lockedSpaceID = spaceID
     let next: NewThreadComposeDestination = spaceID.map {
       .space(id: $0, visibility: lastSpaceVisibility)
     } ?? .home
@@ -177,10 +212,12 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   func selectHome() {
+    guard !isDestinationLocked else { return }
     setDestination(.home)
   }
 
   func selectSpace(_ spaceID: Int64) {
+    guard !isDestinationLocked else { return }
     setDestination(.space(id: spaceID, visibility: lastSpaceVisibility))
   }
 
@@ -213,14 +250,14 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         AllChatsNewThreadComposeModel.presentSubmissionFeedback(result)
         self?.submissionDidFinish(result)
       },
-      submit: { [weak self] draft in
+      submit: { [weak self] draft, intent in
         guard let self else {
           return .failure(NewThreadComposeSubmissionFailure(
             message: "The new thread composer is no longer available.",
             createdPeer: nil
           ))
         }
-        return await submit(draft)
+        return await submit(draft, intent: intent)
       }
     )
   }
@@ -285,7 +322,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   private func submit(
-    _ draft: PreparedNewThreadDraft
+    _ draft: PreparedNewThreadDraft,
+    intent: NewThreadComposeSubmissionIntent
   ) async -> Result<InlineKit.Peer, NewThreadComposeSubmissionFailure> {
     guard !isSubmitting else {
       return .failure(NewThreadComposeSubmissionFailure(
@@ -346,14 +384,16 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       return await submitOptimistically(
         draft,
         participantIDs: participantIDs,
-        signpostID: signpostID
+        signpostID: signpostID,
+        intent: intent
       )
     }
 
     return await submitAfterAuthoritativeCreation(
       draft,
       participantIDs: participantIDs,
-      signpostID: signpostID
+      signpostID: signpostID,
+      intent: intent
     )
   }
 
@@ -363,7 +403,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private func submitOptimistically(
     _ draft: PreparedNewThreadDraft,
     participantIDs: [Int64],
-    signpostID: OSSignpostID
+    signpostID: OSSignpostID,
+    intent: NewThreadComposeSubmissionIntent
   ) async -> Result<InlineKit.Peer, NewThreadComposeSubmissionFailure> {
     var createdPeer: InlineKit.Peer?
     do {
@@ -389,8 +430,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       guard await admitTextSend(draft, peer: peer, chatID: chatID) else {
         log.error("New-thread durable send admission failed after local creation")
         installDraft(draft, on: peer)
-        openCreatedThread(peer, destination: draft.destination)
-        queueDialogOpen(peer)
+        finishCreatedThread(peer, intent: intent)
         os_signpost(
           .event,
           log: performanceLog,
@@ -414,8 +454,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         "durable"
       )
 
-      openCreatedThread(peer, destination: draft.destination)
-      queueDialogOpen(peer)
+      finishCreatedThread(peer, intent: intent)
       os_signpost(
         .event,
         log: performanceLog,
@@ -442,7 +481,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private func submitAfterAuthoritativeCreation(
     _ draft: PreparedNewThreadDraft,
     participantIDs: [Int64],
-    signpostID: OSSignpostID
+    signpostID: OSSignpostID,
+    intent: NewThreadComposeSubmissionIntent
   ) async -> Result<InlineKit.Peer, NewThreadComposeSubmissionFailure> {
     var createdPeer: InlineKit.Peer?
     do {
@@ -492,8 +532,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       }
       guard admitted else {
         log.error("New-thread send transaction admission failed after thread creation")
-        openCreatedThread(peer, destination: draft.destination)
-        queueDialogOpen(peer)
+        finishCreatedThread(peer, intent: intent)
         os_signpost(
           .event,
           log: performanceLog,
@@ -519,8 +558,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       )
       Drafts2.shared.clear(peer: peer)
       await Drafts2.shared.flush()
-      openCreatedThread(peer, destination: draft.destination)
-      queueDialogOpen(peer)
+      finishCreatedThread(peer, intent: intent)
       os_signpost(
         .event,
         log: performanceLog,
@@ -533,8 +571,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     } catch {
       log.error("New-thread submission failed", error: error)
       if let createdPeer {
-        openCreatedThread(createdPeer, destination: draft.destination)
-        queueDialogOpen(createdPeer)
+        finishCreatedThread(createdPeer, intent: intent)
         os_signpost(
           .event,
           log: performanceLog,
@@ -587,18 +624,14 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     }
   }
 
-  private func openCreatedThread(
+  private func finishCreatedThread(
     _ peer: InlineKit.Peer,
-    destination: NewThreadComposeDestination
+    intent: NewThreadComposeSubmissionIntent
   ) {
-    let spaceName = destination.spaceID.flatMap { spaceID in
-      spaces.first(where: { $0.id == spaceID })?.title
+    if case .openThread = intent {
+      dependencies.openNewlyCreatedChatInCurrentContext(peer: peer)
     }
-    dependencies.openNewlyCreatedChat(
-      peer: peer,
-      spaceId: destination.spaceID,
-      spaceName: spaceName
-    )
+    queueDialogOpen(peer)
   }
 
   private func queueDialogOpen(_ peer: InlineKit.Peer) {
@@ -714,10 +747,16 @@ private final class NewThreadGlassComposeHostView: NSView {
   let compose: GlassComposeAppKit
   private weak var completionOverlayHostView: NewThreadComposeOverlayHostView?
 
-  init(model: AllChatsNewThreadComposeModel) {
+  init(
+    model: AllChatsNewThreadComposeModel,
+    placement: AllChatsNewThreadComposePlacement
+  ) {
     let weakHost = WeakNewThreadComposeHost()
     let supplementaryAccessoryView = NSHostingView(
-      rootView: AllChatsComposeAccessoryView(model: model)
+      rootView: AllChatsComposeAccessoryView(
+        model: model,
+        tooltipPlacement: placement.tooltipPlacement
+      )
     )
     compose = GlassComposeAppKit(
       newThread: model.makeContext(
@@ -732,6 +771,7 @@ private final class NewThreadGlassComposeHostView: NSView {
     )
     super.init(frame: .zero)
     weakHost.view = self
+    compose.configureNewThreadSendTooltip(placement: placement.tooltipPlacement)
 
     translatesAutoresizingMaskIntoConstraints = false
     compose.translatesAutoresizingMaskIntoConstraints = false
@@ -795,9 +835,10 @@ private final class NewThreadGlassComposeHostView: NSView {
 @available(macOS 26.0, *)
 private struct NewThreadGlassComposeRepresentable: NSViewRepresentable {
   @ObservedObject var model: AllChatsNewThreadComposeModel
+  let placement: AllChatsNewThreadComposePlacement
 
   func makeNSView(context: Context) -> NewThreadGlassComposeHostView {
-    NewThreadGlassComposeHostView(model: model)
+    NewThreadGlassComposeHostView(model: model, placement: placement)
   }
 
   func updateNSView(_ nsView: NewThreadGlassComposeHostView, context: Context) {}
@@ -809,14 +850,17 @@ struct AllChatsNewThreadComposeHost: View {
 
   let spaces: [AllChatsComposeSpace]
   let selectedSpaceID: Int64?
+  let placement: AllChatsNewThreadComposePlacement
 
   init(
     dependencies: AppDependencies,
     spaces: [AllChatsComposeSpace],
-    selectedSpaceID: Int64?
+    selectedSpaceID: Int64?,
+    placement: AllChatsNewThreadComposePlacement
   ) {
     self.spaces = spaces
     self.selectedSpaceID = selectedSpaceID
+    self.placement = placement
     _model = StateObject(wrappedValue: AllChatsNewThreadComposeModel(
       dependencies: dependencies,
       spaces: spaces,
@@ -825,7 +869,7 @@ struct AllChatsNewThreadComposeHost: View {
   }
 
   var body: some View {
-    NewThreadGlassComposeRepresentable(model: model)
+    NewThreadGlassComposeRepresentable(model: model, placement: placement)
       .frame(maxWidth: .infinity)
       .frame(height: model.composeHeight)
       .padding(.horizontal, 12)
@@ -842,6 +886,7 @@ struct AllChatsNewThreadComposeHost: View {
 @available(macOS 26.0, *)
 private struct AllChatsComposeAccessoryView: View {
   @ObservedObject var model: AllChatsNewThreadComposeModel
+  let tooltipPlacement: InlineTooltipPlacement
 
   var body: some View {
     HStack(spacing: 4) {
@@ -862,7 +907,12 @@ private struct AllChatsComposeAccessoryView: View {
       .buttonStyle(.plain)
       .menuIndicator(.hidden)
       .fixedSize(horizontal: true, vertical: true)
-      .disabled(model.isSubmitting)
+      .disabled(model.isSubmitting || model.isDestinationLocked)
+      .inlineTooltip(
+        verbatim: String(localized: "Thread destination"),
+        description: model.destinationTooltipDescription,
+        placement: tooltipPlacement
+      )
 
       if model.showsVisibility {
         Button(action: model.toggleVisibility) {
@@ -873,7 +923,8 @@ private struct AllChatsComposeAccessoryView: View {
         .disabled(model.isSubmitting)
         .inlineTooltip(
           verbatim: model.visibilityTooltipTitle,
-          description: model.visibilityTooltipDescription
+          description: model.visibilityTooltipDescription,
+          placement: tooltipPlacement
         )
         .transition(.opacity)
       }
@@ -888,7 +939,6 @@ private struct AllChatsComposeAccessoryView: View {
     .frame(height: 24)
     .animation(.easeOut(duration: 0.16), value: model.showsVisibility)
   }
-
 }
 
 @available(macOS 26.0, *)

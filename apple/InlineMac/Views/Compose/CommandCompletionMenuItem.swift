@@ -19,6 +19,7 @@ final class CommandCompletionMenuItem: NSTableCellView {
     set {
       guard _isSelected != newValue else { return }
       _isSelected = newValue
+      setAccessibilitySelected(newValue)
       updateAppearance()
     }
   }
@@ -35,6 +36,8 @@ final class CommandCompletionMenuItem: NSTableCellView {
 
   private func setupView() {
     containerView.wantsLayer = true
+    containerView.layer?.cornerRadius = 8
+    containerView.layer?.cornerCurve = .continuous
     containerView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(containerView)
 
@@ -76,10 +79,10 @@ final class CommandCompletionMenuItem: NSTableCellView {
     containerView.addSubview(botLabel)
 
     NSLayoutConstraint.activate([
-      containerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      containerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      containerView.topAnchor.constraint(equalTo: topAnchor),
-      containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      containerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+      containerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+      containerView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+      containerView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
 
       avatarView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: avatarLeading),
       avatarView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
@@ -112,37 +115,44 @@ final class CommandCompletionMenuItem: NSTableCellView {
 
   func configure(with suggestion: ComposeCommandSuggestion) {
     switch suggestion {
-      case let .bot(command):
-        avatarView.update(peerType: .user(command.botUserInfo))
-        avatarView.isHidden = false
-        appIconView.isHidden = true
-        commandLabel.stringValue = "/\(command.command)"
-        descriptionLabel.stringValue = command.description
+    case let .bot(command):
+      avatarView.update(peerType: .user(command.botUserInfo))
+      avatarView.isHidden = false
+      appIconView.isHidden = true
+      commandLabel.stringValue = "/\(command.command)"
+      descriptionLabel.stringValue = command.description
 
-        if command.isAmbiguous, let botLabelText = command.botLabel {
-          botLabel.stringValue = botLabelText
-          botLabel.isHidden = false
-        } else {
-          botLabel.stringValue = ""
-          botLabel.isHidden = true
-        }
-
-      case let .inline(command):
-        avatarView.isHidden = true
-        appIconView.isHidden = false
-        commandLabel.stringValue = "/\(command.command)"
-        descriptionLabel.stringValue = command.description
+      if command.isAmbiguous, let botLabelText = command.botLabel {
+        botLabel.stringValue = botLabelText
+        botLabel.isHidden = false
+      } else {
         botLabel.stringValue = ""
         botLabel.isHidden = true
+      }
+
+    case let .inline(command):
+      avatarView.isHidden = true
+      appIconView.isHidden = false
+      commandLabel.stringValue = "/\(command.command)"
+      descriptionLabel.stringValue = command.description
+      botLabel.stringValue = ""
+      botLabel.isHidden = true
     }
+    setAccessibilityLabel(
+      [commandLabel.stringValue, descriptionLabel.stringValue, botLabel.stringValue]
+        .filter { !$0.isEmpty }
+        .joined(separator: ", ")
+    )
   }
 
   private func updateAppearance() {
     if isSelected {
-      containerView.layer?.backgroundColor = NSColor.accent.cgColor
-      commandLabel.textColor = .white
-      descriptionLabel.textColor = NSColor.white.withAlphaComponent(0.9)
-      botLabel.textColor = NSColor.white.withAlphaComponent(0.9)
+      containerView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor
+        .resolvedColor(with: effectiveAppearance)
+        .cgColor
+      commandLabel.textColor = .alternateSelectedControlTextColor
+      descriptionLabel.textColor = NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.9)
+      botLabel.textColor = NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.9)
     } else {
       containerView.layer?.backgroundColor = NSColor.clear.cgColor
       commandLabel.textColor = .labelColor
@@ -152,4 +162,9 @@ final class CommandCompletionMenuItem: NSTableCellView {
   }
 
   override func draw(_ dirtyRect: NSRect) {}
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateAppearance()
+  }
 }
