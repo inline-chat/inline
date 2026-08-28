@@ -675,6 +675,7 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
         "text_chunk_limit",
         "reply_threads",
         "system_events",
+        "reactions",
         "channel_prompts",
         "channel_skill_bindings",
         "typing_indicator",
@@ -738,6 +739,10 @@ class InlineAdapter(BasePlatformAdapter):
         self._upload_max_bytes = int(self._upload_max_mb * 1024 * 1024)
         self._system_events = _truthy(
             extra.get("system_events") if "system_events" in extra else os.getenv("INLINE_SYSTEM_EVENTS"),
+            False,
+        )
+        self._processing_reactions = _truthy(
+            extra.get("reactions") if "reactions" in extra else os.getenv("INLINE_REACTIONS"),
             False,
         )
         self._sync_commands = _truthy(
@@ -883,6 +888,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._update_prompt_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._model_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._status_message_ids: "OrderedDict[tuple[str, str, str], str]" = OrderedDict()
+        self._processing_reaction_messages: "OrderedDict[tuple[str, str, str], Dict[str, str]]" = OrderedDict()
         self._thread_action_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._chat_info_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
         self._bot_agent_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
@@ -4348,6 +4354,80 @@ class InlineAdapter(BasePlatformAdapter):
             await self._sidecar_call("/typing", {"target": target, "state": "stop"})
         except Exception:
             pass
+
+    def _processing_reaction_target(
+        self,
+        event: MessageEvent,
+    ) -> Optional[tuple[tuple[str, str, str], Dict[str, str], str]]:
+        if not self._processing_reactions:
+            return None
+        raw_message = getattr(event, "raw_message", None)
+        if isinstance(raw_message, dict):
+            # Lifecycle and reaction events can themselves invoke Hermes when
+            # system events are enabled. Reacting to those would add noise and
+            # could create a reaction-event loop. Agent-action turns resolve
+            # their own source card in place and must not react to that card.
+            kind = str(raw_message.get("kind") or "")
+            if (kind and kind != "message.new") or raw_message.get("_inlineAgentAction"):
+                return None
+        source = getattr(event, "source", None)
+        chat_id = str(getattr(source, "chat_id", None) or "").strip()
+        message_id = str(getattr(event, "message_id", None) or "").strip()
+        if not chat_id or not message_id:
+            return None
+        target = _target_from_chat_id(chat_id)
+        target_kind = "userId" if "userId" in target else "chatId"
+        target_id = str(target.get(target_kind) or "").strip()
+        if not target_id:
+            return None
+        return (target_kind, target_id, message_id), target, message_id
+
+    async def _set_processing_reaction(
+        self,
+        target: Dict[str, str],
+        message_id: str,
+        emoji: str,
+        *,
+        remove: bool = False,
+    ) -> bool:
+        body: Dict[str, Any] = {
+            "target": target,
+            "messageId": message_id,
+            "emoji": emoji,
+        }
+        if remove:
+            body["remove"] = True
+        try:
+            await self._sidecar_call("/reaction", body)
+            return True
+        except Exception as exc:
+            logger.debug("[inline] processing reaction failed: %s", exc)
+            return False
+
+    async def on_processing_start(self, event: MessageEvent) -> None:
+        """Mark an inbound message while Hermes is actively processing it."""
+        reaction_target = self._processing_reaction_target(event)
+        if not reaction_target:
+            return
+        key, target, message_id = reaction_target
+        if await self._set_processing_reaction(target, message_id, "👀"):
+            self._remember(self._processing_reaction_messages, key, target)
+
+    async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
+        """Replace the processing marker without affecting response delivery."""
+        reaction_target = self._processing_reaction_target(event)
+        if not reaction_target:
+            return
+        key, _, message_id = reaction_target
+        target = self._processing_reaction_messages.pop(key, None)
+        if not target:
+            return
+        await self._set_processing_reaction(target, message_id, "👀", remove=True)
+        outcome_name = str(getattr(outcome, "value", outcome) or "").strip().lower()
+        if outcome_name == "success":
+            await self._set_processing_reaction(target, message_id, "✅")
+        elif outcome_name == "failure":
+            await self._set_processing_reaction(target, message_id, "❌")
 
     async def send_image_file(self, chat_id: str, image_path: str, caption: Optional[str] = None, reply_to: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> SendResult:
         return await self._send_attachment(chat_id, image_path, "photo", caption, reply_to, metadata=metadata)

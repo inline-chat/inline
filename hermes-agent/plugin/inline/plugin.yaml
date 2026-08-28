@@ -110,6 +110,10 @@ optional_env:
     description: "Deliver Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages (true/false, default false)"
     prompt: "Deliver lifecycle events? (true/false)"
     password: false
+  - name: INLINE_REACTIONS
+    description: "Show processing reactions on handled inbound messages: eyes while working, then success or failure (true/false, default false)"
+    prompt: "Show processing reactions? (true/false)"
+    password: false
   - name: INLINE_MENTION_PATTERNS
     description: "Mention wake-word regexes, JSON list or comma/newline-separated"
     prompt: "Mention patterns"

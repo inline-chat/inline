@@ -293,6 +293,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On/Off buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
+| `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
 | `INLINE_MENTION_PATTERNS` | JSON list, comma-separated, or newline-separated regex patterns for group wake words. |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
 | `INLINE_SYNC_COMMANDS` | Syncs Hermes slash commands into Inline's native `/` bot command menu on gateway connect. Defaults to `true`. |
@@ -316,7 +317,7 @@ Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
 `context_backfill`, `thread_context_limit`, `reply_context_limit`,
 `observed_context_limit`, `observe_unmentioned_messages`, `settings_path`, and
-`mention_patterns` under the Inline platform config. Operational settings such
+`mention_patterns`, and `reactions` under the Inline platform config. Operational settings such
 as `base_url`, `parse_markdown`, `media_max_mb`, `upload_max_mb`,
 `state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`, and
 `command_limit` can also be set there.

@@ -3791,6 +3791,108 @@ async def assert_status_message_coalescing():
 
 asyncio.run(assert_status_message_coalescing())
 
+async def assert_processing_reactions():
+    disabled = InlineAdapter(PlatformConfig(extra={**base_extra, "reactions": False}))
+    disabled_calls = []
+
+    async def disabled_sidecar(path, body):
+        disabled_calls.append((path, body))
+        return {"ok": True, "result": {}}
+
+    disabled._sidecar_call = disabled_sidecar
+    disabled_event = MessageEvent(
+        source=types.SimpleNamespace(chat_id="chat:10"),
+        message_id="20",
+        raw_message={"kind": "message.new"},
+    )
+    await disabled.on_processing_start(disabled_event)
+    await disabled.on_processing_complete(disabled_event, "success")
+    assert disabled_calls == []
+
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "reactions": True}))
+    calls = []
+
+    async def fake_sidecar(path, body):
+        calls.append((path, body))
+        return {"ok": True, "result": {}}
+
+    adapter._sidecar_call = fake_sidecar
+
+    def processing_event(message_id, raw_message=None):
+        return MessageEvent(
+            source=types.SimpleNamespace(chat_id="chat:10"),
+            message_id=str(message_id),
+            raw_message=raw_message or {"kind": "message.new"},
+        )
+
+    success_event = processing_event("21")
+    await adapter.on_processing_start(success_event)
+    await adapter.on_processing_complete(success_event, types.SimpleNamespace(value="success"))
+    assert calls == [
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "21", "emoji": "👀"}),
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "21", "emoji": "👀", "remove": True}),
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "21", "emoji": "✅"}),
+    ]
+    assert adapter._processing_reaction_messages == {}
+
+    calls.clear()
+    failure_event = processing_event("22")
+    await adapter.on_processing_start(failure_event)
+    await adapter.on_processing_complete(failure_event, types.SimpleNamespace(value="failure"))
+    assert calls[-1] == (
+        "/reaction",
+        {"target": {"chatId": "10"}, "messageId": "22", "emoji": "❌"},
+    )
+
+    calls.clear()
+    cancelled_event = processing_event("23")
+    await adapter.on_processing_start(cancelled_event)
+    await adapter.on_processing_complete(cancelled_event, types.SimpleNamespace(value="cancelled"))
+    assert calls == [
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "23", "emoji": "👀"}),
+        ("/reaction", {"target": {"chatId": "10"}, "messageId": "23", "emoji": "👀", "remove": True}),
+    ]
+
+    calls.clear()
+    await adapter.on_processing_start(MessageEvent(
+        source=types.SimpleNamespace(chat_id="chat:10"),
+        message_id=None,
+        raw_message={"kind": "message.new"},
+    ))
+    await adapter.on_processing_start(processing_event("24", {"kind": "reaction.add"}))
+    await adapter.on_processing_start(processing_event("25", {
+        "kind": "message.new",
+        "_inlineAgentAction": {"actionId": "agent:1:1"},
+    }))
+    assert calls == []
+
+    transport_failure = InlineAdapter(PlatformConfig(extra={**base_extra, "reactions": True}))
+    failed_calls = []
+
+    async def failing_sidecar(path, body):
+        failed_calls.append((path, body))
+        raise RuntimeError("reaction unavailable")
+
+    transport_failure._sidecar_call = failing_sidecar
+    failed_event = processing_event("26")
+    await transport_failure.on_processing_start(failed_event)
+    await transport_failure.on_processing_complete(failed_event, "success")
+    assert len(failed_calls) == 1
+    assert transport_failure._processing_reaction_messages == {}
+
+    bounded = InlineAdapter(PlatformConfig(extra={**base_extra, "reactions": True}))
+    for index in range(513):
+        bounded._remember(
+            bounded._processing_reaction_messages,
+            ("chatId", "10", str(index)),
+            {"chatId": "10"},
+        )
+    assert len(bounded._processing_reaction_messages) == 512
+    assert ("chatId", "10", "0") not in bounded._processing_reaction_messages
+    assert ("chatId", "10", "512") in bounded._processing_reaction_messages
+
+asyncio.run(assert_processing_reactions())
+
 async def assert_action_authorization():
     os.environ.pop("GATEWAY_ALLOWED_USERS", None)
     os.environ.pop("GATEWAY_ALLOW_ALL_USERS", None)
