@@ -33,8 +33,48 @@ export function parseMarkdown(input: string): ParsedMarkdown {
   return { text, entities }
 }
 
+/**
+ * Repairs a narrow gateway progress annotation before Markdown parsing.
+ *
+ * Hermes collapses repeated terminal progress by appending ` (×N)` to the
+ * entire fenced fragment. That leaves the counter after the closing delimiter,
+ * which CommonMark interprets as a new opening fence. Replace only that one
+ * separator while a matching fence is open; the counter remains visible on the
+ * following line and source length stays unchanged for UTF-16 range mapping.
+ */
+export function normalizeMarkdownInput(input: string): string {
+  if (!input.includes("(×")) return input
+
+  const output: string[] = []
+  let cursor = 0
+  let fence: MarkdownFence | undefined
+
+  while (cursor < input.length) {
+    const line = readLine(input, cursor)
+    let value = line.value
+
+    if (fence) {
+      const normalizedClose = normalizeRepeatedClosingFence(value, fence)
+      if (normalizedClose !== undefined) {
+        value = normalizedClose
+        fence = undefined
+      } else if (isClosingFence(value, fence)) {
+        fence = undefined
+      }
+    } else {
+      fence = parseOpeningFence(value)
+    }
+
+    output.push(value, input.slice(line.contentEnd, line.next))
+    cursor = line.next
+  }
+
+  return output.join("")
+}
+
 /** Internal compatibility parser result used to map structural Markdown ranges. */
 export function parseMarkdownWithSourceMap(input: string): ParsedMarkdownWithSourceMap {
+  input = normalizeMarkdownInput(input)
   if (!input) {
     return { text: "", entities: [], sourceToOutput: [0] }
   }
@@ -423,6 +463,13 @@ function isClosingFence(line: string, fence: MarkdownFence): boolean {
   const match = /^ {0,3}(`+|~+)[ \t]*$/.exec(line)
   const run = match?.[1]
   return run?.[0] === fence.character && run.length >= fence.length
+}
+
+function normalizeRepeatedClosingFence(line: string, fence: MarkdownFence): string | undefined {
+  const match = /^( {0,3})(`+|~+) \((×(?:[2-9]|[1-9]\d+))\)$/.exec(line)
+  const run = match?.[2]
+  if (!run || run[0] !== fence.character || run.length < fence.length) return undefined
+  return `${match[1]}${run}\n(${match[3]})`
 }
 
 function cleanFenceLanguage(info: string): string {

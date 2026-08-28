@@ -116,6 +116,49 @@ describe("parseMarkdown", () => {
       .toEqual(["ts", "swift"])
   })
 
+  test("keeps repeated terminal progress counters outside their completed fence", () => {
+    const input = [
+      "```",
+      "first command",
+      "```",
+      "```",
+      "repeated command",
+      "``` (×3)",
+      "```",
+      "next command",
+      "```",
+    ].join("\n")
+    const parsed = parseMarkdown(input)
+
+    expect(parsed.text).toBe([
+      "first command",
+      "repeated command",
+      "(×3)",
+      "next command",
+    ].join("\n"))
+    expect(parsed.entities.map((entity) => entity.type)).toEqual([
+      MessageEntity_Type.PRE,
+      MessageEntity_Type.PRE,
+      MessageEntity_Type.PRE,
+    ])
+    expect(parsed.entities.map((entity) => parsed.text.slice(
+      Number(entity.offset),
+      Number(entity.offset + entity.length),
+    ))).toEqual(["first command", "repeated command", "next command"])
+  })
+
+  test("does not reinterpret repetition-like opening fence info", () => {
+    const parsed = parseMarkdown([
+      "``` (×3)",
+      "literal body",
+      "```",
+    ].join("\n"))
+
+    expect(parsed.text).toBe("literal body")
+    expect(parsed.entities).toHaveLength(1)
+    expect(parsed.entities[0]?.type).toBe(MessageEntity_Type.PRE)
+  })
+
   test("leaves ambiguous trailing inline Markdown literal", () => {
     const input = "**complete**\n\nunfinished **bold and [link](https://example.com"
     const parsed = parseMarkdown(input)

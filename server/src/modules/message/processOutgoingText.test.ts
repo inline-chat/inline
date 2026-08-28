@@ -520,4 +520,56 @@ describe("processOutgoingText", () => {
     const end = start + Number(second.kind.code.text?.length ?? 0n)
     expect(result.text.slice(start, end)).toBe("let second = `value`")
   })
+
+  test("projects Hermes terminal dedup counters without corrupting later code blocks", async () => {
+    const input = [
+      "💻 terminal",
+      "```",
+      "/opt/data/tools/bin/coolify --context...",
+      "```",
+      "```",
+      "/opt/data/tools/bin/axiom-readonly --...",
+      "``` (×3)",
+      "```",
+      "curl --fail --silent --show-error -m...",
+      "```",
+    ].join("\n")
+    const result = await processOutgoingText({
+      text: input,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(result.text).toBe([
+      "💻 terminal",
+      "/opt/data/tools/bin/coolify --context...",
+      "/opt/data/tools/bin/axiom-readonly --...",
+      "(×3)",
+      "curl --fail --silent --show-error -m...",
+    ].join("\n"))
+    expect(result.entities?.entities.map((entity) => entity.type)).toEqual([
+      MessageEntity_Type.PRE,
+      MessageEntity_Type.PRE,
+      MessageEntity_Type.PRE,
+    ])
+    expect(result.blockContent?.blocks.map((block) => block.kind.oneofKind)).toEqual([
+      "paragraph",
+      "code",
+      "code",
+      "paragraph",
+      "code",
+    ])
+
+    const codeText = result.blockContent?.blocks.flatMap((block) => {
+      if (block.kind.oneofKind !== "code" || !block.kind.code.text) return []
+      const start = Number(block.kind.code.text.offset)
+      const end = start + Number(block.kind.code.text.length)
+      return [result.text.slice(start, end)]
+    })
+    expect(codeText).toEqual([
+      "/opt/data/tools/bin/coolify --context...",
+      "/opt/data/tools/bin/axiom-readonly --...",
+      "curl --fail --silent --show-error -m...",
+    ])
+  })
 })

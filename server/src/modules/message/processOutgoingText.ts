@@ -4,7 +4,10 @@ import { botAgents, lower, userNotDeleted, users } from "@in/server/db/schema"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
 import { parseBlockContent, type BlockImageSource } from "@in/server/modules/message/blockContent"
-import { parseMarkdownWithSourceMap } from "@in/server/modules/message/parseMarkdown"
+import {
+  normalizeMarkdownInput,
+  parseMarkdownWithSourceMap,
+} from "@in/server/modules/message/parseMarkdown"
 
 type ProcessOutgoingTextInput = {
   text: string
@@ -727,12 +730,13 @@ export const processOutgoingText = async (
 ): Promise<ProcessOutgoingTextOutput> => {
   let text = input.text
   let entities = input.entities
-  const parsedMarkdown = input.parseMarkdown ? parseMarkdownWithSourceMap(input.text) : undefined
-  const parsedBlocks = parsedMarkdown ? parseBlockContent(input.text, parsedMarkdown) : undefined
+  const markdown = input.parseMarkdown ? normalizeMarkdownInput(input.text) : input.text
+  const parsedMarkdown = input.parseMarkdown ? parseMarkdownWithSourceMap(markdown) : undefined
+  const parsedBlocks = parsedMarkdown ? parseBlockContent(markdown, parsedMarkdown) : undefined
 
   if (parsedMarkdown) {
     const processed = processMessageText({
-      text: input.text,
+      text: markdown,
       entities: input.entities,
       parsedMarkdown,
     })
