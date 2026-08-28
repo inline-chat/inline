@@ -1261,7 +1261,7 @@ class MessageSizeCalculator {
         documentPlan!.spacing = NSEdgeInsets(
           top: 8,
           left: bubbleContentHorizontalInset,
-          bottom: Theme.messageTextAndPhotoSpacing,
+          bottom: hasVoice ? 0 : Theme.messageTextAndPhotoSpacing,
           right: bubbleContentHorizontalInset
         )
       } else {
