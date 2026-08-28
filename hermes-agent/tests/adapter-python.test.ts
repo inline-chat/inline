@@ -304,12 +304,15 @@ assert _parse_inline_target_ref("inline:thread:123") == ("123", None)
 assert _parse_inline_target_ref("space:123") is None
 assert _parse_inline_target_ref("room-name") is None
 assert _parse_inline_target_ref("chat:not-an-id") == ("not-an-id", None)
+assert _parse_inline_target_ref("chat:user:123") is None
+assert _parse_inline_target_ref("thread:user:123") is None
 assert _validate_inline_target_ref("123") is True
 assert _validate_inline_target_ref("user:123") is True
 assert _validate_inline_target_ref("0") == "Inline targets must use a positive signed 64-bit integer ID"
 assert _validate_inline_target_ref("-1") == "Inline targets must use a positive signed 64-bit integer ID"
 assert _validate_inline_target_ref("9223372036854775808") == "Inline targets must use a positive signed 64-bit integer ID"
 assert _validate_inline_target_ref("space:123") == "Use a bare Inline ID or a chat:, thread:, or user: target"
+assert _validate_inline_target_ref("chat:user:123") == "Inline targets must use a positive signed 64-bit integer ID"
 assert _target_from_chat_id("thread:123") == {"chatId": "123"}
 assert _target_from_chat_id("inline:user:123") == {"userId": "123"}
 assert "visible label is their first name, falling back to username" in inline_tools.INLINE_PLATFORM_GUIDANCE
@@ -3292,6 +3295,30 @@ async def assert_model_picker_flow():
     })
     assert answers[-1] == ("interaction-model-4", "Picker expired")
 
+    def failing_model_selection(chat_id, model_id, provider_slug):
+        raise RuntimeError("secret=/private/model-provider-token")
+
+    failed_picker_id = "model-failure"
+    adapter._model_picker_sessions[failed_picker_id] = {
+        "chat_id": "chat:10",
+        "on_model_selected": failing_model_selection,
+    }
+    await adapter._complete_model_selection(
+        {
+            "chatId": "99",
+            "messageId": "42",
+            "interactionId": "interaction-model-failure",
+        },
+        failed_picker_id,
+        adapter._model_picker_sessions[failed_picker_id],
+        "private-model",
+        "private-provider",
+    )
+    assert failed_picker_id not in adapter._model_picker_sessions
+    assert calls[-1][1]["text"] == "Model switch failed; try again."
+    assert "model-provider-token" not in calls[-1][1]["text"]
+    assert answers[-1] == ("interaction-model-failure", "Switch failed")
+
 asyncio.run(assert_model_picker_flow())
 
 async def assert_choice_picker_flow():
@@ -3341,6 +3368,18 @@ async def assert_choice_picker_flow():
     second_action = rows[0]["actions"][1]["id"]
     assert first_action.startswith("system:cp:")
     picker_id = next(iter(adapter._choice_picker_sessions))
+    assert adapter._choice_picker_sessions[picker_id]["target"] == {"chatId": "99"}
+
+    assert await adapter._handle_action({
+        "chatId": "100",
+        "messageId": "choice-message",
+        "interactionId": "choice-wrong-chat",
+        "actorUserId": "u1",
+        "actionId": second_action,
+    })
+    assert answers[-1] == ("choice-wrong-chat", "Picker expired")
+    assert picker_id in adapter._choice_picker_sessions
+    assert selected == []
 
     assert await adapter._handle_action({
         "chatId": "99",
@@ -3405,6 +3444,30 @@ async def assert_choice_picker_flow():
     })
     assert answers[-1] == ("choice-expired", "Picker expired")
     assert selected == [("chat:10", "high")]
+
+    def failing_choice(chat_id, value):
+        raise RuntimeError("secret=/private/provider-token")
+
+    failed_callback = await adapter.send_choice_picker(
+        "chat:10",
+        "Fail safely",
+        [{"value": "fail", "label": "Fail"}],
+        "session-callback-failure",
+        failing_choice,
+    )
+    assert failed_callback.success
+    failed_callback_id = next(reversed(adapter._choice_picker_sessions))
+    assert await adapter._handle_action({
+        "chatId": "10",
+        "messageId": "choice-message",
+        "interactionId": "choice-callback-failure",
+        "actorUserId": "u1",
+        "actionId": f"system:cp:{failed_callback_id}:0",
+    })
+    assert failed_callback_id not in adapter._choice_picker_sessions
+    assert calls[-1][1]["text"] == "Selection failed; try again."
+    assert "provider-token" not in calls[-1][1]["text"]
+    assert answers[-1] == ("choice-callback-failure", "Selection failed")
 
     calls.clear()
     bounded_result = await adapter.send_choice_picker(
@@ -3501,6 +3564,17 @@ async def assert_update_prompt_flow():
     assert [action["text"] for action in prompt_actions] == ["✓ Yes", "✗ No"]
     assert all(action["id"].startswith("system:up:") for action in prompt_actions)
     prompt_id = next(iter(adapter._update_prompt_sessions))
+    assert adapter._update_prompt_sessions[prompt_id]["target"] == {"chatId": "99"}
+
+    assert await adapter._handle_action({
+        "chatId": "100",
+        "messageId": "update-message",
+        "interactionId": "update-wrong-chat",
+        "actorUserId": "u1",
+        "actionId": prompt_actions[0]["id"],
+    })
+    assert answers[-1] == ("update-wrong-chat", "Prompt expired")
+    assert prompt_id in adapter._update_prompt_sessions
 
     assert await adapter._handle_action({
         "chatId": "99",

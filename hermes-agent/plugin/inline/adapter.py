@@ -385,7 +385,7 @@ def _parse_inline_target_ref(target_ref: str) -> Optional[tuple[str, Optional[st
         prefix, raw = raw.split(":", 1)
         prefix = prefix.strip().lower()
         raw = raw.strip()
-        if prefix not in {"chat", "thread", "user"} or not raw:
+        if prefix not in {"chat", "thread", "user"} or not raw or ":" in raw:
             return None
 
     normalized = _normalize_inline_target_id(raw)
@@ -3894,6 +3894,21 @@ class InlineAdapter(BasePlatformAdapter):
     def _is_model_picker_action(action_id: str) -> bool:
         return action_id.startswith(("mp:", "mpg:", "mm:", "mc:", "mg:", "mb:", "mx:"))
 
+    def _action_matches_state_target(self, event: Dict[str, Any], state: Dict[str, Any]) -> bool:
+        target = state.get("target")
+        if not isinstance(target, dict):
+            return False
+        expected_target_id = str(target.get("chatId") or target.get("userId") or "").strip()
+        actual_target_id = self._chat_key(event.get("chatId"))
+        expected_message_id = str(state.get("message_id") or "").strip()
+        actual_message_id = str(event.get("messageId") or "").strip()
+        return bool(
+            expected_target_id
+            and expected_target_id == actual_target_id
+            and expected_message_id
+            and expected_message_id == actual_message_id
+        )
+
     async def _handle_choice_picker_action(self, event: Dict[str, Any]) -> bool:
         action_id = str(event.get("actionId") or "")
         parts = action_id.split(":", 2)
@@ -3905,8 +3920,7 @@ class InlineAdapter(BasePlatformAdapter):
         if not state:
             await self._answer_action(interaction_id, "Picker expired")
             return True
-        expected_message_id = str(state.get("message_id") or "")
-        if expected_message_id and expected_message_id != str(event.get("messageId") or ""):
+        if not self._action_matches_state_target(event, state):
             await self._answer_action(interaction_id, "Picker expired")
             return True
         if time.monotonic() - float(state.get("created_at") or 0) > _CHOICE_PICKER_TTL_SECONDS:
@@ -3939,8 +3953,8 @@ class InlineAdapter(BasePlatformAdapter):
                 result_text = await result_text
             result_text = str(result_text or "Selection applied.")
         except Exception as exc:
-            logger.exception("[inline] choice picker selection failed")
-            result_text = f"Error applying selection: {exc}"
+            logger.error("[inline] choice picker selection failed (%s)", type(exc).__name__)
+            result_text = "Selection failed; try again."
             failed = True
         await self._finish_action(
             event,
@@ -3960,8 +3974,7 @@ class InlineAdapter(BasePlatformAdapter):
         if not state:
             await self._answer_action(interaction_id, "Prompt expired")
             return True
-        expected_message_id = str(state.get("message_id") or "")
-        if expected_message_id and expected_message_id != str(event.get("messageId") or ""):
+        if not self._action_matches_state_target(event, state):
             await self._answer_action(interaction_id, "Prompt expired")
             return True
         if time.monotonic() - float(state.get("created_at") or 0) > _UPDATE_PROMPT_TTL_SECONDS:
@@ -4147,8 +4160,8 @@ class InlineAdapter(BasePlatformAdapter):
                 result_text = await result_text
             result_text = str(result_text or "Model switched.")
         except Exception as exc:
-            logger.exception("[inline] model picker switch failed")
-            result_text = f"Error switching model: {exc}"
+            logger.error("[inline] model picker switch failed (%s)", type(exc).__name__)
+            result_text = "Model switch failed; try again."
             failed = True
         self._model_picker_sessions.pop(picker_id, None)
         await self._edit_action_message(event, result_text, {"rows": []})
@@ -4706,8 +4719,9 @@ class InlineAdapter(BasePlatformAdapter):
             if choice["is_current"]:
                 label = f"✓ {label}"
             actions.append(self._action(f"cp:{picker_id}:{index}", self._short_label(label)))
+        target = self._target_for(chat_id, metadata)
         result = await self._send_sidecar("/send", {
-            "target": self._target_for(chat_id, metadata),
+            "target": target,
             "text": str(title or "Choose an option"),
             "parseMarkdown": self._parse_markdown,
             "actions": {"rows": self._action_rows(actions)},
@@ -4718,6 +4732,7 @@ class InlineAdapter(BasePlatformAdapter):
                 "choices": clean_choices,
                 "session_key": str(session_key),
                 "on_choice_selected": on_choice_selected,
+                "target": target,
                 "message_id": result.message_id,
                 "created_at": time.monotonic(),
             })
@@ -4733,8 +4748,9 @@ class InlineAdapter(BasePlatformAdapter):
     ) -> SendResult:
         prompt_id = secrets.token_hex(6)
         default_hint = f" (default: {default})" if default else ""
+        target = self._target_for(chat_id, metadata)
         result = await self._send_sidecar("/send", {
-            "target": self._target_for(chat_id, metadata),
+            "target": target,
             "text": f"Hermes update needs your input\n\n{prompt}{default_hint}",
             "parseMarkdown": self._parse_markdown,
             "actions": {"rows": [{"actions": [
@@ -4749,6 +4765,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._remember(self._update_prompt_sessions, prompt_id, {
             "chat_id": str(chat_id),
             "session_key": str(session_key),
+            "target": target,
             "message_id": result.message_id,
             "created_at": time.monotonic(),
         })
