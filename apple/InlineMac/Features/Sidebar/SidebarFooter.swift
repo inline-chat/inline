@@ -201,11 +201,8 @@ private enum SidebarHelpVersionSummary {
   static var current: String? {
     guard let version, let buildNumber, let buildDate else { return nil }
 
-    return [
-      "Version \(version)",
-      "Build \(buildNumber)",
-      ageDescription(since: buildDate, now: .now),
-    ].joined(separator: " • ")
+    let daysAgo = max(0, Int(Date.now.timeIntervalSince(buildDate) / 86_400))
+    return "v\(version) (\(buildNumber)) • \(daysAgo)d ago"
   }
 
   private static func bundleValue(for key: String) -> String? {
@@ -215,20 +212,6 @@ private enum SidebarHelpVersionSummary {
     else { return nil }
 
     return value
-  }
-
-  private static func ageDescription(since date: Date, now: Date) -> String {
-    let totalHours = max(0, Int(now.timeIntervalSince(date) / 3_600))
-    let days = totalHours / 24
-    let hours = totalHours % 24
-
-    if days == 0 {
-      return "\(hours) \(hours == 1 ? "hour" : "hours") ago"
-    }
-
-    let dayUnit = days == 1 ? "day" : "days"
-    let hourUnit = hours == 1 ? "hour" : "hours"
-    return "\(days) \(dayUnit), \(hours) \(hourUnit) ago"
   }
 }
 
