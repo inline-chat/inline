@@ -2009,7 +2009,7 @@ class MessageSizeCalculator {
       documentPlan!.spacing = NSEdgeInsets(
         top: 8,
         left: 0,
-        bottom: hasText ? Theme.messageTextAndPhotoSpacing : 8,
+        bottom: hasText ? (hasVoice ? 0 : Theme.messageTextAndPhotoSpacing) : 8,
         right: 0
       )
     }
