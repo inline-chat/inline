@@ -93,6 +93,7 @@ _SIDECAR_DIR = Path(__file__).parent / "sidecar"
 _SIDECAR_ENTRY = _SIDECAR_DIR / "index.mjs"
 _DEFAULT_MEDIA_MAX_MB = 25
 _DEFAULT_UPLOAD_MAX_MB = 300
+_MAX_INLINE_ID = 9_223_372_036_854_775_807
 _MIN_NODE_MAJOR = 20
 _DEFAULT_CONNECT_TIMEOUT_MS = 20_000
 _INLINE_COMMAND_LIMIT = 100
@@ -353,11 +354,79 @@ def _target_from_chat_id(chat_id: str) -> Dict[str, str]:
     raw = str(chat_id or "").strip()
     if raw.startswith("inline:"):
         raw = raw[len("inline:"):].strip()
-    if raw.startswith("chat:"):
-        return {"chatId": raw[len("chat:"):].strip()}
+    if raw.startswith(("chat:", "thread:")):
+        return {"chatId": raw.split(":", 1)[1].strip()}
     if raw.startswith("user:"):
         return {"userId": raw[len("user:"):].strip()}
     return {"chatId": raw}
+
+
+def _normalize_inline_target_id(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text.isdigit():
+        return None
+    parsed = int(text)
+    if parsed <= 0 or parsed > _MAX_INLINE_ID:
+        return None
+    return str(parsed)
+
+
+def _parse_inline_target_ref(target_ref: str) -> Optional[tuple[str, Optional[str]]]:
+    """Normalize Hermes delivery refs without losing direct-user routing."""
+    raw = str(target_ref or "").strip()
+    if raw.lower().startswith("inline:"):
+        raw = raw.split(":", 1)[1].strip()
+    if not raw:
+        return None
+
+    prefix = ""
+    if ":" in raw:
+        prefix, raw = raw.split(":", 1)
+        prefix = prefix.strip().lower()
+        raw = raw.strip()
+        if prefix not in {"chat", "thread", "user"} or not raw:
+            return None
+
+    normalized = _normalize_inline_target_id(raw)
+    if normalized is None:
+        # Preserve recognized explicit refs for the validator so callers get
+        # the same signed-Int64 diagnostic as other Inline ID entry points.
+        if prefix:
+            return (f"user:{raw}" if prefix == "user" else raw), None
+        return None
+    if prefix == "user":
+        return f"user:{normalized}", None
+    return normalized, None
+
+
+def _validate_inline_target_ref(chat_id: str) -> bool | str:
+    raw = str(chat_id or "").strip()
+    if raw.lower().startswith("inline:"):
+        raw = raw.split(":", 1)[1].strip()
+    if ":" in raw:
+        prefix, raw = raw.split(":", 1)
+        if prefix.strip().lower() not in {"chat", "thread", "user"}:
+            return "Use a bare Inline ID or a chat:, thread:, or user: target"
+        raw = raw.strip()
+    if _normalize_inline_target_id(raw) is None:
+        return "Inline targets must use a positive signed 64-bit integer ID"
+    return True
+
+
+def _target_registration_hooks() -> Dict[str, Callable[..., Any]]:
+    """Expose newer Hermes target hooks without breaking older runtimes."""
+    try:
+        from gateway.platform_registry import PlatformEntry
+
+        fields = getattr(PlatformEntry, "__dataclass_fields__", {})
+        if {"parse_target_ref_fn", "validate_target_ref_fn"}.issubset(fields):
+            return {
+                "parse_target_ref_fn": _parse_inline_target_ref,
+                "validate_target_ref_fn": _validate_inline_target_ref,
+            }
+    except Exception:
+        logger.debug("[inline] Hermes target parser hooks are unavailable", exc_info=True)
+    return {}
 
 
 def _inline_sender_profile(event: Dict[str, Any], message: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -5348,6 +5417,7 @@ def register(ctx) -> None:
         pii_safe=False,
         allow_update_command=True,
         platform_hint=_tools.INLINE_PLATFORM_GUIDANCE,
+        **_target_registration_hooks(),
     )
     register_command = getattr(ctx, "register_command", None)
     if callable(register_command):

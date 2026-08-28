@@ -261,6 +261,12 @@ progress message after a successful final reply. Token streaming requires both
 top-level `streaming.enabled: true` and
 `display.platforms.inline.streaming: true`.
 
+Hermes-native sends and scheduled deliveries accept Inline's explicit target
+forms: a bare positive ID or `chat:ID` for a chat, `thread:ID` for a routable
+reply thread, and `user:ID` for a direct user target. IDs are validated as
+positive signed 64-bit integers before delivery. The parser hooks activate on
+Hermes versions that expose the native plugin target-resolution contract.
+
 Hermes also accepts a top-level `inline:` block for plugin-owned settings, but
 `platforms.inline` matches the shape used by most Hermes platform docs and is
 the safest form to copy into `~/.hermes/config.yaml`.

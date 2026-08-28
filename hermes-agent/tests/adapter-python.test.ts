@@ -31,6 +31,7 @@ display_config = types.ModuleType("gateway.display_config")
 platforms = types.ModuleType("gateway.platforms")
 base = types.ModuleType("gateway.platforms.base")
 helpers = types.ModuleType("gateway.platforms.helpers")
+platform_registry = types.ModuleType("gateway.platform_registry")
 httpx = types.ModuleType("httpx")
 tools = types.ModuleType("tools")
 approval = types.ModuleType("tools.approval")
@@ -120,6 +121,12 @@ class SendResult:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
+class PlatformEntry:
+    __dataclass_fields__ = {
+        "parse_target_ref_fn": object(),
+        "validate_target_ref_fn": object(),
+    }
+
 config.Platform = Platform
 config.PlatformConfig = PlatformConfig
 display_config._PLATFORM_DEFAULTS = {}
@@ -127,6 +134,7 @@ base.BasePlatformAdapter = BasePlatformAdapter
 base.MessageEvent = MessageEvent
 base.MessageType = MessageType
 base.SendResult = SendResult
+platform_registry.PlatformEntry = PlatformEntry
 helpers.strip_markdown = lambda text: text
 
 def _cached_file(name, ext):
@@ -245,6 +253,7 @@ sys.modules["gateway.display_config"] = display_config
 sys.modules["gateway.platforms"] = platforms
 sys.modules["gateway.platforms.base"] = base
 sys.modules["gateway.platforms.helpers"] = helpers
+sys.modules["gateway.platform_registry"] = platform_registry
 sys.modules["httpx"] = httpx
 sys.modules["tools"] = tools
 sys.modules["tools.approval"] = approval
@@ -271,7 +280,7 @@ os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.j
 sys.path.insert(0, "plugin")
 
 import inline.adapter as inline_adapter_module
-from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id
+from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _parse_inline_target_ref, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id, _validate_inline_target_ref
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
@@ -287,6 +296,22 @@ assert resolve_inline_message_action_ownership("system:cl:abc:0").native_action_
 assert resolve_inline_message_action_ownership("legacy").explicit is False
 assert parse_inline_agent_action_reply_target(build_inline_agent_action_turn_id("42", "9")) == "42"
 assert parse_inline_agent_action_reply_target("42") is None
+assert _parse_inline_target_ref("123") == ("123", None)
+assert _parse_inline_target_ref("chat:00123") == ("123", None)
+assert _parse_inline_target_ref("thread:123") == ("123", None)
+assert _parse_inline_target_ref("user:123") == ("user:123", None)
+assert _parse_inline_target_ref("inline:thread:123") == ("123", None)
+assert _parse_inline_target_ref("space:123") is None
+assert _parse_inline_target_ref("room-name") is None
+assert _parse_inline_target_ref("chat:not-an-id") == ("not-an-id", None)
+assert _validate_inline_target_ref("123") is True
+assert _validate_inline_target_ref("user:123") is True
+assert _validate_inline_target_ref("0") == "Inline targets must use a positive signed 64-bit integer ID"
+assert _validate_inline_target_ref("-1") == "Inline targets must use a positive signed 64-bit integer ID"
+assert _validate_inline_target_ref("9223372036854775808") == "Inline targets must use a positive signed 64-bit integer ID"
+assert _validate_inline_target_ref("space:123") == "Use a bare Inline ID or a chat:, thread:, or user: target"
+assert _target_from_chat_id("thread:123") == {"chatId": "123"}
+assert _target_from_chat_id("inline:user:123") == {"userId": "123"}
 assert "visible label is their first name, falling back to username" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert "never fenced-code tables" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert "Supported Markdown is emphasis" in inline_tools.INLINE_PLATFORM_GUIDANCE
@@ -420,6 +445,8 @@ assert ctx.platform["label"] == "Inline"
 assert ctx.platform["required_env"] == ["INLINE_TOKEN"]
 assert ctx.platform["cron_deliver_env_var"] == "INLINE_HOME_CHANNEL"
 assert ctx.platform["standalone_sender_fn"] is _standalone_send
+assert ctx.platform["parse_target_ref_fn"] is _parse_inline_target_ref
+assert ctx.platform["validate_target_ref_fn"] is _validate_inline_target_ref
 assert "inline-hermes install" in ctx.platform["install_hint"]
 assert "INLINE_TOKEN/INLINE_BOT_TOKEN" in ctx.platform["install_hint"]
 assert "platforms.inline.token" in ctx.platform["install_hint"]
@@ -437,6 +464,16 @@ assert "target Inline DM, group chat, or reply thread" in registered_commands["f
 assert "/unfollow" in registered_commands["unfollow"]["handler"]("unexpected")
 assert registered_commands["inline-update"]["description"] == "Update the Inline Hermes plugin"
 assert registered_commands["inline-update"]["args_hint"] == ""
+
+saved_platform_fields = PlatformEntry.__dataclass_fields__
+PlatformEntry.__dataclass_fields__ = {}
+try:
+    legacy_ctx = RegistryContext()
+    register(legacy_ctx)
+    assert "parse_target_ref_fn" not in legacy_ctx.platform
+    assert "validate_target_ref_fn" not in legacy_ctx.platform
+finally:
+    PlatformEntry.__dataclass_fields__ = saved_platform_fields
 
 async def assert_inline_update_command():
     with tempfile.TemporaryDirectory(prefix="inline-hermes-update-") as tmp:
