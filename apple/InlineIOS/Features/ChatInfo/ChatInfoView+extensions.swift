@@ -7,49 +7,87 @@ import SwiftUI
 import UIKit
 
 extension ChatInfoView {
+  func cancelParticipantSearch(clearResults: Bool = true) {
+    participantSearchGeneration &+= 1
+    participantSearchTask?.cancel()
+    participantSearchTask = nil
+    if clearResults {
+      searchResults = []
+    }
+    isSearchingState = false
+  }
+
   func searchUsers(query: String) {
+    participantSearchTask?.cancel()
+    participantSearchTask = nil
+    participantSearchGeneration &+= 1
+    let generation = participantSearchGeneration
+    let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !query.isEmpty else {
       searchResults = []
       isSearchingState = false
       return
     }
 
-    isSearchingState = true
-    Task {
+    let excludedUserIDs = participantsWithMembersViewModel.effectiveUserIds
+
+    if currentChat?.spaceId != nil {
+      searchResults = spaceFullMembersViewModel.filteredMembers
+        .map(\.userInfo)
+        .filter {
+          !excludedUserIDs.contains($0.user.id) &&
+            InviteDirectory.localUserMatches($0, query: query, includeEmail: true)
+        }
+        .sorted { $0.user.displayName.localizedCaseInsensitiveCompare($1.user.displayName) == .orderedAscending }
+      isSearchingState = false
+      return
+    }
+
+    let shouldSearchRemotely = InviteDirectory.remoteSearchIsEligible(query: query)
+    isSearchingState = shouldSearchRemotely
+    searchResults = []
+    participantSearchTask = Task {
       do {
-        try await database.reader.read { db in
-          searchResults =
-            try User
-              .filter(
-                sql: "username LIKE ? OR firstName LIKE ? OR lastName LIKE ?",
-                arguments: [
-                  "%\(query.lowercased())%",
-                  "%\(query.lowercased())%",
-                  "%\(query.lowercased())%",
-                ]
-              )
-              // .filter(
-              //   Column("username").like("%\(query.lowercased())%")
-              // )
-              // .filter(Column("firstName").like("%\(query.lowercased())%"))
-              // .filter(Column("lastName").like("%\(query.lowercased())%"))
-              .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-              .asRequest(of: UserInfo.self)
-              .fetchAll(db)
-          Log.shared.debug("searchResults: \(searchResults)")
+        let local = InviteDirectory.mergedUsers(
+          local: try await InviteDirectory.localUsers(query: query, database: database),
+          remote: [],
+          excluding: excludedUserIDs
+        )
+        try Task.checkCancellation()
+        guard participantSearchIsCurrent(generation, query: query) else { return }
+        searchResults = local
+
+        guard shouldSearchRemotely else {
+          isSearchingState = false
+          return
         }
 
-        await MainActor.run {
-          isSearchingState = false
-        }
+        let remote = try await InviteDirectory.remoteUsers(
+          query: query,
+          realtime: Api.realtime,
+          database: database
+        )
+        try Task.checkCancellation()
+        guard participantSearchIsCurrent(generation, query: query) else { return }
+        searchResults = InviteDirectory.mergedUsers(
+          local: local,
+          remote: remote,
+          excluding: excludedUserIDs
+        )
+        isSearchingState = false
+      } catch is CancellationError {
+        return
       } catch {
+        guard participantSearchIsCurrent(generation, query: query) else { return }
         Log.shared.error("Error searching users", error: error)
-        await MainActor.run {
-          searchResults = []
-          isSearchingState = false
-        }
+        isSearchingState = false
       }
     }
+  }
+
+  private func participantSearchIsCurrent(_ generation: UInt64, query: String) -> Bool {
+    generation == participantSearchGeneration &&
+      searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query
   }
 
   func addParticipant(_ userInfo: UserInfo) {
@@ -57,6 +95,7 @@ extension ChatInfoView {
       Log.shared.error("No chat ID found when trying to add participant")
       return
     }
+    cancelParticipantSearch(clearResults: false)
     Task {
       do {
         try await Api.realtime.send(.addChatParticipant(
@@ -76,6 +115,7 @@ extension ChatInfoView {
       Log.shared.error("No chat ID found when trying to add group participant")
       return
     }
+    cancelParticipantSearch(clearResults: false)
 
     Task {
       do {
@@ -494,9 +534,6 @@ extension ChatInfoView {
       searchResults: searchResults,
       groupResults: groupSearchResults,
       isSearching: isSearchingState,
-      onSearchTextChanged: { text in
-        searchDebouncer.input = text
-      },
       onDebouncedInput: { value in
         guard let value else { return }
         searchUsers(query: value)
@@ -504,6 +541,7 @@ extension ChatInfoView {
       onAddParticipant: addParticipant,
       onAddGroup: addGroupParticipant,
       onCancel: {
+        cancelParticipantSearch()
         isSearching = false
         searchText = ""
       }

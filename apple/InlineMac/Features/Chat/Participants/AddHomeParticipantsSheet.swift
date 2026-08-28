@@ -34,11 +34,21 @@ struct AddHomeParticipantsSheet: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
 
+      if let error = viewModel.errorMessage, !viewModel.displayUsers.isEmpty {
+        Label(error, systemImage: "exclamationmark.triangle.fill")
+          .font(.system(size: 11))
+          .foregroundStyle(.orange)
+          .lineLimit(2)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 16)
+          .padding(.bottom, 8)
+      }
+
       if viewModel.isLoading && viewModel.displayUsers.isEmpty {
         loadingView
-      } else if let error = viewModel.errorMessage {
+      } else if let error = viewModel.errorMessage, viewModel.displayUsers.isEmpty {
         errorView(error)
-      } else if viewModel.filteredUsers.isEmpty {
+      } else if viewModel.displayUsers.isEmpty {
         emptyView
       } else {
         usersList
@@ -84,6 +94,20 @@ struct AddHomeParticipantsSheet: View {
       TextField("Search by name, username, or email...", text: $viewModel.searchText)
         .textFieldStyle(.plain)
         .font(.system(size: 13))
+
+      if viewModel.isLoading && !viewModel.displayUsers.isEmpty {
+        ProgressView()
+          .controlSize(.small)
+      }
+
+      if !viewModel.searchText.isEmpty {
+        Button("Clear Search", systemImage: "xmark.circle.fill") {
+          viewModel.searchText = ""
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+      }
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 6)
@@ -94,7 +118,7 @@ struct AddHomeParticipantsSheet: View {
   private var usersList: some View {
     ScrollView {
       LazyVStack(spacing: 0) {
-        ForEach(viewModel.filteredUsers, id: \.id) { userInfo in
+        ForEach(viewModel.displayUsers, id: \.id) { userInfo in
           UserRow(
             userInfo: userInfo,
             isSelected: viewModel.selectedUserIds.contains(userInfo.user.id),
@@ -141,7 +165,7 @@ struct AddHomeParticipantsSheet: View {
       Text(viewModel.searchText.isEmpty ? "No suggested people" : "No results found")
         .font(.system(size: 13, weight: .medium))
       if viewModel.searchText.count > 0 && viewModel.searchText.count < 2 {
-        Text("Type at least 2 characters to search")
+        Text("No chat matches. Type 2 characters to search beyond your chats.")
           .font(.system(size: 11))
           .foregroundColor(.secondary)
       } else if !viewModel.searchText.isEmpty {
@@ -230,4 +254,3 @@ private struct UserRow: View {
     return name.isEmpty ? (userInfo.user.username ?? userInfo.user.email ?? "Unknown") : name
   }
 }
-

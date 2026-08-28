@@ -67,6 +67,44 @@ describe("searchUsersHandler", () => {
     expect(result.users).toEqual([])
   })
 
+  test("autocompletes owned bots while keeping other bots exact-only", async () => {
+    const viewer = await testUtils.createUser("rpc-search-bot-viewer@example.com")
+    await db.insert(users).values([
+      {
+        email: "rpc-search-owned-bot@example.com",
+        firstName: "Release Helper",
+        username: "releasehelperbot",
+        bot: true,
+        botCreatorId: viewer.id,
+      },
+      {
+        email: "rpc-search-other-bot@example.com",
+        firstName: "Other Release Helper",
+        username: "otherreleasehelperbot",
+        bot: true,
+      },
+      {
+        email: "rpc-search-release-human@example.com",
+        firstName: "Release Human",
+        username: "releasehuman",
+      },
+    ])
+
+    const byUsername = await searchUsersHandler({ query: "releasehelp", limit: 20 }, context(viewer.id))
+    expect(byUsername.users.map((user) => user.username)).toContain("releasehelperbot")
+    expect(byUsername.users.map((user) => user.username)).not.toContain("otherreleasehelperbot")
+
+    const byName = await searchUsersHandler({ query: "Release Helper", limit: 20 }, context(viewer.id))
+    expect(byName.users.map((user) => user.username)).toContain("releasehelperbot")
+    expect(byName.users.map((user) => user.username)).not.toContain("otherreleasehelperbot")
+
+    const limited = await searchUsersHandler({ query: "@releasehelp", limit: 1 }, context(viewer.id))
+    expect(limited.users.map((user) => user.username)).toEqual(["releasehelperbot"])
+
+    const exactOther = await searchUsersHandler({ query: "@otherreleasehelperbot", limit: 20 }, context(viewer.id))
+    expect(exactOther.users.map((user) => user.username)).toContain("otherreleasehelperbot")
+  })
+
   test("treats PostgreSQL wildcard characters as literal username text", async () => {
     const viewer = await testUtils.createUser("rpc-search-literal-viewer@example.com")
     await db.insert(users).values([

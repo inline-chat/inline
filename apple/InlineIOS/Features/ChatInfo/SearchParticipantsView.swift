@@ -7,7 +7,6 @@ struct SearchParticipantsView: View {
   let searchResults: [UserInfo]
   let groupResults: [UserGroup]
   let isSearching: Bool
-  let onSearchTextChanged: (String) -> Void
   let onDebouncedInput: (String?) -> Void
   let onAddParticipant: (UserInfo) -> Void
   let onAddGroup: (UserGroup) -> Void
@@ -15,7 +14,7 @@ struct SearchParticipantsView: View {
   @StateObject private var searchDebouncer = Debouncer(delay: 0.3)
 
   var body: some View {
-    NavigationView {
+    NavigationStack {
       VStack {
         if !searchResults.isEmpty || !groupResults.isEmpty {
           List {
@@ -71,7 +70,7 @@ struct SearchParticipantsView: View {
               Text("Search for people or groups")
                 .font(.headline)
                 .foregroundColor(.primary)
-              Text("Type a username or group name to find access to add.")
+              Text("Type a name, username, or group name to find someone to add.")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             }
@@ -90,9 +89,15 @@ struct SearchParticipantsView: View {
       .navigationTitle("Add Participant")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .navigationBarLeading) {
+        ToolbarItem(placement: .topBarLeading) {
           Button("Cancel") {
             onCancel()
+          }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+          if isSearching && (!searchResults.isEmpty || !groupResults.isEmpty) {
+            ProgressView()
+              .controlSize(.small)
           }
         }
       }

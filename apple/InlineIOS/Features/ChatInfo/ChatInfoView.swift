@@ -23,7 +23,8 @@ struct ChatInfoView: View {
   @State var searchText = ""
   @State var searchResults: [UserInfo] = []
   @State var isSearchingState = false
-  @StateObject var searchDebouncer = Debouncer(delay: 0.3)
+  @State var participantSearchTask: Task<Void, Never>?
+  @State var participantSearchGeneration: UInt64 = 0
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var api: ApiClient
   @Environment(Router.self) var router
@@ -394,9 +395,14 @@ struct ChatInfoView: View {
         nav.pop()
       }
     }
-    .sheet(isPresented: $isSearching) {
-      searchSheet
-    }
+    .sheet(
+      isPresented: $isSearching,
+      onDismiss: {
+        cancelParticipantSearch()
+        searchText = ""
+      },
+      content: { searchSheet }
+    )
     .sheet(isPresented: $showMakePrivateSheet) {
       ChatVisibilityParticipantsSheet(
         spaceViewModel: spaceFullMembersViewModel,

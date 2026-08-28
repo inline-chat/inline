@@ -32,6 +32,7 @@ export async function searchUsersHandler(
     query,
     limit,
     excludeUserId: context.userId,
+    includeBotCreatorId: context.userId,
   })
 
   return {

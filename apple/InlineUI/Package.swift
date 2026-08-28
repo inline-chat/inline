@@ -110,7 +110,7 @@ let package = Package(
 
     .testTarget(
       name: "InlineUITests",
-      dependencies: ["InlineUI", "EmojiAutocomplete", "TextProcessing", "Translation"],
+      dependencies: ["InlineUI", "EmojiAutocomplete", "TextProcessing", "Translation", "Invite"],
       swiftSettings: swiftSettings
     ),
 

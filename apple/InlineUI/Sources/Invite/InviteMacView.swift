@@ -82,6 +82,7 @@ private struct InviteMacSelectionScreen: View {
       InviteMacSearchSurface(
         text: $model.query,
         isFocused: $isSearchFocused,
+        isSearching: model.isSearching,
         onContacts: model.showContacts
       )
       .frame(maxWidth: 680)
@@ -167,6 +168,7 @@ private struct InviteMacSelectionScreen: View {
 private struct InviteMacSearchSurface: View {
   @Binding var text: String
   @Binding var isFocused: Bool
+  let isSearching: Bool
   let onContacts: () -> Void
 
   var body: some View {
@@ -178,9 +180,14 @@ private struct InviteMacSearchSurface: View {
       InviteMacAppKitSearchField(
         text: $text,
         isFocused: $isFocused,
-        placeholder: "Username, email, or phone"
+        placeholder: "Name, username, email, or phone"
       )
       .frame(height: 28)
+
+      if isSearching {
+        ProgressView()
+          .controlSize(.small)
+      }
 
       if !text.isEmpty {
         Button("Clear Search", systemImage: "xmark.circle.fill") {
@@ -367,12 +374,9 @@ private struct InviteMacSelectionStatus: View {
 
   var body: some View {
     if isSearching {
-      HStack(spacing: 8) {
-        ProgressView().controlSize(.small)
-        Text("Searching…")
-          .foregroundStyle(.secondary)
-      }
-      .frame(maxWidth: .infinity, minHeight: 64)
+      Text("Searching…")
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 64)
     } else if let message {
       VStack(spacing: 5) {
         Text("No Results")

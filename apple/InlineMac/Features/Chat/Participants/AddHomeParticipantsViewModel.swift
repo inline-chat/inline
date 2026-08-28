@@ -9,6 +9,7 @@ final class AddHomeParticipantsViewModel: ObservableObject {
   @Published private(set) var suggestedUsers: [UserInfo] = []
   @Published private(set) var searchResults: [UserInfo] = []
   @Published private(set) var isLoading = false
+  @Published private(set) var isAdding = false
   @Published private(set) var errorMessage: String?
   @Published var searchText = ""
   @Published var selectedUserIds: Set<Int64> = []
@@ -28,36 +29,25 @@ final class AddHomeParticipantsViewModel: ObservableObject {
   }
 
   var canSearch: Bool {
-    searchText.count >= 2
+    InviteDirectory.remoteSearchIsEligible(query: normalizedQuery)
   }
 
   var displayUsers: [UserInfo] {
-    canSearch ? searchResults : suggestedUsers
-  }
-
-  var filteredUsers: [UserInfo] {
-    let normalizedQuery = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-    let base = displayUsers.filter { !excludedUserIds.contains($0.user.id) }
-
-    // Suggested users are already "filtered" by being suggested, but still apply
-    // a local filter so typing 1 character narrows them while global search is disabled.
-    if !canSearch && normalizedQuery.isEmpty == false {
-      return base.filter { userInfo in
-        let name = "\(userInfo.user.firstName ?? "") \(userInfo.user.lastName ?? "")"
-          .trimmingCharacters(in: .whitespaces)
-        let username = userInfo.user.username ?? ""
-        let email = userInfo.user.email ?? ""
-        return name.localizedCaseInsensitiveContains(normalizedQuery) ||
-          username.localizedCaseInsensitiveContains(normalizedQuery) ||
-          email.localizedCaseInsensitiveContains(normalizedQuery)
-      }
+    let localUsers = suggestedUsers.filter {
+      InviteDirectory.localUserMatches($0, query: normalizedQuery, includeEmail: true)
     }
-
-    return base
+    let remoteUsers = searchResults.filter {
+      InviteDirectory.localUserMatches($0, query: normalizedQuery, includeEmail: true)
+    }
+    return InviteDirectory.mergedUsers(
+      local: localUsers,
+      remote: canSearch ? remoteUsers : [],
+      excluding: excludedUserIds
+    )
   }
 
   var canAddParticipants: Bool {
-    !selectedUserIds.isEmpty && !isLoading
+    !selectedUserIds.isEmpty && !isAdding
   }
 
   func loadSuggestedUsers() async {
@@ -102,12 +92,13 @@ final class AddHomeParticipantsViewModel: ObservableObject {
     }
 
     // Keep suggested list interactive for 1-char local filtering.
-    guard query.count >= 2 else {
+    guard canSearch else {
       searchResults = []
       isLoading = false
       return
     }
 
+    searchResults = []
     isLoading = true
 
     searchTask = Task {
@@ -158,6 +149,10 @@ final class AddHomeParticipantsViewModel: ObservableObject {
     }
   }
 
+  private var normalizedQuery: String {
+    searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   func toggleSelection(userId: Int64) {
     if selectedUserIds.contains(userId) {
       selectedUserIds.remove(userId)
@@ -167,7 +162,7 @@ final class AddHomeParticipantsViewModel: ObservableObject {
   }
 
   func addSelectedParticipants() async throws {
-    isLoading = true
+    isAdding = true
     errorMessage = nil
 
     do {
@@ -176,9 +171,9 @@ final class AddHomeParticipantsViewModel: ObservableObject {
       }
 
       selectedUserIds.removeAll()
-      isLoading = false
+      isAdding = false
     } catch {
-      isLoading = false
+      isAdding = false
       errorMessage = error.localizedDescription
       Log.shared.error("Failed to add participants (home thread)", error: error)
       throw error

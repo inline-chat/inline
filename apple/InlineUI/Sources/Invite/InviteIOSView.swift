@@ -185,7 +185,7 @@ private struct InviteIOSSearchField: View {
       Image(systemName: "magnifyingglass")
         .foregroundStyle(.secondary)
 
-      TextField("Username, email, or phone", text: $text)
+      TextField("Name, username, email, or phone", text: $text)
         .focused($isFocused)
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
@@ -196,7 +196,9 @@ private struct InviteIOSSearchField: View {
       if isSearching {
         ProgressView()
           .controlSize(.small)
-      } else if !text.isEmpty {
+      }
+
+      if !text.isEmpty {
         Button("Clear Search", systemImage: "xmark.circle.fill") {
           text = ""
         }

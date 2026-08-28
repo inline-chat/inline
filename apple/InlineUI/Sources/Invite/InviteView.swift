@@ -141,7 +141,14 @@ final class InviteComposerModel {
   let fixesDestination: Bool
   var spaces: [InlineKit.Space] = []
   var query = "" {
-    didSet { refreshContactTargets() }
+    didSet {
+      if query != oldValue {
+        localUsers = []
+        remoteUsers = []
+        isSearching = false
+      }
+      refreshContactTargets()
+    }
   }
   var localUsers: [UserInfo] = []
   var remoteUsers: [UserInfo] = []
@@ -200,13 +207,9 @@ final class InviteComposerModel {
   }
 
   var userTargets: [InviteTarget] {
-    guard normalizedQuery.count >= 2, emailSuggestion == nil, phoneTarget == nil else { return [] }
-    var seen = Set<Int64>()
-    let merged: [InviteTarget] = (localUsers + remoteUsers).compactMap { info in
-      guard seen.insert(info.id).inserted else { return nil }
-      return InviteTarget(userInfo: info)
-    }
-    return Array(merged.prefix(20))
+    guard !normalizedQuery.isEmpty, phoneTarget == nil else { return [] }
+    return InviteDirectory.mergedUsers(local: localUsers, remote: remoteUsers, limit: 20)
+      .map(InviteTarget.init)
   }
 
   var emailSuggestion: InviteTarget? {
@@ -255,18 +258,25 @@ final class InviteComposerModel {
     searchGeneration &+= 1
     let generation = searchGeneration
     let query = normalizedQuery
-    guard query.count >= 2, emailSuggestion == nil, phoneTarget == nil else {
+    let shouldSearchRemotely = InviteDirectory.remoteSearchIsEligible(query: query)
+    guard !query.isEmpty, phoneTarget == nil else {
       localUsers = []
       remoteUsers = []
       isSearching = false
       return
     }
 
-    isSearching = true
+    isSearching = shouldSearchRemotely
+    localUsers = []
     remoteUsers = []
     let localResults = (try? await InviteDirectory.localUsers(query: query, database: database)) ?? []
     guard searchIsCurrent(generation, query: query) else { return }
     localUsers = localResults
+
+    guard shouldSearchRemotely else {
+      isSearching = false
+      return
+    }
 
     do {
       try await Task.sleep(for: .milliseconds(300))
