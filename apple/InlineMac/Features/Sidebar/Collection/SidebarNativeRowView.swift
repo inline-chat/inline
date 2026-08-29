@@ -1064,6 +1064,9 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
     cleanupView.isHidden = !isOpenSeparator
       || configuration.onCleanUp == nil
       || configuration.onCloseAll == nil
+    if isOpenSeparator {
+      updateOpenSeparatorLayout(animated: false)
+    }
     configureChevron()
     updateControlPresentation(animated: false)
     if isDisclosureSection || isOpenSeparator {
