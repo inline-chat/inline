@@ -55,10 +55,12 @@ Exit waits at most two seconds for reporting, including SDK transport teardown.
 A stalled upload may be abandoned when the CLI exits.
 
 Only command failures are sent, with release, OS/architecture, error code, setup
-provider, and setup phase when available. No error messages, argv, environment,
+provider, and setup phase when available, plus an event timestamp and generated
+identifier. No raw error messages, argv, environment,
 local logs, usernames, bot IDs, paths, request bodies, stack traces, breadcrumbs,
-or session/usage tracking are sent. Common input/authentication/cancellation
-errors are excluded. Runtime bridge errors that are recovered internally and
+or session/usage tracking are sent. The codes `invalid_args`, `not_authenticated`,
+`setup_cancelled`, and `confirmation_required` are excluded. Other validation
+errors may be reported. Runtime bridge errors that are recovered internally and
 panics are not captured in this first slice. Expected doctor/health results that
 print their own status are also excluded.
 
@@ -66,6 +68,11 @@ The SDK's default integrations are disabled. The final event hook reconstructs
 the payload from the metadata allowlist, so future scope additions cannot upload
 arbitrary context. This is deliberately more restrictive than the SDK defaults.
 See the [official Rust SDK options](https://docs.rs/sentry/latest/sentry/struct.ClientOptions.html).
+
+Local process tests inspect the actual HTTP envelope and verify that opt-out,
+an empty DSN, help/version, completions, and excluded errors make no connection.
+They also cover invalid DSNs and an endpoint that accepts a request but never
+responds. These fixtures use synthetic data and do not prove project ingestion.
 
 Before enabling a distributed DSN, validate one synthetic failure's ingestion,
 inspect its event payload, verify opt-out and offline behavior, and update the
