@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
 <dictionary title="Inline Terminology">
-  <suite name="Inline Suite" code="Inln" description="Automate the signed-in Inline Mac app. Lists are bounded local cache snapshots. IDs are decimal text.">
+  <suite name="Inline Suite" code="Inln" description="Automate the signed-in Inline Mac app. Cached lists are bounded snapshots; public-user search uses the network. IDs are decimal text.">
     <command name="show inline" code="Inlnshow" description="Bring Inline forward, opening a main window if necessary.">
       <cocoa class="InlineScriptCommand"/>
       <result type="boolean"/>
@@ -14,6 +14,32 @@
       <cocoa class="InlineScriptCommand"/>
       <parameter name="maximum count" code="Ilmt" type="integer" optional="yes" description="1–100, default 100."><cocoa key="limit"/></parameter>
       <parameter name="start offset" code="Ioff" type="integer" optional="yes" description="0–1000000, default 0."><cocoa key="offset"/></parameter>
+      <result><type type="record" list="yes"/></result>
+    </command>
+    <command name="list users" code="Inlnusrs" description="Cached identities from this account's visible conversations and shared spaces, ordered by ID. No contact details or remote lookup.">
+      <cocoa class="InlineScriptCommand"/>
+      <parameter name="in space" code="Ispc" type="text" optional="yes" description="Restrict to cached members of a space where this account has cached membership."><cocoa key="spaceID"/></parameter>
+      <parameter name="maximum count" code="Ilmt" type="integer" optional="yes" description="1–100, default 100."><cocoa key="limit"/></parameter>
+      <parameter name="start offset" code="Ioff" type="integer" optional="yes"><cocoa key="offset"/></parameter>
+      <result><type type="record" list="yes"/></result>
+    </command>
+    <command name="find users" code="Inlnufnd" description="Find known cached identities by literal name or username substring. Optional leading @ is ignored. Does not search email or phone.">
+      <cocoa class="InlineScriptCommand"/>
+      <direct-parameter type="text" description="Nonblank query, up to 200 UTF-16 units."/>
+      <parameter name="in space" code="Ispc" type="text" optional="yes"><cocoa key="spaceID"/></parameter>
+      <parameter name="maximum count" code="Ilmt" type="integer" optional="yes" description="1–100, default 100."><cocoa key="limit"/></parameter>
+      <parameter name="start offset" code="Ioff" type="integer" optional="yes"><cocoa key="offset"/></parameter>
+      <result><type type="record" list="yes"/></result>
+    </command>
+    <command name="user info" code="Inlnuinf" description="Get one known cached identity by user ID. Never creates a DM or fetches a remote profile.">
+      <cocoa class="InlineScriptCommand"/>
+      <direct-parameter type="text" description="Stable user ID."/>
+      <result type="record"/>
+    </command>
+    <command name="search public users" code="Inlnusrh" description="Network search for globally discoverable usernames, including owned bots by name. Other bots require an exact username. Results do not imply space membership and are not saved to the local cache.">
+      <cocoa class="InlineScriptCommand"/>
+      <direct-parameter type="text" description="2–200 UTF-16 units; optional leading @. Email, phone, and shorter queries yield no results."/>
+      <parameter name="maximum count" code="Ilmt" type="integer" optional="yes" description="1–20, default 20. The server rate-limits discovery."><cocoa key="limit"/></parameter>
       <result><type type="record" list="yes"/></result>
     </command>
     <command name="list chats" code="Inlnchat" description="Cached chats with visible dialog membership, ordered by ID. Does not fetch remote chats.">
@@ -40,6 +66,14 @@
       <direct-parameter type="text" description="Stable chat ID."/>
       <result type="text"/>
     </command>
+    <command name="create thread" code="Inlncrth" description="Create a top-level thread and cache the acknowledged chat. Save its chat ID, then send the first message separately. No offline queue, navigation, or retry deduplication. On timeout or error, check Inline before retrying creation.">
+      <cocoa class="InlineScriptCommand"/>
+      <direct-parameter type="text" optional="yes" description="Optional title, up to 150 UTF-16 units. Empty or omitted means untitled."/>
+      <parameter name="in space" code="Ispc" type="text" optional="yes" description="Omit for Home; the server validates space membership."><cocoa key="spaceID"/></parameter>
+      <parameter name="participant ids" code="Ipts" optional="yes" description="Up to 100 decimal-text user IDs, deduplicated. The creator is included for private threads. Space participants must be existing members."><cocoa key="participantIDs"/><type type="text" list="yes"/></parameter>
+      <parameter name="publicly visible" code="Ipub" type="boolean" optional="yes" description="Default false. True requires a space and no explicit participant IDs."><cocoa key="isPublic"/></parameter>
+      <result type="record" description="Created chat info with a stable chat ID. Use send message for its first message."/>
+    </command>
     <command name="recent messages" code="Inlnmsgs" description="Cached confirmed messages, newest first. Excludes collapsed history. Does not fetch history or mark it read.">
       <cocoa class="InlineScriptCommand"/>
       <direct-parameter type="text" description="Stable chat ID."/>
@@ -47,9 +81,9 @@
       <parameter name="before message" code="Ibfr" type="text" optional="yes" description="Return message IDs smaller than this ID, for pagination."><cocoa key="beforeID"/></parameter>
       <result><type type="record" list="yes"/></result>
     </command>
-    <command name="send message" code="Inlnsend" description="Send text as the signed-in user and wait for server acknowledgement. Does not change the draft or queue offline. On timeout delivery may be unknown; inspect the chat and reuse your request ID if supplied.">
+    <command name="send message" code="Inlnsend" description="Send Markdown as the signed-in user with server Markdown parsing enabled, including stable-ID mentions. Does not change the draft or queue offline. On timeout delivery may be unknown; inspect the chat and reuse your request ID if supplied.">
       <cocoa class="InlineScriptCommand"/>
-      <direct-parameter type="text" description="Nonblank text, up to 4096 UTF-16 units. No attachments or rich-text entities."/>
+      <direct-parameter type="text" description="Nonblank Markdown, up to 4096 UTF-16 units. Use [@Name](inline://user/123) for a stable-ID mention. No attachments or raw entity input."/>
       <parameter name="to chat" code="Icht" type="text" description="Stable cached chat ID; always explicit."><cocoa key="chatID"/></parameter>
       <parameter name="request id" code="Irqi" type="text" optional="yes" description="Positive Int64 decimal text. Reuse only for retries of the same destination and text. Generated if omitted."><cocoa key="requestID"/></parameter>
       <result type="record" description="Acknowledged chat, message, and request IDs."/>
@@ -67,6 +101,12 @@
     <record-type name="space info" code="IspR">
       <property name="space id" code="Isid" type="text" access="r"/>
       <property name="title" code="Itit" type="text" access="r"/>
+    </record-type>
+    <record-type name="user profile" code="IusR">
+      <property name="user id" code="Iuid" type="text" access="r"/>
+      <property name="display name" code="Inam" type="text" access="r"/>
+      <property name="username" code="Iusr" type="text" description="Empty if unset." access="r"/>
+      <property name="is bot" code="Ibot" type="boolean" access="r"/>
     </record-type>
     <record-type name="chat info" code="IchR">
       <property name="chat id" code="Icid" type="text" access="r"/>

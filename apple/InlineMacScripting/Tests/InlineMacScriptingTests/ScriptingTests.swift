@@ -8,8 +8,8 @@ import Testing
     let xml = try XMLDocument(contentsOf: package.appendingPathComponent("Resources/Inline.sdef"))
     let commands = try xml.nodes(forXPath: "//command")
     let codes = commands.compactMap { ($0 as? XMLElement)?.attribute(forName: "code")?.stringValue }
-    #expect(codes.count == 10)
-    #expect(Set(codes).count == 10)
+    #expect(codes.count == 15)
+    #expect(Set(codes).count == 15)
     for code in codes {
       #expect(code.utf8.count == 8)
       #expect(code.hasPrefix("Inln"))
@@ -61,6 +61,34 @@ import Testing
     }
     #expect(throws: ScriptingError.self) {
       try ScriptingRequest.decode(code: fourCC("send"), direct: "hello", arguments: [:])
+    }
+  }
+
+  @Test func userLookupScopesAndBounds() throws {
+    #expect(try ScriptingRequest.decode(code: fourCC("usrs"), direct: nil, arguments: [:]) == .users(query: nil, spaceID: nil, limit: 100, offset: 0))
+    #expect(try ScriptingRequest.decode(code: fourCC("ufnd"), direct: " @Maya ", arguments: ["spaceID": "7", "limit": 4, "offset": 2]) == .users(query: "Maya", spaceID: 7, limit: 4, offset: 2))
+    #expect(try ScriptingRequest.decode(code: fourCC("uinf"), direct: "9223372036854775807", arguments: [:]) == .user(Int64.max))
+    #expect(try ScriptingRequest.decode(code: fourCC("usrh"), direct: "@maya", arguments: [:]) == .searchUsers(query: "maya", limit: 20))
+    #expect(throws: ScriptingError.self) { try ScriptingRequest.decode(code: fourCC("usrh"), direct: "maya", arguments: ["limit": 21]) }
+    #expect(throws: ScriptingError.self) { try ScriptingRequest.decode(code: fourCC("ufnd"), direct: "@", arguments: [:]) }
+  }
+
+  @Test func privateThreadCreationPreservesAndDeduplicatesParticipantIDs() throws {
+    #expect(try ScriptingRequest.decode(code: fourCC("crth"), direct: nil, arguments: [:]) == .createThread(title: nil, spaceID: nil, participantIDs: [], isPublic: false))
+    #expect(try ScriptingRequest.decode(code: fourCC("crth"), direct: " Review ", arguments: ["spaceID": "7", "participantIDs": ["42", "9223372036854775807", "42"]]) == .createThread(title: "Review", spaceID: 7, participantIDs: [42, Int64.max], isPublic: false))
+    for value: Any in ["42", [42], ["0"], Array(repeating: "42", count: 101)] {
+      #expect(throws: ScriptingError.self) { try ScriptingRequest.decode(code: fourCC("crth"), direct: nil, arguments: ["participantIDs": value]) }
+    }
+    #expect(throws: ScriptingError.self) { try ScriptingRequest.decode(code: fourCC("crth"), direct: String(repeating: "🦊", count: 76), arguments: [:]) }
+  }
+
+  @Test func publicThreadsRequireExplicitSpaceAndNoParticipants() throws {
+    #expect(try ScriptingRequest.decode(code: fourCC("crth"), direct: "Public", arguments: ["spaceID": "7", "isPublic": true]) == .createThread(title: "Public", spaceID: 7, participantIDs: [], isPublic: true))
+    for arguments: [String: Any] in [
+      ["isPublic": true], ["spaceID": "7", "isPublic": true, "participantIDs": ["42"]],
+      ["spaceID": "7", "isPublic": 1], ["spaceID": "7", "isPublic": "true"],
+    ] {
+      #expect(throws: ScriptingError.self) { try ScriptingRequest.decode(code: fourCC("crth"), direct: "Public", arguments: arguments) }
     }
   }
 }
@@ -140,5 +168,16 @@ import Testing
     }
     try await Task.sleep(for: .milliseconds(30))
     #expect(result == .failure(.failed))
+  }
+
+  @Test func creationTimeoutWarnsAgainstDuplicateThreads() async {
+    let result: Result<ScriptingValue, ScriptingError> = await withCheckedContinuation { continuation in
+      let execution = ScriptExecution { continuation.resume(returning: $0) }
+      execution.start(request: .createThread(title: nil, spaceID: nil, participantIDs: [], isPublic: false), timeout: .milliseconds(10)) { _ in
+        try await Task.sleep(for: .seconds(1))
+        return .missing
+      }
+    }
+    #expect(result == .failure(.creationOutcomeUnknown))
   }
 }

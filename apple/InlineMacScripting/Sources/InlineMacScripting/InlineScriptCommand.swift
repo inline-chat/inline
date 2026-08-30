@@ -85,7 +85,7 @@ final class ScriptExecution {
     deadline = Task {
       do { try await Task.sleep(for: timeout) }
       catch { return }
-      finish(.failure(.timeout))
+      finish(.failure(request.timeoutError))
     }
   }
 

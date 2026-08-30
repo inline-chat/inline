@@ -56,6 +56,7 @@ public enum ScriptingField: String, Sendable {
   case userID = "Iuid"
   case displayName = "Inam"
   case username = "Iusr"
+  case isBot = "Ibot"
   case spaceID = "Isid"
   case chatID = "Icid"
   case title = "Itit"

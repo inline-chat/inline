@@ -54,6 +54,23 @@ tell application "BUNDLE_PATH"
   my requireTrue((current chat) is missing value, "missing selection")
   set spacesFound to list spaces maximum count 1 start offset 0
   my requireTrue((space id of item 1 of spacesFound) is "7", "spaces")
+  set usersFound to list users in space "7" maximum count 1 start offset 0
+  my requireTrue((user id of item 1 of usersFound) is "7", "user list")
+  my requireTrue((is bot of item 1 of usersFound) is true, "bot profile field")
+  set knownUsers to find users "@Fixture" in space "7" maximum count 1 start offset 0
+  my requireTrue((display name of item 1 of knownUsers) is "Fixture 🦊", "cached user search")
+  my requireTrue((user id of (user info "9223372036854775807")) is "9223372036854775807", "user ID lookup")
+  set publicUsers to search public users "@fixture" maximum count 1
+  my requireTrue((username of item 1 of publicUsers) is "fixture", "public discovery")
+  set createdThread to create thread "Fixture workflow" in space "7" participant ids {"7", "9223372036854775807", "7"}
+  set destination to chat id of createdThread
+  my requireTrue(destination is "43", "thread creation")
+  set firstMessage to send message "**Hello** [@Fixture](inline://user/7)." to chat destination request id "12345"
+  my requireTrue((chat id of firstMessage) is destination, "create then send Markdown with a mention")
+  my requireTrue((send request id of firstMessage) is "12345", "first message retry ID")
+  set publicThread to create thread "Public fixture" in space "7" publicly visible true
+  my requireTrue((chat id of publicThread) is "44", "public thread boolean")
+  my requireTrue((chat id of (create thread)) is "43", "untitled self-only thread")
   set chatsFound to list chats in space "7" maximum count 1 start offset 0
   my requireTrue((chat id of item 1 of chatsFound) is "42", "chats")
   my requireTrue((unread count of item 1 of chatsFound) is 2, "integer field")
@@ -91,8 +108,22 @@ tell application "BUNDLE_PATH"
     set rejected to errorNumber is -10004
   end try
   my requireTrue(rejected, "async error reply")
+  set rejected to false
+  try
+    create thread "Invalid" publicly visible true
+  on error errorText number errorNumber
+    set rejected to errorNumber is -1700
+  end try
+  my requireTrue(rejected, "public Home thread rejected")
+  set rejected to false
+  try
+    create thread "Invalid" in space "7" publicly visible true participant ids {"7"}
+  on error errorText number errorNumber
+    set rejected to errorNumber is -1700
+  end try
+  my requireTrue(rejected, "public participants rejected")
 end tell
-return "PASS: ten commands, native values, Unicode, Int64 IDs, async replies, and errors"
+return "PASS: fifteen commands, thread participants, create-then-send Markdown, user discovery, native values, and errors"
 '''.replace("BUNDLE_PATH", str(bundle).replace("\\", "\\\\").replace('"', '\\"'))
 
 log = package / ".build" / "fixture.log"
