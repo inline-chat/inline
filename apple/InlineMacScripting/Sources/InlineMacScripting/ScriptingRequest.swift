@@ -11,6 +11,7 @@ public enum ScriptingRequest: Equatable, Sendable {
   case chats(query: String?, spaceID: Int64?, limit: Int, offset: Int)
   case createThread(title: String?, spaceID: Int64?, participantIDs: [Int64], isPublic: Bool)
   case currentChat
+  case currentSelection
   case openChat(Int64)
   case messages(chatID: Int64, limit: Int, before: Int64?)
   case send(text: String, chatID: Int64, requestID: Int64)
@@ -32,7 +33,8 @@ public enum ScriptingRequest: Equatable, Sendable {
     case fourCC("chat"), fourCC("find"):
       let query = code == fourCC("find") ? try input.text(direct, name: "query", maximum: 200) : nil
       return try .chats(query: query, spaceID: input.optionalID("spaceID"), limit: input.limit(default: 100), offset: input.offset())
-    case fourCC("curr"): return .currentChat
+    case fourCC("curr"), fourCC("cthr"): return .currentChat
+    case fourCC("csel"): return .currentSelection
     case fourCC("crth"):
       let spaceID = try input.optionalID("spaceID")
       let participantIDs = try input.ids("participantIDs")

@@ -61,6 +61,14 @@
       <cocoa class="InlineScriptCommand"/>
       <result type="any"/>
     </command>
+    <command name="current thread" code="Inlncthr" description="Alias for current chat: the primary DM or thread, with its chat ID, title, URL, and Markdown link; or missing value. Does not select a reply pane.">
+      <cocoa class="InlineScriptCommand"/>
+      <result type="any"/>
+    </command>
+    <command name="current selection" code="Inlncsel" description="The open reply thread, otherwise the primary conversation, in the frontmost visible non-minimized Inline main window. Returns chat info or missing value. This is conversation selection, not selected text or message rows. Never activates Inline, changes the clipboard, or marks messages read.">
+      <cocoa class="InlineScriptCommand"/>
+      <result type="any"/>
+    </command>
     <command name="open chat" code="Inlnopen" description="Open a cached dialog chat in the frontmost main window and activate Inline. Returns the chat ID after requesting navigation; opening can mark messages read.">
       <cocoa class="InlineScriptCommand"/>
       <direct-parameter type="text" description="Stable chat ID."/>
@@ -111,6 +119,8 @@
     <record-type name="chat info" code="IchR">
       <property name="chat id" code="Icid" type="text" access="r"/>
       <property name="title" code="Itit" type="text" access="r"/>
+      <property name="url" code="pURL" type="text" description="Stable chat link using this app build's scheme; independent of the title." access="r"/>
+      <property name="markdown link" code="Imlk" type="text" description="Escaped title and URL from one snapshot, suitable for Hookmark Get Address." access="r"/>
       <property name="chat kind" code="Iknd" type="text" description="private or thread." access="r"/>
       <property name="space id" code="Isid" type="text" description="Empty for Home chats." access="r"/>
       <property name="unread count" code="Iunr" type="integer" access="r"/>

@@ -7,7 +7,7 @@ Automate Inline for Mac from Script Editor, a launcher, Shortcuts, or a shell sc
 
 ## Get Started
 
-Open **Script Editor → File → Open Dictionary** and choose Inline. These workflows require a build whose dictionary includes `create thread` and `find users`. If those commands are missing, your installed build does not support this API; check for an update that includes AppleScript support.
+Open **Script Editor → File → Open Dictionary** and choose Inline. These workflows require a build whose dictionary includes `create thread`, `find users`, and `current selection`. If a command is missing, your installed build does not support that workflow; check for an update that includes it.
 
 Sign in to Inline and wait for your account to load. Paste this complete example into Script Editor and click **Run**:
 
@@ -24,6 +24,77 @@ The result contains your account and cached space records. Use their IDs in late
 macOS may ask the calling app for permission to control Inline. Grant access only to trusted software: it can read exposed chat text and identities, create threads, and send messages as you. Manage access in **System Settings → Privacy & Security → Automation**; Accessibility permission is not required.
 
 The examples below are complete scripts unless marked as fragments. Replace example IDs and usernames with your own. Creation and send examples make real changes when you run them.
+
+## Current Selection and Current Thread
+
+Get a conversation's ID, name, and link without moving focus or changing the clipboard:
+
+```applescript
+tell application "Inline"
+  set contextItem to current selection
+  if contextItem is missing value then error "Open a conversation in Inline first." number -1728
+  return {chat id of contextItem, title of contextItem, url of contextItem}
+end tell
+```
+
+| Command | Which conversation? |
+| --- | --- |
+| `current selection` | The open reply thread, otherwise the primary conversation, in the frontmost visible, non-minimized Inline main window. |
+| `current thread` | The primary conversation, including a DM; an alias for `current chat`. |
+| `current chat` | The existing primary-conversation command. An open reply pane does not change its result. |
+
+Each returns a chat record or `missing value`. Selection means the open conversation, not highlighted text, selected message rows, or keyboard focus. If a reply pane is open, `current selection` keeps targeting it even after a click in the parent pane. Use `current thread` for the parent. An open reply's metadata is available even when that reply is hidden from chat lists.
+
+Chat records include `chat id`, `title`, `url`, and `markdown link`, alongside their other fields. The URL uses the stable ID, so renaming a thread does not change its link. The Markdown label escapes punctuation in titles and turns line breaks into spaces; `title` itself is unchanged. Keep one returned record when you need a consistent name and address.
+
+## Connect Inline to Hookmark
+
+[Hookmark](https://hookproductivity.com/help/integration/information-for-developers-api-requirements/) links an app's current resource to notes, documents, tasks, and other resources. Its integration needs a stable identity, a name, and a way to reopen the item.
+
+In Hookmark's **Scripts** settings, select Inline and put this script in **Get Address**:
+
+```applescript
+tell application "Inline"
+  set contextItem to current selection
+  if contextItem is missing value then error "Open a conversation in Inline first." number -1728
+  return markdown link of contextItem
+end tell
+```
+
+Leave **Get Name** empty: [Hookmark accepts the name and URL together as a Markdown link](https://hookproductivity.com/help/integration/creating-integration-scripts/). Leave **Open Item** empty too; Inline already handles the returned URL. Use `current thread` instead if you always want to link the parent conversation rather than an open reply pane. Custom scripts require a Hookmark edition that supports editing integrations.
+
+Open a conversation in Inline, invoke Hookmark, and copy its link. Confirm the name and destination, then hook it to a note or task. Opening the link later still requires an Inline account with access. These scripts do not use UI scripting or change the clipboard themselves; Hookmark's own commands and permissions are separate.
+
+For **Hook to New**, this optional **New Item** script creates and opens a private Home thread containing only you:
+
+```applescript
+tell application "Inline"
+  set createdThread to create thread "Hookmark note"
+  set destination to chat id of createdThread
+  try
+    open chat destination
+  on error errorText number errorNumber
+    error ("Thread " & destination & " was created. Check Inline before creating another. " & errorText) number errorNumber
+  end try
+  return url of createdThread
+end tell
+```
+
+This deliberately uses a fixed title; rename the thread in Inline afterward. Each invocation requests a new thread, so do not automatically retry creation after an uncertain result. You can add an initial message with the [review-thread workflow](#start-a-review-thread-with-a-mention).
+
+For other launchers, or to paste into a Markdown note without Hookmark, copy the same link explicitly:
+
+```applescript
+tell application "Inline"
+  set contextItem to current selection
+  if contextItem is missing value then error "Open a conversation in Inline first." number -1728
+  set linkText to markdown link of contextItem
+end tell
+set the clipboard to linkText
+return linkText
+```
+
+These are custom integration recipes, not a claim that Inline is already included in Hookmark's built-in scripts. Test them with the Inline build you use before sharing an integration.
 
 ## Find People and User IDs
 
@@ -208,13 +279,15 @@ After a timeout, inspect the destination: the send may have completed. If retryi
 | `list chats` | Cached `chat id`, `title`, `chat kind`, `space id`, `unread count` records. |
 | `find chats "Design"` | Cached chats matching title, name, or username. |
 | `current chat` | The selected primary chat, or `missing value`. |
+| `current thread` | Alias for `current chat`, including DMs. |
+| `current selection` | Open reply thread or primary conversation, or `missing value`. |
 | `open chat "123"` | Requests navigation and returns the chat ID. |
 | `create thread "Review"` | Creates a top-level thread and returns chat info. |
 | `recent messages "123"` | `message id`, `chat id`, `sender id`, `message text`, `sent at`, `outgoing`. |
 | `send message "Hello" to chat "123"` | `chat id`, `message id`, `send request id`. |
 | `chat link "123"` | This app build's deep link to the chat. |
 
-Cached lists take `maximum count` from 1–100; defaults are 20 messages and 100 chats, spaces, or users. Public search is capped at 20 results and 60 requests per minute. Chats, spaces, and users support `start offset`, ordered by ascending ID. Chats and users support `in space`; history supports `before message "789"` for older cached message IDs. Lists can change between calls.
+All chat records also include `url` and `markdown link`. Cached lists take `maximum count` from 1–100; defaults are 20 messages and 100 chats, spaces, or users. Public search is capped at 20 results and 60 requests per minute. Chats, spaces, and users support `start offset`, ordered by ascending ID. Chats and users support `in space`; history supports `before message "789"` for older cached message IDs. Lists can change between calls.
 
 Messages are limited to 4096 UTF-16 units, titles to 150, and search queries to 200. Participant lists accept up to 100 supplied user IDs. Group IDs and reply-subthread creation are not supported. Message IDs are unique within their chat; retain both IDs. `sent at` is Unix time in seconds. Optional names and space IDs use empty text.
 

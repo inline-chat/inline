@@ -22,6 +22,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   /// Primary conversation only; a visible reply pane does not replace this selection.
   var scriptingPrimaryChat: Peer? { nav3.currentRoute.selectedPeer }
 
+  /// Match the navigation context: an open reply thread takes precedence over its parent.
+  var scriptingSelectedChat: Peer? { nav3.currentReplyThreadPeer ?? scriptingPrimaryChat }
+
   private let dependencies: AppDependencies
   private let appBridge: AppBridge
   private let nav3: Nav3

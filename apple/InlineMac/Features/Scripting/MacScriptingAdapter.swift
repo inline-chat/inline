@@ -110,8 +110,11 @@ final class MacScriptingAdapter {
         arguments += [limit, offset]
         return .list(try Row.fetchAll(db, sql: sql, arguments: arguments).map(Self.chatRecord))
       }
-    case .currentChat:
-      guard let peer = Self.frontWindow?.scriptingPrimaryChat else { return .missing }
+    case .currentChat, .currentSelection:
+      let selectsReply = request == .currentSelection
+      let window = selectsReply ? Self.selectionWindow : Self.frontWindow
+      guard let peer = selectsReply ? window?.scriptingSelectedChat : window?.scriptingPrimaryChat else { return .missing }
+      let selectionSQL = selectsReply ? Self.relatedChatSQL : Self.chatSQL
       result = try await database.reader.read { db in
         try auth.validateAccountMutation(token)
         let condition: String
@@ -120,10 +123,10 @@ final class MacScriptingAdapter {
         case let .user(userID): condition = "c.type = 'private' AND c.peerUserId = ?"; id = userID
         case let .thread(chatID): condition = "c.type = 'thread' AND c.id = ?"; id = chatID
         }
-        guard let row = try Row.fetchOne(db, sql: Self.chatSQL + " AND " + condition, arguments: [id]) else {
+        guard let row = try Row.fetchOne(db, sql: selectionSQL + " AND " + condition, arguments: [id]) else {
           return .missing
         }
-        return Self.chatRecord(row)
+        return try Self.chatRecord(row)
       }
     case let .createThread(title, spaceID, participantIDs, isPublic):
       var participants = participantIDs
@@ -171,7 +174,7 @@ final class MacScriptingAdapter {
             dialog.collapsedMaxId = existingDialog.collapsedMaxId
             try dialog.update(db)
           }
-          return Self.chatRecord(try Self.cachedChat(db, id: chat.id))
+          return try Self.chatRecord(Self.cachedChat(db, id: chat.id))
         }
       } catch {
         try validate(auth: auth, token: token, delegate: delegate)
@@ -259,14 +262,24 @@ final class MacScriptingAdapter {
       ?? NSApp.orderedWindows.compactMap { $0.windowController as? MainWindowController }.first
   }
 
+  private static var selectionWindow: MainWindowController? {
+    let candidates = [NSApp.keyWindow, NSApp.mainWindow] + NSApp.orderedWindows.map(Optional.some)
+    return candidates.compactMap { $0 }.first {
+      $0.isVisible && !$0.isMiniaturized && $0.windowController is MainWindowController
+    }?.windowController as? MainWindowController
+  }
+
   // A dialog is the local account's relationship, not merely a discovered/cached public chat.
-  nonisolated private static let chatSQL = """
+  nonisolated private static let relatedChatSQL = """
     SELECT c.*, coalesce(d.unreadCount, 0) AS scriptingUnreadCount,
       coalesce(d.collapsedMaxId, 0) AS scriptingCollapsedMaxId,
       u.firstName AS scriptingFirstName, u.lastName AS scriptingLastName, u.username AS scriptingUsername
     FROM chat c JOIN dialog d ON coalesce(d.chatId, d.peerThreadId) = c.id LEFT JOIN user u ON u.id = c.peerUserId
-    WHERE c.id > 0 AND c.createState IS NULL AND coalesce(d.chatListHidden, 0) = 0
+    WHERE c.id > 0 AND c.createState IS NULL
     """
+
+  // Explicitly selecting an open reply may reveal its metadata, but general queries stay filtered.
+  nonisolated private static let chatSQL = relatedChatSQL + " AND coalesce(d.chatListHidden, 0) = 0"
 
   nonisolated private static func cachedChat(_ db: Database, id: Int64) throws -> Row {
     guard let row = try Row.fetchOne(db, sql: chatSQL + " AND c.id = ?", arguments: [id]) else {
@@ -330,7 +343,7 @@ final class MacScriptingAdapter {
     ])
   }
 
-  nonisolated private static func chatRecord(_ row: Row) -> ScriptingValue {
+  nonisolated private static func chatRecord(_ row: Row) throws -> ScriptingValue {
     let id: Int64 = row["id"]
     let spaceID: Int64? = row["spaceId"]
     let kind: String = row["type"]
@@ -339,8 +352,10 @@ final class MacScriptingAdapter {
     let displayTitle = kind == "private"
       ? name(first: row["scriptingFirstName"], last: row["scriptingLastName"], username: row["scriptingUsername"])
       : (title.flatMap { $0.isEmpty ? nil : $0 } ?? "New thread")
+    guard let url = InlineDeepLink.chat(id: id).url else { throw ScriptingError.failed }
     return .record([
       .chatID: .text(String(id)), .title: .text(displayTitle), .kind: .text(kind),
+      .url: .text(url.absoluteString), .markdownLink: .text(ScriptingLink.markdown(title: displayTitle, url: url)),
       .spaceID: .text(spaceID.map(String.init) ?? ""), .unreadCount: .integer(Int32(clamping: max(0, unread))),
     ])
   }

@@ -60,6 +60,8 @@ public enum ScriptingField: String, Sendable {
   case spaceID = "Isid"
   case chatID = "Icid"
   case title = "Itit"
+  case url = "pURL"
+  case markdownLink = "Imlk"
   case kind = "Iknd"
   case unreadCount = "Iunr"
   case messageID = "Imid"

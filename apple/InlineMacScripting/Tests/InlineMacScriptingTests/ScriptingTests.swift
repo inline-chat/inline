@@ -8,8 +8,8 @@ import Testing
     let xml = try XMLDocument(contentsOf: package.appendingPathComponent("Resources/Inline.sdef"))
     let commands = try xml.nodes(forXPath: "//command")
     let codes = commands.compactMap { ($0 as? XMLElement)?.attribute(forName: "code")?.stringValue }
-    #expect(codes.count == 15)
-    #expect(Set(codes).count == 15)
+    #expect(codes.count == 17)
+    #expect(Set(codes).count == 17)
     for code in codes {
       #expect(code.utf8.count == 8)
       #expect(code.hasPrefix("Inln"))
@@ -20,6 +20,11 @@ import Testing
 
   @Test func stableIDsPreserveAll64Bits() throws {
     #expect(try ScriptingRequest.decode(code: fourCC("open"), direct: "9223372036854775807", arguments: [:]) == .openChat(Int64.max))
+  }
+
+  @Test func selectionAndThreadTerminology() throws {
+    #expect(try ScriptingRequest.decode(code: fourCC("cthr"), direct: nil, arguments: [:]) == .currentChat)
+    #expect(try ScriptingRequest.decode(code: fourCC("csel"), direct: nil, arguments: [:]) == .currentSelection)
   }
 
   @Test(arguments: ["0", "-1", "1.5", " 1", "١", "9223372036854775808", ""])
@@ -94,6 +99,20 @@ import Testing
 }
 
 @Suite struct ScriptingResultTests {
+  @Test func markdownLinksEscapeTitlesWithoutChangingIdentity() throws {
+    let url = try #require(URL(string: "in://chat/9223372036854775807"))
+    let title = "R&D [plan] (v2) \\ *ship* _now_ <img> `code` 🚀\r\nnext"
+    let link = ScriptingLink.markdown(title: title, url: url)
+    #expect(link == #"[R\&D \[plan\] \(v2\) \\ \*ship\* \_now\_ \<img\> \`code\` 🚀 next](in://chat/9223372036854775807)"#)
+    #expect(ScriptingLink.markdown(title: "Renamed", url: url) == "[Renamed](in://chat/9223372036854775807)")
+    let record = ScriptingValue.record([
+      .chatID: .text(String(Int64.max)), .title: .text(title), .url: .text(url.absoluteString), .markdownLink: .text(link),
+    ]).descriptor()
+    #expect(record.forKeyword(fourCC("pURL"))?.stringValue == url.absoluteString)
+    #expect(record.forKeyword(fourCC("Imlk"))?.stringValue == link)
+    #expect(record.forKeyword(fourCC("Itit"))?.stringValue == title)
+  }
+
   @Test func nativeRecordsListsAndMissingValue() {
     let descriptor = ScriptingValue.list([.record([
       .chatID: .text("9223372036854775807"), .unreadCount: .integer(3),
