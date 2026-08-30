@@ -34,6 +34,7 @@ fn run_inline_isolated(
 ) -> Output {
     Command::new(inline_bin())
         .args(args)
+        .env("INLINE_CLI_TELEMETRY", "off")
         .env("INLINE_DATA_DIR", root)
         .env("INLINE_SECRETS_PATH", secrets)
         .env("INLINE_STATE_PATH", state)
@@ -147,6 +148,120 @@ fn human_runtime_errors_emit_short_report_on_stderr() {
     assert!(!root.exists());
     assert!(!secrets.exists());
     assert!(!state.exists());
+}
+
+#[test]
+fn verbose_diagnostics_use_the_binary_target_and_preserve_terminal_json() {
+    let (root, secrets, state) = isolated_paths("verbose-auth-me");
+    let output = run_inline_isolated(
+        &[
+            "--verbose",
+            "--json",
+            "--compact",
+            "auth",
+            "me",
+            "--verbose",
+        ],
+        &root,
+        &secrets,
+        &state,
+    );
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("inline::diagnostics"), "{stderr}");
+    assert!(stderr.contains("trace=true"), "{stderr}");
+    assert!(stderr.contains("command failed code=not_authenticated"));
+    let payload: Value = serde_json::from_str(stderr.lines().last().unwrap()).unwrap();
+    assert_eq!(payload["error"]["code"], "not_authenticated");
+    assert!(!root.exists());
+}
+
+#[test]
+fn invalid_telemetry_dsn_preserves_a_single_json_error() {
+    let (root, secrets, state) = isolated_paths("invalid-telemetry-dsn");
+    let output = Command::new(inline_bin())
+        .args(["--json", "--compact", "messages", "list", "--limit", "1"])
+        .env("INLINE_CLI_TELEMETRY", "on")
+        .env("INLINE_CLI_SENTRY_DSN", "invalid")
+        .env("INLINE_DATA_DIR", &root)
+        .env("INLINE_SECRETS_PATH", secrets)
+        .env("INLINE_STATE_PATH", state)
+        .output()
+        .unwrap();
+    assert_eq!(stderr_json(&output)["error"]["code"], "missing_peer");
+    assert!(!root.exists());
+}
+
+#[test]
+fn stalled_telemetry_endpoint_cannot_hold_the_cli_open() {
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let (connected, connection) = mpsc::sync_channel(1);
+    let (release, released) = mpsc::sync_channel(1);
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while Instant::now() < deadline {
+            if let Ok((stream, _)) = listener.accept() {
+                connected.send(()).unwrap();
+                // Accept the SDK request but never provide an HTTP response.
+                let _ = released.recv_timeout(Duration::from_secs(6));
+                drop(stream);
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    let (root, secrets, state) = isolated_paths("stalled-telemetry");
+    let started = Instant::now();
+    let mut child = Command::new(inline_bin())
+        .args(["--json", "--compact", "messages", "list", "--limit", "1"])
+        .env("INLINE_CLI_TELEMETRY", "on")
+        .env(
+            "INLINE_CLI_SENTRY_DSN",
+            format!("http://fixture@{address}/1"),
+        )
+        .env_remove("HTTP_PROXY")
+        .env_remove("http_proxy")
+        .env_remove("HTTPS_PROXY")
+        .env_remove("https_proxy")
+        .env_remove("ALL_PROXY")
+        .env_remove("all_proxy")
+        .env("NO_PROXY", "127.0.0.1")
+        .env("INLINE_DATA_DIR", &root)
+        .env("INLINE_SECRETS_PATH", secrets)
+        .env("INLINE_STATE_PATH", state)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let completed = loop {
+        if child.try_wait().unwrap().is_some() {
+            break true;
+        }
+        if started.elapsed() > Duration::from_secs(4) {
+            child.kill().unwrap();
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let output = child.wait_with_output().unwrap();
+    let did_connect = connection.try_recv().is_ok();
+    let _ = release.send(());
+    server.join().unwrap();
+    assert!(
+        did_connect,
+        "fixture must exercise an actual stalled telemetry request: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(completed, "telemetry must not exceed the bounded exit wait");
+    assert_eq!(stderr_json(&output)["error"]["code"], "missing_peer");
+    assert!(!root.exists());
 }
 
 #[test]

@@ -30,6 +30,7 @@ struct PluginSetup {
 struct MachinePluginStatus {
     version: String,
     configured: bool,
+    gateway_supported: Option<bool>,
 }
 
 pub(super) async fn preflight(
@@ -47,6 +48,7 @@ pub(super) async fn preflight(
     let profile = resolve_profile(installed, args.profile.as_deref()).await?;
     let installer = find_executable("inline-hermes");
     if let Some(machine) = machine_plugin_status(installed, &profile.environment, false).await? {
+        require_gateway_capability(&machine, args.no_restart)?;
         let configured_bot_id = if machine.configured {
             let status = run_machine_status(installed, &profile.environment, true).await?;
             let bot_id = status_bot_id(&status.stdout).filter(|_| status.success);
@@ -64,17 +66,21 @@ pub(super) async fn preflight(
         return Ok(GatewayPreflight { configured_bot_id });
     }
 
-    let legacy_configured = match installer.as_deref() {
+    let inspected_credential = match installer.as_deref() {
         Some(installer) => {
-            plugin_has_configured_credential(installer, profile.home.as_deref()).await?
-                || legacy_plugin_configured(installed, &profile.environment).await?
+            Some(plugin_has_configured_credential(installer, profile.home.as_deref()).await?)
         }
-        None => legacy_plugin_configured(installed, &profile.environment).await?,
+        None => None,
     };
+    let legacy_configured = inspected_credential == Some(true)
+        || legacy_identity_may_exist(
+            inspected_credential,
+            legacy_plugin_configured(installed, &profile.environment).await?,
+        );
     if legacy_configured && !args.replace {
         return Err(cli_error(
             "setup_conflict",
-            "the existing Hermes Inline plugin is configured but cannot report its bot identity; rerun with --replace to upgrade and replace it",
+            "Hermes cannot verify whether an existing Inline credential needs to be preserved; install or update the Inline Hermes adapter, or rerun with --replace to explicitly allow replacement",
         )
         .into());
     }
@@ -145,6 +151,7 @@ pub(super) async fn setup(
                 "the installed Inline Hermes plugin does not provide the required machine setup protocol",
             )
         })?;
+    require_gateway_capability(&machine, args.no_restart)?;
     integration.version = machine.version;
     progress.completed("integration", integration.action);
 
@@ -199,51 +206,55 @@ pub(super) async fn setup(
     let (service_action, ready) = if args.no_restart {
         ("skipped", false)
     } else {
-        let status = run_with_environment(
-            &installed.executable,
-            &[],
-            &["gateway", "status"],
-            None,
-            COMMAND_TIMEOUT,
-            environment,
-        )
-        .await?;
-        let action = if status.success {
-            require_success_with_environment(
-                &installed.executable,
-                &[],
-                &["gateway", "restart"],
-                None,
-                INSTALL_TIMEOUT,
-                environment,
-            )
-            .await?;
-            "restarted"
-        } else {
-            require_success_with_environment(
-                &installed.executable,
-                &[],
-                &["gateway", "install", "--start-now"],
-                None,
-                INSTALL_TIMEOUT,
-                environment,
-            )
-            .await?;
-            "installed"
-        };
+        let before_restart = run_machine_status(installed, environment, false).await?;
+        let before_restart: serde_json::Value = serde_json::from_str(&before_restart.stdout)
+            .map_err(|_| {
+                cli_error(
+                    "gateway_probe_failed",
+                    "Hermes returned unreadable runtime status before restart",
+                )
+            })?;
+        let previous_generation = before_restart
+            .pointer("/gateway/generation")
+            .and_then(serde_json::Value::as_str);
+        // Human `gateway status` exits 0 even for absent/stopped services.
+        // Install converges without --force; restart reloads saved credentials.
         require_success_with_environment(
             &installed.executable,
             &[],
-            &["gateway", "status"],
+            &["gateway", "install", "--no-start-now"],
             None,
-            COMMAND_TIMEOUT,
+            INSTALL_TIMEOUT,
             environment,
         )
         .await?;
-        (action, true)
+        require_success_with_environment(
+            &installed.executable,
+            &[],
+            &["gateway", "restart"],
+            None,
+            INSTALL_TIMEOUT,
+            environment,
+        )
+        .await?;
+        progress.completed("service", "restarted");
+        progress.started("verification");
+        wait_for_gateway(installed, environment, previous_generation).await?;
+        let status = run_machine_status(installed, environment, true).await?;
+        if !status.success {
+            return Err(cli_error(
+                "gateway_probe_failed",
+                format!("Hermes Inline verification failed: {}", status.stderr),
+            )
+            .into());
+        }
+        verify_status(&status.stdout, bot.id)?;
+        ("restarted", true)
     };
-    progress.completed("service", service_action);
-    progress.started("verification");
+    if !ready {
+        progress.completed("service", service_action);
+        progress.started("verification");
+    }
     progress.completed(
         "verification",
         if ready { "ready" } else { "action_required" },
@@ -255,6 +266,66 @@ pub(super) async fn setup(
         service_action,
         ready,
     })
+}
+
+async fn wait_for_gateway(
+    installed: &InstalledTarget,
+    environment: &[(OsString, OsString)],
+    previous_generation: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut last_reason = "no runtime status".to_string();
+    let result = tokio::time::timeout(COMMAND_TIMEOUT, async {
+        loop {
+            let status = run_machine_status(installed, environment, false).await?;
+            let value: serde_json::Value = serde_json::from_str(&status.stdout)
+                .map_err(|_| cli_error("gateway_probe_failed", format!("Hermes returned unreadable runtime status: {}", status.stderr)))?;
+            let gateway = value.get("gateway").filter(|gateway| gateway.get("supported").and_then(serde_json::Value::as_bool) == Some(true))
+                .ok_or_else(|| cli_error("gateway_readiness_unverified", "Hermes cannot report local gateway readiness; update Hermes and the Inline Hermes adapter, then rerun setup"))?;
+            if status.success && gateway_ready_after_restart(gateway, previous_generation) {
+                return Ok::<_, Box<dyn std::error::Error>>(());
+            }
+            last_reason = crate::diagnostics::safe_text(gateway.get("reason").and_then(serde_json::Value::as_str).unwrap_or("gateway not connected"));
+            log::debug!("Hermes gateway is not ready: {last_reason}");
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }).await;
+    match result {
+        Ok(result) => result,
+        Err(_) => Err(cli_error("gateway_not_ready", format!("Hermes gateway did not connect to Inline within 60 seconds ({last_reason}); run `hermes gateway status --deep` for local diagnostics, then retry setup")).into()),
+    }
+}
+
+fn gateway_ready_after_restart(
+    gateway: &serde_json::Value,
+    previous_generation: Option<&str>,
+) -> bool {
+    let generation = gateway
+        .get("generation")
+        .and_then(serde_json::Value::as_str);
+    // Some service managers return before the old process exits. A credential
+    // probe verifies the saved token, not which token that process loaded.
+    gateway_ready(gateway)
+        && generation.is_some_and(|generation| {
+            generation.len() == 64
+                && generation.bytes().all(|byte| byte.is_ascii_hexdigit())
+                && Some(generation) != previous_generation
+        })
+}
+
+fn gateway_ready(gateway: &serde_json::Value) -> bool {
+    gateway
+        .get("supported")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+        && gateway.get("ready").and_then(serde_json::Value::as_bool) == Some(true)
+        && gateway
+            .get("gatewayState")
+            .and_then(serde_json::Value::as_str)
+            == Some("running")
+        && gateway
+            .get("platformState")
+            .and_then(serde_json::Value::as_str)
+            == Some("connected")
 }
 
 async fn ensure_plugin(
@@ -412,7 +483,22 @@ async fn machine_plugin_status(
     probe: bool,
 ) -> Result<Option<MachinePluginStatus>, Box<dyn std::error::Error>> {
     let status = run_machine_status(installed, environment, probe).await?;
+    let recognized_contract = serde_json::from_str::<serde_json::Value>(&status.stdout)
+        .ok()
+        .is_some_and(|value| value.get("setupProtocolVersion").is_some());
+    if !recognized_contract && !machine_setup_unsupported(&status.stderr) {
+        return Err(cli_error("plugin_probe_failed", format!(
+            "could not inspect the Hermes Inline plugin (exit {:?}): {}; no plugin or bot identity was replaced",
+            status.exit_code, status.stderr
+        )).into());
+    }
     Ok(parse_machine_plugin_status(status.success, &status.stdout))
+}
+
+fn machine_setup_unsupported(stderr: &str) -> bool {
+    stderr.lines().any(|line| {
+        line.contains("invalid choice: 'inline'") || line.contains("unrecognized arguments: --json")
+    })
 }
 
 async fn run_machine_status(
@@ -473,13 +559,31 @@ fn parse_machine_plugin_status(success: bool, output: &str) -> Option<MachinePlu
     Some(MachinePluginStatus {
         version: version.to_string(),
         configured: value.get("configured").and_then(serde_json::Value::as_bool) == Some(true),
+        gateway_supported: value
+            .pointer("/gateway/supported")
+            .and_then(serde_json::Value::as_bool),
     })
+}
+
+fn require_gateway_capability(
+    machine: &MachinePluginStatus,
+    no_restart: bool,
+) -> Result<(), crate::errors::CliError> {
+    if no_restart || machine.gateway_supported == Some(true) {
+        return Ok(());
+    }
+    let message = if machine.gateway_supported.is_none() {
+        "The installed Inline Hermes adapter cannot report gateway readiness. Update the Inline Hermes adapter, then retry setup; no existing bot credentials were changed"
+    } else {
+        "Hermes runtime status helpers are unavailable. Update Hermes and the Inline Hermes adapter, then retry setup; no existing bot credentials were changed"
+    };
+    Err(cli_error("gateway_readiness_unverified", message))
 }
 
 async fn legacy_plugin_configured(
     installed: &InstalledTarget,
     environment: &[(OsString, OsString)],
-) -> Result<bool, Box<dyn std::error::Error>> {
+) -> Result<Option<bool>, Box<dyn std::error::Error>> {
     let status = run_with_environment(
         &installed.executable,
         &[],
@@ -489,11 +593,38 @@ async fn legacy_plugin_configured(
         environment,
     )
     .await?;
-    Ok(status.success
-        && status
-            .stdout
-            .lines()
-            .any(|line| line.trim().eq_ignore_ascii_case("Inline configured: yes")))
+    if status
+        .stdout
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case("Inline configured: yes"))
+    {
+        return Ok(Some(true));
+    }
+    if status
+        .stdout
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case("Inline configured: no"))
+    {
+        return Ok(Some(false));
+    }
+    if machine_setup_unsupported(&status.stderr) {
+        return Ok(None);
+    }
+    // Unknown legacy output is not evidence of an absent credential.
+    Err(cli_error(
+        "plugin_probe_failed",
+        format!(
+            "Hermes could not report its existing Inline configuration: {}",
+            status.stderr
+        ),
+    )
+    .into())
+}
+
+fn legacy_identity_may_exist(inspected: Option<bool>, legacy: Option<bool>) -> bool {
+    // Only an actual inspector or a supported legacy status can prove absence.
+    // An unsupported command with no installer says nothing about stored data.
+    inspected == Some(true) || legacy.unwrap_or(inspected.unwrap_or(true))
 }
 
 async fn resolve_profile(
@@ -608,6 +739,71 @@ fn status_bot_id(output: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_adapter_capability_fails_before_bot_setup_but_stopped_gateway_is_repairable() {
+        let mut machine = MachinePluginStatus {
+            version: "0.0.12".into(),
+            configured: true,
+            gateway_supported: None,
+        };
+        assert!(require_gateway_capability(&machine, false).is_err());
+        assert!(require_gateway_capability(&machine, true).is_ok());
+        machine.gateway_supported = Some(false);
+        assert!(require_gateway_capability(&machine, false).is_err());
+        machine.gateway_supported = Some(true);
+        assert!(require_gateway_capability(&machine, false).is_ok());
+    }
+
+    #[test]
+    fn asynchronous_restart_cannot_accept_the_old_connected_process() {
+        let previous = "a".repeat(64);
+        let next = "b".repeat(64);
+        let mut gateway = serde_json::json!({"supported": true, "ready": true, "gatewayState": "running", "platformState": "connected", "generation": previous});
+        assert!(!gateway_ready_after_restart(&gateway, Some(&previous)));
+        gateway["generation"] = next.into();
+        assert!(gateway_ready_after_restart(&gateway, Some(&previous)));
+        assert!(gateway_ready_after_restart(&gateway, None));
+        gateway.as_object_mut().unwrap().remove("generation");
+        assert!(!gateway_ready_after_restart(&gateway, None));
+    }
+
+    #[test]
+    fn gateway_readiness_requires_explicit_live_inline_connection() {
+        let ready = serde_json::json!({"supported": true, "ready": true, "gatewayState": "running", "platformState": "connected"});
+        assert!(gateway_ready(&ready));
+        for gateway in [
+            serde_json::json!({"ready": true}),
+            serde_json::json!({"supported": false, "ready": true}),
+            serde_json::json!({"supported": true, "ready": true, "gatewayState": "running", "platformState": "retrying"}),
+            serde_json::json!({"supported": true, "ready": false, "gatewayState": "running", "platformState": "connected"}),
+        ] {
+            assert!(!gateway_ready(&gateway));
+        }
+    }
+
+    #[test]
+    fn only_explicit_unsupported_machine_commands_allow_legacy_fallback() {
+        assert!(machine_setup_unsupported(
+            "hermes: error: invalid choice: 'inline' (choose from 'gateway')"
+        ));
+        assert!(machine_setup_unsupported(
+            "hermes: error: unrecognized arguments: --json"
+        ));
+        assert!(!machine_setup_unsupported(
+            "Permission denied loading plugin"
+        ));
+        assert!(!machine_setup_unsupported("Traceback: plugin crashed"));
+    }
+
+    #[test]
+    fn unsupported_legacy_status_without_an_inspector_does_not_allow_replacement() {
+        assert!(legacy_identity_may_exist(None, None));
+        assert!(legacy_identity_may_exist(Some(true), Some(false)));
+        assert!(legacy_identity_may_exist(Some(false), Some(true)));
+        assert!(!legacy_identity_may_exist(Some(false), None));
+        assert!(!legacy_identity_may_exist(None, Some(false)));
+    }
 
     #[test]
     fn status_verification_requires_the_selected_bot() {

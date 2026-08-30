@@ -39,7 +39,7 @@ pub(super) async fn preflight(
         COMMAND_TIMEOUT,
     )
     .await?;
-    let plugin_state = inspect_plugin(&inspected);
+    let plugin_state = inspect_plugin(&inspected)?;
     let plugin_can_probe = matches!(
         &plugin_state,
         PluginState::Healthy { .. } | PluginState::Outdated
@@ -81,10 +81,17 @@ pub(super) async fn preflight(
             COMMAND_TIMEOUT,
         )
         .await?;
-        if status.success {
-            configured_bot_id(&status.stdout)
-        } else {
-            None
+        require_probe_success(&status)?;
+        match configured_bot_id(&status.stdout) {
+            Err(error)
+                if args.replace
+                    && error
+                        .downcast_ref::<crate::errors::CliError>()
+                        .is_some_and(|error| error.code == "setup_conflict") =>
+            {
+                None
+            }
+            result => result?,
         }
     } else {
         None
@@ -92,16 +99,108 @@ pub(super) async fn preflight(
     Ok(GatewayPreflight { configured_bot_id })
 }
 
-fn configured_bot_id(output: &str) -> Option<i64> {
-    let value: serde_json::Value = serde_json::from_str(output).ok()?;
-    value
-        .pointer("/channels/inline/probe/user/id")
-        .and_then(|value| {
-            value
-                .as_i64()
-                .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+fn gateway_service_loaded(
+    status: &super::process::CommandOutput,
+) -> Result<bool, crate::errors::CliError> {
+    // The status command exits 0 even when no service is installed. Only the
+    // explicit service fact can select install versus restart.
+    if status.success
+        && let Some(loaded) = serde_json::from_str::<serde_json::Value>(&status.stdout)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/service/loaded")
+                    .and_then(serde_json::Value::as_bool)
+            })
+    {
+        return Ok(loaded);
+    }
+    Err(cli_error(
+        "gateway_probe_failed",
+        format!(
+            "OpenClaw could not report whether its gateway service is installed (exit {:?}): {}. Run `openclaw gateway status --json` and repair the service before retrying",
+            status.exit_code, status.stderr
+        ),
+    ))
+}
+
+fn configured_bot_id(output: &str) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+    let value = parse_channel_status(output)?;
+    if value
+        .pointer("/channelAccounts/inline")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(Vec::is_empty)
+        && value
+            .get("partial")
+            .is_none_or(|value| value.as_bool() == Some(false))
+        && value
+            .get("warnings")
+            .is_none_or(|value| value.as_array().is_some_and(Vec::is_empty))
+        && value.get("error").is_none_or(serde_json::Value::is_null)
+        && value
+            .pointer("/channels/inline")
+            .is_none_or(|summary| credential_is_absent(summary, false))
+    {
+        // A complete live response can explicitly list no accounts on a fresh
+        // installation. Partial/timed-out snapshots cannot prove absence.
+        return Ok(None);
+    }
+    let channel = selected_channel_account(&value)?;
+    match channel
+        .get("configured")
+        .and_then(serde_json::Value::as_bool)
+    {
+        Some(false) if credential_is_absent(channel, value.get("channelAccounts").is_some()) => {
+            Ok(None)
+        }
+        Some(true)
+            if channel
+                .pointer("/probe/ok")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true) =>
+        {
+            channel_bot_id(channel)
+                .map(Some)
+                .ok_or_else(|| channel_probe_error(channel).into())
+        }
+        Some(false) | Some(true) => Err(cli_error(
+            "setup_conflict",
+            format!("the existing OpenClaw Inline credential cannot be verified: {}. Repair its credential source, or rerun with --replace to explicitly allow replacement", channel_probe_detail(channel)),
+        ).into()),
+        _ => Err(channel_probe_error(channel).into()),
+    }
+}
+
+fn credential_is_absent(channel: &serde_json::Value, require_source: bool) -> bool {
+    if channel
+        .get("configured")
+        .and_then(serde_json::Value::as_bool)
+        != Some(false)
+    {
+        return false;
+    }
+    let source_absent = match channel.get("tokenSource") {
+        Some(serde_json::Value::String(source)) => source == "none",
+        None => !require_source, // Legacy channel summaries did not expose it.
+        _ => false,
+    };
+    // SecretRef, unreadable token files, and duplicate credentials can all be
+    // reported as configured=false. Preserve them instead of creating a bot.
+    source_absent
+        && channel
+            .get("tokenConfigured")
+            .is_none_or(|value| value.as_bool() == Some(false))
+        && channel
+            .get("tokenStatus")
+            .is_none_or(|value| value.as_str() == Some("missing"))
+        && channel.get("stateReason").is_none_or(|value| {
+            value.is_null() || matches!(value.as_str(), Some("" | "not configured"))
         })
-        .filter(|id| *id > 0)
+        && channel
+            .get("lastError")
+            .is_none_or(|value| value.is_null() || value.as_str() == Some(""))
+        && channel.get("probe").is_none_or(serde_json::Value::is_null)
+        && channel_bot_id(channel).is_none()
 }
 
 pub(super) async fn setup(
@@ -128,7 +227,7 @@ pub(super) async fn setup(
         COMMAND_TIMEOUT,
     )
     .await?;
-    let plugin_state = inspect_plugin(&inspected);
+    let plugin_state = inspect_plugin(&inspected)?;
     let (integration_action, verify_install) = match plugin_state {
         PluginState::Healthy { .. } => ("kept", false),
         PluginState::Outdated => {
@@ -229,7 +328,7 @@ pub(super) async fn setup(
             COMMAND_TIMEOUT,
         )
         .await?;
-        let action = if status.success {
+        let action = if gateway_service_loaded(&status)? {
             require_success(
                 &installed.executable,
                 &prefix,
@@ -315,11 +414,47 @@ async fn install_latest_plugin(
     Ok(())
 }
 
-fn inspect_plugin(output: &super::process::CommandOutput) -> PluginState {
+fn inspect_plugin(
+    output: &super::process::CommandOutput,
+) -> Result<PluginState, Box<dyn std::error::Error>> {
     if !output.success {
-        return PluginState::Missing;
+        // The host reports an actual lookup miss as exit 1, even with --json.
+        // A broken config, permission error, or crash must not authorize --force.
+        if output.exit_code == Some(1)
+            && output.stderr.lines().any(|line| {
+                let line = line.trim();
+                line == "Plugin not found: inline"
+                    || line.starts_with("Plugin not found: inline. Run ")
+            })
+        {
+            return Ok(PluginState::Missing);
+        }
+        return Err(cli_error(
+            "plugin_probe_failed",
+            format!(
+                "could not inspect the OpenClaw Inline plugin (exit {:?}): {}",
+                output.exit_code, output.stderr
+            ),
+        )
+        .into());
     }
-    inspect_plugin_json(&output.stdout)
+    let value: serde_json::Value = serde_json::from_str(&output.stdout).map_err(|_| {
+        cli_error(
+            "plugin_probe_failed",
+            "OpenClaw returned unreadable plugin metadata; no plugin was replaced",
+        )
+    })?;
+    if !value
+        .get("plugin")
+        .is_some_and(serde_json::Value::is_object)
+    {
+        return Err(cli_error(
+            "plugin_probe_failed",
+            "OpenClaw returned no plugin metadata; no plugin was replaced",
+        )
+        .into());
+    }
+    Ok(inspect_plugin_json(&output.stdout))
 }
 
 fn inspect_plugin_json(output: &str) -> PluginState {
@@ -631,40 +766,143 @@ fn verify_channel_status(
     output: &str,
     expected_bot_id: i64,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let value = parse_channel_status(output)?;
+    let channel = selected_channel_account(&value)?;
+    let configured = channel
+        .get("configured")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    let running = channel.get("running").and_then(serde_json::Value::as_bool) == Some(true);
+    let connected = channel
+        .get("connected")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    let probe_ok = channel
+        .pointer("/probe/ok")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
+    if !configured
+        || !running
+        || !connected
+        || !probe_ok
+        || channel_bot_id(channel) != Some(expected_bot_id)
+    {
+        return Err(channel_probe_error(channel).into());
+    }
+    Ok(())
+}
+
+fn require_probe_success(
+    output: &super::process::CommandOutput,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !output.success {
+        return Err(cli_error("gateway_probe_failed", format!(
+            "OpenClaw channel probe failed (exit {:?}): {}; existing bot identity was not replaced",
+            output.exit_code, output.stderr
+        )).into());
+    }
+    Ok(())
+}
+
+fn parse_channel_status(output: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let value: serde_json::Value = serde_json::from_str(output).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             "OpenClaw returned unreadable Inline channel status",
         )
     })?;
-    let channel = value.pointer("/channels/inline").ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "OpenClaw returned no Inline channel status",
-        )
-    })?;
-    let configured = channel
-        .get("configured")
+    if value
+        .get("gatewayReachable")
         .and_then(serde_json::Value::as_bool)
-        == Some(true);
-    let running = channel.get("running").and_then(serde_json::Value::as_bool) == Some(true);
-    let probe_ok = channel
-        .pointer("/probe/ok")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true);
-    let actual_id = channel.pointer("/probe/user/id").and_then(|value| {
-        value
-            .as_i64()
-            .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
-    });
-    if !configured || !running || !probe_ok || actual_id != Some(expected_bot_id) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "OpenClaw Inline channel did not verify as the selected bot",
-        )
-        .into());
+        == Some(false)
+        || value.get("configOnly").and_then(serde_json::Value::as_bool) == Some(true)
+    {
+        return Err(cli_error("gateway_probe_failed", format!(
+            "OpenClaw returned config-only status; start or repair its gateway before retrying setup: {}",
+            crate::diagnostics::safe_text(value.get("error").and_then(serde_json::Value::as_str).unwrap_or("gateway unavailable"))
+        )).into());
     }
-    Ok(())
+    Ok(value)
+}
+
+fn selected_channel_account(
+    value: &serde_json::Value,
+) -> Result<&serde_json::Value, Box<dyn std::error::Error>> {
+    // Current hosts put the live probe on the default account, not the summary.
+    // Never fall back to another account when the selected one is incomplete.
+    if let Some(raw_accounts) = value.pointer("/channelAccounts/inline") {
+        let default_id = value
+            .pointer("/channelDefaultAccountId/inline")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("default");
+        // Unified setup writes the literal default account. A named host
+        // default must not be probed and then duplicated into another account.
+        if default_id != "default" {
+            return Err(cli_error(
+                "unsupported_account",
+                "Inline setup currently manages only OpenClaw's default account; configure the selected named Inline account with OpenClaw directly, or use a separate profile",
+            ).into());
+        }
+        return raw_accounts
+            .as_array()
+            .and_then(|accounts| {
+                accounts.iter().find(|account| {
+                    account.get("accountId").and_then(serde_json::Value::as_str) == Some(default_id)
+                })
+            })
+            .ok_or_else(|| {
+                cli_error(
+                    "gateway_probe_failed",
+                    "OpenClaw returned no status for the selected Inline account",
+                )
+                .into()
+            });
+    }
+    value
+        .pointer("/channels/inline")
+        .filter(|channel| channel.is_object())
+        .ok_or_else(|| {
+            cli_error(
+                "gateway_probe_failed",
+                "OpenClaw returned no Inline channel status",
+            )
+            .into()
+        })
+}
+
+fn channel_bot_id(channel: &serde_json::Value) -> Option<i64> {
+    channel
+        .pointer("/probe/user/id")
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+        })
+        .filter(|id| *id > 0)
+}
+
+fn channel_probe_error(channel: &serde_json::Value) -> crate::errors::CliError {
+    cli_error(
+        "gateway_probe_failed",
+        format!(
+            "OpenClaw Inline channel did not verify as the selected connected bot: {}. Repair the gateway and retry setup",
+            channel_probe_detail(channel)
+        ),
+    )
+}
+
+fn channel_probe_detail(channel: &serde_json::Value) -> String {
+    let detail = [
+        channel.get("lastError"),
+        channel.get("stateReason"),
+        channel.pointer("/probe/error"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(serde_json::Value::as_str)
+    .find(|text| !text.trim().is_empty())
+    .unwrap_or("configured identity or live connection could not be verified");
+    crate::diagnostics::safe_text(detail)
 }
 
 #[cfg(unix)]
@@ -694,6 +932,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn absent_gateway_service_requires_install_even_when_status_exits_successfully() {
+        let mut status = super::super::process::CommandOutput {
+            success: true,
+            stdout: r#"{"service":{"loaded":false}}"#.into(),
+            stderr: String::new(),
+            exit_code: Some(0),
+        };
+        assert!(!gateway_service_loaded(&status).unwrap());
+        status.stdout = r#"{"service":{"loaded":true,"runtime":{"status":"stopped"}}}"#.into();
+        assert!(gateway_service_loaded(&status).unwrap());
+        status.stdout = "{}".into();
+        assert!(gateway_service_loaded(&status).is_err());
+        status.stdout = r#"{"service":{"loaded":false}}"#.into();
+        status.success = false;
+        assert!(gateway_service_loaded(&status).is_err());
+    }
+
+    #[test]
     fn parses_absolute_and_home_relative_config_paths() {
         assert_eq!(
             parse_config_path("/tmp/openclaw.json\n").unwrap(),
@@ -705,17 +961,133 @@ mod tests {
     #[test]
     fn channel_verification_requires_the_selected_running_bot() {
         verify_channel_status(
-            r#"{"channels":{"inline":{"configured":true,"running":true,"probe":{"ok":true,"user":{"id":"42"}}}}}"#,
+            r#"{"channels":{"inline":{"configured":true,"running":true,"connected":true,"probe":{"ok":true,"user":{"id":"42"}}}}}"#,
             42,
         )
         .expect("matching bot verifies");
         assert!(
             verify_channel_status(
-                r#"{"channels":{"inline":{"configured":true,"running":true,"probe":{"ok":true,"user":{"id":"43"}}}}}"#,
+                r#"{"channels":{"inline":{"configured":true,"running":true,"connected":true,"probe":{"ok":true,"user":{"id":"43"}}}}}"#,
                 42,
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn channel_probe_uses_the_default_account_and_requires_a_live_connection() {
+        let output = r#"{"channels":{"inline":{"configured":true}},"channelDefaultAccountId":{"inline":"default"},"channelAccounts":{"inline":[{"accountId":"work","configured":true,"probe":{"ok":true,"user":{"id":"43"}}},{"accountId":"default","configured":true,"running":true,"connected":true,"probe":{"ok":true,"user":{"id":"42"}}}]}}"#;
+        assert_eq!(configured_bot_id(output).unwrap(), Some(42));
+        verify_channel_status(output, 42).unwrap();
+        assert!(
+            verify_channel_status(
+                &output.replace("\"connected\":true", "\"connected\":false"),
+                42
+            )
+            .is_err()
+        );
+        assert!(
+            configured_bot_id(&output.replace("\"inline\":\"default\"", "\"inline\":\"missing\""))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn named_default_account_is_not_silently_copied_into_default() {
+        let output = r#"{"channelDefaultAccountId":{"inline":"work"},"channelAccounts":{"inline":[{"accountId":"work","configured":true,"running":true,"connected":true,"probe":{"ok":true,"user":{"id":"42"}}}]}}"#;
+        let error = configured_bot_id(output).unwrap_err();
+        // --replace only overrides setup_conflict, never an account mismatch.
+        assert_eq!(
+            error
+                .downcast_ref::<crate::errors::CliError>()
+                .unwrap()
+                .code,
+            "unsupported_account"
+        );
+        assert!(verify_channel_status(output, 42).is_err());
+    }
+
+    #[test]
+    fn unavailable_channel_probes_never_mean_no_existing_bot() {
+        for output in [
+            r#"{"gatewayReachable":false,"configOnly":true,"configuredChannels":["inline"],"error":"gateway unavailable"}"#,
+            // Config-only announcement lists omit disabled channels and do not
+            // include persisted auth state. An empty list cannot prove absence.
+            r#"{"gatewayReachable":false,"configOnly":true,"configuredChannels":[]}"#,
+            "not json",
+            "{}",
+            r#"{"channels":{"inline":{"configured":true,"probe":{"ok":false}}}}"#,
+        ] {
+            assert!(configured_bot_id(output).is_err(), "{output}");
+            assert!(verify_channel_status(output, 42).is_err());
+        }
+        assert_eq!(
+            configured_bot_id(r#"{"channels":{"inline":{"configured":false}}}"#).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn complete_empty_live_account_lists_allow_first_setup() {
+        let fresh = r#"{"channelAccounts":{"inline":[]},"channelDefaultAccountId":{"inline":"default"},"channels":{"inline":{"configured":false}}}"#;
+        assert_eq!(configured_bot_id(fresh).unwrap(), None);
+        assert_eq!(configured_bot_id(r#"{"channelAccounts":{"inline":[]},"channelDefaultAccountId":{"inline":"default"}}"#).unwrap(), None);
+        assert!(
+            configured_bot_id(&fresh.replace("\"configured\":false", "\"configured\":true"))
+                .is_err()
+        );
+        let mut partial: serde_json::Value = serde_json::from_str(fresh).unwrap();
+        partial["partial"] = true.into();
+        assert!(configured_bot_id(&partial.to_string()).is_err());
+    }
+
+    #[test]
+    fn unavailable_or_duplicate_credentials_are_not_absent() {
+        for account in [
+            serde_json::json!({"configured":false,"tokenSource":"file","stateReason":"not configured: token file is configured but unavailable"}),
+            serde_json::json!({"configured":false,"tokenSource":"env","tokenStatus":"configured_unavailable"}),
+            serde_json::json!({"configured":false,"tokenSource":"config","lastError":"duplicate token"}),
+            serde_json::json!({"configured":false,"tokenSource":"none","stateReason":"credential unavailable"}),
+            serde_json::json!({"configured":false}),
+        ] {
+            let mut account = account;
+            account["accountId"] = "default".into();
+            let output = serde_json::json!({"channelAccounts":{"inline":[account]},"channelDefaultAccountId":{"inline":"default"}});
+            assert!(configured_bot_id(&output.to_string()).is_err(), "{output}");
+        }
+        let unconfigured = r#"{"channelAccounts":{"inline":[{"accountId":"default","configured":false,"tokenSource":"none","stateReason":"not configured"}]}}"#;
+        assert_eq!(configured_bot_id(unconfigured).unwrap(), None);
+        let failure = configured_bot_id(r#"{"channels":{"inline":{"configured":true,"lastError":null,"probe":{"ok":false,"error":"credential rejected TOKEN=private-value"}}}}"#).unwrap_err();
+        assert_eq!(
+            failure
+                .downcast_ref::<crate::errors::CliError>()
+                .unwrap()
+                .code,
+            "setup_conflict"
+        );
+        assert!(failure.to_string().contains("credential rejected"));
+        assert!(!failure.to_string().contains("private-value"));
+    }
+
+    #[test]
+    fn plugin_probe_failures_do_not_authorize_installation() {
+        let mut output = super::super::process::CommandOutput {
+            success: false,
+            stdout: String::new(),
+            exit_code: Some(1),
+            stderr:
+                "Plugin not found: inline. Run `openclaw plugins list` to see installed plugins."
+                    .into(),
+        };
+        assert!(matches!(
+            inspect_plugin(&output).unwrap(),
+            PluginState::Missing
+        ));
+        output.stderr = "config load failed: permission denied".into();
+        assert!(inspect_plugin(&output).is_err());
+        output.success = true;
+        output.stdout = "{}".into();
+        assert!(inspect_plugin(&output).is_err());
     }
 
     #[test]

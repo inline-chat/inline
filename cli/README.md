@@ -2,6 +2,9 @@
 
 Install the Inline CLI and have Claude/Codex interact with it.
 
+For setup failures, repeat the command with `--verbose` (twice for trace detail).
+See [diagnostics and optional error reporting](../docs/cli-diagnostics.md).
+
 ## Install
 
 ### Homebrew (cask)

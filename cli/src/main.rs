@@ -7,6 +7,7 @@ mod chat_output;
 mod completion;
 mod config;
 mod dates;
+mod diagnostics;
 mod doctor;
 mod downloads;
 mod errors;
@@ -22,6 +23,7 @@ mod owner_session;
 mod peer;
 mod skill;
 mod state;
+mod telemetry;
 mod text_input;
 mod update;
 mod validation;
@@ -195,12 +197,14 @@ fn clear_owned_authority_if_invalidated(
 struct DetectedGlobalFlags {
     json: bool,
     json_format: output::JsonFormat,
+    verbose: u8,
 }
 
 fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     let mut json = false;
     let mut pretty = false;
     let mut compact = false;
+    let mut verbose = 0_u8;
     for arg in argv {
         if arg == "--" {
             break;
@@ -211,11 +215,14 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
             pretty = true;
         } else if arg == "--compact" {
             compact = true;
+        } else if arg == "--verbose" {
+            verbose = verbose.saturating_add(1);
         }
     }
     DetectedGlobalFlags {
         json,
         json_format: output::resolve_json_format(pretty, compact),
+        verbose,
     }
 }
 
@@ -269,6 +276,9 @@ struct Cli {
 
     #[arg(short = 'v', long = "version", global = true, action = ArgAction::Version, help = "Print version information")]
     version: Option<bool>,
+
+    #[arg(long, global = true, action = ArgAction::Count, help = "Print scrubbed diagnostics to stderr; repeat --verbose for trace detail (-v prints version)")]
+    verbose: u8,
 
     #[arg(
         long,
@@ -1961,13 +1971,20 @@ fn main() {
 
 #[tokio::main]
 async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
+    // clap's global Count action keeps the innermost count when flags occur
+    // at multiple command levels; preserve all explicit verbosity requests.
+    diagnostics::init(flags.verbose.max(cli.verbose));
+    let telemetry = telemetry::init();
     if let Err(error) = run_until_terminated(cli, started_at).await {
         if is_reported_cli_failure(error.as_ref()) {
+            drop(telemetry);
             std::process::exit(1);
         }
+        diagnostics::log_error(error.as_ref());
+        telemetry::report(&json_cli_error_from_error(error.as_ref()).code, None, None);
         if flags.json {
             let payload = JsonErrorEnvelope {
-                error: json_cli_error_from_error(error.as_ref()),
+                error: diagnostics::error_payload(error.as_ref()),
             };
 
             if let Ok(text) = output::json_string(&payload, flags.json_format) {
@@ -1978,6 +1995,7 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
         } else {
             eprintln!("{}", human_cli_error_from_error(error.as_ref()));
         }
+        drop(telemetry);
         std::process::exit(1);
     }
 }

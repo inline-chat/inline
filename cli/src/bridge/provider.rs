@@ -27,9 +27,9 @@ use inline_agent_driver_acp::{
 use inline_agent_driver_codex::CodexVersionPolicy;
 use inline_agent_driver_codex::{
     CodexAppServerDriver, CodexAppServerTransport, CodexDriverWriter, CodexLaunchConfig,
-    CodexProcessStatus, CodexRuntimeDiscoveryConfig, discover_codex_turn_runtime,
-    is_certified_codex_version, parse_codex_version, should_scrub_codex_environment_name,
-    spawn_codex_driver,
+    CodexProcessStatus, CodexRuntimeDiscoveryConfig, RedactedStderrTail,
+    discover_codex_turn_runtime, discover_codex_turn_runtime_in_paths, is_certified_codex_version,
+    parse_codex_version, should_scrub_codex_environment_name, spawn_codex_driver,
 };
 use sha2::{Digest, Sha256};
 
@@ -188,15 +188,17 @@ pub(super) async fn prepare_setup_provider(
     allow_install: bool,
 ) -> Result<ProviderProbe, String> {
     if provider_id == "codex" {
-        let runtime = discover_codex_turn_runtime(&CodexRuntimeDiscoveryConfig {
-            configured_executable: configured_provider_executable(paths, provider_id)?,
-            ..CodexRuntimeDiscoveryConfig::default()
-        })
-            .await
-            .map_err(|_| {
-                "could not find a compatible Codex runtime on PATH or in the signed ChatGPT application; install or update Codex/ChatGPT, sign in there, then retry"
-                    .to_string()
-            })?;
+        let runtime = discover_codex_turn_runtime_in_paths(
+            &CodexRuntimeDiscoveryConfig {
+                configured_executable: configured_provider_executable(paths, provider_id)?,
+                ..CodexRuntimeDiscoveryConfig::default()
+            },
+            crate::agents::harness_search_directories(),
+        )
+        .await
+        .map_err(|error| {
+            format!("{error}; install or update Codex/ChatGPT or Inline, sign in there, then retry")
+        })?;
         if !runtime.capabilities().existing_turn_driver {
             return Err(format!(
                 "Codex {} is not certified for this Inline bridge; update Inline or Codex/ChatGPT, then retry",
@@ -418,9 +420,10 @@ pub(super) async fn probe_service_provider_async(
             search_chatgpt_app: false,
         })
         .await
-        .map_err(|_| {
-            "the configured Codex runtime is no longer signed and compatible; rerun Inline agent setup"
-                .to_string()
+        .map_err(|error| {
+            format!(
+                "the configured Codex runtime failed validation: {error}; rerun Inline agent setup"
+            )
         })?;
     }
     probe_configured_provider_async(provider_id, executable).await
@@ -791,7 +794,10 @@ impl ProviderLaunch {
                 let spawned = spawn_codex_driver(config.clone(), bridge_version).await?;
                 Ok(SpawnedProvider {
                     driver: ProviderDriver::Codex(spawned.driver),
-                    process_status: ProviderProcessStatus::Codex(spawned.process_status),
+                    process_status: ProviderProcessStatus::Codex {
+                        status: spawned.process_status,
+                        stderr_tail: spawned.stderr_tail,
+                    },
                 })
             }
             Self::Acp(descriptor) => {
@@ -807,14 +813,27 @@ impl ProviderLaunch {
 
 #[derive(Clone, Debug)]
 pub(super) enum ProviderProcessStatus {
-    Codex(CodexProcessStatus),
+    Codex {
+        status: CodexProcessStatus,
+        stderr_tail: RedactedStderrTail,
+    },
     Acp(AcpProcessStatus),
 }
 
 impl ProviderProcessStatus {
     pub(super) fn exit_description(&self) -> Option<String> {
         match self {
-            Self::Codex(status) => status.exit_description(),
+            Self::Codex {
+                status,
+                stderr_tail,
+            } => status.exit_description().map(|exit| {
+                let detail = crate::diagnostics::safe_text(&stderr_tail.snapshot().join("\n"));
+                if detail.is_empty() {
+                    exit
+                } else {
+                    format!("{exit}: {detail}")
+                }
+            }),
             Self::Acp(status) => status.exit_description(),
         }
     }

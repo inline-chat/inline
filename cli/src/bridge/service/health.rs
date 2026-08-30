@@ -47,10 +47,16 @@ struct InlineConnectionState {
 }
 
 #[derive(Clone, Debug)]
+struct ProviderHealthState {
+    state: ProviderRuntimeState,
+    detail: Option<String>,
+}
+
+#[derive(Clone, Debug)]
 pub(in crate::bridge) struct RuntimeHealth {
     inline_connected: Arc<AtomicBool>,
     provider_ready: Arc<AtomicBool>,
-    provider_states: Arc<Mutex<BTreeMap<String, ProviderRuntimeState>>>,
+    provider_states: Arc<Mutex<BTreeMap<String, ProviderHealthState>>>,
     inline_states: Arc<Mutex<BTreeMap<String, InlineConnectionState>>>,
 }
 
@@ -64,7 +70,15 @@ impl RuntimeHealth {
                 installation_ids
                     .iter()
                     .cloned()
-                    .map(|installation_id| (installation_id, ProviderRuntimeState::Starting))
+                    .map(|installation_id| {
+                        (
+                            installation_id,
+                            ProviderHealthState {
+                                state: ProviderRuntimeState::Starting,
+                                detail: None,
+                            },
+                        )
+                    })
                     .collect(),
             )),
             inline_states: Arc::new(Mutex::new(
@@ -144,15 +158,30 @@ impl RuntimeHealth {
         installation_id: &str,
         state: ProviderRuntimeState,
     ) {
+        self.mark_provider_state_with_detail(installation_id, state, None);
+    }
+
+    pub(in crate::bridge) fn mark_provider_state_with_detail(
+        &self,
+        installation_id: &str,
+        state: ProviderRuntimeState,
+        detail: Option<&str>,
+    ) {
+        let detail = detail
+            .map(crate::diagnostics::safe_text)
+            .filter(|detail| !detail.is_empty());
         let any_ready = {
             let mut states = self
                 .provider_states
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            states.insert(installation_id.to_string(), state);
+            states.insert(
+                installation_id.to_string(),
+                ProviderHealthState { state, detail },
+            );
             states
                 .values()
-                .any(|state| matches!(state, ProviderRuntimeState::Ready))
+                .any(|state| matches!(state.state, ProviderRuntimeState::Ready))
         };
         self.provider_ready.store(any_ready, Ordering::Release);
     }
@@ -170,9 +199,12 @@ impl RuntimeHealth {
                 let inline = inline_states.get(installation_id);
                 ProviderRuntimeStatus {
                     installation_id: installation_id.clone(),
-                    state: *state,
+                    state: state.state,
                     inline_connected: inline.map(|inline| inline.connected),
-                    detail: inline.and_then(|inline| inline.detail.clone()),
+                    detail: state
+                        .detail
+                        .clone()
+                        .or_else(|| inline.and_then(|inline| inline.detail.clone())),
                 }
             })
             .collect()
@@ -183,5 +215,38 @@ impl RuntimeHealth {
             self.inline_connected.load(Ordering::Acquire),
             self.provider_ready.load(Ordering::Acquire),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_failure_survives_inline_connection_updates_and_clears_when_ready() {
+        let health = RuntimeHealth::starting(["codex".into()]);
+        health.mark_provider_state_with_detail(
+            "codex",
+            ProviderRuntimeState::Restarting,
+            Some("Codex login expired; TOKEN=fixture-secret"),
+        );
+        health.mark_inline_connected("codex");
+        let snapshot = health.provider_snapshot();
+        assert!(
+            snapshot[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("login expired")
+        );
+        assert!(
+            !snapshot[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("fixture-secret")
+        );
+        health.mark_provider_state("codex", ProviderRuntimeState::Ready);
+        assert!(health.provider_snapshot()[0].detail.is_none());
     }
 }

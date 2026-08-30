@@ -77,7 +77,7 @@ fn find_chatgpt_codex_executable() -> Option<PathBuf> {
     None
 }
 
-fn search_directories() -> Vec<PathBuf> {
+pub(crate) fn search_directories() -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     let mut directories = Vec::new();
     if let Some(path) = env::var_os("PATH") {

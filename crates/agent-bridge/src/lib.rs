@@ -43,7 +43,8 @@ pub use presentation::{
     ActivityKind, NativeToolActivity, PresentationUpdate, SemanticActivity, StreamingPresenter,
     UpdatePriority, ValidationSummary, VisibilityMode, VisibilityPolicy, WORKING_CONTINUED_STATUS,
     WORKING_STATUS, format_elapsed_compact, native_tool_activity, render_completion_summary,
-    sanitize_visible_command, sanitize_visible_transcript, semantic_activity_title,
+    sanitize_diagnostic_text, sanitize_visible_command, sanitize_visible_transcript,
+    semantic_activity_title,
 };
 pub use process_host::{ProcessHostConfig, reap_stale_process_host, run_process_host};
 pub use session::{

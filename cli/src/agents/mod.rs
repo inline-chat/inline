@@ -5,6 +5,7 @@ mod hermes;
 mod openclaw;
 mod process;
 
+use std::cell::{Cell, RefCell};
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 
@@ -18,6 +19,7 @@ use crate::output::JsonFormat;
 
 pub(crate) use catalog::AgentTarget;
 use catalog::TargetFamily;
+pub(crate) use discovery::search_directories as harness_search_directories;
 use discovery::{InstalledTarget, installed_target, installed_targets};
 
 pub(crate) const AGENTS_PROTOCOL_VERSION: u32 = 1;
@@ -34,25 +36,43 @@ pub(super) struct GatewayPreflight {
     pub(super) configured_bot_id: Option<i64>,
 }
 
-#[derive(Clone, Copy)]
 pub(super) struct SetupProgressReporter {
     protocol_version: Option<u32>,
+    phase: Cell<&'static str>,
+    changes: RefCell<Vec<String>>,
+    started_at: std::time::Instant,
+    retry: String,
 }
 
 impl SetupProgressReporter {
     fn new(protocol_version: Option<u32>) -> Self {
-        Self { protocol_version }
+        Self {
+            protocol_version,
+            phase: Cell::new("preflight"),
+            changes: RefCell::new(Vec::new()),
+            started_at: std::time::Instant::now(),
+            retry: String::new(),
+        }
     }
 
     pub(super) fn started(&self, phase: &'static str) {
+        self.phase.set(phase);
         self.emit("phase.started", phase, None);
     }
 
     pub(super) fn completed(&self, phase: &'static str, outcome: &'static str) {
+        if phase != "preflight" && phase != "verification" {
+            self.changes.borrow_mut().push(format!("{phase}_{outcome}"));
+        }
         self.emit("phase.completed", phase, Some(outcome));
     }
 
     fn emit(&self, event: &'static str, phase: &'static str, outcome: Option<&'static str>) {
+        log::debug!(
+            "setup {event} phase={phase} outcome={} elapsed_ms={}",
+            outcome.unwrap_or("pending"),
+            self.started_at.elapsed().as_millis()
+        );
         let Some(protocol_version) = self.protocol_version else {
             return;
         };
@@ -152,6 +172,54 @@ pub(crate) struct ResolvedSetup {
     pub(crate) args: AgentsSetupArgs,
     pub(crate) installed: InstalledTarget,
     pub(crate) non_interactive: bool,
+}
+
+fn setup_retry_command(target: AgentTarget, args: &AgentsSetupArgs) -> String {
+    let mut command = format!(
+        "inline agents setup --target {} --non-interactive --verbose",
+        target.descriptor().id
+    );
+    // Setup options affect identity, workspace, and permissions. A retry must
+    // never silently switch to the default profile/bot or broaden its scope.
+    let mut value = |flag: &str, value: String| {
+        let quoted = if cfg!(windows) {
+            format!("'{}'", value.replace('\'', "''"))
+        } else {
+            format!("'{}'", value.replace('\'', "'\\''"))
+        };
+        command.push_str(&format!(" {flag} {quoted}"));
+    };
+    if let Some(profile) = &args.profile {
+        value("--profile", profile.clone());
+    }
+    if let Some(folder) = &args.folder {
+        value("--folder", folder.display().to_string());
+    }
+    if let Some(id) = args.bot_id {
+        value("--bot-id", id.to_string());
+    }
+    if let Some(name) = &args.bot_name {
+        value("--bot-name", name.clone());
+    }
+    if let Some(username) = &args.bot_username {
+        value("--bot-username", username.clone());
+    }
+    value("--access", access_name(args.access).to_string());
+    for id in &args.allow_users {
+        value("--allow-user", id.to_string());
+    }
+    for (enabled, flag) in [
+        (args.no_install, "--no-install"),
+        (args.no_restart, "--no-restart"),
+        (args.replace, "--replace"),
+        (args.dry_run, "--dry-run"),
+    ] {
+        if enabled {
+            command.push(' ');
+            command.push_str(flag);
+        }
+    }
+    command
 }
 
 pub(crate) fn discover(
@@ -364,7 +432,8 @@ pub(crate) async fn setup(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let target = resolved.installed.descriptor.target;
     let app_protocol = resolved.args.app_protocol;
-    let progress = SetupProgressReporter::new(app_protocol);
+    let mut progress = SetupProgressReporter::new(app_protocol);
+    progress.retry = setup_retry_command(target, &resolved.args);
     if resolved.args.dry_run {
         let preflight = match target {
             AgentTarget::Openclaw => openclaw::preflight(&resolved.installed, &resolved.args)
@@ -378,7 +447,7 @@ pub(crate) async fn setup(
             }
         };
         if let Err(error) = preflight {
-            return report_setup_failure(error, target, "preflight", &[], false, json, json_format);
+            return report_setup_failure(error, target, &progress, false, json, json_format);
         }
         return print_dry_run(&resolved, json, json_format, app_protocol);
     }
@@ -411,9 +480,8 @@ pub(crate) async fn setup(
                     return report_setup_failure(
                         error,
                         target,
-                        "configure",
-                        &[],
-                        true,
+                        &progress,
+                        progress.phase.get() != "preflight",
                         json,
                         json_format,
                     );
@@ -439,8 +507,7 @@ pub(crate) async fn setup(
                     return report_setup_failure(
                         error,
                         target,
-                        "preflight",
-                        &[],
+                        &progress,
                         false,
                         json,
                         json_format,
@@ -464,15 +531,7 @@ pub(crate) async fn setup(
                     bot
                 }
                 Err(error) => {
-                    return report_setup_failure(
-                        error,
-                        target,
-                        "bot",
-                        &[],
-                        true,
-                        json,
-                        json_format,
-                    );
+                    return report_setup_failure(error, target, &progress, true, json, json_format);
                 }
             };
             let outcome = match target {
@@ -487,15 +546,7 @@ pub(crate) async fn setup(
             let outcome = match outcome {
                 Ok(outcome) => outcome,
                 Err(error) => {
-                    return report_setup_failure(
-                        error,
-                        target,
-                        "integration",
-                        &["bot_reconciled"],
-                        true,
-                        json,
-                        json_format,
-                    );
+                    return report_setup_failure(error, target, &progress, true, json, json_format);
                 }
             };
             print_gateway_result(
@@ -514,8 +565,7 @@ pub(crate) async fn setup(
 fn report_setup_failure(
     error: Box<dyn std::error::Error>,
     target: AgentTarget,
-    phase: &'static str,
-    changes: &[&'static str],
+    progress: &SetupProgressReporter,
     may_have_mutated: bool,
     json: bool,
     json_format: JsonFormat,
@@ -530,35 +580,22 @@ fn report_setup_failure(
         documentation_url: &'static str,
         target: &'a str,
         failed_phase: &'static str,
-        changes: &'a [&'static str],
+        changes: &'a [String],
         retry: String,
         error: JsonCliError,
     }
 
-    let payload = if let Some(error) = error.downcast_ref::<CliError>() {
-        JsonCliError {
-            code: error.code.to_string(),
-            message: error.message.clone(),
-            status: None,
-            api_error: None,
-            api_error_code: None,
-            body: None,
-            hint: error.hint.clone(),
-            examples: error.examples.clone(),
-        }
-    } else {
-        JsonCliError::new(
-            "agent_setup_failed",
-            format!(
-                "{} setup could not finish during {phase}.",
-                target.descriptor().display_name
-            ),
-        )
-    };
-    let retry = format!(
-        "inline agents setup --target {} --non-interactive",
-        target.descriptor().id
+    let phase = progress.phase.get();
+    let changes = progress.changes.borrow();
+    let payload = crate::diagnostics::error_payload(error.as_ref());
+    crate::diagnostics::log_error(error.as_ref());
+    log::debug!(
+        "setup failed target={} phase={phase} completed_changes={:?}",
+        target.descriptor().id,
+        &*changes
     );
+    crate::telemetry::report(&payload.code, Some(target.descriptor().id), Some(phase));
+    let retry = progress.retry.clone();
     let status = if may_have_mutated || !changes.is_empty() {
         "partial"
     } else {
@@ -573,14 +610,25 @@ fn report_setup_failure(
             documentation_url: AGENTS_DOCUMENTATION_URL,
             target: target.descriptor().id,
             failed_phase: phase,
-            changes,
+            changes: &changes,
             retry,
             error: payload,
         };
         eprintln!("{}", crate::output::json_string(&output, json_format)?);
     } else {
         eprintln!("Agent setup failed during {phase}: {}", payload.message);
+        eprintln!("Code: {}", payload.code);
+        if let Some(status) = payload.status {
+            eprintln!("Status: {status}");
+        }
+        if let Some(hint) = &payload.hint {
+            eprintln!("Hint: {hint}");
+        }
+        for example in &payload.examples {
+            eprintln!("  {example}");
+        }
         eprintln!("Retry: {retry}");
+        eprintln!("Diagnostics: repeat the command with --verbose (twice for trace detail).");
         eprintln!("Setup guide: {AGENTS_DOCUMENTATION_URL}");
     }
     Err(ReportedCliFailure.into())
@@ -957,6 +1005,71 @@ fn print_dry_run(
 #[cfg(test)]
 mod app_protocol_tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn verbose_is_global_repeatable_and_retry_keeps_mutation_constraints() {
+        let cli = crate::Cli::try_parse_from([
+            "inline",
+            "--verbose",
+            "agents",
+            "setup",
+            "--verbose",
+            "--target",
+            "codex",
+            "--folder",
+            "/tmp/Mo's project",
+            "--allow-user",
+            "42",
+            "--no-install",
+            "--no-restart",
+            "--dry-run",
+        ])
+        .unwrap();
+        let flags = crate::detect_global_flags(
+            &["inline", "--verbose", "agents", "setup", "--verbose"].map(std::ffi::OsString::from),
+        );
+        assert_eq!(flags.verbose.max(cli.verbose), 2);
+        let crate::Command::Agents {
+            command: AgentsCommand::Setup(args),
+        } = cli.command
+        else {
+            panic!("setup");
+        };
+        let retry = setup_retry_command(AgentTarget::Codex, &args);
+        for flag in [
+            "--allow-user '42'",
+            "--no-install",
+            "--no-restart",
+            "--dry-run",
+        ] {
+            assert!(retry.contains(flag));
+        }
+        if cfg!(unix) {
+            assert!(retry.contains("'/tmp/Mo'\\''s project'"));
+        }
+        assert!(!retry.contains("--replace"));
+        assert!(matches!(
+            crate::Cli::try_parse_from(["inline", "-v"])
+                .err()
+                .unwrap()
+                .kind(),
+            clap::error::ErrorKind::DisplayVersion
+        ));
+    }
+
+    #[test]
+    fn failure_ledger_retains_actual_phase_and_completed_changes_without_app_protocol() {
+        let progress = SetupProgressReporter::new(None);
+        progress.started("preflight");
+        progress.completed("preflight", "ready");
+        assert!(progress.changes.borrow().is_empty());
+        progress.started("integration");
+        progress.completed("integration", "ready");
+        progress.started("bot");
+        assert_eq!(progress.phase.get(), "bot");
+        assert_eq!(*progress.changes.borrow(), vec!["integration_ready"]);
+    }
 
     #[test]
     fn discovery_protocol_lists_every_target_without_local_paths() {

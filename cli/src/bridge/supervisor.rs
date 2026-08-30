@@ -110,7 +110,7 @@ where
                 if let Some(description) = spawned.process_status.exit_description() {
                     failures = failures.saturating_add(1);
                     if let Some(readiness) = launch.readiness {
-                        readiness.mark_restarting(launch.installation_id);
+                        readiness.mark_startup_failure(launch.installation_id, false, &description);
                     }
                     eprintln!(
                         "{} exited during startup; retrying while Inline stays connected: {}",
@@ -129,11 +129,11 @@ where
                     &error.to_string(),
                 );
                 if let Some(readiness) = launch.readiness {
-                    if requires_bridge_update {
-                        readiness.mark_unavailable(launch.installation_id);
-                    } else {
-                        readiness.mark_restarting(launch.installation_id);
-                    }
+                    readiness.mark_startup_failure(
+                        launch.installation_id,
+                        requires_bridge_update,
+                        &error.to_string(),
+                    );
                 }
                 eprintln!(
                     "{} startup attempt failed{}: {}",
@@ -188,6 +188,22 @@ pub(super) struct ProviderReadiness {
 }
 
 impl ProviderReadiness {
+    fn mark_startup_failure(
+        &self,
+        installation_id: &str,
+        requires_bridge_update: bool,
+        detail: &str,
+    ) {
+        self.health.mark_provider_state_with_detail(
+            installation_id,
+            if requires_bridge_update {
+                ProviderRuntimeState::Unavailable
+            } else {
+                ProviderRuntimeState::Restarting
+            },
+            Some(detail),
+        );
+    }
     pub(super) fn new(health: RuntimeHealth) -> Self {
         Self { health }
     }

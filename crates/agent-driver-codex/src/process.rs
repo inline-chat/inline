@@ -9,8 +9,8 @@ use futures_util::{SinkExt, StreamExt};
 use inline_agent_bridge::{AgentDriver, DriverError, ProcessHostConfig, reap_stale_process_host};
 use semver::Version;
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStderr, Command};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
 use tokio_tungstenite::client_async_with_config;
@@ -1033,7 +1033,7 @@ fn exit_description(result: std::io::Result<std::process::ExitStatus>) -> String
     }
 }
 
-async fn capture_stderr(mut stderr: ChildStderr, sink: RedactedStderrTail) {
+async fn capture_stderr(mut stderr: impl AsyncRead + Unpin, sink: RedactedStderrTail) {
     let mut chunk = [0_u8; 1_024];
     let mut line = Vec::with_capacity(STDERR_LINE_BYTES);
     loop {
@@ -1043,11 +1043,10 @@ async fn capture_stderr(mut stderr: ChildStderr, sink: RedactedStderrTail) {
                 for byte in &chunk[..read] {
                     if *byte == b'\n' {
                         flush_stderr_chunk(&mut line, &sink);
-                    } else {
+                    } else if line.len() < STDERR_LINE_BYTES {
+                        // Keep a bounded physical line. Splitting it into
+                        // pseudo-lines can detach a secret from its label.
                         line.push(*byte);
-                        if line.len() == STDERR_LINE_BYTES {
-                            flush_stderr_chunk(&mut line, &sink);
-                        }
                     }
                 }
             }
@@ -1292,6 +1291,22 @@ mod tests {
         .expect_err("incompatible shared host");
         assert!(matches!(error, CodexLaunchError::SharedHostIncompatible(_)));
         server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn long_stderr_lines_never_detach_credentials_from_their_labels() {
+        let sink = RedactedStderrTail::new();
+        let output = format!(
+            "{}Authorization: Bearer opaque-private-value\nnext diagnostic\n",
+            "x".repeat(490)
+        );
+        capture_stderr(output.as_bytes(), sink.clone()).await;
+        let lines = sink.snapshot();
+        assert_eq!(
+            lines,
+            vec!["[redacted sensitive Codex diagnostic]", "next diagnostic"]
+        );
+        assert!(!lines.join("\n").contains("opaque-private-value"));
     }
 
     #[test]

@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use semver::Version;
-use thiserror::Error;
 
 use inline_agent_bridge::AgentDriver;
 
@@ -113,16 +112,56 @@ pub enum CodexRuntimeFailure {
     IncompatibleCatalog,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CodexRuntimeAttempt {
     pub source: CodexRuntimeSource,
     pub failure: CodexRuntimeFailure,
+    pub detail: String,
 }
 
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-#[error("no compatible Codex runtime was found")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CodexRuntimeDiscoveryError {
     pub attempts: Vec<CodexRuntimeAttempt>,
+}
+
+impl std::fmt::Display for CodexRuntimeDiscoveryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no compatible Codex runtime was found")?;
+        for attempt in self.attempts.iter().take(12) {
+            write!(f, "; {:?}: {}", attempt.source, attempt.detail)?;
+        }
+        if self.attempts.len() > 12 {
+            write!(
+                f,
+                "; {} more attempts; {}",
+                self.attempts.len() - 12,
+                self.attempts.last().unwrap().detail
+            )?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for CodexRuntimeDiscoveryError {}
+
+fn safe_probe_detail(value: &str) -> String {
+    inline_agent_bridge::sanitize_visible_transcript(value)
+        .unwrap_or_default()
+        .chars()
+        .take(600)
+        .collect()
+}
+
+/// Uses the host's discovery directories so installation detection and setup
+/// agree even when the process has a sparse PATH.
+pub async fn discover_codex_turn_runtime_in_paths(
+    config: &CodexRuntimeDiscoveryConfig,
+    paths: impl IntoIterator<Item = PathBuf>,
+) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
+    discover_candidates(
+        runtime_candidates_in_paths(config, paths),
+        CodexRuntimeRequirement::ExistingTurnDriver,
+    )
+    .await
 }
 
 /// Finds an already-authenticated local Codex runtime without owning login or
@@ -154,44 +193,75 @@ async fn discover_codex_runtime_with_requirement(
     config: &CodexRuntimeDiscoveryConfig,
     requirement: CodexRuntimeRequirement,
 ) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
+    discover_candidates(runtime_candidates(config), requirement).await
+}
+
+async fn discover_candidates(
+    candidates: Vec<RuntimeCandidate>,
+    requirement: CodexRuntimeRequirement,
+) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
     let mut attempts = Vec::new();
+    let started = std::time::Instant::now();
     let mut seen_executables = HashSet::new();
-    for candidate in runtime_candidates(config) {
+    for candidate in candidates {
+        // Do not multiply per-probe deadlines across an arbitrarily long PATH.
+        // Finish/clean up the current bounded probe before stopping discovery.
+        if attempts.len() >= 16 || started.elapsed() >= std::time::Duration::from_secs(60) {
+            attempts.push(CodexRuntimeAttempt {
+                source: candidate.source,
+                failure: CodexRuntimeFailure::Unavailable,
+                detail: "runtime search budget exhausted; remove stale Codex installations from PATH and retry".into(),
+            });
+            break;
+        }
         let Some(executable) = resolve_executable_candidate(&candidate.executable) else {
             attempts.push(CodexRuntimeAttempt {
                 source: candidate.source,
                 failure: CodexRuntimeFailure::Unavailable,
+                detail: "executable is missing or is not executable".into(),
             });
             continue;
         };
         if !seen_executables.insert(executable.clone()) {
             continue;
         }
-        if candidate.verify_openai_signature
-            && verify_chatgpt_codex_signature(&executable).await.is_err()
+        if (candidate.verify_openai_signature || is_chatgpt_bundled_codex_path(&executable))
+            && let Err(error) = verify_chatgpt_codex_signature(&executable).await
         {
             attempts.push(CodexRuntimeAttempt {
                 source: candidate.source,
                 failure: CodexRuntimeFailure::InvalidSignature,
+                detail: safe_probe_detail(&error),
             });
             continue;
         }
 
         let probe = match probe_candidate(&executable).await {
             Ok(probe) => probe,
-            Err(_) => {
+            Err(error) => {
                 attempts.push(CodexRuntimeAttempt {
                     source: candidate.source,
                     failure: CodexRuntimeFailure::Unavailable,
+                    detail: safe_probe_detail(&error),
                 });
                 continue;
             }
         };
         let capabilities = runtime_capabilities(&probe.version);
+        log::debug!(
+            "Codex runtime probe source={:?} version={} turn_certified={}",
+            candidate.source,
+            probe.version,
+            capabilities.existing_turn_driver
+        );
         if !capabilities.stable_session_catalog {
             attempts.push(CodexRuntimeAttempt {
                 source: candidate.source,
                 failure: CodexRuntimeFailure::UnsupportedCatalogVersion,
+                detail: format!(
+                    "Codex {} is too old for the required session API (minimum 0.146.0)",
+                    probe.version
+                ),
             });
             continue;
         }
@@ -201,13 +271,19 @@ async fn discover_codex_runtime_with_requirement(
             attempts.push(CodexRuntimeAttempt {
                 source: candidate.source,
                 failure: CodexRuntimeFailure::UnsupportedTurnDriverVersion,
+                detail: format!("Codex {} is not certified for this Inline bridge; update Inline or use a supported Codex version", probe.version),
             });
             continue;
         }
-        if probe_stable_session_catalog(&executable).await.is_err() {
+        if let Err(error) = probe_stable_session_catalog(&executable).await {
             attempts.push(CodexRuntimeAttempt {
                 source: candidate.source,
                 failure: CodexRuntimeFailure::IncompatibleCatalog,
+                detail: format!(
+                    "Codex {} session API probe failed: {}",
+                    probe.version,
+                    safe_probe_detail(&error)
+                ),
             });
             continue;
         }
@@ -229,6 +305,14 @@ struct RuntimeCandidate {
 }
 
 fn runtime_candidates(config: &CodexRuntimeDiscoveryConfig) -> Vec<RuntimeCandidate> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    runtime_candidates_in_paths(config, std::env::split_paths(&path))
+}
+
+fn runtime_candidates_in_paths(
+    config: &CodexRuntimeDiscoveryConfig,
+    paths: impl IntoIterator<Item = PathBuf>,
+) -> Vec<RuntimeCandidate> {
     let mut candidates = Vec::new();
     if let Some(executable) = config.configured_executable.clone() {
         let verify_openai_signature = is_chatgpt_bundled_codex_path(&executable);
@@ -239,11 +323,18 @@ fn runtime_candidates(config: &CodexRuntimeDiscoveryConfig) -> Vec<RuntimeCandid
         });
     }
     if config.search_path {
-        candidates.push(RuntimeCandidate {
-            executable: PathBuf::from("codex"),
-            source: CodexRuntimeSource::Path,
-            verify_openai_signature: false,
-        });
+        candidates.extend(
+            paths
+                .into_iter()
+                .filter(|directory| directory.is_absolute())
+                .map(|directory| directory.join("codex"))
+                .filter(|executable| executable.is_file())
+                .map(|executable| RuntimeCandidate {
+                    executable,
+                    source: CodexRuntimeSource::Path,
+                    verify_openai_signature: false,
+                }),
+        );
     }
     if config.search_chatgpt_app {
         candidates.extend(chatgpt_runtime_candidates());
@@ -277,7 +368,18 @@ fn resolve_executable_in_paths(
 
 fn canonical_executable(executable: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(executable).ok()?;
-    canonical.is_file().then_some(canonical)
+    let metadata = canonical.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    Some(canonical)
 }
 
 #[cfg(target_os = "macos")]
@@ -301,17 +403,19 @@ fn chatgpt_runtime_candidates() -> Vec<RuntimeCandidate> {
     Vec::new()
 }
 
-async fn probe_candidate(executable: &Path) -> Result<CodexVersionProbe, ()> {
+async fn probe_candidate(executable: &Path) -> Result<CodexVersionProbe, String> {
     let config = CodexLaunchConfig {
         executable: executable.to_owned(),
         transport: crate::CodexAppServerTransport::PrivateStdio,
         version_policy: crate::CodexVersionPolicy::Any,
         ..CodexLaunchConfig::default()
     };
-    probe_codex_version(&config).await.map_err(|_| ())
+    probe_codex_version(&config)
+        .await
+        .map_err(|error| error.to_string())
 }
 
-async fn probe_stable_session_catalog(executable: &Path) -> Result<(), ()> {
+async fn probe_stable_session_catalog(executable: &Path) -> Result<(), String> {
     use std::time::Duration;
 
     let config = CodexLaunchConfig {
@@ -325,19 +429,17 @@ async fn probe_stable_session_catalog(executable: &Path) -> Result<(), ()> {
         spawn_codex_driver(config, env!("CARGO_PKG_VERSION")),
     )
     .await
-    .map_err(|_| ())?
-    .map_err(|_| ())?;
+    .map_err(|_| "Codex app-server startup timed out".to_string())?
+    .map_err(|error| error.to_string())?;
     let contract = tokio::time::timeout(
         Duration::from_secs(15),
         spawned.driver.verify_session_catalog_contract(),
     )
     .await
-    .map_err(|_| ());
+    .map_err(|_| "Codex session API probe timed out".to_string());
     let shutdown = spawned.driver.shutdown().await;
-    match (contract, shutdown) {
-        (Ok(Ok(())), Ok(())) => Ok(()),
-        _ => Err(()),
-    }
+    contract?.map_err(|error| error.to_string())?;
+    shutdown.map_err(|error| error.to_string())
 }
 
 fn runtime_capabilities(version: &Version) -> CodexRuntimeCapabilities {
@@ -353,7 +455,7 @@ fn runtime_capabilities(version: &Version) -> CodexRuntimeCapabilities {
 }
 
 #[cfg(target_os = "macos")]
-async fn verify_chatgpt_codex_signature(executable: &Path) -> Result<(), ()> {
+async fn verify_chatgpt_codex_signature(executable: &Path) -> Result<(), String> {
     use std::process::Stdio;
     use std::time::Duration;
 
@@ -361,34 +463,64 @@ async fn verify_chatgpt_codex_signature(executable: &Path) -> Result<(), ()> {
     use tokio::time::timeout;
 
     if !executable.is_file() {
-        return Err(());
+        return Err("Codex executable is missing".into());
     }
-    let verified = timeout(
-        Duration::from_secs(5),
-        Command::new("/usr/bin/codesign")
-            .args(["--verify", "--strict", "--verbose=2"])
-            .arg(format!(
-                "-R=anchor apple generic and identifier \"codex\" and \
-                 certificate leaf[subject.OU] = \"{OPENAI_TEAM_IDENTIFIER}\""
-            ))
-            .arg(executable)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status(),
-    )
+    use tokio::io::AsyncReadExt;
+    let mut child = Command::new("/usr/bin/codesign")
+        .args(["--verify", "--strict", "--verbose=2"])
+        .arg(format!(
+            "-R=anchor apple generic and identifier \"codex\" and \
+             certificate leaf[subject.OU] = \"{OPENAI_TEAM_IDENTIFIER}\""
+        ))
+        .arg(executable)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| format!("could not launch codesign: {error}"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "codesign stderr unavailable".to_string())?;
+    let (diagnostic, verified) = timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            async {
+                let mut tail = Vec::new();
+                let mut buffer = [0; 2048];
+                loop {
+                    let count = stderr.read(&mut buffer).await?;
+                    if count == 0 {
+                        break;
+                    }
+                    tail.extend_from_slice(&buffer[..count]);
+                    if tail.len() > 4096 {
+                        tail.drain(..tail.len() - 4096);
+                    }
+                }
+                Ok::<_, std::io::Error>(tail)
+            },
+            child.wait()
+        )
+    })
     .await
-    .map_err(|_| ())?
-    .map_err(|_| ())?;
+    .map_err(|_| "OpenAI signature verification timed out".to_string())?;
+    let verified = verified.map_err(|error| format!("could not wait for codesign: {error}"))?;
     if !verified.success() {
-        return Err(());
+        let detail = diagnostic
+            .map(|bytes| safe_probe_detail(&String::from_utf8_lossy(&bytes)))
+            .unwrap_or_default();
+        return Err(format!(
+            "OpenAI signature verification failed (codesign exit {:?}): {detail}",
+            verified.code()
+        ));
     }
     Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn verify_chatgpt_codex_signature(_executable: &Path) -> Result<(), ()> {
-    Err(())
+async fn verify_chatgpt_codex_signature(_executable: &Path) -> Result<(), String> {
+    Err("OpenAI application signature verification is only supported on macOS".into())
 }
 
 #[cfg(test)]
@@ -436,9 +568,11 @@ mod tests {
             search_chatgpt_app: true,
         });
         assert_eq!(candidates[0].source, CodexRuntimeSource::Configured);
-        assert_eq!(candidates[1].source, CodexRuntimeSource::Path);
         #[cfg(target_os = "macos")]
-        assert_eq!(candidates[2].source, CodexRuntimeSource::ChatGptApplication);
+        assert_eq!(
+            candidates.last().unwrap().source,
+            CodexRuntimeSource::ChatGptApplication
+        );
     }
 
     #[test]
@@ -477,6 +611,8 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp directory");
         let executable = directory.path().join("codex-test-runtime");
         std::fs::write(&executable, b"test runtime").expect("test executable");
+        #[cfg(unix)]
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
 
         let resolved = resolve_executable_in_paths(
             Path::new("codex-test-runtime"),
@@ -526,6 +662,68 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn discovery_tries_later_search_directories_after_old_and_non_executable_files() {
+        let (old_dir, old) = fake_codex_runtime("{}");
+        let script = std::fs::read_to_string(&old)
+            .unwrap()
+            .replace("0.146.0", "0.71.0");
+        std::fs::write(&old, script).unwrap();
+        let non_executable = tempfile::tempdir().unwrap();
+        std::fs::write(non_executable.path().join("codex"), "not executable").unwrap();
+        let (valid_dir, valid) = fake_codex_runtime(
+            "{\"id\":2,\"result\":{\"data\":[],\"nextCursor\":null,\"backwardsCursor\":null}}",
+        );
+        let config = CodexRuntimeDiscoveryConfig {
+            configured_executable: None,
+            search_path: true,
+            search_chatgpt_app: false,
+        };
+        let runtime = discover_codex_turn_runtime_in_paths(
+            &config,
+            [
+                old_dir.path().to_owned(),
+                non_executable.path().to_owned(),
+                valid_dir.path().to_owned(),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(runtime.executable(), std::fs::canonicalize(valid).unwrap());
+        let error = discover_codex_turn_runtime_in_paths(&config, [old_dir.path().to_owned()])
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("0.71.0"));
+        assert!(!error.to_string().contains(&old.display().to_string()));
+    }
+
+    #[test]
+    fn automatic_discovery_does_not_execute_relative_path_entries() {
+        let candidates = runtime_candidates_in_paths(
+            &CodexRuntimeDiscoveryConfig {
+                configured_executable: None,
+                search_path: true,
+                search_chatgpt_app: false,
+            },
+            [PathBuf::new(), PathBuf::from("."), PathBuf::from("tools")],
+        );
+        assert!(candidates.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn invalid_signature_preserves_bounded_codesign_detail() {
+        let (_directory, executable) = fake_codex_runtime("{}");
+        let error = verify_chatgpt_codex_signature(&executable)
+            .await
+            .unwrap_err();
+        assert!(error.contains("codesign exit"));
+        assert!(error.contains("not signed") || error.contains("signature"));
+        assert!(!error.contains(executable.to_str().unwrap()));
+        assert!(error.len() < 1_000);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn discovery_advertises_catalog_only_after_live_schema_probe() {
         let (_compatible_directory, compatible) = fake_codex_runtime(
             "{\"id\":2,\"result\":{\"data\":[],\"nextCursor\":null,\"backwardsCursor\":null}}",
@@ -549,13 +747,12 @@ mod tests {
         })
         .await
         .expect_err("incompatible catalog");
+        assert_eq!(error.attempts.len(), 1);
         assert_eq!(
-            error.attempts,
-            vec![CodexRuntimeAttempt {
-                source: CodexRuntimeSource::Configured,
-                failure: CodexRuntimeFailure::IncompatibleCatalog,
-            }]
+            error.attempts[0].failure,
+            CodexRuntimeFailure::IncompatibleCatalog
         );
+        assert!(error.to_string().contains("session API probe failed"));
     }
 
     #[cfg(target_os = "macos")]

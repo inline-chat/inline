@@ -583,18 +583,29 @@ pub fn sanitize_visible_command(value: &str) -> Option<String> {
 /// transcript. This preserves line boundaries while applying the same
 /// credential, signed-URL, and local-path redaction used for visible commands.
 pub fn sanitize_visible_transcript(value: &str) -> Option<String> {
+    sanitize_multiline_text(value, true)
+}
+
+/// Sanitizes diagnostic prose. Unlike command transcripts, a bare word such
+/// as `token` is not an assignment: `No token found` must remain actionable.
+/// Explicit assignments, headers, flags, URLs, and paths use the same scrubber.
+pub fn sanitize_diagnostic_text(value: &str) -> Option<String> {
+    sanitize_multiline_text(value, false)
+}
+
+fn sanitize_multiline_text(value: &str, redact_bare_values: bool) -> Option<String> {
     let sanitized = sanitize_visible_text(value);
     let redacted = sanitized
         .split('\n')
-        .map(redact_sensitive_transcript_line)
+        .map(|line| redact_sensitive_transcript_line(line, redact_bare_values))
         .collect::<Vec<_>>()
         .join("\n");
     let redacted = redacted.trim();
     (!redacted.is_empty()).then(|| redacted.to_string())
 }
 
-fn redact_sensitive_transcript_line(line: &str) -> String {
-    let line = redact_sensitive_command_arguments(line);
+fn redact_sensitive_transcript_line(line: &str, redact_bare_values: bool) -> String {
+    let line = redact_command_arguments(line, redact_bare_values);
     for (separator_index, separator) in line
         .char_indices()
         .filter(|(_, character)| matches!(character, ':' | '='))
@@ -617,6 +628,10 @@ fn redact_sensitive_transcript_line(line: &str) -> String {
 }
 
 fn redact_sensitive_command_arguments(command: &str) -> String {
+    redact_command_arguments(command, true)
+}
+
+fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
     const SECRET_FLAGS: &[&str] = &[
         "--access-token",
         "--api-key",
@@ -660,8 +675,10 @@ fn redact_sensitive_command_arguments(command: &str) -> String {
                 }
                 continue;
             }
-            output.push("[redacted]".to_string());
-            continue;
+            if redact_bare_values {
+                output.push("[redacted]".to_string());
+                continue;
+            }
         }
         if inspect_header_next {
             inspect_header_next = false;
