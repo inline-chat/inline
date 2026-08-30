@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use clap::builder::styling::{AnsiColor, Style, Styles};
+use clap::builder::styling::{AnsiColor, RgbColor, Style, Styles};
 use unicode_width::UnicodeWidthStr;
 
 const COMMAND: Style = AnsiColor::BrightBlue.on_default().bold();
@@ -9,19 +9,47 @@ const VALUE: Style = AnsiColor::Yellow.on_default();
 const HEADING: Style = Style::new().bold();
 const MUTED: Style = Style::new().dimmed();
 const BRAND: Style = AnsiColor::White.on_default();
-// Seven rows preserve Days One's open lowercase e; the smaller mark stays balanced.
-// Static glyphs keep the start page offline and avoid a runtime font dependency.
-const BRAND_FACE: Style = AnsiColor::BrightWhite.on_default();
-const BRAND_BEVEL: Style = AnsiColor::BrightCyan.on_default();
-const BRAND_DEPTH: Style = AnsiColor::Blue.on_default();
-const WORDMARK: &[&str] = &[
-    "              ▄▄▖             ▄▄▖ ▗▄▄",
-    "▗▟██████▙▖   ▐██▌            ▐██▌ ▝▀▀",
-    "██▘▗▄  ▝██   ▐██▌ ▐██▙████▙▖ ▐██▌ ▐██  ███▟████▄  ▗▟█████▄",
-    "██ ██   ██   ▐██▌ ▐██▛   ███ ▐██▌ ▐██  ███▘  ▜██▖▗██▌▄▄▖██▙",
-    "██▖▝▀  ▗██   ▐██▌ ▐██▌   ███ ▐██▌ ▐██  ███   ▐██▌▐██▛▀▀▀▀▀▀",
-    "▝▜██████▛▘   ▐██▌ ▐██▌   ███ ▐██▌ ▐██  ███   ▐██▖ ▜██▄▄▄██▌",
-    "              ▀▀▘ ▝▀▀▘   ▀▀▀  ▀▀▘ ▝▀▀  ▀▀▘   ▝▀▀    ▀▀▀▀▀▘",
+// Static Days One glyphs and per-cell silver tones keep the entry page offline.
+// Eight rows give the mark and lowercase e room for open counters and smooth corners.
+const BRAND_TONES: [Style; 3] = [
+    RgbColor(242, 244, 247).on_default(),
+    RgbColor(219, 225, 232).on_default(),
+    RgbColor(175, 183, 193).on_default(),
+];
+// Each tone digit corresponds to one Unicode glyph, including spaces.
+const WORDMARK: &[(&str, &str)] = &[
+    (
+        "   ▄▄▄▄▄▄▄▄      ▟██▙                ███▖ ▐███",
+        "0000000000000000000000000000000000000000000000",
+    ),
+    (
+        "▗▟██████████▙▖   ████                ███▌  ▀▀▀",
+        "0011111111110000011110000000000000000111000000",
+    ),
+    (
+        "▟██▘ ▄▄   ▝██▙   ████  ███▙▟█████▄   ███▌ ▐███  ▐██▙▟█████▄   ▗▄██████▙▖",
+        "111200000021110001111000000000000000011100011100000000000000000011111100",
+    ),
+    (
+        "██▌ ▐██    ▐██   ████  ████▀▘ ▀███▌  ███▌ ▐███  ▐███▀▘ ▀███▌ ▗███▀  ▝███▌",
+        "1110111000011100011110011111101111000111000111000111110111100001120021111",
+    ),
+    (
+        "██▌ ▐██    ▐██   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███ ▐███▄▄▄▄▟███",
+        "1110111000011100011110011100000111000111000111000111000001110011100001111",
+    ),
+    (
+        "▜██▖ ▀▀   ▗██▛   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███ ▐███▀▀▀▀▀▀▀▀",
+        "1110022000011100011110011100000111000111000111000111000001110111122222222",
+    ),
+    (
+        "▝▜██████████▛▘   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███  ███▙▄▄▄▟██▌",
+        "2211111111112200011110011100000111000111000111000111000001110021100000111",
+    ),
+    (
+        "   ▀▀▀▀▀▀▀▀      ▜██▛  ▜██▌    ▜██▌  ███▘ ▐███  ▐██▛    ▐██▛   ▀▜██████▀",
+        "000222222220000002222002221000022210022210122200122200001222000221111112",
+    ),
 ];
 
 struct Example {
@@ -130,11 +158,13 @@ fn render(columns: usize, color: bool) -> String {
         return page;
     }
     let mut page = String::from("\n");
-    let wordmark_width = WORDMARK.iter().map(|line| line.width()).max().unwrap_or(0);
+    let wordmark_width = WORDMARK
+        .iter()
+        .map(|(line, _)| line.width())
+        .max()
+        .unwrap_or(0);
     if columns > wordmark_width {
-        // Omit the shadow when it would overflow or merge into monochrome lettering.
-        let depth = color && columns > wordmark_width + 2;
-        render_wordmark(&mut page, color, depth);
+        render_wordmark(&mut page, color);
     } else {
         page.push_str(&paint("  inline", BRAND, color));
         page.push('\n');
@@ -205,36 +235,18 @@ fn render(columns: usize, color: bool) -> String {
     page
 }
 
-fn render_wordmark(page: &mut String, color: bool, depth: bool) {
-    let glyphs: Vec<Vec<char>> = WORDMARK.iter().map(|line| line.chars().collect()).collect();
-    let width = glyphs.iter().map(Vec::len).max().unwrap_or(0);
-    for row in 0..glyphs.len() + usize::from(depth) {
-        let mut line = String::new();
-        let mut current_style = None;
-        for column in 0..width + if depth { 2 } else { 0 } {
-            let face = glyphs
-                .get(row)
-                .and_then(|line| line.get(column))
-                .copied()
-                .unwrap_or(' ');
-            let shadow = if depth && row > 0 && column >= 2 {
-                glyphs[row - 1].get(column - 2).copied().unwrap_or(' ')
-            } else {
-                ' '
-            };
-            let (glyph, style) = if face != ' ' {
-                (face, if row < 5 { BRAND_FACE } else { BRAND_BEVEL })
-            } else {
-                (shadow, BRAND_DEPTH)
-            };
-            if color && glyph != ' ' && current_style != Some(style) {
-                line.push_str(&format!("{style}"));
-                current_style = Some(style);
-            }
-            line.push(glyph);
-        }
+fn render_wordmark(page: &mut String, color: bool) {
+    for (line, tones) in WORDMARK {
         page.push(' ');
-        page.push_str(line.trim_end());
+        let mut current_tone = None;
+        for (glyph, tone) in line.chars().zip(tones.bytes()) {
+            if color && glyph != ' ' && current_tone != Some(tone) {
+                let style = BRAND_TONES[usize::from(tone - b'0')];
+                page.push_str(&format!("{style}"));
+                current_tone = Some(tone);
+            }
+            page.push(glyph);
+        }
         if color {
             page.push_str(&format!("{BRAND:#}"));
         }
@@ -360,25 +372,25 @@ mod tests {
     }
 
     #[test]
-    fn brand_preserves_plain_lettering_and_reserves_space_for_depth() {
-        let width = WORDMARK.iter().map(|line| line.width()).max().unwrap();
-        assert!(!render(width, false).contains(WORDMARK[0]));
-        assert!(render(width + 1, false).contains(WORDMARK[0]));
+    fn brand_preserves_geometry_in_color_and_plain_output() {
+        for (line, tones) in WORDMARK {
+            assert_eq!(line.chars().count(), tones.len());
+            assert!(tones.bytes().all(|tone| (b'0'..=b'2').contains(&tone)));
+        }
+        let width = WORDMARK.iter().map(|(line, _)| line.width()).max().unwrap();
+        assert!(!render(width, false).contains(WORDMARK[0].0));
+        assert!(render(width + 1, false).contains(WORDMARK[0].0));
         let plain = render(80, false);
-        assert!(WORDMARK.iter().all(|line| plain.contains(line)));
+        assert!(WORDMARK.iter().all(|(line, _)| plain.contains(line)));
         let ansi = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
-        for columns in [width, width + 1, width + 2, width + 3, 80] {
+        for columns in [width, width + 1, width + 2, 80] {
             let page = render(columns, true);
-            assert!(
-                ansi.replace_all(&page, "")
-                    .lines()
-                    .all(|line| line.width() <= columns)
-            );
+            let unstyled = ansi.replace_all(&page, "");
+            assert!(unstyled.lines().all(|line| line.width() <= columns));
+            assert_eq!(unstyled, render(columns, false));
             let brand = page.split("Work chat").next().unwrap();
-            assert_eq!(brand.contains("\x1b[34m"), columns > width + 2);
-            if columns > width {
-                assert!(brand.contains("\x1b[97m"));
-                assert!(brand.contains("\x1b[96m"));
+            for tone in BRAND_TONES {
+                assert_eq!(brand.contains(&tone.to_string()), columns > width);
             }
         }
     }
@@ -404,10 +416,7 @@ mod tests {
             let plain = render(columns, false);
             let styled = render(columns, true);
             assert!(styled.contains('\x1b'));
-            // The decorative shadow is color-only; all help and commands remain identical.
-            let styled_help = styled.split("Work chat").nth(1).unwrap();
-            let plain_help = plain.split("Work chat").nth(1).unwrap();
-            assert_eq!(ansi.replace_all(styled_help, ""), plain_help);
+            assert_eq!(ansi.replace_all(&styled, ""), plain);
         }
     }
 
