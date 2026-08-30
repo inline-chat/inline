@@ -153,8 +153,18 @@ public struct CLIAuthBootstrapper: Sendable {
     expectedUserID: Int64,
     authorize: @escaping @MainActor @Sendable (CLIAuthBootstrapRequest) async throws -> Void
   ) async throws -> CLIAuthBootstrapResult {
+    let stderr = AuthStderrCapture()
+    let stderrGroup = DispatchGroup()
+    stderrGroup.enter()
     DispatchQueue.global(qos: .utility).async {
-      Self.drain(standardError.fileHandleForReading)
+      stderr.store(CLIAgentSetupRunner.boundedDrain(standardError.fileHandleForReading))
+      stderrGroup.leave()
+    }
+    func commandFailure(fallback: CLIAuthBootstrapError = .commandFailed(nil)) -> CLIAuthBootstrapError {
+      // The child has exited/stopped at each call site. Do not wait forever on
+      // descendants which may have inherited its stderr descriptor.
+      _ = stderrGroup.wait(timeout: .now() + 1)
+      return Self.commandFailure(stderr: stderr.value, fallback: fallback)
     }
 
     let timeoutState = TimeoutState()
@@ -178,7 +188,7 @@ public struct CLIAuthBootstrapper: Sendable {
     } catch {
       Self.stop(process)
       try Self.rethrowUnlessCancelled(
-        timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
+        timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : commandFailure(fallback: .invalidHandshake)
       )
     }
     try Task.checkCancellation()
@@ -188,7 +198,7 @@ public struct CLIAuthBootstrapper: Sendable {
       try Task.checkCancellation()
       guard !timeoutState.didTimeOut else { throw CLIAuthBootstrapError.timedOut }
       guard process.terminationStatus == 0 else {
-        throw CLIAuthBootstrapError.commandFailed(nil)
+        throw commandFailure()
       }
       return try Self.validateResult(existing, expectedUserID: expectedUserID)
     }
@@ -198,7 +208,7 @@ public struct CLIAuthBootstrapper: Sendable {
       request = try Self.parseReady(initialData)
     } catch {
       Self.stop(process)
-      throw timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.invalidHandshake
+      throw timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : commandFailure(fallback: .invalidHandshake)
     }
 
     try Task.checkCancellation()
@@ -219,7 +229,7 @@ public struct CLIAuthBootstrapper: Sendable {
     } catch {
       Self.stop(process)
       try Self.rethrowUnlessCancelled(
-        timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : CLIAuthBootstrapError.commandFailed(nil)
+        timeoutState.didTimeOut ? CLIAuthBootstrapError.timedOut : commandFailure()
       )
     }
     try Task.checkCancellation()
@@ -230,7 +240,7 @@ public struct CLIAuthBootstrapper: Sendable {
       throw CLIAuthBootstrapError.timedOut
     }
     guard process.terminationStatus == 0 else {
-      throw CLIAuthBootstrapError.commandFailed(nil)
+      throw commandFailure()
     }
     return try Self.validateResult(
       Self.parseResult(resultData),
@@ -309,6 +319,11 @@ public struct CLIAuthBootstrapper: Sendable {
 
   static func sanitizedEnvironment(_ environment: [String: String]) -> [String: String] {
     var sanitized = environment.filter { !$0.key.hasPrefix("INLINE_") }
+    // Match setup's privacy opt-out while retaining the narrower auth PATH.
+    if let telemetry = environment["INLINE_CLI_TELEMETRY"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+       ["off", "0", "false"].contains(telemetry) {
+      sanitized["INLINE_CLI_TELEMETRY"] = "off"
+    }
     sanitized["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     return sanitized
   }
@@ -330,12 +345,16 @@ public struct CLIAuthBootstrapper: Sendable {
     throw CLIAuthBootstrapError.invalidHandshake
   }
 
-  private static func drain(_ handle: FileHandle) {
-    do {
-      while let chunk = try handle.read(upToCount: 64 * 1_024) {
-        if chunk.isEmpty { break }
-      }
-    } catch {}
+  static func commandFailure(
+    stderr: Data,
+    fallback: CLIAuthBootstrapError = .commandFailed(nil)
+  ) -> CLIAuthBootstrapError {
+    if let failure = CLIAgentSetupRunner.parseFailure(stderr) {
+      let detail = [failure.message, failure.hint].compactMap { $0 }.joined(separator: "\n")
+      return .commandFailed(detail)
+    }
+    let detail = CLIAgentSetupRunner.safeStructuredText(String(bytes: stderr, encoding: .utf8) ?? "", maximumScalars: 1_000)
+    return detail.isEmpty ? fallback : .commandFailed(detail)
   }
 
   private static func stop(_ process: Process) {
@@ -364,6 +383,13 @@ public struct CLIAuthBootstrapper: Sendable {
           ) else { return false }
     return value as? Bool == true
   }
+}
+
+private final class AuthStderrCapture: @unchecked Sendable {
+  private let lock = NSLock()
+  private var data = Data()
+  var value: Data { lock.withLock { data } }
+  func store(_ value: Data) { lock.withLock { data = value } }
 }
 
 final class AuthProcessCancellationState: @unchecked Sendable {

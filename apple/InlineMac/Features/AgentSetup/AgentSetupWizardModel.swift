@@ -468,7 +468,12 @@ final class AgentSetupWizardModel {
       throw failureForInstaller(failure)
     case let .failed(failure):
       throw failureForInstaller(failure)
-    case .idle, .checkingLocal, .checkingRemote, .downloading, .verifying, .installing:
+    case .checkingLocal, .checkingRemote, .downloading, .verifying, .installing:
+      throw installerFailure(
+        code: "cli_install_in_progress",
+        message: "Another Inline CLI installation or update is still running. Wait for it to finish, then retry setup."
+      )
+    case .idle:
       throw installerFailure(
         code: "cli_install_incomplete",
         message: "Inline CLI installation did not finish."
@@ -494,6 +499,15 @@ final class AgentSetupWizardModel {
       failure = setupFailure
     } else if let authFailure = error as? CLIAuthBootstrapError {
       failure = failureForAuthentication(authFailure)
+    } else if let installerFailure = error as? CLIInstallerFailure {
+      failure = failureForInstaller(installerFailure)
+    } else if let brokerFailure = error as? LocalCLIAuthBroker.Error {
+      failure = AgentSetupFailure(
+        code: "cli_auth_handoff_failed",
+        message: CLIAgentSetupRunner.safeStructuredText(brokerFailure.localizedDescription, maximumScalars: 1_000),
+        hint: "Retry sign-in from Inline, or run `inline login` in Terminal.",
+        recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+      )
     } else {
       failure = AgentSetupFailure(
         code: "agent_setup_failed",
@@ -515,7 +529,13 @@ final class AgentSetupWizardModel {
     guard case .settingUp = phase else { return }
     if event.phase == .configuration,
        !progressItems.contains(where: { $0.id == .configuration }) {
-      progressItems = [AgentSetupProgressItem(id: .configuration)]
+      // Legacy CLIs cannot report individual setup phases. Keep completed
+      // evidence, but replace speculative pending/active rows with one step.
+      progressItems = progressItems.filter {
+        if case .completed = $0.state { return true }
+        return false
+      }
+      progressItems.append(AgentSetupProgressItem(id: .configuration))
     }
     guard let id = Self.progressID(for: event.phase) else { return }
     switch event.event {
@@ -638,7 +658,7 @@ final class AgentSetupWizardModel {
   private func failureForInstaller(_ failure: CLIInstallerFailure) -> AgentSetupFailure {
     AgentSetupFailure(
       code: "cli_\(failure.kind.rawValue)",
-      message: failure.message,
+      message: CLIAgentSetupRunner.safeStructuredText(failure.message, maximumScalars: 1_000),
       hint: "Use the manual CLI installation guide if automatic installation keeps failing.",
       recoveryURL: failure.recoveryURL
     )

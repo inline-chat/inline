@@ -4,6 +4,32 @@ import Testing
 
 @Suite("CLI agent setup app protocol")
 struct CLIAgentSetupRunnerTests {
+  @Test("preserves only an explicit CLI telemetry opt-out")
+  func preservesTelemetryOptOut() {
+    let optedOut = CLIAgentSetupRunner.sanitizedEnvironment([
+      "INLINE_CLI_TELEMETRY": "off",
+      "INLINE_CLI_SENTRY_DSN": "must-not-be-forwarded",
+      "INLINE_TOKEN": "must-not-be-forwarded",
+    ])
+    #expect(optedOut["INLINE_CLI_TELEMETRY"] == "off")
+    #expect(optedOut["INLINE_CLI_SENTRY_DSN"] == nil)
+    #expect(optedOut["INLINE_TOKEN"] == nil)
+    #expect(CLIAgentSetupRunner.sanitizedEnvironment(["INLINE_CLI_TELEMETRY": "on"])["INLINE_CLI_TELEMETRY"] == nil)
+  }
+
+  @Test("retains structured failures surrounded by diagnostic stderr")
+  func decodesFailureWithDiagnostics() throws {
+    let data = Data(("warning: provider probe retrying\n"
+      + #"{"protocolVersion":1,"status":"partial","failedPhase":"integration","changes":["bot_configured"],"error":{"code":"io_error","message":"certificate expired","hint":"Check system trust"}}"#
+      + "\ntrace: command finished\n").utf8)
+    let failure = try #require(CLIAgentSetupRunner.parseFailure(data, targetID: "codex"))
+    #expect(failure.message == "certificate expired")
+    #expect(failure.failedPhase == "integration")
+    #expect(failure.hint == "Check system trust")
+    #expect(failure.completedChanges == ["bot_configured"])
+    #expect(failure.isPartial)
+  }
+
   @Test("uses the released CLI argument contract")
   func usesReleasedCLIArguments() {
     #expect(CLIAgentSetupRunner.discoveryArguments == [

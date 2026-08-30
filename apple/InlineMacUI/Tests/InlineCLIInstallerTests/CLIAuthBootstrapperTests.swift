@@ -4,6 +4,31 @@ import Testing
 
 @Suite("Inline CLI authentication bootstrap")
 struct CLIAuthBootstrapperTests {
+  @Test("authentication honors telemetry opt-out without forwarding the DSN")
+  func preservesTelemetryOptOut() {
+    for value in ["OFF", " 0 ", "false"] {
+      let environment = CLIAuthBootstrapper.sanitizedEnvironment([
+        "INLINE_CLI_TELEMETRY": value,
+        "INLINE_CLI_SENTRY_DSN": "fixture-dsn",
+      ])
+      #expect(environment["INLINE_CLI_TELEMETRY"] == "off")
+      #expect(environment["INLINE_CLI_SENTRY_DSN"] == nil)
+    }
+    #expect(CLIAuthBootstrapper.sanitizedEnvironment(["INLINE_CLI_TELEMETRY": "on"])["INLINE_CLI_TELEMETRY"] == nil)
+  }
+
+  @Test("preserves CLI auth stderr instead of reporting a malformed handshake")
+  func preservesCommandFailure() {
+    let stderr = Data(("warning: retrying\n" + #"{"error":{"code":"network_error","message":"TLS certificate expired","hint":"Check system trust"}}"# + "\n").utf8)
+    let failure = CLIAuthBootstrapper.commandFailure(stderr: stderr, fallback: .invalidHandshake)
+    #expect(failure.localizedDescription.contains("TLS certificate expired"))
+    #expect(failure.localizedDescription.contains("Check system trust"))
+    let plain = CLIAuthBootstrapper.commandFailure(stderr: Data("permission denied TOKEN=secret-value".utf8))
+    #expect(plain.localizedDescription.contains("permission denied"))
+    #expect(!plain.localizedDescription.contains("secret-value"))
+    #expect(CLIAuthBootstrapper.commandFailure(stderr: Data(), fallback: .invalidHandshake).localizedDescription == CLIAuthBootstrapError.invalidHandshake.localizedDescription)
+  }
+
   @Test("accepts a bounded callback handshake")
   func acceptsReadyHandshake() throws {
     let data = Data(

@@ -273,7 +273,7 @@ public actor CLIInstallerService: CLIInstalling {
   }
 
   private func inspectLocalInstallation(at candidate: URL) -> CLIInstallation? {
-    guard fileManager.fileExists(atPath: candidate.path) else { return nil }
+    guard Self.pathIsOccupied(candidate, fileManager: fileManager) else { return nil }
 
     let resolvedURL = candidate.resolvingSymlinksInPath()
     let attributes = try? fileManager.attributesOfItem(atPath: candidate.path)
@@ -359,7 +359,7 @@ public actor CLIInstallerService: CLIInstalling {
       guard candidate.resolvingSymlinksInPath().standardizedFileURL.path != excludedPath else {
         continue
       }
-      if fileManager.fileExists(atPath: candidate.path) {
+      if Self.pathIsOccupied(candidate, fileManager: fileManager) {
         let attributes = try? fileManager.attributesOfItem(atPath: candidate.path)
         guard attributes?[.type] as? FileAttributeType != .typeSymbolicLink,
               (try? verifySignature(of: candidate, allowLegacyAdHoc: true)) != nil else {
@@ -433,13 +433,18 @@ public actor CLIInstallerService: CLIInstalling {
   }
 
   private func validateHTTPResponse(_ response: URLResponse, maximumBytes: Int64) throws {
-    guard let response = response as? HTTPURLResponse,
-          response.url?.scheme == "https",
-          (200 ... 299).contains(response.statusCode) else {
+    guard let response = response as? HTTPURLResponse, response.url?.scheme == "https" else {
       throw failure(
         .network,
         title: "Inline CLI Download Failed",
-        message: "The download server returned an unexpected response."
+        message: "The CLI download did not return a valid HTTPS response."
+      )
+    }
+    guard (200 ... 299).contains(response.statusCode) else {
+      throw failure(
+        .network,
+        title: "Inline CLI Download Failed",
+        message: "The CLI download server returned HTTP \(response.statusCode). Check network access and try again."
       )
     }
     if response.expectedContentLength > maximumBytes {
@@ -449,6 +454,13 @@ public actor CLIInstallerService: CLIInstalling {
         message: "The download server reported an unexpectedly large response."
       )
     }
+  }
+
+  static func pathIsOccupied(_ url: URL, fileManager: FileManager = .default) -> Bool {
+    // fileExists follows symlinks, so a dangling link otherwise looks like a
+    // free install destination and later fails as a misleading permission error.
+    fileManager.fileExists(atPath: url.path)
+      || (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) != nil
   }
 
   private func verifyChecksum(of archiveURL: URL, expected: String) throws {

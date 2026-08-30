@@ -443,6 +443,12 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
 
   static func sanitizedEnvironment(_ environment: [String: String]) -> [String: String] {
     var sanitized = environment.filter { !$0.key.hasPrefix("INLINE_") }
+    // Honor an explicit privacy opt-out without forwarding DSNs or auth/URL
+    // overrides into the trusted app-to-CLI setup boundary.
+    if let telemetry = environment["INLINE_CLI_TELEMETRY"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+       ["off", "0", "false"].contains(telemetry) {
+      sanitized["INLINE_CLI_TELEMETRY"] = "off"
+    }
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let standardPaths = [
       "/opt/homebrew/bin",
@@ -508,7 +514,7 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     return retained
   }
 
-  static func safeStructuredText(_ value: String, maximumScalars: Int) -> String {
+  public static func safeStructuredText(_ value: String, maximumScalars: Int) -> String {
     var text = value.replacingOccurrences(
       of: FileManager.default.homeDirectoryForCurrentUser.path,
       with: "~"
@@ -545,7 +551,15 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
   }
 
   static func parseFailure(_ data: Data, targetID: String? = nil) -> AgentSetupFailure? {
-    guard let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) else {
+    // Diagnostics and provider warnings may precede the terminal compact JSON
+    // failure. Preserve the structured error instead of replacing it with a
+    // generic failure whenever stderr contains more than one line.
+    let decoder = JSONDecoder()
+    let envelope = (try? decoder.decode(ErrorEnvelope.self, from: data))
+      ?? data.split(separator: 0x0A).reversed().lazy.compactMap {
+        try? decoder.decode(ErrorEnvelope.self, from: Data($0))
+      }.first
+    guard let envelope else {
       return nil
     }
     if let version = envelope.protocolVersion, version != protocolVersion {
