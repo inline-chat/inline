@@ -3,13 +3,11 @@ import UIKit
 
 @MainActor
 final class MessagePhotoContextMenuPreview {
-  let sourceImage: UIImage
   let stableID: Int64
   let photoID: Int64
 
-  init?(message: FullMessage, sourceImage: UIImage) {
+  init?(message: FullMessage) {
     guard let photoID = message.photoInfo?.id else { return nil }
-    self.sourceImage = sourceImage
     stableID = message.id
     self.photoID = photoID
   }

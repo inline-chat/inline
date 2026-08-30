@@ -3959,9 +3959,9 @@ private extension MessagesCollectionView {
       if let photoPreview {
         let containerSize = collectionView.window?.bounds.size ?? collectionView.bounds.size
         previewProvider = { [weak self] in
-          guard self?.currentPhotoSource(for: photoPreview) != nil else { return nil }
+          guard let sourceImage = self?.currentPhotoSource(for: photoPreview)?.getCurrentImage() else { return nil }
           return MessagePhotoContextMenuPreviewController(
-            sourceImage: photoPreview.sourceImage,
+            sourceImage: sourceImage,
             containerSize: containerSize
           )
         }
@@ -4183,15 +4183,12 @@ private extension MessagesCollectionView {
       guard !sourceView.isHidden, sourceView.alpha > 0, sourceView.window != nil else { return nil }
       let pointInPhoto = messageView.convert(pointInMessageView, to: sourceView)
       guard sourceView.bounds.contains(pointInPhoto),
-            let sourceImage = sourceView.getCurrentImage(),
+            sourceView.getCurrentImage() != nil,
             photoURL(for: message) != nil
       else {
         return nil
       }
-      return MessagePhotoContextMenuPreview(
-        message: message,
-        sourceImage: sourceImage
-      )
+      return MessagePhotoContextMenuPreview(message: message)
     }
 
     private func currentPhotoSource(for preview: MessagePhotoContextMenuPreview) -> NewPhotoView? {
@@ -4216,8 +4213,7 @@ private extension MessagesCollectionView {
         return nil
       }
       if let preview {
-        guard currentPhotoSource(for: preview) != nil else { return nil }
-        return preview.sourceImage
+        return currentPhotoSource(for: preview)?.getCurrentImage()
       }
       guard let collectionView = currentCollectionView as? MessagesCollectionView,
             let sourceView = collectionView.photoViewForMessageStableId(message.id),
@@ -4532,6 +4528,7 @@ private extension MessagesCollectionView {
       animator.addCompletion { [weak self] in
         guard let self,
               let sourceView = currentPhotoSource(for: photoPreview),
+              let sourceImage = sourceView.getCurrentImage(),
               let currentMessage = viewModel.messagesByID[photoPreview.stableID],
               let imageURL = photoURL(for: currentMessage)
         else {
@@ -4540,7 +4537,7 @@ private extension MessagesCollectionView {
         self.presentPhotoGallery(
           for: currentMessage,
           sourceView: sourceView,
-          sourceImage: photoPreview.sourceImage,
+          sourceImage: sourceImage,
           imageURL: imageURL
         )
       }
