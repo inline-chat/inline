@@ -174,11 +174,12 @@ private struct AuthedAppRoot: View {
     case let .chat(peer):
       ChatView(peer: peer, onOpenSpace: showLegacySpacesRoot)
         .id(peer)
-    case let .externalChat(peer, contextSpaceID):
+    case let .externalChat(peer, contextSpaceID, messageID):
       ChatView(
         peer: peer,
         contextSpaceId: contextSpaceID,
-        onOpenSpace: showLegacySpacesRoot
+        onOpenSpace: showLegacySpacesRoot,
+        focusMessageID: messageID
       )
       .id(peer)
     case let .chatMessage(peer, messageID):

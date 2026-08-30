@@ -128,6 +128,7 @@ public class MessagesProgressiveViewModel {
     newestLoadedMessageId = state.newestLoadedMessageId
     canLoadOlderFromLocal = state.canLoadOlderFromLocal
     canLoadNewerFromLocal = state.canLoadNewerFromLocal
+    atBottom = !state.canLoadNewerFromLocal
   }
 
   private func loadThreadAnchorFromLocalIfNeeded() {
@@ -204,7 +205,7 @@ public class MessagesProgressiveViewModel {
   }
 
   public func setAtBottom(_ atBottom: Bool) {
-    self.atBottom = atBottom
+    self.atBottom = atBottom && !canLoadNewerFromLocal
   }
 
   @discardableResult
@@ -684,6 +685,9 @@ public class MessagesProgressiveViewModel {
       }
 
       aroundBatch = sort(batch: aroundBatch)
+      // A deferred history reload must preserve this window until scrolling
+      // establishes that the user has returned to the live end of the chat.
+      atBottom = false
       messages = aroundBatch
       updateRange()
       updateLoadedWindowMetadata()

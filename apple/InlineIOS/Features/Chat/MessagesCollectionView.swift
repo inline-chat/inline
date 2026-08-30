@@ -39,6 +39,7 @@ final class MessagesCollectionView: UICollectionView {
   private var needsContentInsetUpdateAfterContextMenu = false
   private var pendingScrollMessageID: Int64?
   private var pendingScrollLoadTask: Task<Void, Never>?
+  private var messageFocusRevision: UInt64 = 0
   private let sendAnimationScrollState = SendMessageAnimationScrollState()
   private var scrollAffordanceState = ScrollAffordanceState()
   private var scrollAffordanceUpdateDepth = 0
@@ -227,40 +228,44 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   func scrollToMessageWhenAvailable(_ messageID: Int64) {
+    messageFocusRevision &+= 1
     pendingScrollMessageID = messageID
     pendingScrollLoadTask?.cancel()
+    pendingScrollLoadTask = nil
 
     guard !resolvePendingMessageScroll() else { return }
 
+    let peer = peerId
+    let limit = MessagesProgressiveViewModel.defaultInitialLimit()
     pendingScrollLoadTask = Task { @MainActor [weak self] in
-      guard let self, !Task.isCancelled else { return }
-
-      if coordinator.loadLocalWindowAroundMessage(messageID) {
-        return
-      }
+      guard !Task.isCancelled else { return }
 
       do {
-        _ = try await Api.realtime.send(.getMessages(
-          peer: peerId,
-          messageIds: [messageID]
-        ))
+        let outcome = try await MessageHistoryRepairCoordinator.shared.loadAround(
+          peer: peer,
+          anchorID: messageID,
+          limit: limit
+        )
+        guard let self, !Task.isCancelled, pendingScrollMessageID == messageID else { return }
+        guard outcome != .empty, coordinator.loadLocalWindowAroundMessage(messageID) else {
+          pendingScrollMessageID = nil
+          pendingScrollLoadTask = nil
+          ToastManager.shared.showToast(
+            "Could not load that message",
+            type: .error,
+            systemImage: "exclamationmark.triangle.fill"
+          )
+          return
+        }
+        pendingScrollLoadTask = nil
+        resolvePendingMessageScroll()
       } catch is CancellationError {
         return
       } catch {
-        guard pendingScrollMessageID == messageID else { return }
+        guard let self, !Task.isCancelled, pendingScrollMessageID == messageID else { return }
         pendingScrollMessageID = nil
+        pendingScrollLoadTask = nil
         Log.shared.error("Failed to load focused message", error: error)
-        ToastManager.shared.showToast(
-          "Could not load that message",
-          type: .error,
-          systemImage: "exclamationmark.triangle.fill"
-        )
-        return
-      }
-
-      guard !Task.isCancelled, pendingScrollMessageID == messageID else { return }
-      guard coordinator.loadLocalWindowAroundMessage(messageID) else {
-        pendingScrollMessageID = nil
         ToastManager.shared.showToast(
           "Could not load that message",
           type: .error,
@@ -271,9 +276,16 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
+  func cancelPendingMessageFocus() {
+    messageFocusRevision &+= 1
+    pendingScrollLoadTask?.cancel()
+    pendingScrollLoadTask = nil
+    pendingScrollMessageID = nil
+  }
+
   @discardableResult
   fileprivate func resolvePendingMessageScroll() -> Bool {
-    guard let messageID = pendingScrollMessageID,
+    guard pendingScrollLoadTask == nil, let messageID = pendingScrollMessageID,
           let indexPath = findIndexPath(
             forMessageId: messageID,
             chatId: chatId,
@@ -286,13 +298,16 @@ final class MessagesCollectionView: UICollectionView {
     pendingScrollLoadTask?.cancel()
     pendingScrollLoadTask = nil
     scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+    let revision = messageFocusRevision
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-      guard let self else { return }
+      guard let self, messageFocusRevision == revision,
+            let currentIndexPath = findIndexPath(forMessageId: messageID, chatId: chatId, includeThreadAnchor: false)
+      else { return }
       for cell in visibleCells {
         (cell as? MessageCollectionViewCell)?.clearHighlight()
       }
-      if isValidIndexPath(indexPath),
-         let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell
+      if isValidIndexPath(currentIndexPath),
+         let cell = cellForItem(at: currentIndexPath) as? MessageCollectionViewCell
       {
         cell.highlightBubble()
       }
@@ -1024,6 +1039,8 @@ private extension MessagesCollectionView {
     private var updateWorkItem: DispatchWorkItem?
     private var olderLoadTask: Task<Void, Never>?
     private var remoteOlderTask: Task<Void, Never>?
+    private var newerLoadTask: Task<Void, Never>?
+    private var lastNewerAttempt: (messageID: Int64, date: Date)?
     private var threadAnchorFetchTask: Task<Void, Never>?
     private var didExhaustThreadAnchorFetch = false
     private var loadingRemoteOlderBatch = false
@@ -1449,7 +1466,9 @@ private extension MessagesCollectionView {
     }
 
     func loadLocalWindowAroundMessage(_ messageID: Int64) -> Bool {
-      viewModel.loadLocalWindowAroundMessage(messageId: messageID)
+      olderLoadTask?.cancel()
+      newerLoadTask?.cancel()
+      return viewModel.loadLocalWindowAroundMessage(messageId: messageID)
     }
 
     private static func cell(
@@ -2152,6 +2171,8 @@ private extension MessagesCollectionView {
       olderLoadTask = nil
       remoteOlderTask?.cancel()
       remoteOlderTask = nil
+      newerLoadTask?.cancel()
+      newerLoadTask = nil
       threadAnchorFetchTask?.cancel()
       threadAnchorFetchTask = nil
       mediaWarmupTask?.cancel()
@@ -4468,6 +4489,7 @@ private extension MessagesCollectionView {
       messagesCollectionView.reconcileScrollAffordance()
       let isAtBottom = messagesCollectionView.isAtVisualBottomForUnread
       isAtBottomForUnread = isAtBottom
+      viewModel.setAtBottom(isAtBottom)
 
       if isAtBottom {
         markMessagesSeen()
@@ -4486,9 +4508,37 @@ private extension MessagesCollectionView {
         if isNearTop, isWithinBounds, maxOffset > 0 {
           loadOlderMessagesIfNeeded()
         }
+        if scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + threshold {
+          loadNewerMessagesIfNeeded()
+        }
       }
 
       syncAvatarOverlay(animate: false)
+    }
+
+    private func loadNewerMessagesIfNeeded() {
+      guard newerLoadTask == nil, let newestID = viewModel.newestLoadedMessageId else { return }
+      if !viewModel.canLoadNewerFromLocal,
+         let attempt = lastNewerAttempt, attempt.messageID == newestID,
+         Date().timeIntervalSince(attempt.date) < 2 { return }
+      lastNewerAttempt = (newestID, Date())
+      let peer = peerId
+      let needsRemote = !viewModel.canLoadNewerFromLocal
+      newerLoadTask = Task { @MainActor [weak self] in
+        defer { self?.newerLoadTask = nil }
+        do {
+          if needsRemote {
+            let outcome = try await MessageHistoryRepairCoordinator.shared.loadNewer(peer: peer, afterID: newestID)
+            guard outcome == .loaded else { return }
+          }
+          guard let self, !Task.isCancelled else { return }
+          _ = await viewModel.loadBatchAsync(at: .newer, allowUnavailableLocal: true)
+        } catch is CancellationError {
+          return
+        } catch {
+          Log.shared.error("Failed to load newer history", error: error)
+        }
+      }
     }
 
     private func loadOlderMessagesIfNeeded() {

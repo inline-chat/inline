@@ -681,7 +681,7 @@ private struct ExperimentalAuthedRootView: View {
       restoredSpaceID = nil
     }
 
-    if case let .externalChat(_, contextSpaceID) = router.selectedTabPath.last {
+    if case let .externalChat(_, contextSpaceID, _) = router.selectedTabPath.last {
       nav.activeSpaceId = restoredSpaceID == contextSpaceID ? restoredSpaceID : nil
     } else {
       nav.activeSpaceId = restoredSpaceID

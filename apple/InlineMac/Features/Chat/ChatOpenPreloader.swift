@@ -26,6 +26,10 @@ actor ChatOpenPreloader {
     case newer
   }
 
+  enum TargetError: Error {
+    case unavailable
+  }
+
   func prepare(
     peer: Peer,
     targetMessageId: Int64? = nil,
@@ -56,6 +60,17 @@ actor ChatOpenPreloader {
       MessagesProgressiveViewModel.defaultInitialLimit()
     }
     try Task.checkCancellation()
+
+    if let targetMessageId {
+      let outcome = try await MessageHistoryRepairCoordinator.shared.loadAround(
+        peer: peer,
+        anchorID: targetMessageId,
+        limit: initialLimit,
+        database: database
+      )
+      guard outcome != .empty else { throw TargetError.unavailable }
+      try Task.checkCancellation()
+    }
 
     let payload = try await database.reader.read { db in
       let readSignpostID = OSSignpostID(log: Self.signpostLog)

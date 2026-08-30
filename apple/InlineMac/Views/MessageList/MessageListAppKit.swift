@@ -87,6 +87,10 @@ class MessageListAppKit: NSViewController {
   private var eventMonitorTask: Task<Void, Never>?
   private var integrationCheckTask: Task<Void, Never>?
   private var remoteOlderTask: Task<Void, Never>?
+  private var remoteNewerTask: Task<Void, Never>?
+  private var lastRemoteNewerAttempt: (messageID: Int64, date: Date)?
+  private var targetScrollTask: Task<Void, Never>?
+  private var targetScrollRevision: UInt64 = 0
   private var loadBatchTask: Task<Void, Never>?
   private var heightPrecalcTask: Task<Void, Never>?
   private var mediaWarmupTask: Task<Void, Never>?
@@ -1729,7 +1733,6 @@ class MessageListAppKit: NSViewController {
 
     if feature_loadsMoreWhenApproachingBottom,
        isUserScrolling,
-       chatRows.canLoadNewerFromLocal,
        maxScrollableHeight - currentScrollOffset < viewportSize.height
     {
       loadBatch(at: .newer)
@@ -2135,7 +2138,7 @@ class MessageListAppKit: NSViewController {
 
         await MainActor.run { [weak self] in
           guard Task.isCancelled == false else { return }
-          self?.loadBatch(at: .older)
+          self?.loadBatch(at: .older, allowUnavailableLocal: true)
         }
       } catch is CancellationError {
         return
@@ -2145,7 +2148,27 @@ class MessageListAppKit: NSViewController {
     }
   }
 
-  func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
+  private func requestRemoteNewerBatch(afterMessageId: Int64) {
+    guard remoteNewerTask == nil else { return }
+    if let attempt = lastRemoteNewerAttempt, attempt.messageID == afterMessageId,
+       Date().timeIntervalSince(attempt.date) < 2 { return }
+    lastRemoteNewerAttempt = (afterMessageId, Date())
+    let peer = peerId
+    remoteNewerTask = Task { @MainActor [weak self] in
+      defer { self?.remoteNewerTask = nil }
+      do {
+        let outcome = try await MessageHistoryRepairCoordinator.shared.loadNewer(peer: peer, afterID: afterMessageId)
+        guard let self, !Task.isCancelled, !isDisposed, outcome == .loaded else { return }
+        loadBatch(at: .newer, allowUnavailableLocal: true)
+      } catch is CancellationError {
+        return
+      } catch {
+        self?.log.error("Failed to load newer history", error: error)
+      }
+    }
+  }
+
+  func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection, allowUnavailableLocal: Bool = false) {
     if loadingBatch { return }
     loadingBatch = true
 
@@ -2169,7 +2192,9 @@ class MessageListAppKit: NSViewController {
       var didInsertRows = false
 
       log.trace("Loading \(loadDirectionLabel(direction)) batch")
-      let didLoadLocalBatch = await chatRows.loadBatchAsync(at: direction, publish: false)
+      let didLoadLocalBatch = await chatRows.loadBatchAsync(
+        at: direction, publish: false, allowUnavailableLocal: allowUnavailableLocal
+      )
       guard !Task.isCancelled else { return }
 
       let applyLoadedBatch: () -> Bool? = { [weak self] in
@@ -2232,9 +2257,8 @@ class MessageListAppKit: NSViewController {
           requestRemoteOlderBatch(beforeMessageId: boundaryMessageIdBeforeLoad)
 
         case .newer:
-          // TODO: Add a remote newer-history fallback if we need to bridge non-local gaps below a loaded window.
-          // Keep this local-only for now so CMD+K search recovery does not mix network reloads into scroll anchoring.
-          return
+          guard let boundaryMessageIdBeforeLoad, !chatRows.canLoadNewerFromLocal else { return }
+          requestRemoteNewerBatch(afterMessageId: boundaryMessageIdBeforeLoad)
       }
     }
   }
@@ -3642,79 +3666,64 @@ extension MessageListAppKit {
   // MARK: - Scroll to message
 
   func scrollToMsgAndHighlight(_ request: ScrollToMessageRequest) {
-    scrollToMsgAndHighlight(
-      request.messageId,
-      reason: request.reason,
-      didAttemptLocalAroundLoad: false
-    )
-  }
-
-  private func scrollToMsgAndHighlight(
-    _ msgId: Int64,
-    reason: ScrollToMessageReason,
-    didAttemptLocalAroundLoad: Bool
-  ) {
-    // Don't allow negative msgIds (likely local messages)
-    guard msgId > 0 else { return }
-
-    if messages.isEmpty {
-      log.error("No messages to scroll to")
+    targetScrollRevision &+= 1
+    isProgrammaticScroll = false
+    targetScrollTask?.cancel()
+    targetScrollTask = nil
+    guard request.messageId > 0, !isDisposed else { return }
+    if messages.contains(where: { $0.message.messageId == request.messageId }) {
+      highlightMessage(request.messageId)
       return
     }
 
-    guard let messageIndex = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
-      log.error("Message not found for id \(msgId)")
-
-      if !didAttemptLocalAroundLoad {
-        let loadedAroundTarget = chatRows.loadLocalWindowAroundMessage(
-          messageId: msgId,
-          publish: false
+    let peer = peerId
+    let limit = MessagesProgressiveViewModel.defaultInitialLimit()
+    targetScrollTask = Task { @MainActor [weak self] in
+      do {
+        let outcome = try await MessageHistoryRepairCoordinator.shared.loadAround(
+          peer: peer,
+          anchorID: request.messageId,
+          limit: limit
         )
-        if loadedAroundTarget {
-          log.trace("Loaded local around-target window for message \(msgId), reason=\(reason.rawValue)")
-          rebuildRowItems()
-          clearHoveredMessage()
-          tableView.reloadData()
-          pruneMessageSelection()
-          scheduleMessageHoverRefresh()
-
-          DispatchQueue.main.async { [weak self] in
-            self?.scrollToMsgAndHighlight(
-              msgId,
-              reason: reason,
-              didAttemptLocalAroundLoad: true
-            )
-          }
+        guard let self, !Task.isCancelled, !isDisposed else { return }
+        loadBatchTask?.cancel()
+        loadBatchTask = nil
+        remoteNewerTask?.cancel()
+        guard outcome != .empty, chatRows.loadLocalWindowAroundMessage(
+          messageId: request.messageId,
+          publish: false
+        ) else {
+          ToastCenter.shared.showError("Could not load that message")
           return
         }
+        rebuildRowItems()
+        clearHoveredMessage()
+        tableView.reloadData()
+        pruneMessageSelection()
+        scheduleMessageHoverRefresh()
+        await Task.yield()
+        guard !Task.isCancelled, !isDisposed else { return }
+        highlightMessage(request.messageId)
+      } catch is CancellationError {
+        return
+      } catch {
+        guard let self, !Task.isCancelled, !isDisposed else { return }
+        log.error("Failed to load history for message focus", error: error)
+        ToastCenter.shared.showError("Could not load that message")
       }
+    }
+  }
 
-      // TODO: Load more to get to it
-      if let first = messages.first,
-         first.message.messageId > msgId,
-         chatRows.canLoadOlderFromLocal
-      {
-        log
-          .debug(
-            "Loading batch at top to find message because first message id = \(first.message.messageId) and what we want is \(msgId)"
-          )
-        loadBatch(at: .older)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-          self?.scrollToMsgAndHighlight(
-            msgId,
-            reason: reason,
-            didAttemptLocalAroundLoad: true
-          )
-        }
-      } else {
-        log.error("Message not found for id even after loading all messages from cache \(msgId)")
-      }
+  private func highlightMessage(_ msgId: Int64) {
+    let revision = targetScrollRevision
+    guard let messageIndex = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
       return
     }
 
     let stableId = messages[messageIndex].id
     guard let row = chatRows.rowIndex(forMessageStableId: stableId) else {
       log.error("Row not found for stable message id \(stableId)")
+      ToastCenter.shared.showError("Could not load that message")
       return
     }
 
@@ -3743,6 +3752,7 @@ extension MessageListAppKit {
           : targetY + viewportHeight / 2
         self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: intermediateY))
       } completionHandler: { [weak self] in
+        guard let self, !isDisposed, targetScrollRevision == revision else { return }
         // Phase 2: Slow down for final approach
         NSAnimationContext.runAnimationGroup { [weak self] context in
           context.duration = 0.4
@@ -3751,10 +3761,13 @@ extension MessageListAppKit {
           // Final scroll to target
           self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
         } completionHandler: { [weak self] in
+          guard let self, !isDisposed, targetScrollRevision == revision else { return }
           // Clean up
-          self?.isProgrammaticScroll = false
+          isProgrammaticScroll = false
 
-          self?.highlightMessage(at: row)
+          if let currentRow = chatRows.rowIndex(forMessageStableId: stableId) {
+            highlightMessage(at: currentRow)
+          }
         }
       }
     } else {
@@ -3764,10 +3777,13 @@ extension MessageListAppKit {
         context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
       } completionHandler: { [weak self] in
+        guard let self, !isDisposed, targetScrollRevision == revision else { return }
         // Clean up
-        self?.isProgrammaticScroll = false
+        isProgrammaticScroll = false
 
-        self?.highlightMessage(at: row)
+        if let currentRow = chatRows.rowIndex(forMessageStableId: stableId) {
+          highlightMessage(at: currentRow)
+        }
       }
     }
   }
@@ -3903,6 +3919,10 @@ extension MessageListAppKit {
     integrationCheckTask = nil
     remoteOlderTask?.cancel()
     remoteOlderTask = nil
+    remoteNewerTask?.cancel()
+    remoteNewerTask = nil
+    targetScrollTask?.cancel()
+    targetScrollTask = nil
     loadBatchTask?.cancel()
     loadBatchTask = nil
     heightPrecalcTask?.cancel()

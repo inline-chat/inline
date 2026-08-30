@@ -43,6 +43,8 @@ public class MessagesSectionedViewModel {
   public var messagesByID: [Int64: FullMessage] { progressiveViewModel.messagesByID }
   public var oldestLoadedMessageId: Int64? { progressiveViewModel.oldestLoadedMessageId }
   public var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
+  public var newestLoadedMessageId: Int64? { progressiveViewModel.newestLoadedMessageId }
+  public var canLoadNewerFromLocal: Bool { progressiveViewModel.canLoadNewerFromLocal }
   public var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
   public private(set) var collapsedMaxId: Int64?
   public var highestPositiveMessageId: Int64? {

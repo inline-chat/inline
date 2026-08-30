@@ -612,7 +612,7 @@ final class Nav3ChatOpenPreloadBridge {
           "cancelled"
         )
       } catch {
-        guard self.requestID == id else {
+        guard self.requestID == id, !Task.isCancelled, Auth.shared.getHasPendingAccountTransition() == false else {
           os_signpost(
             .end,
             log: self.signpostLog,
@@ -640,6 +640,9 @@ final class Nav3ChatOpenPreloadBridge {
           "error"
         )
         nav.open(.chat(peer: peer), tracksChatNavigation: false)
+        if targetMessageId != nil {
+          ToastCenter.shared.showError("Could not load that message")
+        }
       }
     }
   }

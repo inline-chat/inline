@@ -87,6 +87,10 @@ struct MainWindowRootView: View {
       nav3.canGoForward
     } selectedPeer: {
       activeSelectedPeer
+    } isViewingChat: { peer in
+      // Read the route directly; menu/selection snapshots can lag a transition.
+      guard viewModel.topLevelRoute == .main else { return false }
+      return nav3.currentRoute.selectedPeer == peer || nav3.currentReplyThreadPeer == peer
     }
     .nativeWindowTab(title: nativeTab.title, icon: nativeTab.iconPeer)
     .onAppear {

@@ -124,9 +124,10 @@ final class ChatRowListViewModel {
   @discardableResult
   func loadBatchAsync(
     at direction: MessagesProgressiveViewModel.MessagesLoadDirection,
-    publish: Bool = true
+    publish: Bool = true,
+    allowUnavailableLocal: Bool = false
   ) async -> Bool {
-    await progressiveViewModel.loadBatchAsync(at: direction, publish: publish)
+    await progressiveViewModel.loadBatchAsync(at: direction, publish: publish, allowUnavailableLocal: allowUnavailableLocal)
   }
 
   func loadLatestWindow() {

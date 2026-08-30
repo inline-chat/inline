@@ -232,9 +232,6 @@ struct ChatView: View {
     .task {
       await fetchChatIfNeeded()
     }
-    .task(id: focusMessageID) {
-      await loadFocusedMessageIfNeeded()
-    }
     .task(id: peerId.toString()) {
       guard !preview else { return }
       botChatSettingsCoordinator.startObservingDiscoveryScope(in: appDatabase)
@@ -585,6 +582,7 @@ struct ChatView: View {
         spaceId: chat.spaceId,
         draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
         focusMessageID: focusMessageID,
+        focusRequestRevision: router.presentationResetRevision,
         collapsedMaxId: fullChatViewModel.chatItem?.dialog.collapsedMaxId,
         isPreview: preview,
         theme: themeManager.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme))
@@ -678,7 +676,7 @@ struct ChatView: View {
     AppTab.allCases.contains { tab in
       router[tab].contains { destination in
         switch destination {
-        case let .chat(peer), let .externalChat(peer, _), let .chatMessage(peer, _):
+        case let .chat(peer), let .externalChat(peer, _, _), let .chatMessage(peer, _):
           peer == peerId
         default:
           false
@@ -687,24 +685,6 @@ struct ChatView: View {
     }
   }
 
-  private func loadFocusedMessageIfNeeded() async {
-    guard !preview, let focusMessageID else { return }
-
-    do {
-      _ = try await realtimeV2.send(
-        .getMessages(peer: peerId, messageIds: [focusMessageID])
-      )
-    } catch is CancellationError {
-      return
-    } catch {
-      Log.shared.error("Failed to load focused message", error: error)
-      ToastManager.shared.showToast(
-        "Could not load that message",
-        type: .error,
-        systemImage: "exclamationmark.triangle.fill"
-      )
-    }
-  }
 }
 
 private struct ChatToolbarMoreMenuHost: View {
