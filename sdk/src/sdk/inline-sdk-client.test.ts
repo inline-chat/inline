@@ -101,6 +101,90 @@ describe("InlineSdkClient", () => {
     expect(credentialOwner.beginLogout).not.toHaveBeenCalled()
     expect(credentialOwner.clearCredentials).not.toHaveBeenCalled()
     expect(credentialOwner.finishLogout).not.toHaveBeenCalled()
+    await expect(client.connect()).rejects.toThrow("create a new InlineSdkClient")
+    expect(transport.state).toBe("idle")
+  })
+
+  it("cannot reconnect an offline instance after destroying its host credentials", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat", token: "test-token", transport,
+      credentialOwner: { beginLogout: vi.fn(), clearCredentials: vi.fn(), finishLogout: vi.fn() },
+    })
+    expect(await client.logout()).toEqual({ remoteOutcome: "notSent" })
+    expect(await client.events()[Symbol.asyncIterator]().next()).toEqual({ done: true, value: undefined })
+    await expect(client.connect()).rejects.toThrow("SDK client is closed")
+    expect(transport.sent).toHaveLength(0)
+  })
+
+  it.each(["close", "offline logout"])("rejects RPCs after %s without queuing work", async (disposal) => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat", token: "test-token", transport, rpcTimeoutMs: null,
+      credentialOwner: { beginLogout: vi.fn(), clearCredentials: vi.fn(), finishLogout: vi.fn() },
+    })
+    if (disposal === "close") {
+      await connectAndOpen(client, transport)
+      await client.close()
+    } else {
+      await client.logout()
+    }
+    const sentCount = transport.sent.length
+    await expect(client.getMe()).rejects.toThrow("SDK client is closed")
+    await expect(client.invoke(Method.GET_ME, { oneofKind: "getMe", getMe: {} }))
+      .rejects.toThrow("SDK client is closed")
+    await expect(client.invokeUncheckedRaw(Method.LOG_OUT, { oneofKind: "logOut", logOut: {} }))
+      .rejects.toThrow("SDK client is closed")
+    expect(client.getDiagnostics().protocol.pendingRpcCount).toBe(0)
+    expect(transport.sent).toHaveLength(sentCount)
+  })
+
+  it("does not restart transport when close interrupts state loading", async () => {
+    const transport = new MockTransport()
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat", token: "test-token", transport,
+      state: { load: async () => { await pending; return null }, save: async () => {} },
+    })
+    const connecting = expect(client.connect()).rejects.toThrow("closed")
+    await client.close()
+    release()
+    await connecting
+    expect(transport.state).toBe("idle")
+    expect(transport.sent).toHaveLength(0)
+  })
+
+  it("does not start transport while logout marker persistence is pending", async () => {
+    const transport = new MockTransport()
+    const start = vi.spyOn(transport, "start")
+    let releaseState!: () => void
+    let releaseMarker!: () => void
+    const stateLoaded = new Promise<void>((resolve) => { releaseState = resolve })
+    const markerSaved = new Promise<void>((resolve) => { releaseMarker = resolve })
+    const clearCredentials = vi.fn()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat", token: "test-token", transport,
+      state: { load: async () => { await stateLoaded; return null }, save: async () => {} },
+      credentialOwner: {
+        beginLogout: () => markerSaved,
+        clearCredentials,
+        finishLogout: vi.fn(),
+      },
+    })
+    const connecting = expect(client.connect()).rejects.toThrow("logout in progress")
+    const logout = client.logout()
+    try {
+      releaseState()
+      await connecting
+      expect(start).not.toHaveBeenCalled()
+      expect(transport.sent).toHaveLength(0)
+    } finally {
+      releaseMarker()
+      await expect(logout).resolves.toEqual({ remoteOutcome: "notSent" })
+      start.mockRestore()
+    }
+    expect(clearCredentials).toHaveBeenCalledOnce()
   })
 
   it("marks logout before RPC and destroys credentials after a lost result", async () => {

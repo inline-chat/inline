@@ -254,6 +254,7 @@ export class InlineSdkClient {
   })
 
   private started = false
+  private closed = false
   private openPromise: Promise<void> | null = null
   private openResolver: (() => void) | null = null
   private openRejecter: ((error: Error) => void) | null = null
@@ -335,6 +336,8 @@ export class InlineSdkClient {
 
   async connect(signal?: AbortSignal): Promise<void> {
     if (this.authenticationError) throw this.authenticationError
+    if (this.logoutInProgress) throw new Error("logout in progress")
+    if (this.closed) throw new Error("SDK client is closed; create a new InlineSdkClient to reconnect")
     if (signal?.aborted) throw new Error("aborted")
     if (this.started) {
       // If a connection attempt is already in-flight, callers should still
@@ -356,12 +359,17 @@ export class InlineSdkClient {
     const abortConnect = () => {
       // Ensure connect() doesn't hang if we're aborted before `open`.
       this.rejectOpen(new Error("aborted"))
-      void this.close()
+      // Aborting a connection attempt remains retryable; it is not an explicit
+      // disposal of the client's event stream.
+      void this.protocol.stopTransport().catch(() => {})
     }
     signal?.addEventListener("abort", abortConnect, { once: true })
 
     try {
       await this.loadState()
+      if (this.closed || this.logoutInProgress || signal?.aborted) {
+        throw new Error(this.closed ? "closed" : this.logoutInProgress ? "logout in progress" : "aborted")
+      }
       await this.protocol.startTransport()
 
       // Wait until authenticated and connection is open.
@@ -381,8 +389,14 @@ export class InlineSdkClient {
     }
   }
 
+  /**
+   * Disconnects without revoking credentials and ends this instance's event
+   * stream. After closing a started client, construct a new client to reconnect.
+   * Calling close before the first connection attempt is a no-op.
+   */
   async close(): Promise<void> {
     if (!this.started) return
+    this.closed = true
     this.started = false
 
     this.rejectOpen(new Error("closed"))
@@ -404,7 +418,8 @@ export class InlineSdkClient {
 
   /**
    * Revokes the remote session best-effort and always destroys host-owned local authority.
-   * A durable credential owner is required; close() remains disconnect-only.
+   * A durable credential owner is required. Unlike logout, close() preserves
+   * host credentials while disposing the started client instance.
    */
   async logout(): Promise<InlineSdkLogoutResult> {
     const owner = this.options.credentialOwner
@@ -414,6 +429,8 @@ export class InlineSdkClient {
     this.logoutInProgress = true
     try {
       await owner.beginLogout()
+      // Even an offline logout disposes this instance's in-memory authority.
+      this.closed = true
       let remoteOutcome: InlineSdkLogoutResult["remoteOutcome"] = "notSent"
       if (this.started) {
         try {
@@ -438,6 +455,7 @@ export class InlineSdkClient {
         }
       }
       await this.close()
+      this.eventStream.close()
       await owner.clearCredentials()
       await owner.finishLogout()
       return { remoteOutcome }
@@ -884,6 +902,7 @@ export class InlineSdkClient {
     input: RpcCall["input"],
     options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
+    if (this.closed) throw new Error("SDK client is closed; create a new InlineSdkClient to reconnect")
     if (this.logoutInProgress && method !== Method.LOG_OUT) {
       throw new Error("logout in progress")
     }
@@ -950,6 +969,7 @@ export class InlineSdkClient {
       const failure = error instanceof Error ? error : new Error("listener-crashed")
       this.log.error?.("SDK listener crashed", failure)
       this.started = false
+      this.closed = true
       this.rejectOpen(failure)
       this.eventStream.fail(failure)
       void this.protocol.stopTransport().catch((stopError) => {
