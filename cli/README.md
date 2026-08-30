@@ -60,18 +60,19 @@ session and returns its credential over an ephemeral loopback connection.
 Agents and other non-interactive sessions can start and finish login explicitly:
 
 ```bash
-# 1. Send a code. Email flows return challengeToken in the JSON result.
+# 1. Send a code. The V3 challenge is saved locally for the next command.
 inline login --email you@example.com --send-code --json --compact
 
-# 2. Verify the code and save the token without printing it.
-inline login --email you@example.com --code 123456 --challenge-token TOKEN --json --compact
+# 2. Verify the code and save the credentials without printing them.
+inline login --email you@example.com --code 123456 --json --compact
 
 # Avoid putting the code in argv when it is available on stdin.
-printf '%s\n' "$LOGIN_CODE" | inline login --email you@example.com --code-stdin --challenge-token TOKEN --json --compact
+printf '%s\n' "$LOGIN_CODE" | inline login --email you@example.com --code-stdin --json --compact
 ```
 
-Phone login uses `--phone` in both steps and does not normally need a challenge
-token. The successful JSON result reports `status: "authenticated"`, `userId`,
+Phone login uses `--phone` in both steps. Run both commands with the same CLI
+configuration and API URL so completion can load the saved challenge. V3 login
+does not return or accept `--challenge-token`. The successful JSON result reports `status: "authenticated"`, `userId`,
 and whether the profile loaded; it never includes the bearer token.
 
 Agents and CI may also pass an existing token with `INLINE_TOKEN`:

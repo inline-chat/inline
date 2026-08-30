@@ -467,6 +467,11 @@ async fn handle_inline_protocol_login(
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if args.challenge_token.is_some() {
+        return Err(CliError::invalid_args(
+            "Inline Protocol login uses the saved local challenge; omit --challenge-token and use --send-code first",
+        ).into());
+    }
     let contact = require_contact(contact_from_args(args.clone())?, "Inline Protocol login")?;
     let v3_url = format!("{}/v3", realtime_url.trim_end_matches('/'));
     if args.send_code {
@@ -1030,6 +1035,76 @@ mod tests {
     use std::fs;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn explicit_v3_login_rejects_legacy_challenge_token_before_network_or_storage() {
+        use clap::Parser;
+        let cli = crate::Cli::try_parse_from([
+            "inline",
+            "login",
+            "--email",
+            "agent@example.com",
+            "--code",
+            "123456",
+            "--challenge-token",
+            "legacy-token",
+            "--json",
+        ])
+        .unwrap();
+        let crate::Command::Login(args) = cli.command else {
+            panic!("expected login")
+        };
+        let root = tempfile::tempdir().unwrap();
+        let secrets = root.path().join("secrets.json");
+        let state = root.path().join("state.json");
+        let api_url = "http://127.0.0.1:9/v1".to_string();
+        let store = AuthStore::new(secrets.clone(), api_url.clone());
+        let db = LocalDb::new(state.clone(), api_url.clone());
+        let error = handle_login(
+            args,
+            &ApiClient::try_new(api_url).unwrap(),
+            &store,
+            "ws://127.0.0.1:9/realtime",
+            &db,
+            true,
+            JsonFormat::Compact,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<CliError>().unwrap().code,
+            "invalid_args"
+        );
+        assert!(error.to_string().contains("omit --challenge-token"));
+        assert!(!secrets.exists());
+        assert!(!state.exists());
+    }
+
+    #[test]
+    fn documented_v3_login_phases_parse_without_legacy_challenge_tokens() {
+        use clap::Parser;
+        for phase in [
+            vec!["--send-code"],
+            vec!["--code", "123456"],
+            vec!["--code-stdin"],
+        ] {
+            let mut argv = vec![
+                "inline",
+                "login",
+                "--email",
+                "agent@example.com",
+                "--json",
+                "--compact",
+            ];
+            argv.extend(phase);
+            let cli = crate::Cli::try_parse_from(argv).unwrap();
+            let crate::Command::Login(args) = cli.command else {
+                panic!("expected login")
+            };
+            assert!(args.challenge_token.is_none());
+            assert!(args.send_code || args.code.is_some() || args.code_stdin);
+        }
+    }
 
     #[tokio::test]
     async fn legacy_email_api_helpers_send_then_verify_without_printing_token() {
