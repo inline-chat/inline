@@ -40,10 +40,10 @@ public enum MessageNotificationPreview {
       fallback = "New message"
     }
     if !text.isEmpty {
-      return (message.isSticker ? "🖼️ " : prefix) + preview(text)
+      return preview((message.isSticker ? "🖼️ " : prefix) + text)
     }
     if message.isSticker { return "🖼️ Sticker" }
-    return prefix + fallback
+    return preview(prefix + fallback)
   }
 
   static func preview(_ text: String, maxBytes: Int = 960) -> String {

@@ -110,26 +110,30 @@ export const messageNotificationBody = ({
   }
   if (text) {
     const prefix = isSticker ? "🖼️ " : mediaType === "video" && isAnimated ? "🎞️ " : mediaPrefix(mediaType)
-    return prefix + truncatePreview(text, maxMessagePreviewBytes)
+    return notificationBodyText(prefix + text)
   }
   if (isSticker) {
-    return "🖼️ Sticker"
+    return notificationBodyText("🖼️ Sticker")
   }
 
   switch (mediaType) {
     case "photo":
-      return "🖼️ Photo"
+      return notificationBodyText("🖼️ Photo")
     case "video":
-      return isAnimated ? "🎞️ GIF" : "🎥 Video"
+      return notificationBodyText(isAnimated ? "🎞️ GIF" : "🎥 Video")
     case "document":
-      return `📄 ${truncatePreview(normalizedText(documentFileName), maxDocumentFileNamePreviewBytes) || "Document"}`
+      return notificationBodyText(
+        `📄 ${truncatePreview(normalizedText(documentFileName), maxDocumentFileNamePreviewBytes) || "Document"}`,
+      )
     case "voice":
       if (voiceDuration != null && Number.isFinite(voiceDuration) && voiceDuration > 0) {
         const seconds = Math.floor(voiceDuration)
-        return `🎤 Voice message (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")})`
+        return notificationBodyText(
+          `🎤 Voice message (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")})`,
+        )
       }
-      return "🎤 Voice message"
+      return notificationBodyText("🎤 Voice message")
     default:
-      return "New message"
+      return notificationBodyText("New message")
   }
 }

@@ -51,6 +51,18 @@ describe("message notification preview", () => {
     expect(notificationBodyText("abc", 2)).toBe("")
   })
 
+  test("includes media prefixes inside the final body budget", () => {
+    const body = messageNotificationBody({ mediaType: "photo", messageText: "😀".repeat(240) })
+    expect(body.startsWith("🖼️ ")).toBe(true)
+    expect(body.endsWith("…")).toBe(true)
+    expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(maxMessagePreviewBytes)
+
+    const document = messageNotificationBody({ mediaType: "document", documentFileName: "a".repeat(1_000) })
+    expect(Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(document))).toHaveLength(240)
+    expect(document.endsWith("…")).toBe(true)
+    expect(Buffer.byteLength(document, "utf8")).toBeLessThanOrEqual(maxMessagePreviewBytes)
+  })
+
   test("preserves Persian text and combining marks at the character limit", () => {
     expect(messageNotificationBody({ mediaType: null, messageText: "سلام\nدنیا" })).toBe("سلام\nدنیا")
     expect(messageNotificationBody({ mediaType: null, messageText: "e\u0301".repeat(241) })).toBe("e\u0301".repeat(240) + "…")

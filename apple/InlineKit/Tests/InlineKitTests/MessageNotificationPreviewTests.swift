@@ -57,11 +57,23 @@ struct MessageNotificationPreviewTests {
     #expect(MessageNotificationPreview.preview("abc", maxBytes: 2).isEmpty)
   }
 
+  @Test func includesMediaPrefixInsideFinalBodyBudget() {
+    var message = InlineProtocol.Message()
+    message.media.photo.photo.id = 1
+    message.message = String(repeating: "😀", count: 240)
+    let body = MessageNotificationPreview.body(for: message)
+    #expect(body.hasPrefix("🖼️ "))
+    #expect(body.hasSuffix("…"))
+    #expect(body.utf8.count <= 960)
+  }
+
   @Test func boundsDocumentFileName() {
     var message = InlineProtocol.Message()
     message.media.document.document.fileName = String(repeating: "季度报告", count: 100) + ".pdf"
     let body = MessageNotificationPreview.body(for: message)
     #expect(body.hasSuffix("…"))
+    #expect(body.count <= 240)
+    #expect(body.utf8.count <= 960)
     #expect(body.dropFirst(2).utf8.count <= 240)
     message.message = "Please review"
     #expect(MessageNotificationPreview.body(for: message) == "📄 Please review")
