@@ -323,7 +323,8 @@ extension MacNotifications {
     peerId: Peer
   ) async {
     let chat = await ObjectCache.shared.getChat(id: chatId)
-    let chatName = chat?.title ?? "Chat"
+    let projectedChatName = MessageNotificationPreview.singleLine(chat?.title ?? "Chat")
+    let chatName = projectedChatName.isEmpty ? "Chat" : projectedChatName
 
     let title = "Message failed to send"
     let body = "Tap to open \(chatName) and retry"
@@ -360,8 +361,10 @@ extension MacNotifications {
       nil
     }
 
-    let senderName = user?.user.displayName ?? "Unknown"
-    let chatName = chat?.title ?? "New Message"
+    let projectedSenderName = MessageNotificationPreview.singleLine(user?.user.displayName ?? "Unknown")
+    let senderName = projectedSenderName.isEmpty ? "Unknown" : projectedSenderName
+    let projectedChatName = MessageNotificationPreview.singleLine(chat?.title ?? "New Message")
+    let chatName = projectedChatName.isEmpty ? "New Message" : projectedChatName
     let isThread = protocolMsg.peerID.toPeer().isThread
 
     // Prepare notification content
@@ -370,7 +373,9 @@ extension MacNotifications {
     let body: String
 
     if isThread {
-      title = space.map { "\(chatName) (\($0.name))" } ?? chatName
+      title = MessageNotificationPreview.singleLine(
+        space.map { "\(chatName) (\($0.name))" } ?? chatName
+      )
       subtitle = senderName
       body = MessageNotificationPreview.body(for: protocolMsg)
     } else {

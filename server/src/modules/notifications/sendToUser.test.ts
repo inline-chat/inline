@@ -115,6 +115,53 @@ describe("sendToUser Expo payloads", () => {
       channelId: "messages_silent",
     })
   })
+
+  it("uses the shared multiline body and single-line identity projection", () => {
+    const message = buildExpoPushMessage({
+      to: "ExponentPushToken[test]",
+      silent: false,
+      payload: {
+        kind: "send_message",
+        senderUserId: 42,
+        senderDisplayName: "\uFEFF Inline\nBot ",
+        threadId: "100",
+        title: "\uFEFF Inline\nBot ",
+        body: " First\r\n Second\n\n\n\tThird ",
+        subtitle: " Product\nUpdates ",
+        messageId: "900",
+      },
+    })
+
+    expect(message).toMatchObject({
+      title: "Inline Bot",
+      body: "First\nSecond\n\nThird",
+      subtitle: "Product Updates",
+      data: { senderDisplayName: "Inline Bot" },
+    })
+  })
+
+  it("falls back from empty titles and omits empty optional identity fields", () => {
+    const message = buildExpoPushMessage({
+      to: "ExponentPushToken[test]",
+      silent: false,
+      payload: {
+        kind: "send_message",
+        senderUserId: 42,
+        senderDisplayName: " \n ",
+        threadId: "100",
+        title: " \n ",
+        body: "Hello",
+        subtitle: " \n ",
+        threadEmoji: " \n ",
+        messageId: "900",
+      },
+    })
+
+    expect(message?.title).toBe("New message")
+    expect(message?.subtitle).toBeUndefined()
+    expect(message?.data?.["senderDisplayName"]).toBeUndefined()
+    expect(message?.data?.["threadEmoji"]).toBeUndefined()
+  })
 })
 
 describe("sendToUser APN payloads", () => {
@@ -129,7 +176,7 @@ describe("sendToUser APN payloads", () => {
       senderHasProfilePhoto: true,
       senderProfilePhotoUrl: "https://api.inline.chat/files/photo/" + "a".repeat(24) + "?expires=1999999999&signature=" + "b".repeat(43),
       title: "😀".repeat(150),
-      body: senderName + ": " + messageNotificationBody({ mediaType: "photo", messageText: "Caption " + "😀".repeat(240) }),
+      body: senderName + ": " + messageNotificationBody({ mediaType: "photo", messageText: "Caption\nSecond " + "😀".repeat(240) }),
       threadId: "chat_34",
       messageId: "90",
       threadEmoji: "😀".repeat(20),
@@ -151,7 +198,7 @@ describe("sendToUser APN payloads", () => {
         const content = decryptSendMessagePushContentForTests({
           privateKey: recipient.privateKey, envelope: notification.payload.encryptedContent,
         })
-        expect(content.body).toContain("🖼️ Caption")
+        expect(content.body).toContain("🖼️ Caption\nSecond")
         expect(content.sender.displayName).toBe(senderName)
         expect(content.sender.hasProfilePhoto).toBe(true)
         expect(content.threadId).toBe("chat_34")
@@ -159,6 +206,32 @@ describe("sendToUser APN payloads", () => {
         expect(JSON.stringify(notification)).not.toContain("Caption")
       }
     }
+  })
+
+  it("preserves bounded body paragraphs while flattening alert identity fields", () => {
+    const notification = buildApnNotification({
+      recipientUserId: 99,
+      session: unencryptedSession,
+      payload: {
+        kind: "alert",
+        senderUserId: 12,
+        threadId: "chat_34",
+        title: " Inline\nBot ",
+        subtitle: " Product\nUpdates ",
+        body: " First\r\n Second\n\n\n\tThird ",
+      },
+      silent: false,
+      topic: "chat.inline.Inline",
+      nowSeconds: 500,
+    })!
+
+    const compiled = JSON.parse(JSON.stringify(notification)) as { aps: { alert: unknown } }
+    expect(compiled.aps.alert).toEqual({
+      title: "Inline Bot",
+      subtitle: "Product Updates",
+      body: "First\nSecond\n\nThird",
+    })
+    expect(Buffer.byteLength(JSON.stringify(notification), "utf8")).toBeLessThanOrEqual(4_096)
   })
 
   it("uses a small private fallback when optional metadata exceeds the final serialized budget", () => {

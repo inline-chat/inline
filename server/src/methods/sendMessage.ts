@@ -30,6 +30,11 @@ import { MessageEntities, Update, type BlockContent } from "@inline-chat/protoco
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
+import {
+  maxNotificationNameBytes,
+  notificationBodyText,
+  notificationText,
+} from "@in/server/modules/notifications/messagePreview"
 import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 import { ChatModel } from "@in/server/db/models/chats"
 import {
@@ -243,12 +248,15 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     // Don't send push notifications to self
     input.peerUserId !== context.currentUserId
   ) {
-    const title: string = currentUser.firstName ?? currentUser.username ?? "New Message"
+    const title = notificationText(
+      currentUser.firstName ?? currentUser.username,
+      maxNotificationNameBytes,
+    ) || "New Message"
     sendPushNotificationToUser({
       userId: Number(input.peerUserId),
       title,
       chatId,
-      message: text ?? "🖼️ Photo", // if no text, it's image for now!!!
+      message: notificationBodyText(text) || (file ? "🖼️ Photo" : "New message"),
       currentUserId: context.currentUserId,
       currentUser,
     })

@@ -1,10 +1,31 @@
 import { describe, expect, test } from "bun:test"
-import { maxDocumentFileNamePreviewBytes, maxMessagePreviewBytes, messageNotificationBody } from "./messagePreview"
+import {
+  maxDocumentFileNamePreviewBytes,
+  maxMessagePreviewBytes,
+  messageNotificationBody,
+  notificationBodyText,
+  notificationText,
+} from "./messagePreview"
 
 describe("message notification preview", () => {
-  test("normalizes multiline captions and keeps the media kind", () => {
-    expect(messageNotificationBody({ mediaType: "photo", messageText: "  Look\n\n at\tthis  " })).toBe("🖼️ Look at this")
+  test("preserves useful caption line breaks and keeps the media kind", () => {
+    expect(messageNotificationBody({ mediaType: "photo", messageText: "  Look\n\n at\tthis  " })).toBe(
+      "🖼️ Look\n\nat this",
+    )
     expect(messageNotificationBody({ mediaType: "document", messageText: " \n ", documentFileName: "Plan.pdf" })).toBe("📄 Plan.pdf")
+  })
+
+  test("normalizes line endings and bounds blank paragraphs", () => {
+    expect(notificationBodyText("  First\r\n Second\n\n\n\tThird  ")).toBe("First\nSecond\n\nThird")
+    expect(notificationBodyText("One\u0085Two\u2028Three\u2029Four")).toBe("One\nTwo\nThree\nFour")
+    expect(notificationText("  Ava\n\tLin  ")).toBe("Ava Lin")
+  })
+
+  test("uses the same explicit Unicode whitespace contract as Apple clients", () => {
+    const input = "\uFEFF Alpha\u00A0Beta\u0085Gamma\t\u2003Delta \uFEFF"
+    expect(notificationBodyText(input)).toBe("Alpha Beta\nGamma Delta")
+    expect(notificationText(input)).toBe("Alpha Beta Gamma Delta")
+    expect(notificationBodyText("A\u000B\u000CB")).toBe("A B")
   })
 
   test("distinguishes GIFs, voice duration, stickers, and nudges", () => {
@@ -24,10 +45,14 @@ describe("message notification preview", () => {
     expect(body.slice(0, -1).split(family).join("")).toBe("")
     expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(maxMessagePreviewBytes)
     expect(messageNotificationBody({ mediaType: null, messageText: "a".repeat(239) + "😀tail" })).toBe("a".repeat(239) + "😀…")
+    for (const grapheme of ["🇺🇳", "👍🏽", "1️⃣", "✈️", "👩‍💻"]) {
+      expect(notificationBodyText(grapheme.repeat(241), 10_000)).toBe(grapheme.repeat(240) + "…")
+    }
+    expect(notificationBodyText("abc", 2)).toBe("")
   })
 
   test("preserves Persian text and combining marks at the character limit", () => {
-    expect(messageNotificationBody({ mediaType: null, messageText: "سلام\nدنیا" })).toBe("سلام دنیا")
+    expect(messageNotificationBody({ mediaType: null, messageText: "سلام\nدنیا" })).toBe("سلام\nدنیا")
     expect(messageNotificationBody({ mediaType: null, messageText: "e\u0301".repeat(241) })).toBe("e\u0301".repeat(240) + "…")
   })
 
