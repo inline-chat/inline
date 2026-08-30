@@ -26,6 +26,10 @@ export type VerifyCodeResult = {
   user: InlineUser
 }
 
+export async function logoutSession(token: string): Promise<void> {
+  await postJson("logout", {}, { token, timeoutMs: 2_000 })
+}
+
 export async function sendEmailCode(email: string): Promise<SendCodeResult> {
   const meta = await clientMeta()
   return postJson<SendCodeResult>("sendEmailCode", {

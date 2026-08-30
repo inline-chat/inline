@@ -15,7 +15,13 @@ export class ApiError extends Error {
   }
 }
 
-export async function postJson<T>(path: string, body: Record<string, unknown>): Promise<T> {
+export async function postJson<T>(
+  path: string,
+  body: Record<string, unknown>,
+  options: { token?: string; timeoutMs?: number } = {},
+): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000)
   let response: Response
   try {
     response = await fetch(`${appConfig.apiBaseUrl}/v1/${path}`, {
@@ -23,26 +29,28 @@ export async function postJson<T>(path: string, body: Record<string, unknown>): 
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     })
-  } catch (error) {
-    log.error("Request transport failed", error, { path })
-    throw error
-  }
-
-  const payload = await response.json().catch(() => null)
-  if (!response.ok) {
-    const message =
-      typeof payload?.message === "string"
-        ? payload.message
-        : typeof payload?.error === "string"
-          ? payload.error
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || payload?.ok !== true) {
+      const message =
+        typeof payload?.description === "string" ? payload.description
+        : typeof payload?.message === "string" ? payload.message
         : "Request failed"
-    const code = typeof payload?.code === "string" ? payload.code : undefined
-    log.warn("Request failed", { path, status: response.status, code })
-    throw new ApiError(message, response.status, code)
+      const code = typeof payload?.error === "string" ? payload.error
+        : typeof payload?.errorCode === "number" ? String(payload.errorCode)
+        : typeof payload?.code === "string" ? payload.code : undefined
+      log.warn("Request failed", { path, status: response.status, code })
+      throw new ApiError(message, response.status, code)
+    }
+    return payload.result as T
+  } catch (error) {
+    if (!(error instanceof ApiError)) log.error("Request transport failed", error, { path })
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
-
-  return payload as T
 }

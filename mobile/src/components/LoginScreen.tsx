@@ -22,7 +22,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
   const normalizedEmail = email.trim().toLowerCase()
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
-  const codeValid = code.trim().length >= 6
+  const codeValid = /^\d{6}$/.test(code.trim())
   const inviteCodeValid = !needsInviteCode || inviteCode.trim().length === 8
 
   async function submitEmail() {
@@ -102,7 +102,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               editable={!busy}
               inputMode="numeric"
               keyboardType="number-pad"
-              maxLength={8}
+              maxLength={6}
               onChangeText={setCode}
               onSubmitEditing={submitCode}
               placeholder="Code"

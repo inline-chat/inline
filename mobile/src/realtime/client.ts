@@ -28,9 +28,9 @@ export class RealtimeClient {
 
   async updateAndroidPushToken(expoPushToken: string): Promise<void> {
     await this.connect()
-    const result = await this.call(Method.UPDATE_PUSH_NOTIFICATION_DETAILS, {
-      oneofKind: "updatePushNotificationDetails",
-      updatePushNotificationDetails: {
+    const result = await this.call(Method.REGISTER_DEVICE, {
+      oneofKind: "registerDevice",
+      registerDevice: {
         applePushToken: "",
         notificationMethod: {
           provider: PushNotificationProvider.EXPO_ANDROID,
@@ -44,7 +44,7 @@ export class RealtimeClient {
       },
     })
 
-    if (result.oneofKind !== "updatePushNotificationDetails") {
+    if (result.oneofKind !== "registerDevice") {
       throw new Error(`Unexpected push registration result: ${String(result.oneofKind)}`)
     }
   }
