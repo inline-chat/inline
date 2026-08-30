@@ -194,8 +194,9 @@ Run `inline` with no arguments in a terminal for a quick introduction, useful
 commands, and links to help. The page is local and exits successfully: it does
 not read credentials, start an agent, check for updates, or connect to Inline.
 Commands and flags are highlighted, with a stacked layout in narrow terminals.
-The compact Inline wordmark uses white tones and falls back to text when it
-cannot fit the terminal width.
+The Inline wordmark uses a white face, cyan bevel, and blue depth shadow.
+Narrow terminals omit the shadow or fall back to text; monochrome output keeps
+the clean lettering without a shadow.
 
 Use `inline --help` for the full command reference and `inline <command> --help`
 for details. Redirected no-argument calls and flags-only errors keep their

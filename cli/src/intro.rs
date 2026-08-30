@@ -9,13 +9,19 @@ const VALUE: Style = AnsiColor::Yellow.on_default();
 const HEADING: Style = Style::new().bold();
 const MUTED: Style = Style::new().dimmed();
 const BRAND: Style = AnsiColor::White.on_default();
-// Compact rendering of the Inline mark and Days One logotype; no font is needed at runtime.
+// Seven rows preserve Days One's open lowercase e; the smaller mark stays balanced.
+// Static glyphs keep the start page offline and avoid a runtime font dependency.
+const BRAND_FACE: Style = AnsiColor::BrightWhite.on_default();
+const BRAND_BEVEL: Style = AnsiColor::BrightCyan.on_default();
+const BRAND_DEPTH: Style = AnsiColor::Blue.on_default();
 const WORDMARK: &[&str] = &[
-    "▗▟██████▙▖   ▗▄▖         ▄▄ ▗▄▖",
-    "██▘▗▄  ▝██   ▐█▌ ▄▄▄▄▄▄  ██ ▗▄▖▗▄▄▄▄▄▖  ▄▄▄▄▄",
-    "██ ██   ██   ▐█▌ ██▘ ▐█▌ ██ ██▌▐█▛▘ ██▖▟█▙▄▟█▙",
-    "██▖▝▀  ▗██   ▐█▌ ██  ▐█▌ ██ ██▌▐█▌  ██▌▜█▛▀▀█▛",
-    "▝▜██████▛▘   ▝▀▘ ▀▀  ▝▀▘ ▀▀ ▀▀▘▝▀▘  ▀▀▘ ▀▀▀▀▀▘",
+    "              ▄▄▖             ▄▄▖ ▗▄▄",
+    "▗▟██████▙▖   ▐██▌            ▐██▌ ▝▀▀",
+    "██▘▗▄  ▝██   ▐██▌ ▐██▙████▙▖ ▐██▌ ▐██  ███▟████▄  ▗▟█████▄",
+    "██ ██   ██   ▐██▌ ▐██▛   ███ ▐██▌ ▐██  ███▘  ▜██▖▗██▌▄▄▖██▙",
+    "██▖▝▀  ▗██   ▐██▌ ▐██▌   ███ ▐██▌ ▐██  ███   ▐██▌▐██▛▀▀▀▀▀▀",
+    "▝▜██████▛▘   ▐██▌ ▐██▌   ███ ▐██▌ ▐██  ███   ▐██▖ ▜██▄▄▄██▌",
+    "              ▀▀▘ ▝▀▀▘   ▀▀▀  ▀▀▘ ▝▀▀  ▀▀▘   ▝▀▀    ▀▀▀▀▀▘",
 ];
 
 struct Example {
@@ -126,17 +132,9 @@ fn render(columns: usize, color: bool) -> String {
     let mut page = String::from("\n");
     let wordmark_width = WORDMARK.iter().map(|line| line.width()).max().unwrap_or(0);
     if columns > wordmark_width {
-        for (index, line) in WORDMARK.iter().enumerate() {
-            // Two neutral ANSI tones add a little depth without assuming a background color.
-            let tone = if index < 2 {
-                AnsiColor::BrightWhite.on_default()
-            } else {
-                BRAND
-            };
-            page.push(' ');
-            page.push_str(&paint(line, tone, color));
-            page.push('\n');
-        }
+        // Omit the shadow when it would overflow or merge into monochrome lettering.
+        let depth = color && columns > wordmark_width + 2;
+        render_wordmark(&mut page, color, depth);
     } else {
         page.push_str(&paint("  inline", BRAND, color));
         page.push('\n');
@@ -205,6 +203,43 @@ fn render(columns: usize, color: bool) -> String {
     }
     page.push('\n');
     page
+}
+
+fn render_wordmark(page: &mut String, color: bool, depth: bool) {
+    let glyphs: Vec<Vec<char>> = WORDMARK.iter().map(|line| line.chars().collect()).collect();
+    let width = glyphs.iter().map(Vec::len).max().unwrap_or(0);
+    for row in 0..glyphs.len() + usize::from(depth) {
+        let mut line = String::new();
+        let mut current_style = None;
+        for column in 0..width + if depth { 2 } else { 0 } {
+            let face = glyphs
+                .get(row)
+                .and_then(|line| line.get(column))
+                .copied()
+                .unwrap_or(' ');
+            let shadow = if depth && row > 0 && column >= 2 {
+                glyphs[row - 1].get(column - 2).copied().unwrap_or(' ')
+            } else {
+                ' '
+            };
+            let (glyph, style) = if face != ' ' {
+                (face, if row < 5 { BRAND_FACE } else { BRAND_BEVEL })
+            } else {
+                (shadow, BRAND_DEPTH)
+            };
+            if color && glyph != ' ' && current_style != Some(style) {
+                line.push_str(&format!("{style}"));
+                current_style = Some(style);
+            }
+            line.push(glyph);
+        }
+        page.push(' ');
+        page.push_str(line.trim_end());
+        if color {
+            page.push_str(&format!("{BRAND:#}"));
+        }
+        page.push('\n');
+    }
 }
 
 impl Example {
@@ -325,18 +360,27 @@ mod tests {
     }
 
     #[test]
-    fn compact_brand_uses_neutral_tones_and_only_appears_when_it_fits() {
+    fn brand_preserves_plain_lettering_and_reserves_space_for_depth() {
         let width = WORDMARK.iter().map(|line| line.width()).max().unwrap();
-        assert_eq!(WORDMARK.len(), 5);
         assert!(!render(width, false).contains(WORDMARK[0]));
         assert!(render(width + 1, false).contains(WORDMARK[0]));
-        let page = render(80, true);
-        let brand = page.split("Work chat").next().unwrap();
-        assert!(brand.contains("\x1b[97m"));
-        assert!(brand.contains("\x1b[37m"));
-        assert!(!brand.contains("\x1b[34m"));
-        assert!(!brand.contains("\x1b[94m"));
-        assert!(!brand.contains("\x1b[36m"));
+        let plain = render(80, false);
+        assert!(WORDMARK.iter().all(|line| plain.contains(line)));
+        let ansi = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+        for columns in [width, width + 1, width + 2, width + 3, 80] {
+            let page = render(columns, true);
+            assert!(
+                ansi.replace_all(&page, "")
+                    .lines()
+                    .all(|line| line.width() <= columns)
+            );
+            let brand = page.split("Work chat").next().unwrap();
+            assert_eq!(brand.contains("\x1b[34m"), columns > width + 2);
+            if columns > width {
+                assert!(brand.contains("\x1b[97m"));
+                assert!(brand.contains("\x1b[96m"));
+            }
+        }
     }
 
     #[test]
@@ -354,13 +398,16 @@ mod tests {
     }
 
     #[test]
-    fn styling_does_not_change_text_or_copyable_commands() {
+    fn styling_does_not_change_help_or_copyable_commands() {
         let ansi = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
         for columns in [40, 80, 120] {
             let plain = render(columns, false);
             let styled = render(columns, true);
             assert!(styled.contains('\x1b'));
-            assert_eq!(ansi.replace_all(&styled, ""), plain);
+            // The decorative shadow is color-only; all help and commands remain identical.
+            let styled_help = styled.split("Work chat").nth(1).unwrap();
+            let plain_help = plain.split("Work chat").nth(1).unwrap();
+            assert_eq!(ansi.replace_all(styled_help, ""), plain_help);
         }
     }
 
