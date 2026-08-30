@@ -159,6 +159,42 @@ restarts so an ambiguous response does not create another final answer.
 
 ## Output
 
+### Everyday shortcuts and scope
+
+Singular command names work alongside the original groups: `chat`, `thread`,
+`message`, `user`, `space`, and `bot`. List commands accept `ls`; chat, message,
+and user `get` commands also accept `view`. Help displays these aliases.
+Common flags have short forms: `-c` for a chat, `-u` for a DM user, `-L` for a
+limit, `-q` for a search query, `-f` for a list filter, and `-m` for message text.
+`-v` still prints the version.
+
+```bash
+inline chat ls --space-id 7 --unread -L 20
+inline chat ls --home --type thread
+inline chat ls --type dm --pinned
+inline search "release checklist" -c 123 --offset-id 500 -L 50
+inline search -c 123 --filter documents --ids
+inline message ls -c 123 --has-media --ids
+```
+
+Scope filters combine with `--filter` and run before `--limit`/`--offset` in
+both human and JSON output. `--home` means chats outside spaces, including DMs
+and Home threads; use `--type thread` to exclude DMs. `--unread` includes manual
+unread marks. `--id` requires exactly one match and cannot be combined with
+pagination, which could otherwise conceal ambiguous matches.
+
+Search accepts one quoted positional phrase or repeated `--query`/`-q` flags;
+the two forms cannot be mixed. `--offset-id` uses the existing search cursor.
+Words within one query are ANDed; repeated queries are ORed. Search also accepts
+`--filter photos|videos|photo-video|documents|links|voice-memos`, with optional
+query text. Media filtering runs on the server before its result limit.
+Time/media filters on message lists, and time filters on search, apply to the
+fetched page; they do not scan all history. `--ids` on message lists and search
+prints peer-local message IDs without fetching the chat catalog for names.
+It cannot be combined with `--json` or `--translate`.
+
+### JSON and text
+
 Use `--json` for automation and `--compact` for pipelines:
 
 ```bash
@@ -229,6 +265,19 @@ fails fast when stdin is an interactive terminal:
 ```bash
 echo "hello" | inline messages send --chat-id 123 --stdin
 ```
+
+Use `--text-file` with send/edit to preserve indentation and trailing newlines:
+
+```bash
+inline message send -c 123 --text-file ./update.md
+inline message edit -c 123 --message-id 456 --text-file ./update.md
+printf '  indented text\n' | inline message send -c 123 --text-file -
+```
+
+File input accepts nonempty UTF-8 up to 1 MiB and cannot be combined with
+`--text` or `--stdin`. The server's message limits still apply. Existing
+`--text`/`--stdin` trimming and precedence are unchanged; use `--attach` for
+files that should be uploaded instead of read as message text.
 
 Human tables detect the current terminal width on Unix; `COLUMNS` overrides
 the detected width and also works in pipes. Chat/user/message tables and chat/

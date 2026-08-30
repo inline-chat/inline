@@ -8,6 +8,87 @@ use crate::output::{
 use crate::peer::{MessageKey, PeerKey, peer_key_from_peer};
 use inline_protocol::proto;
 
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum ChatKind {
+    Dm,
+    Thread,
+}
+
+#[derive(Default, clap::Args)]
+pub(crate) struct ChatListScope {
+    #[arg(long, conflicts_with = "home", help = "Only chats in this space")]
+    pub space_id: Option<i64>,
+    #[arg(
+        long,
+        conflicts_with = "space_id",
+        help = "Only chats outside spaces (DMs and Home threads)"
+    )]
+    pub home: bool,
+    #[arg(long = "type", value_enum, help = "Only direct messages or threads")]
+    pub kind: Option<ChatKind>,
+    #[arg(long, help = "Only chats with unread messages or a manual unread mark")]
+    pub unread: bool,
+    #[arg(long, help = "Only pinned chats")]
+    pub pinned: bool,
+}
+
+impl ChatListScope {
+    pub(crate) fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        crate::validation::validate_optional_positive_id_arg("--space-id", self.space_id)?;
+        Ok(())
+    }
+}
+
+pub(crate) fn apply_chat_list_scope(
+    mut payload: proto::GetChatsResult,
+    scope: &ChatListScope,
+) -> proto::GetChatsResult {
+    if scope.space_id.is_none()
+        && !scope.home
+        && scope.kind.is_none()
+        && !scope.unread
+        && !scope.pinned
+    {
+        return payload;
+    }
+    let by_chat: HashMap<_, _> = payload
+        .dialogs
+        .iter()
+        .filter_map(|dialog| dialog.chat_id.map(|id| (id, dialog)))
+        .collect();
+    let by_peer: HashMap<_, _> = payload
+        .dialogs
+        .iter()
+        .filter_map(|dialog| {
+            dialog
+                .peer
+                .as_ref()
+                .and_then(peer_key_from_peer)
+                .map(|key| (key, dialog))
+        })
+        .collect();
+    payload.chats.retain(|chat| {
+        let peer = chat.peer_id.as_ref().and_then(peer_key_from_peer);
+        let dialog = peer
+            .as_ref()
+            .and_then(|key| by_peer.get(key))
+            .or_else(|| by_chat.get(&chat.id));
+        let is_dm = matches!(peer, Some(PeerKey::User(_)));
+        scope.space_id.is_none_or(|id| chat.space_id == Some(id))
+            && (!scope.home || chat.space_id.is_none())
+            && scope.kind.is_none_or(|kind| match kind {
+                ChatKind::Dm => is_dm,
+                ChatKind::Thread => !is_dm,
+            })
+            && (!scope.unread
+                || dialog.is_some_and(|d| {
+                    d.unread_count.unwrap_or(0) > 0 || d.unread_mark == Some(true)
+                }))
+            && (!scope.pinned || dialog.is_some_and(|d| d.pinned == Some(true)))
+    });
+    apply_chat_list_limits(payload, None, None)
+}
+
 pub(crate) fn apply_chat_list_limits(
     mut payload: proto::GetChatsResult,
     limit: Option<usize>,
@@ -173,7 +254,7 @@ pub(crate) fn build_chat_list(
         spaces_by_id.insert(space.id, space.clone());
     }
 
-    let mut messages_by_id: HashMap<MessageKey, proto::Message> = HashMap::new();
+    let mut messages_by_id: HashMap<MessageKey, &proto::Message> = HashMap::new();
     for message in &result.messages {
         if let Some(peer) = message.peer_id.as_ref().and_then(peer_key_from_peer) {
             messages_by_id.insert(
@@ -181,7 +262,7 @@ pub(crate) fn build_chat_list(
                     peer,
                     id: message.id,
                 },
-                message.clone(),
+                message,
             );
         } else if message.chat_id != 0 {
             messages_by_id.insert(
@@ -189,31 +270,31 @@ pub(crate) fn build_chat_list(
                     peer: PeerKey::Chat(message.chat_id),
                     id: message.id,
                 },
-                message.clone(),
+                message,
             );
         }
     }
 
-    let mut dialog_by_peer: HashMap<PeerKey, proto::Dialog> = HashMap::new();
-    let mut dialog_by_chat_id: HashMap<i64, proto::Dialog> = HashMap::new();
+    let mut dialog_by_peer: HashMap<PeerKey, &proto::Dialog> = HashMap::new();
+    let mut dialog_by_chat_id: HashMap<i64, &proto::Dialog> = HashMap::new();
     for dialog in &result.dialogs {
         if let Some(peer_key) = dialog.peer.as_ref().and_then(peer_key_from_peer) {
-            dialog_by_peer.insert(peer_key, dialog.clone());
+            dialog_by_peer.insert(peer_key, dialog);
         }
         if let Some(chat_id) = dialog.chat_id {
-            dialog_by_chat_id.insert(chat_id, dialog.clone());
+            dialog_by_chat_id.insert(chat_id, dialog);
         }
     }
 
-    struct DraftItem {
-        chat: proto::Chat,
-        dialog: Option<proto::Dialog>,
+    struct DraftItem<'a> {
+        chat: &'a proto::Chat,
+        dialog: Option<&'a proto::Dialog>,
         peer: PeerSummary,
         display_name: String,
         space: Option<SpaceSummary>,
         space_name: Option<String>,
         unread_count: Option<i32>,
-        last_message: Option<proto::Message>,
+        last_message: Option<&'a proto::Message>,
         last_message_date: i64,
     }
 
@@ -224,18 +305,16 @@ pub(crate) fn build_chat_list(
             .as_ref()
             .and_then(|key| dialog_by_peer.get(key))
             .or_else(|| dialog_by_chat_id.get(&chat.id))
-            .cloned();
+            .copied();
         let unread_count = dialog.as_ref().and_then(|dialog| dialog.unread_count);
 
         let last_message = chat.last_msg_id.and_then(|id| {
-            peer_key.as_ref().and_then(|peer_key| {
-                messages_by_id
-                    .get(&MessageKey {
-                        peer: peer_key.clone(),
-                        id,
-                    })
-                    .cloned()
-            })
+            messages_by_id
+                .get(&MessageKey {
+                    peer: peer_key.clone().unwrap_or(PeerKey::Chat(chat.id)),
+                    id,
+                })
+                .copied()
         });
         let last_message_date = last_message.as_ref().map(|msg| msg.date).unwrap_or(0);
 
@@ -269,7 +348,7 @@ pub(crate) fn build_chat_list(
         }
 
         drafts.push(DraftItem {
-            chat: chat.clone(),
+            chat,
             dialog,
             peer,
             display_name,
@@ -305,8 +384,8 @@ pub(crate) fn build_chat_list(
             .map(|summary| summary.relative_date.clone());
 
         items.push(ChatListItem {
-            chat: draft.chat,
-            dialog: draft.dialog,
+            chat: draft.chat.clone(),
+            dialog: draft.dialog.cloned(),
             peer: draft.peer,
             display_name: draft.display_name,
             space: draft.space,
@@ -383,6 +462,164 @@ fn current_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scope_fixture() -> proto::GetChatsResult {
+        let dm = proto::Peer {
+            r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
+        };
+        let thread = proto::Peer {
+            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 42 })),
+        };
+        proto::GetChatsResult {
+            chats: vec![
+                proto::Chat {
+                    id: 1,
+                    peer_id: Some(dm.clone()),
+                    ..Default::default()
+                },
+                proto::Chat {
+                    id: 42,
+                    peer_id: Some(thread.clone()),
+                    space_id: Some(7),
+                    ..Default::default()
+                },
+                proto::Chat {
+                    id: 3,
+                    ..Default::default()
+                },
+            ],
+            dialogs: vec![
+                proto::Dialog {
+                    peer: Some(dm.clone()),
+                    unread_mark: Some(true),
+                    pinned: Some(true),
+                    ..Default::default()
+                },
+                proto::Dialog {
+                    peer: Some(thread.clone()),
+                    unread_count: Some(2),
+                    ..Default::default()
+                },
+                proto::Dialog {
+                    chat_id: Some(3),
+                    unread_count: Some(0),
+                    ..Default::default()
+                },
+            ],
+            messages: vec![
+                proto::Message {
+                    id: 1,
+                    peer_id: Some(dm),
+                    from_id: 42,
+                    ..Default::default()
+                },
+                proto::Message {
+                    id: 1,
+                    peer_id: Some(thread),
+                    from_id: 5,
+                    ..Default::default()
+                },
+            ],
+            users: vec![
+                proto::User {
+                    id: 42,
+                    ..Default::default()
+                },
+                proto::User {
+                    id: 5,
+                    ..Default::default()
+                },
+            ],
+            spaces: vec![proto::Space {
+                id: 7,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn scope_filters_combine_before_pagination_without_colliding_peer_ids() {
+        let filtered = apply_chat_list_scope(
+            scope_fixture(),
+            &ChatListScope {
+                space_id: Some(7),
+                kind: Some(ChatKind::Thread),
+                unread: true,
+                ..Default::default()
+            },
+        );
+        let page = apply_chat_list_limits(filtered, Some(1), None);
+        assert_eq!(page.chats.iter().map(|c| c.id).collect::<Vec<_>>(), [42]);
+        assert_eq!(page.dialogs.len(), 1);
+        assert_eq!(page.messages.len(), 1);
+        assert_eq!(page.messages[0].from_id, 5);
+        assert_eq!(page.users.len(), 1);
+        assert_eq!(page.spaces.len(), 1);
+
+        let pinned = apply_chat_list_scope(
+            scope_fixture(),
+            &ChatListScope {
+                home: true,
+                kind: Some(ChatKind::Dm),
+                unread: true,
+                pinned: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(pinned.chats[0].id, 1);
+        assert_eq!(pinned.messages[0].from_id, 42);
+        assert!(pinned.spaces.is_empty());
+    }
+
+    #[test]
+    fn home_includes_unspaced_threads_and_default_scope_leaves_payload_unchanged() {
+        let original = scope_fixture();
+        let unfiltered = apply_chat_list_scope(original.clone(), &ChatListScope::default());
+        assert_eq!(
+            serde_json::to_value(original).unwrap(),
+            serde_json::to_value(unfiltered).unwrap()
+        );
+        let home = apply_chat_list_scope(
+            scope_fixture(),
+            &ChatListScope {
+                home: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(home.chats.iter().map(|c| c.id).collect::<Vec<_>>(), [1, 3]);
+        let threads = apply_chat_list_scope(
+            scope_fixture(),
+            &ChatListScope {
+                home: true,
+                kind: Some(ChatKind::Thread),
+                ..Default::default()
+            },
+        );
+        assert_eq!(threads.chats[0].id, 3);
+        assert_eq!(threads.dialogs[0].chat_id, Some(3));
+    }
+
+    #[test]
+    fn projection_finds_last_message_without_peer_metadata() {
+        let payload = proto::GetChatsResult {
+            chats: vec![proto::Chat {
+                id: 7,
+                last_msg_id: Some(2),
+                ..Default::default()
+            }],
+            messages: vec![proto::Message {
+                id: 2,
+                chat_id: 7,
+                date: 10,
+                message: Some("hello".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let output = build_chat_list(payload, None, None, None, None).unwrap();
+        assert_eq!(output.items[0].last_message.as_ref().unwrap().message.id, 2);
+    }
 
     #[test]
     fn chat_json_filter_trims_denormalized_payload_by_title() {

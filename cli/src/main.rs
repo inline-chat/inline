@@ -21,6 +21,7 @@ mod owner_session;
 mod peer;
 mod skill;
 mod state;
+mod text_input;
 mod update;
 mod validation;
 
@@ -45,7 +46,8 @@ use crate::auth_flow::{
     build_auth_logout_output, handle_login, print_auth_logout, print_auth_user,
 };
 use crate::chat_output::{
-    apply_chat_list_filter, apply_chat_list_limits, build_chat_list, chat_display_name,
+    ChatListScope, apply_chat_list_filter, apply_chat_list_limits, apply_chat_list_scope,
+    build_chat_list, chat_display_name,
 };
 use crate::config::Config;
 use crate::doctor::{build_doctor_output, print_doctor};
@@ -199,6 +201,9 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     let mut pretty = false;
     let mut compact = false;
     for arg in argv {
+        if arg == "--" {
+            break;
+        }
         if arg == "--json" {
             json = true;
         } else if arg == "--pretty" {
@@ -221,70 +226,35 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     disable_version_flag = true,
     propagate_version = true,
     after_help = r#"Common workflows:
-  Start:
-    inline login [--email you@example.com | --phone +15551234567]
-    inline login --email you@example.com --send-code --json
-    inline login --email you@example.com --code 123456 --challenge-token TOKEN --json
-    inline me
-    inline logout
-    inline doctor
-    inline skill install
+  inline login
+  inline me
+  inline chat ls --space-id 7 --unread -L 20
+  inline search "release checklist" -c 123
+  inline messages get --chat-id 123 --message-id 91,92,100 --json
+  inline message send -c 123 -m "Hello"
+  inline message send -c 123 --text-file ./update.md
+  inline transcript -c 123 -L 500 --output ./feedback.md
+  inline transcript -c 123 --download-media --output ./feedback-bundle
+  inline agents setup
+  inline doctor
 
-  Review a thread:
-    inline chats list --filter "launch"
-    inline transcript --chat-id 123 --limit 500 --output ./feedback.md
-    inline transcript --chat-id 123 --limit 500 --download-media --output ./feedback-bundle
-    inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output ./feedback.md
-    inline messages export --chat-id 123 --output ./messages.json
-    inline messages get --chat-id 123 --message-id 91,92,100 --json
-    inline messages download --chat-id 123 --message-id 80-100 --dir ./media
+Aliases and shortcuts:
+  chat/thread/threads -> chats; message -> messages; user -> users; space -> spaces
+  ls -> list; view -> get; whoami -> me; search -> messages search
+  login/logout -> auth login/logout; transcript -> messages transcript
+  Short flags: -c chat ID, -u DM user ID, -L limit, -q query, -f filter, -m text.
 
-  Core command groups:
-    chats         list|get|participants|add-participant|remove-participant|create|create-dm|update-visibility|rename|mark-unread|mark-read|delete
-    messages      list|search|get|send|forward|edit|delete|add-reaction|delete-reaction|download|export|transcript
-    users         list|get
-    spaces        list|members|invite|delete-member|update-member-access
-    notifications get|set
-    bots          list|create|reveal-token
-    typing        start|stop
-    tasks         create-linear|create-notion
-    schema        proto
+JSON mode:
+  --json prints raw RPC payloads; --pretty is the default; --compact removes whitespace.
+  --filter and chat scope filters work with JSON. --ids/--id are table-only.
+  Destructive commands never prompt in --json mode; pass --yes.
 
-  Aliases and shortcuts:
-    inline login                  -> inline auth login
-    inline logout                 -> inline auth logout
-    inline chat/thread/threads ... -> inline chats ...
-    inline bot ...                  -> inline bots ...
-    inline me, inline whoami        -> inline auth me
-    inline search ...               -> inline messages search ...
-    inline transcript ...           -> inline messages transcript ... (supports --download-media)
-    inline messages send/edit accept: --text | --message | --msg | -m
-
-  JSON mode:
-    --json prints raw RPC payloads (use --pretty or --compact for formatting).
-    In --json mode, these table-only helpers are disabled:
-      inline users list --filter/--ids/--id
-      inline bots list --filter/--ids/--id
-      inline chats list --ids/--id
-    Destructive commands never prompt in --json mode; pass --yes.
-
-  Notes:
-    Bot tokens are not printed in table output; use: inline bots reveal-token --bot-user-id <ID>
-    Mentions use UTF-16 offsets: --mention USER_ID:OFFSET:LENGTH
-
-  Key examples:
-    inline chats list --filter "launch"
-    inline chats update-visibility --chat-id 123 --private --participant 42
-    inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4
-    inline messages list --chat-id 123 --since "2h ago" --until "1h ago"
-    inline transcript --chat-id 123 --limit 500 --output ./feedback.md
-    inline transcript --chat-id 123 --limit 500 --download-media --output ./feedback-bundle
-    inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output ./feedback.md
-    inline messages export --chat-id 123 --output ./messages.json
-    inline messages get --chat-id 123 --message-id 91,92,100 --json
-    inline messages download --chat-id 123 --message-id 80-100 --dir ./media
-    inline tasks create-linear --chat-id 123 --message-id 456
-    inline schema proto
+Tips:
+  Chat scope: --space-id ID | --home; --type dm|thread; --unread; --pinned.
+  Search pagination: --offset-id ID. Time filters apply to the fetched page.
+  Use --text-file - for piped text with whitespace preserved.
+  Mentions use UTF-16 offsets: --mention USER_ID:OFFSET:LENGTH.
+  Run inline <command> --help for command-specific flags and examples.
 
 Docs:
   https://github.com/inline-chat/inline/blob/main/cli/README.md
@@ -321,6 +291,15 @@ struct Cli {
     )]
     compact: bool,
 }
+
+const SEARCH_HELP: &str = "Examples:
+  inline search \"release checklist\" -c 123
+  inline search -c 123 -q bug -q regression --offset-id 500 -L 50
+  inline search -u 42 --filter documents --ids
+
+Words within one query are ANDed; repeated queries are ORed.
+Media filters run before the server limit. Time filters apply to the fetched page.
+Use -- before a positional query beginning with a hyphen.";
 
 #[derive(Subcommand)]
 enum Command {
@@ -359,25 +338,23 @@ enum Command {
     },
     #[command(
         about = "List chats and threads",
-        alias = "chat",
-        alias = "thread",
-        alias = "threads"
+        visible_aliases = ["chat", "thread", "threads"]
     )]
     Chats {
         #[command(subcommand)]
         command: ChatsCommand,
     },
-    #[command(about = "List users or fetch a user by id")]
+    #[command(about = "List users or fetch a user by id", visible_alias = "user")]
     Users {
         #[command(subcommand)]
         command: UsersCommand,
     },
-    #[command(about = "Read and send messages")]
+    #[command(about = "Read and send messages", visible_alias = "message")]
     Messages {
         #[command(subcommand)]
         command: MessagesCommand,
     },
-    #[command(about = "List spaces from your chats")]
+    #[command(about = "List spaces from your chats", visible_alias = "space")]
     Spaces {
         #[command(subcommand)]
         command: SpacesCommand,
@@ -393,7 +370,7 @@ enum Command {
         command: TasksCommand,
     },
 
-    #[command(about = "Bot operations", alias = "bot")]
+    #[command(about = "Bot operations", visible_alias = "bot")]
     Bots {
         #[command(subcommand)]
         command: BotsCommand,
@@ -408,7 +385,7 @@ enum Command {
     // Read-only shortcuts (desire paths).
     #[command(about = "Show current user (shortcut for auth me)", alias = "whoami")]
     Me,
-    #[command(about = "Search messages (shortcut for messages search)")]
+    #[command(about = "Search messages (shortcut for messages search)", after_help = SEARCH_HELP)]
     Search(MessagesSearchArgs),
     #[command(
         about = "Export a clean markdown transcript (shortcut for messages transcript)",
@@ -685,7 +662,7 @@ pub(crate) struct AuthLoginArgs {
     #[arg(
         long,
         value_name = "TOKEN",
-        help = "Email challenge token returned by --send-code",
+        help = "Legacy email challenge token (not used by V3 login)",
         conflicts_with = "send_code"
     )]
     challenge_token: Option<String>,
@@ -709,9 +686,12 @@ enum SchemaCommand {
 
 #[derive(Subcommand)]
 enum ChatsCommand {
-    #[command(about = "List chats with last message and unread count")]
+    #[command(
+        about = "List chats with last message and unread count",
+        visible_alias = "ls"
+    )]
     List(ChatsListArgs),
-    #[command(about = "Fetch a chat by id or user")]
+    #[command(about = "Fetch a chat by id or user", visible_alias = "view")]
     Get(ChatsGetArgs),
     #[command(about = "List participants in a chat")]
     Participants(ChatsParticipantsArgs),
@@ -737,7 +717,7 @@ enum ChatsCommand {
 
 #[derive(Subcommand)]
 enum BotsCommand {
-    #[command(about = "List bots you can access")]
+    #[command(about = "List bots you can access", visible_alias = "ls")]
     List(BotsListArgs),
     #[command(about = "Create a new bot")]
     Create(BotsCreateArgs),
@@ -755,13 +735,16 @@ enum TypingCommand {
 
 #[derive(Args)]
 struct ChatsListArgs {
-    #[arg(long, help = "Maximum number of chats to return")]
+    #[command(flatten)]
+    scope: ChatListScope,
+
+    #[arg(long, short = 'L', help = "Maximum number of chats to return")]
     limit: Option<usize>,
 
     #[arg(long, help = "Offset into the chat list")]
     offset: Option<usize>,
 
-    #[arg(long, help = "Filter chats by name, space, or id")]
+    #[arg(long, short = 'f', help = "Filter chats by name, space, or id")]
     filter: Option<String>,
 
     #[arg(long, help = "Print only chat ids (one per line)")]
@@ -770,7 +753,7 @@ struct ChatsListArgs {
     #[arg(
         long,
         help = "Require exactly one match and print only its chat id",
-        conflicts_with = "ids",
+        conflicts_with_all = ["ids", "limit", "offset"],
         requires = "filter"
     )]
     id: bool,
@@ -778,22 +761,27 @@ struct ChatsListArgs {
 
 #[derive(Args)]
 struct ChatsGetArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 }
 
 #[derive(Args)]
 struct ChatsParticipantsArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, short = 'c', help = "Chat id")]
     chat_id: i64,
 }
 
 #[derive(Args)]
 struct ChatsParticipantArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, short = 'c', help = "Chat id")]
     chat_id: i64,
 
     #[arg(long, help = "User id")]
@@ -868,19 +856,29 @@ struct ChatsRenameArgs {
 
 #[derive(Args)]
 struct ChatsMarkUnreadArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 }
 
 #[derive(Args)]
 struct ChatsMarkReadArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
     #[arg(long, help = "Max message id to mark as read")]
@@ -900,17 +898,23 @@ struct ChatsDeleteArgs {
 enum UsersCommand {
     #[command(
         about = "List users that appear in your chats",
-        alias = "search",
-        alias = "find"
+        visible_aliases = ["ls", "search", "find"]
     )]
     List(UsersListArgs),
-    #[command(about = "Fetch a user by id from the chat list payload")]
+    #[command(
+        about = "Fetch a user by id from the chat list payload",
+        visible_alias = "view"
+    )]
     Get(UserGetArgs),
 }
 
 #[derive(Args)]
 struct UsersListArgs {
-    #[arg(long, help = "Filter users by name, username, email, or phone")]
+    #[arg(
+        long,
+        short = 'f',
+        help = "Filter users by name, username, email, or phone"
+    )]
     filter: Option<String>,
 
     #[arg(long, help = "Print only user ids (one per line)")]
@@ -933,7 +937,7 @@ struct UserGetArgs {
 
 #[derive(Args)]
 struct BotsListArgs {
-    #[arg(long, help = "Filter bots by name or username")]
+    #[arg(long, short = 'f', help = "Filter bots by name or username")]
     filter: Option<String>,
 
     #[arg(long, help = "Print only bot user ids (one per line)")]
@@ -968,21 +972,27 @@ struct BotsRevealTokenArgs {
 
 #[derive(Args)]
 struct TypingArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 }
 
 #[derive(Subcommand)]
 enum MessagesCommand {
-    #[command(about = "List messages for a chat or user")]
+    #[command(about = "List messages for a chat or user", visible_alias = "ls")]
     List(MessagesListArgs),
-    #[command(about = "Search messages in a chat or DM")]
+    #[command(about = "Search messages in a chat or DM", after_help = SEARCH_HELP)]
     Search(MessagesSearchArgs),
     #[command(
         about = "Fetch one or more messages by id",
+        visible_alias = "view",
         after_help = r#"Examples:
   inline messages get --chat-id 123 --message-id 456
   inline messages get --chat-id 123 --message-id 91,92,100 --json
@@ -1052,13 +1062,18 @@ Batch behavior:
 
 #[derive(Args)]
 struct MessagesListArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Maximum number of messages to return")]
+    #[arg(long, short = 'L', help = "Maximum number of messages to return")]
     limit: Option<i32>,
 
     #[arg(long, help = "Offset message id for pagination")]
@@ -1093,20 +1108,43 @@ struct MessagesListArgs {
         help = "Filter messages until time (e.g., today, 1d ago, 2024-01-20)"
     )]
     until: Option<String>,
+
+    #[arg(long, conflicts_with_all = ["json", "translate"], help = "Print only message ids (one per line; skips name lookups)")]
+    ids: bool,
 }
 
 #[derive(Args)]
 struct MessagesSearchArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Search query (repeatable)")]
+    #[arg(
+        long,
+        short = 'q',
+        help = "Search query (repeatable)",
+        conflicts_with = "search_text"
+    )]
     query: Vec<String>,
 
-    #[arg(long, help = "Maximum number of results to return")]
+    #[arg(
+        value_name = "QUERY",
+        help = "Search phrase (alternative to --query)",
+        conflicts_with = "query"
+    )]
+    search_text: Option<String>,
+
+    #[arg(long, help = "Offset message id for search pagination")]
+    offset_id: Option<i64>,
+
+    #[arg(long, short = 'L', help = "Maximum number of results to return")]
     limit: Option<i32>,
 
     #[arg(
@@ -1129,14 +1167,78 @@ struct MessagesSearchArgs {
         help = "Filter results until time (e.g., today, 1d ago)"
     )]
     until: Option<String>,
+
+    #[arg(long, conflicts_with_all = ["json", "translate"], help = "Print only message ids (one per line; skips name lookups)")]
+    ids: bool,
+
+    #[arg(
+        long,
+        value_enum,
+        help = "Search by media type (query text is optional with a filter)"
+    )]
+    filter: Option<MessageSearchFilter>,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum MessageSearchFilter {
+    Photos,
+    Videos,
+    PhotoVideo,
+    Documents,
+    Links,
+    VoiceMemos,
+}
+
+impl MessageSearchFilter {
+    fn protocol_value(self) -> i32 {
+        use proto::SearchMessagesFilter as Filter;
+        (match self {
+            Self::Photos => Filter::FilterPhotos,
+            Self::Videos => Filter::FilterVideos,
+            Self::PhotoVideo => Filter::FilterPhotoVideo,
+            Self::Documents => Filter::FilterDocuments,
+            Self::Links => Filter::FilterLinks,
+            Self::VoiceMemos => Filter::FilterVoiceMemos,
+        }) as i32
+    }
+}
+
+impl MessagesSearchArgs {
+    fn input(&self) -> Result<proto::SearchMessagesInput, Box<dyn std::error::Error>> {
+        let limit = validate_message_limit(self.limit)?;
+        let offset_id = validate_optional_message_id_arg("--offset-id", self.offset_id)?;
+        let peer = input_peer_from_args(self.chat_id, self.user_id)?;
+        let query = self
+            .search_text
+            .as_ref()
+            .map(std::slice::from_ref)
+            .unwrap_or(self.query.as_slice());
+        let queries = if query.is_empty() && self.filter.is_some() {
+            Vec::new()
+        } else {
+            normalize_search_queries(query)?
+        };
+        Ok(proto::SearchMessagesInput {
+            peer_id: Some(peer),
+            queries,
+            limit,
+            offset_id,
+            filter: self.filter.map(MessageSearchFilter::protocol_value),
+        })
+    }
 }
 
 #[derive(Args)]
 struct MessagesGetArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
     #[arg(
@@ -1158,10 +1260,15 @@ struct MessagesGetArgs {
 
 #[derive(Args)]
 struct MessagesSendArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
     #[arg(
@@ -1200,6 +1307,10 @@ struct MessagesSendArgs {
 
     #[arg(long, help = "Read message text/caption from stdin")]
     stdin: bool,
+
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["text", "stdin"], value_hint = clap::ValueHint::FilePath,
+        help = "Read UTF-8 text from a file, or - for stdin (preserves whitespace; max 1 MiB)")]
+    text_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -1239,13 +1350,18 @@ struct MessagesForwardArgs {
 
 #[derive(Args)]
 struct MessagesExportArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Maximum number of messages to return")]
+    #[arg(long, short = 'L', help = "Maximum number of messages to return")]
     limit: Option<i32>,
 
     #[arg(long, help = "Offset message id for pagination")]
@@ -1317,13 +1433,18 @@ struct MessagesExportArgs {
 
 #[derive(Args)]
 struct MessagesTranscriptArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Maximum number of messages to return")]
+    #[arg(long, short = 'L', help = "Maximum number of messages to return")]
     limit: Option<i32>,
 
     #[arg(long, help = "Offset message id for pagination")]
@@ -1410,10 +1531,15 @@ impl From<MessagesTranscriptArgs> for MessagesExportArgs {
 
 #[derive(Args)]
 struct MessagesDownloadArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
     #[arg(
@@ -1464,10 +1590,15 @@ struct MessagesDownloadArgs {
 
 #[derive(Args)]
 struct MessagesDeleteArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
     #[arg(
@@ -1485,10 +1616,15 @@ struct MessagesDeleteArgs {
 
 #[derive(Args)]
 struct MessagesEditArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
     #[arg(long, help = "Message id")]
@@ -1505,14 +1641,23 @@ struct MessagesEditArgs {
 
     #[arg(long, help = "Read message text from stdin")]
     stdin: bool,
+
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["text", "stdin"], value_hint = clap::ValueHint::FilePath,
+        help = "Read UTF-8 text from a file, or - for stdin (preserves whitespace; max 1 MiB)")]
+    text_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
 struct MessagesReactionArgs {
-    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
     user_id: Option<i64>,
 
     #[arg(long, help = "Message id")]
@@ -1614,7 +1759,7 @@ struct MessagesGetBatchOutput {
 
 #[derive(Subcommand)]
 enum SpacesCommand {
-    #[command(about = "List spaces referenced in your chats")]
+    #[command(about = "List spaces referenced in your chats", visible_alias = "ls")]
     List,
     #[command(about = "List members in a space")]
     Members(SpacesMembersArgs),
@@ -2173,83 +2318,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
             }
             Command::Search(args) => {
-                // Shortcut for `inline messages search ...`
-                let limit = validate_message_limit(args.limit)?;
-                let (since_ts, until_ts) =
-                    parse_time_filters(args.since.as_deref(), args.until.as_deref(), Utc::now())?;
-                let translation_language = args
-                    .translate
-                    .as_deref()
-                    .map(normalize_translation_language)
-                    .transpose()?;
-                let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                let queries = normalize_search_queries(&args.query)?;
-                let peer_summary = peer_summary_from_input(&peer);
-                let mut realtime =
-                        connect_authenticated_realtime(&config, &auth_store).await?;
-
-                let input = proto::SearchMessagesInput {
-                    peer_id: Some(peer.clone()),
-                    queries,
-                    limit,
-                    offset_id: None,
-                    filter: None,
-                };
-                let mut payload = realtime.call(input).await?;
-                filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
-                if cli.json {
-                    if let Some(language) = translation_language.as_deref() {
-                        let message_ids = collect_message_ids(&payload.messages);
-                        let translations_by_id =
-                            fetch_message_translations(&mut realtime, &peer, &message_ids, language)
-                                .await?;
-                        let output = TranslatedSearchMessagesOutput {
-                            payload,
-                            translations: translations_in_message_order(
-                                &message_ids,
-                                &translations_by_id,
-                            ),
-                        };
-                        output::print_json(&output, json_format)?;
-                    } else {
-                        output::print_json(&payload, json_format)?;
-                    }
-                } else {
-                    let translations_by_id =
-                        if let Some(language) = translation_language.as_deref() {
-                            let message_ids = collect_message_ids(&payload.messages);
-                            fetch_message_translations(
-                                &mut realtime,
-                                &peer,
-                                &message_ids,
-                                language,
-                            )
-                            .await?
-                        } else {
-                            HashMap::new()
-                        };
-                    let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
-                    let users_by_id = chats_payload
-                        .users
-                        .into_iter()
-                        .map(|user| (user.id, user))
-                        .collect();
-                    let chats_by_id = chats_payload
-                        .chats
-                        .into_iter()
-                        .map(|chat| (chat.id, chat))
-                        .collect();
-                    let current_user_id = local_db.load()?.current_user.map(|user| user.id);
-                    let output = build_message_list_from_messages(
-                        &payload.messages,
-                        &users_by_id,
-                        current_user_id,
-                        peer_summary,
-                        peer_name_from_input(&peer, &users_by_id, &chats_by_id),
-                        Some(&translations_by_id),
-                    );
-                    output::print_messages(&output, false, json_format)?;
-                }
+                handle_messages_search(args, &config, &auth_store, &local_db, cli.json, json_format).await?;
             }
             Command::Transcript(args) => {
                 handle_messages_export(
@@ -2383,10 +2452,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             }
             Command::Chats { command } => match command {
                 ChatsCommand::List(args) => {
+                    args.scope.validate()?;
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
                     let payload = realtime.call(proto::GetChatsInput {}).await?;
+                    let payload = apply_chat_list_scope(payload, &args.scope);
 
                     if cli.json {
                         let payload = apply_chat_list_filter(payload, args.filter.as_deref());
@@ -2791,6 +2862,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             },
             Command::Messages { command } => match command {
                 MessagesCommand::List(args) => {
+                    validate_table_only_list_flags(cli.json, args.ids, false)?;
                     let limit = validate_message_limit(args.limit)?;
                     let offset_id = validate_optional_message_id_arg("--offset-id", args.offset_id)?;
                     let (since_ts, until_ts) =
@@ -2817,7 +2889,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
                     filter_messages_by_list_options(&mut payload.messages, &args);
 
-                    if cli.json {
+                    if args.ids {
+                        for message in &payload.messages {
+                            println!("{}", message.id);
+                        }
+                    } else if cli.json {
                         if let Some(language) = translation_language.as_deref() {
                             let message_ids = collect_message_ids(&payload.messages);
                             let translations_by_id = fetch_message_translations(
@@ -2876,88 +2952,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
                 MessagesCommand::Search(args) => {
-                    let limit = validate_message_limit(args.limit)?;
-                    let (since_ts, until_ts) =
-                        parse_time_filters(args.since.as_deref(), args.until.as_deref(), Utc::now())?;
-                    let translation_language = args
-                        .translate
-                        .as_deref()
-                        .map(normalize_translation_language)
-                        .transpose()?;
-                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let queries = normalize_search_queries(&args.query)?;
-                    let peer_summary = peer_summary_from_input(&peer);
-                    let mut realtime =
-                        connect_authenticated_realtime(&config, &auth_store).await?;
-
-                    let input = proto::SearchMessagesInput {
-                        peer_id: Some(peer.clone()),
-                        queries,
-                        limit,
-                        offset_id: None,
-                        filter: None,
-                    };
-
-                    let mut payload = realtime.call(input).await?;
-                    filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
-
-                    if cli.json {
-                        if let Some(language) = translation_language.as_deref() {
-                            let message_ids = collect_message_ids(&payload.messages);
-                            let translations_by_id = fetch_message_translations(
-                                &mut realtime,
-                                &peer,
-                                &message_ids,
-                                language,
-                            )
-                            .await?;
-                            let output = TranslatedSearchMessagesOutput {
-                                payload,
-                                translations: translations_in_message_order(
-                                    &message_ids,
-                                    &translations_by_id,
-                                ),
-                            };
-                            output::print_json(&output, json_format)?;
-                        } else {
-                            output::print_json(&payload, json_format)?;
-                        }
-                    } else {
-                        let translations_by_id =
-                            if let Some(language) = translation_language.as_deref() {
-                                let message_ids = collect_message_ids(&payload.messages);
-                                fetch_message_translations(
-                                    &mut realtime,
-                                    &peer,
-                                    &message_ids,
-                                    language,
-                                )
-                                .await?
-                            } else {
-                                HashMap::new()
-                            };
-                        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
-                        let users_by_id = chats_payload
-                            .users
-                            .into_iter()
-                            .map(|user| (user.id, user))
-                            .collect();
-                        let chats_by_id = chats_payload
-                            .chats
-                            .into_iter()
-                            .map(|chat| (chat.id, chat))
-                            .collect();
-                        let current_user_id = local_db.load()?.current_user.map(|user| user.id);
-                        let output = build_message_list_from_messages(
-                            &payload.messages,
-                            &users_by_id,
-                            current_user_id,
-                            peer_summary,
-                            peer_name_from_input(&peer, &users_by_id, &chats_by_id),
-                            Some(&translations_by_id),
-                        );
-                        output::print_messages(&output, false, json_format)?;
-                    }
+                    handle_messages_search(args, &config, &auth_store, &local_db, cli.json, json_format).await?;
                 }
                 MessagesCommand::Get(args) => {
                     let message_ids = parse_message_id_selectors("--message-id", &args.message_ids)?;
@@ -3097,7 +3092,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 MessagesCommand::Send(args) => {
                     let reply_to = validate_optional_message_id_arg("--reply-to", args.reply_to)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let caption = resolve_message_caption(args.text, args.stdin)?;
+                    let caption = resolve_message_source(args.text, args.stdin, args.text_file.as_deref())?;
                     let mention_entities = parse_mention_entities(&args.mentions)?;
                     if mention_entities.is_some() && caption.is_none() {
                         return Err(CliError::mentions_require_text().into());
@@ -3396,7 +3391,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 MessagesCommand::Edit(args) => {
                     let message_id = validate_message_id_arg("--message-id", args.message_id)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let text = resolve_message_caption(args.text, args.stdin)?
+                    let text = resolve_message_source(args.text, args.stdin, args.text_file.as_deref())?
                         .ok_or_else(CliError::missing_text_or_stdin)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
@@ -3692,6 +3687,89 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
         update::finish_update_check(update_handle).await;
     }
     result
+}
+
+async fn handle_messages_search(
+    args: MessagesSearchArgs,
+    config: &Config,
+    auth_store: &AuthStore,
+    local_db: &LocalDb,
+    json: bool,
+    json_format: output::JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = args.input()?;
+    validate_table_only_list_flags(json, args.ids, false)?;
+    let (since_ts, until_ts) =
+        parse_time_filters(args.since.as_deref(), args.until.as_deref(), Utc::now())?;
+    let translation_language = args
+        .translate
+        .as_deref()
+        .map(normalize_translation_language)
+        .transpose()?;
+    let peer = input.peer_id.clone().ok_or_else(CliError::missing_peer)?;
+    let peer_summary = peer_summary_from_input(&peer);
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+
+    let mut payload = realtime.call(input).await?;
+    filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+    if args.ids {
+        for message in &payload.messages {
+            println!("{}", message.id);
+        }
+    } else if json {
+        if let Some(language) = translation_language.as_deref() {
+            let message_ids = collect_message_ids(&payload.messages);
+            let translations_by_id =
+                fetch_message_translations(&mut realtime, &peer, &message_ids, language).await?;
+            let output = TranslatedSearchMessagesOutput {
+                payload,
+                translations: translations_in_message_order(&message_ids, &translations_by_id),
+            };
+            output::print_json(&output, json_format)?;
+        } else {
+            output::print_json(&payload, json_format)?;
+        }
+    } else {
+        let translations_by_id = if let Some(language) = translation_language.as_deref() {
+            let message_ids = collect_message_ids(&payload.messages);
+            fetch_message_translations(&mut realtime, &peer, &message_ids, language).await?
+        } else {
+            HashMap::new()
+        };
+        let chats_payload = realtime.call(proto::GetChatsInput {}).await?;
+        let users_by_id = chats_payload
+            .users
+            .into_iter()
+            .map(|user| (user.id, user))
+            .collect();
+        let chats_by_id = chats_payload
+            .chats
+            .into_iter()
+            .map(|chat| (chat.id, chat))
+            .collect();
+        let current_user_id = local_db.load()?.current_user.map(|user| user.id);
+        let output = build_message_list_from_messages(
+            &payload.messages,
+            &users_by_id,
+            current_user_id,
+            peer_summary,
+            peer_name_from_input(&peer, &users_by_id, &chats_by_id),
+            Some(&translations_by_id),
+        );
+        output::print_messages(&output, false, json_format)?;
+    }
+    Ok(())
+}
+
+fn resolve_message_source(
+    text: Option<String>,
+    stdin: bool,
+    text_file: Option<&Path>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    if let Some(path) = text_file {
+        return text_input::read_text_file(path).map(Some);
+    }
+    resolve_message_caption(text, stdin)
 }
 
 fn confirm_action(prompt: &str, assume_yes: bool) -> Result<bool, Box<dyn std::error::Error>> {
@@ -5153,6 +5231,119 @@ mod installed_message_action_tests {
 #[cfg(test)]
 mod cli_parsing_tests {
     use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn command_tree_has_no_alias_or_flag_collisions() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn search_spellings_preserve_query_semantics_and_send_cursor_and_filter() {
+        for prefix in [
+            vec!["inline", "search"],
+            vec!["inline", "message", "search"],
+        ] {
+            let mut argv = prefix;
+            argv.extend([
+                "-c",
+                "42",
+                "-q",
+                "first query",
+                "-q",
+                "second",
+                "--offset-id",
+                "100",
+                "-L",
+                "20",
+                "--filter",
+                "documents",
+            ]);
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let args = match cli.command {
+                Command::Search(args)
+                | Command::Messages {
+                    command: MessagesCommand::Search(args),
+                } => args,
+                _ => panic!("expected search"),
+            };
+            let input = args.input().unwrap();
+            assert_eq!(input.queries, ["first query", "second"]);
+            assert_eq!(input.offset_id, Some(100));
+            assert_eq!(input.limit, Some(20));
+            assert_eq!(
+                input.filter,
+                Some(proto::SearchMessagesFilter::FilterDocuments as i32)
+            );
+            assert!(matches!(
+                input.peer_id.unwrap().r#type,
+                Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+                    chat_id: 42
+                }))
+            ));
+        }
+    }
+
+    #[test]
+    fn search_allows_filter_only_but_keeps_missing_query_and_explicit_peer_contracts() {
+        for filter in [
+            "photos",
+            "videos",
+            "photo-video",
+            "documents",
+            "links",
+            "voice-memos",
+        ] {
+            let cli =
+                Cli::try_parse_from(["inline", "search", "-u", "42", "--filter", filter, "--ids"])
+                    .unwrap();
+            let Command::Search(args) = cli.command else {
+                panic!("expected search")
+            };
+            let input = args.input().unwrap();
+            assert!(input.queries.is_empty());
+            assert!(input.filter.is_some());
+            assert!(args.ids);
+        }
+        for argv in [
+            vec!["inline", "search", "-c", "1"],
+            vec!["inline", "search", "--filter", "photos"],
+        ] {
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let Command::Search(args) = cli.command else {
+                panic!("expected search")
+            };
+            assert!(args.input().is_err());
+        }
+        let cli = Cli::try_parse_from(["inline", "search", "-c", "1", "--", "--literal"]).unwrap();
+        let Command::Search(args) = cli.command else {
+            panic!("expected search")
+        };
+        assert_eq!(args.input().unwrap().queries, ["--literal"]);
+    }
+
+    #[test]
+    fn new_file_input_preserves_legacy_text_and_stdin_precedence() {
+        let cli = Cli::try_parse_from([
+            "inline", "message", "send", "-c", "1", "--stdin", "-m", "legacy",
+        ])
+        .unwrap();
+        let Command::Messages {
+            command: MessagesCommand::Send(args),
+        } = cli.command
+        else {
+            panic!("expected send")
+        };
+        assert!(args.stdin);
+        assert_eq!(args.text.as_deref(), Some("legacy"));
+        assert!(args.text_file.is_none());
+        assert_eq!(
+            resolve_message_source(Some("  legacy\n".into()), false, None)
+                .unwrap()
+                .as_deref(),
+            Some("legacy")
+        );
+    }
 
     fn authority_store() -> (tempfile::TempDir, AuthStore) {
         let directory = tempfile::tempdir().expect("temporary auth directory");
@@ -5719,6 +5910,7 @@ mod cli_parsing_tests {
             has_media: true,
             empty_text: true,
             forwarded: true,
+            ids: false,
             translate: None,
             since: None,
             until: None,
