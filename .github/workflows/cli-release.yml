@@ -21,6 +21,11 @@ on:
         required: false
         default: false
         type: boolean
+      preflight_only:
+        description: "Check release credentials and Homebrew write access without building or publishing"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}
@@ -42,9 +47,10 @@ jobs:
           ref: ${{ github.event.inputs.ref }}
 
       - name: Preflight
+        id: config
         env:
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
-          INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
+          INLINE_HOMEBREW_DEPLOY_KEY: ${{ secrets.INLINE_HOMEBREW_DEPLOY_KEY }}
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
           PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
           PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
@@ -104,6 +110,7 @@ jobs:
             build_only=true
           fi
 
+          homebrew_required=false
           required=()
           if [[ "${build_only}" != "true" ]]; then
             required+=(
@@ -122,9 +129,11 @@ jobs:
               MACOS_CI_KEYCHAIN_PWD
             )
             if [[ "${build_only}" != "true" && "${prerelease}" != "true" ]]; then
-              required+=(INLINE_HOMEBREW_TAP_TOKEN)
+              homebrew_required=true
+              required+=(INLINE_HOMEBREW_DEPLOY_KEY)
             fi
           fi
+          echo "homebrew_required=${homebrew_required}" >> "${GITHUB_OUTPUT}"
           missing=0
           for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
@@ -156,12 +165,53 @@ jobs:
             fi
           fi
 
+      - name: Configure Homebrew Publishing Key
+        if: steps.config.outputs.homebrew_required == 'true'
+        env:
+          INLINE_HOMEBREW_DEPLOY_KEY: ${{ secrets.INLINE_HOMEBREW_DEPLOY_KEY }}
+        run: &homebrew_ssh |
+          set -euo pipefail
+          if [[ -z "${INLINE_HOMEBREW_DEPLOY_KEY}" ]]; then
+            echo "Missing INLINE_HOMEBREW_DEPLOY_KEY. Configure the dedicated Homebrew deploy key."
+            exit 1
+          fi
+          eval "$(ssh-agent -s)" > /dev/null
+          trap 'ssh-agent -k > /dev/null 2>&1 || true' ERR
+          printf '%s\n' "${INLINE_HOMEBREW_DEPLOY_KEY}" | ssh-add - > /dev/null 2>&1
+          identity="${RUNNER_TEMP}/inline-homebrew-identity.pub"
+          known_hosts="${RUNNER_TEMP}/inline-homebrew-known-hosts"
+          ssh-add -L > "${identity}"
+          # Published by GitHub; do not trust an unauthenticated ssh-keyscan result.
+          # https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "${known_hosts}"
+          git_ssh_command="ssh -F /dev/null -i '${identity}' -o IdentityAgent='${SSH_AUTH_SOCK}' -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o UserKnownHostsFile='${known_hosts}' -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=15"
+          {
+            printf 'SSH_AUTH_SOCK=%s\n' "${SSH_AUTH_SOCK}"
+            printf 'SSH_AGENT_PID=%s\n' "${SSH_AGENT_PID}"
+            printf 'GIT_SSH_COMMAND=%s\n' "${git_ssh_command}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Verify Homebrew Write Access
+        if: steps.config.outputs.homebrew_required == 'true'
+        run: |
+          set -euo pipefail
+          git clone --depth 1 git@github.com:inline-chat/homebrew-inline.git homebrew-preflight
+          git -C homebrew-preflight push --dry-run origin HEAD:refs/heads/main
+
+      - name: Stop Homebrew SSH Agent
+        if: always() && steps.config.outputs.homebrew_required == 'true'
+        run: |
+          if [[ -n "${SSH_AGENT_PID:-}" ]]; then
+            ssh-agent -k > /dev/null
+          fi
+
       - name: Verify Published Agent Setup Release Group
         if: ${{ github.event.inputs.build_only != 'true' }}
         run: node scripts/check-agent-release-group.mjs
 
   validate:
     needs: preflight
+    if: github.event.inputs.preflight_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -488,7 +538,7 @@ jobs:
       - validate
       - build-linux
       - build-macos
-    if: ${{ always() && github.event.inputs.build_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    if: ${{ always() && github.event.inputs.preflight_only != 'true' && github.event.inputs.build_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -543,13 +593,15 @@ jobs:
             exit 1
           fi
 
-      - name: Clone Homebrew Tap
+      - name: Configure Homebrew Publishing Key
         if: ${{ steps.release.outputs.prerelease == 'false' && (github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin')) }}
         env:
-          INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
-        run: |
-          set -euo pipefail
-          git clone "https://x-access-token:${INLINE_HOMEBREW_TAP_TOKEN}@github.com/inline-chat/homebrew-inline.git" homebrew-inline
+          INLINE_HOMEBREW_DEPLOY_KEY: ${{ secrets.INLINE_HOMEBREW_DEPLOY_KEY }}
+        run: *homebrew_ssh
+
+      - name: Clone Homebrew Tap
+        if: ${{ steps.release.outputs.prerelease == 'false' && (github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin')) }}
+        run: git clone git@github.com:inline-chat/homebrew-inline.git homebrew-inline
 
       - name: Configure Git Identity
         run: |
@@ -579,3 +631,10 @@ jobs:
           fi
           export INLINE_CLI_GITHUB_TARGET="${public_target}"
           bun run scripts/release-cli.ts publish
+
+      - name: Stop Homebrew SSH Agent
+        if: always()
+        run: |
+          if [[ -n "${SSH_AGENT_PID:-}" ]]; then
+            ssh-agent -k > /dev/null
+          fi
