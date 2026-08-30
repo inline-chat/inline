@@ -7,6 +7,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 export const encodeVideo = ({ video }: { video: DbFullVideo }) => {
   let proto: Video = {
     id: BigInt(video.id),
+    fileUniqueId: video.file.fileUniqueId,
     date: encodeDateStrict(video.date),
     w: video.width ?? 0,
     h: video.height ?? 0,

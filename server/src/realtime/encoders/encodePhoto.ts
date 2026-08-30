@@ -14,6 +14,7 @@ const encodePhotoSize = (size: DbFullPhotoSize): PhotoSize | null => {
   const url = getSignedMediaPhotoUrl(file)
 
   let proto: PhotoSize = {
+    fileUniqueId: file.fileUniqueId,
     type: size.size ?? "f",
     w: file.width ?? 0,
     h: file.height ?? 0,
@@ -84,6 +85,7 @@ export const encodePhotoLegacy = ({ file }: { file: DbFile }) => {
     sizes: [
       {
         type: "f",
+        fileUniqueId: file.fileUniqueId,
         w: file.width ?? 0,
         h: file.height ?? 0,
         size: file.fileSize ?? 0,

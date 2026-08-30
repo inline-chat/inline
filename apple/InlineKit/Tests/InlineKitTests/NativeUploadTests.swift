@@ -14,12 +14,18 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
   }
 
   private let partFailureMode: PartFailureMode
+  private let partSize: UInt32
+  private let finishFailure: UploadFailure?
+  private let emptyMissing: Bool
   private var accepted = false
   private var saveAttempts = 0
   private(set) var methods: [InlineProtocol.Method] = []
 
-  init(partFailureMode: PartFailureMode = .afterAcceptance) {
+  init(partFailureMode: PartFailureMode = .afterAcceptance, partSize: UInt32 = 524_288, finishFailure: UploadFailure? = nil, emptyMissing: Bool = false) {
     self.partFailureMode = partFailureMode
+    self.partSize = partSize
+    self.finishFailure = finishFailure
+    self.emptyMissing = emptyMissing
   }
 
   func callUploadRPC(
@@ -34,7 +40,7 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
       #expect(create.sha256.count == 32)
       var result = CreateUploadResult()
       result.uploadID = Data(repeating: 7, count: 16)
-      result.partSize = 524_288
+      result.partSize = partSize
       result.partCount = 1
       return .createUpload(result)
     case let (.saveUploadPart, .saveUploadPart(save)):
@@ -55,6 +61,16 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
       state.acceptedParts = accepted ? [0] : []
       return .getUploadState(state)
     case (.finishUpload, .finishUpload):
+      if emptyMissing {
+        var finish = FinishUploadResult()
+        finish.missing = UploadMissingParts()
+        return .finishUpload(finish)
+      }
+      if let finishFailure {
+        var finish = FinishUploadResult()
+        finish.failed = finishFailure
+        return .finishUpload(finish)
+      }
       var photo = Photo()
       photo.id = 77
       var complete = UploadComplete()
@@ -63,6 +79,10 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
       var finish = FinishUploadResult()
       finish.complete = complete
       return .finishUpload(finish)
+    case (.cancelUpload, .cancelUpload):
+      var result = CancelUploadResult()
+      result.canceled = true
+      return .cancelUpload(result)
     default:
       Issue.record("Unexpected upload RPC \(method)")
       return nil
@@ -153,8 +173,10 @@ private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
 }
 
 private actor PassthroughUploadStaging: NativeUploadStaging {
+  private var discarded = false
   func stage(logicalID _: String, sourceURL: URL) -> URL { sourceURL }
-  func discard(logicalID _: String) {}
+  func discard(logicalID _: String) { discarded = true }
+  func wasDiscarded() -> Bool { discarded }
 }
 
 private actor CancelingUploadStaging: NativeUploadStaging {
@@ -299,6 +321,86 @@ private final class UploadProgressRecorder: @unchecked Sendable {
 
 @Suite("Native upload")
 struct NativeUploadTests {
+  @Test("rejects empty missing-parts result instead of looping finish")
+  func emptyMissingPartsIsTerminal() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-empty-missing-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(emptyMissing: true)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: staging, ownerScope: { "test-owner" })
+    await #expect(throws: NativeMediaUploadError.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:empty-missing", fileURL: source, fileName: "photo.jpg", mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+    }
+    #expect(await transport.calledMethods().filter { $0 == .finishUpload }.count == 1)
+    #expect(await transport.calledMethods().last == .cancelUpload)
+    #expect(await staging.wasDiscarded())
+  }
+
+  @Test("discards staging when local hashing fails before create")
+  func failedHashDiscardsStaging() async {
+    let missing = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-missing-\(UUID().uuidString)")
+    let transport = UploadRPCMock()
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: staging, ownerScope: { "test-owner" })
+    do {
+      _ = try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:missing", fileURL: missing, fileName: "photo.jpg", mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+      Issue.record("Missing staged body was accepted")
+    } catch {
+      #expect(await staging.wasDiscarded())
+      #expect(await transport.calledMethods().isEmpty)
+    }
+  }
+
+  @Test("rejects invalid geometry before arithmetic or transfer", arguments: [UInt32(0), UInt32.max])
+  func rejectsInvalidPartSize(partSize: UInt32) async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-geometry-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(partSize: partSize)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: staging,
+      ownerScope: { "test-owner" }
+    )
+    await #expect(throws: NativeMediaUploadError.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:geometry", fileURL: source, fileName: "photo.jpg", mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+    }
+    #expect(await transport.calledMethods() == [.createUpload, .cancelUpload])
+    #expect(await staging.wasDiscarded())
+  }
+
+  @Test("discards terminal rejection staging but preserves retryable failures", arguments: [false, true])
+  func rejectedUploadCleanup(retryable: Bool) async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-rejection-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    var failure = UploadFailure()
+    failure.code = .uploadFailureInvalidMedia
+    failure.retryable = retryable
+    let transport = UploadRPCMock(finishFailure: failure)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: staging, ownerScope: { "test-owner" })
+    await #expect(throws: NativeMediaUploadError.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:rejection", fileURL: source, fileName: "photo.jpg", mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+    }
+    #expect(await staging.wasDiscarded() == !retryable)
+    #expect(await transport.calledMethods().contains(.cancelUpload) == !retryable)
+  }
+
   @Test("bounds authenticated processing retry hints")
   func boundsProcessingRetryHints() {
     #expect(boundedUploadProcessingRetrySeconds(0) == 1)

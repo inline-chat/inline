@@ -1225,6 +1225,8 @@ message Video {
 
   // True when the encoded video has an audio track.
   optional bool has_audio = 10;
+  // Immutable original file identity for opt-in getFilePart downloads.
+  optional string file_unique_id = 100;
 }
 
 message Document {
@@ -1247,6 +1249,7 @@ message Document {
 
   // Thumbnail of the document
   optional Photo photo = 7;
+  optional string file_unique_id = 100;
 }
 
 message Voice {
@@ -1269,6 +1272,7 @@ message Voice {
 
   // Waveform bytes for rendering
   bytes waveform = 7;
+  optional string file_unique_id = 100;
 }
 
 // Photo for message media, profile photo, space photo, or chat photo
@@ -1295,6 +1299,8 @@ message Photo {
 }
 
 message PhotoSize {
+  // Identity of this exact stored size. Absent for embedded stripped bytes.
+  optional string file_unique_id = 100;
   /** Thumbnail type.
   Currently supported:
   - "b" - small box 140x140
@@ -1496,6 +1502,7 @@ enum Method {
   JOIN_SPACE_BY_INVITE_TOKEN = 133;
   GET_SPACE_INVITE_LINK = 134;
   SET_SPACE_INVITE_LINK_ENABLED = 135;
+  GET_FILE_PART = 136;
 }
 
 message RpcCall {
@@ -1636,6 +1643,7 @@ message RpcCall {
     JoinSpaceByInviteTokenInput joinSpaceByInviteToken = 134;
     GetSpaceInviteLinkInput getSpaceInviteLink = 135;
     SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136;
+    GetFilePartInput getFilePart = 137;
   }
 }
 
@@ -1778,6 +1786,7 @@ message RpcResult {
     JoinSpaceByInviteTokenResult joinSpaceByInviteToken = 134;
     GetSpaceInviteLinkResult getSpaceInviteLink = 135;
     SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
+    GetFilePartResult getFilePart = 137;
   }
 }
 
@@ -4470,4 +4479,28 @@ message CancelUploadInput { bytes upload_id = 1; }
 message CancelUploadResult {
   bool canceled = 1;
   bool already_terminal = 2;
+}
+
+// Provenance for a file received in a message. Authorization is checked on
+// every range request; neither the file ID nor this locator grants access.
+message FileMessageLocation {
+  int64 chat_id = 1;
+  int64 message_id = 2;
+}
+
+message GetFilePartInput {
+  string file_unique_id = 1;
+  uint64 offset = 2;
+  // 1..524288 bytes. The final range may be shorter; offset == size is EOF.
+  uint32 limit = 3;
+  // Required for files the authenticated user does not own.
+  optional FileMessageLocation message = 4;
+}
+
+message GetFilePartResult {
+  uint64 offset = 1;
+  uint64 total_size = 2;
+  bytes data = 3;
+  // SHA-256 of data (including the empty range at EOF).
+  bytes sha256 = 4;
 }

@@ -1,4 +1,5 @@
 import { getR2 } from "@in/server/libs/r2"
+import { readFileBytes, FileByteLengthError } from "@in/server/modules/files/readFileBytes"
 
 const STAGING_PREFIX = "inline-upload-parts/v1"
 
@@ -9,7 +10,7 @@ export interface UploadPartStore {
     sha256: Uint8Array
     data: Uint8Array
   }): Promise<string>
-  read(objectKey: string): Promise<Uint8Array>
+  read(objectKey: string, byteCount: number, signal?: AbortSignal): Promise<Uint8Array>
   remove(objectKey: string): Promise<void>
 }
 
@@ -41,14 +42,24 @@ export class R2UploadPartStore implements UploadPartStore {
     data: Uint8Array
   }): Promise<string> {
     const key = objectKey(input)
-    await requireR2().file(key).write(input.data, { type: "application/octet-stream" })
+    try {
+      await requireR2().file(key).write(input.data, { type: "application/octet-stream" })
+    } catch (cause) {
+      throw new UploadPartStorageUnavailableError({ cause })
+    }
     return key
   }
 
-  async read(key: string): Promise<Uint8Array> {
+  async read(key: string, byteCount: number, signal?: AbortSignal): Promise<Uint8Array> {
+    signal?.throwIfAborted()
+    if (!Number.isInteger(byteCount) || byteCount < 1 || byteCount > 524_288) {
+      throw new UploadPartStorageUnavailableError()
+    }
     try {
-      return new Uint8Array(await requireR2().file(key).arrayBuffer())
+      return await readFileBytes(requireR2().file(key).stream(), byteCount, signal)
     } catch (cause) {
+      signal?.throwIfAborted()
+      if (cause instanceof FileByteLengthError) throw cause
       throw new UploadPartStorageUnavailableError({ cause })
     }
   }

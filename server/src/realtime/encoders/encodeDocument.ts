@@ -9,6 +9,7 @@ const defaultMimeType = "application/octet-stream"
 export const encodeDocument = ({ document }: { document: DbFullDocument }) => {
   let proto: Document = {
     id: BigInt(document.id),
+    fileUniqueId: document.file.fileUniqueId,
     date: encodeDateStrict(document.date),
     size: document.file.fileSize ?? 0,
     mimeType: document.file.mimeType ?? defaultMimeType,

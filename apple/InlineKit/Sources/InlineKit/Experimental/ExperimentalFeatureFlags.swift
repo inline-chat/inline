@@ -3,6 +3,7 @@ import Foundation
 public enum ExperimentalFeatureFlags {
   public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
   public static let mentionableAgentsKey = "experimental.mentionableAgents"
+  public static let nativeFileDownloadsKey = "experimental.nativeFileDownloads"
 
   public static var sidebarAsInboxEnabled: Bool {
     get { isSidebarAsInboxEnabled }
@@ -19,6 +20,10 @@ public enum ExperimentalFeatureFlags {
 
   public static var mentionableAgentsEnabled: Bool {
     UserDefaults.standard.bool(forKey: mentionableAgentsKey)
+  }
+
+  public static var nativeFileDownloadsEnabled: Bool {
+    UserDefaults.standard.bool(forKey: nativeFileDownloadsKey)
   }
 }
 

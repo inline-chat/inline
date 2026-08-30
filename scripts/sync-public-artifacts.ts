@@ -15,6 +15,7 @@ const files: Array<{ source: string; destination: string }> = [
   { source: "packages/protocol/src/schema.ts", destination: "packages/protocol/src/schema.ts" },
   { source: "packages/protocol/src/vectors.ts", destination: "packages/protocol/src/vectors.ts" },
   { source: "packages/protocol/src/uploads.ts", destination: "packages/protocol/src/uploads.ts" },
+  { source: "packages/protocol/src/downloads.ts", destination: "packages/protocol/src/downloads.ts" },
   { source: "packages/protocol/src/secure/application.ts", destination: "packages/protocol/src/secure/application.ts" },
   { source: "packages/protocol/src/secure/binding.ts", destination: "packages/protocol/src/secure/binding.ts" },
   { source: "packages/protocol/src/secure/bytes.ts", destination: "packages/protocol/src/secure/bytes.ts" },
@@ -32,6 +33,7 @@ const files: Array<{ source: string; destination: string }> = [
   { source: "packages/protocol/tests/portable-core.test.ts", destination: "packages/protocol/tests/portable-core.test.ts" },
   { source: "packages/protocol/tests/server-session.test.ts", destination: "packages/protocol/tests/server-session.test.ts" },
   { source: "packages/protocol/tests/uploads.test.ts", destination: "packages/protocol/tests/uploads.test.ts" },
+  { source: "packages/protocol/tests/downloads.test.ts", destination: "packages/protocol/tests/downloads.test.ts" },
   { source: "packages/protocol/README.md", destination: "packages/protocol/README.md" },
   { source: "packages/protocol/docs/realtime-v3.md", destination: "packages/protocol/docs/realtime-v3.md" },
   {

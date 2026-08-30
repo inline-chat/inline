@@ -182,6 +182,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private static let hashReadSize = 1_048_576
   private static let maximumPartSize = 16 * 1_048_576
   private static let maximumConcurrentPartsPerUpload = 2
+  private static let maximumConcurrentParts = 3
   private static let maximumPartAttempts = 2
   private static let maximumFinishReconciliationAttempts = 3
   // These are individual RPC stall bounds, not a deadline for the complete upload.
@@ -234,7 +235,14 @@ public actor DurableUploadCoordinator: MediaUploading {
       sourceURL: request.fileURL
     )
     try Task.checkCancellation()
-    let (byteCount, digest) = try Self.hashFile(at: stagedURL)
+    let byteCount: Int64
+    let digest: Data
+    do {
+      (byteCount, digest) = try await Self.hashFile(at: stagedURL)
+    } catch {
+      if !Task.isCancelled { await staging.discard(logicalID: ownerScopedLogicalID) }
+      throw error
+    }
     try Task.checkCancellation()
     guard byteCount > 0 else {
       await staging.discard(logicalID: ownerScopedLogicalID)
@@ -265,13 +273,17 @@ public actor DurableUploadCoordinator: MediaUploading {
       throw NativeMediaUploadError.unexpectedResponse
     }
     let partSize = Int64(created.partSize)
-    let expectedPartCount = (byteCount + partSize - 1) / partSize
     guard created.uploadID.count == 16,
           partSize > 0,
           partSize <= Self.maximumPartSize,
           created.partCount > 0,
-          Int64(created.partCount) == expectedPartCount
+          Int64(created.partCount) == (byteCount + partSize - 1) / partSize
     else {
+      if created.uploadID.count == 16 {
+        await cancelAndDiscard(uploadID: created.uploadID, logicalID: ownerScopedLogicalID)
+      } else {
+        await staging.discard(logicalID: ownerScopedLogicalID)
+      }
       throw NativeMediaUploadError.invalidGeometry
     }
 
@@ -287,6 +299,7 @@ public actor DurableUploadCoordinator: MediaUploading {
 
     var accepted = Set(created.acceptedParts)
     guard accepted.allSatisfy({ $0 < created.partCount }) else {
+      await cancelAndDiscard(uploadID: created.uploadID, logicalID: ownerScopedLogicalID)
       throw NativeMediaUploadError.invalidGeometry
     }
     var durableAcceptedBytes = Self.acceptedBytes(
@@ -417,7 +430,8 @@ public actor DurableUploadCoordinator: MediaUploading {
           await staging.discard(logicalID: ownerScopedLogicalID)
           return complete
         case let .missing(missing):
-          guard missing.partIndices.allSatisfy({ $0 < created.partCount }) else {
+          guard !missing.partIndices.isEmpty,
+                missing.partIndices.allSatisfy({ $0 < created.partCount }) else {
             throw NativeMediaUploadError.invalidGeometry
           }
           accepted.subtract(missing.partIndices)
@@ -433,13 +447,22 @@ public actor DurableUploadCoordinator: MediaUploading {
         }
       }
     } catch {
-      if Task.isCancelled {
+      if Task.isCancelled || Self.isTerminalFailure(error) {
         await cancelAndDiscard(
           uploadID: created.uploadID,
           logicalID: ownerScopedLogicalID
         )
       }
       throw error
+    }
+  }
+
+  private static func isTerminalFailure(_ error: any Error) -> Bool {
+    guard let error = error as? NativeMediaUploadError else { return false }
+    switch error {
+    case .invalidGeometry, .sourceChanged, .canceled, .expired, .emptySource: return true
+    case let .rejected(_, retryable): return !retryable
+    case .unauthenticated, .unexpectedResponse: return false
     }
   }
 
@@ -507,8 +530,15 @@ public actor DurableUploadCoordinator: MediaUploading {
     let startedAt = ProcessInfo.processInfo.systemUptime
     let offset = Int64(partIndex) * partSize
     let length = Int(min(partSize, byteCount - offset))
+    let slotStartedAt = ProcessInfo.processInfo.systemUptime
+    try await acquirePartTransferSlot()
+    let slotWaitMilliseconds = Int(
+      (ProcessInfo.processInfo.systemUptime - slotStartedAt) * 1_000
+    )
+    defer { releasePartTransferSlot() }
+    try Task.checkCancellation()
     let readStartedAt = ProcessInfo.processInfo.systemUptime
-    let data = try Self.readPart(
+    let data = try await Self.readPart(
       at: stagedURL,
       offset: UInt64(offset),
       length: length
@@ -521,12 +551,6 @@ public actor DurableUploadCoordinator: MediaUploading {
     save.partIndex = partIndex
     save.data = data
 
-    let slotStartedAt = ProcessInfo.processInfo.systemUptime
-    try await acquirePartTransferSlot()
-    let slotWaitMilliseconds = Int(
-      (ProcessInfo.processInfo.systemUptime - slotStartedAt) * 1_000
-    )
-    defer { releasePartTransferSlot() }
     try Task.checkCancellation()
     let rpcStartedAt = ProcessInfo.processInfo.systemUptime
     log.debug(
@@ -567,6 +591,9 @@ public actor DurableUploadCoordinator: MediaUploading {
         guard state.status == .uploading,
               attempt + 1 < Self.maximumPartAttempts
         else { throw saveError }
+        // State proved this part is still missing. Stagger the bounded retry
+        // so several uploads do not immediately repeat a capacity/provider burst.
+        try await Task.sleep(for: .milliseconds(Int.random(in: 200 ... 400)))
       }
     }
     guard accepted else { throw NativeMediaUploadError.unexpectedResponse }
@@ -585,7 +612,7 @@ public actor DurableUploadCoordinator: MediaUploading {
 
   private func acquirePartTransferSlot() async throws {
     try Task.checkCancellation()
-    guard activePartTransfers >= 3 else {
+    guard activePartTransfers >= Self.maximumConcurrentParts else {
       activePartTransfers += 1
       return
     }
@@ -629,7 +656,8 @@ public actor DurableUploadCoordinator: MediaUploading {
     waiter.continuation.resume(returning: false)
   }
 
-  private static func hashFile(at url: URL) throws -> (Int64, Data) {
+  @concurrent
+  private static func hashFile(at url: URL) async throws -> (Int64, Data) {
     let handle = try FileHandle(forReadingFrom: url)
     defer { try? handle.close() }
     var hash = SHA256()
@@ -644,11 +672,14 @@ public actor DurableUploadCoordinator: MediaUploading {
     return (byteCount, Data(hash.finalize()))
   }
 
-  private static func readPart(at url: URL, offset: UInt64, length: Int) throws -> Data {
+  @concurrent
+  private static func readPart(at url: URL, offset: UInt64, length: Int) async throws -> Data {
+    try Task.checkCancellation()
     let handle = try FileHandle(forReadingFrom: url)
     defer { try? handle.close() }
     try handle.seek(toOffset: offset)
     let data = try handle.read(upToCount: length) ?? Data()
+    try Task.checkCancellation()
     guard data.count == length else { throw NativeMediaUploadError.sourceChanged }
     return data
   }

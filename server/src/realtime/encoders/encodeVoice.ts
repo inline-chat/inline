@@ -27,6 +27,7 @@ export const encodeVoice = ({ voice }: { voice: DbFullVoice }): Voice | undefine
 
   return {
     id: BigInt(voice.id),
+    fileUniqueId: voice.file.fileUniqueId,
     date: encodeDateStrict(voice.date),
     duration: voice.duration ?? 0,
     size: voice.file.fileSize ?? 0,

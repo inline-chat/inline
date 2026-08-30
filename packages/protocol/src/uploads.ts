@@ -30,7 +30,8 @@ const boundedUploadProcessingRetrySeconds = (seconds: number): number =>
 
 export interface UploadByteSource {
   readonly byteCount: number
-  read(offset: number, length: number): Promise<Uint8Array>
+  /** Must settle on abort; keep underlying reads bounded in size and duration. */
+  read(offset: number, length: number, signal?: AbortSignal): Promise<Uint8Array>
 }
 
 export type NativeUploadInput = {
@@ -53,10 +54,11 @@ export type NativeUploadProgress = {
 }
 
 export interface NativeUploadRpcTransport {
-  create(input: CreateUploadInput): Promise<CreateUploadResult>
-  savePart(input: { uploadId: Uint8Array; partIndex: number; data: Uint8Array }): Promise<SaveUploadPartResult>
-  state(input: { uploadId: Uint8Array }): Promise<GetUploadStateResult>
-  finish(input: { uploadId: Uint8Array }): Promise<FinishUploadResult>
+  // Adapters own RPC deadlines and must settle when the supplied signal aborts.
+  create(input: CreateUploadInput, signal?: AbortSignal): Promise<CreateUploadResult>
+  savePart(input: { uploadId: Uint8Array; partIndex: number; data: Uint8Array }, signal?: AbortSignal): Promise<SaveUploadPartResult>
+  state(input: { uploadId: Uint8Array }, signal?: AbortSignal): Promise<GetUploadStateResult>
+  finish(input: { uploadId: Uint8Array }, signal?: AbortSignal): Promise<FinishUploadResult>
   cancel(input: { uploadId: Uint8Array }): Promise<CancelUploadResult>
 }
 
@@ -78,8 +80,10 @@ const randomUploadId = (): Uint8Array => {
   return bytes
 }
 
-const exactRead = async (source: UploadByteSource, offset: number, length: number): Promise<Uint8Array> => {
-  const bytes = await source.read(offset, length)
+const exactRead = async (source: UploadByteSource, offset: number, length: number, signal?: AbortSignal): Promise<Uint8Array> => {
+  if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
+  const bytes = await source.read(offset, length, signal)
+  if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
   if (bytes.length !== length) throw new NativeUploadError("source_changed", "Upload source changed while it was being read")
   return bytes
 }
@@ -89,7 +93,7 @@ const sourceHash = async (source: UploadByteSource, signal?: AbortSignal): Promi
   for (let offset = 0; offset < source.byteCount; offset += HASH_READ_SIZE) {
     if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
     const length = Math.min(HASH_READ_SIZE, source.byteCount - offset)
-    const bytes = await exactRead(source, offset, length)
+    const bytes = await exactRead(source, offset, length, signal)
     if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
     hash.update(bytes)
   }
@@ -111,11 +115,20 @@ const validatePartIndices = (indices: number[], partCount: number): void => {
   }
 }
 
+const reportProgress = (job: UploadJob): void => {
+  // Progress is an observer. Host callbacks cannot strand an admitted job or
+  // turn a durably accepted part into a failed transfer. Use signal to cancel.
+  try {
+    job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount })
+  } catch { /* A failed observer does not change transfer ownership. */ }
+}
+
 const delay = async (seconds: number, signal?: AbortSignal): Promise<void> => {
   if (signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
   await new Promise<void>((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timeout)
+      signal?.removeEventListener("abort", onAbort)
       reject(new NativeUploadError("canceled", "Upload was canceled"))
     }
     const timeout = setTimeout(() => {
@@ -123,12 +136,14 @@ const delay = async (seconds: number, signal?: AbortSignal): Promise<void> => {
       resolve()
     }, Math.max(1, seconds) * 1_000)
     signal?.addEventListener("abort", onAbort, { once: true })
+    if (signal?.aborted) onAbort()
   })
 }
 
 export class NativeUploadClient {
   readonly #jobs: UploadJob[] = []
   #active = 0
+  #finishing = 0
   #cursor = 0
 
   constructor(
@@ -163,9 +178,9 @@ export class NativeUploadClient {
         : input.metadata?.kind === "voice"
           ? { oneofKind: "voice", voice: input.metadata.value }
           : { oneofKind: undefined },
-    })
-    if (created.uploadId.length !== 16 || created.partSize < 1 ||
-        created.partSize > MAX_NEGOTIATED_PART_SIZE || created.partCount < 1 ||
+    }, input.signal)
+    if (created.uploadId.length !== 16 || !Number.isSafeInteger(created.partSize) || created.partSize < 1 ||
+        created.partSize > MAX_NEGOTIATED_PART_SIZE || !Number.isSafeInteger(created.partCount) || created.partCount < 1 ||
         created.partCount !== Math.ceil(input.source.byteCount / created.partSize) ||
         created.acceptedParts.some((index) => !Number.isInteger(index) || index < 0 || index >= created.partCount)) {
       throw new NativeUploadError("protocol", "Server returned invalid upload geometry")
@@ -193,7 +208,7 @@ export class NativeUploadClient {
         this.#abort(job)
         return
       }
-      input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: input.source.byteCount })
+      reportProgress(job)
       if (!job.settled) this.#pump()
     })
   }
@@ -211,6 +226,11 @@ export class NativeUploadClient {
       selected.active += 1
       this.#active += 1
       void this.#sendPart(selected, partIndex)
+    }
+    // A resumed create may already acknowledge every part. It needs no transfer
+    // permit, but still needs finish to reconcile processing/completion.
+    for (const job of this.#jobs) {
+      if (!job.settled && job.active === 0 && this.#nextPart(job) === undefined) void this.#finish(job)
     }
   }
 
@@ -238,12 +258,12 @@ export class NativeUploadClient {
       if (job.input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
       const offset = partIndex * job.upload.partSize
       const length = Math.min(job.upload.partSize, job.input.source.byteCount - offset)
-      const data = await exactRead(job.input.source, offset, length)
+      const data = await exactRead(job.input.source, offset, length, job.input.signal)
       if (job.settled) return
       await this.#savePart(job, partIndex, data)
       if (job.settled) return
       job.accepted.add(partIndex)
-      job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount })
+      reportProgress(job)
     } catch (error) {
       if (!job.settled && !job.input.signal?.aborted) {
         this.#reject(job, error)
@@ -263,7 +283,7 @@ export class NativeUploadClient {
         throw new NativeUploadError("canceled", "Upload was canceled")
       }
       try {
-        await this.rpc.savePart({ uploadId: job.upload.uploadId, partIndex, data })
+        await this.rpc.savePart({ uploadId: job.upload.uploadId, partIndex, data }, job.input.signal)
         return
       } catch (error) {
         if (job.settled || job.input.signal?.aborted) {
@@ -271,7 +291,7 @@ export class NativeUploadClient {
         }
         let state: GetUploadStateResult
         try {
-          state = await this.rpc.state({ uploadId: job.upload.uploadId })
+          state = await this.rpc.state({ uploadId: job.upload.uploadId }, job.input.signal)
         } catch {
           throw error
         }
@@ -283,7 +303,8 @@ export class NativeUploadClient {
   }
 
   async #finish(job: UploadJob): Promise<void> {
-    if (job.settled || job.active > 0) return
+    if (job.settled || job.active !== 0 || this.#finishing >= this.globalConcurrency) return
+    this.#finishing += 1
     job.active = -1
     let reconciliationAttempts = 0
     try {
@@ -291,14 +312,14 @@ export class NativeUploadClient {
         if (job.input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
         let result: FinishUploadResult
         try {
-          result = await this.rpc.finish({ uploadId: job.upload.uploadId })
+          result = await this.rpc.finish({ uploadId: job.upload.uploadId }, job.input.signal)
         } catch (error) {
           if (job.input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
           if (++reconciliationAttempts > MAX_FINISH_RECONCILIATION_ATTEMPTS) throw error
 
           let state: GetUploadStateResult
           try {
-            state = await this.rpc.state({ uploadId: job.upload.uploadId })
+            state = await this.rpc.state({ uploadId: job.upload.uploadId }, job.input.signal)
           } catch {
             throw error
           }
@@ -344,6 +365,9 @@ export class NativeUploadClient {
               `Upload finalization failed with code ${result.state.failed.code}`,
             )
           case "missing":
+            if (result.state.missing.partIndices.length === 0) {
+              throw new NativeUploadError("protocol", "Server returned an empty missing-parts result")
+            }
             validatePartIndices(result.state.missing.partIndices, job.upload.partCount)
             for (const index of result.state.missing.partIndices) job.accepted.delete(index)
             job.active = 0
@@ -361,6 +385,9 @@ export class NativeUploadClient {
       }
     } catch (error) {
       this.#reject(job, error)
+    } finally {
+      this.#finishing -= 1
+      this.#pump()
     }
   }
 
@@ -401,25 +428,25 @@ export const uploadByteSource = (value: Blob | Uint8Array | ArrayBuffer): Upload
 }
 
 export const rpcUploadTransport = (
-  call: (method: Method, input: import("./core.js").RpcCall["input"]) => Promise<import("./core.js").RpcResult["result"]>,
+  call: (method: Method, input: import("./core.js").RpcCall["input"], signal?: AbortSignal) => Promise<import("./core.js").RpcResult["result"]>,
 ): NativeUploadRpcTransport => ({
-  create: async (input) => {
-    const result = await call(Method.CREATE_UPLOAD, { oneofKind: "createUpload", createUpload: input })
+  create: async (input, signal) => {
+    const result = await call(Method.CREATE_UPLOAD, { oneofKind: "createUpload", createUpload: input }, signal)
     if (result.oneofKind !== "createUpload") throw new NativeUploadError("protocol", "Unexpected createUpload result")
     return result.createUpload
   },
-  savePart: async (input) => {
-    const result = await call(Method.SAVE_UPLOAD_PART, { oneofKind: "saveUploadPart", saveUploadPart: input })
+  savePart: async (input, signal) => {
+    const result = await call(Method.SAVE_UPLOAD_PART, { oneofKind: "saveUploadPart", saveUploadPart: input }, signal)
     if (result.oneofKind !== "saveUploadPart") throw new NativeUploadError("protocol", "Unexpected saveUploadPart result")
     return result.saveUploadPart
   },
-  state: async (input) => {
-    const result = await call(Method.GET_UPLOAD_STATE, { oneofKind: "getUploadState", getUploadState: input })
+  state: async (input, signal) => {
+    const result = await call(Method.GET_UPLOAD_STATE, { oneofKind: "getUploadState", getUploadState: input }, signal)
     if (result.oneofKind !== "getUploadState") throw new NativeUploadError("protocol", "Unexpected getUploadState result")
     return result.getUploadState
   },
-  finish: async (input) => {
-    const result = await call(Method.FINISH_UPLOAD, { oneofKind: "finishUpload", finishUpload: input })
+  finish: async (input, signal) => {
+    const result = await call(Method.FINISH_UPLOAD, { oneofKind: "finishUpload", finishUpload: input }, signal)
     if (result.oneofKind !== "finishUpload") throw new NativeUploadError("protocol", "Unexpected finishUpload result")
     return result.finishUpload
   },

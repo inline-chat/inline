@@ -545,8 +545,10 @@ export class InlineUploadRepository {
       const upload = { ...row, acceptedParts: parts.map(({ partIndex }) => partIndex) }
       if (row.status === "complete") return { kind: "complete", upload } as const
       if (row.status === "failed") return { kind: "failed", upload } as const
-      if (row.status === "processing" && row.lockedAt &&
-          row.lockedAt > new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS)) {
+      if (row.status === "processing" && (
+        (row.lockToken !== null && row.lockedAt === null) ||
+        (row.lockedAt && row.lockedAt > new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS))
+      )) {
         return { kind: "processing" } as const
       }
       const accepted = new Set(parts.map(({ partIndex }) => partIndex))
@@ -751,8 +753,8 @@ export class InlineUploadRepository {
     lockToken: Uint8Array
     code: string
     retryable: boolean
-  }): Promise<void> {
-    await db.update(inlineUploads).set({
+  }): Promise<boolean> {
+    const rows = await db.update(inlineUploads).set({
       status: "failed",
       failureCode: input.code,
       failureRetryable: input.retryable,
@@ -762,11 +764,12 @@ export class InlineUploadRepository {
       eq(inlineUploads.id, input.uploadDbId),
       eq(inlineUploads.status, "processing"),
       eq(inlineUploads.lockToken, Buffer.from(input.lockToken)),
-    ))
+    )).returning({ id: inlineUploads.id })
+    return rows.length === 1
   }
 
-  async release(input: { uploadDbId: number; lockToken: Uint8Array }): Promise<void> {
-    await db.update(inlineUploads).set({
+  async release(input: { uploadDbId: number; lockToken: Uint8Array }): Promise<boolean> {
+    const rows = await db.update(inlineUploads).set({
       status: "uploading",
       lockToken: null,
       lockedAt: null,
@@ -774,7 +777,8 @@ export class InlineUploadRepository {
       eq(inlineUploads.id, input.uploadDbId),
       eq(inlineUploads.status, "processing"),
       eq(inlineUploads.lockToken, Buffer.from(input.lockToken)),
-    ))
+    )).returning({ id: inlineUploads.id })
+    return rows.length === 1
   }
 
   async cancel(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<{
@@ -812,7 +816,11 @@ export class InlineUploadRepository {
   async listExpired(limit = 100): Promise<Array<{ id: number }>> {
     const now = new Date()
     return db.select({ id: inlineUploads.id }).from(inlineUploads)
-      .where(or(lt(inlineUploads.expiresAt, now), lt(inlineUploads.hardExpiresAt, now)))
+      .where(and(
+        or(lt(inlineUploads.expiresAt, now), lt(inlineUploads.hardExpiresAt, now)),
+        or(isNull(inlineUploads.lockToken),
+          lt(inlineUploads.lockedAt, new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS))),
+      ))
       .orderBy(asc(inlineUploads.expiresAt))
       .limit(limit)
   }
@@ -833,21 +841,26 @@ export class InlineUploadRepository {
       const [row] = await tx.select().from(inlineUploads)
         .where(eq(inlineUploads.id, uploadDbId)).for("update").limit(1)
       if (!row || (row.expiresAt > now && row.hardExpiresAt > now)) return undefined
-      if (row.status === "processing" && row.lockedAt &&
-          row.lockedAt > new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS)) {
+      // Processing and cleanup use the same lease fields. A fresh cleanup
+      // owner must not be stolen by another process while it deletes parts.
+      if (row.lockToken && (!row.lockedAt ||
+          row.lockedAt > new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS))) {
         return undefined
       }
+      // Completion is durable even if cleanup only partly succeeds. Older
+      // cleanup attempts may have changed status but retained resultMediaId.
+      const completed = row.status === "complete" || row.resultMediaId !== null
       const cleanupToken = randomBytes(32)
       const [claimed] = await tx.update(inlineUploads).set({
-        status: "canceled",
-        canceledAt: row.canceledAt ?? now,
+        status: completed ? "complete" : "canceled",
+        canceledAt: completed ? row.canceledAt : row.canceledAt ?? now,
         lockToken: cleanupToken,
         lockedAt: now,
       }).where(eq(inlineUploads.id, uploadDbId)).returning({ id: inlineUploads.id })
       return claimed
         ? {
           cleanupToken: Uint8Array.from(cleanupToken),
-          upload: { ...row, acceptedParts: [] },
+          upload: { ...row, status: completed ? "complete" : row.status, acceptedParts: [] },
         }
         : undefined
     })
@@ -856,7 +869,7 @@ export class InlineUploadRepository {
   async removeCleanupClaim(uploadDbId: number, cleanupToken: Uint8Array): Promise<boolean> {
     const rows = await db.delete(inlineUploads).where(and(
       eq(inlineUploads.id, uploadDbId),
-      eq(inlineUploads.status, "canceled"),
+      inArray(inlineUploads.status, ["canceled", "complete"]),
       eq(inlineUploads.lockToken, Buffer.from(cleanupToken)),
     )).returning({ id: inlineUploads.id })
     return rows.length === 1

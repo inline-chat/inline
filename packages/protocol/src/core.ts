@@ -3113,6 +3113,12 @@ export interface Video {
      * @generated from protobuf field: optional bool has_audio = 10;
      */
     hasAudio?: boolean;
+    /**
+     * Immutable original file identity for opt-in getFilePart downloads.
+     *
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
 }
 /**
  * @generated from protobuf message Document
@@ -3158,6 +3164,10 @@ export interface Document {
      * @generated from protobuf field: optional Photo photo = 7;
      */
     photo?: Photo;
+    /**
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
 }
 /**
  * @generated from protobuf message Voice
@@ -3203,6 +3213,10 @@ export interface Voice {
      * @generated from protobuf field: bytes waveform = 7;
      */
     waveform: Uint8Array;
+    /**
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
 }
 /**
  * Photo for message media, profile photo, space photo, or chat photo
@@ -3260,6 +3274,12 @@ export enum Photo_Format {
  * @generated from protobuf message PhotoSize
  */
 export interface PhotoSize {
+    /**
+     * Identity of this exact stored size. Absent for embedded stripped bytes.
+     *
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
     /**
      * * Thumbnail type.
      * Currently supported:
@@ -4237,6 +4257,12 @@ export interface RpcCall {
          */
         setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledInput;
     } | {
+        oneofKind: "getFilePart";
+        /**
+         * @generated from protobuf field: GetFilePartInput getFilePart = 137;
+         */
+        getFilePart: GetFilePartInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5055,6 +5081,12 @@ export interface RpcResult {
          * @generated from protobuf field: SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
          */
         setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledResult;
+    } | {
+        oneofKind: "getFilePart";
+        /**
+         * @generated from protobuf field: GetFilePartResult getFilePart = 137;
+         */
+        getFilePart: GetFilePartResult;
     } | {
         oneofKind: undefined;
     };
@@ -12308,6 +12340,70 @@ export interface CancelUploadResult {
     alreadyTerminal: boolean;
 }
 /**
+ * Provenance for a file received in a message. Authorization is checked on
+ * every range request; neither the file ID nor this locator grants access.
+ *
+ * @generated from protobuf message FileMessageLocation
+ */
+export interface FileMessageLocation {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 message_id = 2;
+     */
+    messageId: bigint;
+}
+/**
+ * @generated from protobuf message GetFilePartInput
+ */
+export interface GetFilePartInput {
+    /**
+     * @generated from protobuf field: string file_unique_id = 1;
+     */
+    fileUniqueId: string;
+    /**
+     * @generated from protobuf field: uint64 offset = 2;
+     */
+    offset: bigint;
+    /**
+     * 1..524288 bytes. The final range may be shorter; offset == size is EOF.
+     *
+     * @generated from protobuf field: uint32 limit = 3;
+     */
+    limit: number;
+    /**
+     * Required for files the authenticated user does not own.
+     *
+     * @generated from protobuf field: optional FileMessageLocation message = 4;
+     */
+    message?: FileMessageLocation;
+}
+/**
+ * @generated from protobuf message GetFilePartResult
+ */
+export interface GetFilePartResult {
+    /**
+     * @generated from protobuf field: uint64 offset = 1;
+     */
+    offset: bigint;
+    /**
+     * @generated from protobuf field: uint64 total_size = 2;
+     */
+    totalSize: bigint;
+    /**
+     * @generated from protobuf field: bytes data = 3;
+     */
+    data: Uint8Array;
+    /**
+     * SHA-256 of data (including the empty range at EOF).
+     *
+     * @generated from protobuf field: bytes sha256 = 4;
+     */
+    sha256: Uint8Array;
+}
+/**
  * @generated from protobuf enum DialogFollowMode
  */
 export enum DialogFollowMode {
@@ -13036,7 +13132,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SET_SPACE_INVITE_LINK_ENABLED = 135;
      */
-    SET_SPACE_INVITE_LINK_ENABLED = 135
+    SET_SPACE_INVITE_LINK_ENABLED = 135,
+    /**
+     * @generated from protobuf enum value: GET_FILE_PART = 136;
+     */
+    GET_FILE_PART = 136
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -21006,7 +21106,8 @@ class Video$Type extends MessageType<Video> {
             { no: 7, name: "photo", kind: "message", T: () => Photo },
             { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "is_animated", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Video>): Video {
@@ -21056,6 +21157,9 @@ class Video$Type extends MessageType<Video> {
                 case /* optional bool has_audio */ 10:
                     message.hasAudio = reader.bool();
                     break;
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21098,6 +21202,9 @@ class Video$Type extends MessageType<Video> {
         /* optional bool has_audio = 10; */
         if (message.hasAudio !== undefined)
             writer.tag(10, WireType.Varint).bool(message.hasAudio);
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21118,7 +21225,8 @@ class Document$Type extends MessageType<Document> {
             { no: 4, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 7, name: "photo", kind: "message", T: () => Photo }
+            { no: 7, name: "photo", kind: "message", T: () => Photo },
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Document>): Document {
@@ -21158,6 +21266,9 @@ class Document$Type extends MessageType<Document> {
                 case /* optional Photo photo */ 7:
                     message.photo = Photo.internalBinaryRead(reader, reader.uint32(), options, message.photo);
                     break;
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21191,6 +21302,9 @@ class Document$Type extends MessageType<Document> {
         /* optional Photo photo = 7; */
         if (message.photo)
             Photo.internalBinaryWrite(message.photo, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21211,7 +21325,8 @@ class Voice$Type extends MessageType<Voice> {
             { no: 4, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 7, name: "waveform", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+            { no: 7, name: "waveform", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Voice>): Voice {
@@ -21252,6 +21367,9 @@ class Voice$Type extends MessageType<Voice> {
                 case /* bytes waveform */ 7:
                     message.waveform = reader.bytes();
                     break;
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21285,6 +21403,9 @@ class Voice$Type extends MessageType<Voice> {
         /* bytes waveform = 7; */
         if (message.waveform.length)
             writer.tag(7, WireType.LengthDelimited).bytes(message.waveform);
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21377,6 +21498,7 @@ export const Photo = new Photo$Type();
 class PhotoSize$Type extends MessageType<PhotoSize> {
     constructor() {
         super("PhotoSize", [
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 1, name: "type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "w", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "h", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
@@ -21400,6 +21522,9 @@ class PhotoSize$Type extends MessageType<PhotoSize> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 case /* string type */ 1:
                     message.type = reader.string();
                     break;
@@ -21430,6 +21555,9 @@ class PhotoSize$Type extends MessageType<PhotoSize> {
         return message;
     }
     internalBinaryWrite(message: PhotoSize, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         /* string type = 1; */
         if (message.type !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.type);
@@ -21667,7 +21795,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 133, name: "deleteBotAgent", kind: "message", oneof: "input", T: () => DeleteBotAgentInput },
             { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "input", T: () => JoinSpaceByInviteTokenInput },
             { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "input", T: () => GetSpaceInviteLinkInput },
-            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "input", T: () => SetSpaceInviteLinkEnabledInput }
+            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "input", T: () => SetSpaceInviteLinkEnabledInput },
+            { no: 137, name: "getFilePart", kind: "message", oneof: "input", T: () => GetFilePartInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -22490,6 +22619,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setSpaceInviteLinkEnabled)
                     };
                     break;
+                case /* GetFilePartInput getFilePart */ 137:
+                    message.input = {
+                        oneofKind: "getFilePart",
+                        getFilePart: GetFilePartInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getFilePart)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22907,6 +23042,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136; */
         if (message.input.oneofKind === "setSpaceInviteLinkEnabled")
             SetSpaceInviteLinkEnabledInput.internalBinaryWrite(message.input.setSpaceInviteLinkEnabled, writer.tag(136, WireType.LengthDelimited).fork(), options).join();
+        /* GetFilePartInput getFilePart = 137; */
+        if (message.input.oneofKind === "getFilePart")
+            GetFilePartInput.internalBinaryWrite(message.input.getFilePart, writer.tag(137, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23055,7 +23193,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 133, name: "deleteBotAgent", kind: "message", oneof: "result", T: () => DeleteBotAgentResult },
             { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "result", T: () => JoinSpaceByInviteTokenResult },
             { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "result", T: () => GetSpaceInviteLinkResult },
-            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "result", T: () => SetSpaceInviteLinkEnabledResult }
+            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "result", T: () => SetSpaceInviteLinkEnabledResult },
+            { no: 137, name: "getFilePart", kind: "message", oneof: "result", T: () => GetFilePartResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -23878,6 +24017,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setSpaceInviteLinkEnabled)
                     };
                     break;
+                case /* GetFilePartResult getFilePart */ 137:
+                    message.result = {
+                        oneofKind: "getFilePart",
+                        getFilePart: GetFilePartResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getFilePart)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24295,6 +24440,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136; */
         if (message.result.oneofKind === "setSpaceInviteLinkEnabled")
             SetSpaceInviteLinkEnabledResult.internalBinaryWrite(message.result.setSpaceInviteLinkEnabled, writer.tag(136, WireType.LengthDelimited).fork(), options).join();
+        /* GetFilePartResult getFilePart = 137; */
+        if (message.result.oneofKind === "getFilePart")
+            GetFilePartResult.internalBinaryWrite(message.result.getFilePart, writer.tag(137, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -47224,3 +47372,199 @@ class CancelUploadResult$Type extends MessageType<CancelUploadResult> {
  * @generated MessageType for protobuf message CancelUploadResult
  */
 export const CancelUploadResult = new CancelUploadResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FileMessageLocation$Type extends MessageType<FileMessageLocation> {
+    constructor() {
+        super("FileMessageLocation", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FileMessageLocation>): FileMessageLocation {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.messageId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<FileMessageLocation>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FileMessageLocation): FileMessageLocation {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 message_id */ 2:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FileMessageLocation, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 message_id = 2; */
+        if (message.messageId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.messageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message FileMessageLocation
+ */
+export const FileMessageLocation = new FileMessageLocation$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetFilePartInput$Type extends MessageType<GetFilePartInput> {
+    constructor() {
+        super("GetFilePartInput", [
+            { no: 1, name: "file_unique_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "offset", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "limit", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "message", kind: "message", T: () => FileMessageLocation }
+        ]);
+    }
+    create(value?: PartialMessage<GetFilePartInput>): GetFilePartInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.fileUniqueId = "";
+        message.offset = 0n;
+        message.limit = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GetFilePartInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetFilePartInput): GetFilePartInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string file_unique_id */ 1:
+                    message.fileUniqueId = reader.string();
+                    break;
+                case /* uint64 offset */ 2:
+                    message.offset = reader.uint64().toBigInt();
+                    break;
+                case /* uint32 limit */ 3:
+                    message.limit = reader.uint32();
+                    break;
+                case /* optional FileMessageLocation message */ 4:
+                    message.message = FileMessageLocation.internalBinaryRead(reader, reader.uint32(), options, message.message);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetFilePartInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string file_unique_id = 1; */
+        if (message.fileUniqueId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.fileUniqueId);
+        /* uint64 offset = 2; */
+        if (message.offset !== 0n)
+            writer.tag(2, WireType.Varint).uint64(message.offset);
+        /* uint32 limit = 3; */
+        if (message.limit !== 0)
+            writer.tag(3, WireType.Varint).uint32(message.limit);
+        /* optional FileMessageLocation message = 4; */
+        if (message.message)
+            FileMessageLocation.internalBinaryWrite(message.message, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetFilePartInput
+ */
+export const GetFilePartInput = new GetFilePartInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetFilePartResult$Type extends MessageType<GetFilePartResult> {
+    constructor() {
+        super("GetFilePartResult", [
+            { no: 1, name: "offset", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "total_size", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 4, name: "sha256", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetFilePartResult>): GetFilePartResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.offset = 0n;
+        message.totalSize = 0n;
+        message.data = new Uint8Array(0);
+        message.sha256 = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<GetFilePartResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetFilePartResult): GetFilePartResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint64 offset */ 1:
+                    message.offset = reader.uint64().toBigInt();
+                    break;
+                case /* uint64 total_size */ 2:
+                    message.totalSize = reader.uint64().toBigInt();
+                    break;
+                case /* bytes data */ 3:
+                    message.data = reader.bytes();
+                    break;
+                case /* bytes sha256 */ 4:
+                    message.sha256 = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetFilePartResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint64 offset = 1; */
+        if (message.offset !== 0n)
+            writer.tag(1, WireType.Varint).uint64(message.offset);
+        /* uint64 total_size = 2; */
+        if (message.totalSize !== 0n)
+            writer.tag(2, WireType.Varint).uint64(message.totalSize);
+        /* bytes data = 3; */
+        if (message.data.length)
+            writer.tag(3, WireType.LengthDelimited).bytes(message.data);
+        /* bytes sha256 = 4; */
+        if (message.sha256.length)
+            writer.tag(4, WireType.LengthDelimited).bytes(message.sha256);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetFilePartResult
+ */
+export const GetFilePartResult = new GetFilePartResult$Type();

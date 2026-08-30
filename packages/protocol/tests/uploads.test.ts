@@ -4,14 +4,14 @@ import {
   GetUploadStateResult,
   SaveUploadPartInput,
   UploadFailure_Code,
-} from "../src/core"
+} from "../src/core.js"
 import {
   NativeUploadClient,
   UploadKind,
   UploadStatus,
   uploadByteSource,
   type NativeUploadRpcTransport,
-} from "../src/uploads"
+} from "../src/uploads.js"
 
 class MemoryUploadTransport implements NativeUploadRpcTransport {
   readonly accepted = new Map<string, Set<number>>()
@@ -74,7 +74,7 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
     }
   }
 
-  async finish(input: { uploadId: Uint8Array }) {
+  async finish(input: { uploadId: Uint8Array }): Promise<FinishUploadResult> {
     this.finishCalls += 1
     if (this.failFinishOnce) {
       this.failFinishOnce = false
@@ -86,7 +86,7 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
     return {
       state: {
         oneofKind: "complete" as const,
-        complete: { fileUniqueId: `file-${id}`, media: { oneofKind: undefined as const } },
+        complete: { fileUniqueId: `file-${id}`, media: { oneofKind: undefined } },
       },
     }
   }
@@ -123,6 +123,122 @@ const deferred = () => {
 }
 
 describe("native upload coordinator", () => {
+  test("finishes a fully acknowledged resume without sending any parts", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.acceptedPartsOverride = [0, 1, 2]
+    const result = await new NativeUploadClient(transport).upload(input(35))
+    expect(result.fileUniqueId).toStartWith("file-")
+    expect(transport.partCalls).toHaveLength(0)
+    expect(transport.finishCalls).toBe(1)
+  })
+
+  test("rejects an empty missing-parts response instead of stalling", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.finishResponses.push({ state: { oneofKind: "missing", missing: { partIndices: [] } } })
+    await expect(new NativeUploadClient(transport).upload(input(36))).rejects.toThrow("empty missing-parts")
+  })
+
+  test("bounds finish RPCs when many fully acknowledged uploads resume together", async () => {
+    const reachedLimit = deferred()
+    const release = deferred()
+    let active = 0
+    let maximum = 0
+    class SlowFinishTransport extends MemoryUploadTransport {
+      override async finish(value: { uploadId: Uint8Array }) {
+        active += 1
+        maximum = Math.max(maximum, active)
+        if (active === 3) reachedLimit.resolve()
+        try {
+          await release.promise
+          return await super.finish(value)
+        } finally { active -= 1 }
+      }
+    }
+    const transport = new SlowFinishTransport()
+    transport.acceptedPartsOverride = [0, 1, 2]
+    const client = new NativeUploadClient(transport, 3)
+    const uploads = Promise.all(Array.from({ length: 12 }, (_, index) => client.upload(input(40 + index))))
+    await reachedLimit.promise
+    expect(maximum).toBe(3)
+    release.resolve()
+    expect(await uploads).toHaveLength(12)
+    expect(maximum).toBe(3)
+    expect(transport.finishCalls).toBe(12)
+    expect(transport.partCalls).toHaveLength(0)
+  })
+
+  test("cancellation settles a pending source read before reusing its transfer permit", async () => {
+    const transport = new MemoryUploadTransport()
+    const started = deferred()
+    const controller = new AbortController()
+    let reads = 0
+    const client = new NativeUploadClient(transport, 1, 1)
+    const upload = client.upload({
+      ...input(37), signal: controller.signal,
+      source: {
+        byteCount: 12,
+        async read(_offset, length, signal) {
+          if (++reads === 1) return new Uint8Array(length)
+          started.resolve()
+          return await new Promise((_resolve, reject) => {
+            const abort = () => reject(signal!.reason)
+            signal!.addEventListener("abort", abort, { once: true })
+            if (signal!.aborted) abort()
+          })
+        },
+      },
+    })
+    await started.promise
+    controller.abort()
+    await expect(upload).rejects.toThrow("canceled")
+    expect((await client.upload(input(38))).fileUniqueId).toStartWith("file-")
+    expect(transport.partCalls).toHaveLength(3)
+  })
+
+  test("a throwing progress observer cannot strand or fail an upload", async () => {
+    const transport = new MemoryUploadTransport()
+    const result = await new NativeUploadClient(transport).upload({
+      ...input(31), onProgress() { throw new Error("observer failed") },
+    })
+    expect(result.fileUniqueId).toStartWith("file-")
+    expect(transport.partCalls).toHaveLength(3)
+    expect(transport.finishCalls).toBe(1)
+  })
+
+  test("rejects fractional negotiated geometry before sending parts", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.partSize = 4.5
+    await expect(new NativeUploadClient(transport).upload(input(32))).rejects.toThrow("geometry")
+    expect(transport.partCalls).toHaveLength(0)
+  })
+
+  test("forwards cancellation to in-flight parts and releases capacity after settlement", async () => {
+    const transport = new MemoryUploadTransport()
+    const started = deferred()
+    const savePart = transport.savePart.bind(transport)
+    let stall = true
+    const client = new NativeUploadClient({
+      create: transport.create.bind(transport), state: transport.state.bind(transport),
+      finish: transport.finish.bind(transport), cancel: transport.cancel.bind(transport),
+      async savePart(value, signal) {
+        if (!stall) return savePart(value)
+        started.resolve()
+        return await new Promise((_resolve, reject) => {
+          const abort = () => reject(signal!.reason)
+          signal!.addEventListener("abort", abort, { once: true })
+          if (signal!.aborted) abort()
+        })
+      },
+    }, 1, 1)
+    const controller = new AbortController()
+    const upload = client.upload({ ...input(33), signal: controller.signal })
+    await started.promise
+    controller.abort()
+    await expect(upload).rejects.toThrow("canceled")
+    stall = false
+    expect((await client.upload(input(34))).fileUniqueId).toStartWith("file-")
+  })
+
   test("bounds authenticated processing retry hints", async () => {
     const transport = new MemoryUploadTransport()
     transport.partSize = 12
@@ -133,10 +249,11 @@ describe("native upload coordinator", () => {
         })),
     )
     const delays: number[] = []
-    const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation((callback, milliseconds) => {
+    const timerHost: { setTimeout: (...args: Parameters<typeof setTimeout>) => ReturnType<typeof setTimeout> } = globalThis
+    const realTimeout = timerHost.setTimeout
+    const timeoutSpy = spyOn(timerHost, "setTimeout").mockImplementation((callback, milliseconds, ...rest) => {
       delays.push(milliseconds ?? 0)
-      if (typeof callback === "function") callback()
-      return 0 as unknown as ReturnType<typeof setTimeout>
+      return realTimeout(callback, 0, ...rest)
     })
 
     try {
