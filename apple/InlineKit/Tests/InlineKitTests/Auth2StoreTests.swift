@@ -207,6 +207,38 @@ final class Auth2StoreTests {
     #expect(UserDefaults.standard.object(forKey: h.userDefaultsKey) == nil)
   }
 
+  @Test("bearer identity mismatch cannot publish a different local account", arguments: [false, true])
+  func bearerIdentityMismatchRequiresReauthentication(hasV2Record: Bool) throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    UserDefaults.standard.set(7, forKey: h.userDefaultsKey)
+    AuthKeychainConfig.mockSet("8:other-account", forKey: "token", namespace: h.namespace)
+    if hasV2Record {
+      let data = try JSONEncoder().encode(AuthCredentials(userId: 7, token: "8:other-account"))
+      AuthKeychainConfig.mockSet(data, forKey: "credentials_v2", namespace: h.namespace)
+    }
+    let (cache, _) = h.makeStore()
+    #expect(cache.snapshot().status == .reauthRequired(userIdHint: 7))
+    #expect(cache.snapshot().token == nil)
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == "8:other-account")
+  }
+
+  @Test("bearer writes reject mismatched identity while preserving opaque legacy compatibility")
+  func bearerWriterValidatesKnownIdentity() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let (cache, store) = h.makeStore()
+    await #expect(throws: AuthStorageError.self) {
+      try await store.saveCredentials(token: "8:other-account", userId: 7)
+    }
+    #expect(cache.snapshot().token == nil)
+    #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: h.namespace) == nil)
+    try await store.saveCredentials(token: "legacy-opaque-token", userId: 7)
+    #expect(cache.snapshot().token == "legacy-opaque-token")
+  }
+
   @Test("saving V3 credentials removes bearer authority")
   func savingV3RemovesBearerAuthority() async throws {
     let h = Harness()
@@ -323,6 +355,71 @@ final class Auth2StoreTests {
     #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == "7:legacy")
     #expect(AuthKeychainConfig.mockGetData("credentials_v2", namespace: h.namespace) == v2)
     #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == v3)
+  }
+
+  @Test("malformed V3 authority requires reauthentication without bearer fallback", arguments: [
+    "keyLength", "keyID", "permanentRole", "permanentExpiry", "userID", "sessionID", "temporaryRole", "invalidJSON",
+  ], [false, true])
+  func malformedV3AuthorityFailsClosed(defect: String, hasBearer: Bool) throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(v3Credentials())) as? [String: Any])
+    var permanent = try #require(value["permanent"] as? [String: Any])
+    switch defect {
+    case "keyLength": permanent["key"] = [1, 2, 3]
+    case "keyID": permanent["keyID"] = Array(repeating: 0, count: 8)
+    case "permanentRole": permanent["temporary"] = true
+    case "permanentExpiry": permanent["expiresAt"] = 1
+    case "userID": value["userId"] = 0
+    case "sessionID": value["accountSessionId"] = -1
+    case "temporaryRole": value["temporary"] = permanent
+    default: break
+    }
+    value["permanent"] = permanent
+    let data = try defect == "invalidJSON" ? Data("{invalid".utf8) : JSONSerialization.data(withJSONObject: value)
+    AuthKeychainConfig.mockSet(data, forKey: "inline_protocol_credentials_v1", namespace: h.namespace)
+    if hasBearer {
+      AuthKeychainConfig.mockSet("7:stale-bearer", forKey: "token", namespace: h.namespace)
+    }
+
+    let (cache, _) = h.makeStore()
+    #expect(cache.snapshot().status == .reauthRequired(userIdHint: nil))
+    #expect(cache.snapshot().inlineProtocol == nil)
+    #expect(cache.snapshot().token == nil)
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == data)
+    #expect(AuthKeychainConfig.mockGetString("token", namespace: h.namespace) == (hasBearer ? "7:stale-bearer" : nil))
+  }
+
+  @Test("expired temporary authorization preserves recoverable permanent authority")
+  func expiredTemporaryAuthorityRemainsRecoverable() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    var credentials = try v3Credentials()
+    let key = Array(repeating: UInt8(7), count: 256)
+    credentials.temporary = try InlineProtocolAuthorization(
+      key: key, keyID: InlineSecureTransport.authKeyID(key), serverSalt: 7,
+      temporary: true, expiresAt: 1
+    )
+    let (_, store) = h.makeStore()
+    try await store.saveInlineProtocolCredentials(credentials)
+    let (cache, _) = h.makeStore()
+    #expect(cache.snapshot().status == .authenticatedV3(userId: 42))
+    #expect(cache.snapshot().inlineProtocol == credentials)
+  }
+
+  @Test("invalid V3 identity cannot be published by a credential writer")
+  func invalidV3IdentityIsNotPersisted() async throws {
+    let h = Harness()
+    h.resetStorage()
+    defer { h.resetStorage() }
+    let (cache, store) = h.makeStore()
+    await #expect(throws: AuthStorageError.self) {
+      try await store.saveInlineProtocolCredentials(self.v3Credentials(userID: 0))
+    }
+    #expect(cache.snapshot().inlineProtocol == nil)
+    #expect(AuthKeychainConfig.mockGetData("inline_protocol_credentials_v1", namespace: h.namespace) == nil)
   }
 
   @Test("launch repair remains read-only when the userId hint is missing")

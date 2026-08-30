@@ -26,7 +26,7 @@ final class AuthRealtimeIntegrationTests {
     let initialMessages = await transport.sentMessages
     #expect(initialMessages.isEmpty)
 
-    let token = "1:integrationToken"
+    let token = "42:integrationToken"
     let userId: Int64 = 42
     try await auth.saveCredentials(token: token, userId: userId)
 

@@ -30,6 +30,27 @@ public struct InlineProtocolSessionCredentials: Sendable, Codable, Equatable {
     self.temporary = temporary
     self.createdAt = createdAt
   }
+
+  func validate() throws {
+    guard userId > 0, accountSessionId > 0,
+          !permanent.temporary, permanent.expiresAt == nil
+    else { throw InlineProtocolError.invalidInput }
+    _ = try InlineProtocolAuthorization(
+      key: permanent.key, keyID: permanent.keyID, serverSalt: permanent.serverSalt,
+      temporary: permanent.temporary, expiresAt: permanent.expiresAt
+    )
+    if let temporary {
+      guard temporary.temporary, let expiresAt = temporary.expiresAt, expiresAt > 0 else {
+        throw InlineProtocolError.invalidInput
+      }
+      _ = try InlineProtocolAuthorization(
+        key: temporary.key, keyID: temporary.keyID, serverSalt: temporary.serverSalt,
+        temporary: temporary.temporary, expiresAt: temporary.expiresAt
+      )
+      // An expired, well-formed temporary key is recoverable using the permanent
+      // authority. Do not use local wall time to invalidate that account.
+    }
+  }
 }
 
 public enum AuthStorageError: Error, LocalizedError, Sendable, PrivacySafeErrorCategoryProviding {
@@ -171,6 +192,15 @@ public struct AuthCredentials: Sendable, Codable, Equatable {
     self.userId = userId
     self.token = token
     self.createdAt = createdAt
+  }
+
+  var hasConsistentIdentity: Bool {
+    guard userId > 0, !token.isEmpty else { return false }
+    // Preserve opaque legacy tokens, but never project a different account
+    // when the token carries the current numeric user-id prefix.
+    guard let separator = token.firstIndex(of: ":"),
+          let tokenUserId = Int64(token[..<separator]) else { return true }
+    return tokenUserId == userId
   }
 }
 

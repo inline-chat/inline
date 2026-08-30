@@ -273,6 +273,7 @@ actor AuthStore {
     }
 
     let record = AuthCredentials(userId: userId, token: token)
+    guard record.hasConsistentIdentity else { throw AuthStorageError.encodingFailed }
     let encodedRecord: Data
     do {
       encodedRecord = try JSONEncoder().encode(record)
@@ -311,6 +312,7 @@ actor AuthStore {
 
     let data: Data
     do {
+      try credentials.validate()
       data = try JSONEncoder().encode(credentials)
     } catch {
       throw AuthStorageError.encodingFailed
@@ -1019,9 +1021,20 @@ actor AuthStore {
         inlineProtocolCredentialsKey, primary: primaryKeychain, fallback: fallbackKeychain
       )
     }
-    let inlineProtocol: InlineProtocolSessionCredentials? = switch inlineProtocolOutcome {
-    case .success(let data, _): try? JSONDecoder().decode(InlineProtocolSessionCredentials.self, from: data)
-    case .notFound, .interactionNotAllowed, .error: nil
+    let inlineProtocol: InlineProtocolSessionCredentials?
+    switch inlineProtocolOutcome {
+    case .success(let data, _):
+      do {
+        let credentials = try JSONDecoder().decode(InlineProtocolSessionCredentials.self, from: data)
+        try credentials.validate()
+        inlineProtocol = credentials
+      } catch {
+        // Codable bypasses the authorization's validating initializer. A corrupt
+        // V3 record must not publish authentication or silently fall back to V2.
+        return AuthSnapshot(status: .reauthRequired(userIdHint: userIdHint), didHydrate: true)
+      }
+    case .notFound, .interactionNotAllowed, .error:
+      inlineProtocol = nil
     }
 
     if case .interactionNotAllowed = inlineProtocolOutcome {
@@ -1076,6 +1089,9 @@ actor AuthStore {
     switch credentialsOutcome {
     case .success(let data, _):
       if let creds = try? JSONDecoder().decode(AuthCredentials.self, from: data) {
+        guard creds.hasConsistentIdentity else {
+          return AuthSnapshot(status: .reauthRequired(userIdHint: userIdHint), didHydrate: true)
+        }
         return AuthSnapshot(status: .authenticated(creds), didHydrate: true)
       }
       // Corrupt record; fall back to legacy pieces.
@@ -1110,8 +1126,12 @@ actor AuthStore {
     }
 
     if let token, let userId {
+      let credentials = AuthCredentials(userId: userId, token: token)
+      guard credentials.hasConsistentIdentity else {
+        return AuthSnapshot(status: .reauthRequired(userIdHint: userId), didHydrate: true)
+      }
       return AuthSnapshot(
-        status: .authenticated(AuthCredentials(userId: userId, token: token)),
+        status: .authenticated(credentials),
         didHydrate: true,
         inlineProtocol: nil
       )

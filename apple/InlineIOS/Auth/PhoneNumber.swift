@@ -127,6 +127,9 @@ struct PhoneNumber: View {
       } catch let error as APIError {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isPhoneNumber: true)
         formState.reset()
+      } catch {
+        errorMsg = InlineProtocolNativeLogin.userFacingMessage(for: error)
+        formState.reset()
       }
     }
   }

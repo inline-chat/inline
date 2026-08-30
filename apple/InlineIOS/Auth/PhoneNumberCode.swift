@@ -150,6 +150,7 @@ extension PhoneNumberCode {
         isInputValid = false
       } catch {
         Log.shared.error("Unexpected error", error: error)
+        errorMsg = InlineProtocolNativeLogin.userFacingMessage(for: error)
         formState.reset()
         isInputValid = false
       }
