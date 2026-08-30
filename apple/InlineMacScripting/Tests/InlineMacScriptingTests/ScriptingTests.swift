@@ -16,6 +16,18 @@ import Testing
       guard code.utf8.count == 8 else { continue }
       _ = try ScriptingRequest.decode(code: fourCC(String(code.suffix(4))), direct: "42", arguments: ["chatID": "42"])
     }
+
+    let chatProperties = try xml.nodes(forXPath: "//record-type[@name='chat info']/property").compactMap { $0 as? XMLElement }
+    let chatPropertyCodes = chatProperties.compactMap { $0.attribute(forName: "code")?.stringValue }
+    #expect(chatPropertyCodes.count == Set(chatPropertyCodes).count)
+    let fields = Dictionary(uniqueKeysWithValues: chatProperties.compactMap { property -> (String, String)? in
+      guard let name = property.attribute(forName: "name")?.stringValue,
+            let code = property.attribute(forName: "code")?.stringValue else { return nil }
+      return (name, code)
+    })
+    #expect(fields["id"] == "ID  ")
+    #expect(fields["name"] == "pnam")
+    #expect(fields["URL"] == "pURL")
   }
 
   @Test func stableIDsPreserveAll64Bits() throws {
@@ -23,7 +35,8 @@ import Testing
   }
 
   @Test func selectionAndThreadTerminology() throws {
-    #expect(try ScriptingRequest.decode(code: fourCC("cthr"), direct: nil, arguments: [:]) == .currentChat)
+    #expect(try ScriptingRequest.decode(code: fourCC("curr"), direct: nil, arguments: [:]) == .currentChat)
+    #expect(try ScriptingRequest.decode(code: fourCC("cthr"), direct: nil, arguments: [:]) == .currentSelection)
     #expect(try ScriptingRequest.decode(code: fourCC("csel"), direct: nil, arguments: [:]) == .currentSelection)
   }
 
@@ -106,8 +119,11 @@ import Testing
     #expect(link == #"[R\&D \[plan\] \(v2\) \\ \*ship\* \_now\_ \<img\> \`code\` 🚀 next](in://chat/9223372036854775807)"#)
     #expect(ScriptingLink.markdown(title: "Renamed", url: url) == "[Renamed](in://chat/9223372036854775807)")
     let record = ScriptingValue.record([
+      .identifier: .text(String(Int64.max)), .name: .text(title),
       .chatID: .text(String(Int64.max)), .title: .text(title), .url: .text(url.absoluteString), .markdownLink: .text(link),
     ]).descriptor()
+    #expect(record.forKeyword(fourCC("ID  "))?.stringValue == String(Int64.max))
+    #expect(record.forKeyword(fourCC("pnam"))?.stringValue == title)
     #expect(record.forKeyword(fourCC("pURL"))?.stringValue == url.absoluteString)
     #expect(record.forKeyword(fourCC("Imlk"))?.stringValue == link)
     #expect(record.forKeyword(fourCC("Itit"))?.stringValue == title)

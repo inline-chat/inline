@@ -354,6 +354,7 @@ final class MacScriptingAdapter {
       : (title.flatMap { $0.isEmpty ? nil : $0 } ?? "New thread")
     guard let url = InlineDeepLink.chat(id: id).url else { throw ScriptingError.failed }
     return .record([
+      .identifier: .text(String(id)), .name: .text(displayTitle),
       .chatID: .text(String(id)), .title: .text(displayTitle), .kind: .text(kind),
       .url: .text(url.absoluteString), .markdownLink: .text(ScriptingLink.markdown(title: displayTitle, url: url)),
       .spaceID: .text(spaceID.map(String.init) ?? ""), .unreadCount: .integer(Int32(clamping: max(0, unread))),

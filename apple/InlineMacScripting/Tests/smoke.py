@@ -55,7 +55,7 @@ tell application "BUNDLE_PATH"
   my requireTrue((user id of accountInfo) is "9223372036854775807", "64-bit account ID")
   my requireTrue((display name of accountInfo) is "Fixture 🦊", "Unicode record")
   my requireTrue((current chat) is missing value, "missing selection")
-  my requireTrue((current thread) is missing value, "missing primary thread")
+  my requireTrue((current thread) is missing value, "missing current thread")
   my requireTrue((current selection) is missing value, "missing conversation selection")
   set spacesFound to list spaces maximum count 1 start offset 0
   my requireTrue((space id of item 1 of spacesFound) is "7", "spaces")
@@ -86,11 +86,14 @@ tell application "BUNDLE_PATH"
   my requireTrue((chat id of (current chat)) is "9223372036854775807", "selection")
   my requireTrue((chat id of (current thread)) is "9223372036854775807", "thread alias")
   set contextItem to current selection
+  my requireTrue((id of contextItem) is "9223372036854775807", "standard ID property")
+  my requireTrue((name of contextItem) is "Fixture chat", "standard name property")
   my requireTrue((title of contextItem) is "Fixture chat", "selection title")
-  my requireTrue((url of contextItem) is "in://chat/9223372036854775807", "selection URL precision")
-  my requireTrue((markdown link of contextItem) is "[Fixture chat](in://chat/9223372036854775807)", "Hookmark name and URL")
+  my requireTrue((URL of contextItem) is "in://chat/9223372036854775807", "selection URL precision")
+  my requireTrue((markdown link of contextItem) is "[Fixture chat](in://chat/9223372036854775807)", "Markdown name and URL")
   open chat "88"
-  my requireTrue((chat id of (current thread)) is "42", "primary chat remains primary")
+  my requireTrue((chat id of (current chat)) is "42", "primary chat remains primary")
+  my requireTrue((chat id of (current thread)) is "88", "current thread follows reply selection")
   set contextItem to current selection
   my requireTrue((chat id of contextItem) is "88", "reply conversation selection")
   my requireTrue((title of contextItem) is "Reply [review] 🦊", "reply title")
@@ -142,7 +145,7 @@ tell application "BUNDLE_PATH"
   my requireTrue(rejected, "public participants rejected")
 end tell
 my requireTrue((current application's NSPasteboard's generalPasteboard()'s changeCount() as integer) is clipboardVersion, "commands leave clipboard unchanged")
-return "PASS: seventeen commands, primary/reply selection, Hookmark links, thread participants, Markdown, user discovery, and errors"
+return "PASS: seventeen commands, primary/reply selection, standard chat fields, links, thread participants, Markdown, user discovery, and errors"
 '''.replace("BUNDLE_PATH", str(bundle).replace("\\", "\\\\").replace('"', '\\"'))
 
 log = package / ".build" / "fixture.log"

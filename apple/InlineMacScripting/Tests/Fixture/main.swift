@@ -50,6 +50,7 @@ final class FixtureDelegate: NSObject, NSApplicationDelegate {
   private func chat(_ id: String, title: String = "Fixture chat") -> ScriptingValue {
     let url = URL(string: "in://chat/\(id)")!
     return .record([
+      .identifier: .text(id), .name: .text(title),
       .chatID: .text(id), .title: .text(title), .kind: .text("thread"), .spaceID: .text("7"), .unreadCount: .integer(2),
       .url: .text(url.absoluteString), .markdownLink: .text(ScriptingLink.markdown(title: title, url: url)),
     ])

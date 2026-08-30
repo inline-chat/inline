@@ -33,8 +33,8 @@ public enum ScriptingRequest: Equatable, Sendable {
     case fourCC("chat"), fourCC("find"):
       let query = code == fourCC("find") ? try input.text(direct, name: "query", maximum: 200) : nil
       return try .chats(query: query, spaceID: input.optionalID("spaceID"), limit: input.limit(default: 100), offset: input.offset())
-    case fourCC("curr"), fourCC("cthr"): return .currentChat
-    case fourCC("csel"): return .currentSelection
+    case fourCC("curr"): return .currentChat
+    case fourCC("cthr"), fourCC("csel"): return .currentSelection
     case fourCC("crth"):
       let spaceID = try input.optionalID("spaceID")
       let participantIDs = try input.ids("participantIDs")

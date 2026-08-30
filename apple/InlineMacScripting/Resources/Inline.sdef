@@ -61,7 +61,7 @@
       <cocoa class="InlineScriptCommand"/>
       <result type="any"/>
     </command>
-    <command name="current thread" code="Inlncthr" description="Alias for current chat: the primary DM or thread, with its chat ID, title, URL, and Markdown link; or missing value. Does not select a reply pane.">
+    <command name="current thread" code="Inlncthr" description="Alias for current selection: the open reply thread, otherwise the primary conversation, in the frontmost visible non-minimized Inline main window; or missing value. DMs are included.">
       <cocoa class="InlineScriptCommand"/>
       <result type="any"/>
     </command>
@@ -117,10 +117,12 @@
       <property name="is bot" code="Ibot" type="boolean" access="r"/>
     </record-type>
     <record-type name="chat info" code="IchR">
+      <property name="id" code="ID  " type="text" description="Stable chat ID as decimal text. Alias for chat id." access="r"/>
+      <property name="name" code="pnam" type="text" description="Display name. Alias for title." access="r"/>
       <property name="chat id" code="Icid" type="text" access="r"/>
       <property name="title" code="Itit" type="text" access="r"/>
-      <property name="url" code="pURL" type="text" description="Stable chat link using this app build's scheme; independent of the title." access="r"/>
-      <property name="markdown link" code="Imlk" type="text" description="Escaped title and URL from one snapshot, suitable for Hookmark Get Address." access="r"/>
+      <property name="URL" code="pURL" type="text" description="Stable chat link using this app build's scheme; independent of the name." access="r"/>
+      <property name="markdown link" code="Imlk" type="text" description="Escaped name and URL from the same snapshot for Markdown destinations." access="r"/>
       <property name="chat kind" code="Iknd" type="text" description="private or thread." access="r"/>
       <property name="space id" code="Isid" type="text" description="Empty for Home chats." access="r"/>
       <property name="unread count" code="Iunr" type="integer" access="r"/>

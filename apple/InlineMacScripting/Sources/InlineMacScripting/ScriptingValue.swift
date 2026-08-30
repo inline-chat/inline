@@ -53,6 +53,8 @@ private final class ScriptingDescriptorValue: NSObject {
 }
 
 public enum ScriptingField: String, Sendable {
+  case identifier = "ID  "
+  case name = "pnam"
   case userID = "Iuid"
   case displayName = "Inam"
   case username = "Iusr"
