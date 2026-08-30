@@ -1417,13 +1417,25 @@ public actor RealtimeV2 {
     await transactions.satisfy(blockers: blockers)
   }
 
+  /// Applies an external command's response only to the account generation that sent it.
+  public func applyUpdatesAndWait(
+    _ updates: [InlineProtocol.Update], accountToken: AuthAccountMutationToken
+  ) async throws {
+    try auth.validateAccountMutation(accountToken)
+    await sync.process(updates: updates, mutationToken: accountToken)
+  }
+
   /// Low-level RPC call that bypasses the transaction system.
   /// Used by short-lived contexts (e.g. share extension) that must send media before full transaction support.
   public func callRpcDirect(
     method: InlineProtocol.Method,
     input: RpcCall.OneOf_Input?,
-    timeout: Duration? = .seconds(15)
+    timeout: Duration? = .seconds(15),
+    accountToken: AuthAccountMutationToken? = nil
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    // External integrations may have resolved their destination before hopping to this actor.
+    // Validate at admission so an old request cannot be sent using a replacement account.
+    if let accountToken { try auth.validateAccountMutation(accountToken) }
     try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
     beginDirectRPCOperation()
     defer { endDirectRPCOperation() }
