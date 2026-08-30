@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { inlineAuthApi, InlineAuthError } from "./auth-api"
 
 const response = (body: unknown, status = 200) =>
@@ -8,6 +8,26 @@ const response = (body: unknown, status = 200) =>
   })
 
 describe("Inline auth API", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+  it("revokes the bearer session using POST and aborts an unreachable logout", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response({ ok: true, result: { success: true } }))
+    vi.stubGlobal("fetch", fetchMock)
+    await inlineAuthApi.logout("session-token")
+    const [url, options] = fetchMock.mock.calls[0]!
+    expect(new URL(String(url)).pathname).toBe("/v1/logout")
+    expect(options?.method).toBe("POST")
+    expect(new Headers(options?.headers).get("Authorization")).toBe("Bearer session-token")
+
+    vi.useFakeTimers()
+    fetchMock.mockImplementation((_url, options) => new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener("abort", () => reject(new Error("aborted")))
+    }))
+    const logout = expect(inlineAuthApi.logout("session-token")).rejects.toThrow("Could not connect")
+    await vi.advanceTimersByTimeAsync(2_000)
+    await logout
+  })
+
   beforeEach(() => {
     window.localStorage.clear()
     vi.restoreAllMocks()

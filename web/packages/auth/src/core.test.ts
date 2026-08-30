@@ -254,6 +254,29 @@ describe("AuthStore persistence boundary", () => {
     })
   })
 
+  it("retains logout recovery until every legacy credential is removed", async () => {
+    const { values, localStorage } = installBrowserStorage()
+    const key = `legacy-logout-${crypto.randomUUID()}`
+    const persistence = new BrowserAuthSessionPersistence(key)
+    await persistence.save({ token: "current-token", userId: userId(7) })
+    values.set(key, JSON.stringify({ token: "legacy-token", currentUserId: "7" }))
+    localStorage.removeItem.mockImplementation((entry) => {
+      if (entry === key) throw new Error("legacy storage removal blocked")
+      values.delete(entry)
+    })
+    await expect(persistence.clear()).rejects.toThrow("Legacy session cleanup")
+    expect(values.get(`${key}:logout-pending`)).toBe("1")
+    for (let reload = 0; reload < 2; reload++) {
+      expect(await new BrowserAuthSessionPersistence(key).load()).toEqual({ status: "ready", session: null })
+      expect(values.get(`${key}:logout-pending`)).toBe("1")
+    }
+    localStorage.removeItem.mockImplementation((entry) => { values.delete(entry) })
+    expect(await new BrowserAuthSessionPersistence(key).load()).toEqual({ status: "ready", session: null })
+    expect(values.has(key)).toBe(false)
+    expect(values.has(`${key}:logout-pending`)).toBe(false)
+    expect(await new BrowserAuthSessionPersistence(key).load()).toEqual({ status: "ready", session: null })
+  })
+
   it("uses a logout tombstone to prevent stale-session resurrection after delete failure", async () => {
     const { values } = installBrowserStorage()
     const key = `logout-${crypto.randomUUID()}`
