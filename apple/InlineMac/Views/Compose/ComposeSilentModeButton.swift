@@ -4,34 +4,41 @@ final class ComposeSilentModeButton: NSView {
   static let controlSize: CGFloat = Theme.composeButtonSize * 0.94
 
   private let mode: ComposeControlMode
+  private let presentation: ComposeControlPresentation
   private var size: CGFloat { mode.silentButtonSize }
-  private let iconView: NSImageView
+  private var usesCustomHoverFill: Bool {
+    mode.usesCustomHoverFill || presentation == .accessoryBar
+  }
+  private let button: NSButton
   private var trackingArea: NSTrackingArea?
   private var isHovering = false
 
   var onClick: (() -> Void)?
 
+  var isEnabled: Bool {
+    get { button.isEnabled }
+    set {
+      button.isEnabled = newValue
+      if !newValue {
+        isHovering = false
+      }
+      updateBackgroundColor()
+    }
+  }
+
   override init(frame frameRect: NSRect) {
     mode = .legacy
-    let configuration = NSImage.SymbolConfiguration(pointSize: mode.silentIconPointSize, weight: .medium)
-    let image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: "Disable send silently")?
-      .withSymbolConfiguration(configuration)
-    iconView = NSImageView(image: image ?? NSImage())
-    iconView.translatesAutoresizingMaskIntoConstraints = false
-    iconView.contentTintColor = .tertiaryLabelColor
+    presentation = .standard
+    button = Self.makeButton(mode: mode)
 
     super.init(frame: frameRect)
     setupView()
   }
 
-  init(mode: ComposeControlMode) {
+  init(mode: ComposeControlMode, presentation: ComposeControlPresentation = .standard) {
     self.mode = mode
-    let configuration = NSImage.SymbolConfiguration(pointSize: mode.silentIconPointSize, weight: .medium)
-    let image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: "Disable send silently")?
-      .withSymbolConfiguration(configuration)
-    iconView = NSImageView(image: image ?? NSImage())
-    iconView.translatesAutoresizingMaskIntoConstraints = false
-    iconView.contentTintColor = .tertiaryLabelColor
+    self.presentation = presentation
+    button = Self.makeButton(mode: mode)
 
     super.init(frame: .zero)
     setupView()
@@ -52,14 +59,45 @@ final class ComposeSilentModeButton: NSView {
     layer?.cornerRadius = size / 2
     layer?.masksToBounds = true
 
-    addSubview(iconView)
+    button.target = self
+    button.action = #selector(handleClick)
+    addSubview(button)
 
     NSLayoutConstraint.activate([
-      iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      button.leadingAnchor.constraint(equalTo: leadingAnchor),
+      button.trailingAnchor.constraint(equalTo: trailingAnchor),
+      button.topAnchor.constraint(equalTo: topAnchor),
+      button.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
     toolTip = "Send silently is enabled for this chat. Click to turn it off."
+  }
+
+  private static func makeButton(mode: ComposeControlMode) -> NSButton {
+    let button = NSButton(frame: .zero)
+    button.bezelStyle = .regularSquare
+    button.isBordered = false
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.imageScaling = .scaleNone
+    button.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: mode.silentIconPointSize, weight: .medium))
+    button.contentTintColor = .tertiaryLabelColor
+    button.setAccessibilityLabel("Disable send silently")
+    return button
+  }
+
+  /// New-thread Compose exposes both states; existing chats keep their
+  /// enabled-only indicator until they explicitly opt into this presentation.
+  func updateSendSilently(_ enabled: Bool) {
+    button.setButtonType(.toggle)
+    button.state = enabled ? .on : .off
+    button.image = NSImage(systemSymbolName: enabled ? "bell.slash" : "bell", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: mode.silentIconPointSize, weight: .medium))
+    button.contentTintColor = .labelColor
+    button.setAccessibilityRole(.checkBox)
+    button.setAccessibilityLabel("Silent mode")
+    button.setAccessibilityValue(enabled ? 1 : 0)
+    toolTip = nil
   }
 
   override func layout() {
@@ -67,8 +105,7 @@ final class ComposeSilentModeButton: NSView {
     layer?.cornerRadius = bounds.height / 2
   }
 
-  override func mouseDown(with event: NSEvent) {
-    super.mouseDown(with: event)
+  @objc private func handleClick() {
     onClick?()
   }
 
@@ -98,13 +135,13 @@ final class ComposeSilentModeButton: NSView {
   }
 
   private func updateBackgroundColor() {
-    guard mode.usesCustomHoverFill else {
+    guard usesCustomHoverFill, button.isEnabled else {
       layer?.backgroundColor = NSColor.clear.cgColor
       return
     }
 
     NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.12
+      context.duration = presentation == .accessoryBar ? 0.2 : 0.12
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
       layer?.backgroundColor = isHovering ? NSColor.gray.withAlphaComponent(0.1).cgColor : NSColor.clear.cgColor
     }

@@ -17,17 +17,20 @@ struct ComposeMenuCapabilities: OptionSet {
 struct ComposeCapabilities {
   let menu: ComposeMenuCapabilities
   let showsEmojiButton: Bool
+  let showsSilentModeToggle: Bool
   let supportsVoiceMessages: Bool
 
   static let chatDefault = Self(
     menu: .chatDefault,
     showsEmojiButton: true,
+    showsSilentModeToggle: false,
     supportsVoiceMessages: true
   )
 
   static let allChatsNewThread = Self(
     menu: .newThread,
     showsEmojiButton: false,
+    showsSilentModeToggle: true,
     supportsVoiceMessages: false
   )
 }
