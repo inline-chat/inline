@@ -185,6 +185,7 @@ export const makeInlineProtocolRealtimeTransport = (
     maximumBufferedApplicationUpdateBytes = MAX_BUFFERED_APPLICATION_UPDATE_BYTES,
     applicationDispatcherFactory = (input) => makeInlineProtocolApplicationDispatcher({
       operations: runtime.operations,
+      authorizationKeys: runtime.authorizationKeys,
       ...input,
     }),
   }: {

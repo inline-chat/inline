@@ -1,6 +1,7 @@
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { loginCodes, type DbLoginCode } from "@in/server/db/schema/loginCodes"
-import { and, desc, eq, gte, inArray, lt } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm"
 import {
   generateLoginChallengeId,
   hashLoginCode,
@@ -50,37 +51,23 @@ async function pruneActiveEmailChallenges(email: string): Promise<void> {
   await db.delete(loginCodes).where(inArray(loginCodes.id, staleRows.map((row) => row.id)))
 }
 
-async function getVerificationCandidates(input: {
+// Reserve a guess before hashing. The conditional update serializes concurrent
+// requests so they cannot all reuse the same remaining attempt.
+async function claimVerificationAttempt(input: {
   email: string
   challengeToken?: string | null
   maxAttempts?: number
-}): Promise<LoginCodeCandidate[]> {
-  const maxAttempts = input.maxAttempts ?? MAX_LOGIN_ATTEMPTS
-  const baseConditions = and(
-    eq(loginCodes.email, input.email),
-    gte(loginCodes.expiresAt, new Date()),
-    lt(loginCodes.attempts, maxAttempts),
-  )
-
-  if (input.challengeToken) {
-    const challengeRow = (
-      await db
-        .select({
-          id: loginCodes.id,
-          attempts: loginCodes.attempts,
-          code: loginCodes.code,
-          codeHash: loginCodes.codeHash,
-        })
-        .from(loginCodes)
-        .where(and(baseConditions, eq(loginCodes.challengeId, input.challengeToken)))
-        .orderBy(desc(loginCodes.date), desc(loginCodes.id))
-        .limit(1)
-    )[0]
-
-    return challengeRow ? [challengeRow] : []
-  }
-
-  return []
+}): Promise<LoginCodeCandidate | undefined> {
+  if (!input.challengeToken) return undefined
+  return (await db.update(loginCodes)
+    .set({ attempts: sql`coalesce(${loginCodes.attempts}, 0) + 1` })
+    .where(and(
+      eq(loginCodes.email, input.email),
+      eq(loginCodes.challengeId, input.challengeToken),
+      gte(loginCodes.expiresAt, new Date()),
+      lt(sql`coalesce(${loginCodes.attempts}, 0)`, input.maxAttempts ?? MAX_LOGIN_ATTEMPTS),
+    ))
+    .returning({ id: loginCodes.id, attempts: loginCodes.attempts, code: loginCodes.code, codeHash: loginCodes.codeHash }))[0]
 }
 
 async function matchesCode(candidate: LoginCodeCandidate, code: string): Promise<boolean> {
@@ -91,40 +78,26 @@ async function matchesCode(candidate: LoginCodeCandidate, code: string): Promise
   return candidate.code === code
 }
 
-async function incrementAttempts(candidate: LoginCodeCandidate): Promise<void> {
-  await db
-    .update(loginCodes)
-    .set({
-      attempts: (candidate.attempts ?? 0) + 1,
-    })
-    .where(eq(loginCodes.id, candidate.id))
-}
-
 export async function verifyEmailLoginChallenge(input: {
   email: string
   code: string
   challengeToken?: string | null
   maxAttempts?: number
-}): Promise<boolean> {
-  const candidates = await getVerificationCandidates(input)
+}, completeInTransaction?: (tx: Transaction) => Promise<void>): Promise<boolean> {
+  const candidate = await claimVerificationAttempt(input)
+  if (!candidate || !await matchesCode(candidate, input.code)) return false
 
-  if (candidates.length === 0) {
-    return false
-  }
-
-  if (input.challengeToken) {
-    const candidate = candidates[0]
-    if (!candidate) return false
-
-    const matches = await matchesCode(candidate, input.code)
-    if (!matches) {
-      await incrementAttempts(candidate)
-      return false
-    }
-
-    await db.delete(loginCodes).where(eq(loginCodes.id, candidate.id))
+  // Correct proof does not spend the wrong-code budget when invite validation
+  // fails. Consumption and account creation must then commit together.
+  await db.update(loginCodes).set({ attempts: sql`${loginCodes.attempts} - 1` })
+    .where(eq(loginCodes.id, candidate.id))
+  return db.transaction(async (tx) => {
+    const consumed = await tx.delete(loginCodes).where(and(
+      eq(loginCodes.id, candidate.id),
+      gte(loginCodes.expiresAt, new Date()),
+    )).returning({ id: loginCodes.id })
+    if (consumed.length !== 1) return false
+    await completeInTransaction?.(tx)
     return true
-  }
-
-  return false
+  })
 }

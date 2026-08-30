@@ -1,12 +1,14 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import { app } from "../legacyServer"
 import { setupTestLifecycle, testUtils } from "./setup"
 import { OauthModel } from "@in/server/db/models/oauth"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { sha256Base64Url, sha256Hex } from "@inline-chat/oauth-core"
 import { db } from "@in/server/db"
-import { oauthAuthRequests } from "@in/server/db/schema"
-import { inArray } from "drizzle-orm"
+import { oauthAuthRequests, oauthAuthCodes, oauthGrants } from "@in/server/db/schema"
+import { eq, inArray } from "drizzle-orm"
+import { authRequestCookieName } from "@in/server/modules/oauth/authRequestCookie"
+import { oauthConfig } from "@in/server/modules/oauth/config"
 import {
   hostedLoginChooser,
   hostedLoginVerificationForm,
@@ -26,6 +28,77 @@ function extractHidden(html: string, name: string): string {
 
 describe("OAuth controller", () => {
   setupTestLifecycle()
+
+  async function consentFixture() {
+    const nowMs = Date.now()
+    const user = await testUtils.createUser(`consent-${crypto.randomUUID()}@example.com`)
+    const client = await OauthModel.createClient({
+      clientId: crypto.randomUUID(), redirectUris: ["https://example.com/callback"], clientName: "consent-test", nowMs,
+    })
+    const request = await OauthModel.createAuthRequest({
+      id: crypto.randomUUID(), clientId: client.clientId, redirectUri: "https://example.com/callback",
+      state: "state", scope: "messages:read", resource: "https://mcp.inline.chat",
+      codeChallenge: await sha256Base64Url("test-verifier"), csrfToken: "test-csrf", deviceId: crypto.randomUUID(),
+      nowMs, expiresAtMs: nowMs + 60_000,
+    })
+    const { token } = await testUtils.createSessionForUser(user.id)
+    await OauthModel.setAuthRequestInlineSession({
+      id: request.id,
+      inlineUserId: user.id,
+      inlineTokenEncrypted: Encryption2.encrypt(Buffer.from(token, "utf8")),
+      authMethod: "email",
+    })
+    const submit = () => app.handle(new Request("http://localhost/oauth/authorize/consent", {
+      method: "POST",
+      headers: { cookie: `${authRequestCookieName(oauthConfig())}=${request.id}` },
+      body: new URLSearchParams({ csrf: request.csrfToken, allow_dms: "1" }),
+    }))
+    return { request, client, submit }
+  }
+
+  it("preserves hosted backing credentials through continuation and consent", async () => {
+    const { request, submit } = await consentFixture()
+    const before = await OauthModel.getAuthRequest(request.id, Date.now())
+    const response = await app.handle(new Request("http://localhost/oauth/authorize/continue", {
+      headers: { cookie: `${authRequestCookieName(oauthConfig())}=${request.id}` },
+    }))
+    expect(response.status).toBe(200)
+    const after = await OauthModel.getAuthRequest(request.id, Date.now())
+    expect(after?.inlineTokenEncrypted).toEqual(before?.inlineTokenEncrypted)
+    expect((await submit()).status).toBe(302)
+  })
+
+  it("rejects consent without backing credentials and preserves the request", async () => {
+    const { request, client, submit } = await consentFixture()
+    await db.update(oauthAuthRequests).set({ inlineTokenEncrypted: null })
+      .where(eq(oauthAuthRequests.id, request.id))
+    expect((await submit()).status).toBe(400)
+    expect(await db.select().from(oauthGrants).where(eq(oauthGrants.clientId, client.clientId))).toHaveLength(0)
+    expect(await db.select().from(oauthAuthCodes).where(eq(oauthAuthCodes.clientId, client.clientId))).toHaveLength(0)
+    expect(await OauthModel.getAuthRequest(request.id, Date.now())).not.toBeNull()
+  })
+
+  it("issues only one grant and code for concurrent consent submissions", async () => {
+    const { request, client, submit } = await consentFixture()
+    const responses = await Promise.all([submit(), submit()])
+    expect(responses.map((response) => response.status).sort()).toEqual([302, 400])
+    expect(await db.select().from(oauthGrants).where(eq(oauthGrants.clientId, client.clientId))).toHaveLength(1)
+    expect(await db.select().from(oauthAuthCodes).where(eq(oauthAuthCodes.clientId, client.clientId))).toHaveLength(1)
+    expect(await OauthModel.getAuthRequest(request.id, Date.now())).toBeNull()
+  })
+
+  it("rolls back consent consumption and the grant when code issuance fails", async () => {
+    const { request, client, submit } = await consentFixture()
+    const issueCode = spyOn(OauthModel, "createAuthCode").mockRejectedValueOnce(new Error("injected issuance failure"))
+    try {
+      expect((await submit()).status).toBe(500)
+    } finally {
+      issueCode.mockRestore()
+    }
+    expect(await OauthModel.getAuthRequest(request.id, Date.now())).not.toBeNull()
+    expect(await db.select().from(oauthGrants).where(eq(oauthGrants.clientId, client.clientId))).toHaveLength(0)
+    expect((await submit()).status).toBe(302)
+  })
 
   it("cleans expired OAuth rows with typed timestamp predicates", async () => {
     const nowMs = Date.now()

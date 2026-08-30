@@ -12,7 +12,8 @@ import {
 } from "@in/server/db/schema"
 import { API_BASE_URL } from "@in/server/env"
 import { InlineError } from "@in/server/types/errors"
-import { authorizeInlineProtocolKey } from "@in/server/modules/inlineProtocol/authorizeKey"
+import { authorizeInlineProtocolKey, finishInlineProtocolSessionReplacement } from "@in/server/modules/inlineProtocol/authorizeKey"
+import type { SessionReplacement } from "@in/server/db/models/sessions"
 import { generateToken } from "@in/server/utils/auth"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
@@ -115,7 +116,7 @@ export async function completeHostedLogin(input: {
   now?: Date
 }): Promise<{ targetKind: "inline_protocol_key" | "oauth_authorization" | "native_app" }> {
   const now = input.now ?? new Date()
-  return db.transaction(async (tx) => {
+  const completed = await db.transaction(async (tx) => {
     const transaction = (await tx.select().from(loginTransactions).where(and(
       eq(loginTransactions.id, input.transactionId),
       eq(loginTransactions.status, "pending"),
@@ -135,8 +136,9 @@ export async function completeHostedLogin(input: {
     )).returning({ id: loginTransactions.id })
     if (claimed.length !== 1) throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
 
+    let replacement: SessionReplacement | undefined
     if (transaction.targetKind === "inline_protocol_key" && transaction.inlineProtocolAuthKeyId) {
-      await authorizeInlineProtocolKey({
+      const authorized = await authorizeInlineProtocolKey({
         tx,
         authKeyId: transaction.inlineProtocolAuthKeyId,
         userId: input.account.userId,
@@ -146,6 +148,7 @@ export async function completeHostedLogin(input: {
         ip: input.ip,
         now,
       })
+      replacement = authorized.replacement
     } else if (transaction.targetKind === "oauth_authorization" && transaction.oauthAuthRequestId) {
       // Transitional MCP bridge: the OAuth target, not the authentication
       // method, owns this backing session until MCP executes grant-aware calls.
@@ -184,8 +187,10 @@ export async function completeHostedLogin(input: {
       eq(loginTransactions.id, transaction.id),
       eq(loginTransactions.status, "claimed"),
     ))
-    return { targetKind: transaction.targetKind as "inline_protocol_key" | "oauth_authorization" | "native_app" }
+    return { targetKind: transaction.targetKind as "inline_protocol_key" | "oauth_authorization" | "native_app", replacement }
   })
+  await finishInlineProtocolSessionReplacement(completed.replacement)
+  return { targetKind: completed.targetKind }
 }
 
 export async function inlineProtocolBrowserLoginStatus(input: {

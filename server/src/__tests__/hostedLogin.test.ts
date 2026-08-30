@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import { eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { inlineProtocolAuthKeys, loginTransactions } from "@in/server/db/schema"
@@ -8,6 +8,7 @@ import {
   inlineProtocolBrowserLoginStatus,
 } from "@in/server/modules/auth/hostedLogin/service"
 import { setupTestLifecycle, testUtils } from "./setup"
+import { connectionManager } from "@in/server/ws/connections"
 
 describe("hosted login transactions", () => {
   setupTestLifecycle()
@@ -22,9 +23,11 @@ describe("hosted login transactions", () => {
       currentServerSalt: 1n,
     })
 
+    const deviceId = crypto.randomUUID()
+    const previous = await testUtils.createSessionForUser(user.id, { deviceId })
     const begun = await beginInlineProtocolBrowserLogin({
       authKeyId,
-      client: { clientType: "cli", deviceId: crypto.randomUUID(), deviceName: "test CLI" },
+      client: { clientType: "cli", deviceId, deviceName: "test CLI" },
     })
     expect(begun.verificationCode).toMatch(/^\d{6}$/)
     expect(begun.browserUrl).not.toContain(Buffer.from(authKeyId).toString("hex"))
@@ -33,10 +36,16 @@ describe("hosted login transactions", () => {
       authKeyId,
     })).toEqual({ kind: "pending" })
 
-    await completeHostedLogin({
-      transactionId: begun.loginTransactionId,
-      account: { userId: user.id, method: "email" },
-    })
+    const close = spyOn(connectionManager, "closeConnectionForSession")
+    try {
+      await completeHostedLogin({
+        transactionId: begun.loginTransactionId,
+        account: { userId: user.id, method: "email" },
+      })
+      expect(close).toHaveBeenCalledWith(user.id, previous.session.id, { authenticationInvalidated: true }, undefined)
+    } finally {
+      close.mockRestore()
+    }
     const status = await inlineProtocolBrowserLoginStatus({
       transactionId: begun.loginTransactionId,
       authKeyId,

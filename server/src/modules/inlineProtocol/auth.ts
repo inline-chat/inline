@@ -9,7 +9,7 @@ import {
   type AuthCompleteRequest,
   type AuthCompleteResult,
 } from "@inline-chat/protocol/core"
-import { and, count, eq, gte, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, count, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { db } from "@in/server/db"
 import {
@@ -18,6 +18,7 @@ import {
 import { encodeUser } from "@in/server/realtime/encoders/encodeUser"
 import { getOrCreateUserByEmailForSignup } from "@in/server/modules/auth/signupInvites"
 import { getOrCreateUserByPhoneForSignup } from "@in/server/modules/auth/signupInvites"
+import { lockGridMutations } from "@in/server/modules/grid/roomLifecycle"
 import { normalizeEmail } from "@in/server/utils/normalize"
 import { sendEmail } from "@in/server/utils/email"
 import { prelude } from "@in/server/libs/prelude"
@@ -33,7 +34,7 @@ import {
 import type { InlineProtocolSecretKeyRing } from "./keyCipher"
 import { InlineProtocolChallengeCipher } from "./challengeCipher"
 import { DEMO_CODE, DEMO_CODE2, DEMO_EMAIL, DEMO_EMAIL2 } from "@in/server/env"
-import { authorizeInlineProtocolKey } from "./authorizeKey"
+import { authorizeInlineProtocolKey, finishInlineProtocolSessionReplacement } from "./authorizeKey"
 import {
   beginInlineProtocolBrowserLogin,
   inlineProtocolBrowserLoginStatus,
@@ -190,22 +191,34 @@ export class InlineProtocolAuthOperations {
       : []
     const now = new Date()
     const rateStart = new Date(now.getTime() - RATE_WINDOW_MS)
-    const [{ value: recent = 0 } = { value: 0 }] = await db.select({ value: count() })
-      .from(inlineProtocolAuthChallenges)
-      .where(and(
-        gte(inlineProtocolAuthChallenges.createdAt, rateStart),
-        or(
-          eq(inlineProtocolAuthChallenges.authKeyId, Buffer.from(authKeyId)),
-          inArray(inlineProtocolAuthChallenges.identifierHash, identifierHashes),
-          ...(networkHashes.length > 0 ? [inArray(inlineProtocolAuthChallenges.networkHash, networkHashes)] : []),
-          ...(deviceHashes.length > 0 ? [inArray(inlineProtocolAuthChallenges.deviceHash, deviceHashes)] : []),
-        ),
-      ))
-    if (recent >= MAX_CHALLENGES_PER_WINDOW) throw new InlineError(InlineError.ApiError.FLOOD)
-
     const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS)
     const encryptedIdentifier = this.challengeCipher.encrypt(challengeId, identifier.value)
     await db.transaction(async (tx) => {
+      // Serialize overlapping quota dimensions across connections/processes.
+      // Stable ordering prevents deadlocks when two requests share only some
+      // dimensions; the locks contain hashes, never contact or network data.
+      const quotaLocks = [
+        `key:${Buffer.from(authKeyId).toString("hex")}`,
+        ...identifierHashes.map((hash) => `identifier:${hash.toString("hex")}`),
+        ...networkHashes.map((hash) => `network:${hash.toString("hex")}`),
+        ...deviceHashes.map((hash) => `device:${hash.toString("hex")}`),
+      ].sort()
+      for (const lock of quotaLocks) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`auth-begin:${lock}`}, 0))`)
+      }
+      const [{ value: recent = 0 } = { value: 0 }] = await tx.select({ value: count() })
+        .from(inlineProtocolAuthChallenges)
+        .where(and(
+          gte(inlineProtocolAuthChallenges.createdAt, rateStart),
+          or(
+            eq(inlineProtocolAuthChallenges.authKeyId, Buffer.from(authKeyId)),
+            inArray(inlineProtocolAuthChallenges.identifierHash, identifierHashes),
+            ...(networkHashes.length > 0 ? [inArray(inlineProtocolAuthChallenges.networkHash, networkHashes)] : []),
+            ...(deviceHashes.length > 0 ? [inArray(inlineProtocolAuthChallenges.deviceHash, deviceHashes)] : []),
+          ),
+        ))
+      if (recent >= MAX_CHALLENGES_PER_WINDOW) throw new InlineError(InlineError.ApiError.FLOOD)
+
       await tx.update(inlineProtocolAuthChallenges).set({ consumedAt: now }).where(and(
         eq(inlineProtocolAuthChallenges.authKeyId, Buffer.from(authKeyId)),
         eq(inlineProtocolAuthChallenges.identifierHash, identifierHash),
@@ -260,13 +273,17 @@ export class InlineProtocolAuthOperations {
       throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
     }
     const now = new Date()
-    const challenge = (await db.select().from(inlineProtocolAuthChallenges).where(and(
+    // Claim the attempt atomically before checking its proof. Concurrent guesses
+    // must share the same finite budget.
+    const challenge = (await db.update(inlineProtocolAuthChallenges)
+      .set({ attempts: sql`${inlineProtocolAuthChallenges.attempts} + 1` }).where(and(
       eq(inlineProtocolAuthChallenges.challengeId, Buffer.from(request.challengeId)),
       eq(inlineProtocolAuthChallenges.authKeyId, Buffer.from(authKeyId)),
       isNull(inlineProtocolAuthChallenges.consumedAt),
       gte(inlineProtocolAuthChallenges.expiresAt, now),
-    )).limit(1))[0]
-    if (!challenge || challenge.attempts >= MAX_ATTEMPTS) {
+      lt(inlineProtocolAuthChallenges.attempts, MAX_ATTEMPTS),
+    )).returning())[0]
+    if (!challenge) {
       throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
     }
     const identifier = this.challengeCipher.decrypt(
@@ -278,20 +295,28 @@ export class InlineProtocolAuthOperations {
     if (!pepper) throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
     const expected = inlineProtocolAuthCodeMac(pepper, request.challengeId, identifier, request.code)
     if (challenge.codeMac.length !== expected.length || !timingSafeEqual(challenge.codeMac, expected)) {
-      await db.update(inlineProtocolAuthChallenges).set({ attempts: sql`${inlineProtocolAuthChallenges.attempts} + 1` })
-        .where(and(
-          eq(inlineProtocolAuthChallenges.challengeId, Buffer.from(request.challengeId)),
-          isNull(inlineProtocolAuthChallenges.consumedAt),
-        ))
       throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
     }
+
+    // A valid proof may be retried while entering an invite code. Only wrong
+    // guesses consume the budget, including when signup later rolls back.
+    await db.update(inlineProtocolAuthChallenges)
+      .set({ attempts: sql`${inlineProtocolAuthChallenges.attempts} - 1` })
+      .where(and(
+        eq(inlineProtocolAuthChallenges.challengeId, Buffer.from(request.challengeId)),
+        isNull(inlineProtocolAuthChallenges.consumedAt),
+      ))
 
     const client = challenge.client
     let completed
     try {
       completed = await db.transaction(async (tx) => {
+        // Session replacement also takes this lock. Match Grid's lock order
+        // before signup can lock a user row.
+        await lockGridMutations(tx)
         const consumed = await tx.update(inlineProtocolAuthChallenges).set({ consumedAt: now }).where(and(
           eq(inlineProtocolAuthChallenges.challengeId, Buffer.from(request.challengeId)),
+          gte(inlineProtocolAuthChallenges.expiresAt, new Date()),
           isNull(inlineProtocolAuthChallenges.consumedAt),
         )).returning({ challengeId: inlineProtocolAuthChallenges.challengeId })
         if (consumed.length !== 1) throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
@@ -299,7 +324,7 @@ export class InlineProtocolAuthOperations {
         const user = challenge.delivery === "sms"
           ? (await getOrCreateUserByPhoneForSignup(identifier, request.inviteCode, tx)).user
           : (await getOrCreateUserByEmailForSignup(identifier, request.inviteCode, tx)).user
-        const { accountSessionId } = await authorizeInlineProtocolKey({
+        const { accountSessionId, replacement } = await authorizeInlineProtocolKey({
           tx,
           authKeyId,
           userId: user.id,
@@ -309,7 +334,7 @@ export class InlineProtocolAuthOperations {
           now,
         })
         const accountSession = { id: accountSessionId }
-        return { user, accountSession }
+        return { user, accountSession, replacement }
       })
     } catch (error) {
       if (error instanceof InlineError && error.type === "INVITE_CODE_REQUIRED") {
@@ -317,6 +342,7 @@ export class InlineProtocolAuthOperations {
       }
       throw error
     }
+    await finishInlineProtocolSessionReplacement(completed.replacement)
     return {
       state: {
         oneofKind: "authorized",

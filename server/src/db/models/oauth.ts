@@ -1,4 +1,5 @@
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import {
   oauthAccessTokens,
   oauthAuthCodes,
@@ -7,7 +8,7 @@ import {
   oauthGrants,
   oauthRefreshTokens,
 } from "@in/server/db/schema/oauth"
-import { and, eq, gt, isNull, lte, or } from "drizzle-orm"
+import { and, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm"
 
 export type OauthRegisteredClient = {
   clientId: string
@@ -290,6 +291,16 @@ export const OauthModel = {
     await db.delete(oauthAuthRequests).where(eq(oauthAuthRequests.id, id))
   },
 
+  async consumeAuthRequest(id: string, userId: number, nowMs: number, tx: Transaction): Promise<OauthAuthRequest | null> {
+    const [row] = await tx.delete(oauthAuthRequests).where(and(
+      eq(oauthAuthRequests.id, id),
+      eq(oauthAuthRequests.inlineUserId, userId),
+      isNotNull(oauthAuthRequests.inlineTokenEncrypted),
+      gt(oauthAuthRequests.expiresAt, toDate(nowMs)),
+    )).returning()
+    return row ? mapAuthRequest(row) : null
+  },
+
   async createGrant(input: {
     id: string
     clientId: string
@@ -301,8 +312,8 @@ export const OauthModel = {
     allowHomeThreads: boolean
     inlineTokenEncrypted?: Buffer | null
     nowMs: number
-  }): Promise<OauthGrant> {
-    const [inserted] = await db
+  }, connection: Transaction | typeof db = db): Promise<OauthGrant> {
+    const [inserted] = await connection
       .insert(oauthGrants)
       .values({
         id: input.id,
@@ -345,8 +356,8 @@ export const OauthModel = {
     codeChallenge: string
     nowMs: number
     expiresAtMs: number
-  }): Promise<OauthAuthCode> {
-    const [inserted] = await db
+  }, connection: Transaction | typeof db = db): Promise<OauthAuthCode> {
+    const [inserted] = await connection
       .insert(oauthAuthCodes)
       .values({
         code: input.code,

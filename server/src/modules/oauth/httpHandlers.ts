@@ -75,6 +75,7 @@ import {
   authRequestCookieName,
 } from "./authRequestCookie"
 import { normalizeMcpResourceIndicator } from "./resourceIndicator"
+import { isGrantSessionActive } from "./grantSession"
 
 const config = oauthConfig()
 // TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
@@ -1129,7 +1130,7 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
     return html(400, renderPage("Error", `<div class="error">Session expired. Please try again.</div>`))
   }
 
-  if (!authRequest.inlineUserId) {
+  if (!authRequest.inlineUserId || !authRequest.inlineTokenEncrypted?.length) {
     return html(400, renderPage("Error", `<div class="error">Not signed in.</div>`))
   }
 
@@ -1169,35 +1170,44 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
 
   const nowMs = Date.now()
   const grantId = crypto.randomUUID()
-  const grant = await OauthModel.createGrant({
-    id: grantId,
-    clientId: authRequest.clientId,
-    inlineUserId: authRequest.inlineUserId,
-    scope: authRequest.scope,
-    resource: authRequest.resource,
-    spaceIds: chosenSpaceIds,
-    allowDms,
-    allowHomeThreads,
-    inlineTokenEncrypted: authRequest.inlineTokenEncrypted,
-    nowMs,
-  })
-
   const authCode = createRandomToken("mcp_ac")
-  await OauthModel.createAuthCode({
-    code: authCode,
-    grantId: grant.id,
-    clientId: grant.clientId,
-    redirectUri: authRequest.redirectUri,
-    codeChallenge: authRequest.codeChallenge,
-    nowMs,
-    expiresAtMs: nowMs + config.authCodeTtlMs,
+  const userId = authRequest.inlineUserId
+  const consumed = await db.transaction(async (tx) => {
+    // Consent is single-use, just like its authorization code. Consumption and
+    // issuance share a transaction so a failed insert remains safely retryable.
+    const request = await OauthModel.consumeAuthRequest(authRequest.id, userId, nowMs, tx)
+    if (!request) return null
+    const grant = await OauthModel.createGrant({
+      id: grantId,
+      clientId: request.clientId,
+      inlineUserId: userId,
+      scope: request.scope,
+      resource: request.resource,
+      spaceIds: chosenSpaceIds,
+      allowDms,
+      allowHomeThreads,
+      inlineTokenEncrypted: request.inlineTokenEncrypted,
+      nowMs,
+    }, tx)
+    await OauthModel.createAuthCode({
+      code: authCode,
+      grantId: grant.id,
+      clientId: grant.clientId,
+      redirectUri: request.redirectUri,
+      codeChallenge: request.codeChallenge,
+      nowMs,
+      expiresAtMs: nowMs + config.authCodeTtlMs,
+    }, tx)
+    return request
   })
 
-  await OauthModel.deleteAuthRequest(authRequest.id)
+  if (!consumed) {
+    return html(400, renderPage("Error", `<div class="error">Session expired. Please try again.</div>`))
+  }
 
-  const redirect = new URL(authRequest.redirectUri)
+  const redirect = new URL(consumed.redirectUri)
   redirect.searchParams.set("code", authCode)
-  redirect.searchParams.set("state", authRequest.state)
+  redirect.searchParams.set("state", consumed.state)
 
   return new Response(null, {
     status: 302,
@@ -1393,6 +1403,10 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
       "OAuth introspection session decryption failed.",
       { cause, response },
     )
+  }
+
+  if (!await isGrantSessionActive(inlineToken, result.grant.inlineUserId)) {
+    return json(401, { active: false })
   }
 
   return json(200, {

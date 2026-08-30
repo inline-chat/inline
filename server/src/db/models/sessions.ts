@@ -8,6 +8,7 @@ import { db } from "@in/server/db"
 import { Log } from "@in/server/utils/log"
 import {
   revokeSession,
+  finishSessionRevocation,
   revokeSessionInTransaction,
   type RevokeSessionInput,
   type RevokeSessionTransactionOutcome,
@@ -103,43 +104,17 @@ const log = new Log("SessionsModel")
 export class SessionsModel {
   // Create a new session
   static async create(data: CreateSessionData): Promise<SessionWithDecryptedData> {
-    if (!data.userId || !data.tokenHash) {
-      throw new Error("Missing required fields: userId and tokenHash are required")
+    const { session, replacement } = await db.transaction((tx) => this.createReplacingInTransaction(tx, data))
+    if (replacement) {
+      // Session creation has committed. A notification failure must not make a
+      // successful login appear retryable or undo the durable replacement.
+      await finishSessionRevocation(replacement.outcome, replacement.input).catch((cause) => {
+        log.warn("Session replacement follow-up failed after commit", {
+          errorName: cause instanceof Error ? cause.name : "UnknownError",
+        })
+      })
     }
-
-    const now = new Date()
-
-    try {
-      const sessionData = this.makeSessionData(data, now)
-
-      // check if a previous userId session deviceId exists, delete that session
-      if (data.deviceId) {
-        let hasExistingDevice = await db
-          .select()
-          .from(sessions)
-          .where(and(eq(sessions.deviceId, data.deviceId), eq(sessions.userId, data.userId)))
-        let existingDevice = hasExistingDevice[0]
-        if (existingDevice) {
-          await revokeSession({
-            actor: "system",
-            targetUserId: data.userId,
-            sessionId: existingDevice.id,
-          })
-          await db.delete(sessions).where(eq(sessions.id, existingDevice.id))
-          log.info("Deleted previous session with matching device id", { userId: data.userId, sessionId: existingDevice.id })
-        }
-      }
-
-      const [session] = await db.insert(sessions).values(sessionData).returning()
-
-      if (!session) {
-        throw new Error("Failed to create session")
-      }
-
-      return this.decryptSessionData(session)
-    } catch (error) {
-      throw new Error(`Failed to create session: ${error instanceof Error ? error.message : "Unknown error"}`)
-    }
+    return session
   }
 
   /** Creates the session inside an existing authority transaction.
