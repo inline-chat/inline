@@ -746,6 +746,7 @@ private final class NewThreadComposeOverlayHostView: NSView {
 private final class NewThreadGlassComposeHostView: NSView {
   let compose: GlassComposeAppKit
   private weak var completionOverlayHostView: NewThreadComposeOverlayHostView?
+  private var focusRequested: Binding<Bool> = .constant(false)
 
   init(
     model: AllChatsNewThreadComposeModel,
@@ -794,6 +795,33 @@ private final class NewThreadGlassComposeHostView: NSView {
     compose.didLayout()
   }
 
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    scheduleRequestedFocus()
+  }
+
+  func updateFocusRequest(_ focusRequested: Binding<Bool>) {
+    self.focusRequested = focusRequested
+    scheduleRequestedFocus()
+  }
+
+  private func scheduleRequestedFocus() {
+    guard focusRequested.wrappedValue, window != nil else { return }
+
+    // Focusing expands Compose and publishes its height, so wait until the
+    // native view is mounted and the current SwiftUI update has finished.
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.focusRequested.wrappedValue else { return }
+
+      self.focusRequested.wrappedValue = false
+      guard self.window?.isKeyWindow == true,
+            !self.isHiddenOrHasHiddenAncestor
+      else { return }
+
+      self.compose.focus()
+    }
+  }
+
   override func viewWillMove(toWindow newWindow: NSWindow?) {
     if newWindow == nil {
       completionOverlayHostView?.removeFromSuperview()
@@ -835,18 +863,22 @@ private final class NewThreadGlassComposeHostView: NSView {
 @available(macOS 26.0, *)
 private struct NewThreadGlassComposeRepresentable: NSViewRepresentable {
   @ObservedObject var model: AllChatsNewThreadComposeModel
+  @Binding var focusRequested: Bool
   let placement: AllChatsNewThreadComposePlacement
 
   func makeNSView(context: Context) -> NewThreadGlassComposeHostView {
     NewThreadGlassComposeHostView(model: model, placement: placement)
   }
 
-  func updateNSView(_ nsView: NewThreadGlassComposeHostView, context: Context) {}
+  func updateNSView(_ nsView: NewThreadGlassComposeHostView, context: Context) {
+    nsView.updateFocusRequest($focusRequested)
+  }
 }
 
 @available(macOS 26.0, *)
 struct AllChatsNewThreadComposeHost: View {
   @StateObject private var model: AllChatsNewThreadComposeModel
+  @Binding private var focusRequested: Bool
 
   let spaces: [AllChatsComposeSpace]
   let selectedSpaceID: Int64?
@@ -856,11 +888,13 @@ struct AllChatsNewThreadComposeHost: View {
     dependencies: AppDependencies,
     spaces: [AllChatsComposeSpace],
     selectedSpaceID: Int64?,
-    placement: AllChatsNewThreadComposePlacement
+    placement: AllChatsNewThreadComposePlacement,
+    focusRequested: Binding<Bool> = .constant(false)
   ) {
     self.spaces = spaces
     self.selectedSpaceID = selectedSpaceID
     self.placement = placement
+    _focusRequested = focusRequested
     _model = StateObject(wrappedValue: AllChatsNewThreadComposeModel(
       dependencies: dependencies,
       spaces: spaces,
@@ -869,7 +903,11 @@ struct AllChatsNewThreadComposeHost: View {
   }
 
   var body: some View {
-    NewThreadGlassComposeRepresentable(model: model, placement: placement)
+    NewThreadGlassComposeRepresentable(
+      model: model,
+      focusRequested: $focusRequested,
+      placement: placement
+    )
       .frame(maxWidth: .infinity)
       .frame(height: model.composeHeight)
       .padding(.horizontal, 12)

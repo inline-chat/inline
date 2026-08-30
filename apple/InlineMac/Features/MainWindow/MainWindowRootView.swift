@@ -76,7 +76,7 @@ struct MainWindowRootView: View {
       guard let dependencies = windowDependencies,
             dependencies.viewModel.topLevelRoute == .main
       else { return }
-      NewThreadAction.start(dependencies: dependencies, spaceId: nav3.selectedSpaceId)
+      NewThreadAction.start(dependencies: dependencies, nav: nav3)
     } goBack: {
       nav3.goBack()
     } goForward: {

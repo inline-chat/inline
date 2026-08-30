@@ -8,6 +8,8 @@ struct EmptyRouteView: View {
   @Environment(SidebarViewModel.self) private var sidebar
 
   var body: some View {
+    @Bindable var nav = nav
+
     ZStack {
       EmptyRouteLogoButton {
         nav.openCommandBar()
@@ -19,7 +21,8 @@ struct EmptyRouteView: View {
           dependencies: dependencies,
           spaces: composeSpaces,
           selectedSpaceID: nav.selectedSpaceId,
-          placement: .bottom
+          placement: .bottom,
+          focusRequested: $nav.newThreadComposeFocusRequested
         )
         .padding(.horizontal, 12)
         .padding(.bottom, 12)

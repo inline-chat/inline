@@ -3114,7 +3114,7 @@ struct SidebarView: View {
       return
     }
 
-    NewThreadAction.start(dependencies: dependencies, spaceId: activeSpaceId)
+    NewThreadAction.start(dependencies: dependencies, nav: nav)
   }
 
   private func createNewThread(inFolder folderID: Int64) {

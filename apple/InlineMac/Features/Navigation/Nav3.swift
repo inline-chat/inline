@@ -158,6 +158,7 @@ class Nav3 {
   var history: [Nav3RouteState] = []
   var historyIndex: Int = -1
   var cmdKVisible = false
+  var newThreadComposeFocusRequested = false
 
   var selectedSpaceId: Int64? {
     currentState.selectedSpaceId
@@ -214,6 +215,11 @@ class Nav3 {
 
   func open(_ route: Nav3Route, tracksChatNavigation: Bool = true) {
     open(state(for: route), tracksChatNavigation: tracksChatNavigation)
+  }
+
+  func openNewThreadComposer() {
+    open(.empty, tracksChatNavigation: false)
+    newThreadComposeFocusRequested = true
   }
 
   @MainActor
@@ -321,6 +327,7 @@ class Nav3 {
   }
 
   func reset() {
+    newThreadComposeFocusRequested = false
     guard currentRoute != .empty || selectedSpaceId != nil || cmdKVisible else { return }
     history = []
     historyIndex = -1
@@ -381,6 +388,7 @@ class Nav3 {
   }
 
   private func notifyRouteChange() {
+    newThreadComposeFocusRequested = false
     persistActiveSpaceSelection()
     recordVisibleChatSwitchIfNeeded()
     onRouteChange?()
