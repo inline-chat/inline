@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { McpSessionManager } from "./sessions"
 
@@ -14,6 +14,18 @@ const initRequest = {
 }
 
 describe("McpSessionManager", () => {
+  it("closes uninitialized resources exactly once even with concurrent cleanup", async () => {
+    const manager = new McpSessionManager()
+    const server = new McpServer({ name: "setup-test", version: "0" })
+    let closed = 0
+    const managed = manager.createTransport({
+      grantId: "g1", nowMs: Date.now(), server,
+      close: async () => { closed++ },
+    })
+    await Promise.all([managed.close(), managed.close()])
+    expect(closed).toBe(1)
+  })
+
   it("stores session on initialize and closes cleanly", async () => {
     const mgr = new McpSessionManager({ idleTimeoutMs: 60_000 })
 
@@ -54,7 +66,9 @@ describe("McpSessionManager", () => {
     expect(s?.grantId).toBe("g1")
 
     mgr.touch(sessionId!, Date.now() + 1)
+    const closeTransport = vi.spyOn(transport, "close")
     await mgr.close(sessionId!)
+    expect(closeTransport).toHaveBeenCalledOnce()
     expect(externalClosed).toBe(1)
     expect(mgr.get(sessionId!)).toBeNull()
   })

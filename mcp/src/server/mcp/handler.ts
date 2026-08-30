@@ -318,24 +318,32 @@ export const Mcp = {
             },
           })
 
-          const server = createInlineMcpServer({
-            grant: authRes.grant,
-            inline,
-            resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
-            contractVersion,
-          })
+          let close = async () => { await inline.close() }
+          try {
+            const server = createInlineMcpServer({
+              grant: authRes.grant,
+              inline,
+              resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
+              contractVersion,
+            })
 
-          const { transport } = sessions.createTransport({
-            grantId: authRes.grant.id,
-            nowMs: Date.now(),
-            server,
-            close: async () => {
-              await inline.close()
-            },
-          })
-
-          await server.connect(transport)
-          return await transport.handleRequest(req, { authInfo: authRes.auth })
+            const managed = sessions.createTransport({
+              grantId: authRes.grant.id,
+              nowMs: Date.now(),
+              server,
+              close: async () => { await inline.close() },
+            })
+            close = managed.close
+            await server.connect(managed.transport)
+            const response = await managed.transport.handleRequest(req, { authInfo: authRes.auth })
+            // Invalid first requests can return 4xx without ever creating a
+            // session, so the idle-session reaper cannot own their resources.
+            if (!managed.transport.sessionId) await close()
+            return response
+          } catch (error) {
+            await close().catch(() => undefined)
+            throw error
+          }
         } catch {
           return json(500, { error: "mcp_internal_error" })
         }

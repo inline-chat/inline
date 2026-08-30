@@ -24,4 +24,16 @@ describe("mcp auth helpers", () => {
   it("hashes tokens", async () => {
     expect(await tokenHashHex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
   })
+
+  it.each(["Bearer abc extra", "Bearer abc,def", "Bearer\tabc", "Bearer"])(
+    "rejects ambiguous authorization material: %s", (authorization) => {
+      expect(getBearerToken(new Request("http://localhost/mcp", { headers: { authorization } })))
+        .toEqual({ ok: false, error: { kind: "invalid_format" } })
+    },
+  )
+
+  it("accepts case-insensitive bearer with multiple separating spaces", () => {
+    expect(getBearerToken(new Request("http://localhost/mcp", { headers: { authorization: "bearer  mcp_at_abc-123" } })))
+      .toEqual({ ok: true, token: "mcp_at_abc-123" })
+  })
 })

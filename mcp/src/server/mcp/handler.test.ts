@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createApp } from "../app"
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import * as inlineApi from "../inline/inline-api"
 
 const initRequest = {
   jsonrpc: "2.0",
@@ -41,6 +43,34 @@ function activeIntrospection(input: {
 describe("/mcp", () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it.each(["connect failure", "invalid first request"])("closes Inline resources after %s", async (failure) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json(activeIntrospection({ grantId: "g1" })))
+    const close = vi.fn(async () => {})
+    const unused = async (): Promise<never> => { throw new Error("Unexpected tool execution during initialization") }
+    vi.spyOn(inlineApi, "createInlineApi").mockReturnValue({
+      close, listSpaces: unused, searchPeople: unused, getEligibleChats: unused,
+      resolveConversation: unused, getConversation: unused, messageContext: unused,
+      getMessages: unused, recentMessages: unused, searchMessages: unused,
+      unreadMessages: unused, createChat: unused, uploadFile: unused,
+      sendMessage: unused, sendMediaMessage: unused,
+    })
+    if (failure === "connect failure") {
+      vi.spyOn(McpServer.prototype, "connect").mockRejectedValueOnce(new Error("injected setup failure"))
+    }
+    const app = createApp({ issuer: "http://localhost:8791", oauthInternalSharedSecret: "test-secret" })
+    const response = await app.fetch(new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer mcp_at_test",
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(failure === "connect failure" ? initRequest : { jsonrpc: "2.0", id: 1, method: "ping" }),
+    }))
+    expect(response.status).toBe(failure === "connect failure" ? 500 : 400)
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
   it("requires Authorization", async () => {

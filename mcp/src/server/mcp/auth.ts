@@ -14,12 +14,11 @@ export type BearerTokenError =
 export function getBearerToken(req: Request): { ok: true; token: string } | { ok: false; error: BearerTokenError } {
   const auth = req.headers.get("authorization")
   if (!auth) return { ok: false, error: { kind: "missing" } }
-  const [type, token] = auth.split(" ")
-  if (!type || type.toLowerCase() !== "bearer" || !token) return { ok: false, error: { kind: "invalid_format" } }
+  const token = /^Bearer +([A-Za-z0-9._~+/-]+=*)$/i.exec(auth)?.[1]
+  if (!token) return { ok: false, error: { kind: "invalid_format" } }
   return { ok: true, token }
 }
 
 export async function tokenHashHex(token: string): Promise<string> {
   return await sha256Hex(token)
 }
-
