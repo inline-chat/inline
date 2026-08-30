@@ -643,6 +643,7 @@ extension NSTextView {
 
   /// Set attributed text while preserving selection
   func setAttributedText(_ attributedString: NSAttributedString, preserveSelection: Bool = true) {
+    (self as? ComposeNSTextView)?.resetPastedLinks()
     let selectedRanges = preserveSelection ? selectedRanges : []
     textStorage?.setAttributedString(attributedString)
     if preserveSelection {

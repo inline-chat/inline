@@ -66,8 +66,7 @@ public struct ExternalResourceReference: Identifiable, Hashable, Sendable {
   }
 
   public var referenceText: String {
-    let prefix = emoji.flatMap { $0.isEmpty ? nil : "\($0) " } ?? ""
-    return "[[\(prefix)\(title)]]"
+    ExternalResourceLinkEditing.label(title: title, emoji: emoji)
   }
 
   fileprivate init?(_ value: InlineProtocol.ExternalResource) {
@@ -98,8 +97,22 @@ public struct ExternalResourceReference: Identifiable, Hashable, Sendable {
 public enum ExternalResourceSearchClient {
   private static let log = Log.scoped("ExternalResourceSearchClient", enableTracing: true)
 
+  /// A nil peer uses only the current user's personal Notion connection.
+  public static func resolveLinkLabel(peer: Peer?, url: String) async throws -> String? {
+    let response = try await Api.realtime.callRpcDirect(
+      method: .resolveURLPreview,
+      input: .resolveURLPreview(.with {
+        if let peer { $0.peerID = peer.toInputPeer() }
+        $0.url = url
+      }),
+      timeout: .seconds(4)
+    )
+    guard case let .resolveURLPreview(result)? = response, result.canSubstitute else { return nil }
+    return ExternalResourceLinkEditing.label(title: result.urlPreview.title, emoji: result.urlPreview.iconEmoji)
+  }
+
   public static func search(
-    peer: Peer,
+    peer: Peer?,
     query: String,
     limit: Int
   ) async throws -> [ExternalResourceReference] {
@@ -113,7 +126,7 @@ public enum ExternalResourceSearchClient {
       let response = try await Api.realtime.callRpcDirect(
         method: .searchExternalResources,
         input: .searchExternalResources(.with {
-          $0.peerID = peer.toInputPeer()
+          if let peer { $0.peerID = peer.toInputPeer() }
           $0.query = query
           $0.limit = Int32(limit)
         }),
@@ -139,6 +152,13 @@ public enum ExternalResourceSearchClient {
 }
 
 public enum ExternalResourceLinkEditing {
+  public static func label(title: String, emoji: String?) -> String {
+    let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !title.isEmpty else { return "" }
+    let emoji = emoji?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return emoji.isEmpty ? title : "\(emoji) \(title)"
+  }
+
   public static func replaceReference(
     in attributedText: NSAttributedString,
     range: NSRange,
@@ -154,17 +174,6 @@ public enum ExternalResourceLinkEditing {
       string: resource.referenceText,
       attributes: attributes
     )
-    AttributedStringHelpers.styleThreadLinkSyntax(
-      in: linkedText,
-      range: NSRange(location: 0, length: linkedText.length)
-    )
-    if let linkColor = attributes[.foregroundColor], linkedText.length > 4 {
-      linkedText.addAttribute(
-        .foregroundColor,
-        value: linkColor,
-        range: NSRange(location: 2, length: linkedText.length - 4)
-      )
-    }
     linkedText.append(NSAttributedString(string: trailingText, attributes: trailingAttributes))
 
     let mutable = NSMutableAttributedString(attributedString: attributedText)

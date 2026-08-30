@@ -1660,6 +1660,7 @@ class LegacyComposeAppKit: NSView {
 
   // Send the message
   func send(sendMode: MessageSendMode? = nil) {
+    textEditor.textView.resetPastedLinks()
     if voiceViewModel.phase == .review {
       sendVoiceRecording()
       return

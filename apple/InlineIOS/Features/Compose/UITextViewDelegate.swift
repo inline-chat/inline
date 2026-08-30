@@ -92,6 +92,7 @@ extension ComposeView: UITextViewDelegate {
     }
 
     draftManager.invalidateLoadedEntities(overlapping: range)
+    (textView as? ComposeTextView)?.willChangePastedLinks(in: range, replacement: text)
 
     return true
   }

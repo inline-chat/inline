@@ -2628,6 +2628,7 @@ message UpdateUserSettingsInput { UserSettings user_settings = 1; }
 message UpdateUserSettingsResult { repeated Update updates = 1; }
 
 message ResolveUrlPreviewInput {
+  // Omit for personal Notion lookup before chat creation; no space connection is used.
   InputPeer peer_id = 1;
   string url = 2;
 }
@@ -3219,6 +3220,7 @@ message ExternalResource {
 }
 
 message SearchExternalResourcesInput {
+  // Omit for personal Notion search before chat creation; no space connection is used.
   InputPeer peer_id = 1;
   string query = 2;
   optional int32 limit = 3;

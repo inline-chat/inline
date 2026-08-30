@@ -65,6 +65,19 @@ describe("notion authenticated preview provider", () => {
     })
   })
 
+  it("resolves the reported URL by its page ID while preserving the selected view", () => {
+    const originalUrl = "https://app.notion.com/p/example/22222222222242228222222222222222?v=33333333333343338333333333333333&source=copy_link"
+    const parsed = parseNotionUrl(originalUrl)
+
+    expect(parsed).toMatchObject({
+      resourceType: "unknown",
+      resourceId: "22222222-2222-4222-8222-222222222222",
+      originalUrl,
+      normalizedUrl: "https://app.notion.com/p/example/22222222222242228222222222222222?v=33333333333343338333333333333333",
+    })
+    expect(extractPreviewRoutes(originalUrl)[0]?.kind).toBe("authenticated")
+  })
+
   it("extracts protected Notion URLs without enabling public generic fetching", () => {
     const routes = extractPreviewRoutes(
       "see https://www.notion.so/workspace/Roadmap-0123456789abcdef0123456789abcdef and https://example.com/a",
@@ -99,6 +112,7 @@ describe("notion authenticated preview provider", () => {
       return new Response(
         JSON.stringify({
           object: "database",
+          icon: { type: "emoji", emoji: "⏰" },
           title: [{ plain_text: "Product roadmap" }],
           description: [{ plain_text: "Company project tracker" }],
           data_sources: [{ id: "source-a", name: "Projects" }],
@@ -112,6 +126,7 @@ describe("notion authenticated preview provider", () => {
     expect(preview).toMatchObject({
       provider: "notion",
       providerResourceType: "notion.database",
+      iconEmoji: "⏰",
       title: "Product roadmap",
       url: parsed.normalizedUrl,
       finalUrl: parsed.normalizedUrl,
@@ -135,6 +150,7 @@ describe("notion authenticated preview provider", () => {
       return new Response(
         JSON.stringify({
           object: "data_source",
+          icon: { type: "emoji", emoji: "👩🏽‍❤️‍💋‍👩🏻" },
           title: [{ plain_text: "Projects" }],
           description: [{ plain_text: "Active work by team." }],
         }),
@@ -152,6 +168,7 @@ describe("notion authenticated preview provider", () => {
     expect(preview).toMatchObject({
       provider: "notion",
       providerResourceType: "notion.data_source",
+      iconEmoji: "👩🏽‍❤️‍💋‍👩🏻",
       title: "Projects",
       description: "Active work by team.",
       mediaType: "article",

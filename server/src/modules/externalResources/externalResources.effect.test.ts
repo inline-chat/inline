@@ -26,6 +26,50 @@ const peer: InputPeer = {
 }
 
 describe("ExternalResourceSearch", () => {
+  test("new-thread search uses personal connections without looking up a chat or space", async () => {
+    const resolveSpaceId = vi.fn(async () => { throw new Error("No chat should be resolved") })
+    const resolveConnections = vi.fn(async (_provider: string, userId: number, spaceId: number | null) => {
+      expect(spaceId).toBeNull()
+      return [connection({ integrationId: userId * 10, userId })]
+    })
+    const service = makeExternalResourceSearch({
+      resolveSpaceId,
+      resolveConnection: async () => null,
+      resolveConnections,
+      searchNotion: async (auth) => [{
+        id: `personal-${auth.integrationId}`,
+        provider: "notion",
+        kind: "database",
+        title: "Reminders",
+        url: `https://www.notion.so/personal-${auth.integrationId}`,
+      }],
+    })
+
+    const first = await Effect.runPromise(service.search({ currentUserId: 1, query: "reminders" }))
+    const second = await Effect.runPromise(service.search({ currentUserId: 2, query: "reminders" }))
+    expect(first.map((resource) => resource.id)).toEqual(["personal-10"])
+    expect(second.map((resource) => resource.id)).toEqual(["personal-20"])
+    expect(resolveSpaceId).not.toHaveBeenCalled()
+    expect(resolveConnections).toHaveBeenCalledWith("notion", 1, null)
+    expect(resolveConnections).toHaveBeenCalledWith("notion", 2, null)
+  })
+
+  test.each<IntegrationAuthToken["owner"]>([
+    { type: "space", spaceId: 7 },
+    { type: "user", userId: 2 },
+  ])("new-thread search rejects credentials outside the requesting user: %j", async (owner) => {
+    const searchNotion = vi.fn(async () => [])
+    const service = makeExternalResourceSearch({
+      resolveSpaceId: async () => { throw new Error("No chat should be resolved") },
+      resolveConnection: async () => ({ ...connection({ integrationId: 20, userId: 1 }), owner }),
+      searchNotion,
+    })
+
+    const result = await Effect.runPromiseExit(service.search({ currentUserId: 1, query: "reminders" }))
+    expect(result._tag).toBe("Failure")
+    expect(searchNotion).not.toHaveBeenCalled()
+  })
+
   test("normalizes queries and caches connection-scoped results", async () => {
     let connectionLookups = 0
     const calls: Array<{
@@ -69,7 +113,11 @@ describe("ExternalResourceSearch", () => {
     expect(calls).toEqual([{
       integrationId: 20,
       query: "product roadmap",
-      limit: 6,
+      limit: 12,
+    }, {
+      integrationId: 20,
+      query: "product roadmap",
+      limit: 24,
     }])
   })
 
@@ -170,7 +218,7 @@ describe("ExternalResourceSearch", () => {
 
     expect(first[0]?.title).toBe("Page 20")
     expect(second[0]?.title).toBe("Page 30")
-    expect(providerCalls).toEqual([20, 30])
+    expect(providerCalls).toEqual([20, 20, 30, 30])
   })
 
   test("merges personal and space search results without duplicates", async () => {
@@ -196,7 +244,7 @@ describe("ExternalResourceSearch", () => {
             : "https://www.notion.so/space-only",
         },
         {
-          id: "duplicate",
+          id: "page-20",
           provider: "notion",
           kind: "page",
           title: "Duplicate",
@@ -284,7 +332,7 @@ describe("ExternalResourceSearch", () => {
       },
       {
         providerRequestLimits: {
-          perUser: { max: 1, windowMs: 60_000 },
+          perUser: { max: 2, windowMs: 60_000 },
           perConnection: { max: 2, windowMs: 60_000 },
         },
         now: () => 1_000,
@@ -300,8 +348,109 @@ describe("ExternalResourceSearch", () => {
       peerId: peer,
       currentUserId: 1,
       query: "projects",
-    }))).toEqual([])
-    expect(providerCalls).toBe(1)
+    }).pipe(Effect.flip))).toBeInstanceOf(ExternalResourceProviderFailure)
+    expect(providerCalls).toBe(2)
+  })
+
+  test("ranks space candidates before trimming a full personal result pool", async () => {
+    const service = makeExternalResourceSearch({
+      resolveSpaceId: async () => 7,
+      resolveConnection: async () => null,
+      resolveConnections: async () => [connection({ integrationId: 20, userId: 1 }), {
+        ...connection({ integrationId: 30, userId: 1 }), owner: { type: "space", spaceId: 7 },
+      }],
+      searchNotion: async (auth, _, limit, object) => auth.integrationId === 30 && object === "data_source"
+        ? [{ id: "reminders", provider: "notion", kind: "database", title: "Reminders", url: "https://notion.so/reminders" }]
+        : Array.from({ length: limit }, (_, i) => ({
+          id: `task-${i}`, provider: "notion" as const, kind: "page" as const,
+          title: `Reminders for customer ${i}`, url: `https://notion.so/task-${i}`,
+        })),
+    })
+    const results = await Effect.runPromise(service.search({ peerId: peer, currentUserId: 1, query: "Reminders" }))
+    expect(results).toHaveLength(6)
+    expect(results[0]?.id).toBe("reminders")
+  })
+
+  test("a failed category does not poison its cache or hide successful sources", async () => {
+    let failPages = true
+    const calls: string[] = []
+    const service = makeExternalResourceSearch({
+      resolveSpaceId: async () => 7,
+      resolveConnection: async () => connection({ integrationId: 20, userId: 1 }),
+      searchNotion: async (_, __, ___, object) => {
+        calls.push(object!)
+        if (object === "page" && failPages) throw new Error("timeout")
+        return [{ id: object!, provider: "notion", kind: "page", title: "Reminders", url: `https://notion.so/${object}` }]
+      },
+    })
+    const input = { peerId: peer, currentUserId: 1, query: "Reminders" }
+    expect(await Effect.runPromise(service.search(input))).toHaveLength(1)
+    failPages = false
+    expect(await Effect.runPromise(service.search(input))).toHaveLength(2)
+    expect(calls).toEqual(["data_source", "page", "page"])
+  })
+
+  test("rate-limited queries can retry after the budget resets without an empty cache hit", async () => {
+    let now = 1_000
+    let calls = 0
+    const service = makeExternalResourceSearch({
+      resolveSpaceId: async () => 7,
+      resolveConnection: async () => connection({ integrationId: 20, userId: 1 }),
+      searchNotion: async () => { calls += 1; return [] },
+    }, {
+      now: () => now,
+      providerRequestLimits: { perUser: { max: 2, windowMs: 1_000 }, perConnection: { max: 2, windowMs: 1_000 } },
+    })
+    const input = { peerId: peer, currentUserId: 1, query: "first" }
+    await Effect.runPromise(service.search(input))
+    const retry = { ...input, query: "second" }
+    expect(await Effect.runPromise(service.search(retry).pipe(Effect.flip))).toBeInstanceOf(ExternalResourceProviderFailure)
+    now = 2_001
+    expect(await Effect.runPromise(service.search(retry))).toEqual([])
+    expect(calls).toBe(4)
+  })
+
+  test("one user shares the provider budget across personal and space connections", async () => {
+    let calls = 0
+    const service = makeExternalResourceSearch({
+      resolveSpaceId: async () => 7,
+      resolveConnection: async () => null,
+      resolveConnections: async () => [connection({ integrationId: 20, userId: 1 }), {
+        ...connection({ integrationId: 30, userId: 1 }), owner: { type: "space", spaceId: 7 },
+      }],
+      searchNotion: async () => {
+        calls += 1
+        return [{ id: "page", provider: "notion", kind: "page", title: "Reminders", url: "https://notion.so/page" }]
+      },
+    }, {
+      now: () => 1_000,
+      providerRequestLimits: { perUser: { max: 2, windowMs: 60_000 }, perConnection: { max: 120, windowMs: 60_000 } },
+    })
+    const input = { peerId: peer, currentUserId: 1, query: "Reminders" }
+    expect(await Effect.runPromise(service.search(input))).toHaveLength(1)
+    expect(calls).toBe(2)
+    expect(await Effect.runPromise(service.search({ ...input, query: "Projects" }).pipe(Effect.flip)))
+      .toBeInstanceOf(ExternalResourceProviderFailure)
+    expect(calls).toBe(2)
+  })
+
+  test("an incomplete empty search is retryable rather than a cached no-match", async () => {
+    let failPages = true
+    let calls = 0
+    const service = makeExternalResourceSearch({
+      resolveSpaceId: async () => 7,
+      resolveConnection: async () => connection({ integrationId: 20, userId: 1 }),
+      searchNotion: async (_, __, ___, object) => {
+        calls += 1
+        if (object === "page" && failPages) throw new Error("timeout")
+        return []
+      },
+    })
+    const input = { peerId: peer, currentUserId: 1, query: "Reminders" }
+    expect(await Effect.runPromise(service.search(input).pipe(Effect.flip))).toBeInstanceOf(ExternalResourceProviderFailure)
+    failPages = false
+    expect(await Effect.runPromise(service.search(input))).toEqual([])
+    expect(calls).toBe(3)
   })
 
   test("rejects an excessive limit in the typed error channel", async () => {

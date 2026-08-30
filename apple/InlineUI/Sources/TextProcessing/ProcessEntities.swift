@@ -968,6 +968,8 @@ public class ProcessEntities {
       }
     }
 
+    // Detect whole URLs before email/phone substrings inside their paths or queries.
+    entities = extractMissingURLEntities(text: text, existingEntities: entities)
     entities = extractBotCommandEntities(text: text, existingEntities: entities)
     entities = extractEmailEntities(text: text, existingEntities: entities)
     entities = extractPhoneNumberEntities(text: text, existingEntities: entities)
@@ -979,6 +981,31 @@ public class ProcessEntities {
     messageEntities.entities = entities
 
     return (text: text, entities: messageEntities)
+  }
+
+  /// Paste/send must not depend on a platform data detector running after a delimiter.
+  private static func extractMissingURLEntities(
+    text: String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    let protected = existingEntities.filter { entity in
+      switch entity.type {
+      case .bold, .italic: false
+      default: true
+      }
+    }
+    let source = NSAttributedString(string: text)
+    let detected = ComposeLinkPaste.links(in: source, range: NSRange(location: 0, length: source.length))
+      .compactMap { match -> MessageEntity? in
+      guard !protected.contains(where: { rangesOverlap(lhs: $0, rhs: match.range) })
+      else { return nil }
+      return MessageEntity.with {
+        $0.type = .url
+        $0.offset = Int64(match.range.location)
+        $0.length = Int64(match.range.length)
+      }
+    }
+    return existingEntities + detected
   }
 
   private static func trimmedEntityRange(in text: NSString, range: NSRange) -> NSRange? {
@@ -1761,6 +1788,11 @@ public class ProcessEntities {
     let fullRange: NSRange
     let textRange: NSRange
     let url: String
+  }
+
+  static func markdownLinkRanges(in text: String) -> [NSRange] {
+    guard text.contains("](") else { return [] }
+    return findMarkdownLinkMatches(in: text).map(\.fullRange)
   }
 
   private struct ThreadTitleLinkMatch {

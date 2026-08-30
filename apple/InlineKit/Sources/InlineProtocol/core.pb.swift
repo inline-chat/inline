@@ -12586,6 +12586,7 @@ public nonisolated struct ResolveUrlPreviewInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Omit for personal Notion lookup before chat creation; no space connection is used.
   public var peerID: InputPeer {
     get {_peerID ?? InputPeer()}
     set {_peerID = newValue}
@@ -14728,6 +14729,7 @@ public nonisolated struct SearchExternalResourcesInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Omit for personal Notion search before chat creation; no space connection is used.
   public var peerID: InputPeer {
     get {_peerID ?? InputPeer()}
     set {_peerID = newValue}

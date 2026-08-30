@@ -23,7 +23,7 @@ export async function resolveUrlPreviewHandler(
   input: ResolveUrlPreviewInput,
   context: HandlerContext,
 ): Promise<ResolveUrlPreviewResult> {
-  if (!input.peerId || !input.url.trim()) {
+  if (!input.url.trim() || (!input.peerId && context.isBot)) {
     throw RealtimeRpcError.UrlPreviewUnavailable()
   }
 
@@ -36,13 +36,14 @@ export async function resolveUrlPreviewHandler(
     throw RealtimeRpcError.RateLimit()
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, { currentUserId: context.userId })
-  await AccessGuards.ensureChatAccess(chat, context.userId)
+  const chat = input.peerId
+    ? await ChatModel.getChatFromInputPeer(input.peerId, { currentUserId: context.userId })
+    : undefined
+  if (chat) await AccessGuards.ensureChatAccess(chat, context.userId)
 
   const resolved = await resolveUrlPreview({
     url: input.url,
-    chatId: chat.id,
-    spaceId: chat.spaceId,
+    ...(chat ? { chatId: chat.id, spaceId: chat.spaceId } : {}),
     currentUserId: context.userId,
   })
   if (!resolved?.metadata.title?.trim()) {

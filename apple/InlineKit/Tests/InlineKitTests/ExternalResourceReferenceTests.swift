@@ -23,14 +23,16 @@ struct ExternalResourceReferenceTests {
       with: resource
     )
 
-    #expect(result.newAttributedText.string == "See [[🧭 Roadmap]] today")
-    #expect(result.newCursorPosition == ("See [[🧭 Roadmap]] " as NSString).length)
+    #expect(result.newAttributedText.string == "See 🧭 Roadmap today")
+    #expect(result.newCursorPosition == ("See 🧭 Roadmap " as NSString).length)
     let link = result.newAttributedText.attribute(
       .link,
       at: 8,
       effectiveRange: nil
     ) as? String
     #expect(link == "https://www.notion.so/notion-roadmap")
+    let trailingSpace = ("See 🧭 Roadmap" as NSString).length
+    #expect(result.newAttributedText.attribute(.link, at: trailingSpace, effectiveRange: nil) == nil)
   }
 
   @Test("replacement leaves following text intact without closing brackets")
@@ -50,6 +52,13 @@ struct ExternalResourceReferenceTests {
       with: resource
     )
 
-    #expect(result.newAttributedText.string == "[[Roadmap]] next")
+    #expect(result.newAttributedText.string == "Roadmap next")
+  }
+
+  @Test("paste and autocomplete share the title and Unicode emoji label")
+  func sharedLabel() {
+    #expect(ExternalResourceLinkEditing.label(title: " Reminders ", emoji: " ⏰ ") == "⏰ Reminders")
+    #expect(ExternalResourceLinkEditing.label(title: " Reminders ", emoji: nil) == "Reminders")
+    #expect(ExternalResourceLinkEditing.label(title: " ", emoji: "⏰").isEmpty)
   }
 }

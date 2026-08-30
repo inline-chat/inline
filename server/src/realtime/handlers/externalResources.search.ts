@@ -44,15 +44,11 @@ export const searchExternalResources = async (
     return { resources: [] }
   }
 
-  if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid()
-  }
-
   const exit = await Effect.runPromiseExit(
     Effect.gen(function* () {
       const search = yield* ExternalResourceSearch
       return yield* search.search({
-        peerId: input.peerId!,
+        peerId: input.peerId,
         currentUserId: handlerContext.userId,
         query: input.query,
         limit: input.limit,

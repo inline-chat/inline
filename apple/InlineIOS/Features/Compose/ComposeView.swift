@@ -150,6 +150,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var inlineCommandTask: Task<Void, Never>?
   var peerId: InlineKit.Peer? {
     didSet {
+      if oldValue != peerId { textView.resetPastedLinks() }
       updateEmbedState(animated: false)
       updateVoiceAvailability(animated: false)
     }
@@ -289,6 +290,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   override func removeFromSuperview() {
+    textView.resetPastedLinks()
     voiceViewModel.cancel()
     saveDraft()
     stopDraftSaveTimer()
@@ -1017,6 +1019,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func sendMessage(sendMode: MessageSendMode? = nil) {
+    textView.resetPastedLinks()
     guard let peerId else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil

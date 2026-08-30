@@ -13,7 +13,7 @@ export function resolveUrlPreviewSubstitution(metadata: SubstitutionMetadata): U
   if (!title) return { canSubstitute: false }
 
   if (metadata.provider === "notion") {
-    return supportedProviderTitle(metadata.providerResourceType, ["notion.page", "notion.database"], title)
+    return supportedProviderTitle(metadata.providerResourceType, ["notion.page", "notion.database", "notion.data_source"], title)
   }
 
   if (metadata.provider === "linear") {

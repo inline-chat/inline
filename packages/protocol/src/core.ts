@@ -7332,6 +7332,8 @@ export interface UpdateUserSettingsResult {
  */
 export interface ResolveUrlPreviewInput {
     /**
+     * Omit for personal Notion lookup before chat creation; no space connection is used.
+     *
      * @generated from protobuf field: InputPeer peer_id = 1;
      */
     peerId?: InputPeer;
@@ -8702,6 +8704,8 @@ export interface ExternalResource {
  */
 export interface SearchExternalResourcesInput {
     /**
+     * Omit for personal Notion search before chat creation; no space connection is used.
+     *
      * @generated from protobuf field: InputPeer peer_id = 1;
      */
     peerId?: InputPeer;

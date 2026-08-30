@@ -129,7 +129,7 @@ public final class LinkDetector: Sendable {
   public func detectLinks(in text: String) -> [LinkMatch] {
     guard !text.isEmpty else { return [] }
 
-    log.trace("Starting link detection for text: '\(text)'")
+    log.trace("Starting link detection length=\(text.utf16.count)")
 
     var matches: [LinkMatch] = []
     var handledRanges: Set<NSRange> = []
@@ -255,7 +255,7 @@ public final class LinkDetector: Sendable {
     let range = NSRange(location: 0, length: text.utf16.count)
     let matches = Self.bareDomainRegex.matches(in: text, options: [], range: range)
 
-    log.trace("Bare domain regex found \(matches.count) matches in text: '\(text)'")
+    log.trace("Bare domain regex found \(matches.count) matches")
 
     return matches.compactMap { match in
       // Skip if this range overlaps with already handled ranges
@@ -317,12 +317,12 @@ public final class LinkDetector: Sendable {
         return nil
       }
 
-      log.trace("Found bare domain with optional path: '\(urlSubstring)' at range \(adjustedRange)")
+      log.trace("Found bare domain at range \(adjustedRange)")
 
       // Add https:// protocol to make it a valid URL
       let urlString = "https://\(urlSubstring)"
       guard let url = URL(string: urlString) else {
-        log.trace("Failed to create URL from: '\(urlString)'")
+        log.trace("Failed to create URL from detected range")
         return nil
       }
 
