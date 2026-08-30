@@ -15,6 +15,18 @@ final class NewPhotoView: UIView {
 
   private var fullMessage: FullMessage
 
+  var messageStableID: Int64 {
+    fullMessage.id
+  }
+
+  var photoStableID: Int64? {
+    fullMessage.photoInfo?.id
+  }
+
+  var contextMenuVisiblePath: UIBezierPath? {
+    maskLayer.path.map(UIBezierPath.init(cgPath:))
+  }
+
   private let maxWidth: CGFloat = 280
   private let maxHeight: CGFloat = 400
   private let minWidth: CGFloat = 180

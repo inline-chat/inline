@@ -681,13 +681,17 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   func sourceViewForMessageStableId(_ stableId: Int64) -> UIView? {
+    photoViewForMessageStableId(stableId)?.imageView
+  }
+
+  func photoViewForMessageStableId(_ stableId: Int64) -> NewPhotoView? {
     guard let indexPath = findIndexPath(forStableMessageId: stableId),
           let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell
     else {
       return nil
     }
 
-    return cell.messageView?.newPhotoView.imageView
+    return cell.messageView?.newPhotoView
   }
 
   private func safeScrollToTop(animated: Bool = true) {
@@ -3876,6 +3880,8 @@ private extension MessagesCollectionView {
         return nil
       }
 
+      var photoPreview: MessagePhotoContextMenuPreview?
+
       // Check if the touch point is within a view that has its own context menu interaction
       if let messageView = cell.messageView {
         let pointInMessageView = collectionView.convert(point, to: messageView)
@@ -3897,6 +3903,12 @@ private extension MessagesCollectionView {
             currentView = view.superview
           }
         }
+
+        photoPreview = makePhotoContextMenuPreview(
+          for: fullMessage,
+          messageView: messageView,
+          pointInMessageView: pointInMessageView
+        )
       }
 
       if message.isServiceMessage {
@@ -3935,14 +3947,29 @@ private extension MessagesCollectionView {
         gravity: 0
       )
 
-      let identifierView = ContextMenuIdentifierUIView(
+      let identifierView = MessageContextMenuIdentifierView(
         accessoryView: reactionPickerView,
-        configuration: configuration
+        configuration: configuration,
+        photoPreview: photoPreview
       )
 
       collectionView.addSubview(identifierView)
 
-      return UIContextMenuConfiguration(identifier: identifierView, previewProvider: nil) { [weak self] _ in
+      let previewProvider: UIContextMenuContentPreviewProvider?
+      if let photoPreview {
+        let containerSize = collectionView.window?.bounds.size ?? collectionView.bounds.size
+        previewProvider = { [weak self] in
+          guard self?.currentPhotoSource(for: photoPreview) != nil else { return nil }
+          return MessagePhotoContextMenuPreviewController(
+            sourceImage: photoPreview.sourceImage,
+            containerSize: containerSize
+          )
+        }
+      } else {
+        previewProvider = nil
+      }
+
+      return UIContextMenuConfiguration(identifier: identifierView, previewProvider: previewProvider) { [weak self] _ in
         guard let self else { return UIMenu(children: []) }
 
         let isMessageSending = message.status == .sending
@@ -3959,17 +3986,14 @@ private extension MessagesCollectionView {
 
         if isMessageSending {
           if fullMessage.photoInfo != nil {
-            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
-              [weak self] _ in
-              guard let self else { return }
-              if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-                UIPasteboard.general.image = image
-                ToastManager.shared.showToast(
-                  "Photo copied to clipboard",
-                  type: .success,
-                  systemImage: "doc.on.clipboard"
-                )
-              }
+            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+              guard let self, let photoImage = currentPhotoImage(for: fullMessage, preview: nil) else { return }
+              UIPasteboard.general.image = photoImage
+              ToastManager.shared.showToast(
+                "Photo copied to clipboard",
+                type: .success,
+                systemImage: "doc.on.clipboard"
+              )
             }
             actions.append(copyPhotoAction)
           }
@@ -4005,17 +4029,14 @@ private extension MessagesCollectionView {
 
         if isMessageFailed {
           if fullMessage.photoInfo != nil {
-            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
-              [weak self] _ in
-              guard let self else { return }
-              if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-                UIPasteboard.general.image = image
-                ToastManager.shared.showToast(
-                  "Photo copied to clipboard",
-                  type: .success,
-                  systemImage: "doc.on.clipboard"
-                )
-              }
+            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+              guard let self, let photoImage = currentPhotoImage(for: fullMessage, preview: nil) else { return }
+              UIPasteboard.general.image = photoImage
+              ToastManager.shared.showToast(
+                "Photo copied to clipboard",
+                type: .success,
+                systemImage: "doc.on.clipboard"
+              )
             }
             actions.append(copyPhotoAction)
           }
@@ -4037,18 +4058,28 @@ private extension MessagesCollectionView {
           return UIMenu(children: actions)
         }
 
+        let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
+          ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
+        }
+        actions.insert(replyAction, at: 0)
+
+        let replyThreadAction = UIAction(
+          title: "Reply in Thread",
+          image: UIImage(systemName: "arrowshape.turn.up.left.circle")
+        ) { _ in
+          ReplyThreadNavigator.open(message: message, source: .menu)
+        }
+        actions.insert(replyThreadAction, at: 1)
+
         if fullMessage.photoInfo != nil {
-          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
-            [weak self] _ in
-            guard let self else { return }
-            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-              UIPasteboard.general.image = image
-              ToastManager.shared.showToast(
-                "Photo copied to clipboard",
-                type: .success,
-                systemImage: "doc.on.clipboard"
-              )
-            }
+          let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+            guard let self, let photoImage = currentPhotoImage(for: fullMessage, preview: photoPreview) else { return }
+            UIPasteboard.general.image = photoImage
+            ToastManager.shared.showToast(
+              "Photo copied to clipboard",
+              type: .success,
+              systemImage: "doc.on.clipboard"
+            )
           }
           actions.append(copyPhotoAction)
 
@@ -4057,39 +4088,20 @@ private extension MessagesCollectionView {
             image: UIImage(systemName: "square.and.arrow.down")
           ) { [weak self] _ in
             guard let self else { return }
-            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-              UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            guard let photoImage = currentPhotoImage(for: fullMessage, preview: photoPreview) else {
               ToastManager.shared.showToast(
-                "Photo saved to Photos Library",
-                type: .success,
-                systemImage: "photo"
-              )
-            } else {
-              ToastManager.shared.showToast(
-                "Failed to save photo",
+                "Could not save photo",
                 type: .error,
                 systemImage: "exclamationmark.triangle"
               )
+              return
             }
+            savePhoto(photoImage)
           }
           actions.append(savePhotoAction)
         }
 
-        let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
-          ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
-        }
-        actions.append(replyAction)
-
-        let replyThreadAction = UIAction(
-          title: "Reply in Thread",
-          image: UIImage(systemName: "arrowshape.turn.up.left.circle")
-        ) { _ in
-          ReplyThreadNavigator.open(message: message, source: .menu)
-        }
-        actions.append(replyThreadAction)
-
-        let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
-          [weak self] _ in
+        let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) { [weak self] _ in
           guard let self else { return }
           presentForwardSheet(fullMessage)
         }
@@ -4152,6 +4164,99 @@ private extension MessagesCollectionView {
         menuChildren.append(deleteMenu)
 
         return UIMenu(children: menuChildren)
+      }
+    }
+
+    private func makePhotoContextMenuPreview(
+      for message: FullMessage,
+      messageView: UIMessageView,
+      pointInMessageView: CGPoint
+    ) -> MessagePhotoContextMenuPreview? {
+      guard message.photoInfo != nil,
+            message.message.isSticker != true,
+            message.message.status != .sending,
+            message.message.status != .failed
+      else {
+        return nil
+      }
+      let sourceView = messageView.newPhotoView
+      guard !sourceView.isHidden, sourceView.alpha > 0, sourceView.window != nil else { return nil }
+      let pointInPhoto = messageView.convert(pointInMessageView, to: sourceView)
+      guard sourceView.bounds.contains(pointInPhoto),
+            let sourceImage = sourceView.getCurrentImage(),
+            photoURL(for: message) != nil
+      else {
+        return nil
+      }
+      return MessagePhotoContextMenuPreview(
+        message: message,
+        sourceImage: sourceImage
+      )
+    }
+
+    private func currentPhotoSource(for preview: MessagePhotoContextMenuPreview) -> NewPhotoView? {
+      guard let collectionView = currentCollectionView as? MessagesCollectionView,
+            let sourceView = collectionView.photoViewForMessageStableId(preview.stableID),
+            preview.matches(sourceView),
+            let currentMessage = viewModel.messagesByID[preview.stableID],
+            currentMessage.photoInfo?.id == preview.photoID
+      else {
+        return nil
+      }
+      return sourceView
+    }
+
+    private func currentPhotoImage(
+      for message: FullMessage,
+      preview: MessagePhotoContextMenuPreview?
+    ) -> UIImage? {
+      guard let currentMessage = viewModel.messagesByID[message.id],
+            currentMessage.photoInfo?.id == message.photoInfo?.id
+      else {
+        return nil
+      }
+      if let preview {
+        guard currentPhotoSource(for: preview) != nil else { return nil }
+        return preview.sourceImage
+      }
+      guard let collectionView = currentCollectionView as? MessagesCollectionView,
+            let sourceView = collectionView.photoViewForMessageStableId(message.id),
+            sourceView.photoStableID == message.photoInfo?.id,
+            !sourceView.isHidden,
+            sourceView.alpha > 0,
+            sourceView.window != nil
+      else {
+        return nil
+      }
+      return sourceView.getCurrentImage()
+    }
+
+    private func savePhoto(_ image: UIImage) {
+      UIImageWriteToSavedPhotosAlbum(
+        image,
+        self,
+        #selector(photo(_:didFinishSavingWithError:contextInfo:)),
+        nil
+      )
+    }
+
+    @objc private func photo(
+      _: UIImage,
+      didFinishSavingWithError error: Error?,
+      contextInfo _: UnsafeRawPointer
+    ) {
+      if error == nil {
+        ToastManager.shared.showToast(
+          "Photo saved to Photos Library",
+          type: .success,
+          systemImage: "photo"
+        )
+      } else {
+        ToastManager.shared.showToast(
+          "Could not save photo",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
       }
     }
 
@@ -4402,7 +4507,7 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      targetedPreview(for: indexPath)
+      targetedPreview(for: indexPath, configuration: configuration)
     }
 
     func collectionView(
@@ -4410,12 +4515,52 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      targetedPreview(for: indexPath)
+      targetedPreview(for: indexPath, configuration: configuration)
+    }
+
+    func collectionView(
+      _ collectionView: UICollectionView,
+      willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+      animator: UIContextMenuInteractionCommitAnimating
+    ) {
+      guard let identifierView = configuration.identifier as? MessageContextMenuIdentifierView,
+            let photoPreview = identifierView.photoPreview
+      else {
+        return
+      }
+      animator.preferredCommitStyle = .dismiss
+      animator.addCompletion { [weak self] in
+        guard let self,
+              let sourceView = currentPhotoSource(for: photoPreview),
+              let currentMessage = viewModel.messagesByID[photoPreview.stableID],
+              let imageURL = photoURL(for: currentMessage)
+        else {
+          return
+        }
+        self.presentPhotoGallery(
+          for: currentMessage,
+          sourceView: sourceView,
+          sourceImage: photoPreview.sourceImage,
+          imageURL: imageURL
+        )
+      }
     }
 
     // MARK: - Private
 
-    private func targetedPreview(for indexPath: IndexPath) -> UITargetedPreview? {
+    private func targetedPreview(
+      for indexPath: IndexPath,
+      configuration: UIContextMenuConfiguration
+    ) -> UITargetedPreview? {
+      if let identifierView = configuration.identifier as? MessageContextMenuIdentifierView,
+         let photoPreview = identifierView.photoPreview,
+         let sourceView = currentPhotoSource(for: photoPreview) {
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        parameters.visiblePath = sourceView.contextMenuVisiblePath ?? UIBezierPath(rect: sourceView.bounds)
+        return UITargetedPreview(view: sourceView, parameters: parameters)
+      }
+
       guard let collectionView = currentCollectionView,
             let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
             let messageView = cell.messageView else { return nil }
