@@ -488,13 +488,7 @@ fn style_error_label(value: &str) -> String {
 }
 
 fn should_use_stderr_color() -> bool {
-    if std::env::var_os("NO_COLOR").is_some() {
-        return false;
-    }
-    if std::env::var_os("CLICOLOR_FORCE").is_some_and(|force| force != "0") {
-        return true;
-    }
-    io::stderr().is_terminal()
+    crate::output::color_enabled(io::stderr().is_terminal())
 }
 
 fn find_error_in_chain<'a, T: std::error::Error + 'static>(

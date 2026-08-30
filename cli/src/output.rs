@@ -1074,7 +1074,7 @@ fn minimum_column_width(column: FlexibleColumn) -> usize {
         .min(column.max_width)
 }
 
-fn terminal_columns() -> Option<usize> {
+pub(crate) fn terminal_columns() -> Option<usize> {
     env::var("COLUMNS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -1135,21 +1135,34 @@ fn header_left(value: &str, width: usize) -> String {
 
 pub(crate) fn style_heading(value: &str) -> String {
     let value = terminal_text(value);
-    if should_use_color() {
+    if color_enabled(io::stdout().is_terminal()) {
         format!("\x1b[1m{value}\x1b[0m")
     } else {
         value.to_string()
     }
 }
 
-fn should_use_color() -> bool {
+pub(crate) fn color_enabled(is_terminal: bool) -> bool {
+    match color_choice() {
+        clap::ColorChoice::Always => true,
+        clap::ColorChoice::Never => false,
+        clap::ColorChoice::Auto => is_terminal,
+    }
+}
+
+pub(crate) fn color_choice() -> clap::ColorChoice {
     if env::var_os("NO_COLOR").is_some() {
-        return false;
+        return clap::ColorChoice::Never;
     }
-    if env::var_os("CLICOLOR_FORCE").is_some_and(|force| force != "0") {
-        return true;
+    if env::var_os("CLICOLOR_FORCE").is_some_and(|force| !force.is_empty() && force != "0") {
+        return clap::ColorChoice::Always;
     }
-    io::stdout().is_terminal()
+    if env::var_os("CLICOLOR").is_some_and(|value| value == "0")
+        || env::var_os("TERM").is_some_and(|value| value == "dumb")
+    {
+        return clap::ColorChoice::Never;
+    }
+    clap::ColorChoice::Auto
 }
 
 fn truncate_display(value: &str, max_width: usize) -> String {

@@ -21,6 +21,35 @@ fn run(args: &[&str]) -> Output {
 }
 
 #[test]
+fn redirected_no_arguments_and_flags_only_keep_existing_error_contracts() {
+    let output = run(&[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let text = String::from_utf8(output.stderr).unwrap();
+    assert!(text.contains("Usage:"));
+    assert!(!text.contains("Work chat and agents"));
+
+    let output = run(&["--json", "--compact"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "invalid_args");
+}
+
+#[test]
+fn explicit_help_keeps_the_complete_command_reference() {
+    let output = run(&["--help"]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("Commands:"));
+    assert!(text.contains("bridge"));
+    assert!(text.contains("notifications"));
+    assert!(text.contains("--json"));
+    assert!(!text.contains("Work chat and agents"));
+}
+
+#[test]
 fn generates_all_completions_without_configuration_or_network() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         let output = Command::new(env!("CARGO_BIN_EXE_inline"))

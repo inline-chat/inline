@@ -12,6 +12,7 @@ mod doctor;
 mod downloads;
 mod errors;
 mod identity;
+mod intro;
 mod mac_app_auth;
 mod media;
 mod message_export;
@@ -231,6 +232,8 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     name = "inline",
     version,
     about = "Inline CLI",
+    styles = intro::help_styles(),
+    color = output::color_choice(),
     disable_version_flag = true,
     propagate_version = true,
     after_help = r#"Common workflows:
@@ -1910,6 +1913,19 @@ struct TasksCreateNotionArgs {
 fn main() {
     install_broken_pipe_handler();
     let argv: Vec<OsString> = env::args_os().collect();
+    // A local landing page for people opening the CLI. Keep redirected calls,
+    // explicit help and argument errors on the established parser path.
+    if argv.len() == 1 && io::stdin().is_terminal() && io::stdout().is_terminal() {
+        if let Err(error) = intro::write(
+            io::stdout().lock(),
+            output::terminal_columns().unwrap_or(80),
+            output::color_enabled(true),
+        ) {
+            eprintln!("Error: could not write introduction: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let flags = detect_global_flags(&argv);
 
     let started_at = Instant::now();
@@ -5292,6 +5308,13 @@ mod installed_message_action_tests {
 #[cfg(test)]
 mod cli_parsing_tests {
     use super::*;
+
+    #[test]
+    fn all_intro_examples_parse_with_the_real_cli() {
+        for args in intro::example_arguments() {
+            Cli::try_parse_from(&args).unwrap_or_else(|error| panic!("{args:?}: {error}"));
+        }
+    }
 
     #[test]
     fn command_tree_has_no_alias_or_flag_collisions() {
