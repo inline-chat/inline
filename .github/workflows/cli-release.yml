@@ -289,18 +289,22 @@ jobs:
         if: steps.target.outputs.selected == 'true'
         env:
           INLINE_CLI_TARGETS: ${{ matrix.target }}
+          INLINE_CLI_SENTRY_DSN: ${{ secrets.INLINE_CLI_SENTRY_DSN }}
         run: |
           set -euo pipefail
+          test -n "${INLINE_CLI_SENTRY_DSN}" || { echo "Missing INLINE_CLI_SENTRY_DSN release configuration" >&2; exit 1; }
           bun run scripts/release-cli.ts build
 
       - name: Validate Target Binary
         if: steps.target.outputs.selected == 'true'
         env:
           TARGET: ${{ matrix.target }}
+          INLINE_CLI_SENTRY_DSN: ${{ secrets.INLINE_CLI_SENTRY_DSN }}
         run: |
           set -euo pipefail
           binary="target/${TARGET}/release/inline"
           test -x "${binary}"
+          python3 -c 'import os, pathlib; dsn = os.environ["INLINE_CLI_SENTRY_DSN"]; binary = pathlib.Path("target") / os.environ["TARGET"] / "release/inline"; assert dsn and dsn.encode() in binary.read_bytes(), "Release binary is missing its Sentry DSN"'
           file "${binary}"
           case "${TARGET}" in
             aarch64-unknown-linux-gnu)
@@ -425,6 +429,7 @@ jobs:
         if: steps.target.outputs.selected == 'true'
         env:
           INLINE_CLI_TARGETS: ${{ matrix.target }}
+          INLINE_CLI_SENTRY_DSN: ${{ secrets.INLINE_CLI_SENTRY_DSN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || secrets.MACOS_CERTIFICATE_NAME }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -438,16 +443,19 @@ jobs:
           set -euo pipefail
           security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$MACOS_CI_KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$MACOS_CI_KEYCHAIN_PATH"
+          test -n "${INLINE_CLI_SENTRY_DSN}" || { echo "Missing INLINE_CLI_SENTRY_DSN release configuration" >&2; exit 1; }
           bun run scripts/release-cli.ts build
 
       - name: Validate Signed Target Binary
         if: steps.target.outputs.selected == 'true'
         env:
           TARGET: ${{ matrix.target }}
+          INLINE_CLI_SENTRY_DSN: ${{ secrets.INLINE_CLI_SENTRY_DSN }}
         run: |
           set -euo pipefail
           binary="target/${TARGET}/release/inline"
           test -x "${binary}"
+          python3 -c 'import os, pathlib; dsn = os.environ["INLINE_CLI_SENTRY_DSN"]; binary = pathlib.Path("target") / os.environ["TARGET"] / "release/inline"; assert dsn and dsn.encode() in binary.read_bytes(), "Release binary is missing its Sentry DSN"'
           file "${binary}"
           codesign --verify --strict --verbose=2 "${binary}"
           case "${TARGET}" in

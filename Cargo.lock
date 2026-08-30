@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "inline-agent-bridge"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "futures-util",
  "libc",
@@ -1370,7 +1370,7 @@ dependencies = [
 
 [[package]]
 name = "inline-agent-driver-acp"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "agent-client-protocol",
  "base64 0.22.1",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "inline-agent-driver-codex"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "inline-cli"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "inline-protocol"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "aes",
  "cipher",
@@ -1486,7 +1486,7 @@ dependencies = [
 
 [[package]]
 name = "inline-sdk"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "base64 0.22.1",
  "futures-util",

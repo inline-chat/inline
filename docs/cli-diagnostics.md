@@ -42,9 +42,16 @@ require coordinated CLI and Hermes adapter releases and current-host validation.
 
 ## Optional Sentry reporting
 
-Reporting is disabled when no DSN is configured. `INLINE_CLI_SENTRY_DSN` can be
-provided to the build to embed the CLI project's public DSN, or set at runtime.
+Official releases starting with 0.7.6 include metadata-only error reporting to
+Inline's Sentry project. Set `INLINE_CLI_TELEMETRY=off` to opt out.
+
+Source builds have reporting disabled when no DSN is configured.
+`INLINE_CLI_SENTRY_DSN` can be provided to the build to embed the CLI project's
+public DSN, or set at runtime.
 An empty runtime value disables an embedded DSN. No DSN is included in source.
+The release workflow supplies it from the
+`INLINE_CLI_SENTRY_DSN` Actions secret only when building release artifacts,
+and verifies it is embedded in every target. Tests use local fixture endpoints.
 The native app strips runtime Inline environment overrides, so distributed app
 setup should use the CLI's embedded DSN when reporting is enabled.
 
