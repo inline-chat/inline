@@ -449,6 +449,11 @@ const sendPushNotificationToUser = async ({
       return
     }
 
+    const projectedTitle = notificationText(title, maxNotificationNameBytes) || "New Message"
+    const projectedBody = notificationBodyText(message) || "New message"
+    const projectedFirstName = notificationText(currentUser.firstName, maxNotificationNameBytes) || undefined
+    const projectedLastName = notificationText(currentUser.lastName, maxNotificationNameBytes) || undefined
+
     for (const session of userSessions) {
       if (!session.applePushToken) continue
 
@@ -467,8 +472,8 @@ const sendPushNotificationToUser = async ({
         userId: currentUserId,
 
         from: {
-          firstName: currentUser.firstName,
-          lastName: currentUser.lastName,
+          firstName: projectedFirstName,
+          lastName: projectedLastName,
         },
       }
       notification.contentAvailable = true
@@ -477,8 +482,14 @@ const sendPushNotificationToUser = async ({
       notification.threadId = `chat_${chatId}`
       notification.sound = "default"
       notification.alert = {
-        title,
-        body: message,
+        title: projectedTitle,
+        body: projectedBody,
+      }
+
+      const payloadBytes = Buffer.byteLength(JSON.stringify(notification), "utf8")
+      if (payloadBytes > 4_096) {
+        Log.shared.warn("Legacy notification payload exceeded APNs byte budget", { payloadBytes, userId })
+        continue
       }
 
       let apnProvider = getApnProvider()
