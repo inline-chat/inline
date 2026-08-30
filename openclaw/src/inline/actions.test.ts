@@ -2,6 +2,61 @@ import { describe, expect, it, vi } from "vitest"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 
 describe("inline/actions", () => {
+  it("rejects a DM parent before creating a reply thread", async () => {
+    vi.resetModules()
+    const invokeRaw = vi.fn()
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "user" } } }))
+        invokeRaw = invokeRaw
+      },
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    await expect(inlineMessageActions.handleAction?.({ channel: "inline", action: "thread-create",
+      cfg: { channels: { inline: { token: "token" } } }, params: { to: "7", messageId: "3", threadName: "Test" },
+    } as any)).rejects.toThrow("reply threads are supported in group chats")
+    expect(invokeRaw).not.toHaveBeenCalled()
+  })
+
+  it("routes sends and activity to the current child while preserving explicit other destinations", async () => {
+    vi.resetModules()
+    const sendMessage = vi.fn(async () => ({ messageId: 10n }))
+    const invokeRaw = vi.fn(async () => ({ oneofKind: "sendComposeAction", sendComposeAction: {} }))
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        sendMessage = sendMessage
+        invokeRaw = invokeRaw
+      },
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    const { rememberInlineReplyThreadRoute } = await import("./thread-routes")
+    rememberInlineReplyThreadRoute({ accountId: "default", parentChatId: "91001", threadId: "91002" })
+    const context = {
+      channel: "inline", cfg: { channels: { inline: { token: "token" } } },
+      toolContext: { currentChannelId: "91002", currentGraphChannelId: "91001", currentThreadTs: "91002" },
+    }
+    await inlineMessageActions.handleAction?.({ ...context, action: "send", params: { to: "91001", message: "child" } } as any)
+    await inlineMessageActions.handleAction?.({ ...context, action: "typing", params: { to: "91001" } } as any)
+    await inlineMessageActions.handleAction?.({ ...context, action: "send", params: { to: "91001", topLevel: true, message: "parent" } } as any)
+    await inlineMessageActions.handleAction?.({ ...context, action: "send", params: { to: "91003", message: "other" } } as any)
+    expect(sendMessage.mock.calls.map(([p]) => [p.chatId, p.text])).toEqual([
+      [91002n, "child"], [91001n, "parent"], [91003n, "other"],
+    ])
+    expect(invokeRaw).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({
+      sendComposeAction: expect.objectContaining({ peerId: { type: { oneofKind: "chat", chat: { chatId: 91002n } } } }),
+    }))
+    await expect(inlineMessageActions.handleAction?.({ ...context, action: "send",
+      params: { to: "91003", threadId: "91002", message: "wrong parent" },
+    } as any)).rejects.toThrow("threadId does not belong")
+    expect(sendMessage).toHaveBeenCalledTimes(3)
+  })
+
   it("lists gated actions only when inline is configured", async () => {
     vi.resetModules()
     const { inlineMessageActions } = await import("./actions")
@@ -857,6 +912,7 @@ describe("inline/actions", () => {
         DELETE_MESSAGE_ATTACHMENT: 55,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4241,6 +4297,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4360,6 +4417,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4477,6 +4535,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4571,7 +4630,7 @@ describe("inline/actions", () => {
     })
   })
 
-  it("falls back to active thread-reply route when inherited message context has no route", async () => {
+  it("does not reuse an unrelated active thread when the current parent message has no route", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -4595,6 +4654,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4623,34 +4683,14 @@ describe("inline/actions", () => {
       },
     } as any)
 
-    const result = await inlineMessageActions.handleAction?.({
+    await expect(inlineMessageActions.handleAction?.({
       channel: "inline",
       action: "thread-reply",
       cfg,
-      params: {
-        to: "9900",
-        message: "reply through active route",
-      },
-      toolContext: {
-        currentMessageId: "990099",
-      },
-    } as any)
-
-    expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: 9901n,
-        text: "reply through active route",
-      }),
-    )
-    expect(result).toMatchObject({
-      details: {
-        ok: true,
-        threadId: "9901",
-        resolvedBy: "route",
-        parentChatId: "9900",
-        parentMessageId: null,
-      },
-    })
+      params: { to: "9900", message: "must not go to the older thread" },
+      toolContext: { currentMessageId: "990099" },
+    } as any)).rejects.toThrow("threadId is required")
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it("uses createSubthread for thread-create", async () => {
@@ -4678,6 +4718,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4744,6 +4785,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4811,6 +4853,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4883,6 +4926,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4950,6 +4994,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -5201,6 +5246,7 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
+        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close

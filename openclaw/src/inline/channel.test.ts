@@ -549,6 +549,20 @@ describe("inline/channel", () => {
     expect(inlineChannelPlugin.messaging?.preserveHeartbeatThreadIdForGroupRoute).toBe(true)
   })
 
+  it("inherits the current thread only for the same target and matches child delivery", async () => {
+    const { inlineChannelPlugin: plugin } = await import("./channel")
+    const toolContext = { currentChannelId: "inline:7", currentThreadTs: "8" }
+    expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "chat:7", toolContext })).toBe("8")
+    expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "chat:9", toolContext })).toBeUndefined()
+    expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "user:7", toolContext })).toBeUndefined()
+    expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:8", targetKey: "7", targetThreadId: "8" })).toBe(true)
+    expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:8", targetKey: "7", targetThreadId: "9" })).toBe(false)
+    const context = plugin.threading?.buildToolContext?.({ cfg: {}, context: {
+      To: "inline:8", NativeChannelId: "7", CurrentMessageId: "123", MessageThreadId: "8",
+    } })
+    expect(context?.currentMessageId).toBe("")
+  })
+
   it("sends heartbeat typing for Inline chat and reply-thread targets", async () => {
     vi.resetModules()
 
@@ -684,6 +698,42 @@ describe("inline/channel", () => {
         to: "chat:7",
       }),
     )
+  })
+
+  it.each(["", ":inline-agent:researcher"])("preserves a child-target tool mirror in its inbound session%s", async (suffix) => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+    const currentSessionKey = `agent:main:inline:group:7:thread:8${suffix}`
+    const resolve = inlineChannelPlugin.messaging?.resolveOutboundSessionRoute
+    const context = { cfg: {} as OpenClawConfig, agentId: "main", currentSessionKey }
+    expect(await resolve?.({ ...context, target: "inline:8", threadId: "8" })).toMatchObject({
+      sessionKey: currentSessionKey, baseSessionKey: "agent:main:inline:group:7", threadId: "8",
+    })
+    expect(await resolve?.({ ...context, target: "inline:9", threadId: "9" })).toMatchObject({
+      sessionKey: "agent:main:inline:group:9:thread:9",
+    })
+    expect(await resolve?.({ ...context, agentId: "other", target: "inline:8", threadId: "8" })).toMatchObject({
+      sessionKey: "agent:other:inline:group:8:thread:8",
+    })
+  })
+
+  it("mirrors an adopted thread under its parent rather than a false child group", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const currentSessionKey = "agent:main:inline:group:7:inline-agent:researcher"
+    const end = beginInlineActiveThreadRoute({ accountId: "default", sessionKey: currentSessionKey,
+      sourceChatId: 7n, sourceMessageId: 1n, threadId: 8n, threadReplyDelivered: false,
+      onThreadAdopted: async () => {},
+    })
+    try {
+      expect(await inlineChannelPlugin.messaging?.resolveOutboundSessionRoute?.({
+        cfg: {} as OpenClawConfig, agentId: "main", currentSessionKey, target: "inline:8", threadId: "8",
+      })).toMatchObject({
+        sessionKey: "agent:main:inline:group:7:thread:8:inline-agent:researcher",
+        baseSessionKey: "agent:main:inline:group:7", threadId: "8",
+      })
+    } finally { end() }
   })
 
   it("config adapters support account enable/disable + delete", async () => {

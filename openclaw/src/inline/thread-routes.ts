@@ -215,6 +215,7 @@ function keysForLookup(params: {
   }
   if (params.agentId) {
     keys.add(activeKey(params.accountId, params.parentChatId, params.agentId))
+    return [...keys]
   }
   keys.add(activeKey(params.accountId, params.parentChatId))
   return [...keys]

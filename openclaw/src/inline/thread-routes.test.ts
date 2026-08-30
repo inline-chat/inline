@@ -163,6 +163,15 @@ describe("inline/thread-routes", () => {
     ).resolves.toBeNull()
   })
 
+  it("does not use another agent's active route when the requested agent has none", async () => {
+    rememberInlineReplyThreadRoute({
+      accountId: "default", parentChatId: 7000n, threadId: 7100n, agentId: "other",
+    })
+    await expect(lookupInlineReplyThreadRoute({
+      accountId: "default", parentChatId: 7000n, agentId: "main",
+    })).resolves.toBeNull()
+  })
+
   it("reads active route files when keyed store is unavailable", async () => {
     const stateDir = setStateDir()
     writeRoutesFile(stateDir, Date.now())

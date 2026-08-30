@@ -1,5 +1,6 @@
 import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
+import { beginInlineActiveThreadRoute, type ActiveInlineThreadRoute } from "./active-thread-route.js"
 import {
   buildCommandTextFromArgs,
   findCommandByNativeName,
@@ -481,19 +482,6 @@ function buildInlineTypingDispatcherOptions(typingCallbacks?: InlineTypingCallba
   }
 }
 
-function uniqueInlineChatIds(chatIds: Array<bigint | null | undefined>): bigint[] {
-  const seen = new Set<string>()
-  const out: bigint[] = []
-  for (const chatId of chatIds) {
-    if (chatId == null) continue
-    const key = String(chatId)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(chatId)
-  }
-  return out
-}
-
 async function sendInlineTypingToChats(params: {
   client: Pick<InlineSdkClient, "sendTyping">
   chatIds: bigint[]
@@ -683,6 +671,7 @@ function createInlineBotPresenceLifecycle(params: {
 
   const send = (kind: InlineBotPresenceKind, comment?: string): Promise<void> => {
     if (currentKind === kind && currentComment === comment) return Promise.resolve()
+    const chatIds = params.chatIds
     currentKind = kind
     currentComment = comment
     sendChain = sendChain
@@ -690,7 +679,7 @@ function createInlineBotPresenceLifecycle(params: {
       .then(() =>
         sendInlineBotPresenceToChats({
           client: params.client,
-          chatIds: params.chatIds,
+          chatIds,
           kind,
           ...(comment ? { comment } : {}),
           onPartialError: params.onPartialError,
@@ -741,6 +730,22 @@ function createInlineBotPresenceLifecycle(params: {
   }
 
   return {
+    retarget: async (chatId: bigint) => {
+      clearIdleTimer()
+      clearGestureTimer()
+      const oldChatIds = params.chatIds
+      params.chatIds = [chatId]
+      currentKind = undefined
+      currentComment = undefined
+      sendChain = sendChain.catch(() => {}).then(() => sendInlineBotPresenceToChats({
+        client: params.client,
+        chatIds: oldChatIds,
+        kind: "idle",
+        onPartialError: params.onPartialError,
+      }).catch(params.onError))
+      if (active) await send(busyKind, busyComment)
+      else await sendChain
+    },
     start: async (cue?: InlineBotPresenceSignal | null) => {
       if (params.chatIds.length === 0) return
       clearIdleTimer()
@@ -4708,6 +4713,16 @@ export async function monitorInlineProvider(params: {
         explicitThreadIntent: explicitReplyThreadIntent,
       }) &&
       !shouldEditCallbackTargetInPlace
+    if (shouldCreateDeliveryThread && !isGroup) {
+      await client.sendMessage({
+        chatId,
+        text: "Reply threads are currently supported in group chats. I haven't generated an answer here; please ask in a group or ask me to answer in this chat.",
+        replyToMsgId: msg.id,
+        parseMarkdown,
+      })
+      publishStatus({ lastOutboundAt: Date.now() })
+      return
+    }
     let parentThreadCreationTyping = false
     const setParentThreadCreationTyping = async (typing: boolean): Promise<void> => {
       if (!shouldCreateDeliveryThread || parentThreadCreationTyping === typing) return
@@ -4803,7 +4818,17 @@ export async function monitorInlineProvider(params: {
       }
     }
     if (shouldCreateDeliveryThread && !deliveryReplyThreadContext) {
-      runtime.error?.("inline create reply thread failed; falling back to parent chat delivery")
+      await setParentThreadCreationTyping(false)
+      runtime.error?.("inline create reply thread failed; answer withheld from parent chat")
+      const sent = await client.sendMessage({
+        chatId,
+        text: "I couldn't open the reply thread. Please try again; I haven't sent the answer to this chat.",
+        replyToMsgId: msg.id,
+        parseMarkdown,
+      })
+      rememberSentBotMessage({ chatId, messageId: sent.messageId })
+      publishStatus({ lastOutboundAt: Date.now() })
+      return
     }
     await setParentThreadCreationTyping(false)
     if (!replyThreadContext && deliveryReplyThreadContext?.anchorMessage != null) {
@@ -4843,11 +4868,8 @@ export async function monitorInlineProvider(params: {
       }
     }
 
-    const deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
-    const typingChatIds = uniqueInlineChatIds([
-      deliveryChatId,
-      !replyThreadContext && deliveryReplyThreadContext ? deliveryReplyThreadContext.parentChatId : null,
-    ])
+    let deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
+    let adoptingThread = false
     const inlineAgentId = currentContent?.entities.find((entity) =>
       entity.type === "mention" && entity.userId === String(meId) && entity.agentId)?.agentId
     let inlineAgent: Awaited<ReturnType<typeof inlineAgentResolver.resolve>> = null
@@ -5037,7 +5059,8 @@ export async function monitorInlineProvider(params: {
       CommandAuthorized: commandAuthorized,
       ...(systemPrompt ? { GroupSystemPrompt: systemPrompt } : {}),
       OriginatingChannel: CHANNEL_ID,
-      OriginatingTo: `inline:${String(effectiveChatId)}`,
+      OriginatingTo: `inline:${String(deliveryChatId)}`,
+      NativeChannelId: String(chatId),
     })
 
     await core.channel.session.recordInboundSession({
@@ -5063,10 +5086,10 @@ export async function monitorInlineProvider(params: {
       channel: CHANNEL_ID,
       accountId: account.accountId,
       typing: {
-        start: () =>
+        start: () => adoptingThread ? Promise.resolve() :
           sendInlineTypingToChats({
             client,
-            chatIds: typingChatIds,
+            chatIds: [deliveryChatId],
             typing: true,
             onPartialError: (chatId, error) =>
               runtime.error?.(`inline typing start failed for chat ${String(chatId)}: ${String(error)}`),
@@ -5074,7 +5097,7 @@ export async function monitorInlineProvider(params: {
         stop: () =>
           sendInlineTypingToChats({
             client,
-            chatIds: typingChatIds,
+            chatIds: [deliveryChatId],
             typing: false,
             onPartialError: (chatId, error) =>
               runtime.error?.(`inline typing stop failed for chat ${String(chatId)}: ${String(error)}`),
@@ -5087,7 +5110,7 @@ export async function monitorInlineProvider(params: {
     const rawTypingCallbacks = replyPipeline.typingCallbacks
     const botPresenceLifecycle = createInlineBotPresenceLifecycle({
       client,
-      chatIds: typingChatIds,
+      chatIds: [deliveryChatId],
       onPartialError: (chatId, error) =>
         runtime.error?.(`inline bot presence failed for chat ${String(chatId)}: ${String(error)}`),
       onError: (error) => runtime.error?.(`inline bot presence failed: ${String(error)}`),
@@ -5155,8 +5178,8 @@ export async function monitorInlineProvider(params: {
     const progressToolProgressEnabled =
       progressPlaceholderEnabled && resolveChannelStreamingPreviewToolProgress(account.config)
     const suppressDefaultToolProgressMessages = progressPlaceholderEnabled
-    const canReplyToSourceMessage = deliveryChatId === chatId
-    const defaultReplyToMsgId =
+    let canReplyToSourceMessage = deliveryChatId === chatId
+    let defaultReplyToMsgId =
       canReplyToSourceMessage && isGroup && msg.replyToMsgId != null ? msg.id : undefined
     const inlineBlockStreamingEnabled = resolveInlineBlockStreamingEnabled(account.config)
     const disableBlockStreaming =
@@ -5179,7 +5202,7 @@ export async function monitorInlineProvider(params: {
       actionsFingerprint: null,
       latestActions: undefined,
     }
-    const progressSeed = `${account.accountId}:${String(deliveryChatId)}:${String(msg.id)}`
+    let progressSeed = `${account.accountId}:${String(deliveryChatId)}:${String(msg.id)}`
     const progressState: InlineProgressPlaceholderState = {
       messageId: null,
       text: "",
@@ -5188,7 +5211,7 @@ export async function monitorInlineProvider(params: {
       closing: false,
     }
     const renderInlineProgressPlaceholder = async (): Promise<void> => {
-      if (!progressPlaceholderEnabled || progressState.closing) return
+      if (!progressPlaceholderEnabled || progressState.closing || adoptingThread) return
       const text = sanitizeInlineDeliveryText(
         formatChannelProgressDraftText({
           entry: account.config,
@@ -5242,7 +5265,7 @@ export async function monitorInlineProvider(params: {
 
       await progressState.opChain
     }
-    const progressDraftGate = createChannelProgressDraftGate({
+    let progressDraftGate = createChannelProgressDraftGate({
       onStart: renderInlineProgressPlaceholder,
     })
     const pushInlineProgressPlaceholder = async (
@@ -5638,6 +5661,7 @@ export async function monitorInlineProvider(params: {
       await resetEditStreamForAssistantMessage()
     }
     const handlePartialStreamPayload = (payload: InlineReplyPayload): void => {
+      if (adoptingThread || activeThreadRoute.threadReplyDelivered) return
       const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
       if (!visiblePayload) return
       const partialText = typeof visiblePayload.text === "string" ? visiblePayload.text : ""
@@ -5698,6 +5722,49 @@ export async function monitorInlineProvider(params: {
       options?: Parameters<typeof buildChannelProgressDraftLineForEntry>[2],
     ): ChannelProgressDraftLine | undefined =>
       buildChannelProgressDraftLineForEntry(account.config, input, options)
+
+    let delivered = false
+    const activeThreadRoute: ActiveInlineThreadRoute = {
+      accountId: account.accountId,
+      sessionKey: deliverySessionKey,
+      sourceChatId: chatId,
+      sourceMessageId: msg.id,
+      sourceMessageSid: messageSid,
+      threadId: deliveryReplyThreadContext?.childChatId,
+      threadReplyDelivered: false,
+      onThreadAdopted: async (threadId: bigint) => {
+        adoptingThread = true
+        // Drain old-chat operations before changing IDs: Inline message IDs
+        // are local to a chat, so an old draft cannot be edited in the child.
+        await resetEditStreamForAssistantMessage()
+        await cleanupInlineProgressPlaceholder()
+        delivered = false
+        partialMediaDelivered = false
+        await sendInlineTypingToChats({ client, chatIds: [deliveryChatId], typing: false })
+          .catch((error) => runtime.error?.(`inline thread handoff typing stop failed: ${String(error)}`))
+        deliveryChatId = threadId
+        deliveryReplyThreadContext = {
+          childChatId: threadId,
+          parentChatId: chatId,
+          parentChatTitle: effectiveGroupTitle,
+          parentMessageId: msg.id,
+          threadLabel: null,
+          anchorMessage: msg,
+        }
+        canReplyToSourceMessage = false
+        defaultReplyToMsgId = undefined
+        ctxPayload.OriginatingTo = `inline:${String(threadId)}`
+        ctxPayload.MessageThreadId = String(threadId)
+        await botPresenceLifecycle.retarget(threadId)
+        await sendInlineTypingToChats({ client, chatIds: [threadId], typing: true })
+          .catch((error) => runtime.error?.(`inline thread handoff typing start failed: ${String(error)}`))
+        progressState.closing = false
+        progressState.lines = []
+        progressSeed = `${account.accountId}:${String(threadId)}:${String(msg.id)}`
+        progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
+        adoptingThread = false
+      },
+    }
 
     const replyOptions = {
       ...(onModelSelected ? { onModelSelected: onModelSelected as (ctx: unknown) => void } : {}),
@@ -5890,8 +5957,8 @@ export async function monitorInlineProvider(params: {
       ...(typeof disableBlockStreaming === "boolean" ? { disableBlockStreaming } : {}),
     }
 
+    const endActiveThreadRoute = beginInlineActiveThreadRoute(activeThreadRoute)
     try {
-      let delivered = false
       let skippedNonSilent = false
       let skippedSilently = false
       let failedNonSilent = false
@@ -5925,6 +5992,8 @@ export async function monitorInlineProvider(params: {
                 payloadVisible = true
               }
               const finishPayload = () => inlineReplyDeliveryResult(payloadVisible)
+              await activeThreadRoute.adoption
+              if (activeThreadRoute.threadReplyDelivered) return finishPayload()
               const presenceSignal = resolveInlineBotPresenceSignal(payload)
               if (presenceSignal) {
                 botPresenceLifecycle.express(presenceSignal)
@@ -6272,7 +6341,7 @@ export async function monitorInlineProvider(params: {
 
       await settleEditStream(false)
       await settlePartialMediaDeliveries()
-      if (partialMediaDelivered) {
+      if (partialMediaDelivered || activeThreadRoute.threadReplyDelivered) {
         delivered = true
       }
       await cleanupInlineProgressPlaceholder()
@@ -6296,7 +6365,7 @@ export async function monitorInlineProvider(params: {
         dispatchResult.noVisibleReplyFallbackEligible === true
       const explicitFailure = dispatchError != null || failedNonSilent
       if (
-        !delivered &&
+        !delivered && !adoptingThread &&
         (explicitFailure ||
           (!hostHandledTurn &&
             !deliberateSilence &&
@@ -6324,6 +6393,7 @@ export async function monitorInlineProvider(params: {
         publishStatus({ lastOutboundAt: Date.now() })
       }
     } finally {
+      endActiveThreadRoute()
       await setParentThreadCreationTyping(false)
       if (callbackActionEvent && !callbackActionAnswered) {
         try {

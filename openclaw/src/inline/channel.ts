@@ -48,6 +48,7 @@ import {
   buildInlineModelsProviderChannelData,
 } from "./command-ui.js"
 import { inlineDoctor } from "./doctor.js"
+import { getInlineActiveThreadRoute } from "./active-thread-route.js"
 import {
   buildInlineInboundFormattingHints,
   sanitizeInlineOutgoingText,
@@ -321,26 +322,50 @@ function resolveInlineOutboundSessionRoute(params: {
       ? "user"
       : parsed.kind
   const chatType: "direct" | "group" = kind === "user" ? "direct" : "group"
-  const peer = {
-    kind: chatType,
-    id: parsed.normalizedNumeric,
-  }
-  const route = buildChannelOutboundSessionRoute({
+  const buildRoute = (id: string) => buildChannelOutboundSessionRoute({
     cfg: params.cfg,
     agentId: params.agentId,
     channel: "inline",
     ...(params.accountId !== undefined ? { accountId: params.accountId } : {}),
-    peer,
+    peer: { kind: chatType, id },
     chatType,
-    from: kind === "user" ? `inline:${parsed.normalizedNumeric}` : `inline:chat:${parsed.normalizedNumeric}`,
-    to: kind === "user" ? `user:${parsed.normalizedNumeric}` : `chat:${parsed.normalizedNumeric}`,
+    from: kind === "user" ? `inline:${id}` : `inline:chat:${id}`,
+    to: kind === "user" ? `user:${id}` : `chat:${id}`,
   })
+  const route = buildRoute(parsed.normalizedNumeric)
 
   if (
     kind === "user" ||
     !isInlineReplyThreadsEnabled({ cfg: params.cfg, accountId: params.accountId ?? null })
   ) {
     return route
+  }
+
+  // OriginatingTo identifies the actual child chat. Its mirror must retain the
+  // parent-based session used by inbound turns, including agent specialization.
+  const currentSessionKey = params.currentSessionKey
+  const activeRoute = getInlineActiveThreadRoute({
+    accountId: resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null }).accountId,
+    sessionKey: currentSessionKey,
+  })
+  if (activeRoute?.threadId === BigInt(parsed.normalizedNumeric) &&
+    activeRoute.sourceChatId !== activeRoute.threadId && params.threadId !== null &&
+    (params.threadId === undefined || String(params.threadId) === String(activeRoute.threadId))) {
+    const parentRoute = buildRoute(String(activeRoute.sourceChatId))
+    const specialization = currentSessionKey?.match(/:inline-agent:[^:]+$/)?.[0] ?? ""
+    if (currentSessionKey === `${parentRoute.baseSessionKey}${specialization}`) {
+      const threadId = String(activeRoute.threadId)
+      return { ...parentRoute, sessionKey: `${parentRoute.baseSessionKey}:thread:${threadId}${specialization}`, threadId }
+    }
+  }
+  const current = currentSessionKey?.match(/^(.*:group:([0-9]+)):thread:([0-9]+)(?::inline-agent:[^:]+)?$/)
+  const [, baseSessionKey, parentId, childId] = current ?? []
+  if (currentSessionKey && parentId && childId && parsed.normalizedNumeric === childId && params.threadId !== null &&
+    (params.threadId === undefined || String(params.threadId) === childId)) {
+    const parentRoute = buildRoute(parentId)
+    if (parentRoute.baseSessionKey === baseSessionKey) {
+      return { ...parentRoute, sessionKey: currentSessionKey, threadId: childId }
+    }
   }
 
   return buildThreadAwareOutboundSessionRoute({
@@ -1144,6 +1169,11 @@ const resolveInlineAllowlistGroupOverrides = createFlatAllowlistOverrideResolver
 
 const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound"]> = {
   deliveryMode: "direct",
+  targetsMatchForReplySuppression: ({ originTarget, targetKey, targetThreadId }) => {
+    const origin = resolveInlineSessionTarget({ id: originTarget })
+    const destination = resolveInlineSessionTarget({ id: targetThreadId ?? targetKey })
+    return Boolean(origin && destination === origin)
+  },
   chunker: (text, limit) => getInlineRuntime().channel.text.chunkMarkdownText(text, limit),
   chunkerMode: "markdown",
   extractMarkdownImages: true,
@@ -1458,6 +1488,14 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
 
   threading: {
     resolveReplyToMode: () => "off",
+    resolveAutoThreadId: ({ to, toolContext }) => {
+      if (!toolContext?.currentThreadTs || !toolContext.currentChannelId) return undefined
+      const target = resolveInlineSessionTarget({ id: to })
+      const current = resolveInlineSessionTarget({ id: toolContext.currentChannelId })
+      return target && target === current ? toolContext.currentThreadTs : undefined
+    },
+    resolveCurrentChannelId: ({ to, threadId }) =>
+      threadId != null ? resolveInlineSessionTarget({ id: String(threadId) }) : to,
     buildToolContext: ({ cfg, accountId, context, hasRepliedRef }) => {
       if (!isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })) {
         return undefined
@@ -1468,10 +1506,18 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       }
       return {
         currentChannelId,
+        ...(context.ChatType === "group" && context.From
+          ? { currentGraphChannelId: resolveInlineSessionTarget({ id: context.From }) ?? currentChannelId }
+          : {}),
         ...(context.MessageThreadId != null
           ? { currentThreadTs: String(context.MessageThreadId) }
           : {}),
-        ...(context.CurrentMessageId != null ? { currentMessageId: context.CurrentMessageId } : {}),
+        ...(context.NativeChannelId != null &&
+        resolveInlineSessionTarget({ id: String(context.NativeChannelId) }) !==
+          resolveInlineSessionTarget({ id: currentChannelId })
+          // The triggering message lives in the parent, not the newly created child.
+          ? { currentMessageId: "" }
+          : context.CurrentMessageId != null ? { currentMessageId: context.CurrentMessageId } : {}),
         replyToMode: "off" as const,
         ...(hasRepliedRef ? { hasRepliedRef } : {}),
       }

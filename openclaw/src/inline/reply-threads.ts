@@ -91,7 +91,7 @@ export function resolveInlineReplyThreadChatId(params: {
 
   const normalized =
     typeof params.threadId === "number"
-      ? Number.isFinite(params.threadId) && Number.isInteger(params.threadId) && params.threadId >= 0
+      ? Number.isSafeInteger(params.threadId) && params.threadId > 0
         ? BigInt(params.threadId)
         : null
       : typeof params.threadId === "string"
@@ -106,7 +106,10 @@ export function resolveInlineReplyThreadChatId(params: {
           : null
         : null
 
-  return normalized ?? params.parentChatId
+  if (normalized == null || normalized <= 0n) {
+    throw new Error("inline: invalid reply-thread chat id")
+  }
+  return normalized
 }
 
 export async function loadInlineReplyThreadMetadata(params: {

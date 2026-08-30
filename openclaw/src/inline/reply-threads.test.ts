@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 import {
   getInlineReplyThreadsCapabilityConfig,
+  resolveInlineReplyThreadChatId,
   isInlineReplyThreadsEnabled,
 } from "./reply-threads"
 
 describe("inline/reply-threads", () => {
+  it.each(["", "invalid", "0", "-1", 0, -1, Number.MAX_SAFE_INTEGER + 1])("rejects an invalid explicit child instead of sending to its parent: %s", (threadId) => {
+    expect(() => resolveInlineReplyThreadChatId({ cfg: {}, parentChatId: 7n, threadId })).toThrow("invalid reply-thread")
+  })
+
   it("treats Inline reply threads as available by default", () => {
     expect(
       isInlineReplyThreadsEnabled({
