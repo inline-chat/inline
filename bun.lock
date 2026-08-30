@@ -14,7 +14,7 @@
     },
     "hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "0.0.12",
+      "version": "0.0.13",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
