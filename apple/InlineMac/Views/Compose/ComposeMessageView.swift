@@ -100,6 +100,7 @@ class ComposeMessageView: NSView {
       messageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       messageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       messageView.widthAnchor.constraint(equalTo: widthAnchor),
+      messageView.topAnchor.constraint(equalTo: topAnchor),
       messageView.heightAnchor.constraint(equalToConstant: defaultHeight),
     ])
   }
