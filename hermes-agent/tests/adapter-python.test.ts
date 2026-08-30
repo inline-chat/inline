@@ -1113,6 +1113,57 @@ assert "Inline configured:" in status_text
 assert "Node available: yes (" in status_text
 assert "hermes inline setup" in status_text
 assert "Advanced diagnostics: inline-hermes doctor --json" in status_text
+# Optional gateway facts must never redefine the pre-restart credential check.
+assert inline_cli._gateway_status()["supported"] is False
+gateway_status = types.ModuleType("gateway.status")
+gateway_runtime = {"pid": 123, "start_time": 456, "gateway_state": "running", "platforms": {"inline": {"state": "connected", "writer_pid": 123, "writer_start_time": 456, "error_message": "private-token"}}, "exit_reason": "private-token"}
+gateway_status.read_runtime_status = lambda: gateway_runtime
+gateway_status.get_runtime_status_running_pid = lambda runtime, expected_home=None: 123
+saved_hermes_home_helper = getattr(hermes_constants, "get_hermes_home", None)
+hermes_constants.get_hermes_home = lambda: Path("/test-profile")
+sys.modules["gateway.status"] = gateway_status
+try:
+    live_status = inline_cli._gateway_status()
+    assert live_status["ready"] is True
+    assert len(live_status["generation"]) == 64
+    assert "private-token" not in json.dumps(live_status)
+    assert "pid" not in live_status and "start_time" not in live_status
+    gateway_runtime["start_time"] = 457
+    assert inline_cli._gateway_status()["generation"] != live_status["generation"]
+    assert inline_cli._gateway_status()["ready"] is False
+    gateway_runtime["start_time"] = 456
+    gateway_runtime["platforms"]["inline"]["writer_pid"] = 999
+    assert inline_cli._gateway_status()["reason"] == "platform_status_stale"
+    gateway_runtime["platforms"]["inline"]["writer_pid"] = 123
+    del gateway_runtime["platforms"]["inline"]["writer_start_time"]
+    assert inline_cli._gateway_status()["supported"] is False
+    gateway_runtime["platforms"]["inline"]["writer_start_time"] = 456
+    for state in ["starting", "draining", "stopped", "startup_failed"]:
+        gateway_runtime["gateway_state"] = state
+        assert inline_cli._gateway_status()["ready"] is False
+    gateway_runtime["gateway_state"] = "running"
+    for state in ["retrying", "fatal", "disconnected", "unknown"]:
+        gateway_runtime["platforms"]["inline"]["state"] = state
+        assert inline_cli._gateway_status()["ready"] is False
+    gateway_runtime["platforms"]["inline"]["state"] = "connected"
+    gateway_status.get_runtime_status_running_pid = lambda runtime, expected_home=None: None
+    assert inline_cli._gateway_status()["reason"] == "stale_pid"
+    gateway_status.read_runtime_status = lambda: None
+    assert inline_cli._gateway_status()["reason"] == "missing_status"
+    gateway_status.get_runtime_status_running_pid = lambda runtime: None
+    assert inline_cli._gateway_status()["supported"] is False
+    def broken_runtime_status():
+        raise ValueError("private-token")
+    gateway_status.read_runtime_status = broken_runtime_status
+    unavailable = inline_cli._gateway_status()
+    assert unavailable["supported"] is False
+    assert "private-token" not in json.dumps(unavailable)
+finally:
+    sys.modules.pop("gateway.status", None)
+    if saved_hermes_home_helper is None:
+        del hermes_constants.get_hermes_home
+    else:
+        hermes_constants.get_hermes_home = saved_hermes_home_helper
 real_sidecar_entry = inline_cli._SIDECAR_ENTRY
 try:
     inline_cli._SIDECAR_ENTRY = Path("/definitely/missing/inline-sidecar.mjs")

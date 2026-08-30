@@ -7,6 +7,7 @@ the plugin has already been discovered by Hermes.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -463,6 +464,7 @@ def _status(args) -> int:
         "sidecar": sidecar,
         "node": node,
         "probeRequested": probe_requested,
+        "gateway": _gateway_status(),
         **({"probe": probe} if probe is not None else {}),
     }
     if getattr(args, "json", False):
@@ -478,6 +480,51 @@ def _status(args) -> int:
             print(f"Inline credential probe: {'ready' if ready else 'failed'}")
         print("Advanced diagnostics: inline-hermes doctor --json")
     return 0 if runtime_usable and (not probe_requested or ready) else 1
+
+
+def _gateway_status() -> dict:
+    """Project local runtime facts without changing the credential-status contract."""
+    unavailable = {"supported": False, "ready": False, "reason": "runtime_status_unavailable"}
+    try:
+        from gateway.status import read_runtime_status, get_runtime_status_running_pid
+        from hermes_constants import get_hermes_home
+
+        runtime = read_runtime_status()
+        # Also validate this helper contract for an absent runtime: older hosts
+        # lack expected_home and must not claim support until after installation.
+        pid = get_runtime_status_running_pid(runtime if isinstance(runtime, dict) else {}, expected_home=get_hermes_home())
+        if not isinstance(runtime, dict):
+            return {"supported": True, "ready": False, "reason": "missing_status"}
+        # Return only an opaque generation, never process IDs or raw state.
+        start_time = runtime.get("start_time")
+        valid_identity = type(pid) is int and pid > 0 and type(start_time) is int and start_time >= 0
+        if pid and not valid_identity:
+            return {"supported": False, "ready": False, "reason": "runtime_identity_unavailable"}
+        generation = hashlib.sha256(f"inline-gateway:{pid}:{start_time}".encode()).hexdigest() if valid_identity else None
+        state = runtime.get("gateway_state")
+        platforms = runtime.get("platforms")
+        inline = platforms.get("inline") if isinstance(platforms, dict) else None
+        platform_state = inline.get("state") if isinstance(inline, dict) else None
+        state = state if state in ("starting", "running", "draining", "stopping", "stopped", "startup_failed") else "unknown"
+        platform_state = platform_state if platform_state in ("connected", "connecting", "retrying", "fatal", "disconnected") else "unknown"
+        if pid and isinstance(inline, dict) and ("writer_pid" not in inline or "writer_start_time" not in inline):
+            return {"supported": False, "ready": False, "reason": "runtime_writer_identity_unavailable"}
+        # Runtime status can retain platform entries from the prior process.
+        # Only the current process's own connected projection is readiness proof.
+        writer_matches = isinstance(inline, dict) and inline.get("writer_pid") == pid and inline.get("writer_start_time") == start_time
+        ready = generation is not None and writer_matches and state == "running" and platform_state == "connected"
+        return {
+            "supported": True,
+            "ready": ready,
+            **({"generation": generation} if generation is not None else {}),
+            "gatewayState": state,
+            "platformState": platform_state,
+            "reason": "ready" if ready else "stale_pid" if not pid else "gateway_not_running" if state != "running" else "platform_status_stale" if not writer_matches else "platform_not_connected",
+        }
+    except Exception:
+        # Older Hermes versions may not expose the helpers. Never return raw
+        # runtime files or exceptions: they can contain provider/credential data.
+        return unavailable
 
 
 def _plugin_version() -> str:
