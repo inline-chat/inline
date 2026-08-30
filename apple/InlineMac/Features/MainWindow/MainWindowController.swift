@@ -19,6 +19,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
   let sceneId: String
 
+  /// Primary conversation only; a visible reply pane does not replace this selection.
+  var scriptingPrimaryChat: Peer? { nav3.currentRoute.selectedPeer }
+
   private let dependencies: AppDependencies
   private let appBridge: AppBridge
   private let nav3: Nav3

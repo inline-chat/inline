@@ -4,6 +4,7 @@ import Combine
 import Darwin
 import InlineConfig
 import InlineKit
+import InlineMacScripting
 import InlineMacUI
 import Logger
 import MacDevtools
@@ -50,6 +51,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }()
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
+  @MainActor private lazy var scriptingAdapter = MacScriptingAdapter(delegate: self)
+  @MainActor var scriptingAccountIsReady: Bool {
+    !isLoggingOut && !isResettingLocalData && terminationTask == nil
+      && dependencies.viewModel.topLevelRoute == .main
+  }
   @MainActor private var terminationTask: Task<Void, Never>?
   @MainActor var isLoggingOut = false
   @MainActor private var isResettingLocalData = false
@@ -83,6 +89,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupNotifications()
 
     _ = dependencies
+    InlineScripting.install { [weak self] request in
+      guard let self else { throw ScriptingError.unavailable }
+      return try await self.scriptingAdapter.execute(request)
+    }
   }
 
   func applicationDidFinishLaunching(_: Notification) {

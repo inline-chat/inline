@@ -1,0 +1,144 @@
+import AppKit
+import Testing
+@testable import InlineMacScripting
+
+@Suite struct ScriptingArgumentTests {
+  @Test func dictionaryCommandCodesAreUniqueAndDispatchable() throws {
+    let package = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let xml = try XMLDocument(contentsOf: package.appendingPathComponent("Resources/Inline.sdef"))
+    let commands = try xml.nodes(forXPath: "//command")
+    let codes = commands.compactMap { ($0 as? XMLElement)?.attribute(forName: "code")?.stringValue }
+    #expect(codes.count == 10)
+    #expect(Set(codes).count == 10)
+    for code in codes {
+      #expect(code.utf8.count == 8)
+      #expect(code.hasPrefix("Inln"))
+      guard code.utf8.count == 8 else { continue }
+      _ = try ScriptingRequest.decode(code: fourCC(String(code.suffix(4))), direct: "42", arguments: ["chatID": "42"])
+    }
+  }
+
+  @Test func stableIDsPreserveAll64Bits() throws {
+    #expect(try ScriptingRequest.decode(code: fourCC("open"), direct: "9223372036854775807", arguments: [:]) == .openChat(Int64.max))
+  }
+
+  @Test(arguments: ["0", "-1", "1.5", " 1", "١", "9223372036854775808", ""])
+  func invalidIDsAreRejected(_ value: String) {
+    #expect(throws: ScriptingError.self) {
+      try ScriptingRequest.decode(code: fourCC("open"), direct: value, arguments: [:])
+    }
+  }
+
+  @Test func missingAndNumericIDsAreRejected() {
+    #expect(throws: ScriptingError.self) {
+      try ScriptingRequest.decode(code: fourCC("open"), direct: nil, arguments: [:])
+    }
+    #expect(throws: ScriptingError.self) {
+      try ScriptingRequest.decode(code: fourCC("open"), direct: NSNumber(value: Int64.max), arguments: [:])
+    }
+  }
+
+  @Test func defaultsAndPagination() throws {
+    #expect(try ScriptingRequest.decode(code: fourCC("msgs"), direct: "42", arguments: [:]) == .messages(chatID: 42, limit: 20, before: nil))
+    #expect(try ScriptingRequest.decode(code: fourCC("find"), direct: "%_", arguments: ["spaceID": "7", "limit": 50, "offset": 100]) == .chats(query: "%_", spaceID: 7, limit: 50, offset: 100))
+    #expect(try ScriptingRequest.decode(code: fourCC("msgs"), direct: "42", arguments: ["beforeID": "99"]) == .messages(chatID: 42, limit: 20, before: 99))
+  }
+
+  @Test func badBoundsAndBooleansAreRejected() {
+    for value: Any in [0, -1, 101, 1.5, true, "20"] {
+      #expect(throws: ScriptingError.self) {
+        try ScriptingRequest.decode(code: fourCC("msgs"), direct: "1", arguments: ["limit": value])
+      }
+    }
+  }
+
+  @Test func sendRequiresExplicitDestinationAndPreservesText() throws {
+    #expect(try ScriptingRequest.decode(code: fourCC("send"), direct: " Hello 🦊\n", arguments: ["chatID": "2", "requestID": "9223372036854775807"]) == .send(text: " Hello 🦊\n", chatID: 2, requestID: Int64.max))
+    for text in [" ", String(repeating: "🦊", count: 2049)] {
+      #expect(throws: ScriptingError.self) {
+        try ScriptingRequest.decode(code: fourCC("send"), direct: text, arguments: ["chatID": "2"])
+      }
+    }
+    #expect(throws: ScriptingError.self) {
+      try ScriptingRequest.decode(code: fourCC("send"), direct: "hello", arguments: [:])
+    }
+  }
+}
+
+@Suite struct ScriptingResultTests {
+  @Test func nativeRecordsListsAndMissingValue() {
+    let descriptor = ScriptingValue.list([.record([
+      .chatID: .text("9223372036854775807"), .unreadCount: .integer(3),
+      .outgoing: .boolean(true), .sentAt: .seconds(1_700_000_000), .text: .text("Hello 🦊"),
+    ])]).descriptor()
+    #expect(descriptor.numberOfItems == 1)
+    let record = descriptor.atIndex(1)
+    #expect(record?.forKeyword(fourCC("Icid"))?.stringValue == "9223372036854775807")
+    #expect(record?.forKeyword(fourCC("Iunr"))?.int32Value == 3)
+    #expect(record?.forKeyword(fourCC("Iout"))?.booleanValue == true)
+    #expect(record?.forKeyword(fourCC("Itxt"))?.stringValue == "Hello 🦊")
+    #expect(ScriptingValue.missing.descriptor().typeCodeValue == fourCC("msng"))
+  }
+}
+
+@Suite @MainActor struct ScriptingExecutionTests {
+  @Test func replyWaitsForCompletion() async throws {
+    var results: [Result<ScriptingValue, ScriptingError>] = []
+    let execution = ScriptExecution { results.append($0) }
+    execution.start(request: .account) { _ in
+      try await Task.sleep(for: .milliseconds(10))
+      return .text("ready")
+    }
+    #expect(results.isEmpty)
+    try await Task.sleep(for: .milliseconds(60))
+    #expect(results == [.success(.text("ready"))])
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func timedOutHandlersKeepCapacityUntilTheyExit() async throws {
+    var results: [Result<ScriptingValue, ScriptingError>] = []
+    var suspended: [CheckedContinuation<ScriptingValue, Never>] = []
+    let (replies, replied) = AsyncStream<Void>.makeStream()
+    let (completions, completed) = AsyncStream<Void>.makeStream()
+    InlineScripting.install { _ in
+      await withCheckedContinuation { suspended.append($0) }
+    }
+
+    for _ in 0 ..< 16 {
+      let handler = try InlineScripting.begin()
+      let execution = ScriptExecution {
+        results.append($0)
+        replied.yield()
+      }
+      execution.start(request: .account, timeout: .milliseconds(10)) { request in
+        defer { completed.yield() }
+        return try await handler(request)
+      }
+    }
+    var replyIterator = replies.makeAsyncIterator()
+    for _ in 0 ..< 16 { await replyIterator.next() }
+    #expect(results == Array(repeating: .failure(.timeout), count: 16))
+    #expect(suspended.count == 16)
+    #expect(throws: ScriptingError.self) { try InlineScripting.begin() }
+
+    // Continuations remain suspended after cancellation, unlike cancellable sleep.
+    for continuation in suspended { continuation.resume(returning: .text("too late")) }
+    var completionIterator = completions.makeAsyncIterator()
+    for _ in 0 ..< 16 { await completionIterator.next() }
+    #expect(results.count == 16)
+
+    InlineScripting.install { _ in .boolean(true) }
+    let nextHandler = try InlineScripting.begin()
+    #expect(try await nextHandler(.show) == .boolean(true))
+  }
+
+  @Test func unexpectedErrorsDoNotExposeImplementationDetails() async throws {
+    var result: Result<ScriptingValue, ScriptingError>?
+    let execution = ScriptExecution { result = $0 }
+    execution.start(request: .account) { _ in
+      throw NSError(domain: "private SQL and paths", code: 1)
+    }
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(result == .failure(.failed))
+  }
+}
