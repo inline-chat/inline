@@ -230,7 +230,10 @@ fails fast when stdin is an interactive terminal:
 echo "hello" | inline messages send --chat-id 123 --stdin
 ```
 
-Human tables adapt to terminal width through `COLUMNS`. Set `NO_COLOR=1` to
+Human tables detect the current terminal width on Unix; `COLUMNS` overrides
+the detected width and also works in pipes. Chat/user/message tables and chat/
+message details escape terminal control characters from content. JSON and
+exports preserve original strings. Set `NO_COLOR=1` to
 disable color, or `CLICOLOR_FORCE=1` to force color in a non-TTY. Non-JSON
 runtime errors print a short human report with an error code, and may include
 status, API error, response preview, hint, and examples.

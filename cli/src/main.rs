@@ -2333,7 +2333,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if cli.json {
                         output::print_json(&payload, json_format)?;
                     } else if let Some(bot) = payload.bot.as_ref() {
-                        println!("Created bot {} (id {}).", user_display_name(bot), bot.id);
+                        println!("Created bot {} (id {}).", output::terminal_text(&user_display_name(bot)), bot.id);
                         println!(
                             "To reveal token: inline bots reveal-token --bot-user-id {}",
                             bot.id
@@ -2663,7 +2663,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if cli.json {
                         output::print_json(&payload, json_format)?;
                     } else if let Some(chat) = payload.chat.as_ref() {
-                        println!("Renamed chat {} to \"{}\".", chat.id, chat.title);
+                        println!("Renamed chat {} to \"{}\".", chat.id, output::terminal_text(&chat.title));
                     } else {
                         println!("Renamed chat {}.", chat_id);
                     }
@@ -3497,7 +3497,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             .as_ref()
                             .map(user_display_name)
                             .unwrap_or_else(|| "user".to_string());
-                        println!("Invited {} to space {}.", name, space_id);
+                        println!("Invited {} to space {}.", output::terminal_text(&name), space_id);
                     }
                 }
                 SpacesCommand::DeleteMember(args) => {
@@ -3646,7 +3646,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if cli.json {
                         output::print_json(&result, json_format)?;
                     } else {
-                        println!("Created Linear issue: {}", result.url);
+                        println!("Created Linear issue: {}", output::terminal_text(&result.url));
                     }
                 }
                 TasksCommand::CreateNotion(args) => {
@@ -3671,7 +3671,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     if cli.json {
                         output::print_json(&result, json_format)?;
                     } else {
-                        println!("Created Notion task: {}", result.url);
+                        println!("Created Notion task: {}", output::terminal_text(&result.url));
                     }
                 }
             },
@@ -3814,7 +3814,7 @@ async fn send_messages_with_attachments(
             attachment.display_name
         );
         if !json {
-            println!("{progress}");
+            println!("{}", output::terminal_text(&progress));
         }
 
         let input = attachment.to_native_upload_input();
@@ -3836,7 +3836,8 @@ async fn send_messages_with_attachments(
         if !json {
             println!(
                 "Sent {} (updates: {}).",
-                attachment.display_name, updates_len
+                output::terminal_text(&attachment.display_name),
+                updates_len
             );
         }
     }
@@ -4115,7 +4116,8 @@ fn print_download_errors(errors: &[DownloadErrorOutput]) {
     for error in errors.iter().take(5) {
         eprintln!(
             "Warning: message {} failed: {}",
-            error.message_id, error.error
+            error.message_id,
+            output::terminal_text(&error.error)
         );
     }
     if errors.len() > 5 {

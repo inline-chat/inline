@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, IsTerminal};
@@ -261,6 +262,14 @@ pub fn print_chat_list(
         return print_json(output, json_format);
     }
 
+    let id_width = id_column_width(output.items.iter().map(|item| item.chat.id));
+    let unread_width = id_column_width(
+        output
+            .items
+            .iter()
+            .map(|item| i64::from(item.unread_count.unwrap_or(0))),
+    );
+
     let mut name_width = display_width("name");
     let mut space_width = display_width("space");
     let mut last_width = display_width("last message");
@@ -294,7 +303,7 @@ pub fn print_chat_list(
                 max_width: 96,
             },
         ],
-        fixed_table_width(&[6, 6], 5),
+        fixed_table_width(&[id_width, unread_width], 5),
     );
     let name_width = widths[0];
     let space_width = widths[1];
@@ -302,10 +311,10 @@ pub fn print_chat_list(
 
     println!(
         "{}  {}  {}  {}  {}",
-        header_left("id", 6),
+        header_left("id", id_width),
         header_right("name", name_width),
         header_right("space", space_width),
-        header_left("unread", 6),
+        header_left("unread", unread_width),
         header_right("last message", last_width),
     );
 
@@ -316,19 +325,19 @@ pub fn print_chat_list(
         let name = name_lines.first().map(String::as_str).unwrap_or("");
         println!(
             "{}  {}  {}  {}  {}",
-            pad_left(&item.chat.id.to_string(), 6),
+            pad_left(&item.chat.id.to_string(), id_width),
             pad_right(name, name_width),
             pad_right(&truncate_display(space, space_width), space_width),
-            pad_left(&item.unread_count.unwrap_or(0).to_string(), 6),
+            pad_left(&item.unread_count.unwrap_or(0).to_string(), unread_width),
             pad_right(&truncate_display(preview, last_width), last_width),
         );
         for continuation in name_lines.iter().skip(1) {
             println!(
                 "{}  {}  {}  {}  {}",
-                pad_left("", 6),
+                pad_left("", id_width),
                 pad_right(continuation, name_width),
                 pad_right("", space_width),
-                pad_left("", 6),
+                pad_left("", unread_width),
                 pad_right("", last_width),
             );
         }
@@ -338,7 +347,7 @@ pub fn print_chat_list(
 
 pub(crate) fn print_chat_details(chat: &proto::Chat, dialog: Option<&proto::Dialog>) {
     for line in chat_detail_lines(chat, dialog) {
-        println!("{line}");
+        println!("{}", terminal_text(&line));
     }
 }
 
@@ -406,6 +415,8 @@ pub fn print_users(
         return print_json(output, json_format);
     }
 
+    let id_width = id_column_width(output.users.iter().map(|user| user.user.id));
+
     let mut name_width = display_width("name");
     let mut username_width = display_width("username");
     for user in &output.users {
@@ -441,7 +452,7 @@ pub fn print_users(
                 max_width: 18,
             },
         ],
-        fixed_table_width(&[6, 3], 6),
+        fixed_table_width(&[id_width, 3], 6),
     );
     let name_width = widths[0];
     let username_width = widths[1];
@@ -450,7 +461,7 @@ pub fn print_users(
 
     println!(
         "{}  {}  {}  {}  {}  {}",
-        header_left("id", 6),
+        header_left("id", id_width),
         header_right("name", name_width),
         header_right("username", username_width),
         header_right("email", email_width),
@@ -464,7 +475,7 @@ pub fn print_users(
         let bot = user.user.bot.unwrap_or(false);
         println!(
             "{}  {}  {}  {}  {}  {}",
-            pad_left(&user.user.id.to_string(), 6),
+            pad_left(&user.user.id.to_string(), id_width),
             pad_right(
                 &truncate_display(&user.display_name, name_width),
                 name_width
@@ -547,6 +558,8 @@ pub fn print_spaces(
         return print_json(output, json_format);
     }
 
+    let id_width = id_column_width(output.spaces.iter().map(|space| space.space.id));
+
     let mut name_width = display_width("name");
     for space in &output.spaces {
         name_width = name_width.max(display_width(&space.display_name));
@@ -558,20 +571,20 @@ pub fn print_spaces(
             min_width: 12,
             max_width: 32,
         }],
-        fixed_table_width(&[6, 7], 3),
+        fixed_table_width(&[id_width, 7], 3),
     );
     let name_width = widths[0];
 
     println!(
         "{}  {}  {}",
-        header_left("id", 6),
+        header_left("id", id_width),
         header_right("name", name_width),
         header_right("creator", 7),
     );
     for space in &output.spaces {
         println!(
             "{}  {}  {}",
-            pad_left(&space.space.id.to_string(), 6),
+            pad_left(&space.space.id.to_string(), id_width),
             pad_right(
                 &truncate_display(&space.display_name, name_width),
                 name_width
@@ -603,6 +616,9 @@ pub fn print_space_members(
         return print_json(output, json_format);
     }
 
+    let user_width = id_column_width(output.members.iter().map(|item| item.member.user_id));
+    let member_width = id_column_width(output.members.iter().map(|item| item.member.id));
+
     let mut name_width = display_width("name");
     let mut role_width = display_width("role");
     for member in &output.members {
@@ -624,15 +640,15 @@ pub fn print_space_members(
                 max_width: 12,
             },
         ],
-        fixed_table_width(&[6, 6, 6], 5),
+        fixed_table_width(&[user_width, member_width, 6], 5),
     );
     let name_width = widths[0];
     let role_width = widths[1];
 
     println!(
         "{}  {}  {}  {}  {}",
-        header_left("user", 6),
-        header_left("member", 6),
+        header_left("user", user_width),
+        header_left("member", member_width),
         header_right("name", name_width),
         header_right("role", role_width),
         header_right("public", 6),
@@ -640,8 +656,8 @@ pub fn print_space_members(
     for member in &output.members {
         println!(
             "{}  {}  {}  {}  {}",
-            pad_left(&member.member.user_id.to_string(), 6),
-            pad_left(&member.member.id.to_string(), 6),
+            pad_left(&member.member.user_id.to_string(), user_width),
+            pad_left(&member.member.id.to_string(), member_width),
             pad_right(
                 &truncate_display(&member.display_name, name_width),
                 name_width
@@ -713,6 +729,13 @@ pub fn print_chat_participants(
         return print_json(output, json_format);
     }
 
+    let id_width = id_column_width(
+        output
+            .participants
+            .iter()
+            .map(|item| item.participant.user_id),
+    );
+
     let mut name_width = display_width("name");
     let mut joined_width = display_width("joined");
     for participant in &output.participants {
@@ -734,26 +757,29 @@ pub fn print_chat_participants(
                 max_width: 10,
             },
         ],
-        fixed_table_width(&[6], 3),
+        fixed_table_width(&[id_width], 3),
     );
     let name_width = widths[0];
     let joined_width = widths[1];
 
     println!(
         "{}  {}  {}",
-        header_left("user", 6),
+        header_left("user", id_width),
         header_right("name", name_width),
         header_right("joined", joined_width),
     );
     for participant in &output.participants {
         println!(
             "{}  {}  {}",
-            pad_left(&participant.participant.user_id.to_string(), 6),
+            pad_left(&participant.participant.user_id.to_string(), id_width),
             pad_right(
                 &truncate_display(&participant.display_name, name_width),
                 name_width
             ),
-            pad_right(&participant.relative_date, joined_width),
+            pad_right(
+                &truncate_display(&participant.relative_date, joined_width),
+                joined_width
+            ),
         );
     }
     Ok(())
@@ -799,6 +825,8 @@ pub fn print_messages(
         return print_json(output, json_format);
     }
 
+    let id_width = id_column_width(output.items.iter().map(|item| item.message.id));
+
     if let Some(peer_name) = &output.peer_name {
         if let Some(peer) = &output.peer {
             println!(
@@ -839,14 +867,14 @@ pub fn print_messages(
                 max_width: 96,
             },
         ],
-        fixed_table_width(&[6, when_width], 4),
+        fixed_table_width(&[id_width, when_width], 4),
     );
     let from_width = widths[0];
     let text_width = widths[1];
 
     println!(
         "{}  {}  {}  {}",
-        header_left("id", 6),
+        header_left("id", id_width),
         header_right("when", when_width),
         header_right("from", from_width),
         header_right("text", text_width),
@@ -855,8 +883,11 @@ pub fn print_messages(
         let text = truncate_display(&item.preview, text_width);
         println!(
             "{}  {}  {}  {}",
-            pad_left(&item.message.id.to_string(), 6),
-            pad_right(&item.relative_date, when_width),
+            pad_left(&item.message.id.to_string(), id_width),
+            pad_right(
+                &truncate_display(&item.relative_date, when_width),
+                when_width
+            ),
             pad_right(&truncate_display(&item.sender_name, from_width), from_width),
             pad_right(&text, text_width),
         );
@@ -869,7 +900,7 @@ pub(crate) fn print_message_detail(summary: &MessageSummary, peer_label: &str) {
         "{}",
         style_heading(&format!("Message {} ({})", summary.message.id, peer_label))
     );
-    println!("  from: {}", summary.sender_name);
+    println!("  from: {}", terminal_text(&summary.sender_name));
     println!(
         "  when: {} ({})",
         summary.relative_date, summary.message.date
@@ -903,21 +934,24 @@ pub(crate) fn print_message_detail(summary: &MessageSummary, peer_label: &str) {
     if let Some(media) = &summary.media {
         println!();
         println!("{}", style_heading("Media"));
-        println!("  {}", format_media_detail(media));
+        println!("  {}", terminal_text(&format_media_detail(media)));
     }
 
     if !summary.attachments.is_empty() {
         println!();
         println!("{}", style_heading("Attachments"));
         for attachment in &summary.attachments {
-            println!("  - {}", format_attachment_detail(attachment));
+            println!(
+                "  - {}",
+                terminal_text(&format_attachment_detail(attachment))
+            );
         }
     }
 }
 
 fn print_detail_block(value: &str) {
     for line in value.lines() {
-        println!("  {}", line);
+        println!("  {}", terminal_text(line));
     }
 }
 
@@ -968,6 +1002,10 @@ fn format_attachment_detail(attachment: &AttachmentSummary) -> String {
         parts.push(format!("assignedUserId={}", assigned_user_id));
     }
     parts.join(" ")
+}
+
+fn id_column_width(ids: impl Iterator<Item = i64>) -> usize {
+    ids.map(|id| id.to_string().len()).max().unwrap_or(0).max(6)
 }
 
 fn fixed_table_width(fixed_columns: &[usize], column_count: usize) -> usize {
@@ -1041,10 +1079,50 @@ fn terminal_columns() -> Option<usize> {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|columns| *columns >= 20)
+        .or_else(tty_columns)
+}
+
+#[cfg(unix)]
+fn tty_columns() -> Option<usize> {
+    if !io::stdout().is_terminal() {
+        return None;
+    }
+    // SAFETY: winsize is a plain C value; ioctl receives a valid writable pointer
+    // for the duration of the call and does not retain it.
+    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+    let result = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) };
+    (result == 0 && size.ws_col > 0).then_some(usize::from(size.ws_col))
+}
+
+#[cfg(not(unix))]
+fn tty_columns() -> Option<usize> {
+    None
+}
+
+// Escape controls from server/user content at the human rendering boundary only.
+// JSON and exports retain the original strings. Borrow ordinary text unchanged.
+pub(crate) fn terminal_text(value: &str) -> Cow<'_, str> {
+    if !value.chars().any(is_terminal_control) {
+        return Cow::Borrowed(value);
+    }
+    let mut output = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if is_terminal_control(ch) {
+            output.extend(ch.escape_default());
+        } else {
+            output.push(ch);
+        }
+    }
+    Cow::Owned(output)
+}
+
+fn is_terminal_control(ch: char) -> bool {
+    ch.is_control()
+        || matches!(ch, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 fn display_width(value: &str) -> usize {
-    UnicodeWidthStr::width(value)
+    UnicodeWidthStr::width(terminal_text(value).as_ref())
 }
 
 fn header_right(value: &str, width: usize) -> String {
@@ -1056,6 +1134,7 @@ fn header_left(value: &str, width: usize) -> String {
 }
 
 pub(crate) fn style_heading(value: &str) -> String {
+    let value = terminal_text(value);
     if should_use_color() {
         format!("\x1b[1m{value}\x1b[0m")
     } else {
@@ -1074,10 +1153,15 @@ fn should_use_color() -> bool {
 }
 
 fn truncate_display(value: &str, max_width: usize) -> String {
+    let value = terminal_text(value);
+    let value = value.as_ref();
     if display_width(value) <= max_width {
         return value.to_string();
     }
     let ellipsis = "...";
+    if max_width <= ellipsis.len() {
+        return ellipsis[..max_width].to_string();
+    }
     let mut width = 0usize;
     let mut output = String::new();
     for ch in value.chars() {
@@ -1098,12 +1182,13 @@ fn wrap_display_lines(value: &str, max_width: usize, max_lines: usize) -> Vec<St
     }
 
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = terminal_text(&normalized);
     if display_width(&normalized) <= max_width {
-        return vec![normalized];
+        return vec![normalized.into_owned()];
     }
 
     let mut lines = Vec::new();
-    let mut remaining = normalized.as_str();
+    let mut remaining = normalized.as_ref();
     while !remaining.is_empty() && lines.len() < max_lines {
         let is_last_line = lines.len() + 1 == max_lines;
         if display_width(remaining) <= max_width {
@@ -1153,6 +1238,8 @@ fn take_display_line(value: &str, max_width: usize) -> (String, &str) {
 }
 
 fn pad_right(value: &str, width: usize) -> String {
+    let value = terminal_text(value);
+    let value = value.as_ref();
     let mut output = value.to_string();
     let current = display_width(value);
     if current < width {
@@ -1162,6 +1249,8 @@ fn pad_right(value: &str, width: usize) -> String {
 }
 
 fn pad_left(value: &str, width: usize) -> String {
+    let value = terminal_text(value);
+    let value = value.as_ref();
     let current = display_width(value);
     if current >= width {
         return value.to_string();
@@ -1174,6 +1263,44 @@ fn pad_left(value: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn id_columns_keep_full_int64_values_aligned() {
+        let width = id_column_width([1, 1_234_567, i64::MAX].into_iter());
+        assert_eq!(width, 19);
+        for id in [1, 1_234_567, i64::MAX] {
+            assert_eq!(display_width(&pad_left(&id.to_string(), width)), width);
+        }
+        assert_eq!(id_column_width([1, 2].into_iter()), 6);
+    }
+
+    #[test]
+    fn terminal_controls_cannot_execute_or_reorder_table_content() {
+        let value =
+            "safe\x1b[2J\x1b]52;c;payload\x07\r\n\u{009b}31m\u{202e}hidden\u{061c}\u{200e}\u{200f}";
+        for rendered in [
+            terminal_text(value).into_owned(),
+            truncate_display(value, 1000),
+            pad_right(value, 1),
+            pad_left(value, 1),
+        ] {
+            assert!(!rendered.chars().any(is_terminal_control));
+            assert!(rendered.contains("payload"));
+        }
+        let ordinary = "سلام می‌خواهم 👩🏽‍💻 hello";
+        assert!(matches!(terminal_text(ordinary), Cow::Borrowed(_)));
+        assert_eq!(terminal_text(ordinary), ordinary);
+    }
+
+    #[test]
+    fn truncation_respects_tiny_widths_and_json_keeps_original_content() {
+        for width in 0..6 {
+            assert!(display_width(&truncate_display("你好 abcdef", width)) <= width);
+        }
+        let value = "a\x1b[31m\n b";
+        let rendered = json_string(&value, JsonFormat::Compact).unwrap();
+        assert_eq!(serde_json::from_str::<String>(&rendered).unwrap(), value);
+    }
 
     #[test]
     fn flexible_widths_keep_preferred_width_without_terminal_columns() {
