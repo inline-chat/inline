@@ -1,4 +1,4 @@
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 fn run(args: &[&str]) -> Output {
     let directory = tempfile::tempdir().unwrap();
@@ -21,12 +21,63 @@ fn run(args: &[&str]) -> Output {
 }
 
 #[test]
+fn generates_all_completions_without_configuration_or_network() {
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_inline"))
+            .args(["completion", shell])
+            // Invalid configuration must not affect this local command.
+            .env("INLINE_API_BASE_URL", "not a URL")
+            .env("INLINE_CLI_SENTRY_DSN", "not a DSN")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{shell}: {:?}", output.stderr);
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("inline"));
+        assert!(text.contains("text-file"));
+        assert!(text.contains("unread"));
+        assert!(!text.contains("mac-app-bootstrap"), "{shell}");
+        assert!(!text.contains("expected-user-id"), "{shell}");
+        assert!(!text.contains("provider-host"), "{shell}");
+    }
+}
+
+#[test]
+fn completion_exits_quietly_when_a_pipeline_consumer_closes() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_inline"))
+        .args(["completion", "bash"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn completion_rejects_json_before_emitting_a_script() {
+    for args in [
+        ["--json", "completion", "bash"],
+        ["completion", "bash", "--json"],
+    ] {
+        let output = run(&args);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["code"], "invalid_args");
+    }
+}
+
+#[test]
 fn aliases_and_new_flags_appear_in_command_help() {
     for args in [
         vec!["chat", "ls", "--help"],
         vec!["message", "view", "--help"],
         vec!["user", "ls", "--help"],
         vec!["space", "ls", "--help"],
+        vec!["completions", "--help"],
     ] {
         let output = run(&args);
         assert!(output.status.success(), "{args:?}: {:?}", output.stderr);

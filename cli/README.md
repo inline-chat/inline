@@ -193,6 +193,31 @@ fetched page; they do not scan all history. `--ids` on message lists and search
 prints peer-local message IDs without fetching the chat catalog for names.
 It cannot be combined with `--json` or `--translate`.
 
+### Shell completions
+
+Generate completions from the CLI's current command tree. Generation is local:
+it does not read account configuration, connect to Inline, or start the runtime.
+
+```bash
+inline completion bash > inline.bash
+inline completion zsh > _inline
+inline completion fish > inline.fish
+```
+
+Bash can source `inline.bash`; put `_inline` in a directory on Zsh's `fpath`
+before running `compinit`; put `inline.fish` in Fish's completion directory.
+`powershell` and `elvish` are also supported. `completions` is an alias.
+The command writes the script to stdout and never edits shell startup files.
+Hidden internal commands and flags are omitted. A pipeline consumer closing
+early is handled quietly instead of printing a panic.
+`--json` is rejected because the output is a shell script.
+
+The upstream generator has shell-specific limits: Fish does not offer flags
+for commands nested beyond two levels, such as `bridge workspace add`.
+PowerShell and Elvish stop detecting the command path at the first flag, so
+place global flags after the command path when using their completions
+(for example, `inline message send --json`).
+
 ### JSON and text
 
 Use `--json` for automation and `--compact` for pipelines:

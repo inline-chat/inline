@@ -4,6 +4,7 @@ mod auth;
 mod auth_flow;
 mod bridge;
 mod chat_output;
+mod completion;
 mod config;
 mod dates;
 mod doctor;
@@ -26,7 +27,7 @@ mod update;
 mod validation;
 
 use chrono::Utc;
-use clap::{ArgAction, Args, Parser, Subcommand, error::ErrorKind};
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, error::ErrorKind};
 use dialoguer::Confirm;
 use futures_util::stream::{self, StreamExt};
 use rand::{RngCore, rngs::OsRng};
@@ -254,6 +255,7 @@ Tips:
   Search pagination: --offset-id ID. Time filters apply to the fetched page.
   Use --text-file - for piped text with whitespace preserved.
   Mentions use UTF-16 offsets: --mention USER_ID:OFFSET:LENGTH.
+  inline completion bash|zsh|fish|powershell|elvish generates shell completions.
   Run inline <command> --help for command-specific flags and examples.
 
 Docs:
@@ -402,6 +404,16 @@ One-pass review:
 "#
     )]
     Transcript(MessagesTranscriptArgs),
+
+    #[command(
+        about = "Generate shell completions without signing in",
+        visible_alias = "completions",
+        after_help = "Examples:\n  inline completion bash > inline.bash\n  inline completion zsh > _inline\n  inline completion fish > inline.fish\n\nSource the generated script or place it in your shell's completion directory."
+    )]
+    Completion {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 
     #[command(about = "Show local API schema info")]
     Schema {
@@ -1885,8 +1897,7 @@ struct TasksCreateNotionArgs {
     space_id: i64,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     install_broken_pipe_handler();
     let argv: Vec<OsString> = env::args_os().collect();
     let flags = detect_global_flags(&argv);
@@ -1919,6 +1930,37 @@ async fn main() {
         }
     };
 
+    if let Command::Completion { shell } = &cli.command {
+        let result: Result<(), Box<dyn std::error::Error>> = if flags.json {
+            Err(CliError::invalid_args(
+                "--json cannot be combined with completion; this command outputs a shell script",
+            )
+            .into())
+        } else {
+            let mut command = completion::public_command(&Cli::command());
+            completion::write(*shell, &mut command, io::stdout().lock()).map_err(Into::into)
+        };
+        if let Err(error) = result {
+            if flags.json {
+                let payload = JsonErrorEnvelope {
+                    error: json_cli_error_from_error(error.as_ref()),
+                };
+                if let Ok(text) = output::json_string(&payload, flags.json_format) {
+                    eprintln!("{text}");
+                }
+            } else {
+                eprintln!("Error: could not write completion: {error}");
+            }
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    run_cli(cli, flags, started_at);
+}
+
+#[tokio::main]
+async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
     if let Err(error) = run_until_terminated(cli, started_at).await {
         if is_reported_cli_failure(error.as_ref()) {
             std::process::exit(1);
@@ -2331,6 +2373,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 )
                 .await?;
             }
+            Command::Completion { .. } => unreachable!("completions are handled before runtime setup"),
             Command::Schema { command } => match command {
                 SchemaCommand::Proto => {
                     let bundle = bundled_proto_sources();
@@ -5231,7 +5274,6 @@ mod installed_message_action_tests {
 #[cfg(test)]
 mod cli_parsing_tests {
     use super::*;
-    use clap::CommandFactory;
 
     #[test]
     fn command_tree_has_no_alias_or_flag_collisions() {
