@@ -23,6 +23,28 @@ curl -fsSL https://inline.chat/cli/install.sh | sh
 Supports macOS and Linux (x86_64/aarch64, glibc and musl). Set
 `INLINE_INSTALL_DIR` to choose a custom install directory.
 
+### Check for updates
+
+```bash
+inline update --check
+inline update --check --json --compact
+inline update
+```
+
+`--check` reads the release manifest without downloading a bundle, accessing
+credentials, changing local state, or restarting agents. A successful check exits
+zero, whether an update is available or not. JSON includes `current_version`,
+`latest_version`, `target`, `supported`, and `update_available`. `inline upgrade`
+is an alias for `inline update`; installing still requires omitting `--check`.
+
+Updates stream downloads to private temporary storage and verify the checksum
+and optional manifest size before extraction; downloads are limited to 512 MiB.
+When installing without elevation across filesystems, the CLI stages a complete
+replacement beside the destination before renaming it into place. Temporary
+download files are cleaned up on normal success and failure paths.
+Homebrew installations can use `brew upgrade --cask inline` to keep Homebrew in
+charge of the installed version.
+
 ## (Optional) Install the Inline skill for Codex
 
 The CLI bundles the complete skill directory from `skills/inline/`, including

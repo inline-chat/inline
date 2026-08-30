@@ -44,6 +44,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 thiserror = "1.0.69"
 toml = { workspace = true }
 tar = "0.4.41"
+tempfile = "3"
 tokio = { version = "1.43.0", features = [
   "fs",
   "io-util",
@@ -63,6 +64,3 @@ zip = "0.6.6"
 [[bin]]
 name = "inline"
 path = "src/main.rs"
-
-[dev-dependencies]
-tempfile = "3"

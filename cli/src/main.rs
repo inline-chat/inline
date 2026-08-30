@@ -327,8 +327,17 @@ enum Command {
     Login(AuthLoginArgs),
     #[command(about = "Log out (shortcut for auth logout)")]
     Logout,
-    #[command(about = "Update the CLI to the latest release")]
-    Update,
+    #[command(
+        about = "Update the CLI to the latest release",
+        visible_alias = "upgrade"
+    )]
+    Update {
+        #[arg(
+            long,
+            help = "Check for an update without downloading or installing it"
+        )]
+        check: bool,
+    },
     #[command(about = "Print diagnostic information about this CLI")]
     Doctor,
     #[command(about = "Install or update Inline's agent skill", alias = "skills")]
@@ -2065,6 +2074,15 @@ fn is_interactive_terminal() -> bool {
 async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Error>> {
     let json_format = output::resolve_json_format(cli.pretty, cli.compact);
     let config = Config::load();
+    if matches!(&cli.command, Command::Update { check: true }) {
+        let check = update::check_update(&config).await?;
+        if cli.json {
+            output::print_json(&check, json_format)?;
+        } else {
+            update::print_update_check(&check);
+        }
+        return Ok(());
+    }
     let auth_store = AuthStore::new(config.secrets_path.clone(), config.api_base_url.clone());
     let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
     if auth_store.logout_pending()? {
@@ -2078,7 +2096,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             | Command::Auth {
                 command: AuthCommand::Login(_)
             }
-            | Command::Update
+            | Command::Update { .. }
             | Command::Doctor
             | Command::Skill { .. }
             | Command::Setup { .. }
@@ -2371,7 +2389,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
             },
-            Command::Update => {
+            Command::Update { .. } => {
                 if let Some(updated_binary) = update::run_update(&config, cli.json).await? {
                     bridge::refresh_after_update(&config, &updated_binary).await?;
                 }
@@ -5308,6 +5326,15 @@ mod installed_message_action_tests {
 #[cfg(test)]
 mod cli_parsing_tests {
     use super::*;
+
+    #[test]
+    fn update_defaults_to_install_and_check_is_explicit() {
+        let cli = Cli::try_parse_from(["inline", "update"]).unwrap();
+        assert!(matches!(cli.command, Command::Update { check: false }));
+        let cli = Cli::try_parse_from(["inline", "upgrade", "--check", "--json"]).unwrap();
+        assert!(matches!(cli.command, Command::Update { check: true }));
+        assert!(cli.json);
+    }
 
     #[test]
     fn all_intro_examples_parse_with_the_real_cli() {
