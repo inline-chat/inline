@@ -4987,12 +4987,13 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("does not create an unsupported DM thread or generate its answer in the parent", async () => {
+  it("creates a reply thread from a DM and sends the answer only in the child", async () => {
     const harness = await setupMonitorHarness({
       events: [{ kind: "message.new", chatId: 89n, message: {
         id: 12n, date: 1_700_000_014n, fromId: 51n, message: "reply in a thread with the answer",
       } }],
       chats: { "89": { kind: "direct", title: "DM", peerUserId: 51n } },
+      dispatchReplyPayload: { text: "DM thread answer" },
     })
     const handle = await harness.monitorInlineProvider({ cfg: {} as any,
       account: buildAccount({ dmPolicy: "open" }),
@@ -5001,10 +5002,11 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
     await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ chatId: 89n, text: expect.stringContaining("supported in group chats") }),
+      expect.objectContaining({ chatId: 8912n, text: "DM thread answer" }),
     ))
-    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-    expect(harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")).toHaveLength(0)
+    expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    expect(harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 89n)).toEqual([])
+    expect(harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")).toHaveLength(1)
     await handle.stop()
   })
 

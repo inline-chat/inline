@@ -4731,10 +4731,6 @@ export const inlineMessageActions = {
           }
 
           if (isThreadCreate && parentChatId != null) {
-            const parentChat = await client.getChat({ chatId: parentChatId })
-            if (parentChat.peer?.type.oneofKind === "user") {
-              throw new Error("inline thread-create: reply threads are supported in group chats, not DMs")
-            }
             const parentMessageId = parseOptionalInlineId(
               explicitParentMessageId ??
                 (explicitParentChatId != null

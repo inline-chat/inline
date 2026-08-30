@@ -278,7 +278,7 @@ Inline reply-thread semantics:
 - `invite-to-space` invites one user per call into a space using `userId`/`user`/`participant`, `email`, or `phoneNumber`; pass `role: "admin"` for admin invites or omit it for a member invite.
 - In `replyThreadMode: "auto"`, explicit user requests such as "reply in a thread" create and answer in a child reply thread automatically; the `thread-create` and `thread-reply` message-tool actions remain available for manual tool use.
 - Parent typing stops when reply-thread creation finishes; subsequent typing, presence, and answers stay in the child. If required creation fails, Inline reports a short error in the parent without generating the answer there.
-- Reply-thread creation is supported in group chats. DM requests fail clearly instead of creating a child with incompatible session and access-policy semantics.
+- Reply threads can be created from both DM and group parent chats. A direct parent does not make its child reply thread unsupported.
 - A message tool that creates a reply thread during a response hands the running turn to that child. Successful tool replies suppress the duplicate automatic final. Any commentary already sent before creation remains in the parent.
 - Saved thread routes are scoped to the parent message. A missing current-message route never selects an unrelated active thread, and an agent without its own active route cannot inherit another agent's route.
 - Existing route state is reused only for the same parent-message anchor. New parent-chat messages get separate reply threads; messages already inside a reply thread stay in that thread and do not create nested threads.

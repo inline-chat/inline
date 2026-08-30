@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from "vitest"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 
 describe("inline/actions", () => {
-  it("rejects a DM parent before creating a reply thread", async () => {
+  it("allows thread-create from a DM parent", async () => {
     vi.resetModules()
-    const invokeRaw = vi.fn()
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "createSubthread",
+      createSubthread: { chat: { id: 73n, parentChatId: 7n, parentMessageId: 3n } },
+    }))
     vi.doMock("@inline-chat/realtime-sdk", () => ({
       Method: {},
       InlineSdkClient: class {
@@ -15,10 +18,13 @@ describe("inline/actions", () => {
       },
     }))
     const { inlineMessageActions } = await import("./actions")
-    await expect(inlineMessageActions.handleAction?.({ channel: "inline", action: "thread-create",
+    const result = await inlineMessageActions.handleAction?.({ channel: "inline", action: "thread-create",
       cfg: { channels: { inline: { token: "token" } } }, params: { to: "7", messageId: "3", threadName: "Test" },
-    } as any)).rejects.toThrow("reply threads are supported in group chats")
-    expect(invokeRaw).not.toHaveBeenCalled()
+    } as any)
+    expect(result?.details).toMatchObject({ ok: true, mode: "reply-thread", chat: { id: "73" } })
+    expect(invokeRaw).toHaveBeenCalledWith(42, expect.objectContaining({
+      createSubthread: expect.objectContaining({ parentChatId: 7n, parentMessageId: 3n }),
+    }))
   })
 
   it("routes sends and activity to the current child while preserving explicit other destinations", async () => {
@@ -912,7 +918,6 @@ describe("inline/actions", () => {
         DELETE_MESSAGE_ATTACHMENT: 55,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4297,7 +4302,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4417,7 +4421,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4535,7 +4538,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4654,7 +4656,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4718,7 +4719,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4785,7 +4785,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4853,7 +4852,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4926,7 +4924,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -4994,7 +4991,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close
@@ -5246,7 +5242,6 @@ describe("inline/actions", () => {
         CREATE_SUBTHREAD: 42,
       },
       InlineSdkClient: class {
-        getChat = vi.fn(async () => ({ peer: { type: { oneofKind: "chat" } } }))
         constructor(_opts: unknown) {}
         connect = connect
         close = close

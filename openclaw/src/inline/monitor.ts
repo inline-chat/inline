@@ -4713,16 +4713,6 @@ export async function monitorInlineProvider(params: {
         explicitThreadIntent: explicitReplyThreadIntent,
       }) &&
       !shouldEditCallbackTargetInPlace
-    if (shouldCreateDeliveryThread && !isGroup) {
-      await client.sendMessage({
-        chatId,
-        text: "Reply threads are currently supported in group chats. I haven't generated an answer here; please ask in a group or ask me to answer in this chat.",
-        replyToMsgId: msg.id,
-        parseMarkdown,
-      })
-      publishStatus({ lastOutboundAt: Date.now() })
-      return
-    }
     let parentThreadCreationTyping = false
     const setParentThreadCreationTyping = async (typing: boolean): Promise<void> => {
       if (!shouldCreateDeliveryThread || parentThreadCreationTyping === typing) return
