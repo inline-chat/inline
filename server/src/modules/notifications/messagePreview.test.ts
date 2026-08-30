@@ -1,7 +1,36 @@
 import { describe, expect, test } from "bun:test"
-import { maxDocumentFileNamePreviewBytes, messageNotificationBody } from "./messagePreview"
+import { maxDocumentFileNamePreviewBytes, maxMessagePreviewBytes, messageNotificationBody } from "./messagePreview"
 
 describe("message notification preview", () => {
+  test("normalizes multiline captions and keeps the media kind", () => {
+    expect(messageNotificationBody({ mediaType: "photo", messageText: "  Look\n\n at\tthis  " })).toBe("🖼️ Look at this")
+    expect(messageNotificationBody({ mediaType: "document", messageText: " \n ", documentFileName: "Plan.pdf" })).toBe("📄 Plan.pdf")
+  })
+
+  test("distinguishes GIFs, voice duration, stickers, and nudges", () => {
+    expect(messageNotificationBody({ mediaType: "video", isAnimated: true })).toBe("🎞️ GIF")
+    expect(messageNotificationBody({ mediaType: "video", isAnimated: true, messageText: "Hello" })).toBe("🎞️ Hello")
+    expect(messageNotificationBody({ mediaType: "voice", voiceDuration: 65 })).toBe("🎤 Voice message (1:05)")
+    expect(messageNotificationBody({ mediaType: "voice", voiceDuration: NaN })).toBe("🎤 Voice message")
+    expect(messageNotificationBody({ mediaType: "photo", isSticker: true })).toBe("🖼️ Sticker")
+    expect(messageNotificationBody({ mediaType: "nudge" })).toBe("👋 Nudge")
+    expect(messageNotificationBody({ mediaType: "nudge", messageText: "🚨" })).toBe("🚨 Urgent nudge")
+  })
+
+  test("truncates text without splitting surrogate pairs or composed emoji", () => {
+    const family = "👨‍👩‍👧‍👦"
+    const body = messageNotificationBody({ mediaType: null, messageText: family.repeat(100) })
+    expect(body.endsWith("…")).toBe(true)
+    expect(body.slice(0, -1).split(family).join("")).toBe("")
+    expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(maxMessagePreviewBytes)
+    expect(messageNotificationBody({ mediaType: null, messageText: "a".repeat(239) + "😀tail" })).toBe("a".repeat(239) + "😀…")
+  })
+
+  test("preserves Persian text and combining marks at the character limit", () => {
+    expect(messageNotificationBody({ mediaType: null, messageText: "سلام\nدنیا" })).toBe("سلام دنیا")
+    expect(messageNotificationBody({ mediaType: null, messageText: "e\u0301".repeat(241) })).toBe("e\u0301".repeat(240) + "…")
+  })
+
   test("uses a normalized document file name when there is no caption", () => {
     expect(
       messageNotificationBody({

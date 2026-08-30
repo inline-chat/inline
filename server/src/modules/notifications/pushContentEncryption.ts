@@ -33,6 +33,7 @@ export type EncryptedSendMessagePushContent = {
     id: number
     displayName?: string
     profilePhotoUrl?: string
+    hasProfilePhoto?: boolean
   }
   title: string
   body: string

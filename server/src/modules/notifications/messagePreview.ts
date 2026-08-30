@@ -5,6 +5,8 @@ type MessageNotificationBodyInput = {
   mediaType: MessageNotificationMediaType
   isSticker?: boolean | null
   documentFileName?: string | null
+  isAnimated?: boolean | null
+  voiceDuration?: number | null
 }
 
 const mediaPrefix = (mediaType: MessageNotificationMediaType): string => {
@@ -23,38 +25,56 @@ const mediaPrefix = (mediaType: MessageNotificationMediaType): string => {
 }
 
 export const maxDocumentFileNamePreviewBytes = 240
+export const maxMessagePreviewBytes = 960
+export const maxNotificationNameBytes = 256
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
-const truncateUtf8 = (value: string, maxBytes: number): string => {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value
-
+const truncatePreview = (value: string, maxBytes: number): string => {
   const ellipsis = "…"
   const contentBudget = maxBytes - Buffer.byteLength(ellipsis, "utf8")
   let result = ""
   let byteLength = 0
+  let count = 0
 
-  for (const character of value) {
+  for (const { segment: character } of graphemes.segment(value)) {
     const characterByteLength = Buffer.byteLength(character, "utf8")
-    if (byteLength + characterByteLength > contentBudget) break
+    if (count == 240 || byteLength + characterByteLength > maxBytes) {
+      while (Buffer.byteLength(result, "utf8") > contentBudget) {
+        const segments = Array.from(graphemes.segment(result))
+        result = result.slice(0, segments.at(-1)!.index)
+      }
+      return result.trimEnd() + ellipsis
+    }
     result += character
     byteLength += characterByteLength
+    count += 1
   }
 
-  return result.trimEnd() + ellipsis
+  return result
 }
 
-const normalizedFileName = (fileName: string | null | undefined): string | undefined => {
-  const normalized = fileName?.trim().replace(/\s+/g, " ")
-  return normalized ? truncateUtf8(normalized, maxDocumentFileNamePreviewBytes) : undefined
+const normalizedText = (text: string | null | undefined): string => {
+  return text?.trim().replace(/\s+/g, " ") ?? ""
 }
+
+export const notificationText = (text: string | null | undefined, maxBytes = maxMessagePreviewBytes): string =>
+  truncatePreview(normalizedText(text), maxBytes)
 
 export const messageNotificationBody = ({
   messageText,
   mediaType,
   isSticker,
   documentFileName,
+  isAnimated,
+  voiceDuration,
 }: MessageNotificationBodyInput): string => {
-  if (messageText) {
-    return mediaPrefix(mediaType) + messageText.substring(0, 240)
+  const text = normalizedText(messageText)
+  if (mediaType === "nudge") {
+    return text === "🚨" ? "🚨 Urgent nudge" : "👋 Nudge"
+  }
+  if (text) {
+    const prefix = isSticker ? "🖼️ " : mediaType === "video" && isAnimated ? "🎞️ " : mediaPrefix(mediaType)
+    return prefix + truncatePreview(text, maxMessagePreviewBytes)
   }
   if (isSticker) {
     return "🖼️ Sticker"
@@ -64,10 +84,14 @@ export const messageNotificationBody = ({
     case "photo":
       return "🖼️ Photo"
     case "video":
-      return "🎥 Video"
+      return isAnimated ? "🎞️ GIF" : "🎥 Video"
     case "document":
-      return `📄 ${normalizedFileName(documentFileName) ?? "Document"}`
+      return `📄 ${truncatePreview(normalizedText(documentFileName), maxDocumentFileNamePreviewBytes) || "Document"}`
     case "voice":
+      if (voiceDuration != null && Number.isFinite(voiceDuration) && voiceDuration > 0) {
+        const seconds = Math.floor(voiceDuration)
+        return `🎤 Voice message (${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")})`
+      }
       return "🎤 Voice message"
     default:
       return "New message"
