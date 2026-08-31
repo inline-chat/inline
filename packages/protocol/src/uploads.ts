@@ -13,15 +13,21 @@ import {
   type UploadVideoMetadata,
   type UploadVoiceMetadata,
 } from "./core.js"
+import { INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "./transfers.js"
 
 const HASH_READ_SIZE = 1024 * 1024
-const MAX_NEGOTIATED_PART_SIZE = 16 * 1024 * 1024
 const DEFAULT_GLOBAL_CONCURRENCY = 3
 const DEFAULT_UPLOAD_CONCURRENCY = 2
 const MAX_PART_ATTEMPTS = 2
 const MAX_FINISH_RECONCILIATION_ATTEMPTS = 3
 const FINISH_RECONCILIATION_DELAY_SECONDS = 1
 const MAX_PROCESSING_RETRY_SECONDS = 30
+const MAX_UPLOAD_BYTES_BY_KIND: Partial<Record<UploadKind, number>> = {
+  [UploadKind.PHOTO]: 40_000_000,
+  [UploadKind.VIDEO]: 200_000_000,
+  [UploadKind.DOCUMENT]: 200_000_000,
+  [UploadKind.VOICE]: 20_000_000,
+}
 
 const boundedUploadProcessingRetrySeconds = (seconds: number): number =>
   Number.isNaN(seconds)
@@ -161,11 +167,15 @@ export class NativeUploadClient {
     if (!Number.isSafeInteger(input.source.byteCount) || input.source.byteCount <= 0) {
       throw new NativeUploadError("invalid_source", "Upload source must have a positive safe byte count")
     }
+    const maximumByteCount = MAX_UPLOAD_BYTES_BY_KIND[input.kind]
+    if (maximumByteCount === undefined || input.source.byteCount > maximumByteCount) {
+      throw new NativeUploadError("invalid_source", "Upload source exceeds the media size limit")
+    }
     if (input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
     const clientUploadId = input.clientUploadId?.slice() ?? randomUploadId()
     if (clientUploadId.length !== 16) throw new NativeUploadError("invalid_source", "Client upload ID must be 16 bytes")
     const digest = await sourceHash(input.source, input.signal)
-    const created = await this.rpc.create({
+    const createInput: CreateUploadInput = {
       clientUploadId,
       fileName: input.fileName,
       mimeType: input.mimeType,
@@ -178,9 +188,23 @@ export class NativeUploadClient {
         : input.metadata?.kind === "voice"
           ? { oneofKind: "voice", voice: input.metadata.value }
           : { oneofKind: undefined },
-    }, input.signal)
-    if (created.uploadId.length !== 16 || !Number.isSafeInteger(created.partSize) || created.partSize < 1 ||
-        created.partSize > MAX_NEGOTIATED_PART_SIZE || !Number.isSafeInteger(created.partCount) || created.partCount < 1 ||
+    }
+    let created: CreateUploadResult
+    try {
+      created = await this.rpc.create(createInput, input.signal)
+    } catch (error) {
+      if (input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
+      // create is idempotent by the stable clientUploadId. One replay recovers
+      // a committed request whose response was lost without a resume registry.
+      try {
+        created = await this.rpc.create(createInput, input.signal)
+      } catch (replayError) {
+        if (input.signal?.aborted) throw new NativeUploadError("canceled", "Upload was canceled")
+        throw replayError
+      }
+    }
+    if (created.uploadId.length !== 16 || created.partSize !== INLINE_TRANSFER_PART_SIZE ||
+        !Number.isSafeInteger(created.partCount) || created.partCount < 1 || created.partCount > INLINE_UPLOAD_MAX_PARTS ||
         created.partCount !== Math.ceil(input.source.byteCount / created.partSize) ||
         created.acceptedParts.some((index) => !Number.isInteger(index) || index < 0 || index >= created.partCount)) {
       throw new NativeUploadError("protocol", "Server returned invalid upload geometry")
@@ -214,7 +238,7 @@ export class NativeUploadClient {
   }
 
   #pump(): void {
-    while (this.#active < this.globalConcurrency) {
+    while (this.#active + this.#finishing < this.globalConcurrency) {
       const selected = this.#nextJob()
       if (!selected) break
       const partIndex = this.#nextPart(selected)
@@ -303,7 +327,7 @@ export class NativeUploadClient {
   }
 
   async #finish(job: UploadJob): Promise<void> {
-    if (job.settled || job.active !== 0 || this.#finishing >= this.globalConcurrency) return
+    if (job.settled || job.active !== 0 || this.#active + this.#finishing >= this.globalConcurrency) return
     this.#finishing += 1
     job.active = -1
     let reconciliationAttempts = 0
@@ -332,8 +356,8 @@ export class NativeUploadClient {
               job.resolve(state.complete)
               return
             case UploadStatus.PROCESSING:
-              await delay(FINISH_RECONCILIATION_DELAY_SECONDS, job.input.signal)
-              continue
+              this.#resumeFinishAfter(job, FINISH_RECONCILIATION_DELAY_SECONDS)
+              return
             case UploadStatus.UPLOADING:
               job.accepted = new Set(state.acceptedParts)
               if (this.#nextPart(job) === undefined) continue
@@ -374,11 +398,11 @@ export class NativeUploadClient {
             this.#pump()
             return
           case "processing":
-            await delay(
+            this.#resumeFinishAfter(
+              job,
               boundedUploadProcessingRetrySeconds(result.state.processing.retryAfterSeconds),
-              job.input.signal,
             )
-            break
+            return
           default:
             throw new NativeUploadError("protocol", "Server returned an empty finish result")
         }
@@ -389,6 +413,16 @@ export class NativeUploadClient {
       this.#finishing -= 1
       this.#pump()
     }
+  }
+
+  #resumeFinishAfter(job: UploadJob, seconds: number): void {
+    void delay(seconds, job.input.signal).then(() => {
+      if (job.settled) return
+      job.active = 0
+      void this.#finish(job)
+    }, (error: unknown) => {
+      if (!job.settled) this.#reject(job, error)
+    })
   }
 
   #abort(job: UploadJob): void {

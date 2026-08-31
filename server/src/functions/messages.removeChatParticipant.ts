@@ -141,6 +141,10 @@ export async function removeChatParticipant(
       return { update, accessUpdates, permissionUpdates }
     })
 
+    // A read racing the in-transaction reset can repopulate the positive cache
+    // from the pre-commit row. Reset again after commit makes revocation final.
+    AccessGuardsCache.resetChatParticipant(input.chatId, userId)
+
     await pushUpdates({
       chatId: input.chatId,
       userId,

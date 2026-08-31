@@ -7,8 +7,9 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { resolveDownloadFile } from "./downloadAccess"
 import { readFileBytes } from "./readFileBytes"
+import { INLINE_TRANSFER_MAX_LOCATOR_ID, INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 
-export const MAX_DOWNLOAD_PART_SIZE = 512 * 1024
+export const MAX_DOWNLOAD_PART_SIZE = INLINE_TRANSFER_PART_SIZE
 const MAX_DOWNLOADS_PER_SESSION = 8
 const MAX_CONCURRENT_DOWNLOADS = 64
 
@@ -38,7 +39,7 @@ export class NativeDownloadOperations {
         input.offset < 0n || input.offset > BigInt(Number.MAX_SAFE_INTEGER) ||
         !Number.isInteger(input.limit) || input.limit < 1 || input.limit > MAX_DOWNLOAD_PART_SIZE ||
         (input.message && [input.message.chatId, input.message.messageId].some(
-          (id) => id <= 0n || id > BigInt(Number.MAX_SAFE_INTEGER),
+          (id) => id <= 0n || id > INLINE_TRANSFER_MAX_LOCATOR_ID,
         ))) throw RealtimeRpcError.BadRequest()
     checkAbort(context.signal)
     const active = this.#sessions.get(context.sessionId) ?? 0

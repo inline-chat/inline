@@ -26,9 +26,10 @@ import {
   type DbInlineUpload,
 } from "@in/server/db/schema"
 import { decrypt } from "@in/server/modules/encryption/encryption"
+import { INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "@inline-chat/protocol/transfers"
 
-export const INLINE_UPLOAD_PART_SIZE = 512 * 1_024
-export const INLINE_UPLOAD_MAX_PARTS = 1_000
+export const INLINE_UPLOAD_PART_SIZE = INLINE_TRANSFER_PART_SIZE
+export { INLINE_UPLOAD_MAX_PARTS }
 export const INLINE_UPLOAD_IDLE_TTL_MS = 24 * 60 * 60 * 1_000
 export const INLINE_UPLOAD_HARD_TTL_MS = 7 * 24 * 60 * 60 * 1_000
 const INLINE_UPLOAD_PROCESSING_LEASE_MS = 5 * 60 * 1_000
@@ -596,7 +597,8 @@ export class InlineUploadRepository {
           upload.kind !== publication.file.record.fileType ||
           upload.resultFileUniqueId !== publication.file.record.fileUniqueId ||
           publication.file.path !== inlineUploadPublicationPath(publication.file.record.fileUniqueId) ||
-          upload.userId !== publication.file.record.userId) {
+          upload.userId !== publication.file.record.userId ||
+          publication.file.record.fileSize !== Number(upload.byteCount)) {
         throw new InlineUploadPublicationConflictError()
       }
 

@@ -33,6 +33,7 @@ import {
 import { InlineError } from "@in/server/types/errors"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 import { Log } from "@in/server/utils/log"
 import {
   UploadIntegrityError,
@@ -58,6 +59,7 @@ const MAX_ACTIVE_UPLOADS_PER_SESSION = 20
 const MAX_ACTIVE_RESERVED_UPLOAD_BYTES_PER_SESSION = 2n * 1_024n * 1_024n * 1_024n
 const MAX_CONCURRENT_FINALIZERS = 4
 const FINALIZER_LEASE_RENEW_INTERVAL_MS = 60_000
+const FINALIZER_LEASE_RENEW_TIMEOUT_MS = 15_000
 
 const kindFor = (kind: UploadKind): InlineUploadKind | undefined => {
   switch (kind) {
@@ -92,7 +94,8 @@ const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
       !fileName || fileName.length > 255 || fileName.includes("\0") ||
       !mimeType || mimeType.length > 255 || input.byteCount <= 0n ||
       input.byteCount > BigInt(Math.min(MAX_FILE_SIZE, MEDIA_UPLOAD_MAX_BYTES[kind]))) return badRequest()
-  const partCount = Number((input.byteCount + 524_287n) / 524_288n)
+  const partCount = Number((input.byteCount + BigInt(INLINE_TRANSFER_PART_SIZE - 1)) /
+    BigInt(INLINE_TRANSFER_PART_SIZE))
   if (partCount < 1 || partCount > INLINE_UPLOAD_MAX_PARTS) return badRequest()
   if (input.thumbnailFileUniqueId !== undefined &&
       (input.thumbnailFileUniqueId.length < 1 || input.thumbnailFileUniqueId.length > 128 ||
@@ -161,7 +164,12 @@ export class NativeUploadOperations {
     private readonly repository: InlineUploadRepository,
     private readonly partStore: UploadPartStore,
     private readonly finalizer: MediaUploadFinalizer,
-  ) {}
+    private readonly leaseRenewTimeoutMs = FINALIZER_LEASE_RENEW_TIMEOUT_MS,
+  ) {
+    if (!Number.isSafeInteger(leaseRenewTimeoutMs) || leaseRenewTimeoutMs < 1) {
+      throw new RangeError("Invalid upload lease-renew timeout")
+    }
+  }
 
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
     throwIfAborted(context.signal)
@@ -360,10 +368,21 @@ export class NativeUploadOperations {
     const leaseAbort = new AbortController()
     let leaseLost = false
     const renewLease = async (): Promise<void> => {
-      if (leaseLost || !await this.repository.renew({
-        uploadDbId: claim.upload.id,
-        lockToken: claim.lockToken,
-      })) {
+      if (leaseLost) throw new UploadFinalizationOwnershipLostError()
+      const deadline = new AbortController()
+      let renewed: boolean
+      try {
+        renewed = await Promise.race([
+          this.repository.renew({
+            uploadDbId: claim.upload.id,
+            lockToken: claim.lockToken,
+          }),
+          delay(this.leaseRenewTimeoutMs, false, { signal: deadline.signal }),
+        ])
+      } finally {
+        deadline.abort()
+      }
+      if (!renewed) {
         leaseLost = true
         throw new UploadFinalizationOwnershipLostError()
       }

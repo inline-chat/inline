@@ -200,7 +200,13 @@ export interface ServerApplicationDispatcher {
     markExecutionStarted: () => void
     sendUpdate: (payload: Uint8Array) => void
   }): Promise<
-    | { kind: "result"; payload: Uint8Array; terminateAuthorization?: boolean }
+    | {
+      kind: "result"
+      payload: Uint8Array
+      /** Compact durable replay payload when the first response is too large to retain. */
+      replayPayload?: Uint8Array
+      terminateAuthorization?: boolean
+    }
     | { kind: "error"; code: number; message: string; terminateAuthorization?: boolean }
   >
 }
@@ -1107,11 +1113,14 @@ export class InlineProtocolServerSession {
         ? encodeInlineResult(input.dispatched.payload)
         : encodeRpcError(input.dispatched.code, input.dispatched.message)
       const resultBody = encodeRpcResult(input.messageId, resultObject)
+      const replayResultBody = input.dispatched.kind === "result" && input.dispatched.replayPayload
+        ? encodeRpcResult(input.messageId, encodeInlineResult(input.dispatched.replayPayload))
+        : resultBody
       const completion = await this.options.replay.complete({
         authKeyId: input.authKeyId,
         sessionId: input.sessionId,
         messageId: input.messageId,
-        resultBody,
+        resultBody: replayResultBody,
       })
       const terminateAuthorization = input.dispatched.terminateAuthorization === true
       if (terminateAuthorization) {

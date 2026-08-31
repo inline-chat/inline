@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
-import { blockContentImageJobs, blockContents, chatParticipants, documents, files, messages, messageAttachments, photos, photoSizes, urlPreview } from "@in/server/db/schema"
+import { blockContentImageJobs, blockContents, chatParticipants, documents, files, members, messages, messageAttachments, photos, photoSizes, spaces, urlPreview } from "@in/server/db/schema"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { resolveDownloadFile } from "./downloadAccess"
 
@@ -46,6 +46,25 @@ describe("native download authorization", () => {
     await testUtils.addParticipant(chat!.id, recipient.id)
     AccessGuardsCache.resetChatParticipant(chat!.id, recipient.id)
     await db.delete(messages).where(eq(messages.globalId, message!.globalId))
+    expect(await resolveDownloadFile(file!.fileUniqueId, recipient.id, locator)).toBeUndefined()
+  })
+
+  test("rejects a cached member after the containing space is soft-deleted", async () => {
+    const owner = await testUtils.createUser("download-deleted-space-owner@example.com")
+    const recipient = await testUtils.createUser("download-deleted-space-recipient@example.com")
+    const space = await testUtils.createSpace("Deleted download space")
+    const chat = await testUtils.createChat(space!.id, "Deleted download", "thread", true, owner.id)
+    await db.insert(members).values([
+      { spaceId: space!.id, userId: owner.id, role: "owner" },
+      { spaceId: space!.id, userId: recipient.id, role: "member" },
+    ])
+    const [file] = await db.insert(files).values({ fileUniqueId: "IND_deleted_space", userId: owner.id }).returning()
+    const [document] = await db.insert(documents).values({ fileId: file!.id }).returning()
+    await db.insert(messages).values({ messageId: 1, chatId: chat!.id, fromId: owner.id, documentId: document!.id })
+    const locator = { chatId: BigInt(chat!.id), messageId: 1n }
+
+    expect((await resolveDownloadFile(file!.fileUniqueId, recipient.id, locator))?.id).toBe(file!.id)
+    await db.update(spaces).set({ deleted: new Date() }).where(eq(spaces.id, space!.id))
     expect(await resolveDownloadFile(file!.fileUniqueId, recipient.id, locator)).toBeUndefined()
   })
 

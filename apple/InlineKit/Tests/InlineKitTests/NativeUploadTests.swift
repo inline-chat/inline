@@ -1,6 +1,7 @@
 import Foundation
 import InlineProtocol
 import Testing
+@testable import Auth
 @testable import InlineKit
 
 private enum SimulatedUploadFailure: Error {
@@ -15,15 +16,28 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
 
   private let partFailureMode: PartFailureMode
   private let partSize: UInt32
+  private let partCount: UInt32
+  private let createResponsesLost: Int
   private let finishFailure: UploadFailure?
   private let emptyMissing: Bool
   private var accepted = false
+  private var createAttempts = 0
+  private var createUploadIDs: [Data] = []
   private var saveAttempts = 0
   private(set) var methods: [InlineProtocol.Method] = []
 
-  init(partFailureMode: PartFailureMode = .afterAcceptance, partSize: UInt32 = 524_288, finishFailure: UploadFailure? = nil, emptyMissing: Bool = false) {
+  init(
+    partFailureMode: PartFailureMode = .afterAcceptance,
+    partSize: UInt32 = 524_288,
+    partCount: UInt32 = 1,
+    createResponsesLost: Int = 0,
+    finishFailure: UploadFailure? = nil,
+    emptyMissing: Bool = false
+  ) {
     self.partFailureMode = partFailureMode
     self.partSize = partSize
+    self.partCount = partCount
+    self.createResponsesLost = createResponsesLost
     self.finishFailure = finishFailure
     self.emptyMissing = emptyMissing
   }
@@ -36,12 +50,17 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
     methods.append(method)
     switch (method, input) {
     case let (.createUpload, .createUpload(create)):
+      createAttempts += 1
+      createUploadIDs.append(create.clientUploadID)
       #expect(create.byteCount == 3)
       #expect(create.sha256.count == 32)
+      if createAttempts <= createResponsesLost {
+        throw SimulatedUploadFailure.responseLost
+      }
       var result = CreateUploadResult()
       result.uploadID = Data(repeating: 7, count: 16)
       result.partSize = partSize
-      result.partCount = 1
+      result.partCount = partCount
       return .createUpload(result)
     case let (.saveUploadPart, .saveUploadPart(save)):
       #expect(save.partIndex == 0)
@@ -90,6 +109,7 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
   }
 
   func calledMethods() -> [InlineProtocol.Method] { methods }
+  func createdUploadIDs() -> [Data] { createUploadIDs }
 }
 
 private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
@@ -271,10 +291,10 @@ private actor PipelinedPartUploadRPCMock: NativeUploadRPCTransport {
   ) async throws -> RpcResult.OneOf_Result? {
     switch (method, input) {
     case let (.createUpload, .createUpload(create)):
-      #expect(create.byteCount == 4)
+      #expect(create.byteCount == 4 * 524_288)
       var result = CreateUploadResult()
       result.uploadID = create.clientUploadID
-      result.partSize = 1
+      result.partSize = 524_288
       result.partCount = 4
       return .createUpload(result)
     case let (.saveUploadPart, .saveUploadPart(save)):
@@ -319,8 +339,157 @@ private final class UploadProgressRecorder: @unchecked Sendable {
   }
 }
 
+private enum UploadAccountFenceError: Error { case changed }
+
+private final class TestUploadAccountFence: NativeUploadAccountFencing, @unchecked Sendable {
+  private let lock = NSLock()
+  private var current = AuthAccountMutationToken(generation: 1, userID: 7)
+
+  func beginUploadAccountFence() throws -> AuthAccountMutationToken { lock.withLock { current } }
+  func validateUploadAccountFence(_ token: AuthAccountMutationToken) throws {
+    if lock.withLock({ token != current }) { throw UploadAccountFenceError.changed }
+  }
+  func switchAccount() {
+    lock.withLock {
+      current = AuthAccountMutationToken(generation: current.generation + 1, userID: 8)
+    }
+  }
+}
+
+private actor BlockingUploadStaging: NativeUploadStaging {
+  let entered = AsyncStream<Void>.makeStream()
+  let release = AsyncStream<Void>.makeStream()
+  private var discarded = false
+
+  func stage(logicalID _: String, sourceURL: URL) async -> URL {
+    entered.continuation.yield()
+    for await _ in release.stream { break }
+    return sourceURL
+  }
+  func discard(logicalID _: String) { discarded = true }
+  func wasDiscarded() -> Bool { discarded }
+}
+
+private actor AccountFencedUploadRPCMock: AccountBoundNativeUploadRPCTransport {
+  let fence: TestUploadAccountFence
+  private var methods: [InlineProtocol.Method] = []
+
+  init(fence: TestUploadAccountFence) { self.fence = fence }
+
+  func callUploadRPC(
+    method _: InlineProtocol.Method,
+    input _: RpcCall.OneOf_Input?,
+    timeout _: Duration?
+  ) async throws -> RpcResult.OneOf_Result? {
+    Issue.record("Account-fenced upload used the unfenced RPC overload")
+    throw UploadAccountFenceError.changed
+  }
+
+  func callUploadRPC(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout _: Duration?,
+    accountToken: AuthAccountMutationToken
+  ) async throws -> RpcResult.OneOf_Result? {
+    try fence.validateUploadAccountFence(accountToken)
+    methods.append(method)
+    switch (method, input) {
+    case let (.createUpload, .createUpload(create)):
+      var result = CreateUploadResult()
+      result.uploadID = create.clientUploadID
+      result.partSize = 524_288
+      result.partCount = UInt32((create.byteCount + 524_287) / 524_288)
+      return .createUpload(result)
+    case (.saveUploadPart, .saveUploadPart):
+      fence.switchAccount()
+      return .saveUploadPart(SaveUploadPartResult())
+    case (.cancelUpload, .cancelUpload):
+      return .cancelUpload(CancelUploadResult())
+    default:
+      Issue.record("Unexpected account-fenced RPC \(method)")
+      return nil
+    }
+  }
+
+  func calledMethods() -> [InlineProtocol.Method] { methods }
+}
+
 @Suite("Native upload")
 struct NativeUploadTests {
+  @Test("rejects an over-limit file before staging")
+  func rejectsOverLimitBeforeStaging() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-limit-\(UUID().uuidString)")
+    FileManager.default.createFile(atPath: source.path, contents: Data())
+    let handle = try FileHandle(forWritingTo: source)
+    try handle.truncate(atOffset: 20_000_001)
+    try handle.close()
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock()
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport, staging: staging, ownerScope: { "test-owner" }
+    )
+    await #expect(throws: NativeMediaUploadError.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "voice:large", fileURL: source, fileName: "large.ogg",
+        mimeType: "audio/ogg", kind: .voice
+      ), progress: { _, _ in })
+    }
+    #expect(await transport.calledMethods().isEmpty)
+    #expect(!(await staging.wasDiscarded()))
+  }
+
+  @Test("account switch while staging is blocked performs no replacement-account RPC")
+  func accountSwitchDuringStaging() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-account-stage-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let fence = TestUploadAccountFence()
+    let transport = AccountFencedUploadRPCMock(fence: fence)
+    let staging = BlockingUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport, staging: staging, accountFence: fence, ownerScope: { "test-owner" }
+    )
+    let upload = Task {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "document:account-stage", fileURL: source, fileName: "proof.bin",
+        mimeType: "application/octet-stream", kind: .document
+      ), progress: { _, _ in })
+    }
+    for await _ in await staging.entered.stream { break }
+    fence.switchAccount()
+    await staging.release.continuation.finish()
+    await #expect(throws: UploadAccountFenceError.self) { try await upload.value }
+    #expect(await transport.calledMethods().isEmpty)
+    #expect(await staging.wasDiscarded())
+  }
+
+  @Test("account switch between parts stops RPCs, cleans staging, and emits no late progress")
+  func accountSwitchBetweenParts() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-account-parts-\(UUID().uuidString)")
+    try Data(repeating: 1, count: 2 * 524_288).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let fence = TestUploadAccountFence()
+    let transport = AccountFencedUploadRPCMock(fence: fence)
+    let staging = PassthroughUploadStaging()
+    let progress = UploadProgressRecorder()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport, staging: staging, accountFence: fence, ownerScope: { "test-owner" }
+    )
+    await #expect(throws: UploadAccountFenceError.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "document:account-parts", fileURL: source, fileName: "proof.bin",
+        mimeType: "application/octet-stream", kind: .document
+      ), progress: { accepted, _ in progress.append(accepted) })
+    }
+    #expect(await transport.calledMethods() == [.createUpload, .saveUploadPart])
+    #expect(progress.recordedValues() == [0])
+    #expect(await staging.wasDiscarded())
+  }
+
   @Test("rejects empty missing-parts result instead of looping finish")
   func emptyMissingPartsIsTerminal() async throws {
     let source = FileManager.default.temporaryDirectory
@@ -358,7 +527,10 @@ struct NativeUploadTests {
     }
   }
 
-  @Test("rejects invalid geometry before arithmetic or transfer", arguments: [UInt32(0), UInt32.max])
+  @Test(
+    "rejects invalid geometry before arithmetic or transfer",
+    arguments: [UInt32(0), UInt32(1), UInt32(16 * 1_048_576), UInt32.max]
+  )
   func rejectsInvalidPartSize(partSize: UInt32) async throws {
     let source = FileManager.default.temporaryDirectory
       .appendingPathComponent("inline-native-upload-geometry-\(UUID().uuidString)")
@@ -374,6 +546,32 @@ struct NativeUploadTests {
     await #expect(throws: NativeMediaUploadError.self) {
       try await coordinator.upload(NativeMediaUploadRequest(
         logicalID: "photo:geometry", fileURL: source, fileName: "photo.jpg", mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+    }
+    #expect(await transport.calledMethods() == [.createUpload, .cancelUpload])
+    #expect(await staging.wasDiscarded())
+  }
+
+  @Test("rejects more than one thousand parts before transfer")
+  func rejectsExcessivePartCount() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-part-count-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(partCount: 1_001)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: staging,
+      ownerScope: { "test-owner" }
+    )
+    await #expect(throws: NativeMediaUploadError.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:part-count",
+        fileURL: source,
+        fileName: "photo.jpg",
+        mimeType: "image/jpeg",
+        kind: .photo
       ), progress: { _, _ in })
     }
     #expect(await transport.calledMethods() == [.createUpload, .cancelUpload])
@@ -439,6 +637,68 @@ struct NativeUploadTests {
       .getUploadState,
       .finishUpload,
     ])
+  }
+
+  @Test("replays create once with the same stable client upload ID after a lost response")
+  func replaysLostCreateResponse() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-create-replay-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(createResponsesLost: 1)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: staging,
+      ownerScope: { "test-owner" }
+    )
+
+    let complete = try await coordinator.upload(NativeMediaUploadRequest(
+      logicalID: "photo:create-replay",
+      fileURL: source,
+      fileName: "photo.jpg",
+      mimeType: "image/jpeg",
+      kind: .photo
+    ), progress: { _, _ in })
+
+    #expect(complete.fileUniqueID == "INP_native")
+    let clientUploadIDs = await transport.createdUploadIDs()
+    #expect(clientUploadIDs.count == 2)
+    #expect(clientUploadIDs[0] == clientUploadIDs[1])
+    let methods = await transport.calledMethods()
+    #expect(Array(methods.prefix(2)) == [.createUpload, .createUpload])
+    #expect(await staging.wasDiscarded())
+  }
+
+  @Test("preserves staging when both bounded create responses are lost")
+  func preservesStagingAfterAmbiguousCreate() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-create-ambiguous-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(createResponsesLost: 2)
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: staging,
+      ownerScope: { "test-owner" }
+    )
+
+    await #expect(throws: SimulatedUploadFailure.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:create-ambiguous",
+        fileURL: source,
+        fileName: "photo.jpg",
+        mimeType: "image/jpeg",
+        kind: .photo
+      ), progress: { _, _ in })
+    }
+
+    #expect(await transport.calledMethods() == [.createUpload, .createUpload])
+    let clientUploadIDs = await transport.createdUploadIDs()
+    #expect(clientUploadIDs.count == 2)
+    #expect(clientUploadIDs[0] == clientUploadIDs[1])
+    #expect(!(await staging.wasDiscarded()))
   }
 
   @Test("replays a part once when authoritative state says it is missing")
@@ -608,7 +868,7 @@ struct NativeUploadTests {
     #expect(FileManager.default.fileExists(atPath: staged.path) == false)
   }
 
-  @Test("stops preflight without deleting retry staging when canceled after staging")
+  @Test("discards unaddressable staging when canceled before create")
   func cancelsAfterStaging() async throws {
     let source = FileManager.default.temporaryDirectory
       .appendingPathComponent("inline-native-upload-preflight-cancel-test-\(UUID().uuidString)")
@@ -641,7 +901,7 @@ struct NativeUploadTests {
       return
     }
     #expect(error is CancellationError)
-    #expect(await staging.wasDiscarded() == false)
+    #expect(await staging.wasDiscarded())
     #expect(await transport.calledMethods().isEmpty)
   }
 
@@ -731,7 +991,7 @@ struct NativeUploadTests {
   func pipelinesParts() async throws {
     let source = FileManager.default.temporaryDirectory
       .appendingPathComponent("inline-native-upload-pipeline-\(UUID().uuidString)")
-    try Data([0, 1, 2, 3]).write(to: source)
+    try Data(repeating: 7, count: 4 * 524_288).write(to: source)
     defer { try? FileManager.default.removeItem(at: source) }
 
     let transport = PipelinedPartUploadRPCMock()
@@ -782,6 +1042,6 @@ struct NativeUploadTests {
     let complete = try await upload.value
     #expect(complete.fileUniqueID == "INP_pipeline")
     #expect(await transport.finishCount() == 1)
-    #expect(progress.recordedValues() == [0, 1, 2, 3, 4])
+    #expect(progress.recordedValues() == (0 ... 4).map { Int64($0 * 524_288) })
   }
 }

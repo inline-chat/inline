@@ -4,8 +4,12 @@ import { Document, GetFilePartInput, GetFilePartResult, Method, PhotoSize, RpcCa
 import { NativeDownloadClient, rpcDownloadTransport, type NativeDownloadRpcTransport } from "../src/downloads.js"
 import { decodeInlineApplicationObject, encodeInlineResult } from "../src/secure/application.js"
 import { decryptRecord, encryptRecord } from "../src/secure/record.js"
+import { INLINE_TRANSFER_MAX_LOCATOR_ID, INLINE_TRANSFER_PART_SIZE } from "../src/transfers.js"
 
-const source = Uint8Array.from({ length: 25 }, (_, index) => index)
+const source = Uint8Array.from(
+  { length: INLINE_TRANSFER_PART_SIZE * 3 + 1 },
+  (_, index) => index % 251,
+)
 const input = { fileUniqueId: "IND_test" }
 const part = (request: GetFilePartInput): GetFilePartResult => {
   const data = source.slice(Number(request.offset), Number(request.offset) + request.limit)
@@ -73,11 +77,16 @@ describe("native downloads", () => {
         result: { oneofKind: "getFilePart", getFilePart: part(decoded.input.getFilePart) },
       }))).result
     })
-    const chunks = await Array.fromAsync(new NativeDownloadClient(transport, 3, 8).download({
+    const chunks = await Array.fromAsync(new NativeDownloadClient(transport).download({
       ...input, message: { chatId: 123n, messageId: 456n },
     }))
     expect(Buffer.concat(chunks.map((chunk) => chunk.data))).toEqual(Buffer.from(source))
-    expect(chunks.map((chunk) => chunk.offset)).toEqual([0n, 8n, 16n, 24n])
+    expect(chunks.map((chunk) => chunk.offset)).toEqual([
+      0n,
+      BigInt(INLINE_TRANSFER_PART_SIZE),
+      BigInt(INLINE_TRANSFER_PART_SIZE * 2),
+      BigInt(INLINE_TRANSFER_PART_SIZE * 3),
+    ])
   })
 
   test("prefetches a bounded window, preserves order, and honors a slow consumer", async () => {
@@ -86,35 +95,46 @@ describe("native downloads", () => {
     const transport: NativeDownloadRpcTransport = {
       async getPart(request) {
         requested.push(request.offset)
-        if (request.offset > 0n) await gates[Number(request.offset / 4n) - 1]?.promise
+        if (request.offset > 0n) {
+          await gates[Number(request.offset / BigInt(INLINE_TRANSFER_PART_SIZE)) - 1]?.promise
+        }
         return part(request)
       },
     }
-    const stream = new NativeDownloadClient(transport, 3, 4).download(input)
+    const stream = new NativeDownloadClient(transport).download(input)
     expect((await stream.next()).value?.offset).toBe(0n)
     const second = stream.next()
     await Promise.resolve()
-    expect(requested).toEqual([0n, 4n, 8n, 12n])
+    expect(requested).toEqual([
+      0n,
+      BigInt(INLINE_TRANSFER_PART_SIZE),
+      BigInt(INLINE_TRANSFER_PART_SIZE * 2),
+      BigInt(INLINE_TRANSFER_PART_SIZE * 3),
+    ])
     gates[2]!.resolve()
     gates[1]!.resolve()
     await Promise.resolve()
     expect(requested).toHaveLength(4)
     gates[0]!.resolve()
-    expect((await second).value?.offset).toBe(4n)
+    expect((await second).value?.offset).toBe(BigInt(INLINE_TRANSFER_PART_SIZE))
     await Promise.resolve()
     expect(requested).toHaveLength(4)
-    expect((await stream.next()).value?.offset).toBe(8n)
-    expect(requested).toHaveLength(5)
+    expect((await stream.next()).value?.offset).toBe(BigInt(INLINE_TRANSFER_PART_SIZE * 2))
+    expect(requested).toHaveLength(4)
     await stream.return(undefined)
   })
 
   test("resumes only from the caller's checkpoint and handles exact EOF", async () => {
     const requested: bigint[] = []
-    const client = new NativeDownloadClient({ async getPart(request) { requested.push(request.offset); return part(request) } }, 2, 8)
+    const client = new NativeDownloadClient({ async getPart(request) { requested.push(request.offset); return part(request) } }, 2)
     const chunks = await Array.fromAsync(client.download({ ...input, offset: 13n }))
     expect(Buffer.concat(chunks.map((chunk) => chunk.data))).toEqual(Buffer.from(source.slice(13)))
-    expect(requested).toEqual([13n, 21n])
-    const eof = await Array.fromAsync(client.download({ ...input, offset: 25n }))
+    expect(requested).toEqual([
+      13n,
+      13n + BigInt(INLINE_TRANSFER_PART_SIZE),
+      13n + BigInt(INLINE_TRANSFER_PART_SIZE * 2),
+    ])
+    const eof = await Array.fromAsync(client.download({ ...input, offset: BigInt(source.length) }))
     expect(eof).toHaveLength(1)
     expect(eof[0]!.data).toHaveLength(0)
   })
@@ -123,7 +143,7 @@ describe("native downloads", () => {
     const location = { chatId: 1n, messageId: 2n }
     const options = { ...input, message: location }
     const requests: GetFilePartInput[] = []
-    const client = new NativeDownloadClient({ async getPart(request) { requests.push(request); return part(request) } }, 2, 8)
+    const client = new NativeDownloadClient({ async getPart(request) { requests.push(request); return part(request) } }, 2)
     const stream = client.download(options)
     await stream.next()
     options.fileUniqueId = "IND_changed"
@@ -156,7 +176,7 @@ describe("native downloads", () => {
       if (failure === "total") value.totalSize = 0n
       if (failure === "changed-total" && request.offset > 0n) value.totalSize += 1n
       return value
-    } }, 3, 8)
+    } })
     await expect(Array.fromAsync(client.download(input))).rejects.toThrow()
   })
 
@@ -166,7 +186,7 @@ describe("native downloads", () => {
       signals.push(signal!)
       return part(request)
     } }
-    const stream = new NativeDownloadClient(transport, 3, 4).download(input)
+    const stream = new NativeDownloadClient(transport).download(input)
     await stream.next()
     await stream.next()
     await stream.return(undefined)
@@ -185,9 +205,21 @@ describe("native downloads", () => {
     const client = new NativeDownloadClient({ async getPart(request) {
       if (request.offset > 0n) throw denied
       return part(request)
-    } }, 1, 8)
+    } }, 1)
     const stream = client.download(input)
-    expect((await stream.next()).value?.data).toEqual(source.slice(0, 8))
+    expect((await stream.next()).value?.data).toEqual(source.slice(0, INLINE_TRANSFER_PART_SIZE))
     await expect(stream.next()).rejects.toBe(denied)
+  })
+
+  test("requires production geometry and signed-int32 message locators before transport", async () => {
+    const transport: NativeDownloadRpcTransport = { async getPart(request) { return part(request) } }
+    expect(() => new NativeDownloadClient(transport, 1, 1)).toThrow("part size")
+    expect(() => new NativeDownloadClient(transport, 1, 16 * 1024 * 1024)).toThrow("part size")
+    const calls: GetFilePartInput[] = []
+    const client = new NativeDownloadClient({ async getPart(request) { calls.push(request); return part(request) } })
+    await expect(Array.fromAsync(client.download({
+      ...input, message: { chatId: INLINE_TRANSFER_MAX_LOCATOR_ID + 1n, messageId: 1n },
+    }))).rejects.toThrow("Invalid file ID")
+    expect(calls).toHaveLength(0)
   })
 })

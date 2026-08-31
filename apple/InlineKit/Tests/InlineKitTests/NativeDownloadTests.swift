@@ -2,8 +2,31 @@ import Combine
 import CryptoKit
 import Foundation
 import InlineProtocol
+import RealtimeV2
 import Testing
 @testable import InlineKit
+
+private final class FilePartReplayProbe {
+  let message: String
+  private(set) var calls = 0
+  private(set) var validations = 0
+
+  init(message: String) { self.message = message }
+
+  func call() async throws -> RpcResult.OneOf_Result? {
+    calls += 1
+    if calls == 1 {
+      throw RealtimeDirectRpcError.rpcError(
+        errorCode: .rateLimit,
+        message: message,
+        code: 429
+      )
+    }
+    return .getFilePart(GetFilePartResult())
+  }
+
+  func validate() { validations += 1 }
+}
 
 private actor DownloadPartMock: NativeFilePartFetching {
   enum Corruption: Sendable { case none, offset, size, length, digest }
@@ -236,6 +259,32 @@ private func downloadDestination() -> URL {
     }
   }
 
+  @Test func exactFreshRequestReplayTombstoneRetriesOnceAfterAccountValidation() async throws {
+    let probe = FilePartReplayProbe(message: NativeDocumentDownload.freshRequestReplayMessage)
+    let result = try await NativeDocumentDownload.callFilePartRPCWithReplay(
+      call: { try await probe.call() },
+      validateAccount: { probe.validate() }
+    )
+    guard let result, case .getFilePart = result else {
+      Issue.record("Fresh request replay did not return the second RPC result")
+      return
+    }
+    #expect(probe.calls == 2)
+    #expect(probe.validations == 2)
+  }
+
+  @Test func nearMatchFreshRequestErrorIsTerminal() async {
+    let probe = FilePartReplayProbe(message: "Retry a different RPC")
+    await #expect(throws: RealtimeDirectRpcError.self) {
+      _ = try await NativeDocumentDownload.callFilePartRPCWithReplay(
+        call: { try await probe.call() },
+        validateAccount: { probe.validate() }
+      )
+    }
+    #expect(probe.calls == 1)
+    #expect(probe.validations == 1)
+  }
+
   @Test func boundedOutOfOrderRangesProduceExactFile() async throws {
     let partSize = 524_288
     let bytes = Data((0 ..< partSize * 4 + 17).map { UInt8($0 % 251) })
@@ -286,9 +335,20 @@ private func downloadDestination() -> URL {
       try await NativeFileDownloader(transport: transport).download(fileUniqueID: "INP_download", to: destination)
     }
     await transport.waitForRequest(524_288)
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    let sentinel = Data([9, 8, 7])
+    try sentinel.write(to: destination)
     download.cancel()
     await #expect(throws: CancellationError.self) { try await download.value }
-    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    #expect(try Data(contentsOf: destination) == sentinel)
+    let partialPrefix = ".\(destination.lastPathComponent).inline-download-"
+    let siblings = try FileManager.default.contentsOfDirectory(
+      at: destination.deletingLastPathComponent(),
+      includingPropertiesForKeys: nil
+    )
+    #expect(!siblings.contains(where: {
+      $0.lastPathComponent.hasPrefix(partialPrefix) && $0.pathExtension == "partial"
+    }))
     let (_, _, active) = await transport.snapshot()
     #expect(active == 0)
   }

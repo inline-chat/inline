@@ -1,7 +1,8 @@
 import { sha256 } from "@noble/hashes/sha2.js"
 import { Method, type FileMessageLocation, type GetFilePartInput, type GetFilePartResult, type RpcCall, type RpcResult } from "./core.js"
+import { INLINE_TRANSFER_MAX_LOCATOR_ID, INLINE_TRANSFER_PART_SIZE } from "./transfers.js"
 
-export const MAX_DOWNLOAD_PART_SIZE = 512 * 1024
+export const MAX_DOWNLOAD_PART_SIZE = INLINE_TRANSFER_PART_SIZE
 
 export interface NativeDownloadRpcTransport {
   /** Must settle on abort and enforce a bounded individual RPC deadline. */
@@ -33,7 +34,7 @@ export class NativeDownloadClient {
     private readonly partSize = MAX_DOWNLOAD_PART_SIZE,
   ) {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8 ||
-        !Number.isInteger(partSize) || partSize < 1 || partSize > MAX_DOWNLOAD_PART_SIZE) {
+        partSize !== INLINE_TRANSFER_PART_SIZE) {
       throw new TypeError("Invalid download concurrency or part size")
     }
   }
@@ -44,6 +45,8 @@ export class NativeDownloadClient {
     const signal = input.signal
     const offset = input.offset ?? 0n
     if (!/^[A-Za-z0-9_-]{6,128}$/.test(input.fileUniqueId) || offset < 0n ||
+        (message && (message.chatId < 1n || message.chatId > INLINE_TRANSFER_MAX_LOCATOR_ID ||
+          message.messageId < 1n || message.messageId > INLINE_TRANSFER_MAX_LOCATOR_ID)) ||
         offset > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new NativeDownloadError("invalid_input", "Invalid file ID or download offset")
     }

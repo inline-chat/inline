@@ -77,6 +77,18 @@ const errorResponse = (error: unknown): Uint8Array => {
   })
 }
 
+const freshRequestIdRequiredResponse = (): Uint8Array => RealtimeV3Response.toBinary({
+  body: {
+    oneofKind: "rpcError",
+    rpcError: {
+      reqMsgId: 0n,
+      errorCode: RpcError_Code.RATE_LIMIT,
+      message: "Retry getFilePart with a fresh request ID",
+      code: 429,
+    },
+  },
+})
+
 const sendV3Update = (
   message: ServerProtocolMessage,
   sendUpdate: (payload: Uint8Array) => void,
@@ -279,6 +291,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
           return {
             kind: "result",
             terminateAuthorization: rpc.method === Method.LOG_OUT,
+            replayPayload: rpc.method === Method.GET_FILE_PART
+              ? freshRequestIdRequiredResponse()
+              : undefined,
             payload: RealtimeV3Response.toBinary({
               body: {
                 oneofKind: "rpcResult",

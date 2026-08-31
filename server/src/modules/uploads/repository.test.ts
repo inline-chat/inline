@@ -252,6 +252,22 @@ describe("native upload repository", () => {
     })).rejects.toBeInstanceOf(InlineUploadPublicationConflictError)
     expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(0)
 
+    await expect(repository.publishComplete({
+      uploadDbId: reclaimed.upload.id,
+      lockToken: reclaimed.lockToken,
+      publication: {
+        ...publication,
+        file: {
+          ...publication.file,
+          record: {
+            ...publication.file.record,
+            fileSize: Number(reclaimed.upload.byteCount) - 1,
+          },
+        },
+      },
+    })).rejects.toBeInstanceOf(InlineUploadPublicationConflictError)
+    expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(0)
+
     // Treat the successful result as lost. A subsequent finish claim must
     // reconcile from the committed upload row without publishing again.
     await repository.publishComplete({

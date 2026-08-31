@@ -1,5 +1,6 @@
 import { getR2 } from "@in/server/libs/r2"
 import { readFileBytes, FileByteLengthError } from "@in/server/modules/files/readFileBytes"
+import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 
 const STAGING_PREFIX = "inline-upload-parts/v1"
 
@@ -35,6 +36,15 @@ const objectKey = ({
 }
 
 export class R2UploadPartStore implements UploadPartStore {
+  constructor(
+    private readonly writePart: (
+      key: string,
+      data: Uint8Array,
+    ) => Promise<number> = async (key, data) => requireR2().file(key).write(data, {
+      type: "application/octet-stream",
+    }),
+  ) {}
+
   async put(input: {
     uploadId: Uint8Array
     partIndex: number
@@ -43,7 +53,10 @@ export class R2UploadPartStore implements UploadPartStore {
   }): Promise<string> {
     const key = objectKey(input)
     try {
-      await requireR2().file(key).write(input.data, { type: "application/octet-stream" })
+      const written = await this.writePart(key, input.data)
+      if (written !== input.data.byteLength) {
+        throw new Error(`Upload part storage wrote ${written} of ${input.data.byteLength} bytes`)
+      }
     } catch (cause) {
       throw new UploadPartStorageUnavailableError({ cause })
     }
@@ -52,7 +65,7 @@ export class R2UploadPartStore implements UploadPartStore {
 
   async read(key: string, byteCount: number, signal?: AbortSignal): Promise<Uint8Array> {
     signal?.throwIfAborted()
-    if (!Number.isInteger(byteCount) || byteCount < 1 || byteCount > 524_288) {
+    if (!Number.isInteger(byteCount) || byteCount < 1 || byteCount > INLINE_TRANSFER_PART_SIZE) {
       throw new UploadPartStorageUnavailableError()
     }
     try {

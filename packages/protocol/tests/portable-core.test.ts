@@ -499,14 +499,41 @@ describe("session counters", () => {
     expect(acknowledgements.drain()).toEqual([8n])
     const pending = new PendingMessageCache()
     pending.retain({ messageId: 8n, sequenceNumber: 1, body: Uint8Array.of(1, 2, 3, 4) })
+    expect(pending.retainedBytes).toBe(4)
     expect(pending.state([8n, 12n])).toEqual(Uint8Array.of(4, 1))
     expect(pending.resend([8n]).length).toBe(1)
     pending.acknowledge([8n])
+    expect(pending.retainedBytes).toBe(0)
     expect(pending.resend([8n])).toEqual([])
     const answer = encodeRpcResult(44n, encodeMsgsAck([44n]))
     pending.retain({ messageId: 48n, sequenceNumber: 3, body: answer })
+    expect(pending.retainedBytes).toBe(answer.length)
     expect(pending.dropRpcResult(44n)).toEqual({ messageId: 48n, sequenceNumber: 3, body: answer })
+    expect(pending.retainedBytes).toBe(0)
     expect(pending.dropRpcResult(44n)).toBeUndefined()
+  })
+
+  test("bounds pending response bytes and accounts for replacement and release", () => {
+    const pending = new PendingMessageCache(3, 1_048_576)
+    const halfMiB = new Uint8Array(512 * 1024)
+    pending.retain({ messageId: 1n, sequenceNumber: 1, body: halfMiB })
+    pending.retain({ messageId: 2n, sequenceNumber: 3, body: halfMiB })
+    expect(pending.retainedBytes).toBe(1_048_576)
+    expect(() => pending.retain({
+      messageId: 3n, sequenceNumber: 5, body: Uint8Array.of(1),
+    })).toThrow("byte capacity")
+    expect(pending.retainedBytes).toBe(1_048_576)
+
+    pending.retain({ messageId: 1n, sequenceNumber: 7, body: Uint8Array.of(1) })
+    expect(pending.retainedBytes).toBe(512 * 1024 + 1)
+    pending.acknowledge([2n])
+    expect(pending.retainedBytes).toBe(1)
+
+    pending.retain({ messageId: 2n, sequenceNumber: 9, body: Uint8Array.of(2) })
+    pending.retain({ messageId: 3n, sequenceNumber: 11, body: Uint8Array.of(3) })
+    expect(() => pending.retain({
+      messageId: 4n, sequenceNumber: 13, body: Uint8Array.of(4),
+    })).toThrow("cache is full")
   })
 })
 

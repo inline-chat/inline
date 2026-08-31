@@ -890,7 +890,7 @@ public final class FileDownloader: NSObject, Sendable {
     progressPublishers.count
   }
 
-  nonisolated static func isCancellation(_ error: Error) -> Bool {
+  public nonisolated static func isCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
     let nsError = error as NSError
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled

@@ -12,6 +12,7 @@ import {
   uploadByteSource,
   type NativeUploadRpcTransport,
 } from "../src/uploads.js"
+import { INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "../src/transfers.js"
 
 class MemoryUploadTransport implements NativeUploadRpcTransport {
   readonly accepted = new Map<string, Set<number>>()
@@ -27,7 +28,8 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
   finishResponses: FinishUploadResult[] = []
   stateCalls = 0
   finishCalls = 0
-  partSize = 4
+  partSize = INLINE_TRANSFER_PART_SIZE
+  partCountOverride: number | undefined
   maxPartBytes = 0
 
   async create(input: { clientUploadId: Uint8Array; byteCount: bigint }) {
@@ -36,7 +38,7 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
     return {
       uploadId: input.clientUploadId,
       partSize: this.partSize,
-      partCount: Math.ceil(Number(input.byteCount) / this.partSize),
+      partCount: this.partCountOverride ?? Math.ceil(Number(input.byteCount) / this.partSize),
       expiresAt: 1_900_000_000n,
       acceptedParts: this.acceptedPartsOverride ?? [],
     }
@@ -98,7 +100,10 @@ class MemoryUploadTransport implements NativeUploadRpcTransport {
 }
 
 const input = (seed: number) => ({
-  source: uploadByteSource(Uint8Array.from({ length: 12 }, (_, index) => seed + index)),
+  source: {
+    byteCount: INLINE_TRANSFER_PART_SIZE * 3,
+    read: async (_offset: number, length: number) => new Uint8Array(length).fill(seed),
+  },
   fileName: `file-${seed}.bin`,
   mimeType: "application/octet-stream",
   kind: UploadKind.DOCUMENT,
@@ -123,6 +128,48 @@ const deferred = () => {
 }
 
 describe("native upload coordinator", () => {
+  test("rejects an over-limit source before hashing or create", async () => {
+    const transport = new MemoryUploadTransport()
+    let reads = 0
+    await expect(new NativeUploadClient(transport).upload({
+      ...input(60),
+      kind: UploadKind.VOICE,
+      source: {
+        byteCount: 20_000_001,
+        async read(_offset, length) { reads += 1; return new Uint8Array(length) },
+      },
+    })).rejects.toThrow("size limit")
+    expect(reads).toBe(0)
+    expect(transport.accepted.size).toBe(0)
+  })
+
+  test("recovers a committed create whose first response was lost", async () => {
+    const transport = new MemoryUploadTransport()
+    const create = transport.create.bind(transport)
+    let creates = 0
+    transport.create = async (value) => {
+      const result = await create(value)
+      creates += 1
+      if (creates === 1) throw new Error("create response lost")
+      return result
+    }
+    await expect(new NativeUploadClient(transport).upload(virtualInput(61, 12))).resolves.toBeDefined()
+    expect(creates).toBe(2)
+  })
+
+  test("surfaces the replayed create failure when both bounded attempts fail", async () => {
+    const transport = new MemoryUploadTransport()
+    const first = new Error("first create failure")
+    const replay = new Error("replayed create failure")
+    let creates = 0
+    transport.create = async () => {
+      creates += 1
+      throw creates === 1 ? first : replay
+    }
+    await expect(new NativeUploadClient(transport).upload(virtualInput(62, 12))).rejects.toBe(replay)
+    expect(creates).toBe(2)
+  })
+
   test("finishes a fully acknowledged resume without sending any parts", async () => {
     const transport = new MemoryUploadTransport()
     transport.acceptedPartsOverride = [0, 1, 2]
@@ -167,6 +214,26 @@ describe("native upload coordinator", () => {
     expect(transport.partCalls).toHaveLength(0)
   })
 
+  test("processing waits release finish admission for later uploads", async () => {
+    const transport = new MemoryUploadTransport()
+    transport.acceptedPartsOverride = [0]
+    transport.finishResponses.push(...Array.from({ length: 3 }, () => ({
+      state: { oneofKind: "processing" as const, processing: { retryAfterSeconds: 30 } },
+    })))
+    const client = new NativeUploadClient(transport, 3)
+    const controllers = Array.from({ length: 4 }, () => new AbortController())
+    const uploads = controllers.map((controller, index) => client.upload({
+      ...virtualInput(70 + index, 12), signal: controller.signal,
+    }))
+    const fourth = await Promise.race([
+      uploads[3]!,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("finish starved")), 250)),
+    ])
+    expect(fourth.fileUniqueId).toStartWith("file-")
+    controllers.slice(0, 3).forEach((controller) => controller.abort())
+    await Promise.allSettled(uploads.slice(0, 3))
+  })
+
   test("cancellation settles a pending source read before reusing its transfer permit", async () => {
     const transport = new MemoryUploadTransport()
     const started = deferred()
@@ -205,10 +272,23 @@ describe("native upload coordinator", () => {
     expect(transport.finishCalls).toBe(1)
   })
 
-  test("rejects fractional negotiated geometry before sending parts", async () => {
+  test.each([
+    [1, undefined],
+    [16 * 1024 * 1024, undefined],
+    [INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS + 1],
+  ])("rejects hostile geometry before reading upload parts", async (partSize, partCount) => {
     const transport = new MemoryUploadTransport()
-    transport.partSize = 4.5
-    await expect(new NativeUploadClient(transport).upload(input(32))).rejects.toThrow("geometry")
+    transport.partSize = partSize
+    transport.partCountOverride = partCount
+    let reads = 0
+    await expect(new NativeUploadClient(transport).upload({
+      ...input(32),
+      source: {
+        byteCount: 12,
+        async read(_offset, length) { reads += 1; return new Uint8Array(length) },
+      },
+    })).rejects.toThrow("geometry")
+    expect(reads).toBe(1) // source hash only; no part read or index scan
     expect(transport.partCalls).toHaveLength(0)
   })
 
@@ -241,7 +321,6 @@ describe("native upload coordinator", () => {
 
   test("bounds authenticated processing retry hints", async () => {
     const transport = new MemoryUploadTransport()
-    transport.partSize = 12
     transport.finishResponses.push(
       ...[0, 2.9, 4_294_967_295, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]
         .map((retryAfterSeconds) => ({
@@ -257,7 +336,7 @@ describe("native upload coordinator", () => {
     })
 
     try {
-      await new NativeUploadClient(transport).upload(input(20))
+      await new NativeUploadClient(transport).upload(virtualInput(20, 12))
     } finally {
       timeoutSpy.mockRestore()
     }
@@ -427,26 +506,24 @@ describe("native upload coordinator", () => {
     })
 
     expect(result.fileUniqueId).toContain("file-")
-    expect(progress.at(-1)).toBe(12)
+    expect(progress.at(-1)).toBe(INLINE_TRANSFER_PART_SIZE * 3)
     expect(transport.partCalls).toHaveLength(3)
   })
 
   test("retries one part when authoritative state says it is still missing", async () => {
     const transport = new MemoryUploadTransport()
-    transport.partSize = 12
     transport.failBeforeAcceptCount = 1
 
-    await expect(new NativeUploadClient(transport).upload(input(46))).resolves.toBeDefined()
+    await expect(new NativeUploadClient(transport).upload(virtualInput(46, 12))).resolves.toBeDefined()
     expect(transport.partCalls).toHaveLength(2)
     expect(transport.stateCalls).toBe(1)
   })
 
   test("stops after one replay when a part remains missing", async () => {
     const transport = new MemoryUploadTransport()
-    transport.partSize = 12
     transport.failBeforeAcceptCount = 2
 
-    await expect(new NativeUploadClient(transport).upload(input(47)))
+    await expect(new NativeUploadClient(transport).upload(virtualInput(47, 12)))
       .rejects.toThrow("transient save failure")
     expect(transport.partCalls).toHaveLength(2)
     expect(transport.stateCalls).toBe(2)

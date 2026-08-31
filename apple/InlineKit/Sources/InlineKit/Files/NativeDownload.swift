@@ -10,22 +10,6 @@ public protocol NativeFilePartFetching: Sendable {
   func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult
 }
 
-extension RealtimeV2: NativeFilePartFetching {
-  public func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
-    let result = try await callRpcDirect(method: .getFilePart, input: .getFilePart(input), timeout: timeout)
-    guard case let .getFilePart(part)? = result else { throw NativeFileDownloadError.invalidResponse }
-    return part
-  }
-}
-
-extension RealtimeDirectSession: NativeFilePartFetching {
-  public func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
-    let result = try await callRpcDirect(method: .getFilePart, input: .getFilePart(input), timeout: timeout)
-    guard case let .getFilePart(part)? = result else { throw NativeFileDownloadError.invalidResponse }
-    return part
-  }
-}
-
 public enum NativeFileDownloadError: Error, LocalizedError, Sendable {
   case invalidRequest
   case invalidResponse
@@ -51,14 +35,14 @@ public struct NativeFileDownloader: Sendable {
   private static let concurrency = 2
   private let transport: any NativeFilePartFetching
 
-  public init(transport: any NativeFilePartFetching = Api.realtime) {
+  public init(transport: any NativeFilePartFetching) {
     self.transport = transport
   }
 
   /// The caller owns a successful file. Failure/cancellation removes only this
   /// invocation's incomplete destination; existing files are never truncated.
-  /// The supplied RealtimeV2 or RealtimeDirectSession must use an authenticated
-  /// V3 transport. Legacy sessions cannot use this RPC.
+  /// The explicit fetcher must bind every request to one authenticated account
+  /// on a V3 transport. Legacy sessions cannot use this RPC.
   @concurrent
   public func download(
     fileUniqueID: String,
@@ -72,7 +56,7 @@ public struct NativeFileDownloader: Sendable {
           fileUniqueID.utf8.allSatisfy({ (48 ... 57).contains($0) || (65 ... 90).contains($0) ||
             (97 ... 122).contains($0) || $0 == 45 || $0 == 95 }),
           message.map({ $0.chatID > 0 && $0.messageID > 0 &&
-            $0.chatID <= 9_007_199_254_740_991 && $0.messageID <= 9_007_199_254_740_991 }) ?? true
+            $0.chatID <= 2_147_483_647 && $0.messageID <= 2_147_483_647 }) ?? true
     else { throw NativeFileDownloadError.invalidRequest }
     try Task.checkCancellation()
     // Avoid fetching bytes for an obviously unusable destination; O_EXCL below
@@ -86,7 +70,10 @@ public struct NativeFileDownloader: Sendable {
     let totalSize = first.totalSize
     try Task.checkCancellation()
 
-    let descriptor = destination.withUnsafeFileSystemRepresentation { path in
+    let staging = destination.deletingLastPathComponent().appendingPathComponent(
+      ".\(destination.lastPathComponent).inline-download-\(UUID().uuidString).partial"
+    )
+    let descriptor = staging.withUnsafeFileSystemRepresentation { path in
       path.map { Darwin.open($0, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR) } ?? -1
     }
     guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
@@ -94,7 +81,7 @@ public struct NativeFileDownloader: Sendable {
     var complete = false
     defer {
       try? handle.close()
-      if !complete { try? FileManager.default.removeItem(at: destination) }
+      if !complete { try? FileManager.default.removeItem(at: staging) }
     }
     var written: UInt64 = 0
     func write(_ part: GetFilePartResult) throws {
@@ -134,6 +121,17 @@ public struct NativeFileDownloader: Sendable {
     try handle.synchronize()
     try Task.checkCancellation()
     try handle.close()
+    let published = staging.withUnsafeFileSystemRepresentation { stagingPath in
+      destination.withUnsafeFileSystemRepresentation { destinationPath in
+        guard let stagingPath, let destinationPath else { return EINVAL }
+        return Darwin.renameatx_np(
+          AT_FDCWD, stagingPath, AT_FDCWD, destinationPath, UInt32(RENAME_EXCL)
+        ) == 0 ? 0 : errno
+      }
+    }
+    guard published == 0 else {
+      throw POSIXError(POSIXErrorCode(rawValue: published) ?? .EIO)
+    }
     complete = true
     return destination
   }
@@ -164,6 +162,8 @@ public struct NativeFileDownloader: Sendable {
 /// Fetch identity at explicit download admission, without adding persistent media
 /// fields for the experiment. Bind all RPCs to the account that started it.
 struct NativeDocumentDownload: NativeFilePartFetching {
+  static let freshRequestReplayMessage = "Retry getFilePart with a fresh request ID"
+
   let auth: AuthHandle
   let accountToken: AuthAccountMutationToken
 
@@ -174,12 +174,47 @@ struct NativeDocumentDownload: NativeFilePartFetching {
   }
 
   func fetchFilePart(_ input: GetFilePartInput, timeout: Duration) async throws -> GetFilePartResult {
-    let result = try await Api.realtime.callRpcDirect(
-      method: .getFilePart, input: .getFilePart(input), timeout: timeout, accountToken: accountToken
+    let result = try await Self.callFilePartRPCWithReplay(
+      call: {
+        try await Api.realtime.callRpcDirect(
+          method: .getFilePart,
+          input: .getFilePart(input),
+          timeout: timeout,
+          accountToken: accountToken
+        )
+      },
+      validateAccount: { try auth.validateAccountMutation(accountToken) }
     )
-    try auth.validateAccountMutation(accountToken)
     guard case let .getFilePart(part)? = result else { throw NativeFileDownloadError.invalidResponse }
     return part
+  }
+
+  static func callFilePartRPCWithReplay(
+    call: () async throws -> RpcResult.OneOf_Result?,
+    validateAccount: () throws -> Void
+  ) async throws -> RpcResult.OneOf_Result? {
+    for attempt in 0 ... 1 {
+      let result: RpcResult.OneOf_Result?
+      do {
+        result = try await call()
+      } catch {
+        try validateAccount()
+        guard attempt == 0, isFreshRequestReplayTombstone(error) else { throw error }
+        continue
+      }
+      try validateAccount()
+      return result
+    }
+    throw NativeFileDownloadError.invalidResponse
+  }
+
+  private static func isFreshRequestReplayTombstone(_ error: any Error) -> Bool {
+    guard let error = error as? RealtimeDirectRpcError,
+          case let .rpcError(errorCode, message, code) = error
+    else {
+      return false
+    }
+    return errorCode == .rateLimit && code == 429 && message == freshRequestReplayMessage
   }
 
   func download(

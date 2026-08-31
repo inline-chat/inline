@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { describe, expect, test } from "bun:test"
 import { GetFilePartInput, RpcError_Code } from "@inline-chat/protocol/core"
+import { INLINE_TRANSFER_MAX_LOCATOR_ID } from "@inline-chat/protocol/transfers"
 import type { DbFile } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import type { HandlerContext } from "@in/server/realtime/types"
@@ -44,7 +45,8 @@ describe("native download ranges", () => {
     let lookups = 0
     const operations = new NativeDownloadOperations(async () => { lookups += 1; return file })
     for (const input of [request(-1n), request(2n ** 63n), request(0n, 0), request(0n, 524289),
-      request(0n, 1.5), { ...request(), message: { chatId: 1n, messageId: 0n } }]) {
+      request(0n, 1.5), { ...request(), message: { chatId: 1n, messageId: 0n } },
+      { ...request(), message: { chatId: INLINE_TRANSFER_MAX_LOCATOR_ID + 1n, messageId: 1n } }]) {
       await expect(operations.getPart(input, context)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
     }
     expect(lookups).toBe(0)

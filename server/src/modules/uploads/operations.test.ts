@@ -218,6 +218,32 @@ describe("native upload operations", () => {
     expect((await operations.state({ uploadId: created.uploadId }, requestContext)).status).toBe(UploadStatus.PROCESSING)
   })
 
+  test("bounds a hung lease renewal and releases the finalizer request", async () => {
+    class Repository extends InlineUploadRepository {
+      override async renew(): Promise<boolean> {
+        return new Promise(() => {})
+      }
+    }
+    const user = await testUtils.createUser("native-upload-hung-renewal@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(new Repository(), store, finalizer, 10)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([7, 8, 9])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(18), fileName: "lease.bin", mimeType: "application/octet-stream",
+      byteCount: 3n, sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+
+    const result = await Promise.race([
+      operations.finish({ uploadId: created.uploadId }, requestContext),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("lease renewal pinned finish")), 250)),
+    ])
+    expect(result.state.oneofKind).toBe("processing")
+  })
+
   test("runs create, durable save, reconciliation, finish, and cached finish", async () => {
     const user = await testUtils.createUser("native-upload-operations@example.com")
     const account = await testUtils.createSessionForUser(user.id)

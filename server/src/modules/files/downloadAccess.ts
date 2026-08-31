@@ -2,9 +2,10 @@ import type { FileMessageLocation } from "@inline-chat/protocol/core"
 import { eq, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { getFileByUniqueId } from "@in/server/db/models/files"
-import { chats } from "@in/server/db/schema"
+import { chats, spaces } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { INLINE_TRANSFER_MAX_LOCATOR_ID } from "@inline-chat/protocol/transfers"
 
 // Resolve one message, never reverse-scan the message history for a file ID.
 export async function resolveDownloadFile(
@@ -13,7 +14,7 @@ export async function resolveDownloadFile(
   message?: FileMessageLocation,
 ) {
   if (message && (message.chatId <= 0n || message.messageId <= 0n ||
-      message.chatId > BigInt(Number.MAX_SAFE_INTEGER) || message.messageId > BigInt(Number.MAX_SAFE_INTEGER))) {
+      message.chatId > INLINE_TRANSFER_MAX_LOCATOR_ID || message.messageId > INLINE_TRANSFER_MAX_LOCATOR_ID)) {
     return undefined
   }
   const file = await getFileByUniqueId(fileUniqueId)
@@ -21,8 +22,13 @@ export async function resolveDownloadFile(
   if (file.userId === userId) return file
   if (!message) return undefined
 
-  const [chat] = await db.select().from(chats).where(eq(chats.id, Number(message.chatId))).limit(1)
-  if (!chat) return undefined
+  const [accessScope] = await db.select({ chat: chats, spaceDeleted: spaces.deleted })
+    .from(chats)
+    .leftJoin(spaces, eq(chats.spaceId, spaces.id))
+    .where(eq(chats.id, Number(message.chatId)))
+    .limit(1)
+  const chat = accessScope?.chat
+  if (!chat || (chat.spaceId !== null && accessScope.spaceDeleted !== null)) return undefined
   try {
     await AccessGuards.ensureChatAccess(chat, userId)
   } catch (error) {
