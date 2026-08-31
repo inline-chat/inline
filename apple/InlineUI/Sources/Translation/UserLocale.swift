@@ -59,14 +59,8 @@ public class UserLocale {
   
   /// Get the user's preferred translation language if set
   public static func getPreferredTranslationLanguage() -> String? {
-    // Fast-path: if we've already loaded the value, just return it and avoid the lock
-    if cacheLoaded {
-      return cachedPreferredLanguage
-    }
-
-    // Slow-path (executed only once per session, unless the value is reset):
+    // Cached reads and writes share the same lock across UI and translation tasks.
     return cacheLock.withLock {
-      // If another thread loaded the value while we were waiting for the lock
       if cacheLoaded {
         return cachedPreferredLanguage
       }

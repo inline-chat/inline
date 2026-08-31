@@ -15,6 +15,7 @@ public actor TranslationViewModel {
   private let log = Log.scoped("TranslationViewModel")
 
   private let peerId: Peer
+  private let subscriptionKey = "translationViewModel_\(UUID().uuidString)"
 
   // Combined state management
   private var processedMessages: [TranslationMessageKey: String] = [:] // messageKey -> targetLanguage
@@ -28,10 +29,11 @@ public actor TranslationViewModel {
 
   public init(peerId: Peer) {
     self.peerId = peerId
+    let subscriptionKey = self.subscriptionKey
 
     // Subscribe to translation state changes
     Task { @MainActor in
-      TranslationState.shared.subscribe(peerId: peerId, key: "translationViewModel") { [weak self] enabled in
+      TranslationState.shared.subscribe(peerId: peerId, key: subscriptionKey) { [weak self] enabled in
         Task {
           await self?.translationStateChanged(enabled: enabled)
         }
@@ -41,8 +43,9 @@ public actor TranslationViewModel {
 
   deinit {
     let peerId = self.peerId
+    let subscriptionKey = self.subscriptionKey
     Task { @MainActor in
-      TranslationState.shared.unsubscribe(peerId: peerId, key: "translationViewModel")
+      TranslationState.shared.unsubscribe(peerId: peerId, key: subscriptionKey)
     }
   }
 
