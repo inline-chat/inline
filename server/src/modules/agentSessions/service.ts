@@ -119,6 +119,13 @@ function ensureBounded(value: string | undefined, maxBytes: number, required: bo
   return value
 }
 
+function ensureCompatibleProjectRef(row: DbAgentSession, projectRef: string | undefined): void {
+  if (projectRef === undefined || row.projectRefEncrypted === null) return
+  if (decryptAgentRef(row.projectRefEncrypted) !== projectRef) {
+    throw RealtimeRpcError.BadRequest()
+  }
+}
+
 async function ensureNotInternetPublic(chat: DbChat): Promise<void> {
   if (chat.spaceId === null) return
   const [space] = await db.select({ isPublic: spaces.isPublic }).from(spaces).where(eq(spaces.id, chat.spaceId)).limit(1)
@@ -174,6 +181,7 @@ async function encodeAgentSession(row: DbAgentSession, viewerUserId: number): Pr
     botUserId: BigInt(row.botUserId),
     provider: row.provider,
     statusMessageId: statusMessage ? BigInt(statusMessage.messageId) : undefined,
+    parentChatId: chat.parentChatId ? BigInt(chat.parentChatId) : undefined,
   }
 }
 
@@ -201,6 +209,7 @@ export async function connectAgentSession(
     )).limit(1)
     if (!external) return { state: ConnectAgentSessionState.UNSPECIFIED }
     if (external.ownerUserId !== currentUserId) throw RealtimeRpcError.UserIdInvalid()
+    ensureCompatibleProjectRef(external, projectRef)
     const canonicalChat = await db._query.chats.findFirst({ where: eq(chats.id, external.chatId) })
     if (!canonicalChat) throw RealtimeRpcError.PeerIdInvalid()
     await verifiedOwnerBotChat({ chat: canonicalChat, botUserId, ownerUserId: currentUserId })
@@ -223,16 +232,19 @@ export async function connectAgentSession(
         eq(agentSessions.botUserId, botUserId),
         eq(agentSessions.provider, input.provider),
         eq(agentSessions.sessionKeyHash, sessionKeyHash),
-      )).limit(1)
+      )).for("update").limit(1)
     if (external) {
       if (external.ownerUserId !== currentUserId) throw RealtimeRpcError.UserIdInvalid()
+      ensureCompatibleProjectRef(external, projectRef)
       if (external.chatId !== chat.id) {
         return { row: external, state: ConnectAgentSessionState.CONNECTED_ELSEWHERE }
       }
       const [updated] = await tx
         .update(agentSessions)
         .set({
-          projectRefEncrypted: projectRef ? encryptAgentRef(projectRef) : external.projectRefEncrypted,
+          projectRefEncrypted: external.projectRefEncrypted ?? (
+            projectRef === undefined ? null : encryptAgentRef(projectRef)
+          ),
           statusMessageGlobalId: statusGlobalId ?? external.statusMessageGlobalId,
           updatedAt: new Date(),
         })
@@ -272,6 +284,7 @@ export async function connectAgentSession(
       )).limit(1)
       if (concurrentExternal?.ownerUserId !== currentUserId) throw RealtimeRpcError.BadRequest()
       if (concurrentExternal) {
+        ensureCompatibleProjectRef(concurrentExternal, projectRef)
         return {
           row: concurrentExternal,
           state: concurrentExternal.chatId === chat.id
@@ -382,6 +395,12 @@ async function prepareSync(input: AgentSessionMessageSync): Promise<PreparedSync
     sourceDateSeconds !== undefined &&
     (!Number.isSafeInteger(sourceDateSeconds) || sourceDateSeconds < 0)
   ) throw RealtimeRpcError.BadRequest()
+  const sourceDate = sourceDateSeconds === undefined
+    ? undefined
+    : new Date(sourceDateSeconds * 1_000)
+  if (sourceDate !== undefined && !Number.isFinite(sourceDate.getTime())) {
+    throw RealtimeRpcError.BadRequest()
+  }
   const revisionRef = ensureBounded(input.revisionRef, 512, true)!
   const baseRevisionRef = ensureBounded(input.baseRevisionRef, 512, false)
   let entities = input.operation.upsert.entities
@@ -423,7 +442,7 @@ async function prepareSync(input: AgentSessionMessageSync): Promise<PreparedSync
     encryptedEntities: entityBytes && entityBytes.length > 0 ? encryptBinary(entityBytes) : undefined,
     preparedBlockContent,
     hasLink: detectHasLink({ entities }),
-    sourceDate: sourceDateSeconds === undefined ? undefined : new Date(sourceDateSeconds * 1_000),
+    sourceDate,
   }
 }
 

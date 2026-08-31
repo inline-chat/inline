@@ -738,6 +738,64 @@ describe("agent session continuity", () => {
     expect(lookup.agentSession?.id).toBe(first.agentSession?.id)
   })
 
+  test("returns the authoritative parent for reply-thread session recovery", async () => {
+    const parent = await testUtils.createChat(null, "Parent thread", "thread", false, ownerId)
+    if (!parent) throw new Error("parent chat not created")
+    await db.update(chats).set({ parentChatId: parent.id }).where(eq(chats.id, chatId))
+
+    const connected = await connect()
+    expect(connected.agentSession?.parentChatId).toBe(BigInt(parent.id))
+    const lookup = await connectAgentSession({
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "codex-installation",
+      sessionRef: "codex-session",
+      projectRef: "inline-public",
+    }, ownerId)
+    expect(lookup.agentSession?.parentChatId).toBe(BigInt(parent.id))
+  })
+
+  test("keeps the first project identity immutable across reconnects and lookups", async () => {
+    await connect()
+
+    const mismatched = {
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "codex-installation",
+      sessionRef: "codex-session",
+      projectRef: "different-project",
+    }
+    await expect(connectAgentSession({
+      ...mismatched,
+      peerId: { type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chatId) } } },
+    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    await expect(connectAgentSession(mismatched, ownerId)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.BAD_REQUEST,
+    })
+
+    const recovered = await getAgentSession({
+      peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
+      botUserId: BigInt(botId),
+    }, ownerId)
+    expect(recovered.connection?.projectRef).toBe("inline-public")
+  })
+
+  test("rejects provider timestamps outside the JavaScript Date range", async () => {
+    const connected = await connect()
+    await expect(syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.HISTORY,
+      messages: [{
+        role: AgentSessionMessageRole.ASSISTANT,
+        itemRef: "invalid-date-item",
+        sourceDate: 8_640_000_000_001n,
+        revisionRef: "invalid-date-r1",
+        complete: true,
+        operation: { oneofKind: "upsert", upsert: { text: "Invalid timestamp" } },
+      }],
+    }, botId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
   test("canonical lookup misses without creating or reserving a session", async () => {
     const lookup = await connectAgentSession({
       botUserId: BigInt(botId),
