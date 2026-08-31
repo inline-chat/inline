@@ -62,6 +62,12 @@ enum LocalAgentWorkspaceRegistrar {
     let botUserID: Int64
     let capability: String
     let path: String?
+
+    private enum CodingKeys: String, CodingKey {
+      case version, action, capability, path
+      case hostInstallationID = "hostInstallationId"
+      case botUserID = "botUserId"
+    }
   }
 
   private struct Response: Decodable, Sendable {
@@ -69,6 +75,11 @@ enum LocalAgentWorkspaceRegistrar {
     let status: String
     let workspaceID: String?
     let detail: String?
+
+    private enum CodingKeys: String, CodingKey {
+      case version, status, detail
+      case workspaceID = "workspaceId"
+    }
   }
 
   private static func request(
