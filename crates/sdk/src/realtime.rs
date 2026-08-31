@@ -646,7 +646,11 @@ impl RealtimeEventReceiver {
                 changed = self.closed.changed() => {
                     match changed {
                         Ok(()) => continue,
-                        Err(_) => return Err(RealtimeError::ConnectionClosed),
+                        Err(_) => {
+                            // The transport publishes terminal events before dropping
+                            // its watch sender. Drain them even if shutdown wins select.
+                            return self.try_recv()?.ok_or(RealtimeError::ConnectionClosed);
+                        }
                     }
                 }
             }
@@ -781,6 +785,12 @@ impl RealtimeClientBuilder {
 }
 
 impl RealtimeClient {
+    /// Converts this authenticated connection into a multiplexed session,
+    /// preserving its socket, request IDs, and timeout policy.
+    pub fn into_session(self) -> RealtimeSession {
+        RealtimeSession::from_client(self)
+    }
+
     /// Invokes a typed Inline RPC request.
     pub async fn call<R>(&mut self, request: R) -> Result<R::Response, RealtimeError>
     where
@@ -1925,6 +1935,13 @@ rpc_requests!(
         CancelUploadResult,
         CancelUpload
     ),
+    (
+        UpdateDialogArchivedInput,
+        UpdateDialogArchived,
+        UpdateDialogArchived,
+        UpdateDialogArchivedResult,
+        UpdateDialogArchived
+    ),
     (GetSpaceInput, GetSpace, GetSpace, GetSpaceResult, GetSpace),
     (
         ConnectAgentSessionInput,
@@ -2251,6 +2268,38 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn receiver_drains_queued_events_after_transport_task_exits() {
+        let (events, receiver) = broadcast::channel(128);
+        let (closed_tx, closed) = watch::channel(false);
+        let mut receiver = RealtimeEventReceiver {
+            events: receiver,
+            closed,
+        };
+        for nonce in 0..64 {
+            events.send(RealtimeEvent::Pong { nonce }).unwrap();
+        }
+        events
+            .send(RealtimeEvent::AuthenticationInvalidated)
+            .unwrap();
+        closed_tx.send(true).unwrap();
+        drop(closed_tx);
+
+        for expected in 0..64 {
+            assert!(
+                matches!(receiver.recv().await, Ok(RealtimeEvent::Pong { nonce }) if nonce == expected)
+            );
+        }
+        assert!(matches!(
+            receiver.recv().await,
+            Ok(RealtimeEvent::AuthenticationInvalidated)
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Err(RealtimeError::ConnectionClosed)
+        ));
+    }
+
     #[test]
     fn bounded_receiver_snapshot_does_not_chase_future_events() {
         let (commands, _command_rx) = mpsc::channel(DEFAULT_SESSION_COMMAND_CAPACITY);
@@ -2464,6 +2513,78 @@ mod tests {
 
         assert_eq!(result.user.unwrap().id, 42);
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn converting_client_to_session_reuses_authenticated_socket_and_request_ids() {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut ws = accept_async(stream).await.unwrap();
+                let init = read_test_client_message(&mut ws).await;
+                assert!(matches!(
+                    init.body,
+                    Some(proto::client_message::Body::ConnectionInit(_))
+                ));
+                send_test_server_message(
+                    &mut ws,
+                    proto::ServerProtocolMessage {
+                        id: 1,
+                        body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                            proto::ConnectionOpen {},
+                        )),
+                    },
+                )
+                .await;
+                let mut previous_id = 0;
+                for response_id in [2, 3] {
+                    let rpc = read_test_client_message(&mut ws).await;
+                    assert!(matches!(
+                        rpc.body,
+                        Some(proto::client_message::Body::RpcCall(_))
+                    ));
+                    assert!(rpc.id > previous_id);
+                    previous_id = rpc.id;
+                    send_test_server_message(
+                        &mut ws,
+                        get_me_result_message(response_id, rpc.id, 42),
+                    )
+                    .await;
+                }
+            });
+            let mut client = RealtimeClient::builder(format!("ws://{addr}/realtime"), "test-token")
+                .rpc_timeout(Duration::from_millis(500))
+                .connect()
+                .await
+                .unwrap();
+            assert_eq!(
+                client
+                    .call(proto::GetMeInput {})
+                    .await
+                    .unwrap()
+                    .user
+                    .unwrap()
+                    .id,
+                42
+            );
+            let session = client.into_session();
+            assert_eq!(session.rpc_timeout, Some(Duration::from_millis(500)));
+            assert_eq!(
+                session
+                    .call(proto::GetMeInput {})
+                    .await
+                    .unwrap()
+                    .user
+                    .unwrap()
+                    .id,
+                42
+            );
+            server.await.unwrap();
+        })
+        .await
+        .expect("conversion must not open another connection");
     }
 
     #[tokio::test]
@@ -3426,6 +3547,26 @@ mod tests {
             }
             other => panic!("expected unexpected result error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn archived_dialog_rpc_has_typed_v2_and_v3_mapping() {
+        assert_eq!(
+            <proto::UpdateDialogArchivedInput as RpcRequest>::METHOD,
+            proto::Method::UpdateDialogArchived
+        );
+        assert!(matches!(
+            proto::UpdateDialogArchivedInput::default().into_rpc_input(),
+            proto::rpc_call::Input::UpdateDialogArchived(_)
+        ));
+        assert!(
+            <proto::UpdateDialogArchivedInput as RpcRequest>::response_from_rpc_result(
+                proto::rpc_result::Result::UpdateDialogArchived(
+                    proto::UpdateDialogArchivedResult::default(),
+                ),
+            )
+            .is_ok()
+        );
     }
 
     #[tokio::test]

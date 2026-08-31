@@ -153,21 +153,10 @@ impl OwnerSession {
 
     pub(crate) async fn into_realtime_session(
         self,
-        config: &Config,
+        _config: &Config,
     ) -> Result<RealtimeSession, Box<dyn std::error::Error>> {
         match self.connection {
-            OwnerConnection::V2(connection) => {
-                drop(connection);
-                let token = self.access_token.ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "V2 owner has no access token")
-                })?;
-                Ok(RealtimeSession::connect_with_identity(
-                    &config.realtime_url,
-                    token.expose_secret(),
-                    identity::client_identity(),
-                )
-                .await?)
-            }
+            OwnerConnection::V2(connection) => Ok(connection.into_session()),
             OwnerConnection::V3(connection) => Ok(connection.into_session()),
         }
     }
