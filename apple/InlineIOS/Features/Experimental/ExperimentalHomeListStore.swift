@@ -362,6 +362,11 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
 
     if let previous = lastApplied {
       guard previous != presentation else {
+        // The latest snapshot can undo a queued update before it is flushed.
+        pendingGeneration += 1
+        pending = nil
+        pendingWorkItem?.cancel()
+        pendingWorkItem = nil
         lock.unlock()
         return
       }

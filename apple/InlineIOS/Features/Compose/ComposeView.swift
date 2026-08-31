@@ -329,6 +329,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       log.debug("No peerId available")
       return
     }
+    let targetChatId = chatId ?? 0
+    let replyToMsgId = ChatState.shared.getState(peer: peerId).replyingMessageId
 
     Task.detached(priority: .userInitiated) { @MainActor in
       let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
@@ -339,9 +341,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           .init(
             text: nil,
             peerId: peerId,
-            chatId: self.chatId ?? 0,
+            chatId: targetChatId,
             mediaItems: [mediaItem],
-            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
+            replyToMsgId: replyToMsgId,
             isSticker: true
           )
         )
