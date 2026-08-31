@@ -29,6 +29,8 @@ type InlineParentContextToolContext = {
   agentAccountId?: string
   sessionKey?: string
   messageChannel?: string
+  requesterSenderId?: string
+  deliveryContext?: { threadId?: string | number }
 }
 
 type InlineParentContextToolArgs = {
@@ -433,10 +435,13 @@ export function createInlineParentContextTool(ctx: InlineParentContextToolContex
       const args = rawArgs as InlineParentContextToolArgs
       const currentSession = parseCurrentInlineSession(ctx)
       const explicitThreadId = readStringCandidate(args.threadId)
+      const ambientThreadId = ctx.messageChannel?.trim().toLowerCase() === "inline"
+        ? parseOptionalInlineId(ctx.deliveryContext?.threadId, "current thread")
+        : null
       const threadId =
         explicitThreadId != null
           ? parseInlineId(explicitThreadId, "threadId")
-          : currentSession?.threadId ?? null
+          : currentSession?.threadId ?? ambientThreadId
       let parentChatId =
         parseOptionalChatId(readIdCandidate(args.parentChatId, args.chatId), "parentChatId") ??
         currentSession?.parentChatId ??
@@ -472,6 +477,19 @@ export function createInlineParentContextTool(ctx: InlineParentContextToolContex
 
           if (parentChatId == null) {
             throw new Error("inline_parent_context: parentChatId is required outside an Inline reply-thread session")
+          }
+
+          if (ctx.messageChannel?.trim().toLowerCase() === "inline") {
+            // Bot-token access does not prove that a child-only participant can
+            // read the parent DM. Validate the actual target, including overrides.
+            const parent = await client.getChat({ chatId: parentChatId })
+            const peer = parent.peer?.type
+            if (peer?.oneofKind !== "user" && peer?.oneofKind !== "chat") {
+              throw new Error("inline_parent_context: parent chat identity is unavailable")
+            }
+            if (peer.oneofKind === "user" && ctx.requesterSenderId !== String(peer.user.userId)) {
+              throw new Error("inline_parent_context: parent DM history is unavailable to this participant")
+            }
           }
 
           const history = resolveParentContextHistoryRequest({
@@ -510,7 +528,7 @@ export function createInlineParentContextTool(ctx: InlineParentContextToolContex
             afterLimit: history.afterLimit,
             limit,
             includeAnchor,
-            usedCurrentThreadDefault: explicitThreadId == null && currentSession?.threadId != null,
+            usedCurrentThreadDefault: explicitThreadId == null && threadId != null,
             nextBeforeMessageId: oldest?.id ?? null,
             nextAfterMessageId: newest?.id ?? null,
             messages,

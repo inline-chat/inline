@@ -74,6 +74,7 @@ import {
 import type { OpenClawConfig, PluginCommandContext } from "openclaw/plugin-sdk/core"
 import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract"
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
+import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing"
 import {
   BotCapability_Kind,
   BotChatSettingsProblem_Code,
@@ -153,6 +154,7 @@ import {
 } from "./thread-participation.js"
 import {
   lookupInlineReplyThreadRoute,
+  lookupInlineReplyThreadRouteByThreadId,
   rememberInlineReplyThreadRoute,
   type InlineReplyThreadRouteRecord,
 } from "./thread-routes.js"
@@ -380,6 +382,8 @@ type InlineUntrustedStructuredContextEntry = {
 type InlineReplyThreadContext = {
   childChatId: bigint
   parentChatId: bigint
+  parentChatKind: CachedChatInfo["kind"]
+  parentPeerUserId?: bigint | null
   parentChatTitle: string | null
   parentMessageId: bigint | null
   threadLabel: string | null
@@ -656,6 +660,7 @@ function createInlineBotPresenceLifecycle(params: {
   let busyKind: InlineBotPresenceKind = "running"
   let busyComment: string | undefined
   let sendChain: Promise<void> = Promise.resolve()
+  let generation = 0
 
   const clearIdleTimer = () => {
     if (!idleTimer) return
@@ -688,10 +693,14 @@ function createInlineBotPresenceLifecycle(params: {
     return sendChain
   }
 
-  const scheduleIdle = (delayMs = INLINE_BOT_PRESENCE_IDLE_DELAY_MS) => {
+  const scheduleIdle = (
+    delayMs = INLINE_BOT_PRESENCE_IDLE_DELAY_MS,
+    expectedGeneration = generation,
+  ) => {
     clearIdleTimer()
     idleTimer = setTimeout(() => {
       idleTimer = undefined
+      if (generation !== expectedGeneration) return
       active = false
       finishing = false
       busyKind = "running"
@@ -720,9 +729,11 @@ function createInlineBotPresenceLifecycle(params: {
     clearIdleTimer()
     clearGestureTimer()
     active = true
+    const expectedGeneration = generation
     void send(kind, comment)
     gestureTimer = setTimeout(() => {
       gestureTimer = undefined
+      if (generation !== expectedGeneration) return
       if (!active || finishing) return
       void send(resumeKind, resumeComment)
     }, INLINE_BOT_PRESENCE_GESTURE_MS)
@@ -731,10 +742,15 @@ function createInlineBotPresenceLifecycle(params: {
 
   return {
     retarget: async (chatId: bigint) => {
+      generation += 1
       clearIdleTimer()
       clearGestureTimer()
       const oldChatIds = params.chatIds
       params.chatIds = [chatId]
+      // Adoption means work continues in the child even if a parent gesture was
+      // finishing. Start a fresh lifecycle so the child cannot remain busy.
+      active = true
+      finishing = false
       currentKind = undefined
       currentComment = undefined
       sendChain = sendChain.catch(() => {}).then(() => sendInlineBotPresenceToChats({
@@ -743,8 +759,7 @@ function createInlineBotPresenceLifecycle(params: {
         kind: "idle",
         onPartialError: params.onPartialError,
       }).catch(params.onError))
-      if (active) await send(busyKind, busyComment)
-      else await sendChain
+      await send(busyKind, busyComment)
     },
     start: async (cue?: InlineBotPresenceSignal | null) => {
       if (params.chatIds.length === 0) return
@@ -774,7 +789,12 @@ function createInlineBotPresenceLifecycle(params: {
         clearGestureTimer()
         active = true
         finishing = true
-        void send("failed", signal.comment).finally(() => scheduleIdle(INLINE_BOT_PRESENCE_FAILED_MS))
+        const expectedGeneration = generation
+        void send("failed", signal.comment).finally(() => {
+          if (generation === expectedGeneration) {
+            scheduleIdle(INLINE_BOT_PRESENCE_FAILED_MS, expectedGeneration)
+          }
+        })
         return
       }
       if (params.chatIds.length === 0) return
@@ -782,7 +802,10 @@ function createInlineBotPresenceLifecycle(params: {
       clearGestureTimer()
       active = true
       finishing = true
-      void send(signal.kind, signal.comment).finally(() => scheduleIdle())
+      const expectedGeneration = generation
+      void send(signal.kind, signal.comment).finally(() => {
+        if (generation === expectedGeneration) scheduleIdle(undefined, expectedGeneration)
+      })
     },
     finish: () => {
       if (!active || finishing) return
@@ -796,7 +819,12 @@ function createInlineBotPresenceLifecycle(params: {
       clearGestureTimer()
       active = true
       finishing = true
-      void send("failed", comment).finally(() => scheduleIdle(INLINE_BOT_PRESENCE_FAILED_MS))
+      const expectedGeneration = generation
+      void send("failed", comment).finally(() => {
+        if (generation === expectedGeneration) {
+          scheduleIdle(INLINE_BOT_PRESENCE_FAILED_MS, expectedGeneration)
+        }
+      })
     },
     cleanup: () => {
       if (!active) return
@@ -804,7 +832,9 @@ function createInlineBotPresenceLifecycle(params: {
       clearIdleTimer()
       clearGestureTimer()
       active = false
+      const expectedGeneration = generation
       void send("idle").finally(() => {
+        if (generation !== expectedGeneration) return
         finishing = false
         busyKind = "running"
         busyComment = undefined
@@ -848,6 +878,7 @@ type InlineSystemEventContext = {
   agentId: string
   effectiveChatId: bigint
   isReplyThread: boolean
+  conversationKind: CachedChatInfo["kind"]
   chatInfo: CachedChatInfo
 }
 
@@ -2342,6 +2373,7 @@ function rememberInlineBotDelivery(params: {
   messageId: bigint
   accountId: string
   agentId: string
+  inlineAgentId?: string
   replyThreadContext?: InlineReplyThreadContext | null
 }): void {
   rememberBotMessageId(params.botMessageIdsByChat, params.chatId, params.messageId)
@@ -2359,6 +2391,7 @@ function rememberInlineBotDelivery(params: {
     parentMessageId: params.replyThreadContext.parentMessageId,
     threadLabel: params.replyThreadContext.threadLabel,
     agentId: params.agentId,
+    ...(params.inlineAgentId ? { inlineAgentId: params.inlineAgentId } : {}),
   })
 }
 
@@ -3020,10 +3053,7 @@ async function resolveInlineInboundReplyThreadContext(params: {
   const parentChatInfo =
     metadata.parentChatId === params.chatId
       ? params.chatInfo
-      : await resolveChatInfo(params.client, params.chatCache, metadata.parentChatId).catch(() => ({
-          kind: "group" as const,
-          title: null,
-        }))
+      : await resolveChatInfo(params.client, params.chatCache, metadata.parentChatId)
   const anchorMessage =
     metadata.parentMessageId != null
       ? await loadInlineReplyThreadAnchorMessage({
@@ -3036,6 +3066,8 @@ async function resolveInlineInboundReplyThreadContext(params: {
   return {
     childChatId: metadata.childChatId,
     parentChatId: metadata.parentChatId,
+    parentChatKind: parentChatInfo.kind,
+    ...(parentChatInfo.peerUserId != null ? { parentPeerUserId: parentChatInfo.peerUserId } : {}),
     parentChatTitle: parentChatInfo.title ?? null,
     parentMessageId: metadata.parentMessageId,
     threadLabel: buildInlineReplyThreadLabel({
@@ -3059,7 +3091,7 @@ async function resolveInlineReplyThreadContextFromRoute(params: {
   route: InlineReplyThreadRouteRecord
   client: InlineSdkClient
   chatCache: Map<bigint, CachedChatInfo>
-  fallbackParentChatTitle: string | null
+  fallbackParentChatInfo: CachedChatInfo
 }): Promise<InlineReplyThreadContext | null> {
   const parentChatId = parseCachedInlineId(params.route.parentChatId)
   const childChatId = parseCachedInlineId(params.route.threadId)
@@ -3067,10 +3099,8 @@ async function resolveInlineReplyThreadContextFromRoute(params: {
     return null
   }
   const parentMessageId = parseCachedInlineId(params.route.parentMessageId)
-  const parentChatInfo = await resolveChatInfo(params.client, params.chatCache, parentChatId).catch(() => ({
-    kind: "group" as const,
-    title: params.fallbackParentChatTitle,
-  }))
+  const parentChatInfo = await resolveChatInfo(params.client, params.chatCache, parentChatId)
+    .catch(() => params.fallbackParentChatInfo)
   const anchorMessage =
     parentMessageId != null
       ? await loadInlineReplyThreadAnchorMessage({
@@ -3084,7 +3114,9 @@ async function resolveInlineReplyThreadContextFromRoute(params: {
   return {
     childChatId,
     parentChatId,
-    parentChatTitle: parentChatInfo.title ?? params.fallbackParentChatTitle,
+    parentChatKind: parentChatInfo.kind,
+    ...(parentChatInfo.peerUserId != null ? { parentPeerUserId: parentChatInfo.peerUserId } : {}),
+    parentChatTitle: parentChatInfo.title ?? params.fallbackParentChatInfo.title,
     parentMessageId,
     threadLabel: buildInlineReplyThreadLabel({
       title: labelSource,
@@ -3475,6 +3507,41 @@ export async function monitorInlineProvider(params: {
 
   const hydrateChatParticipants = (chatId: bigint): Promise<void> => senderProfilesById.hydrateChat(chatId)
 
+  const projectSavedInlineReplyThreadSessionKey = async (params: {
+    baseSessionKey: string
+    threadId: bigint
+    agentId: string
+    eventKind: string
+  }): Promise<string> => {
+    const threadedSessionKey = buildInlineReplyThreadSessionKey(
+      params.baseSessionKey,
+      params.threadId,
+    )
+    try {
+      const savedRoute = await lookupInlineReplyThreadRouteByThreadId({
+        accountId: account.accountId,
+        threadId: params.threadId,
+      })
+      if (
+        savedRoute?.agentId !== params.agentId ||
+        !savedRoute.inlineAgentId
+      ) {
+        return threadedSessionKey
+      }
+      const specialization = await inlineAgentResolver.resolve(savedRoute.inlineAgentId)
+      return projectInlineAgentSessionKey(
+        threadedSessionKey,
+        savedRoute.inlineAgentId,
+        specialization,
+      )
+    } catch (error) {
+      runtime.error?.(
+        `inline: ${params.eventKind} reply-thread specialization lookup failed: ${String(error)}`,
+      )
+      return threadedSessionKey
+    }
+  }
+
   const resolveInlineSystemEventContext = async (params: {
     chatId: bigint
     senderId?: bigint | null
@@ -3488,23 +3555,42 @@ export async function monitorInlineProvider(params: {
       return null
     }
 
-    const isGroup = chatInfo.kind !== "direct"
     const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+    let replyThreadContextFailed = false
     const replyThreadContext = await resolveInlineInboundReplyThreadContext({
       replyThreadsEnabled,
       client,
       chatId: params.chatId,
       chatInfo,
       chatCache,
-      useCachedChatMetadata: params.eventKind.startsWith("bot.chatSettings."),
+      // resolveChatInfo already loaded the child record. Reuse its parent
+      // metadata so a transient second GET_CHAT cannot turn a known child into
+      // an apparent top-level group.
+      useCachedChatMetadata: true,
     }).catch((err) => {
       publishStatus({ lastError: `getChat (system event reply thread) failed: ${String(err)}` })
+      replyThreadContextFailed = true
       return null
     })
+    if (replyThreadContextFailed && chatInfo.parentChatId != null) {
+      log?.warn(
+        `[${account.accountId}] inline: drop ${params.eventKind} child=${String(params.chatId)} (parent chat unavailable)`,
+      )
+      return null
+    }
+    const conversationKind = replyThreadContext?.parentChatKind ?? chatInfo.kind
+    const isGroup = conversationKind !== "direct"
     const effectiveChatId = replyThreadContext?.parentChatId ?? params.chatId
     const effectiveChatInfo =
       replyThreadContext?.parentChatId != null
-        ? { ...chatInfo, title: replyThreadContext.parentChatTitle ?? chatInfo.title }
+        ? {
+            ...chatInfo,
+            kind: replyThreadContext.parentChatKind,
+            title: replyThreadContext.parentChatTitle ?? chatInfo.title,
+            ...(replyThreadContext.parentPeerUserId != null
+              ? { peerUserId: replyThreadContext.parentPeerUserId }
+              : {}),
+          }
         : chatInfo
     const senderId = params.senderId != null ? String(params.senderId) : null
     const dmPolicy = account.config.dmPolicy ?? "pairing"
@@ -3570,22 +3656,33 @@ export async function monitorInlineProvider(params: {
           id: String(effectiveChatId),
         },
       })
+      const sessionKey = replyThreadContext
+        ? await projectSavedInlineReplyThreadSessionKey({
+            baseSessionKey: route.sessionKey,
+            threadId: replyThreadContext.childChatId,
+            agentId: route.agentId,
+            eventKind: params.eventKind,
+          })
+        : route.sessionKey
       return {
         channelLabel: formatInlineSystemEventChannelLabel({
           chatInfo: effectiveChatInfo,
           effectiveChatId,
         }),
-        sessionKey: replyThreadContext
-          ? buildInlineReplyThreadSessionKey(route.sessionKey, replyThreadContext.childChatId)
-          : route.sessionKey,
+        sessionKey,
         agentId: route.agentId,
         effectiveChatId,
         isReplyThread: replyThreadContext != null,
+        conversationKind,
         chatInfo,
       }
     }
 
-    const peerUserId = senderId ?? (chatInfo.peerUserId != null ? String(chatInfo.peerUserId) : null)
+    const peerUserId =
+      senderId ??
+      (replyThreadContext?.parentPeerUserId != null
+        ? String(replyThreadContext.parentPeerUserId)
+        : chatInfo.peerUserId != null ? String(chatInfo.peerUserId) : null)
     if (!peerUserId) {
       log?.info(
         `[${account.accountId}] inline: drop ${params.eventKind} chat=${String(params.chatId)} (direct peer unknown)`,
@@ -3625,15 +3722,24 @@ export async function monitorInlineProvider(params: {
         id: peerUserId,
       },
     })
+    const sessionKey = replyThreadContext
+      ? await projectSavedInlineReplyThreadSessionKey({
+          baseSessionKey: route.sessionKey,
+          threadId: replyThreadContext.childChatId,
+          agentId: route.agentId,
+          eventKind: params.eventKind,
+        })
+      : route.sessionKey
     return {
       channelLabel: formatInlineSystemEventChannelLabel({
-        chatInfo,
-        effectiveChatId: params.chatId,
+        chatInfo: effectiveChatInfo,
+        effectiveChatId,
       }),
-      sessionKey: route.sessionKey,
+      sessionKey,
       agentId: route.agentId,
-      effectiveChatId: params.chatId,
-      isReplyThread: false,
+      effectiveChatId,
+      isReplyThread: replyThreadContext != null,
+      conversationKind,
       chatInfo,
     }
   }
@@ -3840,28 +3946,40 @@ export async function monitorInlineProvider(params: {
     try {
       chatInfo = await resolveChatInfo(client, chatCache, chatId)
     } catch (err) {
-      // Default conservative behavior if metadata fetch fails.
-      chatInfo = { kind: "group", title: null }
       publishStatus({ lastError: `getChat failed: ${String(err)}` })
+      runtime.log?.(`inline: drop message chat=${String(chatId)} (chat metadata unavailable)`)
+      return
     }
 
-    const isGroup = chatInfo.kind !== "direct"
     const inlineThreadDefaults = (cfg.channels?.inline ?? {}) as {
       replyThreadMode?: unknown
       replyThreadRequireExplicitMention?: boolean
       replyThreadParentHistoryLimit?: number
     }
     const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+    let replyThreadContextFailed = false
     const replyThreadContext = await resolveInlineInboundReplyThreadContext({
       replyThreadsEnabled,
       client,
       chatId,
       chatInfo,
       chatCache,
+      useCachedChatMetadata: true,
     }).catch((err) => {
       publishStatus({ lastError: `getChat (reply thread) failed: ${String(err)}` })
+      replyThreadContextFailed = true
       return null
     })
+    if (replyThreadContextFailed && chatInfo.parentChatId != null) {
+      runtime.log?.(
+        `inline: drop child message chat=${String(chatId)} (reply-thread parent unavailable)`,
+      )
+      return
+    }
+    // Inline encodes every reply-thread child as a chat peer. Preserve the
+    // logical parent kind so a DM child remains a DM for policy and sessions.
+    const conversationKind = replyThreadContext?.parentChatKind ?? chatInfo.kind
+    const isGroup = conversationKind !== "direct"
     const effectiveChatId = replyThreadContext?.parentChatId ?? chatId
     const effectiveGroupTitle = replyThreadContext?.parentChatTitle ?? chatInfo.title ?? null
     const replyThreadMode =
@@ -3888,7 +4006,7 @@ export async function monitorInlineProvider(params: {
           })
         : false
     const replyThreadParentHistoryLimit =
-      isGroup && replyThreadsEnabled
+      replyThreadsEnabled
         ? resolveInlineGroupReplyThreadParentHistoryLimit({
             cfg,
             accountId: account.accountId,
@@ -3915,7 +4033,7 @@ export async function monitorInlineProvider(params: {
     const senderUsername = senderProfile?.username
     const senderName = isGroup
       ? senderProfile?.name
-      : resolveInlineDirectSenderName({ profileName: senderProfile?.name, chatTitle: chatInfo.title, senderId })
+      : resolveInlineDirectSenderName({ profileName: senderProfile?.name, chatTitle: effectiveGroupTitle, senderId })
     const callbackActionOwnership = callbackActionEvent
       ? resolveInlineMessageActionOwnership(callbackActionEvent.actionId)
       : null
@@ -3984,6 +4102,8 @@ export async function monitorInlineProvider(params: {
     }
     const shouldEditCallbackTargetInPlace = callbackActionEvent != null
     const normalizedCommandBody = callbackCommandBody ?? commandTarget.body
+    const mentionedInlineAgentId = currentContent?.entities.find((entity) =>
+      entity.type === "mention" && entity.userId === String(meId) && entity.agentId)?.agentId
     const route = core.channel.routing.resolveAgentRoute({
       cfg,
       channel: CHANNEL_ID,
@@ -3994,11 +4114,40 @@ export async function monitorInlineProvider(params: {
         id: isGroup ? String(effectiveChatId) : senderId,
       },
     })
-    const inboundSessionKey =
-      replyThreadContext && isGroup
-        ? buildInlineReplyThreadSessionKey(route.sessionKey, replyThreadContext.childChatId)
-        : route.sessionKey
-    if (replyThreadContext && isGroup) {
+    const savedReplyThreadRoute = replyThreadContext
+      ? await lookupInlineReplyThreadRouteByThreadId({
+          accountId: account.accountId,
+          threadId: replyThreadContext.childChatId,
+        }).catch((error) => {
+          runtime.error?.(`inline reply-thread specialization lookup failed: ${String(error)}`)
+          return null
+        })
+      : null
+    // A specialized Inline Agent remains attached to its reply-thread child.
+    // Follow-up messages should not need to mention the Agent again, but a
+    // child route owned by another OpenClaw agent must not leak specialization.
+    const inlineAgentId = mentionedInlineAgentId ?? (
+      savedReplyThreadRoute?.agentId === route.agentId
+        ? savedReplyThreadRoute.inlineAgentId
+        : undefined
+    )
+    let inlineAgent: Awaited<ReturnType<typeof inlineAgentResolver.resolve>> = null
+    if (inlineAgentId) {
+      try {
+        inlineAgent = await inlineAgentResolver.resolve(inlineAgentId)
+      } catch (error) {
+        runtime.error?.(`inline: failed to resolve mentioned Agent ${inlineAgentId}: ${String(error)}`)
+      }
+    }
+    const baseInboundSessionKey = replyThreadContext
+      ? buildInlineReplyThreadSessionKey(route.sessionKey, replyThreadContext.childChatId)
+      : route.sessionKey
+    const inboundSessionKey = projectInlineAgentSessionKey(
+      baseInboundSessionKey,
+      inlineAgentId,
+      inlineAgent,
+    )
+    if (replyThreadContext) {
       rememberInlineReplyThreadRoute({
         accountId: account.accountId,
         parentChatId: replyThreadContext.parentChatId,
@@ -4006,6 +4155,7 @@ export async function monitorInlineProvider(params: {
         parentMessageId: replyThreadContext.parentMessageId,
         threadLabel: replyThreadContext.threadLabel,
         agentId: route.agentId,
+        ...(inlineAgentId ? { inlineAgentId } : {}),
       })
     }
     const rememberSentBotMessage = (params: {
@@ -4020,6 +4170,7 @@ export async function monitorInlineProvider(params: {
         messageId: params.messageId,
         accountId: account.accountId,
         agentId: route.agentId,
+        ...(inlineAgentId ? { inlineAgentId } : {}),
         replyThreadContext: params.replyThreadContext ?? null,
       })
     }
@@ -4659,6 +4810,7 @@ export async function monitorInlineProvider(params: {
                 agentId: route.agentId,
                 effectiveChatId,
                 isReplyThread: replyThreadContext != null,
+                conversationKind,
                 chatInfo,
               },
               actorUserId: msg.fromId,
@@ -4748,7 +4900,7 @@ export async function monitorInlineProvider(params: {
           route: cachedRoute,
           client,
           chatCache,
-          fallbackParentChatTitle: effectiveGroupTitle,
+          fallbackParentChatInfo: chatInfo,
         }).catch((error) => {
           publishStatus({ lastError: `reply-thread route restore failed: ${String(error)}` })
           runtime.error?.(`inline reply-thread route restore failed: ${String(error)}`)
@@ -4772,6 +4924,8 @@ export async function monitorInlineProvider(params: {
         deliveryReplyThreadContext = {
           childChatId: createdThread.childChatId,
           parentChatId: createdThread.parentChatId,
+          parentChatKind: chatInfo.kind,
+          ...(chatInfo.peerUserId != null ? { parentPeerUserId: chatInfo.peerUserId } : {}),
           parentChatTitle: effectiveGroupTitle,
           parentMessageId: createdThread.parentMessageId,
           threadLabel: buildInlineReplyThreadLabel({
@@ -4788,6 +4942,7 @@ export async function monitorInlineProvider(params: {
           title: createdThread.title,
           threadLabel: deliveryReplyThreadContext.threadLabel,
           agentId: route.agentId,
+          ...(inlineAgentId ? { inlineAgentId } : {}),
         })
       }
     }
@@ -4803,7 +4958,7 @@ export async function monitorInlineProvider(params: {
           route: cachedRoute,
           client,
           chatCache,
-          fallbackParentChatTitle: effectiveGroupTitle,
+          fallbackParentChatInfo: chatInfo,
         }).catch(() => null)
       }
     }
@@ -4812,7 +4967,7 @@ export async function monitorInlineProvider(params: {
       runtime.error?.("inline create reply thread failed; answer withheld from parent chat")
       const sent = await client.sendMessage({
         chatId,
-        text: "I couldn't open the reply thread. Please try again; I haven't sent the answer to this chat.",
+        text: "I couldn't confirm the reply thread, so I haven't sent the answer. Please check the thread or try again.",
         replyToMsgId: msg.id,
         parseMarkdown,
       })
@@ -4838,7 +4993,12 @@ export async function monitorInlineProvider(params: {
         meId,
       })
     }
-    if (deliveryReplyThreadContext) {
+    const canExposeParentHistoryToSender =
+      deliveryReplyThreadContext != null &&
+      (deliveryReplyThreadContext.parentChatKind !== "direct" ||
+        (deliveryReplyThreadContext.parentPeerUserId != null &&
+          String(deliveryReplyThreadContext.parentPeerUserId) === senderId))
+    if (deliveryReplyThreadContext && canExposeParentHistoryToSender) {
       const parentHistoryContext = await buildReplyThreadParentHistoryContext({
         client,
         replyThreadContext: deliveryReplyThreadContext,
@@ -4859,21 +5019,30 @@ export async function monitorInlineProvider(params: {
     }
 
     let deliveryChatId = deliveryReplyThreadContext?.childChatId ?? chatId
-    let adoptingThread = false
-    const inlineAgentId = currentContent?.entities.find((entity) =>
-      entity.type === "mention" && entity.userId === String(meId) && entity.agentId)?.agentId
-    let inlineAgent: Awaited<ReturnType<typeof inlineAgentResolver.resolve>> = null
-    if (inlineAgentId) {
-      try {
-        inlineAgent = await inlineAgentResolver.resolve(inlineAgentId)
-      } catch (error) {
-        runtime.error?.(`inline: failed to resolve mentioned Agent ${inlineAgentId}: ${String(error)}`)
-      }
+    let deliveryTypingChain: Promise<void> = Promise.resolve()
+    const sendDeliveryTyping = (targetChatId: bigint, typing: boolean): Promise<void> => {
+      const phase = typing ? "start" : "stop"
+      const task = deliveryTypingChain
+        .catch(() => {})
+        .then(() => sendInlineTypingToChats({
+          client,
+          chatIds: [targetChatId],
+          typing,
+          onPartialError: (failedChatId, error) =>
+            runtime.error?.(
+              `inline typing ${phase} failed for chat ${String(failedChatId)}: ${String(error)}`,
+            ),
+        }))
+      // Preserve ordering after an individual activity RPC fails. The caller
+      // still receives the original failure through `task`.
+      deliveryTypingChain = task.catch(() => {})
+      return task
     }
-    const baseDeliverySessionKey =
-      deliveryReplyThreadContext && isGroup
-        ? buildInlineReplyThreadSessionKey(route.sessionKey, deliveryReplyThreadContext.childChatId)
-        : route.sessionKey
+    let adoptingThread = false
+    let adoptedThreadThisTurn = false
+    const baseDeliverySessionKey = deliveryReplyThreadContext
+      ? buildInlineReplyThreadSessionKey(route.sessionKey, deliveryReplyThreadContext.childChatId)
+      : baseInboundSessionKey
     const deliverySessionKey = projectInlineAgentSessionKey(
       baseDeliverySessionKey,
       inlineAgentId,
@@ -5060,10 +5229,13 @@ export async function monitorInlineProvider(params: {
       ...(!isGroup
         ? {
             updateLastRoute: {
-              sessionKey: route.mainSessionKey,
+              sessionKey: resolveInboundLastRouteSessionKey({ route, sessionKey: route.sessionKey }),
               channel: CHANNEL_ID,
               to: `inline:${String(effectiveChatId)}`,
               accountId: route.accountId,
+              ...(deliveryChatId !== effectiveChatId
+                ? { threadId: String(deliveryChatId) }
+                : {}),
             },
           }
         : {}),
@@ -5077,21 +5249,8 @@ export async function monitorInlineProvider(params: {
       accountId: account.accountId,
       typing: {
         start: () => adoptingThread ? Promise.resolve() :
-          sendInlineTypingToChats({
-            client,
-            chatIds: [deliveryChatId],
-            typing: true,
-            onPartialError: (chatId, error) =>
-              runtime.error?.(`inline typing start failed for chat ${String(chatId)}: ${String(error)}`),
-          }),
-        stop: () =>
-          sendInlineTypingToChats({
-            client,
-            chatIds: [deliveryChatId],
-            typing: false,
-            onPartialError: (chatId, error) =>
-              runtime.error?.(`inline typing stop failed for chat ${String(chatId)}: ${String(error)}`),
-          }),
+          sendDeliveryTyping(deliveryChatId, true),
+        stop: () => sendDeliveryTyping(deliveryChatId, false),
         onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
         onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
       },
@@ -5105,6 +5264,11 @@ export async function monitorInlineProvider(params: {
         runtime.error?.(`inline bot presence failed for chat ${String(chatId)}: ${String(error)}`),
       onError: (error) => runtime.error?.(`inline bot presence failed: ${String(error)}`),
     })
+    let deferredTypingCleanup = false
+    const runTypingCleanup = () => {
+      rawTypingCallbacks?.onCleanup?.()
+      botPresenceLifecycle.cleanup()
+    }
     const typingCallbacks: InlineTypingCallbacks | undefined = rawTypingCallbacks
       ? {
           onReplyStart: async () => {
@@ -5124,8 +5288,11 @@ export async function monitorInlineProvider(params: {
           ...(rawTypingCallbacks.onCleanup
             ? {
                 onCleanup: () => {
-                  rawTypingCallbacks.onCleanup?.()
-                  botPresenceLifecycle.cleanup()
+                  if (adoptingThread) {
+                    deferredTypingCleanup = true
+                    return
+                  }
+                  runTypingCleanup()
                 },
               }
             : {}),
@@ -5651,7 +5818,7 @@ export async function monitorInlineProvider(params: {
       await resetEditStreamForAssistantMessage()
     }
     const handlePartialStreamPayload = (payload: InlineReplyPayload): void => {
-      if (adoptingThread || activeThreadRoute.threadReplyDelivered) return
+      if (adoptingThread) return
       const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
       if (!visiblePayload) return
       const partialText = typeof visiblePayload.text === "string" ? visiblePayload.text : ""
@@ -5720,39 +5887,51 @@ export async function monitorInlineProvider(params: {
       sourceChatId: chatId,
       sourceMessageId: msg.id,
       sourceMessageSid: messageSid,
+      parentPeer: {
+        kind: isGroup ? "group" : "direct",
+        id: isGroup ? String(effectiveChatId) : senderId,
+      },
       threadId: deliveryReplyThreadContext?.childChatId,
-      threadReplyDelivered: false,
       onThreadAdopted: async (threadId: bigint) => {
         adoptingThread = true
-        // Drain old-chat operations before changing IDs: Inline message IDs
-        // are local to a chat, so an old draft cannot be edited in the child.
-        await resetEditStreamForAssistantMessage()
-        await cleanupInlineProgressPlaceholder()
-        delivered = false
-        partialMediaDelivered = false
-        await sendInlineTypingToChats({ client, chatIds: [deliveryChatId], typing: false })
-          .catch((error) => runtime.error?.(`inline thread handoff typing stop failed: ${String(error)}`))
-        deliveryChatId = threadId
-        deliveryReplyThreadContext = {
-          childChatId: threadId,
-          parentChatId: chatId,
-          parentChatTitle: effectiveGroupTitle,
-          parentMessageId: msg.id,
-          threadLabel: null,
-          anchorMessage: msg,
+        try {
+          // Drain old-chat operations before changing IDs: Inline message IDs
+          // are local to a chat, so an old draft cannot be edited in the child.
+          await resetEditStreamForAssistantMessage().catch((error) =>
+            runtime.error?.(`inline thread handoff stream reset failed: ${String(error)}`))
+          await cleanupInlineProgressPlaceholder().catch((error) =>
+            runtime.error?.(`inline thread handoff placeholder cleanup failed: ${String(error)}`))
+          delivered = false
+          partialMediaDelivered = false
+          await sendDeliveryTyping(deliveryChatId, false)
+            .catch((error) => runtime.error?.(`inline thread handoff typing stop failed: ${String(error)}`))
+          deliveryChatId = threadId
+          adoptedThreadThisTurn = true
+          deliveryReplyThreadContext = {
+            childChatId: threadId,
+            parentChatId: chatId,
+            parentChatKind: chatInfo.kind,
+            ...(chatInfo.peerUserId != null ? { parentPeerUserId: chatInfo.peerUserId } : {}),
+            parentChatTitle: effectiveGroupTitle,
+            parentMessageId: msg.id,
+            threadLabel: null,
+            anchorMessage: msg,
+          }
+          canReplyToSourceMessage = false
+          defaultReplyToMsgId = undefined
+          ctxPayload.OriginatingTo = `inline:${String(threadId)}`
+          ctxPayload.MessageThreadId = String(threadId)
+          await botPresenceLifecycle.retarget(threadId).catch((error) =>
+            runtime.error?.(`inline thread handoff presence retarget failed: ${String(error)}`))
+          await sendDeliveryTyping(threadId, true)
+            .catch((error) => runtime.error?.(`inline thread handoff typing start failed: ${String(error)}`))
+          progressState.closing = false
+          progressState.lines = []
+          progressSeed = `${account.accountId}:${String(threadId)}:${String(msg.id)}`
+          progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
+        } finally {
+          adoptingThread = false
         }
-        canReplyToSourceMessage = false
-        defaultReplyToMsgId = undefined
-        ctxPayload.OriginatingTo = `inline:${String(threadId)}`
-        ctxPayload.MessageThreadId = String(threadId)
-        await botPresenceLifecycle.retarget(threadId)
-        await sendInlineTypingToChats({ client, chatIds: [threadId], typing: true })
-          .catch((error) => runtime.error?.(`inline thread handoff typing start failed: ${String(error)}`))
-        progressState.closing = false
-        progressState.lines = []
-        progressSeed = `${account.accountId}:${String(threadId)}:${String(msg.id)}`
-        progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
-        adoptingThread = false
       },
     }
 
@@ -5983,7 +6162,6 @@ export async function monitorInlineProvider(params: {
               }
               const finishPayload = () => inlineReplyDeliveryResult(payloadVisible)
               await activeThreadRoute.adoption
-              if (activeThreadRoute.threadReplyDelivered) return finishPayload()
               const presenceSignal = resolveInlineBotPresenceSignal(payload)
               if (presenceSignal) {
                 botPresenceLifecycle.express(presenceSignal)
@@ -6329,9 +6507,14 @@ export async function monitorInlineProvider(params: {
         runtime.error?.(`inline dispatch failed: ${String(error)}`)
       }
 
+      if (deferredTypingCleanup) {
+        deferredTypingCleanup = false
+        runTypingCleanup()
+      }
+
       await settleEditStream(false)
       await settlePartialMediaDeliveries()
-      if (partialMediaDelivered || activeThreadRoute.threadReplyDelivered) {
+      if (partialMediaDelivered) {
         delivered = true
       }
       await cleanupInlineProgressPlaceholder()
@@ -6384,6 +6567,11 @@ export async function monitorInlineProvider(params: {
       }
     } finally {
       endActiveThreadRoute()
+      if (adoptedThreadThisTurn) {
+        await sendDeliveryTyping(deliveryChatId, false).catch((error) =>
+          runtime.error?.(`inline adopted thread typing cleanup failed: ${String(error)}`))
+        botPresenceLifecycle.cleanup()
+      }
       await setParentThreadCreationTyping(false)
       if (callbackActionEvent && !callbackActionAnswered) {
         try {
@@ -6495,26 +6683,33 @@ export async function monitorInlineProvider(params: {
       try {
         chatInfo = await resolveChatInfo(client, chatCache, params.chatId)
       } catch (err) {
-        chatInfo = { kind: "group", title: null }
         publishStatus({ lastError: `getChat failed: ${String(err)}` })
+        return false
       }
     }
 
-    const isGroup = chatInfo.kind !== "direct"
+    let conversationKind = params.resolvedContext?.conversationKind ?? chatInfo.kind
+    let isGroup = conversationKind !== "direct"
     let effectiveChatId = params.resolvedContext?.effectiveChatId
     if (effectiveChatId == null) {
       const replyThreadsEnabled = isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+      let replyThreadContextFailed = false
       const replyThreadContext = await resolveInlineInboundReplyThreadContext({
         replyThreadsEnabled,
         client,
         chatId: params.chatId,
         chatInfo,
         chatCache,
+        useCachedChatMetadata: true,
       }).catch((err) => {
         publishStatus({ lastError: `getChat (abort reply thread) failed: ${String(err)}` })
+        replyThreadContextFailed = true
         return null
       })
+      if (replyThreadContextFailed && chatInfo.parentChatId != null) return false
       effectiveChatId = replyThreadContext?.parentChatId ?? params.chatId
+      conversationKind = replyThreadContext?.parentChatKind ?? chatInfo.kind
+      isGroup = conversationKind !== "direct"
     }
     const dmPolicy = account.config.dmPolicy ?? "pairing"
     const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
@@ -6867,7 +7062,7 @@ export async function monitorInlineProvider(params: {
           model,
           currentLevel: reasoningLevel,
         }),
-        ...(ingress.chatInfo.kind === "direct"
+        ...(ingress.conversationKind === "direct"
           ? {}
           : { following: isInlineDialogFollowing(ingress.chatInfo.dialogFollowMode) }),
         replyThreads: params.replyThreads ?? (
@@ -6889,7 +7084,7 @@ export async function monitorInlineProvider(params: {
     // hooks. A direct session-store patch can update disk without changing the
     // running session, which is the mismatch this path exists to prevent.
     const currentConfig = core.config.current() as OpenClawConfig
-    const isGroup = params.ingress.chatInfo.kind !== "direct"
+    const isGroup = params.ingress.conversationKind !== "direct"
     const ctx = core.channel.reply.finalizeInboundContext({
       Body: params.command,
       BodyForAgent: params.command,
@@ -7122,7 +7317,7 @@ export async function monitorInlineProvider(params: {
             setFollowing: async (value) => {
               await updateInlineFollowMode({
                 client,
-                target: ingress.chatInfo.kind === "direct"
+                target: ingress.conversationKind === "direct"
                   ? { userId: event.actorUserId }
                   : { chatId: event.chatId },
                 command: value ? "follow" : "unfollow",

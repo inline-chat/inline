@@ -3,9 +3,11 @@ import path from "node:path"
 import {
   buildChannelOutboundSessionRoute,
   buildThreadAwareOutboundSessionRoute,
+  resolveThreadSessionKeys,
   type ChannelPlugin,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/core"
+import { parseAgentSessionKey, parseThreadSessionSuffix } from "openclaw/plugin-sdk/routing"
 import { createChannelMessageAdapterFromOutbound } from "openclaw/plugin-sdk/channel-outbound"
 import {
   presentationToInteractiveReply,
@@ -49,6 +51,7 @@ import {
 } from "./command-ui.js"
 import { inlineDoctor } from "./doctor.js"
 import { getInlineActiveThreadRoute } from "./active-thread-route.js"
+import { lookupInlineReplyThreadRouteByThreadId } from "./thread-routes.js"
 import {
   buildInlineInboundFormattingHints,
   sanitizeInlineOutgoingText,
@@ -296,7 +299,7 @@ function parseInlineExplicitTarget(raw: string): { to: string; chatType: "direct
   return { to: `chat:${parsed.normalizedNumeric}`, chatType: "group" }
 }
 
-function resolveInlineOutboundSessionRoute(params: {
+async function resolveInlineOutboundSessionRoute(params: {
   cfg: OpenClawConfig
   agentId: string
   accountId?: string | null
@@ -322,15 +325,15 @@ function resolveInlineOutboundSessionRoute(params: {
       ? "user"
       : parsed.kind
   const chatType: "direct" | "group" = kind === "user" ? "direct" : "group"
-  const buildRoute = (id: string) => buildChannelOutboundSessionRoute({
+  const buildRoute = (id: string, peerKind: "direct" | "group" = chatType) => buildChannelOutboundSessionRoute({
     cfg: params.cfg,
     agentId: params.agentId,
     channel: "inline",
     ...(params.accountId !== undefined ? { accountId: params.accountId } : {}),
-    peer: { kind: chatType, id },
-    chatType,
-    from: kind === "user" ? `inline:${id}` : `inline:chat:${id}`,
-    to: kind === "user" ? `user:${id}` : `chat:${id}`,
+    peer: { kind: peerKind, id },
+    chatType: peerKind,
+    from: peerKind === "direct" ? `inline:${id}` : `inline:chat:${id}`,
+    to: peerKind === "direct" ? `user:${id}` : `chat:${id}`,
   })
   const route = buildRoute(parsed.normalizedNumeric)
 
@@ -348,23 +351,66 @@ function resolveInlineOutboundSessionRoute(params: {
     accountId: resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null }).accountId,
     sessionKey: currentSessionKey,
   })
-  if (activeRoute?.threadId === BigInt(parsed.normalizedNumeric) &&
+  if (activeRoute?.threadId != null &&
+    (activeRoute.threadId === BigInt(parsed.normalizedNumeric) ||
+      activeRoute.sourceChatId === BigInt(parsed.normalizedNumeric)) &&
     activeRoute.sourceChatId !== activeRoute.threadId && params.threadId !== null &&
     (params.threadId === undefined || String(params.threadId) === String(activeRoute.threadId))) {
-    const parentRoute = buildRoute(String(activeRoute.sourceChatId))
+    const parentRoute = buildRoute(activeRoute.parentPeer.id, activeRoute.parentPeer.kind)
     const specialization = currentSessionKey?.match(/:inline-agent:[^:]+$/)?.[0] ?? ""
-    if (currentSessionKey === `${parentRoute.baseSessionKey}${specialization}`) {
+    const parentSessionKey = specialization
+      ? currentSessionKey?.slice(0, -specialization.length)
+      : currentSessionKey
+    if (parentSessionKey) {
       const threadId = String(activeRoute.threadId)
-      return { ...parentRoute, sessionKey: `${parentRoute.baseSessionKey}:thread:${threadId}${specialization}`, threadId }
+      const projected = resolveThreadSessionKeys({
+        baseSessionKey: parentSessionKey,
+        threadId,
+      })
+      return {
+        ...parentRoute,
+        baseSessionKey: parentSessionKey,
+        sessionKey: `${projected.sessionKey}${specialization}`,
+        threadId,
+      }
     }
   }
-  const current = currentSessionKey?.match(/^(.*:group:([0-9]+)):thread:([0-9]+)(?::inline-agent:[^:]+)?$/)
-  const [, baseSessionKey, parentId, childId] = current ?? []
-  if (currentSessionKey && parentId && childId && parsed.normalizedNumeric === childId && params.threadId !== null &&
-    (params.threadId === undefined || String(params.threadId) === childId)) {
-    const parentRoute = buildRoute(parentId)
-    if (parentRoute.baseSessionKey === baseSessionKey) {
-      return { ...parentRoute, sessionKey: currentSessionKey, threadId: childId }
+  const specialization = currentSessionKey?.match(/:inline-agent:[^:]+$/)?.[0] ?? ""
+  const currentWithoutSpecialization = specialization
+    ? currentSessionKey?.slice(0, -specialization.length)
+    : currentSessionKey
+  const current = parseThreadSessionSuffix(currentWithoutSpecialization)
+  const baseSessionKey = current.baseSessionKey
+  const childId = current.threadId
+  const parent = baseSessionKey?.match(/:(direct|group):([0-9]+)$/)
+  const [, parentKind, parentId] = parent ?? []
+  const currentAgentId = parseAgentSessionKey(baseSessionKey)?.agentId
+  const savedChildRoute = childId != null
+    ? await lookupInlineReplyThreadRouteByThreadId({
+        accountId: resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null }).accountId,
+        threadId: childId,
+      }).catch(() => null)
+    : null
+  const targetMatchesCurrentChild = childId != null && (
+    parsed.normalizedNumeric === childId ||
+    (parentKind === "group" && parsed.normalizedNumeric === parentId) ||
+    savedChildRoute?.parentChatId === parsed.normalizedNumeric
+  )
+  const mirrorsCurrentChild = childId != null && params.threadId !== null && (
+    params.threadId === undefined
+      ? parsed.normalizedNumeric === childId
+      : String(params.threadId) === childId
+  ) && targetMatchesCurrentChild
+  if (
+    currentSessionKey && baseSessionKey && parentKind && parentId && childId && mirrorsCurrentChild &&
+    currentAgentId === params.agentId
+  ) {
+    const parentRoute = buildRoute(parentId, parentKind as "direct" | "group")
+    return {
+      ...parentRoute,
+      baseSessionKey,
+      sessionKey: currentSessionKey,
+      threadId: childId,
     }
   }
 
@@ -1492,7 +1538,10 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       if (!toolContext?.currentThreadTs || !toolContext.currentChannelId) return undefined
       const target = resolveInlineSessionTarget({ id: to })
       const current = resolveInlineSessionTarget({ id: toolContext.currentChannelId })
-      return target && target === current ? toolContext.currentThreadTs : undefined
+      const parent = toolContext.currentGraphChannelId
+        ? resolveInlineSessionTarget({ id: toolContext.currentGraphChannelId })
+        : undefined
+      return target && (target === current || target === parent) ? toolContext.currentThreadTs : undefined
     },
     resolveCurrentChannelId: ({ to, threadId }) =>
       threadId != null ? resolveInlineSessionTarget({ id: String(threadId) }) : to,
@@ -1506,15 +1555,17 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       }
       return {
         currentChannelId,
-        ...(context.ChatType === "group" && context.From
-          ? { currentGraphChannelId: resolveInlineSessionTarget({ id: context.From }) ?? currentChannelId }
-          : {}),
+        // To remains the parent chat for DM children as well. From is a user
+        // identity in DMs and must never substitute for the parent chat ID.
+        currentGraphChannelId: resolveInlineSessionTarget({
+          id: context.ChatType === "group" && context.From ? context.From : currentChannelId,
+        }) ?? currentChannelId,
         ...(context.MessageThreadId != null
           ? { currentThreadTs: String(context.MessageThreadId) }
           : {}),
-        ...(context.NativeChannelId != null &&
+        ...(context.NativeChannelId != null && context.MessageThreadId != null &&
         resolveInlineSessionTarget({ id: String(context.NativeChannelId) }) !==
-          resolveInlineSessionTarget({ id: currentChannelId })
+          resolveInlineSessionTarget({ id: String(context.MessageThreadId) })
           // The triggering message lives in the parent, not the newly created child.
           ? { currentMessageId: "" }
           : context.CurrentMessageId != null ? { currentMessageId: context.CurrentMessageId } : {}),
@@ -1573,7 +1624,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline reply threads: use normal `reply` for short or newly started parent-chat conversations unless the user asks for a thread.",
       "- Inline reply threads: use `thread-create` to create or reuse a real reply thread under the current/target chat. On parent-chat inbound turns, omit `messageId` to anchor it to the current message, or pass `messageId`/`parentMessageId` explicitly.",
       "- Inline reply threads: use `thread-reply` to send into a real reply thread. Prefer `threadId` from `thread-create`; when already inside a reply-thread turn you may omit it, and after `thread-create` you may pass the parent chat target plus `parentMessageId` to recover the saved route.",
-      "- Inline reply threads: when already inside a reply-thread chat, continue in that reply thread and do not create nested reply threads.",
+      "- Inline reply threads: when already inside a reply-thread chat, an unanchored `thread-create` reuses the current child. Create a nested reply thread only for an explicit user request and pass an explicit child-local `parentMessageId`; creation does not move the current turn, so use the returned child with `thread-reply` when content belongs there.",
       "- Inline reply-thread turns include nearby parent-chat context as background only; answer the current reply-thread conversation, not unrelated parent-chat or other-thread questions; unrelated parent-chat messages need separate parent-message anchors.",
     ],
   },

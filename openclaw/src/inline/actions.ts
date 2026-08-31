@@ -958,6 +958,10 @@ function resolveInlineActionAgentId(params: {
   )
 }
 
+function resolveInlineSpecializationIdFromSessionKey(sessionKey: string | null | undefined): string | undefined {
+  return sessionKey?.match(/:inline-agent:([^:]+)$/)?.[1]
+}
+
 function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] {
   if (!Array.isArray(raw)) return []
   const rows: InlineReplyMarkupButton[][] = []
@@ -2265,6 +2269,7 @@ async function resolveInlineThreadReplyTarget(params: {
     currentMessageId?: string | number | null | undefined
   }
 }): Promise<InlineThreadReplyTarget | null> {
+  const explicitParentChatId = resolveOptionalChatIdFromParams(params.args)
   const rawThreadId =
     readFlexibleId(params.args, "threadId") ??
     readStringParam(params.args, "threadId")
@@ -2274,13 +2279,51 @@ async function resolveInlineThreadReplyTarget(params: {
       accountId: params.accountId,
       threadId: chatId,
     })
+    const routeParentChatId = route ? parseInlineId(route.parentChatId, "parentChatId") : undefined
+    if (
+      route != null &&
+      explicitParentChatId != null &&
+      explicitParentChatId !== chatId &&
+      explicitParentChatId !== routeParentChatId
+    ) {
+      throw new Error(
+        "inline thread-reply: threadId does not belong to the target chat",
+      )
+    }
     return {
       chatId,
       resolvedBy: "threadId",
-      ...(route ? { parentChatId: parseInlineId(route.parentChatId, "parentChatId") } : {}),
+      ...(routeParentChatId != null ? { parentChatId: routeParentChatId } : {}),
       ...(route?.parentMessageId != null
         ? { parentMessageId: parseInlineId(route.parentMessageId, "parentMessageId") }
         : {}),
+    }
+  }
+
+  const parentMessageHint = resolveThreadReplyRouteParentMessageHint({
+    args: params.args,
+    ...(params.toolContext != null
+      ? { toolContext: { currentMessageId: params.toolContext.currentMessageId } }
+      : {}),
+  })
+  if (parentMessageHint.source === "explicit") {
+    const parentChatId = explicitParentChatId ?? resolveToolContextChatId(params.toolContext)
+    if (parentChatId == null) return null
+    const parentMessageId = parseInlineId(parentMessageHint.value, "parentMessageId")
+    const route = await lookupInlineReplyThreadRoute({
+      accountId: params.accountId,
+      parentChatId,
+      parentMessageId,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
+    }).catch((error) => {
+      throw new Error(`inline thread-reply route lookup failed: ${getErrorMessage(error)}`)
+    })
+    if (!route) return null
+    return {
+      chatId: parseInlineId(route.threadId, "threadId"),
+      resolvedBy: "route",
+      parentChatId,
+      parentMessageId,
     }
   }
 
@@ -2291,13 +2334,20 @@ async function resolveInlineThreadReplyTarget(params: {
       accountId: params.accountId,
       threadId: chatId,
     })
-    return {
-      chatId,
-      resolvedBy: "current-thread",
-      ...(route ? { parentChatId: parseInlineId(route.parentChatId, "parentChatId") } : {}),
-      ...(route?.parentMessageId != null
-        ? { parentMessageId: parseInlineId(route.parentMessageId, "parentMessageId") }
-        : {}),
+    const routeParentChatId = route ? parseInlineId(route.parentChatId, "parentChatId") : undefined
+    if (
+      explicitParentChatId == null ||
+      explicitParentChatId === chatId ||
+      explicitParentChatId === routeParentChatId
+    ) {
+      return {
+        chatId,
+        resolvedBy: "current-thread",
+        ...(routeParentChatId != null ? { parentChatId: routeParentChatId } : {}),
+        ...(route?.parentMessageId != null
+          ? { parentMessageId: parseInlineId(route.parentMessageId, "parentMessageId") }
+          : {}),
+      }
     }
   }
 
@@ -2306,12 +2356,6 @@ async function resolveInlineThreadReplyTarget(params: {
     return null
   }
 
-  const parentMessageHint = resolveThreadReplyRouteParentMessageHint({
-    args: params.args,
-    ...(params.toolContext != null
-      ? { toolContext: { currentMessageId: params.toolContext.currentMessageId } }
-      : {}),
-  })
   const parentMessageId = parseOptionalInlineId(parentMessageHint.value, "parentMessageId")
   const lookupRoute = async (routeParentMessageId?: bigint) =>
     await lookupInlineReplyThreadRoute({
@@ -3513,12 +3557,52 @@ export const inlineMessageActions = {
   messageActionTargetAliases: inlineMessageActionTargetAliases,
   extractToolSend: ({ args }) => {
     const action = typeof args.action === "string" ? args.action.trim() : ""
-    if (action !== "sendMessage") return null
-    const to = typeof args.to === "string" ? args.to.trim() : ""
-    if (!to) return null
-    const normalized = normalizeInlineTarget(to) ?? to
-    if (!/^(user:)?[0-9]+$/i.test(normalized)) return null
-    return { to: normalized }
+    if (!["sendMessage", "send", "reply", "thread-reply", "sendAttachment", "upload-file"]
+      .includes(action)) return null
+    const explicitUserId = [args.userId, args.user]
+      .find((value): value is string | number =>
+        (typeof value === "string" && /^[0-9]+$/.test(value.trim())) ||
+        (typeof value === "number" && Number.isSafeInteger(value) && value > 0))
+    const to = explicitUserId != null
+      ? `user:${typeof explicitUserId === "number" ? String(explicitUserId) : explicitUserId.trim()}`
+      : [args.to, args.target, args.chatId, args.channelId, args.threadId]
+          .find((value): value is string | number =>
+            (typeof value === "string" && Boolean(value.trim())) ||
+            (typeof value === "number" && Number.isSafeInteger(value) && value > 0))
+    const toText = typeof to === "number" ? String(to) : to?.trim() ?? ""
+    if (!toText) return null
+    const normalized = normalizeInlineTarget(toText) ?? toText
+    if (!/^(?:(?:user|chat):)?[0-9]+$/i.test(normalized)) return null
+    const canImplicitlyThread = !/^user:/i.test(normalized)
+    const rawThreadId = args.threadId
+    const threadId = typeof rawThreadId === "number" && Number.isSafeInteger(rawThreadId) && rawThreadId > 0
+      ? String(rawThreadId)
+      : typeof rawThreadId === "string" && /^[0-9]+$/.test(rawThreadId.trim())
+        ? rawThreadId.trim()
+        : undefined
+    const threadSuppressed = rawThreadId === null || args.topLevel === true
+    return {
+      to: normalized,
+      ...(threadId ? { threadId } : {}),
+      ...(!threadId && !threadSuppressed && canImplicitlyThread ? { threadImplicit: true } : {}),
+      ...(threadSuppressed ? { threadSuppressed: true } : {}),
+    }
+  },
+  extractToolSendResult: ({ result, send }) => {
+    const envelope = isRecord(result) && isRecord(result.details) ? result.details : result
+    if (!isRecord(envelope) || envelope.ok === false) return null
+    const threadId = readFlexibleId(envelope, "threadId")
+    const parentChatId = readFlexibleId(envelope, "parentChatId")
+    const actualTarget = readFlexibleId(envelope, "target") ?? readFlexibleId(envelope, "chatId")
+    if (threadId && parentChatId) {
+      return {
+        to: parentChatId,
+        threadId,
+        ...(send.accountId != null ? { accountId: send.accountId } : {}),
+      }
+    }
+    if (!actualTarget) return send
+    return { ...send, to: normalizeInlineTarget(actualTarget) ?? actualTarget }
   },
   handleAction: async ({
     action,
@@ -3552,7 +3636,11 @@ export const inlineMessageActions = {
       ...(toolContext?.currentMessageId ? { sourceMessageId: String(toolContext.currentMessageId) } : {}),
     })
     await activeThreadRoute?.adoption
-    if (activeThreadRoute && toolContext?.currentMessageId === activeThreadRoute.sourceMessageSid) {
+    if (
+      activeThreadRoute &&
+      toolContext?.currentMessageId != null &&
+      String(toolContext.currentMessageId) === activeThreadRoute.sourceMessageSid
+    ) {
       toolContext = { ...toolContext, currentMessageId: String(activeThreadRoute.sourceMessageId) }
     }
     if (activeThreadRoute?.threadId != null) {
@@ -3561,14 +3649,111 @@ export const inlineMessageActions = {
         currentChannelId: String(activeThreadRoute.threadId),
         currentGraphChannelId: toolContext?.currentGraphChannelId ?? String(activeThreadRoute.sourceChatId),
         currentThreadTs: String(activeThreadRoute.threadId),
+        ...(activeThreadRoute.sourceChatId !== activeThreadRoute.threadId ? { currentMessageId: "" } : {}),
       }
     }
-    const noteThreadDelivery = (chatId: bigint | undefined) => {
-      if (activeThreadRoute && activeThreadRoute.threadId === chatId && chatId != null) {
-        activeThreadRoute.threadReplyDelivered = true
+    const adoptedAcrossChats = Boolean(
+      activeThreadRoute?.threadId != null &&
+      activeThreadRoute.sourceChatId !== activeThreadRoute.threadId,
+    )
+    const rawActionTarget =
+      readFlexibleId(params, "chatId") ??
+      readFlexibleId(params, "channelId") ??
+      readFlexibleId(params, "to") ??
+      readFlexibleId(params, "target")
+    let explicitActionChatId: bigint | undefined
+    try {
+      explicitActionChatId = resolveOptionalChatIdFromParams(
+        rawActionTarget ? { ...params, to: rawActionTarget } : params,
+      )
+    } catch {
+      // Leave malformed or direct-user targets to their ordinary action parser.
+    }
+    const rawActionThreadId = readFlexibleId(params, "threadId")
+    const explicitActionThreadId = rawActionThreadId && /^[0-9]+$/.test(rawActionThreadId)
+      ? BigInt(rawActionThreadId)
+      : null
+    const explicitlyTargetsUser = params.userId != null ||
+      (rawActionTarget != null && /^(?:inline:)?user:/i.test(rawActionTarget))
+    const suppressImplicitThread = params.topLevel === true || params.threadId === null
+    const currentThreadIdForEscape = resolveToolContextThreadId(toolContext)
+    const currentGraphChatId = resolveToolContextChatId({ currentChannelId: toolContext?.currentGraphChannelId })
+    if (
+      suppressImplicitThread && currentThreadIdForEscape && !explicitlyTargetsUser &&
+      (normalizedAction === "send" || normalizedAction === "reply" ||
+        normalizedAction === "thread-reply" || normalizedAction === "sendAttachment" ||
+        normalizedAction === "upload-file" || isInlineComposeActionName(normalizedAction)) &&
+      (explicitActionChatId == null ||
+        (explicitActionChatId !== BigInt(currentThreadIdForEscape) &&
+          (explicitActionChatId === currentGraphChatId ||
+            explicitActionChatId === activeThreadRoute?.sourceChatId)))
+    ) {
+      throw new Error(
+        "inline action: parent escape is unavailable because supported OpenClaw hosts cannot validate and mirror that route reliably",
+      )
+    }
+    const explicitlyTargetsAdoptedChild = Boolean(
+      adoptedAcrossChats &&
+      activeThreadRoute?.threadId != null &&
+      (
+        explicitActionChatId === activeThreadRoute.threadId ||
+        explicitActionThreadId === activeThreadRoute.threadId
+      ),
+    )
+    const routesThroughAdoptedChild = Boolean(
+      adoptedAcrossChats &&
+      activeThreadRoute?.threadId != null &&
+      !explicitlyTargetsUser &&
+      (explicitActionThreadId != null
+        ? explicitActionThreadId === activeThreadRoute.threadId
+        : explicitActionChatId == null ||
+          explicitActionChatId === activeThreadRoute.sourceChatId ||
+          explicitActionChatId === activeThreadRoute.threadId),
+    )
+    let strippedParentReplyReference = false
+    if (
+      routesThroughAdoptedChild &&
+      (normalizedAction === "send" || normalizedAction === "reply" ||
+        normalizedAction === "thread-reply" || normalizedAction === "sendAttachment" ||
+        normalizedAction === "upload-file")
+    ) {
+      const explicitReplyReference =
+        readFlexibleId(params, "messageId") ??
+        readFlexibleId(params, "replyTo") ??
+        readFlexibleId(params, "replyToId") ??
+        readStringParam(params, "messageId") ??
+        readStringParam(params, "replyTo") ??
+        readStringParam(params, "replyToId")
+      if (explicitReplyReference != null) {
+        const matchesSourceSid = explicitReplyReference === activeThreadRoute?.sourceMessageSid &&
+          !/^[0-9]+$/.test(explicitReplyReference)
+        let matchesSource = matchesSourceSid
+        try {
+          matchesSource ||= parseInlineId(explicitReplyReference, "messageId") === activeThreadRoute?.sourceMessageId
+        } catch {
+          // The ordinary action parser reports malformed IDs after this exact
+          // source-message exception has been ruled out.
+        }
+        if (!matchesSource && !explicitlyTargetsAdoptedChild && explicitActionChatId != null) {
+          throw new Error(
+            "inline action: the reply id belongs to the parent chat; only the exact source message can be carried into a new child, where it becomes an unanchored send",
+          )
+        }
+        // An explicit child destination makes numeric reply IDs child-local,
+        // even when they happen to equal the source parent's message ID.
+        if (matchesSource && (!explicitlyTargetsAdoptedChild || matchesSourceSid)) {
+          const {
+            messageId: _messageId,
+            replyTo: _replyTo,
+            replyToId: _replyToId,
+            ...withoutParentReplyReference
+          } = params
+          params = withoutParentReplyReference
+          strippedParentReplyReference = true
+        }
       }
     }
-    let replyingAcrossChats = false
+    let effectiveThreadRoute: { parentChatId: bigint; threadId: bigint } | undefined
     // OpenClaw carries a thread separately from its parent target. Inline sends
     // and compose actions must translate that into the child chat before using RPCs.
     if (
@@ -3582,12 +3767,15 @@ export const inlineMessageActions = {
       const targetChatId = isUser ? undefined : resolveOptionalChatIdFromParams({ ...params, ...(target ? { to: target } : {}) })
       const contextChatId = resolveToolContextChatId(toolContext)
       const graphChatId = resolveToolContextChatId({ currentChannelId: toolContext?.currentGraphChannelId })
-      const currentThreadId = params.threadId === null || params.topLevel === true
+      const currentThreadId = suppressImplicitThread
         ? undefined
         : targetChatId == null || targetChatId === contextChatId || targetChatId === graphChatId
           ? resolveToolContextThreadId(toolContext)
           : undefined
       const threadId = explicitThreadId ?? currentThreadId
+      if (isUser && explicitThreadId != null) {
+        throw new Error("inline action: threadId cannot be combined with a user target")
+      }
       if (!isUser && threadId != null) {
         const childChatId = String(parseInlineId(threadId, "threadId"))
         const knownRoute = await lookupInlineReplyThreadRouteByThreadId({
@@ -3598,14 +3786,18 @@ export const inlineMessageActions = {
           targetChatId !== BigInt(knownRoute.parentChatId)) {
           throw new Error("inline action: threadId does not belong to the target chat")
         }
-        params = { ...params, to: childChatId, target: childChatId, chatId: childChatId, channelId: childChatId }
-        if (activeThreadRoute && activeThreadRoute.sourceChatId !== BigInt(childChatId)) {
-          const reference = readFlexibleId(params, "messageId") ?? readFlexibleId(params, "replyTo") ?? readFlexibleId(params, "replyToId")
-          if (reference === String(activeThreadRoute.sourceMessageId)) {
-            replyingAcrossChats = true
-            params = { ...params, messageId: undefined, replyTo: undefined, replyToId: undefined }
+        if (knownRoute) {
+          effectiveThreadRoute = {
+            parentChatId: BigInt(knownRoute.parentChatId),
+            threadId: BigInt(knownRoute.threadId),
+          }
+        } else if (activeThreadRoute?.threadId === BigInt(childChatId)) {
+          effectiveThreadRoute = {
+            parentChatId: activeThreadRoute.sourceChatId,
+            threadId: activeThreadRoute.threadId,
           }
         }
+        params = { ...params, to: childChatId, target: childChatId, chatId: childChatId, channelId: childChatId }
       }
     }
     const actionAgentId = resolveInlineActionAgentId({
@@ -3695,10 +3887,15 @@ export const inlineMessageActions = {
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
               parseMarkdown,
             })
-            noteThreadDelivery(sendTarget.chatId)
             return jsonResult({
               ok: true,
               target: target.target,
+              ...(effectiveThreadRoute
+                ? {
+                    parentChatId: String(effectiveThreadRoute.parentChatId),
+                    threadId: String(effectiveThreadRoute.threadId),
+                  }
+                : {}),
               messageId: sent.messageId != null ? String(sent.messageId) : null,
               replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
             })
@@ -3725,11 +3922,16 @@ export const inlineMessageActions = {
               ...(index === 0 && replyToMsgId != null ? { replyToMsgId } : {}),
               ...(index === 0 && !caption.shouldSkip && caption.text ? { parseMarkdown } : {}),
             })
-            noteThreadDelivery(sendTarget.chatId)
           }
           return jsonResult({
             ok: true,
             target: target.target,
+            ...(effectiveThreadRoute
+              ? {
+                  parentChatId: String(effectiveThreadRoute.parentChatId),
+                  threadId: String(effectiveThreadRoute.threadId),
+                }
+              : {}),
             messageId: lastSent?.messageId != null ? String(lastSent.messageId) : null,
             ...(mediaSources.length === 1 ? { mediaUrl: mediaSources[0] } : { mediaUrls: mediaSources }),
             replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
@@ -3824,15 +4026,23 @@ export const inlineMessageActions = {
               )
             }
             const chatId = target.chatId
-            const replyToMsgId = parseOptionalInlineId(
+            if (target.parentChatId != null) {
+              effectiveThreadRoute = { parentChatId: target.parentChatId, threadId: chatId }
+            } else if (activeThreadRoute?.threadId === chatId) {
+              effectiveThreadRoute = { parentChatId: activeThreadRoute.sourceChatId, threadId: chatId }
+            }
+            const rawReplyToMsgId =
               readFlexibleId(params, "messageId") ??
-                readFlexibleId(params, "replyTo") ??
-                readFlexibleId(params, "replyToId") ??
-                readStringParam(params, "messageId") ??
-                readStringParam(params, "replyTo") ??
-                readStringParam(params, "replyToId"),
+              readFlexibleId(params, "replyTo") ??
+              readFlexibleId(params, "replyToId") ??
+              readStringParam(params, "messageId") ??
+              readStringParam(params, "replyTo") ??
+              readStringParam(params, "replyToId")
+            const parsedReplyToMsgId = parseOptionalInlineId(
+              rawReplyToMsgId,
               "messageId",
             )
+            const replyToMsgId = parsedReplyToMsgId
             const text = resolveInlineActionText(params, { required: true })
             const visibleText = sanitizeVisibleActionText(text)
             if (visibleText.shouldSkip) {
@@ -3845,7 +4055,6 @@ export const inlineMessageActions = {
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
               parseMarkdown,
             })
-            noteThreadDelivery(chatId)
             if (target.parentChatId != null) {
               recordInlineThreadParticipation(
                 account.accountId,
@@ -3867,15 +4076,17 @@ export const inlineMessageActions = {
           }
           const replyParams = params
           const chatId = resolveChatIdFromParams(replyParams)
-          const replyToMsgId = replyingAcrossChats ? undefined : parseInlineId(
-            readFlexibleId(replyParams, "messageId") ??
-              readFlexibleId(replyParams, "replyTo") ??
-              readFlexibleId(replyParams, "replyToId") ??
-              readStringParam(replyParams, "messageId") ??
-              readStringParam(replyParams, "replyTo") ??
-              readStringParam(replyParams, "replyToId", { required: true }),
-            "messageId",
-          )
+          const replyToMsgId = strippedParentReplyReference
+            ? null
+            : parseInlineId(
+                readFlexibleId(replyParams, "messageId") ??
+                  readFlexibleId(replyParams, "replyTo") ??
+                  readFlexibleId(replyParams, "replyToId") ??
+                  readStringParam(replyParams, "messageId") ??
+                  readStringParam(replyParams, "replyTo") ??
+                  readStringParam(replyParams, "replyToId", { required: true }),
+                "messageId",
+              )
           const text = resolveInlineActionText(replyParams, { required: true })
           const visibleText = sanitizeVisibleActionText(text)
           if (visibleText.shouldSkip) {
@@ -3888,10 +4099,15 @@ export const inlineMessageActions = {
             ...(replyToMsgId != null ? { replyToMsgId } : {}),
             parseMarkdown,
           })
-          noteThreadDelivery(chatId)
           return jsonResult({
             ok: true,
             chatId: String(chatId),
+            ...(effectiveThreadRoute
+              ? {
+                  parentChatId: String(effectiveThreadRoute.parentChatId),
+                  threadId: String(effectiveThreadRoute.threadId),
+                }
+              : {}),
             messageId: sent.messageId != null ? String(sent.messageId) : null,
             replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
           })
@@ -4689,19 +4905,61 @@ export const inlineMessageActions = {
               (dedupedParticipants.length > 0 && !(spaceId != null && explicitParentMessageId != null)))
           const explicitParentChatId =
             isThreadCreate && !hasTopLevelThreadIntent ? resolveOptionalChatIdFromParams(params) : undefined
-          const currentThreadId = safeToolContextThreadChatId(toolContext)
-          const currentGraphChatId = resolveToolContextChatId({ currentChannelId: toolContext?.currentGraphChannelId })
           if (
-            isThreadCreate && !hasTopLevelThreadIntent && currentThreadId != null &&
-            (explicitParentChatId == null || explicitParentChatId === currentThreadId ||
-              (explicitParentChatId === currentGraphChatId && explicitParentMessageId == null))
+            isThreadCreate &&
+            !hasTopLevelThreadIntent &&
+            explicitParentMessageId == null &&
+            activeThreadRoute?.threadId != null &&
+            activeThreadRoute.sourceChatId !== activeThreadRoute.threadId &&
+            (
+              explicitParentChatId == null ||
+              explicitParentChatId === activeThreadRoute.sourceChatId ||
+              explicitParentChatId === activeThreadRoute.threadId
+            )
           ) {
-            // A reply-thread turn already has its destination. Do not nest it.
-            return jsonResult({ ok: true, mode: "reply-thread", reused: true,
-              chat: { id: String(currentThreadId) },
-              threadId: String(currentThreadId),
+            // Once this turn has adopted a child, another unanchored creation
+            // request continues there. An explicit anchor remains the only way
+            // to deliberately create a nested child.
+            return jsonResult({
+              ok: true,
+              mode: "reply-thread",
+              reused: true,
+              parentChatId: String(activeThreadRoute.sourceChatId),
+              parentMessageId: String(activeThreadRoute.sourceMessageId),
+              chat: { id: String(activeThreadRoute.threadId) },
+              threadId: String(activeThreadRoute.threadId),
               hint: "Continue in this reply thread with thread-reply.",
             })
+          }
+          if (
+            isThreadCreate &&
+            !hasTopLevelThreadIntent &&
+            explicitParentMessageId == null &&
+            activeThreadRoute?.threadId != null &&
+            activeThreadRoute.sourceChatId === activeThreadRoute.threadId
+          ) {
+            const currentChildId = activeThreadRoute.threadId
+            const currentRoute = await lookupInlineReplyThreadRouteByThreadId({
+              accountId: account.accountId,
+              threadId: currentChildId,
+            })
+            const currentParentChatId = currentRoute != null ? BigInt(currentRoute.parentChatId) : null
+            if (
+              explicitParentChatId == null ||
+              explicitParentChatId === currentChildId ||
+              (currentParentChatId != null && explicitParentChatId === currentParentChatId)
+            ) {
+              return jsonResult({
+                ok: true,
+                mode: "reply-thread",
+                reused: true,
+                parentChatId: currentRoute?.parentChatId ?? null,
+                parentMessageId: currentRoute?.parentMessageId ?? null,
+                chat: { id: String(currentChildId) },
+                threadId: String(currentChildId),
+                hint: "Continue in this reply thread with thread-reply.",
+              })
+            }
           }
           const contextParentChatId =
             isThreadCreate &&
@@ -4763,12 +5021,14 @@ export const inlineMessageActions = {
             const createdChat = result.createSubthread.chat ?? null
             if (createdChat?.id != null) {
               const routeParentMessageId = createdChat.parentMessageId ?? parentMessageId
+              const inlineSpecializationId = resolveInlineSpecializationIdFromSessionKey(sessionKey)
               rememberInlineReplyThreadRoute({
                 accountId: account.accountId,
                 parentChatId: createdChat.parentChatId ?? parentChatId,
                 threadId: createdChat.id,
                 title: createdChat.title ?? title,
                 ...(actionAgentId ? { agentId: actionAgentId } : {}),
+                ...(inlineSpecializationId ? { inlineAgentId: inlineSpecializationId } : {}),
                 ...(routeParentMessageId != null ? { parentMessageId: routeParentMessageId } : {}),
               })
               await adoptInlineActiveThread({

@@ -2,6 +2,74 @@ import { describe, expect, it, vi } from "vitest"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 
 describe("inline/parent-context-tool", () => {
+  it.each([
+    { sender: "51", session: "agent:main:inline:direct:51:thread:8912:inline-agent:researcher", allowed: true },
+    { sender: "52", session: "agent:main:inline:direct:52:thread:8912", allowed: false },
+    { sender: undefined, session: "agent:main:inline:direct:51:thread:8912", allowed: false },
+    { sender: "51", session: "agent:main:main", allowed: true },
+    { sender: "52", session: "agent:main:main", allowed: false },
+  ])("checks the actual parent DM peer for $sender in $session", async ({ sender, session, allowed }) => {
+    vi.resetModules()
+    const invokeRaw = vi.fn(async (_method: number, input: any) => {
+      if (input.oneofKind === "getChat") return {
+        oneofKind: "getChat", getChat: { chat: { id: 8912n, parentChatId: 89n, parentMessageId: 12n } },
+      }
+      return { oneofKind: "getChatHistory", getChatHistory: { messages: [] } }
+    })
+    const getChat = vi.fn(async () => ({
+      peer: { type: { oneofKind: "user", user: { userId: 51n } } },
+    }))
+    vi.doMock("@inline-chat/realtime-sdk", async () => ({
+      ...await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk"),
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+        getChat = getChat
+      },
+    }))
+    const { createInlineParentContextTool } = await import("./parent-context-tool")
+    const tool = createInlineParentContextTool({
+      config: { channels: { inline: { token: "token", baseUrl: "https://api.inline.chat" } } },
+      messageChannel: "inline", sessionKey: session, requesterSenderId: sender,
+      deliveryContext: { threadId: "8912" },
+    })!
+    if (allowed) {
+      await expect(tool.execute("parent", {})).resolves.toMatchObject({
+        details: { ok: true, parentChatId: "89", threadId: "8912", usedCurrentThreadDefault: true },
+      })
+    } else {
+      await expect(tool.execute("parent", {})).rejects.toThrow("parent DM history is unavailable")
+      expect(invokeRaw.mock.calls.some(([, input]) => input.oneofKind === "getChatHistory")).toBe(false)
+    }
+    expect(getChat).toHaveBeenCalledWith({ chatId: 89n })
+  })
+
+  it("checks explicit parent overrides and fails closed when parent metadata is unavailable", async () => {
+    vi.resetModules()
+    const invokeRaw = vi.fn()
+    const getChat = vi.fn()
+      .mockResolvedValueOnce({ peer: { type: { oneofKind: "user", user: { userId: 51n } } } })
+      .mockRejectedValueOnce(new Error("metadata unavailable"))
+    vi.doMock("@inline-chat/realtime-sdk", async () => ({
+      ...await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk"),
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+        getChat = getChat
+      },
+    }))
+    const { createInlineParentContextTool } = await import("./parent-context-tool")
+    const tool = createInlineParentContextTool({
+      config: { channels: { inline: { token: "token", baseUrl: "https://api.inline.chat" } } },
+      messageChannel: "inline", sessionKey: "agent:main:inline:group:7", requesterSenderId: "52",
+    })!
+    await expect(tool.execute("parent", { parentChatId: "89" })).rejects.toThrow("parent DM history is unavailable")
+    await expect(tool.execute("parent", { parentChatId: "89" })).rejects.toThrow("metadata unavailable")
+    expect(invokeRaw).not.toHaveBeenCalled()
+  })
+
   it("fetches parent chat context for the current Inline reply-thread session", async () => {
     vi.resetModules()
 
@@ -73,6 +141,9 @@ describe("inline/parent-context-tool", () => {
           connect = vi.fn(async () => {})
           close = vi.fn(async () => {})
           invokeRaw = invokeRaw
+          getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => ({
+            peer: { type: { oneofKind: "chat", chat: { chatId } } },
+          }))
         },
       }
     })
@@ -205,6 +276,9 @@ describe("inline/parent-context-tool", () => {
           connect = vi.fn(async () => {})
           close = vi.fn(async () => {})
           invokeRaw = invokeRaw
+          getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => ({
+            peer: { type: { oneofKind: "chat", chat: { chatId } } },
+          }))
         },
       }
     })
@@ -303,6 +377,9 @@ describe("inline/parent-context-tool", () => {
           connect = vi.fn(async () => {})
           close = vi.fn(async () => {})
           invokeRaw = invokeRaw
+          getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => ({
+            peer: { type: { oneofKind: "chat", chat: { chatId } } },
+          }))
         },
       }
     })
@@ -404,6 +481,9 @@ describe("inline/parent-context-tool", () => {
           connect = vi.fn(async () => {})
           close = vi.fn(async () => {})
           invokeRaw = invokeRaw
+          getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => ({
+            peer: { type: { oneofKind: "chat", chat: { chatId } } },
+          }))
         },
       }
     })

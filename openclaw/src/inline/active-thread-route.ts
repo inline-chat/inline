@@ -4,9 +4,9 @@ export type ActiveInlineThreadRoute = {
   sourceChatId: bigint
   sourceMessageId: bigint
   sourceMessageSid?: string
+  parentPeer: { kind: "direct" | "group"; id: string }
   threadId?: bigint | undefined
   adoption?: Promise<void>
-  threadReplyDelivered: boolean
   onThreadAdopted: (threadId: bigint) => Promise<void>
 }
 
@@ -51,10 +51,17 @@ export async function adoptInlineActiveThread(params: {
   if (route.adoption) await route.adoption
   if (route.threadId != null) return
   // Publish one transition before invoking callbacks, and expose the new route
-  // only after all old-chat operations have drained. A failed handoff stays failed.
-  route.adoption = Promise.resolve().then(async () => {
+  // only after all old-chat operations have drained. A failed transition can be
+  // retried instead of poisoning every later action in the turn.
+  const adoption = Promise.resolve().then(async () => {
     await route.onThreadAdopted(params.threadId)
     route.threadId = params.threadId
   })
-  await route.adoption
+  route.adoption = adoption
+  try {
+    await adoption
+  } catch (error) {
+    if (route.adoption === adoption) delete route.adoption
+    throw error
+  }
 }

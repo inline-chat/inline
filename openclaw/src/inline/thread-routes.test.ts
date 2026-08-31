@@ -68,6 +68,7 @@ describe("inline/thread-routes", () => {
       threadId: 7100n,
       parentMessageId: 700001n,
       agentId: "main",
+      inlineAgentId: "researcher",
     })
 
     await expect(
@@ -83,6 +84,7 @@ describe("inline/thread-routes", () => {
       threadId: "7100",
       parentMessageId: "700001",
       agentId: "main",
+      inlineAgentId: "researcher",
     })
   })
 
@@ -169,6 +171,42 @@ describe("inline/thread-routes", () => {
     })
     await expect(lookupInlineReplyThreadRoute({
       accountId: "default", parentChatId: 7000n, agentId: "main",
+    })).resolves.toBeNull()
+  })
+
+  it("isolates anchored routes for different OpenClaw agents", async () => {
+    rememberInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: 7000n,
+      parentMessageId: 700001n,
+      threadId: 7100n,
+      agentId: "main",
+    })
+    rememberInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: 7000n,
+      parentMessageId: 700001n,
+      threadId: 7200n,
+      agentId: "other",
+    })
+
+    await expect(lookupInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: 7000n,
+      parentMessageId: 700001n,
+      agentId: "main",
+    })).resolves.toMatchObject({ threadId: "7100", agentId: "main" })
+    await expect(lookupInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: 7000n,
+      parentMessageId: 700001n,
+      agentId: "other",
+    })).resolves.toMatchObject({ threadId: "7200", agentId: "other" })
+    await expect(lookupInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: 7000n,
+      parentMessageId: 700001n,
+      agentId: "missing",
     })).resolves.toBeNull()
   })
 

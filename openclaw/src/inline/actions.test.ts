@@ -27,6 +27,110 @@ describe("inline/actions", () => {
     }))
   })
 
+  it("creates an explicitly anchored nested reply thread from a child", async () => {
+    vi.resetModules()
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "createSubthread",
+      createSubthread: { chat: { id: 72n, parentChatId: 71n, parentMessageId: 5n } },
+    }))
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const end = beginInlineActiveThreadRoute({
+      accountId: "default",
+      sessionKey: "agent:main:inline:group:7:thread:71",
+      sourceChatId: 71n,
+      sourceMessageId: 5n,
+      parentPeer: { kind: "group", id: "7" },
+      threadId: 71n,
+      onThreadAdopted: async () => {},
+    })
+    const result = await (async () => {
+      try {
+        return await inlineMessageActions.handleAction?.({
+          channel: "inline",
+          action: "thread-create",
+          cfg: { channels: { inline: { token: "token" } } },
+          sessionKey: "agent:main:inline:group:7:thread:71",
+          toolContext: { currentChannelId: "71", currentThreadTs: "71", currentMessageId: "5" },
+          params: { to: "71", parentMessageId: "5", threadName: "Nested" },
+        } as any)
+      } finally {
+        end()
+      }
+    })()
+    expect(result?.details).toMatchObject({
+      ok: true,
+      mode: "reply-thread",
+      parentChatId: "71",
+      parentMessageId: "5",
+      chat: { id: "72" },
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(42, expect.objectContaining({
+      createSubthread: expect.objectContaining({ parentChatId: 71n, parentMessageId: 5n }),
+    }))
+  })
+
+  it("reuses the current child for unanchored thread-create follow-ups", async () => {
+    vi.resetModules()
+    const invokeRaw = vi.fn()
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const { rememberInlineReplyThreadRoute } = await import("./thread-routes")
+    rememberInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: "7",
+      parentMessageId: "5",
+      threadId: "71",
+      agentId: "main",
+    })
+    const sessionKey = "agent:main:inline:group:7:thread:71"
+    const end = beginInlineActiveThreadRoute({
+      accountId: "default",
+      sessionKey,
+      sourceChatId: 71n,
+      sourceMessageId: 6n,
+      parentPeer: { kind: "group", id: "7" },
+      threadId: 71n,
+      onThreadAdopted: async () => {},
+    })
+    try {
+      for (const params of [
+        { threadName: "Continue" },
+        { to: "7", threadName: "Continue" },
+      ]) {
+        await expect(inlineMessageActions.handleAction?.({
+          channel: "inline",
+          action: "thread-create",
+          cfg: { channels: { inline: { token: "token" } } },
+          sessionKey,
+          toolContext: { currentChannelId: "71", currentGraphChannelId: "7", currentThreadTs: "71", currentMessageId: "6" },
+          params,
+        } as any)).resolves.toMatchObject({
+          details: { ok: true, reused: true, parentChatId: "7", threadId: "71" },
+        })
+      }
+      expect(invokeRaw).not.toHaveBeenCalled()
+    } finally {
+      end()
+    }
+  })
+
   it("routes sends and activity to the current child while preserving explicit other destinations", async () => {
     vi.resetModules()
     const sendMessage = vi.fn(async () => ({ messageId: 10n }))
@@ -49,10 +153,9 @@ describe("inline/actions", () => {
     }
     await inlineMessageActions.handleAction?.({ ...context, action: "send", params: { to: "91001", message: "child" } } as any)
     await inlineMessageActions.handleAction?.({ ...context, action: "typing", params: { to: "91001" } } as any)
-    await inlineMessageActions.handleAction?.({ ...context, action: "send", params: { to: "91001", topLevel: true, message: "parent" } } as any)
     await inlineMessageActions.handleAction?.({ ...context, action: "send", params: { to: "91003", message: "other" } } as any)
     expect(sendMessage.mock.calls.map(([p]) => [p.chatId, p.text])).toEqual([
-      [91002n, "child"], [91001n, "parent"], [91003n, "other"],
+      [91002n, "child"], [91003n, "other"],
     ])
     expect(invokeRaw).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({
       sendComposeAction: expect.objectContaining({ peerId: { type: { oneofKind: "chat", chat: { chatId: 91002n } } } }),
@@ -60,7 +163,244 @@ describe("inline/actions", () => {
     await expect(inlineMessageActions.handleAction?.({ ...context, action: "send",
       params: { to: "91003", threadId: "91002", message: "wrong parent" },
     } as any)).rejects.toThrow("threadId does not belong")
-    expect(sendMessage).toHaveBeenCalledTimes(3)
+    await expect(inlineMessageActions.handleAction?.({ ...context, action: "send",
+      params: { topLevel: true, message: "unsupported route" },
+    } as any)).rejects.toThrow("parent escape is unavailable")
+    await expect(inlineMessageActions.handleAction?.({ ...context, action: "send",
+      params: { to: "91001", threadId: null, message: "unsupported route" },
+    } as any)).rejects.toThrow("parent escape is unavailable")
+    await expect(inlineMessageActions.handleAction?.({ ...context, action: "thread-reply",
+      params: { to: "91003", message: "wrong current thread" },
+    } as any)).rejects.toThrow("threadId is required")
+    await expect(inlineMessageActions.handleAction?.({ ...context, action: "thread-reply",
+      params: { to: "91003", threadId: "91002", message: "contradictory route" },
+    } as any)).rejects.toThrow("threadId does not belong")
+    expect(sendMessage).toHaveBeenCalledTimes(2)
+    await inlineMessageActions.handleAction?.({ ...context, action: "send",
+      params: { to: "91003", topLevel: true, message: "explicit other top level" },
+    } as any)
+    await inlineMessageActions.handleAction?.({ ...context, action: "send",
+      params: { to: "91002", threadId: null, message: "explicit child" },
+    } as any)
+    expect(sendMessage.mock.calls.slice(-2).map(([p]) => [p.chatId, p.text])).toEqual([
+      [91003n, "explicit other top level"], [91002n, "explicit child"],
+    ])
+  })
+
+  it("keeps parent-addressed DM child tools in the child through the host tool context", async () => {
+    vi.resetModules()
+    const sendMessage = vi.fn(async () => ({ messageId: 10n }))
+    const invokeRaw = vi.fn(async () => ({ oneofKind: "sendComposeAction", sendComposeAction: {} }))
+    vi.doMock("@inline-chat/realtime-sdk", async () => ({
+      ...await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk"),
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        sendMessage = sendMessage
+        invokeRaw = invokeRaw
+      },
+    }))
+    vi.doMock("./media", async () => ({
+      ...await vi.importActual<Record<string, unknown>>("./media"),
+      uploadInlineMediaFromUrl: vi.fn(async () => ({ kind: "photo", photoId: 901n })),
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    const { inlineChannelPlugin } = await import("./channel")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const { rememberInlineReplyThreadRoute } = await import("./thread-routes")
+    rememberInlineReplyThreadRoute({ accountId: "default", parentChatId: "7", threadId: "71" })
+    const cfg = { channels: { inline: { token: "token" } } }
+    const sessionKey = "agent:main:inline:direct:51:thread:71"
+    const toolContext = inlineChannelPlugin.threading?.buildToolContext?.({ cfg, context: {
+      ChatType: "direct", From: "inline:51", To: "inline:7",
+      NativeChannelId: "71", CurrentMessageId: "6", MessageThreadId: "71",
+    } })
+    const end = beginInlineActiveThreadRoute({
+      accountId: "default", sessionKey, sourceChatId: 71n, sourceMessageId: 6n,
+      parentPeer: { kind: "direct", id: "51" }, threadId: 71n,
+      onThreadAdopted: async () => {},
+    })
+    const input = { channel: "inline", cfg, sessionKey, toolContext }
+    try {
+      await inlineMessageActions.handleAction?.({ ...input, action: "send", params: { to: "7", message: "child" } } as any)
+      await inlineMessageActions.handleAction?.({ ...input, action: "reply", params: { to: "7", messageId: "21", message: "child reply" } } as any)
+      await inlineMessageActions.handleAction?.({ ...input, action: "sendAttachment", params: { to: "7", mediaUrl: "https://cdn.inline.chat/test.jpg" } } as any)
+      await inlineMessageActions.handleAction?.({ ...input, action: "typing", params: { to: "7" } } as any)
+      expect(sendMessage.mock.calls.map(([p]) => p.chatId)).toEqual([71n, 71n, 71n])
+      expect(sendMessage.mock.calls[1]?.[0]).toMatchObject({ replyToMsgId: 21n })
+      expect(invokeRaw).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({
+        sendComposeAction: expect.objectContaining({ peerId: { type: { oneofKind: "chat", chat: { chatId: 71n } } } }),
+      }))
+      for (const escape of [{ topLevel: true }, { threadId: null }]) {
+        await expect(inlineMessageActions.handleAction?.({ ...input, action: "send",
+          params: { to: "7", message: "ambiguous parent escape", ...escape },
+        } as any)).rejects.toThrow("parent escape is unavailable")
+      }
+      await inlineMessageActions.handleAction?.({ ...input, action: "send", params: { to: "72", message: "other" } } as any)
+      expect(sendMessage.mock.calls.at(-1)?.[0]).toMatchObject({ chatId: 72n, text: "other" })
+    } finally {
+      end()
+      vi.doUnmock("./media")
+    }
+  })
+
+  it("strips the exact source reply id but rejects unrelated parent ids during handoff", async () => {
+    vi.resetModules()
+    const sendMessage = vi.fn(async () => ({ messageId: 10n }))
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        sendMessage = sendMessage
+      },
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const end = beginInlineActiveThreadRoute({
+      accountId: "default",
+      sessionKey: "agent:main:inline:group:7",
+      sourceChatId: 7n,
+      sourceMessageId: 12n,
+      parentPeer: { kind: "group", id: "7" },
+      threadId: 71n,
+      onThreadAdopted: async () => {},
+    })
+    try {
+      await inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "reply",
+        cfg: { channels: { inline: { token: "token" } } },
+        sessionKey: "agent:main:inline:group:7",
+        toolContext: { currentChannelId: "7", currentMessageId: "12" },
+        params: { to: "7", messageId: "12", message: "source reply" },
+      } as any)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: 71n,
+        text: "source reply",
+      }))
+      expect(sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ replyToMsgId: 12n }))
+      await inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "reply",
+        cfg: { channels: { inline: { token: "token" } } },
+        sessionKey: "agent:main:inline:group:7",
+        toolContext: { currentChannelId: "7", currentMessageId: "12" },
+        params: { to: "71", messageId: "21", message: "child-local reply" },
+      } as any)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: 71n,
+        replyToMsgId: 21n,
+        text: "child-local reply",
+      }))
+      await inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "reply",
+        cfg: { channels: { inline: { token: "token" } } },
+        sessionKey: "agent:main:inline:group:7",
+        toolContext: { currentChannelId: "7", currentMessageId: "12" },
+        params: { to: "71", messageId: "12", message: "child id matching parent id" },
+      } as any)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: 71n,
+        text: "child id matching parent id",
+        replyToMsgId: 12n,
+      }))
+      for (const action of ["reply", "thread-reply"]) {
+        await inlineMessageActions.handleAction?.({
+          channel: "inline", action,
+          cfg: { channels: { inline: { token: "token" } } },
+          sessionKey: "agent:main:inline:group:7",
+          toolContext: { currentChannelId: "7", currentMessageId: "12" },
+          params: { messageId: "21", message: `implicit child ${action}` },
+        } as any)
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+          chatId: 71n, replyToMsgId: 21n, text: `implicit child ${action}`,
+        }))
+      }
+      await inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "thread-reply",
+        cfg: { channels: { inline: { token: "token" } } },
+        sessionKey: "agent:main:inline:group:7",
+        toolContext: { currentChannelId: "7", currentMessageId: "12" },
+        params: { to: "7", threadId: "71", messageId: "22", message: "explicit child reply" },
+      } as any)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: 71n,
+        replyToMsgId: 22n,
+        text: "explicit child reply",
+      }))
+      await inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "reply",
+        cfg: { channels: { inline: { token: "token" } } },
+        sessionKey: "agent:main:inline:group:7",
+        toolContext: { currentChannelId: "7", currentMessageId: "12" },
+        params: { to: "72", messageId: "31", message: "unrelated chat-local reply" },
+      } as any)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: 72n,
+        replyToMsgId: 31n,
+        text: "unrelated chat-local reply",
+      }))
+      await expect(inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "reply",
+        cfg: { channels: { inline: { token: "token" } } },
+        sessionKey: "agent:main:inline:group:7",
+        toolContext: { currentChannelId: "7", currentMessageId: "12" },
+        params: { to: "7", messageId: "11", message: "wrong parent reply" },
+      } as any)).rejects.toThrow("only the exact source message")
+    } finally {
+      end()
+    }
+  })
+
+  it("reuses an adopted child for repeated unanchored thread creation", async () => {
+    vi.resetModules()
+    const invokeRaw = vi.fn()
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+    const { inlineMessageActions } = await import("./actions")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const sessionKey = "agent:main:inline:group:7"
+    const end = beginInlineActiveThreadRoute({
+      accountId: "default",
+      sessionKey,
+      sourceChatId: 7n,
+      sourceMessageId: 12n,
+      parentPeer: { kind: "group", id: "7" },
+      threadId: 71n,
+      onThreadAdopted: async () => {},
+    })
+    try {
+      for (const params of [
+        { threadName: "Continue" },
+        { to: "7", threadName: "Continue" },
+        { to: "71", threadName: "Continue" },
+      ]) {
+        await expect(inlineMessageActions.handleAction?.({
+          channel: "inline",
+          action: "thread-create",
+          cfg: { channels: { inline: { token: "token" } } },
+          sessionKey,
+          toolContext: { currentChannelId: "7", currentMessageId: "12" },
+          params,
+        } as any)).resolves.toMatchObject({
+          details: { ok: true, reused: true, parentChatId: "7", threadId: "71" },
+        })
+      }
+      expect(invokeRaw).not.toHaveBeenCalled()
+    } finally {
+      end()
+    }
   })
 
   it("lists gated actions only when inline is configured", async () => {
@@ -595,6 +935,8 @@ describe("inline/actions", () => {
     expect(workDiscovery?.actions).not.toContain("edit")
     expect(workDiscovery?.capabilities).toEqual([])
     expect(inlineMessageActions.supportsButtons?.({ cfg, accountId: "work" })).toBe(false)
+    expect(defaultDiscovery?.schema?.some((entry) =>
+      entry.actions?.includes("send") && "topLevel" in (entry.properties ?? {}))).toBe(false)
   })
 
   it("extracts explicit user targets for send routing", async () => {
@@ -606,6 +948,25 @@ describe("inline/actions", () => {
     } as any)
 
     expect(extracted).toEqual({ to: "user:99" })
+    expect(inlineMessageActions.extractToolSend?.({
+      args: { action: "send", userId: "99" },
+    } as any)).toEqual({ to: "user:99" })
+  })
+
+  it("reconciles tool delivery evidence to the actual Inline child route", async () => {
+    vi.resetModules()
+    const { inlineMessageActions } = await import("./actions")
+    const pending = inlineMessageActions.extractToolSend?.({
+      args: { action: "send", to: "89" },
+    } as any)
+    expect(pending).toEqual({ to: "89", threadImplicit: true })
+    expect(inlineMessageActions.extractToolSend?.({
+      args: { action: "send", to: "99", topLevel: true },
+    } as any)).toEqual({ to: "99", threadSuppressed: true })
+    expect(inlineMessageActions.extractToolSendResult?.({
+      send: pending!,
+      result: { details: { ok: true, target: "8912", parentChatId: "89", threadId: "8912" } },
+    } as any)).toEqual({ to: "89", threadId: "8912" })
   })
 
   it("dispatches expanded rpc action set via Inline RPC", async () => {

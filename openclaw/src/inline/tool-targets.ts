@@ -72,17 +72,19 @@ export function parseCurrentInlineSession(ctx: {
   sessionKey?: string
 }): InlineCurrentSession | null {
   if ((ctx.messageChannel ?? "").trim().toLowerCase() !== "inline") return null
-  const sessionKey = ctx.sessionKey?.trim()
+  const sessionKey = ctx.sessionKey?.trim().replace(/:inline-agent:[^:]+$/i, "")
   if (!sessionKey) return null
 
   const explicitMatch = sessionKey.match(/^agent:[^:]+:inline:(chat|group|user|direct):([0-9]+)(?::thread:([0-9]+))?$/i)
   if (explicitMatch?.[1] && explicitMatch[2]) {
     const kind = explicitMatch[1].toLowerCase()
     const threadId = explicitMatch[3]
-    if ((kind === "chat" || kind === "group") && threadId) {
+    if (threadId) {
       return {
         target: parseInlineTarget(threadId, "current chat"),
-        parentChatId: parseInlineId(explicitMatch[2], "current parent chat"),
+        parentChatId: kind === "chat" || kind === "group"
+          ? parseInlineId(explicitMatch[2], "current parent chat")
+          : null,
         threadId: parseInlineId(threadId, "current thread"),
       }
     }

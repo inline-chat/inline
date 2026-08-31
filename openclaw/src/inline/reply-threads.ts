@@ -44,6 +44,22 @@ export type InlineCreatedReplyThread = {
   anchorMessage: Message | null
 }
 
+function inlineErrorChainHasCode(error: unknown, code: string): boolean {
+  const visited = new Set<unknown>()
+  let current: unknown = error
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current)
+    if ((current as { code?: unknown }).code === code) return true
+    current = (current as { cause?: unknown }).cause
+  }
+  return false
+}
+
+function isRetryableInlineCreateOutcomeUnknown(error: unknown): boolean {
+  return inlineErrorChainHasCode(error, "commit-outcome-unknown") ||
+    inlineErrorChainHasCode(error, "timeout")
+}
+
 function buildChatPeer(chatId: bigint): {
   type: {
     oneofKind: "chat"
@@ -95,7 +111,7 @@ export function resolveInlineReplyThreadChatId(params: {
         ? BigInt(params.threadId)
         : null
       : typeof params.threadId === "string"
-        ? params.threadId.trim()
+        ? /^[0-9]+$/.test(params.threadId.trim())
           ? (() => {
               try {
                 return BigInt(params.threadId.trim())
@@ -187,14 +203,25 @@ export async function createInlineReplyThreadForMessage(params: {
   parentChatId: bigint
   parentMessageId: bigint
 }): Promise<InlineCreatedReplyThread | null> {
-  const result = await params.client.invokeRaw(CREATE_SUBTHREAD_METHOD, {
-    oneofKind: "createSubthread",
+  const input = {
+    oneofKind: "createSubthread" as const,
     createSubthread: {
       parentChatId: params.parentChatId,
       parentMessageId: params.parentMessageId,
       participants: [],
     },
-  })
+  }
+  const invokeCreate = () => params.client.invokeRaw(CREATE_SUBTHREAD_METHOD, input)
+  let result: Awaited<ReturnType<typeof invokeCreate>>
+  try {
+    result = await invokeCreate()
+  } catch (error) {
+    if (!isRetryableInlineCreateOutcomeUnknown(error)) throw error
+    // Reply-thread creation is idempotent for this exact parent-message anchor.
+    // A single retry recovers the server result when the first response was
+    // lost after commit without risking a second child.
+    result = await invokeCreate()
+  }
 
   if (result.oneofKind !== "createSubthread") {
     return null

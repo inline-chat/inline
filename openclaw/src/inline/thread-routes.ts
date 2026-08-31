@@ -21,6 +21,7 @@ export type InlineReplyThreadRouteRecord = {
   title?: string
   threadLabel?: string
   agentId?: string
+  inlineAgentId?: string
 }
 
 type InlineReplyThreadRouteStore = {
@@ -111,6 +112,7 @@ function normalizeRecord(value: unknown): InlineReplyThreadRouteRecord | null {
   const title = normalizeOptionalText(readString(value, "title"))
   const threadLabel = normalizeOptionalText(readString(value, "threadLabel"))
   const agentId = normalizeOptionalText(readString(value, "agentId"))
+  const inlineAgentId = normalizeOptionalText(readString(value, "inlineAgentId"))
   return {
     accountId,
     parentChatId,
@@ -121,6 +123,7 @@ function normalizeRecord(value: unknown): InlineReplyThreadRouteRecord | null {
     ...(title ? { title } : {}),
     ...(threadLabel ? { threadLabel } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(inlineAgentId ? { inlineAgentId } : {}),
   }
 }
 
@@ -181,8 +184,14 @@ function activeKey(accountId: string, parentChatId: string, agentId?: string): s
   return `${accountId}:parent:${parentChatId}:agent:${agentId || DEFAULT_AGENT_KEY}`
 }
 
-function messageKey(accountId: string, parentChatId: string, parentMessageId: string): string {
-  return `${accountId}:parent:${parentChatId}:message:${parentMessageId}`
+function messageKey(
+  accountId: string,
+  parentChatId: string,
+  parentMessageId: string,
+  agentId?: string,
+): string {
+  const base = `${accountId}:parent:${parentChatId}:message:${parentMessageId}`
+  return agentId ? `${base}:agent:${agentId}` : base
 }
 
 function threadKey(accountId: string, threadId: string): string {
@@ -193,6 +202,9 @@ function keysForRecord(record: InlineReplyThreadRouteRecord): string[] {
   const keys = new Set<string>()
   keys.add(threadKey(record.accountId, record.threadId))
   if (record.parentMessageId) {
+    if (record.agentId) {
+      keys.add(messageKey(record.accountId, record.parentChatId, record.parentMessageId, record.agentId))
+    }
     keys.add(messageKey(record.accountId, record.parentChatId, record.parentMessageId))
   }
   if (record.agentId) {
@@ -210,6 +222,14 @@ function keysForLookup(params: {
 }): string[] {
   const keys = new Set<string>()
   if (params.parentMessageId) {
+    if (params.agentId) {
+      keys.add(messageKey(
+        params.accountId,
+        params.parentChatId,
+        params.parentMessageId,
+        params.agentId,
+      ))
+    }
     keys.add(messageKey(params.accountId, params.parentChatId, params.parentMessageId))
     return [...keys]
   }
@@ -354,6 +374,7 @@ export function rememberInlineReplyThreadRoute(params: {
   title?: string | null
   threadLabel?: string | null
   agentId?: string | null
+  inlineAgentId?: string | null
 }): InlineReplyThreadRouteRecord | null {
   const accountId = params.accountId.trim()
   const parentChatId = normalizePositiveId(params.parentChatId)
@@ -365,6 +386,7 @@ export function rememberInlineReplyThreadRoute(params: {
   const title = normalizeOptionalText(params.title)
   const threadLabel = normalizeOptionalText(params.threadLabel)
   const agentId = normalizeOptionalText(params.agentId)
+  const inlineAgentId = normalizeOptionalText(params.inlineAgentId)
   const record: InlineReplyThreadRouteRecord = {
     accountId,
     parentChatId,
@@ -375,6 +397,7 @@ export function rememberInlineReplyThreadRoute(params: {
     ...(title ? { title } : {}),
     ...(threadLabel ? { threadLabel } : {}),
     ...(agentId ? { agentId } : {}),
+    ...(inlineAgentId ? { inlineAgentId } : {}),
   }
   const keys = keysForRecord(record)
   for (const key of keys) {
@@ -411,7 +434,11 @@ export async function lookupInlineReplyThreadRoute(params: {
     ...(parentMessageId ? { parentMessageId } : {}),
     ...(agentId ? { agentId } : {}),
   })
-  return await lookupInlineReplyThreadRouteByKeys(accountId, keys)
+  const route = await lookupInlineReplyThreadRouteByKeys(accountId, keys)
+  if (!route || route.accountId !== accountId || route.parentChatId !== parentChatId) return null
+  if (parentMessageId && route.parentMessageId !== parentMessageId) return null
+  if (agentId && route.agentId && route.agentId !== agentId) return null
+  return route
 }
 
 export async function lookupInlineReplyThreadRouteByThreadId(params: {

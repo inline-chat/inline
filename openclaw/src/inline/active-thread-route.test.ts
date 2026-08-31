@@ -7,7 +7,7 @@ import {
 describe("active reply-thread handoff", () => {
   const makeRoute = (overrides: Partial<ActiveInlineThreadRoute> = {}): ActiveInlineThreadRoute => ({
     accountId: "test", sessionKey: "session", sourceChatId: 10n, sourceMessageId: 20n,
-    threadReplyDelivered: false, onThreadAdopted: vi.fn(async () => {}), ...overrides,
+    parentPeer: { kind: "group", id: "10" }, onThreadAdopted: vi.fn(async () => {}), ...overrides,
   })
   const target = { accountId: "test", sessionKey: "session", parentChatId: 10n, parentMessageId: 20n, threadId: 30n }
 
@@ -30,13 +30,17 @@ describe("active reply-thread handoff", () => {
     expect(getInlineActiveThreadRoute(target)).toBeUndefined()
   })
 
-  it("keeps a failed transition failed instead of exposing a half-adopted child", async () => {
+  it("does not expose a failed transition and allows a clean retry", async () => {
     const route = makeRoute({ onThreadAdopted: vi.fn(async () => { throw new Error("drain failed") }) })
     const end = beginInlineActiveThreadRoute(route)
     try {
       await expect(adoptInlineActiveThread(target)).rejects.toThrow("drain failed")
-      await expect(adoptInlineActiveThread(target)).rejects.toThrow("drain failed")
       expect(route.threadId).toBeUndefined()
+      expect(route.adoption).toBeUndefined()
+      expect(route.onThreadAdopted).toHaveBeenCalledTimes(1)
+      route.onThreadAdopted = vi.fn(async () => {})
+      await adoptInlineActiveThread(target)
+      expect(route.threadId).toBe(30n)
       expect(route.onThreadAdopted).toHaveBeenCalledTimes(1)
     } finally { end() }
   })

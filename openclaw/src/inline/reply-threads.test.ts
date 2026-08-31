@@ -1,13 +1,42 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 import {
+  createInlineReplyThreadForMessage,
   getInlineReplyThreadsCapabilityConfig,
   resolveInlineReplyThreadChatId,
   isInlineReplyThreadsEnabled,
 } from "./reply-threads"
 
 describe("inline/reply-threads", () => {
-  it.each(["", "invalid", "0", "-1", 0, -1, Number.MAX_SAFE_INTEGER + 1])("rejects an invalid explicit child instead of sending to its parent: %s", (threadId) => {
+  it("retries an unknown anchored-create outcome once and recovers the server child", async () => {
+    const invokeRaw = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error("response lost"), { code: "commit-outcome-unknown" }))
+      .mockResolvedValueOnce({
+        oneofKind: "createSubthread",
+        createSubthread: {
+          chat: { id: 73n, parentChatId: 7n, parentMessageId: 3n, title: "Reply" },
+          anchorMessage: null,
+        },
+      })
+    await expect(createInlineReplyThreadForMessage({
+      client: { invokeRaw } as any,
+      parentChatId: 7n,
+      parentMessageId: 3n,
+    })).resolves.toMatchObject({ childChatId: 73n, parentChatId: 7n, parentMessageId: 3n })
+    expect(invokeRaw).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not retry a definite anchored-create rejection", async () => {
+    const invokeRaw = vi.fn().mockRejectedValue(Object.assign(new Error("denied"), { code: "forbidden" }))
+    await expect(createInlineReplyThreadForMessage({
+      client: { invokeRaw } as any,
+      parentChatId: 7n,
+      parentMessageId: 3n,
+    })).rejects.toThrow("denied")
+    expect(invokeRaw).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["", "invalid", "0", "-1", "+1", "0x10", 0, -1, Number.MAX_SAFE_INTEGER + 1])("rejects an invalid explicit child instead of sending to its parent: %s", (threadId) => {
     expect(() => resolveInlineReplyThreadChatId({ cfg: {}, parentChatId: 7n, threadId })).toThrow("invalid reply-thread")
   })
 

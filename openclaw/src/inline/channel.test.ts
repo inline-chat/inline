@@ -555,12 +555,27 @@ describe("inline/channel", () => {
     expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "chat:7", toolContext })).toBe("8")
     expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "chat:9", toolContext })).toBeUndefined()
     expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "user:7", toolContext })).toBeUndefined()
+    const dmChildContext = plugin.threading?.buildToolContext?.({ cfg: {}, context: {
+      ChatType: "direct", From: "inline:51", To: "inline:7",
+      NativeChannelId: "8", CurrentMessageId: "456", MessageThreadId: "8",
+    } })
+    expect(dmChildContext?.currentGraphChannelId).toBe("chat:7")
+    expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "chat:7",
+      toolContext: { ...dmChildContext, currentChannelId: "inline:8" },
+    })).toBe("8")
+    expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "chat:51",
+      toolContext: { ...dmChildContext, currentChannelId: "inline:8" },
+    })).toBeUndefined()
     expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:8", targetKey: "7", targetThreadId: "8" })).toBe(true)
     expect(plugin.outbound?.targetsMatchForReplySuppression?.({ originTarget: "inline:8", targetKey: "7", targetThreadId: "9" })).toBe(false)
     const context = plugin.threading?.buildToolContext?.({ cfg: {}, context: {
       To: "inline:8", NativeChannelId: "7", CurrentMessageId: "123", MessageThreadId: "8",
     } })
     expect(context?.currentMessageId).toBe("")
+    const childContext = plugin.threading?.buildToolContext?.({ cfg: {}, context: {
+      To: "inline:8", NativeChannelId: "8", CurrentMessageId: "456", MessageThreadId: "8",
+    } })
+    expect(childContext?.currentMessageId).toBe("456")
   })
 
   it("sends heartbeat typing for Inline chat and reply-thread targets", async () => {
@@ -715,6 +730,57 @@ describe("inline/channel", () => {
     expect(await resolve?.({ ...context, agentId: "other", target: "inline:8", threadId: "8" })).toMatchObject({
       sessionKey: "agent:other:inline:group:8:thread:8",
     })
+    expect(await resolve?.({ ...context, target: "inline:99", threadId: "8" })).toMatchObject({
+      sessionKey: "agent:main:inline:group:99:thread:8",
+    })
+  })
+
+  it.each(["", ":inline-agent:researcher"])("preserves a DM child mirror in its direct parent session%s", async (suffix) => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+    const { rememberInlineReplyThreadRoute } = await import("./thread-routes")
+    rememberInlineReplyThreadRoute({
+      accountId: "default",
+      parentChatId: "7",
+      parentMessageId: "1",
+      threadId: "8",
+      agentId: "main",
+    })
+    const currentSessionKey = `agent:main:inline:direct:42:thread:8${suffix}`
+    const resolve = inlineChannelPlugin.messaging?.resolveOutboundSessionRoute
+    expect(await resolve?.({
+      cfg: {} as OpenClawConfig,
+      agentId: "main",
+      currentSessionKey,
+      target: "inline:8",
+      threadId: "8",
+    })).toMatchObject({
+      sessionKey: currentSessionKey,
+      baseSessionKey: "agent:main:inline:direct:42",
+      threadId: "8",
+      peer: { kind: "direct", id: "42" },
+    })
+    expect(await resolve?.({
+      cfg: {} as OpenClawConfig,
+      agentId: "main",
+      currentSessionKey,
+      target: "inline:7",
+      threadId: "8",
+    })).toMatchObject({
+      sessionKey: currentSessionKey,
+      baseSessionKey: "agent:main:inline:direct:42",
+      threadId: "8",
+      peer: { kind: "direct", id: "42" },
+    })
+    expect(await resolve?.({
+      cfg: {} as OpenClawConfig,
+      agentId: "main",
+      currentSessionKey,
+      target: "inline:99",
+      threadId: "8",
+    })).toMatchObject({
+      sessionKey: "agent:main:inline:group:99:thread:8",
+    })
   })
 
   it("mirrors an adopted thread under its parent rather than a false child group", async () => {
@@ -723,7 +789,7 @@ describe("inline/channel", () => {
     const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
     const currentSessionKey = "agent:main:inline:group:7:inline-agent:researcher"
     const end = beginInlineActiveThreadRoute({ accountId: "default", sessionKey: currentSessionKey,
-      sourceChatId: 7n, sourceMessageId: 1n, threadId: 8n, threadReplyDelivered: false,
+      sourceChatId: 7n, sourceMessageId: 1n, parentPeer: { kind: "group", id: "7" }, threadId: 8n,
       onThreadAdopted: async () => {},
     })
     try {
@@ -732,6 +798,36 @@ describe("inline/channel", () => {
       })).toMatchObject({
         sessionKey: "agent:main:inline:group:7:thread:8:inline-agent:researcher",
         baseSessionKey: "agent:main:inline:group:7", threadId: "8",
+      })
+    } finally { end() }
+  })
+
+  it("mirrors an adopted DM thread under its direct peer", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+    const { beginInlineActiveThreadRoute } = await import("./active-thread-route")
+    const currentSessionKey = "agent:main:inline:direct:42"
+    const end = beginInlineActiveThreadRoute({
+      accountId: "default",
+      sessionKey: currentSessionKey,
+      sourceChatId: 7n,
+      sourceMessageId: 1n,
+      parentPeer: { kind: "direct", id: "42" },
+      threadId: 8n,
+      onThreadAdopted: async () => {},
+    })
+    try {
+      expect(await inlineChannelPlugin.messaging?.resolveOutboundSessionRoute?.({
+        cfg: {} as OpenClawConfig,
+        agentId: "main",
+        currentSessionKey,
+        target: "inline:8",
+        threadId: "8",
+      })).toMatchObject({
+        sessionKey: "agent:main:inline:direct:42:thread:8",
+        baseSessionKey: "agent:main:inline:direct:42",
+        peer: { kind: "direct", id: "42" },
+        threadId: "8",
       })
     } finally { end() }
   })
@@ -1433,7 +1529,8 @@ describe("inline/channel", () => {
     expect(hints.join("\n")).toContain("thread-reply")
     expect(hints.join("\n")).toContain("normal `reply` for short")
     expect(hints.join("\n")).toContain("unrelated parent-chat messages need separate parent-message anchors")
-    expect(hints.join("\n")).toContain("do not create nested reply threads")
+    expect(hints.join("\n")).toContain("an unanchored `thread-create` reuses the current child")
+    expect(hints.join("\n")).toContain("explicit child-local `parentMessageId`")
     expect(hints.join("\n")).toContain("parent-chat context as background only")
     expect(hints.join("\n")).toContain("not unrelated parent-chat or other-thread questions")
     expect(hints.join("\n")).toContain("attachmentUrls")

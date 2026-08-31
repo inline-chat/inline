@@ -336,6 +336,7 @@ type MonitorSetup = {
   partialReplyDelayMs?: number
   runtimeConfig?: Record<string, unknown>
   createSubthreadError?: string
+  getChatErrors?: Record<string, string>
   followModeError?: string
   getMeError?: Error
   connectAuthenticationError?: "UNAUTHORIZED" | "INVALID_AUTH" | "SESSION_REVOKED"
@@ -554,6 +555,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     accountId: input.accountId ?? "default",
     sessionKey: `agent:main:inline:${String(input.peer?.kind ?? "unknown")}:${String(input.peer?.id ?? "unknown")}`,
     mainSessionKey: "agent:main:main",
+    lastRoutePolicy: "session",
     matchedBy: "default",
   }))
   const recordInboundSession = vi.fn(async () => {})
@@ -719,6 +721,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
     if (method === 25 && input?.oneofKind === "getChat") {
       const chatId = String(input.getChat?.peerId?.type?.chat?.chatId ?? "")
+      const getChatError = setup.getChatErrors?.[chatId]
+      if (getChatError) throw new Error(getChatError)
       const info = setup.chats[chatId]
       if (!info) {
         return {
@@ -987,6 +991,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         getMe = vi.fn(async () => ({ userId: setup.me?.userId ?? 777n }))
         getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => {
           const key = String(chatId)
+          const getChatError = setup.getChatErrors?.[key]
+          if (getChatError) throw new Error(getChatError)
           const info = setup.chats[key] ?? { kind: "group", title: `chat-${key}` }
           if (info.kind === "direct") {
             return {
@@ -4637,6 +4643,52 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("does not expose broader DM history to a participant added only to the reply child", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 8912n, message: {
+        id: 2n,
+        date: 1_700_000_016n,
+        fromId: 52n,
+        message: "question from invited participant",
+      } }],
+      chats: {
+        "89": { kind: "direct", title: "DM", peerUserId: 51n },
+        "8912": { kind: "group", title: "Reply", parentChatId: 89n, parentMessageId: 12n },
+      },
+      participants: {
+        "8912": [{ id: 52n, firstName: "Invited" }],
+      },
+      historyByChat: {
+        "89": [
+          { id: 11n, date: 1_700_000_013n, fromId: 51n, message: "private DM history" },
+          { id: 12n, date: 1_700_000_014n, fromId: 51n, message: "shared anchor" },
+        ],
+        "8912": [
+          { id: 1n, date: 1_700_000_015n, fromId: 777n, message: "child-local context", out: true },
+          { id: 2n, date: 1_700_000_016n, fromId: 52n, message: "question from invited participant" },
+        ],
+      },
+      dispatchReplyPayload: { text: "safe child answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+    const inboundBodies = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
+      .InboundHistory.map((entry: { body: string }) => entry.body)
+    expect(inboundBodies).toContain("shared anchor")
+    expect(inboundBodies).toContain("child-local context")
+    expect(inboundBodies).not.toContain("private DM history")
+    expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 8912n, text: "safe child answer" }),
+    )
+    await handle.stop()
+  })
+
   it("does not promote reply-thread anchor images to current media paths", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -5004,13 +5056,243 @@ describe("inline/monitor", () => {
     await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 8912n, text: "DM thread answer" }),
     ))
+    expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SessionKey: "agent:main:inline:direct:51:thread:8912",
+        ParentSessionKey: "agent:main:inline:direct:51",
+        ChatType: "direct",
+        From: "inline:51",
+        To: "inline:89",
+        OriginatingTo: "inline:8912",
+        MessageThreadId: "8912",
+      }),
+    )
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
     expect(harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 89n)).toEqual([])
     expect(harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")).toHaveLength(1)
     await handle.stop()
   })
 
-  it.each(["none", "thread-reply", "send", "reply"])("adopts tool-created thread for typing and final output (tool=%s)", async (tool) => {
+  it("honors a DM-specific reply-thread mode override", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 89n, message: {
+        id: 12n, date: 1_700_000_014n, fromId: 51n, message: "please help with this",
+      } }],
+      chats: { "89": { kind: "direct", title: "DM", peerUserId: 51n } },
+      dispatchReplyPayload: { text: "DM configured thread answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: { channels: { inline: { groups: { "89": { replyThreadMode: "thread" } } } } } as any,
+      account: buildAccount({ dmPolicy: "open", replyThreadMode: "main" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 8912n, text: "DM configured thread answer" }),
+    ))
+    expect(harness.calls.invokeRaw.mock.calls.filter(([, args]) =>
+      args?.oneofKind === "createSubthread")).toHaveLength(1)
+    expect(harness.calls.sendMessage.mock.calls.filter(([args]) =>
+      args.chatId === 89n && args.text === "DM configured thread answer")).toEqual([])
+    await handle.stop()
+  })
+
+  it("keeps a DM reply-thread follow-up in the direct session without requiring a mention", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        { kind: "message.new", chatId: 89n, message: {
+          id: 12n, date: 1_700_000_014n, fromId: 51n, message: "reply in a thread with the answer",
+        } },
+        { kind: "message.new", chatId: 8912n, message: {
+          id: 1n, date: 1_700_000_015n, fromId: 51n, message: "one more thing",
+        } },
+      ],
+      chats: {
+        "89": { kind: "direct", title: "DM", peerUserId: 51n },
+        "8912": { kind: "group", title: "Reply", parentChatId: 89n, parentMessageId: 12n },
+      },
+      historyByChat: {
+        "89": [{ id: 12n, date: 1_700_000_014n, fromId: 51n, message: "reply in a thread with the answer" }],
+      },
+      dispatchReplyPayload: { text: "DM child answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2))
+    const contexts = harness.calls.finalizeInboundContext.mock.calls.map(([ctx]) => ctx)
+    expect(contexts).toHaveLength(2)
+    for (const context of contexts) {
+      expect(context).toMatchObject({
+        SessionKey: "agent:main:inline:direct:51:thread:8912",
+        ParentSessionKey: "agent:main:inline:direct:51",
+        ChatType: "direct",
+        From: "inline:51",
+        To: "inline:89",
+        OriginatingTo: "inline:8912",
+        MessageThreadId: "8912",
+      })
+      expect(context).not.toHaveProperty("GroupSubject")
+      expect(context).not.toHaveProperty("WasMentioned")
+    }
+    expect(harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 89n)).toEqual([])
+    expect(harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 8912n)).toHaveLength(2)
+    expect(harness.calls.recordInboundSession).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        sessionKey: "agent:main:inline:direct:51:thread:8912",
+        updateLastRoute: expect.objectContaining({
+          sessionKey: "agent:main:inline:direct:51",
+          to: "inline:89",
+          threadId: "8912",
+        }),
+      }),
+    )
+    await handle.stop()
+  })
+
+  it("applies DM policy to a reply-thread child instead of group policy", async () => {
+    const logInfo = vi.fn()
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 8912n, message: {
+        id: 2n, date: 1_700_000_016n, fromId: 51n, message: "should remain blocked",
+      } }],
+      chats: {
+        "89": { kind: "direct", title: "DM", peerUserId: 51n },
+        "8912": { kind: "group", title: "Reply", parentChatId: 89n, parentMessageId: 12n },
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "disabled", groupPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: logInfo, warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(logInfo).toHaveBeenCalledWith(
+      expect.stringContaining("dmPolicy=disabled"),
+    ))
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+
+  it("honors a zero parent-history limit for a DM reply child", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 8912n, message: {
+        id: 2n, date: 1_700_000_016n, fromId: 51n, message: "continue here",
+      } }],
+      chats: {
+        "89": { kind: "direct", peerUserId: 51n },
+        "8912": { kind: "group", parentChatId: 89n, parentMessageId: 12n },
+      },
+      historyByChat: { "89": [{ id: 11n, date: 1_700_000_010n, fromId: 51n, message: "private parent history" }] },
+      dispatchReplyPayload: { text: "child answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: { channels: { inline: { groups: { "89": { replyThreadParentHistoryLimit: 0 } } } } } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitForMockPromise(harness.calls.dispatchReply)
+    const ctx = harness.calls.finalizeInboundContext.mock.calls[0]?.[0]
+    expect(ctx.ChatType).toBe("direct")
+    expect(JSON.stringify(ctx)).not.toContain("private parent history")
+    expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ chatId: 8912n }))
+    await handle.stop()
+  })
+
+  it("fails closed when a reply-thread child's parent kind cannot be resolved", async () => {
+    const runtimeLog = vi.fn()
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 8912n, message: {
+        id: 2n, date: 1_700_000_016n, fromId: 51n, message: "do not guess my policy",
+      } }],
+      chats: {
+        "8912": { kind: "group", title: "Reply", parentChatId: 89n, parentMessageId: 12n },
+      },
+      getChatErrors: { "89": "parent unavailable" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "disabled", groupPolicy: "open" }),
+      runtime: { log: runtimeLog, error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(runtimeLog).toHaveBeenCalledWith(
+      expect.stringContaining("reply-thread parent unavailable"),
+    ))
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+
+  it("drops an inbound child when its own chat metadata is unavailable", async () => {
+    const runtimeLog = vi.fn()
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 8912n, message: {
+        id: 2n, date: 1_700_000_016n, fromId: 51n, message: "do not guess my policy",
+      } }],
+      chats: {},
+      getChatErrors: { "8912": "metadata unavailable" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "disabled", groupPolicy: "open" }),
+      runtime: { log: runtimeLog, error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(runtimeLog).toHaveBeenCalledWith(
+      expect.stringContaining("chat metadata unavailable"),
+    ))
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+
+  it("shows typing and presence only in an existing DM reply-thread child", async () => {
+    const harness = await setupMonitorHarness({
+      dispatchTypingLifecycle: true,
+      events: [{ kind: "message.new", chatId: 8912n, message: {
+        id: 3n, date: 1_700_000_017n, fromId: 51n, message: "continue here",
+      } }],
+      chats: {
+        "89": { kind: "direct", title: "DM", peerUserId: 51n },
+        "8912": { kind: "group", title: "Reply", parentChatId: 89n, parentMessageId: 12n },
+      },
+      dispatchReplyPayload: { text: "still in the child" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 8912n, text: "still in the child" }),
+    ))
+    await waitFor(() => expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 8912n, typing: false }))
+    const typingCalls = harness.calls.sendTyping.mock.calls.map(([args]) => args)
+    expect(typingCalls).toContainEqual({ chatId: 8912n, typing: true })
+    expect(typingCalls).toContainEqual({ chatId: 8912n, typing: false })
+    expect(typingCalls.some((args) => args.chatId === 89n)).toBe(false)
+    const presenceChats = harness.calls.invokeRaw.mock.calls
+      .filter(([, input]) => input?.oneofKind === "setBotPresenceState")
+      .map(([, input]) => input.setBotPresenceState.peerId.type.chat.chatId)
+    expect(presenceChats.length).toBeGreaterThan(0)
+    expect(new Set(presenceChats)).toEqual(new Set([8912n]))
+    await handle.stop()
+  })
+
+  it.each(["none", "reply", "thread-reply", "send"])("adopts tool-created thread for typing and distinct final output (tool=%s)", async (tool) => {
     const toolReply = tool !== "none"
     const cfg = { channels: { inline: { token: "token", baseUrl: "https://api.inline.chat" } } }
     const harness = await setupMonitorHarness({
@@ -5033,7 +5315,8 @@ describe("inline/monitor", () => {
           sessionKey: source.SessionKey, accountId: "default", toolContext: context,
           params: { to: "89", threadName: "Investigation" },
         } as any)
-        // A model following a stale parent context must reuse the adopted child.
+        // A repeated stale-parent call in this same handoff reuses the exact
+        // adopted child without disabling explicit nested thread creation.
         await inlineMessageActions.handleAction?.({ channel: "inline", action: "thread-create", cfg,
           sessionKey: source.SessionKey, accountId: "default", toolContext: context,
           params: { to: "89", threadName: "Investigation" },
@@ -5056,10 +5339,13 @@ describe("inline/monitor", () => {
     await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 8912n, text: toolReply ? "Tool answer" : "Automatic final" }),
     ))
+    await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 8912n, text: "Automatic final" }),
+    ))
     await waitFor(() => expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 8912n, typing: false }))
     const childSends = harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 8912n)
-    expect(childSends).toHaveLength(1)
-    expect(childSends[0]?.[0]).not.toHaveProperty("replyToMsgId")
+    expect(childSends).toHaveLength(toolReply ? 2 : 1)
+    expect(childSends.every(([args]) => args.replyToMsgId == null)).toBe(true)
     expect(harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 89n &&
       ["Tool answer", "Automatic final"].includes(args.text))).toEqual([])
     const typing = harness.calls.sendTyping.mock.calls.map(([args]) => args)
@@ -5069,6 +5355,44 @@ describe("inline/monitor", () => {
     expect(harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")).toHaveLength(1)
     await handle.stop()
   })
+
+  it.each(["other-target", "reply-anchor", "controls", "failed-send"])(
+    "does not suppress a final using insufficient tool evidence (%s)", async (variant) => {
+      const cfg = { channels: { inline: { token: "token", baseUrl: "https://api.inline.chat" } } }
+      const harness = await setupMonitorHarness({
+        events: [{ kind: "message.new", chatId: 8912n, message: {
+          id: 2n, date: 1_700_000_014n, fromId: 51n, message: "continue", mentioned: true,
+        } }],
+        chats: { "89": { kind: "direct", peerUserId: 51n },
+          "8912": { kind: "group", parentChatId: 89n, parentMessageId: 12n } },
+        ...(variant === "failed-send" ? { sendMessageErrors: [new Error("send failed")] } : {}),
+        dispatchReplyBlocker: async ({ ctx }) => {
+          const { inlineMessageActions } = await import("./actions")
+          const result = inlineMessageActions.handleAction?.({ channel: "inline", action: "send", cfg,
+            sessionKey: (ctx as any).SessionKey, accountId: "default",
+            toolContext: { currentChannelId: "8912", currentThreadTs: "8912", currentMessageId: "2" },
+            params: { to: variant === "other-target" ? "99" : "8912", message: "Same text",
+              ...(variant === "reply-anchor" ? { replyToId: "1" } : {}) },
+          } as any)
+          if (variant === "failed-send") await expect(result).rejects.toThrow("send failed")
+          else await result
+        },
+        dispatchReplyPayload: { text: "Same text",
+          ...(variant === "controls" ? { channelData: { inline: { buttons: [[{ text: "Next", callback_data: "next" }]] } } } : {}) },
+        payloadInfoKinds: ["final"],
+      })
+      const handle = await harness.monitorInlineProvider({ cfg: cfg as any,
+        account: buildAccount({ dmPolicy: "open" }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      })
+      await waitForMockPromise(harness.calls.dispatchReply)
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage.mock.calls[1]?.[0]).toMatchObject({ chatId: 8912n, text: "Same text" })
+      await handle.stop()
+    },
+  )
 
   it("keeps auto mode in the parent chat when the message says not to thread", async () => {
     const harness = await setupMonitorHarness({
@@ -5521,6 +5845,151 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("serializes an in-flight parent typing start before handing activity to a tool-created child", async () => {
+    let releaseParentStart!: () => void
+    const parentStartGate = new Promise<void>((resolve) => { releaseParentStart = resolve })
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          groups: { "91": { replyThreadMode: "main" } },
+        },
+      },
+    }
+    const harness = await setupMonitorHarness({
+      sendTyping: async ({ chatId, typing }) => {
+        if (chatId === 91n && typing) await parentStartGate
+      },
+      events: [{ kind: "message.new", chatId: 91n, message: {
+        id: 9n,
+        date: 1_700_000_014n,
+        fromId: 51n,
+        message: "@inlinebot investigate this",
+        mentioned: true,
+      } }],
+      chats: { "91": { kind: "group", title: "Typing Race Room" } },
+      dispatchReplyBlocker: async ({ ctx, dispatcherOptions }) => {
+        const parentStart = dispatcherOptions.onReplyStart?.()
+        await waitFor(() => expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 91n, typing: true }))
+        const { inlineMessageActions } = await import("./actions")
+        const source = ctx as { SessionKey: string }
+        const create = inlineMessageActions.handleAction?.({
+          channel: "inline",
+          action: "thread-create",
+          cfg,
+          sessionKey: source.SessionKey,
+          accountId: "default",
+          toolContext: { currentChannelId: "91", currentMessageId: "9" },
+          params: { to: "91", threadName: "Investigation" },
+        } as any)
+        await Promise.resolve()
+        expect(harness.calls.sendTyping).not.toHaveBeenCalledWith({ chatId: 91n, typing: false })
+        releaseParentStart()
+        await parentStart
+        await create
+      },
+      dispatchReplyPayload: { text: "child answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: cfg as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 919n, text: "child answer" }),
+    ))
+    const typing = harness.calls.sendTyping.mock.calls.map(([args]) => args)
+    const parentStartIndex = typing.findIndex((args) => args.chatId === 91n && args.typing)
+    const parentStopIndex = typing.findIndex((args) => args.chatId === 91n && !args.typing)
+    const childStartIndex = typing.findIndex((args) => args.chatId === 919n && args.typing)
+    expect(parentStartIndex).toBeGreaterThanOrEqual(0)
+    expect(parentStopIndex).toBeGreaterThan(parentStartIndex)
+    expect(childStartIndex).toBeGreaterThan(parentStopIndex)
+    expect(typing.slice(parentStopIndex + 1)).not.toContainEqual({ chatId: 91n, typing: true })
+    await handle.stop()
+  })
+
+  it("defers cleanup during handoff and balances child activity after dispatch", async () => {
+    let releaseParentStop!: () => void
+    const parentStopGate = new Promise<void>((resolve) => { releaseParentStop = resolve })
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          groups: { "91": { replyThreadMode: "main" } },
+        },
+      },
+    }
+    const harness = await setupMonitorHarness({
+      sendTyping: async ({ chatId, typing }) => {
+        if (chatId === 91n && !typing) await parentStopGate
+      },
+      events: [{ kind: "message.new", chatId: 91n, message: {
+        id: 9n,
+        date: 1_700_000_014n,
+        fromId: 51n,
+        message: "@inlinebot investigate this",
+        mentioned: true,
+      } }],
+      chats: { "91": { kind: "group", title: "Cleanup Race Room" } },
+      dispatchReplyBlocker: async ({ ctx, dispatcherOptions }) => {
+        await dispatcherOptions.onReplyStart?.()
+        const { inlineMessageActions } = await import("./actions")
+        const source = ctx as { SessionKey: string }
+        const create = inlineMessageActions.handleAction?.({
+          channel: "inline",
+          action: "thread-create",
+          cfg,
+          sessionKey: source.SessionKey,
+          accountId: "default",
+          toolContext: { currentChannelId: "91", currentMessageId: "9" },
+          params: { to: "91", threadName: "Investigation" },
+        } as any)
+        await waitFor(() => expect(harness.calls.sendTyping)
+          .toHaveBeenCalledWith({ chatId: 91n, typing: false }))
+        dispatcherOptions.onCleanup?.()
+        releaseParentStop()
+        await create
+      },
+      dispatchReplyPayload: { text: "child answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: cfg as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 919n, text: "child answer" }),
+    ))
+    await waitFor(() => expect(harness.calls.sendTyping)
+      .toHaveBeenCalledWith({ chatId: 919n, typing: false }))
+
+    const typing = harness.calls.sendTyping.mock.calls.map(([args]) => args)
+    const parentStopIndex = typing.findIndex((args) => args.chatId === 91n && !args.typing)
+    const childStartIndex = typing.findIndex((args) => args.chatId === 919n && args.typing)
+    const childStopIndex = typing.findIndex(
+      (args, index) => index > childStartIndex && args.chatId === 919n && !args.typing,
+    )
+    expect(childStartIndex).toBeGreaterThan(parentStopIndex)
+    expect(childStopIndex).toBeGreaterThan(childStartIndex)
+    expect(typing.slice(parentStopIndex + 1)).not.toContainEqual({ chatId: 91n, typing: true })
+
+    const childPresenceKinds = harness.calls.invokeRaw.mock.calls
+      .filter(([method, input]) =>
+        method === SET_BOT_PRESENCE_STATE &&
+        input?.setBotPresenceState?.peerId?.type?.chat?.chatId === 919n)
+      .map(([, input]) => input.setBotPresenceState.state.kind)
+    expect(childPresenceKinds).toContain(BOT_PRESENCE_RUNNING)
+    expect(childPresenceKinds.at(-1)).toBe(BOT_PRESENCE_IDLE)
+    await handle.stop()
+  })
+
   it("lets reply payload channelData set bot presence comment", async () => {
     const harness = await setupMonitorHarness({
       dispatchTypingLifecycle: true,
@@ -5791,7 +6260,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 88n,
-          text: "I couldn't open the reply thread. Please try again; I haven't sent the answer to this chat.",
+          text: "I couldn't confirm the reply thread, so I haven't sent the answer. Please check the thread or try again.",
           replyToMsgId: 2003n,
         }),
       )
