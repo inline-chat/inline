@@ -131,6 +131,7 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
         alignment: .bottom
       )
       footer.pinToVisibleBounds = true // This makes it sticky
+      footer.zIndex = 2
       section.boundarySupplementaryItems = [footer]
 
       return section
