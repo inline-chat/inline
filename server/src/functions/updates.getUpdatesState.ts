@@ -8,19 +8,32 @@ import { SpaceModel } from "@in/server/db/models/spaces"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { DbChat } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { decodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { decodeDate } from "@in/server/realtime/encoders/helpers"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
-import { UpdateBucket } from "@in/server/db/schema"
+import {
+  UpdateBucket,
+  chatParticipantGroups,
+  chatParticipants,
+  members,
+  updates as updatesTable,
+  userGroupMembers,
+  userGroups,
+  userNotDeleted,
+  users as usersTable,
+} from "@in/server/db/schema"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
+import { captureUpdateDiscoveryWatermark } from "@in/server/modules/updates/updateDiscoveryBarrier"
 
 const log = new Log("updates.getUpdatesState")
 const MAX_UPDATE_HINTS_PER_BATCH = 512
 const MAX_UPDATE_HINT_BATCH_BYTES = 1024 * 1024
 const MAX_CONCURRENT_CHAT_ACCESS_CHECKS = 16
+const MAX_CHAT_ACCESS_QUERY_BATCH = 512
 
 export const getUpdatesState = async (
   input: GetUpdatesStateInput,
@@ -30,6 +43,13 @@ export const getUpdatesState = async (
   if (input.date !== undefined && input.date <= 0n) {
     throw RealtimeRpcError.BadRequest()
   }
+
+  // The exclusive fence drains every durable writer that already holds the
+  // shared side, then commits immediately. Resource and access scans happen
+  // after it is released. If the lock or DB clock read fails, this RPC rejects
+  // and therefore cannot advance the client's checkpoint.
+  const scanStartedAt = await captureUpdateDiscoveryWatermark()
+  const scanStartDate = floorWireDate(scanStartedAt)
 
   const user = await UsersModel.getUserById(context.currentUserId)
   if (!user) {
@@ -48,7 +68,20 @@ export const getUpdatesState = async (
     },
   })
   const userSeq = Math.max(user.updateSeq ?? 0, latestUserUpdate?.seq ?? 0)
-  const nowEncoded = encodeDateStrict(new Date())
+
+  if (input.date !== undefined && input.date > scanStartDate) {
+    // A future cursor cannot be clamped and scanned from "now": that would
+    // silently skip history before the clamped date. Current Sync recognizes a
+    // lower date as an explicit account-repair checkpoint; older clients keep
+    // their monotonic cursor instead of accepting a lossy checkpoint and need
+    // their existing reset/account-repair flow. The lower date is the repair
+    // marker; no bucket work was discovered, so updatesFound stays false.
+    return {
+      date: scanStartDate,
+      updatesFound: false,
+      seq: userSeq,
+    }
+  }
 
   // An absent date requests a fresh checkpoint. Snapshot RPCs seed the resource
   // buckets independently, so bootstrap must not discover or replay old work.
@@ -61,12 +94,15 @@ export const getUpdatesState = async (
       pushed: 0,
     })
     return {
-      date: nowEncoded,
+      date: scanStartDate,
       updatesFound: false,
       seq: userSeq,
     }
   }
 
+  // Discovery is inclusive. The cursor has already been validated not to be
+  // newer than the scan-start watermark, so same-second work can be found on a
+  // subsequent scan even when this scan crosses a second boundary.
   const userLocalDate = decodeDate(input.date)
 
   // check latest changes of chats from this user's dialogs for changes compared to date
@@ -113,13 +149,16 @@ export const getUpdatesState = async (
       pushed: 0,
     })
     return {
-      date: nowEncoded > input.date ? nowEncoded : input.date,
+      date: scanStartDate,
       updatesFound: false,
       seq: userSeq,
     }
   }
-  let latestUpdateDate = new Date(latestUpdateTs)
-  let latestUpdateDateEncoded = encodeDateStrict(latestUpdateDate)
+
+  const durableSeqs = await getDurableSeqsByTarget(
+    chats.filter((chat) => chat.lastUpdateDate).map((chat) => chat.id),
+    spaces.filter((space) => space.lastUpdateDate).map((space) => space.id),
+  )
 
   const updatesToPush: Parameters<typeof RealtimeUpdates.pushToUser>[1] = []
 
@@ -135,7 +174,7 @@ export const getUpdatesState = async (
         chatHasNewUpdates: {
           chatId: BigInt(chat.id),
           // PTS should not be null here
-          updateSeq: chat.updateSeq ?? 0,
+          updateSeq: reconcileTargetSeq(UpdateBucket.Chat, chat.id, chat.updateSeq, durableSeqs),
           peerId: Encoders.peerFromChat(chat, {
             currentUserId: context.currentUserId,
           }),
@@ -157,14 +196,14 @@ export const getUpdatesState = async (
           // Zero is the existing "fetch authoritatively" sentinel. A changed
           // bucket must never disappear merely because its cached counter is
           // temporarily absent or being repaired.
-          updateSeq: space.updateSeq ?? 0,
+          updateSeq: reconcileTargetSeq(UpdateBucket.Space, space.id, space.updateSeq, durableSeqs),
         },
       },
     })
   }
 
   if (updatesToPush.length > 0) {
-    pushBoundedUpdateHints(context.currentUserId, updatesToPush)
+    await pushBoundedUpdateHints(context.currentUserId, updatesToPush)
   }
 
   logGetUpdatesStateTiming({
@@ -178,16 +217,74 @@ export const getUpdatesState = async (
   })
 
   return {
-    date: latestUpdateDateEncoded,
+    // This is a complete scan: every changed target was materialized and its
+    // hint was emitted before the checkpoint is returned. A fixed watermark
+    // makes an immediate inclusive follow-up converge without skipping a
+    // target that changed during either resource scan.
+    date: scanStartDate,
     updatesFound: true,
     seq: userSeq,
   }
 }
 
-const pushBoundedUpdateHints = (
+const floorWireDate = (date: Date): bigint => BigInt(Math.floor(date.getTime() / 1000))
+
+const reconcileTargetSeq = (
+  bucket: UpdateBucket,
+  entityId: number,
+  cachedSeq: number | null | undefined,
+  durableSeqs: Map<string, number>,
+): number => Math.max(cachedSeq ?? 0, durableSeqs.get(`${bucket}:${entityId}`) ?? 0)
+
+const getDurableSeqsByTarget = async (
+  chatIds: number[],
+  spaceIds: number[],
+): Promise<Map<string, number>> => {
+  const uniqueChatIds = Array.from(new Set(chatIds))
+  const uniqueSpaceIds = Array.from(new Set(spaceIds))
+  if (uniqueChatIds.length === 0 && uniqueSpaceIds.length === 0) {
+    return new Map()
+  }
+
+  const targets = [
+    ...uniqueChatIds.map((entityId) => ({ bucket: UpdateBucket.Chat, entityId })),
+    ...uniqueSpaceIds.map((entityId) => ({ bucket: UpdateBucket.Space, entityId })),
+  ]
+  const durableSeqs = new Map<string, number>()
+  for (let offset = 0; offset < targets.length; offset += MAX_CHAT_ACCESS_QUERY_BATCH) {
+    const batch = targets.slice(offset, offset + MAX_CHAT_ACCESS_QUERY_BATCH)
+    const batchChatIds = batch.filter((target) => target.bucket === UpdateBucket.Chat).map((target) => target.entityId)
+    const batchSpaceIds = batch.filter((target) => target.bucket === UpdateBucket.Space).map((target) => target.entityId)
+    const targetWhere = batchChatIds.length > 0 && batchSpaceIds.length > 0
+      ? or(
+          and(eq(updatesTable.bucket, UpdateBucket.Chat), inArray(updatesTable.entityId, batchChatIds)),
+          and(eq(updatesTable.bucket, UpdateBucket.Space), inArray(updatesTable.entityId, batchSpaceIds)),
+        )
+      : batchChatIds.length > 0
+        ? and(eq(updatesTable.bucket, UpdateBucket.Chat), inArray(updatesTable.entityId, batchChatIds))
+        : and(eq(updatesTable.bucket, UpdateBucket.Space), inArray(updatesTable.entityId, batchSpaceIds))
+
+    const rows = await db
+      .select({
+        bucket: updatesTable.bucket,
+        entityId: updatesTable.entityId,
+        maxSeq: sql<number>`max(${updatesTable.seq})`,
+      })
+      .from(updatesTable)
+      .where(targetWhere)
+      .groupBy(updatesTable.bucket, updatesTable.entityId)
+    for (const row of rows) {
+      durableSeqs.set(`${row.bucket}:${row.entityId}`, Number(row.maxSeq))
+    }
+  }
+
+  return durableSeqs
+}
+
+const pushBoundedUpdateHints = async (
   userId: number,
   updates: Parameters<typeof RealtimeUpdates.pushToUser>[1],
-): void => {
+): Promise<void> => {
   let offset = 0
   while (offset < updates.length) {
     let batch = updates.slice(offset, offset + MAX_UPDATE_HINTS_PER_BATCH)
@@ -199,7 +296,7 @@ const pushBoundedUpdateHints = (
     if (encodedBytes > MAX_UPDATE_HINT_BATCH_BYTES) {
       throw new RangeError("Realtime update hint exceeds the bounded batch size")
     }
-    RealtimeUpdates.pushToUser(userId, batch)
+    await RealtimeUpdates.pushToUser(userId, batch)
     offset += batch.length
   }
 }
@@ -227,15 +324,21 @@ const logGetUpdatesStateTiming = (timing: GetUpdatesStateTiming): void => {
 }
 
 const filterAccessibleChats = async (chats: DbChat[], userId: number): Promise<DbChat[]> => {
-  const accessible = Array.from<DbChat | undefined>({ length: chats.length })
+  const knownAccessibleChatIds = await findKnownAccessibleChatIds(chats, userId)
+  const chatsRequiringGuard = chats.filter((chat) => !knownAccessibleChatIds.has(chat.id))
+  if (chatsRequiringGuard.length === 0) {
+    return chats
+  }
+
+  const accessible = Array.from<DbChat | undefined>({ length: chatsRequiringGuard.length })
   let nextIndex = 0
-  const workerCount = Math.min(chats.length, MAX_CONCURRENT_CHAT_ACCESS_CHECKS)
+  const workerCount = Math.min(chatsRequiringGuard.length, MAX_CONCURRENT_CHAT_ACCESS_CHECKS)
 
   await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (nextIndex < chats.length) {
+    while (nextIndex < chatsRequiringGuard.length) {
       const index = nextIndex
       nextIndex += 1
-      const chat = chats[index]
+      const chat = chatsRequiringGuard[index]
       if (!chat) continue
       try {
         await AccessGuards.ensureChatAccess(chat, userId)
@@ -249,7 +352,85 @@ const filterAccessibleChats = async (chats: DbChat[], userId: number): Promise<D
     }
   }))
 
-  return accessible.filter((chat): chat is DbChat => chat !== undefined)
+  const guardedAccessibleIds = new Set(
+    accessible.filter((chat): chat is DbChat => chat !== undefined).map((chat) => chat.id),
+  )
+  return chats.filter((chat) => knownAccessibleChatIds.has(chat.id) || guardedAccessibleIds.has(chat.id))
+}
+
+const findKnownAccessibleChatIds = async (chats: DbChat[], userId: number): Promise<Set<number>> => {
+  const knownAccessibleChatIds = new Set<number>()
+  const publicSpaceIds = new Set<number>()
+  const grantChatIds: number[] = []
+
+  for (const chat of chats) {
+    // Linked subthreads can outlive membership in the dialog catalog. Their
+    // owning-space and inherited-root rules must pass the complete guard;
+    // retained direct/group grants alone are not sufficient authority.
+    if (chat.parentChatId != null) continue
+    if (chat.type === "private" && (chat.minUserId === userId || chat.maxUserId === userId)) {
+      // AccessGuards.ensureChatAccess returns immediately for a matching DM.
+      knownAccessibleChatIds.add(chat.id)
+    } else if (
+      chat.type === "thread" &&
+      chat.parentChatId == null &&
+      chat.spaceId != null &&
+      chat.publicThread
+    ) {
+      publicSpaceIds.add(chat.spaceId)
+    } else if (chat.type !== "private") {
+      grantChatIds.push(chat.id)
+    }
+  }
+
+  for (let offset = 0; offset < grantChatIds.length; offset += MAX_CHAT_ACCESS_QUERY_BATCH) {
+    const batchChatIds = grantChatIds.slice(offset, offset + MAX_CHAT_ACCESS_QUERY_BATCH)
+    const [directRows, groupRows] = await Promise.all([
+      db
+        .select({ chatId: chatParticipants.chatId })
+        .from(chatParticipants)
+        .where(and(inArray(chatParticipants.chatId, batchChatIds), eq(chatParticipants.userId, userId))),
+      db
+        .select({ chatId: chatParticipantGroups.chatId })
+        .from(chatParticipantGroups)
+        .innerJoin(userGroups, eq(chatParticipantGroups.groupId, userGroups.id))
+        .innerJoin(userGroupMembers, eq(chatParticipantGroups.groupId, userGroupMembers.groupId))
+        .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
+        .innerJoin(usersTable, eq(usersTable.id, userGroupMembers.userId))
+        .where(
+          and(
+            inArray(chatParticipantGroups.chatId, batchChatIds),
+            eq(userGroupMembers.userId, userId),
+            userNotDeleted(),
+          ),
+        ),
+    ])
+    for (const row of directRows) knownAccessibleChatIds.add(row.chatId)
+    for (const row of groupRows) knownAccessibleChatIds.add(row.chatId)
+  }
+
+  const publicSpaceIdList = Array.from(publicSpaceIds)
+  for (let offset = 0; offset < publicSpaceIdList.length; offset += MAX_CHAT_ACCESS_QUERY_BATCH) {
+    const batchSpaceIds = publicSpaceIdList.slice(offset, offset + MAX_CHAT_ACCESS_QUERY_BATCH)
+    const memberRows = await db
+      .select({ spaceId: members.spaceId })
+      .from(members)
+      .where(
+        and(
+          inArray(members.spaceId, batchSpaceIds),
+          eq(members.userId, userId),
+          eq(members.canAccessPublicChats, true),
+        ),
+      )
+    const accessibleSpaceIds = new Set(memberRows.map((row) => row.spaceId))
+    for (const chat of chats) {
+      if (chat.spaceId != null && accessibleSpaceIds.has(chat.spaceId) && chat.publicThread && chat.parentChatId == null) {
+        knownAccessibleChatIds.add(chat.id)
+      }
+    }
+  }
+
+  return knownAccessibleChatIds
 }
 
 const isExpectedAccessError = (error: unknown): boolean =>

@@ -3,6 +3,7 @@ import { UpdateBucket, updates, type DbUpdate } from "@in/server/db/schema/updat
 import type { Transaction } from "@in/server/db/types"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { acquireUpdateDiscoveryWriterFence } from "@in/server/modules/updates/updateDiscoveryBarrier"
 
 export const UpdatesModel = {
   build: buildServerUpdate,
@@ -61,8 +62,10 @@ export type UpdateSeqAndDate = {
 async function insertUpdate(tx: Transaction, input: InsertUpdateInput): Promise<InsertUpdateOutput> {
   const { update, entity, bucket } = input
 
+  // Hold the shared discovery fence through the caller's outer transaction.
+  // The paired watermark waits for this update to commit before advancing.
+  const date = await acquireUpdateDiscoveryWriterFence(tx)
   const seq = (entity.updateSeq ?? 0) + 1
-  const date = new Date()
 
   const updateRecord = UpdatesModel.build({
     update: update,

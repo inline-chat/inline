@@ -402,7 +402,12 @@ describe("messages.clearChatHistory", () => {
       { userId: owner.id, role: "owner" },
       { userId: admin.id, role: "admin" },
     ])
-    await addSpaceMembers(otherSpace.id, [{ userId: admin.id, role: "admin" }])
+    await addSpaceMembers(otherSpace.id, [
+      { userId: admin.id, role: "admin" },
+      // Owning-space membership is always required. This member inherits the
+      // target root before detach, but cannot access the new public root.
+      { userId: owner.id, canAccessPublicChats: false },
+    ])
 
     const parent = await testUtils.createChat(targetSpace.id, "Target Parent", "thread", true, owner.id)
     if (!parent) {
@@ -505,7 +510,10 @@ describe("messages.clearChatHistory", () => {
       { userId: admin.id, role: "admin" },
       { userId: member.id },
     ])
-    await addSpaceMembers(otherSpace.id, [{ userId: admin.id, role: "admin" }])
+    await addSpaceMembers(otherSpace.id, [
+      { userId: admin.id, role: "admin" },
+      { userId: owner.id, canAccessPublicChats: false },
+    ])
 
     const parent = await testUtils.createChat(targetSpace.id, "Nested Target Parent", "thread", true, owner.id)
     if (!parent) {
@@ -705,8 +713,9 @@ describe("messages.clearChatHistory", () => {
       owner.id,
       admin.id,
       member.id,
-      directParticipant.id,
     ].sort((a, b) => a - b))
+    // Retained direct rows never confer access without owning-space membership.
+    expect(userUpdates.some((update) => update.entityId === directParticipant.id)).toBe(false)
     for (const update of userUpdates) {
       const decrypted = UpdatesModel.decrypt(update)
       expect(decrypted.payload.update.oneofKind).toBe("userRemovedFromChat")
