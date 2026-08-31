@@ -53,6 +53,8 @@ final class ChatRowListViewModel {
   var rowCount: Int { rows.count }
   var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
   var canLoadNewerFromLocal: Bool { progressiveViewModel.canLoadNewerFromLocal }
+  var needsNewerHistoryRepair: Bool { progressiveViewModel.needsNewerHistoryRepair }
+  var historyCoverage: MessageHistoryCoverageProjection { progressiveViewModel.historyCoverage }
   var reversed: Bool { progressiveViewModel.reversed }
 
   // MARK: - Init
@@ -136,6 +138,16 @@ final class ChatRowListViewModel {
 
   func setAtBottom(_ atBottom: Bool) {
     progressiveViewModel.setAtBottom(atBottom)
+  }
+
+  func isCertifiedHistoryContinuation(
+    between firstMessageID: Int64,
+    and secondMessageID: Int64
+  ) -> Bool {
+    historyCoverage.isCertifiedContinuation(
+      between: firstMessageID,
+      and: secondMessageID
+    )
   }
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) -> UpdateKind {

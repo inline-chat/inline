@@ -95,7 +95,6 @@ class MessageListAppKit: NSViewController {
   private var heightPrecalcTask: Task<Void, Never>?
   private var mediaWarmupTask: Task<Void, Never>?
   private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
-  private var readAllTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
   private var avatarOverlaySyncInProgress = false
   private var avatarOverlaySyncPending = false
@@ -115,8 +114,8 @@ class MessageListAppKit: NSViewController {
   private var hasAnalyzedInitialMessages = false
   private var deferredTranslationTask: Task<Void, Never>?
   private var hasDeferredInitialTranslation = false
-  private var needsUnreadUpdateOnActive = false
-  private var didRunInitialUnreadSync = false
+  private var lastVisibleReadCandidateID: Int64?
+  private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
   private var appActivityObserverId: UUID?
 
   init(
@@ -159,8 +158,7 @@ class MessageListAppKit: NSViewController {
     appActivityObserverId = AppActivityMonitor.shared.addObserver { [weak self] state in
       guard let self else { return }
       guard state == .active else { return }
-      guard needsUnreadUpdateOnActive else { return }
-      needsUnreadUpdateOnActive = false
+      lastVisibleReadCandidateID = nil
       updateUnreadIfNeeded()
     }
 
@@ -1097,6 +1095,14 @@ class MessageListAppKit: NSViewController {
     guard !earlier.message.isServiceMessage, !later.message.isServiceMessage else { return false }
     guard earlier.message.fromId == later.message.fromId else { return false }
 
+    let earlierID = earlier.message.messageId
+    let laterID = later.message.messageId
+    if earlierID > 0, laterID > 0,
+       !chatRows.isCertifiedHistoryContinuation(between: earlierID, and: laterID)
+    {
+      return false
+    }
+
     let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
     guard gapSeconds <= 300 else { return false }
 
@@ -1742,7 +1748,10 @@ class MessageListAppKit: NSViewController {
       let shouldShow = !isAtBottom // && messages.count > 0
       scrollToBottomButton.setVisibility(shouldShow)
       if isAtBottom {
-        markMessagesSeen()
+        updateUnreadIfNeeded()
+        if chatRows.historyCoverage.isAtCertifiedLiveEnd {
+          markMessagesSeen()
+        }
       } else {
         updateUnreadBadgeVisibility()
       }
@@ -1912,11 +1921,6 @@ class MessageListAppKit: NSViewController {
       }
 
       scrollToBottom(animated: false)
-      markMessagesSeen()
-      if !didRunInitialUnreadSync {
-        didRunInitialUnreadSync = true
-        updateUnreadIfNeeded()
-      }
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
         guard let self else { return }
@@ -1964,6 +1968,10 @@ class MessageListAppKit: NSViewController {
     updateScrollViewInsets()
     updateToolbar()
     scheduleAvatarOverlaySync()
+    DispatchQueue.main.async { [weak self] in
+      self?.lastVisibleReadCandidateID = nil
+      self?.updateUnreadIfNeeded()
+    }
   }
 
   override func viewWillDisappear() {
@@ -2257,7 +2265,7 @@ class MessageListAppKit: NSViewController {
           requestRemoteOlderBatch(beforeMessageId: boundaryMessageIdBeforeLoad)
 
         case .newer:
-          guard let boundaryMessageIdBeforeLoad, !chatRows.canLoadNewerFromLocal else { return }
+          guard let boundaryMessageIdBeforeLoad, chatRows.needsNewerHistoryRepair else { return }
           requestRemoteNewerBatch(afterMessageId: boundaryMessageIdBeforeLoad)
       }
     }
@@ -3150,40 +3158,48 @@ class MessageListAppKit: NSViewController {
 
   // MARK: - Unread
 
-  func readAll() {
-    let peerId = peerId
-    let chatId = chatId
+  func updateUnreadIfNeeded() {
+    guard AppActivityMonitor.shared.isActive else { return }
+    guard isViewLoaded,
+          let window = view.window,
+          window.isVisible,
+          !view.isHiddenOrHasHiddenAncestor
+    else { return }
 
-    readAllTask?.cancel()
-    readAllTask = Task {
-      await Task.yield()
-      guard !Task.isCancelled else { return }
-      UnreadManager.shared.readAll(peerId, chatId: chatId)
+    let coverage = chatRows.historyCoverage
+    if coverage != lastVisibleReadCoverage {
+      lastVisibleReadCoverage = coverage
+      lastVisibleReadCandidateID = nil
     }
+    guard let highestVisibleIncomingID = highestVisibleIncomingMessageID() else { return }
+    guard highestVisibleIncomingID > (lastVisibleReadCandidateID ?? 0) else { return }
+    lastVisibleReadCandidateID = highestVisibleIncomingID
+    UnreadManager.shared.readVisible(
+      peerId: peerId,
+      chatId: chatId,
+      highestVisibleIncomingID: highestVisibleIncomingID
+    )
+    if isAtBottom, coverage.isAtCertifiedLiveEnd { markMessagesSeen() }
   }
 
-  func updateUnreadIfNeeded() {
-    guard AppActivityMonitor.shared.isActive else {
-      needsUnreadUpdateOnActive = true
-      return
-    }
-
-    // Quicker check
-    if isAtBottom {
-      readAll()
-      markMessagesSeen()
-      return
-    }
-
+  private func highestVisibleIncomingMessageID() -> Int64? {
     let visibleRect = tableView.visibleRect
     let visibleRange = tableView.rows(in: visibleRect)
-    let maxRow = tableView.numberOfRows - 1
-    let isLastRowVisible = visibleRange.location + visibleRange.length >= maxRow
+    guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return nil }
 
-    if isLastRowVisible {
-      readAll()
-      markMessagesSeen()
-    }
+    let upperBound = min(NSMaxRange(visibleRange), tableView.numberOfRows)
+    return (visibleRange.location ..< upperBound).compactMap { row -> Int64? in
+      guard case .message? = rowItem(at: row),
+            tableView.rect(ofRow: row).intersects(visibleRect),
+            let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false),
+            !cell.isHiddenOrHasHiddenAncestor,
+            let message = message(forRow: row),
+            !message.message.isServiceMessage,
+            message.message.messageId > 0,
+            message.message.out != true
+      else { return nil }
+      return message.message.messageId
+    }.max()
   }
 
   private func latestMessageId() -> Int64? {
@@ -3204,7 +3220,7 @@ class MessageListAppKit: NSViewController {
 
   private func handleIncomingMessages(_ newMessages: [FullMessage]) {
     guard !newMessages.isEmpty else { return }
-    if isAtBottom {
+    if isAtBottom, chatRows.historyCoverage.isAtCertifiedLiveEnd {
       markMessagesSeen()
       return
     }
@@ -3672,7 +3688,7 @@ extension MessageListAppKit {
     targetScrollTask = nil
     guard request.messageId > 0, !isDisposed else { return }
     if messages.contains(where: { $0.message.messageId == request.messageId }) {
-      highlightMessage(request.messageId)
+      scrollToMessage(request.messageId, shouldHighlight: true)
       return
     }
 
@@ -3703,7 +3719,14 @@ extension MessageListAppKit {
         scheduleMessageHoverRefresh()
         await Task.yield()
         guard !Task.isCancelled, !isDisposed else { return }
-        highlightMessage(request.messageId)
+        guard let displayedMessageID = nearestDisplayedMessageID(to: request.messageId) else {
+          ToastCenter.shared.showError("Could not load that message")
+          return
+        }
+        scrollToMessage(
+          displayedMessageID,
+          shouldHighlight: displayedMessageID == request.messageId
+        )
       } catch is CancellationError {
         return
       } catch {
@@ -3714,7 +3737,14 @@ extension MessageListAppKit {
     }
   }
 
-  private func highlightMessage(_ msgId: Int64) {
+  private func nearestDisplayedMessageID(to coordinate: Int64) -> Int64? {
+    let messageIDs = messages.lazy.map(\.message.messageId).filter { $0 > 0 }
+    if messageIDs.contains(coordinate) { return coordinate }
+    return messageIDs.filter { $0 > coordinate }.min()
+      ?? messageIDs.filter { $0 < coordinate }.max()
+  }
+
+  private func scrollToMessage(_ msgId: Int64, shouldHighlight: Bool) {
     let revision = targetScrollRevision
     guard let messageIndex = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
       return
@@ -3764,8 +3794,11 @@ extension MessageListAppKit {
           guard let self, !isDisposed, targetScrollRevision == revision else { return }
           // Clean up
           isProgrammaticScroll = false
+          updateUnreadIfNeeded()
 
-          if let currentRow = chatRows.rowIndex(forMessageStableId: stableId) {
+          if shouldHighlight,
+             let currentRow = chatRows.rowIndex(forMessageStableId: stableId)
+          {
             highlightMessage(at: currentRow)
           }
         }
@@ -3780,8 +3813,11 @@ extension MessageListAppKit {
         guard let self, !isDisposed, targetScrollRevision == revision else { return }
         // Clean up
         isProgrammaticScroll = false
+        updateUnreadIfNeeded()
 
-        if let currentRow = chatRows.rowIndex(forMessageStableId: stableId) {
+        if shouldHighlight,
+           let currentRow = chatRows.rowIndex(forMessageStableId: stableId)
+        {
           highlightMessage(at: currentRow)
         }
       }
@@ -3936,8 +3972,6 @@ extension MessageListAppKit {
         await InlineTinyThumbnailPrewarmer.cancel(warmup)
       }
     }
-    readAllTask?.cancel()
-    readAllTask = nil
     deferredTranslationTask?.cancel()
     deferredTranslationTask = nil
     toolbarDisplayModeObservation?.invalidate()

@@ -5,6 +5,45 @@ import Testing
 
 @Suite("MessagesSectionedViewModel Ordering Tests")
 struct MessagesSectionedViewModelOrderingTests {
+  @Test("sectioned projection exposes the immutable history coverage snapshot")
+  @MainActor
+  func projectsHistoryCoverage() {
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let peer = Peer.user(id: 9_000)
+    let older = makeSectionTestFullMessage(
+      messageId: 10,
+      globalId: 10,
+      date: date,
+      peerUserId: peer.id
+    )
+    let newer = makeSectionTestFullMessage(
+      messageId: 20,
+      globalId: 20,
+      date: date.addingTimeInterval(1),
+      peerUserId: peer.id
+    )
+    let coverage = MessageHistoryCoverageProjection(
+      messages: [older, newer],
+      holes: [MessageHistoryHole(chatId: 1, lowerId: 11, upperId: 19)],
+      olderCandidateMessageID: nil,
+      newerCandidateMessageID: nil
+    )
+    let viewModel = MessagesSectionedViewModel(
+      peer: peer,
+      reversed: true,
+      initialState: .init(
+        messages: [newer, older],
+        loadedWindowMetadata: .init(
+          messages: [newer, older],
+          holes: [MessageHistoryHole(chatId: 1, lowerId: 11, upperId: 19)]
+        )
+      )
+    )
+
+    #expect(viewModel.historyCoverage == coverage)
+    #expect(!viewModel.isCertifiedHistoryContinuation(between: 10, and: 20))
+  }
+
   @Test("collapse boundary is applied before initial sections and can be cleared")
   @MainActor
   func collapseBoundaryProjectsVisibleMessages() {
@@ -22,10 +61,7 @@ struct MessagesSectionedViewModelOrderingTests {
     )
     let initialState = MessagesProgressiveViewModel.InitialState(
       messages: [old, boundary, visible, pending],
-      oldestLoadedMessageId: 1,
-      newestLoadedMessageId: 3,
-      canLoadOlderFromLocal: false,
-      canLoadNewerFromLocal: false
+      loadedWindowMetadata: testSectionLoadedWindowMetadata(messages: [old, boundary, visible, pending])
     )
 
     let viewModel = MessagesSectionedViewModel(
@@ -98,10 +134,7 @@ struct MessagesSectionedViewModelOrderingTests {
     )
     let initialState = MessagesProgressiveViewModel.InitialState(
       messages: [existing],
-      oldestLoadedMessageId: existing.message.messageId,
-      newestLoadedMessageId: existing.message.messageId,
-      canLoadOlderFromLocal: false,
-      canLoadNewerFromLocal: false
+      loadedWindowMetadata: testSectionLoadedWindowMetadata(messages: [existing])
     )
     let viewModel = MessagesSectionedViewModel(
       peer: peer,
@@ -140,10 +173,7 @@ struct MessagesSectionedViewModelOrderingTests {
       reversed: true,
       initialState: .init(
         messages: [],
-        oldestLoadedMessageId: nil,
-        newestLoadedMessageId: nil,
-        canLoadOlderFromLocal: false,
-        canLoadNewerFromLocal: false
+        loadedWindowMetadata: testSectionLoadedWindowMetadata()
       )
     )
 
@@ -185,10 +215,7 @@ struct MessagesSectionedViewModelOrderingTests {
       reversed: true,
       initialState: .init(
         messages: [existing],
-        oldestLoadedMessageId: existing.message.messageId,
-        newestLoadedMessageId: existing.message.messageId,
-        canLoadOlderFromLocal: false,
-        canLoadNewerFromLocal: false
+        loadedWindowMetadata: testSectionLoadedWindowMetadata(messages: [existing])
       )
     )
 
@@ -230,10 +257,7 @@ struct MessagesSectionedViewModelOrderingTests {
       reversed: true,
       initialState: .init(
         messages: [clearedMessage],
-        oldestLoadedMessageId: clearedMessage.message.messageId,
-        newestLoadedMessageId: clearedMessage.message.messageId,
-        canLoadOlderFromLocal: false,
-        canLoadNewerFromLocal: false
+        loadedWindowMetadata: testSectionLoadedWindowMetadata(messages: [clearedMessage])
       ),
       collapsedMaxId: clearedMessage.message.messageId
     )
@@ -269,6 +293,21 @@ struct MessagesSectionedViewModelOrderingTests {
     #expect(updatedMessageIds == [pendingMessage.id])
     #expect(animated == true)
   }
+}
+
+private func testSectionLoadedWindowMetadata(
+  messages: [FullMessage] = []
+) -> MessagesProgressiveViewModel.LoadedWindowMetadata {
+  .init(
+    messages: messages,
+    holes: [
+      MessageHistoryHole(
+        chatId: 0,
+        lowerId: 1,
+        upperId: MessageHistoryHole.positiveMessageIDMax
+      ),
+    ]
+  )
 }
 
 private func makeSectionTestFullMessage(

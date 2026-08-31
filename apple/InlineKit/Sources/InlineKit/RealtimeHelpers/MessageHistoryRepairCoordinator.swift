@@ -39,12 +39,18 @@ public final class MessageHistoryRepairCoordinator {
     limit: Int,
     database: AppDatabase = .shared
   ) async throws -> Outcome {
-    guard anchorID > 0 else { throw RepairError.invalidResponse }
+    guard 1 ... MessageHistoryHole.positiveMessageIDMax ~= anchorID else {
+      throw RepairError.invalidResponse
+    }
     let windowLimit = Int32(clamping: max(60, limit))
     let cached = try await database.reader.read { db in
       let chat = try Chat.getByPeerId(db: db, peerId: peer)
       let window = try Self.aroundCache(db, chat: chat, anchorID: anchorID, limit: Int(windowLimit))
-      return (hasChat: chat != nil, hasTarget: window.hasTarget, needsHistory: window.needsHistory)
+      return (
+        hasChat: chat != nil,
+        hasTarget: window.hasTarget,
+        needsHistory: window.needsHistory
+      )
     }
     try Task.checkCancellation()
     guard cached.needsHistory else { return .notNeeded }
@@ -71,19 +77,22 @@ public final class MessageHistoryRepairCoordinator {
       guard let rpcResult, case let .getChatHistory(result) = rpcResult else {
         throw RepairError.invalidResponse
       }
-      return result.messages.contains(where: { $0.id == anchorID }) ? .loaded : .empty
+      // AROUND is a coordinate query, not an exact-message lookup. The anchor
+      // may have been deleted while the returned neighbors still establish a
+      // useful and durably certified window around that coordinate.
+      return result.messages.isEmpty ? .empty : .loaded
     } catch {
       try Task.checkCancellation()
-      // Preserve offline jumps to a cached message even if its surrounding
-      // history cannot be repaired. Never claim new coverage for this fallback.
-      let hasCachedTarget = try await database.reader.read { db in
+      // Preserve offline jumps to an exact cached message, and also accept a
+      // concurrently repaired deleted-coordinate window. Never claim coverage
+      // merely from materialized neighboring rows.
+      let hasUsableCache = try await database.reader.read { db in
         guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return false }
-        return try Message
-          .filter(Message.Columns.chatId == chat.id && Message.Columns.messageId == anchorID)
-          .fetchCount(db) > 0
+        let window = try Self.aroundCache(db, chat: chat, anchorID: anchorID, limit: Int(windowLimit))
+        return window.hasTarget || (window.hasWindow && !window.needsHistory)
       }
       try Task.checkCancellation()
-      guard hasCachedTarget else { throw error }
+      guard hasUsableCache else { throw error }
       return .notNeeded
     }
   }
@@ -93,13 +102,13 @@ public final class MessageHistoryRepairCoordinator {
     chat: Chat?,
     anchorID: Int64,
     limit: Int
-  ) throws -> (hasTarget: Bool, needsHistory: Bool) {
-    guard let chat else { return (false, true) }
+  ) throws -> (hasTarget: Bool, hasWindow: Bool, needsHistory: Bool) {
+    guard let chat else { return (false, false, true) }
     let query = Message.filter(Message.Columns.chatId == chat.id)
-    guard try query.filter(Message.Columns.messageId == anchorID).fetchCount(db) > 0 else { return (false, true) }
+    let hasTarget = try query.filter(Message.Columns.messageId == anchorID).fetchCount(db) > 0
 
     let beforeLimit = max(60, limit) / 2
-    let afterLimit = max(60, limit) - beforeLimit - 1
+    let afterLimit = max(60, limit) - beforeLimit - (hasTarget ? 1 : 0)
     let older = try query
       .filter(Message.Columns.messageId > 0 && Message.Columns.messageId < anchorID)
       .select(Message.Columns.messageId)
@@ -113,12 +122,46 @@ public final class MessageHistoryRepairCoordinator {
       .limit(afterLimit)
       .asRequest(of: Int64.self).fetchAll(db)
 
+    let hasWindow = hasTarget || !older.isEmpty || !newer.isEmpty
+    if !hasTarget {
+      // A missing row is a valid deleted-message coordinate only when durable
+      // coverage connects its nearest materialized neighbors through it.
+      let lower = older.first ?? anchorID
+      // Prefer the first newer row for deleted-target presentation. When none
+      // is materialized, only certified tail coverage proves that older is the
+      // correct fallback rather than a premature cached choice.
+      let upper = newer.first ?? MessageHistoryHole.positiveMessageIDMax
+      return (
+        false,
+        hasWindow,
+        try MessageHistoryCoverageStore.intersects(
+          db,
+          chatId: chat.id,
+          lowerId: min(lower, anchorID),
+          upperId: max(upper, anchorID)
+        )
+      )
+    }
+
     // Sparse search/reply rows do not prove that their neighbors are loaded.
-    // If a side has too few rows, include its known boundary in the coverage check.
+    // A short side must be certified all the way to its absolute boundary.
     let lower = older.count == beforeLimit ? (older.last ?? anchorID) : 1
-    let knownTail = max(anchorID, max(chat.lastMsgId ?? anchorID, newer.last ?? anchorID))
-    let upper = newer.count == afterLimit ? (newer.last ?? anchorID) : knownTail
-    return (true, try MessageHistoryCoverageStore.intersects(db, chatId: chat.id, lowerId: lower, upperId: upper))
+    // Chat.lastMsgId is a presentation summary, not proof that no newer
+    // history exists. A short newer side is complete only when durable
+    // coverage reaches the positive message-ID boundary.
+    let upper = newer.count == afterLimit
+      ? (newer.last ?? anchorID)
+      : MessageHistoryHole.positiveMessageIDMax
+    return (
+      true,
+      true,
+      try MessageHistoryCoverageStore.intersects(
+        db,
+        chatId: chat.id,
+        lowerId: lower,
+        upperId: upper
+      )
+    )
   }
 
   public func loadOlder(peer: Peer, beforeID: Int64) async throws -> Outcome {

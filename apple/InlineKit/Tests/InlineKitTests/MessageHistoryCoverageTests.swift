@@ -13,7 +13,7 @@ struct MessageHistoryCoverageTests {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
 
-    try await queue.write { db in
+    try await queue.write { (db: Database) throws in
       try Chat(
         id: 7,
         date: Date(timeIntervalSince1970: 1),
@@ -46,7 +46,7 @@ struct MessageHistoryCoverageTests {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
 
-    try await queue.write { db in
+    try await queue.write { (db: Database) throws in
       try User(id: 1, email: "history@example.com", firstName: "History").insert(db)
       try Chat(
         id: 7,
@@ -119,7 +119,7 @@ struct MessageHistoryCoverageTests {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
 
-    try await queue.write { db in
+    try await queue.write { (db: Database) throws in
       try User(id: 1, email: "history@example.com", firstName: "History").insert(db)
       try Chat(
         id: 7,
@@ -150,12 +150,12 @@ struct MessageHistoryCoverageTests {
     let context = transaction.context
 
     #expect(throws: TransactionExecutionError.self) {
-      try queue.write { db in
+      try queue.write { (db: Database) throws in
         try GetChatHistoryTransaction.apply(invalidResponse, context: context, db: db)
       }
     }
 
-    let (messageCount, holes) = try await queue.read { db in
+    let (messageCount, holes) = try await queue.read { (db: Database) throws in
       (
         try Message.fetchCount(db),
         try MessageHistoryCoverageStore.holes(db, chatId: 7)
@@ -190,7 +190,7 @@ struct MessageHistoryCoverageTests {
     ) == nil)
   }
 
-  @Test("non-empty latest and around pages certify only returned extrema")
+  @Test("latest certifies its tail and around coverage includes a deleted anchor")
   func nonEmptyCoverageExtrema() {
     let latest = GetChatHistoryTransaction(
       peer: .thread(id: 7),
@@ -206,7 +206,20 @@ struct MessageHistoryCoverageTests {
       anchorID: 50,
       limit: 100
     )
-    #expect(GetChatHistoryTransaction.provenCoverage(context: around.context, messageIDs: [60, 40]) == 40 ... 60)
+    #expect(GetChatHistoryTransaction.provenCoverage(context: around.context, messageIDs: [60, 40]) ==
+      1 ... MessageHistoryHole.positiveMessageIDMax)
+    #expect(GetChatHistoryTransaction.provenCoverage(context: around.context, messageIDs: [40, 45]) ==
+      1 ... MessageHistoryHole.positiveMessageIDMax)
+    #expect(GetChatHistoryTransaction.provenCoverage(context: around.context, messageIDs: [55, 60]) ==
+      1 ... MessageHistoryHole.positiveMessageIDMax)
+
+    let fullWindow = GetChatHistoryTransaction(
+      peer: .thread(id: 7), mode: .historyModeAround, anchorID: 50, limit: 4
+    )
+    #expect(GetChatHistoryTransaction.provenCoverage(context: fullWindow.context, messageIDs: [40, 45, 55, 60]) ==
+      40 ... 60)
+    #expect(GetChatHistoryTransaction.provenCoverage(context: fullWindow.context, messageIDs: []) ==
+      1 ... MessageHistoryHole.positiveMessageIDMax)
   }
 
   @Test("overlapping and adjacent persisted holes normalize during subtraction")
@@ -214,7 +227,7 @@ struct MessageHistoryCoverageTests {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
 
-    try await queue.write { db in
+    try await queue.write { (db: Database) throws in
       try Chat(
         id: 7,
         date: Date(timeIntervalSince1970: 1),
@@ -240,7 +253,7 @@ struct MessageHistoryCoverageTests {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
 
-    try await queue.write { db in
+    try await queue.write { (db: Database) throws in
       try Chat(
         id: 7,
         date: Date(timeIntervalSince1970: 1),

@@ -3,6 +3,165 @@ import Foundation
 import GRDB
 import Logger
 
+/// Immutable history-continuity evidence for one loaded transcript window.
+/// Message rows are materialization only; every certified edge or adjacency is
+/// derived from the persisted history-hole intervals.
+public struct MessageHistoryCoverageProjection: Sendable, Equatable {
+  public struct UnknownAdjacencyBoundary: Sendable, Equatable, Hashable {
+    public let lowerMessageID: Int64
+    public let upperMessageID: Int64
+
+    fileprivate init(lowerMessageID: Int64, upperMessageID: Int64) {
+      self.lowerMessageID = lowerMessageID
+      self.upperMessageID = upperMessageID
+    }
+  }
+
+  public static let unknown = MessageHistoryCoverageProjection(
+    messages: [],
+    holes: [
+      MessageHistoryHole(
+        chatId: 0,
+        lowerId: 1,
+        upperId: MessageHistoryHole.positiveMessageIDMax
+      ),
+    ],
+    olderCandidateMessageID: nil,
+    newerCandidateMessageID: nil
+  )
+
+  /// Loaded positive-ID neighbors separated by at least one persisted hole.
+  public let unknownAdjacencyBoundaries: [UnknownAdjacencyBoundary]
+  /// The oldest row reaches its nearest local candidate, or absolute start,
+  /// without crossing a persisted hole.
+  public let hasCertifiedOlderEdge: Bool
+  /// The newest row reaches its nearest local candidate, or absolute tail,
+  /// without crossing a persisted hole.
+  public let hasCertifiedNewerEdge: Bool
+  /// No newer local candidate exists and coverage reaches the positive tail.
+  public let isAtCertifiedLiveEnd: Bool
+
+  private let unknownRanges: [ClosedRange<Int64>]
+
+  init(
+    messages: [FullMessage],
+    holes: [MessageHistoryHole],
+    olderCandidateMessageID: Int64?,
+    newerCandidateMessageID: Int64?
+  ) {
+    let unknownRanges = Self.normalizedRanges(holes)
+    self.unknownRanges = unknownRanges
+
+    let positiveMessageIDs = messages.lazy.map(\.message.messageId).filter { $0 > 0 }
+    let messageIDs = Array(Set(positiveMessageIDs)).sorted()
+    unknownAdjacencyBoundaries = zip(messageIDs, messageIDs.dropFirst()).compactMap { pair in
+      let (lowerID, upperID) = pair
+      guard Self.intersects(unknownRanges, lowerID: lowerID, upperID: upperID) else { return nil }
+      return UnknownAdjacencyBoundary(lowerMessageID: lowerID, upperMessageID: upperID)
+    }
+
+    guard let oldestMessageID = messageIDs.first, let newestMessageID = messageIDs.last else {
+      hasCertifiedOlderEdge = unknownRanges.isEmpty && olderCandidateMessageID == nil
+      hasCertifiedNewerEdge = unknownRanges.isEmpty && newerCandidateMessageID == nil
+      isAtCertifiedLiveEnd = hasCertifiedNewerEdge
+      return
+    }
+
+    let olderBoundaryID = olderCandidateMessageID ?? 1
+    hasCertifiedOlderEdge = !Self.intersects(
+      unknownRanges,
+      lowerID: min(olderBoundaryID, oldestMessageID),
+      upperID: max(olderBoundaryID, oldestMessageID)
+    )
+
+    let newerBoundaryID = newerCandidateMessageID ?? MessageHistoryHole.positiveMessageIDMax
+    hasCertifiedNewerEdge = !Self.intersects(
+      unknownRanges,
+      lowerID: min(newestMessageID, newerBoundaryID),
+      upperID: max(newestMessageID, newerBoundaryID)
+    )
+    isAtCertifiedLiveEnd = newerCandidateMessageID == nil && hasCertifiedNewerEdge
+  }
+
+  /// Returns whether two materialized rows belong to one certified history
+  /// interval. Optimistic rows do not represent persisted history coordinates.
+  public func isCertifiedContinuation(
+    between firstMessageID: Int64,
+    and secondMessageID: Int64
+  ) -> Bool {
+    guard firstMessageID > 0, secondMessageID > 0, firstMessageID != secondMessageID else { return true }
+    return !Self.intersects(
+      unknownRanges,
+      lowerID: min(firstMessageID, secondMessageID),
+      upperID: max(firstMessageID, secondMessageID)
+    )
+  }
+
+  /// Returns the highest concrete read marker that can advance from the
+  /// authoritative dialog frontier without crossing unknown history.
+  ///
+  /// A hole beginning immediately after (or containing) the current frontier
+  /// rejects the advance. A later hole caps it at the last certified ID before
+  /// that hole. Optimistic IDs never become server read coordinates.
+  public func certifiedReadMaxID(
+    after currentReadMaxID: Int64,
+    through highestVisibleIncomingID: Int64
+  ) -> Int64? {
+    let frontier = max(0, currentReadMaxID)
+    guard highestVisibleIncomingID > frontier, highestVisibleIncomingID > 0 else { return nil }
+
+    guard let firstUnknownRange = unknownRanges.first(where: {
+      $0.upperBound > frontier && $0.lowerBound <= highestVisibleIncomingID
+    }) else {
+      return highestVisibleIncomingID
+    }
+
+    let cappedReadMaxID = firstUnknownRange.lowerBound - 1
+    return cappedReadMaxID > frontier ? cappedReadMaxID : nil
+  }
+
+  private static func normalizedRanges(_ holes: [MessageHistoryHole]) -> [ClosedRange<Int64>] {
+    var ranges: [ClosedRange<Int64>] = []
+    for hole in holes.sorted(by: { $0.lowerId < $1.lowerId }) {
+      let lower = max(1, hole.lowerId)
+      let upper = min(MessageHistoryHole.positiveMessageIDMax, hole.upperId)
+      guard lower <= upper else { continue }
+      guard let previous = ranges.last else {
+        ranges.append(lower ... upper)
+        continue
+      }
+
+      let touchesPrevious = previous.upperBound == MessageHistoryHole.positiveMessageIDMax
+        || lower <= previous.upperBound + 1
+      if touchesPrevious {
+        ranges[ranges.count - 1] = previous.lowerBound ... max(previous.upperBound, upper)
+      } else {
+        ranges.append(lower ... upper)
+      }
+    }
+    return ranges
+  }
+
+  private static func intersects(
+    _ ranges: [ClosedRange<Int64>],
+    lowerID: Int64,
+    upperID: Int64
+  ) -> Bool {
+    var lowerBound = 0
+    var upperBound = ranges.count
+    while lowerBound < upperBound {
+      let middle = lowerBound + (upperBound - lowerBound) / 2
+      if ranges[middle].upperBound < lowerID {
+        lowerBound = middle + 1
+      } else {
+        upperBound = middle
+      }
+    }
+    guard lowerBound < ranges.count else { return false }
+    return ranges[lowerBound].lowerBound <= upperID
+  }
+}
+
 /// todos
 /// - listen to changes of count to first id - last id to detect new messages in between
 /// - do a refetch on update instead of manually checking things (90/10)
@@ -11,7 +170,7 @@ import Logger
 @MainActor
 public class MessagesProgressiveViewModel {
   // props
-  public var peer: Peer
+  public let peer: Peer
   public var reversed: Bool = false
 
   // state
@@ -31,44 +190,33 @@ public class MessagesProgressiveViewModel {
   public private(set) var newestLoadedMessageId: Int64?
   public private(set) var canLoadOlderFromLocal: Bool = false
   public private(set) var canLoadNewerFromLocal: Bool = false
+  public private(set) var historyCoverage: MessageHistoryCoverageProjection = .unknown
+  public var needsNewerHistoryRepair: Bool {
+    !canLoadNewerFromLocal && !historyCoverage.isAtCertifiedLiveEnd
+  }
   public private(set) var threadAnchor: FullMessage?
 
   public struct InitialState: Sendable {
     public let messages: [FullMessage]
     public let threadAnchor: FullMessage?
-    public let oldestLoadedMessageId: Int64?
-    public let newestLoadedMessageId: Int64?
-    public let canLoadOlderFromLocal: Bool
-    public let canLoadNewerFromLocal: Bool
+    public let loadedWindowMetadata: LoadedWindowMetadata
+
+    public var oldestLoadedMessageId: Int64? { loadedWindowMetadata.oldestLoadedMessageId }
+    public var newestLoadedMessageId: Int64? { loadedWindowMetadata.newestLoadedMessageId }
+    public var canLoadOlderFromLocal: Bool { loadedWindowMetadata.canLoadOlderFromLocal }
+    public var canLoadNewerFromLocal: Bool { loadedWindowMetadata.canLoadNewerFromLocal }
+    public var historyCoverage: MessageHistoryCoverageProjection { loadedWindowMetadata.historyCoverage }
 
     public init(
       messages: [FullMessage],
       threadAnchor: FullMessage? = nil,
-      oldestLoadedMessageId: Int64?,
-      newestLoadedMessageId: Int64?,
-      canLoadOlderFromLocal: Bool,
-      canLoadNewerFromLocal: Bool
+      loadedWindowMetadata: LoadedWindowMetadata
     ) {
       self.messages = messages
       self.threadAnchor = threadAnchor
-      self.oldestLoadedMessageId = oldestLoadedMessageId
-      self.newestLoadedMessageId = newestLoadedMessageId
-      self.canLoadOlderFromLocal = canLoadOlderFromLocal
-      self.canLoadNewerFromLocal = canLoadNewerFromLocal
+      self.loadedWindowMetadata = loadedWindowMetadata
     }
   }
-
-  struct MessageGapRange: Equatable {
-    let startMessageId: Int64
-    let endMessageId: Int64
-
-    init(startMessageId: Int64, endMessageId: Int64) {
-      self.startMessageId = min(startMessageId, endMessageId)
-      self.endMessageId = max(startMessageId, endMessageId)
-    }
-  }
-
-  private(set) var gapRanges: [MessageGapRange] = []
 
   // internals
   // was 80
@@ -86,6 +234,7 @@ public class MessagesProgressiveViewModel {
   private let db = AppDatabase.shared
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
+  private var loadedWindowMetadataGeneration: UInt64 = 0
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
@@ -128,7 +277,8 @@ public class MessagesProgressiveViewModel {
     newestLoadedMessageId = state.newestLoadedMessageId
     canLoadOlderFromLocal = state.canLoadOlderFromLocal
     canLoadNewerFromLocal = state.canLoadNewerFromLocal
-    atBottom = !state.canLoadNewerFromLocal
+    historyCoverage = state.historyCoverage
+    atBottom = state.historyCoverage.isAtCertifiedLiveEnd
   }
 
   private func loadThreadAnchorFromLocalIfNeeded() {
@@ -175,6 +325,7 @@ public class MessagesProgressiveViewModel {
   }
 
   public func loadBatch(at direction: MessagesLoadDirection, publish: Bool = true) {
+    if direction == .newer, historyCoverage.isAtCertifiedLiveEnd { return }
     let request = buildAdditionalLoadRequest(direction: direction)
     log.trace(
       "Loading batch direction=\(request.direction.logLabel) limit=\(request.limit) prepend=\(request.prepend)"
@@ -192,6 +343,7 @@ public class MessagesProgressiveViewModel {
     publish: Bool = true,
     allowUnavailableLocal: Bool = false
   ) async -> Bool {
+    if direction == .newer, historyCoverage.isAtCertifiedLiveEnd { return false }
     if !allowUnavailableLocal {
       if direction == .older, !canLoadOlderFromLocal { return false }
       if direction == .newer, !canLoadNewerFromLocal { return false }
@@ -205,7 +357,7 @@ public class MessagesProgressiveViewModel {
   }
 
   public func setAtBottom(_ atBottom: Bool) {
-    self.atBottom = atBottom && !canLoadNewerFromLocal
+    self.atBottom = atBottom && historyCoverage.isAtCertifiedLiveEnd
   }
 
   @discardableResult
@@ -213,19 +365,6 @@ public class MessagesProgressiveViewModel {
     let previousAnchor = threadAnchor
     loadThreadAnchorFromLocalIfNeeded()
     return previousAnchor != threadAnchor
-  }
-
-  func setGapRanges(_ ranges: [MessageGapRange]) {
-    gapRanges = Self.mergedGapRanges(ranges)
-  }
-
-  func addGapRange(startMessageId: Int64, endMessageId: Int64) {
-    let range = MessageGapRange(startMessageId: startMessageId, endMessageId: endMessageId)
-    gapRanges = Self.mergedGapRanges(gapRanges + [range])
-  }
-
-  func clearGapRanges() {
-    gapRanges.removeAll(keepingCapacity: true)
   }
 
   public enum MessagesChangeSet {
@@ -359,6 +498,12 @@ public class MessagesProgressiveViewModel {
             // latest messages
             loadMessages(.limit(initialLimit))
             // TODO: if new messages were added, we should animate adding them
+          } else if !historyCoverage.isAtCertifiedLiveEnd {
+            // A prepared around-target window can be disconnected from the
+            // live tail. The deferred latest repair publishes this reload;
+            // merge that repaired tail with the prepared island instead of
+            // querying the old date range again or discarding the target.
+            mergeLatestWindowFromLocal()
           } else {
             // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
             // check if actually anything changed then post update
@@ -395,10 +540,54 @@ public class MessagesProgressiveViewModel {
     let newestMessageId: Int64
   }
 
-  struct MessageSortKey: Hashable {
+  /// Value metadata prepared alongside a transcript window. App preloaders can
+  /// install it without making the first render query the database.
+  public struct LoadedWindowMetadata: Sendable, Equatable {
+    public let oldestLoadedMessageId: Int64?
+    public let newestLoadedMessageId: Int64?
+    public let canLoadOlderFromLocal: Bool
+    public let canLoadNewerFromLocal: Bool
+    public let historyCoverage: MessageHistoryCoverageProjection
+
+    /// Derives all pagination authority from the same immutable set of rows,
+    /// persisted holes, and nearest local candidates. Callers cannot inject
+    /// booleans that disagree with the coverage projection.
+    public init(
+      messages: [FullMessage],
+      holes: [MessageHistoryHole],
+      olderCandidateMessageID: Int64? = nil,
+      newerCandidateMessageID: Int64? = nil
+    ) {
+      let positiveMessages = messages.filter { $0.message.messageId > 0 }
+      let bounds = MessagesProgressiveViewModel.loadedWindowBounds(for: positiveMessages)
+      let coverage = MessageHistoryCoverageProjection(
+        messages: positiveMessages,
+        holes: holes,
+        olderCandidateMessageID: olderCandidateMessageID,
+        newerCandidateMessageID: newerCandidateMessageID
+      )
+
+      oldestLoadedMessageId = bounds?.oldestMessageId
+      newestLoadedMessageId = bounds?.newestMessageId
+      canLoadOlderFromLocal = bounds != nil
+        && olderCandidateMessageID != nil
+        && coverage.hasCertifiedOlderEdge
+      canLoadNewerFromLocal = bounds != nil
+        && newerCandidateMessageID != nil
+        && coverage.hasCertifiedNewerEdge
+      historyCoverage = coverage
+    }
+  }
+
+  struct MessageSortKey: Hashable, Sendable {
     let date: Date
     let globalId: Int64
     let messageId: Int64
+  }
+
+  struct LoadedWindowMetadataRequest: Sendable {
+    let generation: UInt64
+    let fingerprint: [MessageSortKey]
   }
 
   nonisolated static func messageKey(for message: FullMessage) -> MessageSortKey {
@@ -481,7 +670,27 @@ public class MessagesProgressiveViewModel {
     batch.filter { existingByID[$0.id] == nil }
   }
 
-  static func loadedWindowBounds(for messages: [FullMessage]) -> LoadedWindowBounds? {
+  nonisolated static func mergingLatestMessages(
+    existing: [FullMessage],
+    latest: [FullMessage],
+    reversed: Bool
+  ) -> [FullMessage] {
+    guard !latest.isEmpty else { return existing }
+
+    var merged = existing
+    var indicesByID = Dictionary(uniqueKeysWithValues: existing.enumerated().map { ($0.element.id, $0.offset) })
+    for message in latest {
+      if let index = indicesByID[message.id] {
+        merged[index] = message
+      } else {
+        indicesByID[message.id] = merged.count
+        merged.append(message)
+      }
+    }
+    return stableSortedMessages(merged, reversed: reversed)
+  }
+
+  nonisolated static func loadedWindowBounds(for messages: [FullMessage]) -> LoadedWindowBounds? {
     guard let first = messages.first else { return nil }
 
     var oldest = first
@@ -504,14 +713,20 @@ public class MessagesProgressiveViewModel {
     )
   }
 
-  private static func isOlderByDateAndMessageId(_ lhs: FullMessage, than rhs: FullMessage) -> Bool {
+  private nonisolated static func isOlderByDateAndMessageId(
+    _ lhs: FullMessage,
+    than rhs: FullMessage
+  ) -> Bool {
     if lhs.message.date != rhs.message.date {
       return lhs.message.date < rhs.message.date
     }
     return lhs.message.messageId < rhs.message.messageId
   }
 
-  private static func isNewerByDateAndMessageId(_ lhs: FullMessage, than rhs: FullMessage) -> Bool {
+  private nonisolated static func isNewerByDateAndMessageId(
+    _ lhs: FullMessage,
+    than rhs: FullMessage
+  ) -> Bool {
     if lhs.message.date != rhs.message.date {
       return lhs.message.date > rhs.message.date
     }
@@ -544,39 +759,6 @@ public class MessagesProgressiveViewModel {
     return (minDate: lowestDate, maxDate: highestDate)
   }
 
-  static func mergedGapRanges(_ ranges: [MessageGapRange]) -> [MessageGapRange] {
-    guard !ranges.isEmpty else { return [] }
-
-    let sorted = ranges.sorted { lhs, rhs in
-      if lhs.startMessageId != rhs.startMessageId {
-        return lhs.startMessageId < rhs.startMessageId
-      }
-      return lhs.endMessageId < rhs.endMessageId
-    }
-
-    var merged: [MessageGapRange] = []
-    merged.reserveCapacity(sorted.count)
-
-    for range in sorted {
-      guard let last = merged.last else {
-        merged.append(range)
-        continue
-      }
-
-      let touchesOrOverlaps = last.endMessageId == .max || range.startMessageId <= (last.endMessageId + 1)
-      if touchesOrOverlaps {
-        merged[merged.count - 1] = MessageGapRange(
-          startMessageId: last.startMessageId,
-          endMessageId: max(last.endMessageId, range.endMessageId)
-        )
-      } else {
-        merged.append(range)
-      }
-    }
-
-    return merged
-  }
-
   // TODO: make it O(1) instead of O(n)
   private func updateRange() {
     let range = Self.dateRange(for: messages)
@@ -585,99 +767,148 @@ public class MessagesProgressiveViewModel {
   }
 
   private func updateLoadedWindowMetadata() {
-    guard let bounds = Self.loadedWindowBounds(for: messages) else {
-      oldestLoadedMessageId = nil
-      newestLoadedMessageId = nil
-      canLoadOlderFromLocal = false
-      canLoadNewerFromLocal = false
-      return
-    }
-
-    oldestLoadedMessageId = bounds.oldestMessageId
-    newestLoadedMessageId = bounds.newestMessageId
+    let request = beginLoadedWindowMetadataRequest()
 
     do {
-      let availability = try db.reader.read { db -> (Bool, Bool) in
-        try Self.loadedWindowAvailability(db, peer: peer, bounds: bounds)
+      let metadata = try db.reader.read { db in
+        try Self.loadedWindowMetadata(db, peer: peer, messages: messages)
       }
-
-      canLoadOlderFromLocal = availability.0
-      canLoadNewerFromLocal = availability.1
+      _ = applyLoadedWindowMetadata(metadata, for: request)
     } catch {
+      guard isCurrentLoadedWindowMetadataRequest(request) else { return }
       Log.shared.error("Failed to update loaded window metadata", error: error)
-      canLoadOlderFromLocal = false
-      canLoadNewerFromLocal = false
+      _ = applyLoadedWindowMetadata(Self.unknownLoadedWindowMetadata(for: messages), for: request)
     }
   }
 
   private func updateLoadedWindowMetadataAsync() async {
-    guard let bounds = Self.loadedWindowBounds(for: messages) else {
-      oldestLoadedMessageId = nil
-      newestLoadedMessageId = nil
-      canLoadOlderFromLocal = false
-      canLoadNewerFromLocal = false
-      return
-    }
-
-    oldestLoadedMessageId = bounds.oldestMessageId
-    newestLoadedMessageId = bounds.newestMessageId
+    let request = beginLoadedWindowMetadataRequest()
+    let messages = messages
 
     do {
-      let availability = try await Self.loadedWindowAvailability(
+      let metadata = try await Self.loadedWindowMetadata(
         db: db,
         peer: peer,
-        bounds: bounds
+        messages: messages
       )
       guard !Task.isCancelled else { return }
-
-      canLoadOlderFromLocal = availability.0
-      canLoadNewerFromLocal = availability.1
+      _ = applyLoadedWindowMetadata(metadata, for: request)
+    } catch is CancellationError {
+      return
     } catch {
+      guard !Task.isCancelled, isCurrentLoadedWindowMetadataRequest(request) else { return }
       Log.shared.error("Failed to update loaded window metadata", error: error)
-      canLoadOlderFromLocal = false
-      canLoadNewerFromLocal = false
+      _ = applyLoadedWindowMetadata(Self.unknownLoadedWindowMetadata(for: messages), for: request)
     }
+  }
+
+  func beginLoadedWindowMetadataRequest() -> LoadedWindowMetadataRequest {
+    loadedWindowMetadataGeneration &+= 1
+    return LoadedWindowMetadataRequest(
+      generation: loadedWindowMetadataGeneration,
+      fingerprint: Self.loadedWindowFingerprint(messages)
+    )
+  }
+
+  func isCurrentLoadedWindowMetadataRequest(_ request: LoadedWindowMetadataRequest) -> Bool {
+    request.generation == loadedWindowMetadataGeneration
+      && request.fingerprint == Self.loadedWindowFingerprint(messages)
+  }
+
+  @discardableResult
+  func applyLoadedWindowMetadata(
+    _ metadata: LoadedWindowMetadata,
+    for request: LoadedWindowMetadataRequest
+  ) -> Bool {
+    guard isCurrentLoadedWindowMetadataRequest(request) else { return false }
+    oldestLoadedMessageId = metadata.oldestLoadedMessageId
+    newestLoadedMessageId = metadata.newestLoadedMessageId
+    canLoadOlderFromLocal = metadata.canLoadOlderFromLocal
+    canLoadNewerFromLocal = metadata.canLoadNewerFromLocal
+    historyCoverage = metadata.historyCoverage
+    return true
+  }
+
+  nonisolated static func loadedWindowFingerprint(_ messages: [FullMessage]) -> [MessageSortKey] {
+    messages.map { messageKey(for: $0) }
+  }
+
+  nonisolated static func unknownLoadedWindowMetadata(
+    for messages: [FullMessage]
+  ) -> LoadedWindowMetadata {
+    return LoadedWindowMetadata(
+      messages: messages,
+      holes: [
+        MessageHistoryHole(
+          chatId: 0,
+          lowerId: 1,
+          upperId: MessageHistoryHole.positiveMessageIDMax
+        ),
+      ]
+    )
+  }
+
+  /// Returns a local window centered on a numeric server coordinate. If the
+  /// exact row was deleted, nearest neighbors are accepted only when persisted
+  /// coverage proves the interval through that coordinate.
+  public nonisolated static func localWindowAroundCoordinate(
+    _ db: Database,
+    peer: Peer,
+    messageID: Int64,
+    limit: Int
+  ) throws -> [FullMessage]? {
+    guard 1 ... MessageHistoryHole.positiveMessageIDMax ~= messageID else { return nil }
+
+    let query = baseQuery(for: peer)
+    let totalWindow = max(60, limit)
+    let beforeLimit = max(20, totalWindow / 2)
+    let exact = try query
+      .filter(Column("messageId") == messageID)
+      .fetchOne(db)
+    let afterLimit = max(20, totalWindow - beforeLimit - (exact == nil ? 0 : 1))
+
+    let older = try query
+      .filter(Column("messageId") > 0 && Column("messageId") < messageID)
+      .order(Column("messageId").desc)
+      .limit(beforeLimit)
+      .fetchAll(db)
+    let newer = try query
+      .filter(Column("messageId") > messageID)
+      .order(Column("messageId").asc)
+      .limit(afterLimit)
+      .fetchAll(db)
+
+    if exact == nil {
+      guard let chatID = try historyChatID(for: peer, db: db) else { return nil }
+      let lowerID = older.first?.message.messageId ?? messageID
+      let upperID = newer.first?.message.messageId ?? MessageHistoryHole.positiveMessageIDMax
+      let crossesUnknownHistory = try MessageHistoryCoverageStore.intersects(
+        db,
+        chatId: chatID,
+        lowerId: min(lowerID, messageID),
+        upperId: max(upperID, messageID)
+      )
+      guard !crossesUnknownHistory else { return nil }
+    }
+
+    var window = Array(older.reversed())
+    if let exact { window.append(exact) }
+    window.append(contentsOf: newer)
+    return stableSortedMessages(window, reversed: false)
   }
 
   @discardableResult
   public func loadLocalWindowAroundMessage(messageId: Int64, publish: Bool = true) -> Bool {
     guard messageId > 0 else { return false }
 
-    let totalWindow = max(60, initialLimit)
-    let beforeLimit = max(20, totalWindow / 2)
-    let afterLimit = max(20, totalWindow - beforeLimit - 1)
-
     do {
-      let aroundBatch = try db.reader.read { db -> [FullMessage]? in
-        guard let target = try baseQuery()
-          .filter(Column("messageId") == messageId)
-          .fetchOne(db)
-        else {
-          return nil
-        }
-
-        let targetDate = target.message.date
-        let targetMessageId = target.message.messageId
-
-        let olderOrTarget = try baseQuery()
-          .filter(
-            (Column("date") < targetDate)
-              || ((Column("date") == targetDate) && (Column("messageId") <= targetMessageId))
-          )
-          .order(Column("date").desc, Column("messageId").desc)
-          .limit(beforeLimit + 1)
-          .fetchAll(db)
-
-        let newer = try baseQuery()
-          .filter(
-            (Column("date") > targetDate)
-              || ((Column("date") == targetDate) && (Column("messageId") > targetMessageId))
-          )
-          .order(Column("date").asc, Column("messageId").asc)
-          .limit(afterLimit)
-          .fetchAll(db)
-
-        return olderOrTarget.reversed() + newer
+      let aroundBatch = try db.reader.read { db in
+        try Self.localWindowAroundCoordinate(
+          db,
+          peer: peer,
+          messageID: messageId,
+          limit: initialLimit
+        )
       }
 
       guard var aroundBatch else {
@@ -692,7 +923,7 @@ public class MessagesProgressiveViewModel {
       updateRange()
       updateLoadedWindowMetadata()
 
-      return messages.contains { $0.message.messageId == messageId }
+      return !messages.isEmpty
     } catch {
       Log.shared.error("Failed to load local around-target window", error: error)
       return false
@@ -701,6 +932,17 @@ public class MessagesProgressiveViewModel {
 
   private func refetchCurrentRange() {
     loadMessages(.preserveRange)
+  }
+
+  private func mergeLatestWindowFromLocal() {
+    do {
+      let latest = try fetchMessages(loadMode: .limit(initialLimit), previousCount: messages.count)
+      messages = Self.mergingLatestMessages(existing: messages, latest: latest, reversed: reversed)
+      updateRange()
+      updateLoadedWindowMetadata()
+    } catch {
+      Log.shared.error("Failed to merge repaired latest message window", error: error)
+    }
   }
 
   private enum LoadMode {
@@ -879,22 +1121,46 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  private nonisolated static func loadedWindowAvailability(
+  private nonisolated static func loadedWindowMetadata(
     db appDatabase: AppDatabase,
     peer: Peer,
-    bounds: LoadedWindowBounds
-  ) async throws -> (Bool, Bool) {
+    messages: [FullMessage]
+  ) async throws -> LoadedWindowMetadata {
     try await appDatabase.reader.read { db in
-      try loadedWindowAvailability(db, peer: peer, bounds: bounds)
+      try loadedWindowMetadata(db, peer: peer, messages: messages)
     }
   }
 
-  private nonisolated static func loadedWindowAvailability(
+  /// Reads local candidates and persisted holes inside the caller's database
+  /// snapshot, then derives the complete window metadata value.
+  public nonisolated static func loadedWindowMetadata(
     _ db: Database,
     peer: Peer,
-    bounds: LoadedWindowBounds
-  ) throws -> (Bool, Bool) {
+    messages: [FullMessage]
+  ) throws -> LoadedWindowMetadata {
+    let positiveMessages = messages.filter { $0.message.messageId > 0 }
+    let bounds = loadedWindowBounds(for: positiveMessages)
+    guard let chatID = try historyChatID(for: peer, db: db) else {
+      return unknownLoadedWindowMetadata(for: messages)
+    }
+
+    let holes = try MessageHistoryCoverageStore.holes(db, chatId: chatID)
+    guard let bounds else {
+      let localCandidate = try baseQuery(for: peer)
+        .filter(Column("messageId") > 0)
+        .limit(1)
+        .fetchOne(db)?
+        .message.messageId
+      return LoadedWindowMetadata(
+        messages: messages,
+        holes: holes,
+        olderCandidateMessageID: localCandidate,
+        newerCandidateMessageID: localCandidate
+      )
+    }
+
     let olderCandidate = try baseQuery(for: peer)
+      .filter(Column("messageId") > 0)
       .filter(
         (Column("date") < bounds.oldestDate)
           || ((Column("date") == bounds.oldestDate) && (Column("messageId") < bounds.oldestMessageId))
@@ -903,6 +1169,7 @@ public class MessagesProgressiveViewModel {
       .limit(1)
       .fetchOne(db)
     let newerCandidate = try baseQuery(for: peer)
+      .filter(Column("messageId") > 0)
       .filter(
         (Column("date") > bounds.newestDate)
           || ((Column("date") == bounds.newestDate) && (Column("messageId") > bounds.newestMessageId))
@@ -911,22 +1178,12 @@ public class MessagesProgressiveViewModel {
       .limit(1)
       .fetchOne(db)
 
-    guard let chatID = try historyChatID(for: peer, db: db) else {
-      return (false, false)
-    }
-    let olderAvailable = try candidateIsCertified(
-      olderCandidate?.message.messageId,
-      through: bounds.oldestMessageId,
-      chatID: chatID,
-      db: db
+    return LoadedWindowMetadata(
+      messages: messages,
+      holes: holes,
+      olderCandidateMessageID: olderCandidate?.message.messageId,
+      newerCandidateMessageID: newerCandidate?.message.messageId
     )
-    let newerAvailable = try candidateIsCertified(
-      newerCandidate?.message.messageId,
-      through: bounds.newestMessageId,
-      chatID: chatID,
-      db: db
-    )
-    return (olderAvailable, newerAvailable)
   }
 
   private nonisolated static func historyChatID(for peer: Peer, db: Database) throws -> Int64? {
@@ -938,21 +1195,6 @@ public class MessagesProgressiveViewModel {
           .fetchOne(db)?
           .id
     }
-  }
-
-  private nonisolated static func candidateIsCertified(
-    _ candidateID: Int64?,
-    through referenceID: Int64,
-    chatID: Int64,
-    db: Database
-  ) throws -> Bool {
-    guard let candidateID, candidateID > 0, referenceID > 0 else { return false }
-    return try !MessageHistoryCoverageStore.intersects(
-      db,
-      chatId: chatID,
-      lowerId: min(candidateID, referenceID),
-      upperId: max(candidateID, referenceID)
-    )
   }
 
   private func loadModeLogLabel(_ loadMode: LoadMode) -> String {

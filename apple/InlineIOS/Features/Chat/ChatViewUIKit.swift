@@ -862,9 +862,6 @@ struct ChatViewUIKit: UIViewRepresentable {
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
       view.focusMessage(focusMessageID, requestRevision: focusRequestRevision)
-
-      // Mark messages as read when the interactive chat appears.
-      UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
     }
 
     return view

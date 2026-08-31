@@ -164,6 +164,10 @@ final class MessagesCollectionView: UICollectionView {
       coordinator.attachAvatarOverlay(over: self, parent: findViewController())
       coordinator.syncAvatarOverlay(animate: false)
       syncVisibleBubbleGradients()
+      DispatchQueue.main.async { [weak self] in
+        self?.coordinator.resetVisibleReadCandidate()
+        self?.coordinator.updateUnreadIfNeeded()
+      }
     }
   }
 
@@ -258,7 +262,20 @@ final class MessagesCollectionView: UICollectionView {
           return
         }
         pendingScrollLoadTask = nil
-        resolvePendingMessageScroll()
+        guard let displayedMessageID = coordinator.nearestDisplayedMessageID(to: messageID),
+              resolvePendingMessageScroll(
+                displayedMessageID: displayedMessageID,
+                shouldHighlight: displayedMessageID == messageID
+              )
+        else {
+          pendingScrollMessageID = nil
+          ToastManager.shared.showToast(
+            "Could not load that message",
+            type: .error,
+            systemImage: "exclamationmark.triangle.fill"
+          )
+          return
+        }
       } catch is CancellationError {
         return
       } catch {
@@ -284,24 +301,37 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   @discardableResult
-  fileprivate func resolvePendingMessageScroll() -> Bool {
-    guard pendingScrollLoadTask == nil, let messageID = pendingScrollMessageID,
-          let indexPath = findIndexPath(
-            forMessageId: messageID,
-            chatId: chatId,
-            includeThreadAnchor: false
-          ),
-          isValidIndexPath(indexPath)
+  fileprivate func resolvePendingMessageScroll(
+    displayedMessageID: Int64? = nil,
+    shouldHighlight: Bool = true
+  ) -> Bool {
+    guard pendingScrollLoadTask == nil, let requestedMessageID = pendingScrollMessageID else { return false }
+    let displayedMessageID = displayedMessageID ?? requestedMessageID
+    guard let indexPath = findIndexPath(
+      forMessageId: displayedMessageID,
+      chatId: chatId,
+      includeThreadAnchor: false
+    ),
+      isValidIndexPath(indexPath)
     else { return false }
 
     pendingScrollMessageID = nil
     pendingScrollLoadTask?.cancel()
     pendingScrollLoadTask = nil
+    for cell in visibleCells {
+      (cell as? MessageCollectionViewCell)?.clearHighlight()
+    }
     scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+    guard shouldHighlight else { return true }
+
     let revision = messageFocusRevision
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
       guard let self, messageFocusRevision == revision,
-            let currentIndexPath = findIndexPath(forMessageId: messageID, chatId: chatId, includeThreadAnchor: false)
+            let currentIndexPath = findIndexPath(
+              forMessageId: displayedMessageID,
+              chatId: chatId,
+              includeThreadAnchor: false
+            )
       else { return }
       for cell in visibleCells {
         (cell as? MessageCollectionViewCell)?.clearHighlight()
@@ -856,6 +886,19 @@ final class MessagesCollectionView: UICollectionView {
       name: Notification.Name("ScrollToRepliedMessage"),
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(applicationDidBecomeActive),
+      name: UIApplication.didBecomeActiveNotification,
+      object: nil
+    )
+  }
+
+  @objc private func applicationDidBecomeActive() {
+    DispatchQueue.main.async { [weak self] in
+      self?.coordinator.resetVisibleReadCandidate()
+      self?.coordinator.updateUnreadIfNeeded()
+    }
   }
 
   var isKeyboardVisible: Bool = false
@@ -1062,6 +1105,8 @@ private extension MessagesCollectionView {
     private var v2GeometryAnimator: UIViewPropertyAnimator?
     private var deferredContextMenuUpdatedMessageIDs = Set<Int64>()
     private var deferredContextMenuUpdateAnimated = false
+    private var lastVisibleReadCandidateID: Int64?
+    private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
 
     private struct MessageGroupInfo {
       let ownerItem: MessageListItem
@@ -1473,6 +1518,13 @@ private extension MessagesCollectionView {
       olderLoadTask?.cancel()
       newerLoadTask?.cancel()
       return viewModel.loadLocalWindowAroundMessage(messageId: messageID)
+    }
+
+    func nearestDisplayedMessageID(to coordinate: Int64) -> Int64? {
+      let messageIDs = messages.lazy.map(\.message.messageId).filter { $0 > 0 }
+      if messageIDs.contains(coordinate) { return coordinate }
+      return messageIDs.filter { $0 > coordinate }.min()
+        ?? messageIDs.filter { $0 < coordinate }.max()
     }
 
     private static func cell(
@@ -2688,6 +2740,14 @@ private extension MessagesCollectionView {
       guard earlier.message.fromId == later.message.fromId else { return false }
       guard groupCalendar.isDate(earlier.message.date, inSameDayAs: later.message.date) else { return false }
 
+      let earlierID = earlier.message.messageId
+      let laterID = later.message.messageId
+      if earlierID > 0, laterID > 0,
+         !viewModel.isCertifiedHistoryContinuation(between: earlierID, and: laterID)
+      {
+        return false
+      }
+
       let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
       return gapSeconds >= 0 && gapSeconds <= 300
     }
@@ -2758,6 +2818,7 @@ private extension MessagesCollectionView {
         // Kick-off the auto-hide timer on first load as well (after layout pass)
         DispatchQueue.main.async {
           self?.scheduleHideDateSeparators()
+          self?.updateUnreadIfNeeded()
         }
       }
 
@@ -3394,17 +3455,55 @@ private extension MessagesCollectionView {
       applyUpdatedMessages(messageIDs, animated: animated)
     }
 
+    func resetVisibleReadCandidate() {
+      lastVisibleReadCandidateID = nil
+    }
+
     func updateUnreadIfNeeded() {
       guard !isPreview else { return }
       // Only mark as read when the chat is actually on-screen and app is in foreground.
       guard let collectionView = currentCollectionView,
             let window = collectionView.window,
+            collectionView.isDescendant(of: window),
+            !collectionView.isHidden,
+            collectionView.alpha > 0.01,
             window.windowScene?.activationState == .foregroundActive,
             UIApplication.shared.applicationState == .active
       else {
         return
       }
-      UnreadManager.shared.readAll(peerId, chatId: chatId)
+      let coverage = viewModel.historyCoverage
+      if coverage != lastVisibleReadCoverage {
+        lastVisibleReadCoverage = coverage
+        lastVisibleReadCandidateID = nil
+      }
+      guard let highestVisibleIncomingID = highestVisibleIncomingMessageID(in: collectionView) else { return }
+      guard highestVisibleIncomingID > (lastVisibleReadCandidateID ?? 0) else { return }
+      lastVisibleReadCandidateID = highestVisibleIncomingID
+      UnreadManager.shared.readVisible(
+        peerId: peerId,
+        chatId: chatId,
+        highestVisibleIncomingID: highestVisibleIncomingID
+      )
+    }
+
+    private func highestVisibleIncomingMessageID(in collectionView: UICollectionView) -> Int64? {
+      let visibleRect = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+      guard !visibleRect.isEmpty, !visibleRect.isNull else { return nil }
+
+      return collectionView.indexPathsForVisibleItems.compactMap { indexPath -> Int64? in
+        guard let cell = collectionView.cellForItem(at: indexPath),
+              !cell.isHidden,
+              cell.alpha > 0.01,
+              cell.frame.intersects(visibleRect),
+              case .message? = item(at: indexPath),
+              let message = message(at: indexPath),
+              !message.message.isServiceMessage,
+              message.message.messageId > 0,
+              message.message.out != true
+        else { return nil }
+        return message.message.messageId
+      }.max()
     }
 
     private func latestMessageId() -> Int64? {
@@ -3422,7 +3521,7 @@ private extension MessagesCollectionView {
 
     private func handleIncomingMessages() {
       guard let latestId = latestMessageId() else { return }
-      if isAtBottomForUnread {
+      if isAtBottomForUnread, viewModel.historyCoverage.isAtCertifiedLiveEnd {
         markMessagesSeen()
         return
       }
@@ -4599,6 +4698,7 @@ private extension MessagesCollectionView {
       if !decelerate {
         scheduleHideDateSeparators()
         scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_drag_end")
+        updateUnreadIfNeeded()
       }
     }
 
@@ -4606,11 +4706,13 @@ private extension MessagesCollectionView {
       isUserScrollInEffect = false
       scheduleHideDateSeparators()
       scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_deceleration_end")
+      updateUnreadIfNeeded()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
       scheduleHideDateSeparators()
       scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_animation_end")
+      updateUnreadIfNeeded()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -4633,7 +4735,7 @@ private extension MessagesCollectionView {
       isAtBottomForUnread = isAtBottom
       viewModel.setAtBottom(isAtBottom)
 
-      if isAtBottom {
+      if isAtBottom, viewModel.historyCoverage.isAtCertifiedLiveEnd {
         markMessagesSeen()
       }
 
@@ -4660,12 +4762,13 @@ private extension MessagesCollectionView {
 
     private func loadNewerMessagesIfNeeded() {
       guard newerLoadTask == nil, let newestID = viewModel.newestLoadedMessageId else { return }
-      if !viewModel.canLoadNewerFromLocal,
+      guard viewModel.canLoadNewerFromLocal || viewModel.needsNewerHistoryRepair else { return }
+      let needsRemote = viewModel.needsNewerHistoryRepair
+      if needsRemote,
          let attempt = lastNewerAttempt, attempt.messageID == newestID,
          Date().timeIntervalSince(attempt.date) < 2 { return }
-      lastNewerAttempt = (newestID, Date())
+      if needsRemote { lastNewerAttempt = (newestID, Date()) }
       let peer = peerId
-      let needsRemote = !viewModel.canLoadNewerFromLocal
       newerLoadTask = Task { @MainActor [weak self] in
         defer { self?.newerLoadTask = nil }
         do {
