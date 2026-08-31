@@ -1,4 +1,4 @@
-import { members, spaces, spaceJoinBlocks, users } from "@in/server/db/schema"
+import { members, spaces, spaceJoinBlocks, userNotDeleted, users } from "@in/server/db/schema"
 import { chatParticipants, chats } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
 import { userGroupMembers, userGroups } from "@in/server/db/schema/userGroups"
@@ -9,7 +9,6 @@ import { DeleteMemberInput, Update } from "@inline-chat/protocol/core"
 import { isValidSpaceId } from "@in/server/utils/validate"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { Log } from "@in/server/utils/log"
-import { getUpdateGroupForSpace } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Effect } from "effect"
 import { SpaceIdInvalidError, SpaceNotExistsError } from "@in/server/functions/_errors"
@@ -20,14 +19,14 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { db } from "@in/server/db"
 import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
 import { and, eq, inArray } from "drizzle-orm"
-import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
-import { finishGridMemberAccess } from "@in/server/modules/grid/accessLifecycle"
+import { publishGridMemberAccessRevoked } from "@in/server/modules/grid/accessLifecycle"
 import {
   removeGridMemberPresenceInTransaction,
   type GridPresenceRemovalState,
 } from "@in/server/modules/grid/roomLifecycle"
-import { connectionManager } from "@in/server/ws/connections"
+import { deactivateCommittedSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
+import { notifyGridChanged } from "@in/server/modules/grid/realtime"
 import type { Transaction } from "@in/server/db/types"
 import {
   getEffectiveChatAccessUserIds,
@@ -69,7 +68,7 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
 
     // Membership and Grid media authority are one durable state transition.
     // Provider revocation is inserted into the outbox before this commits.
-    const { gridRemovalState, persisted, accessUpdates } = yield* Effect.tryPromise({
+    const { gridRemovalState, persisted, accessUpdates, remainingMemberUserIds, removedMemberId } = yield* Effect.tryPromise({
       try: () => removeMemberAndGridPresence(spaceId, userId, context.currentUserId, input.blockJoin),
       catch: (error) =>
         error instanceof MemberNotExistsError
@@ -78,29 +77,44 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
             ? error
             : new Error("removeMemberAndGridPresence failed"),
     })
-    AccessGuardsCache.resetSpaceMember(spaceId, userId)
-    connectionManager.unsubscribeUserFromSpace(userId, spaceId)
-
-    yield* Effect.tryPromise({
-      try: () => finishGridMemberAccess(gridRemovalState, spaceId, userId),
-      catch: (error) => (error instanceof Error ? error : new Error("finishGridMemberAccess failed")),
-    })
-
-    AccessGuardsCache.resetForUser(userId)
+    yield* Effect.promise(() =>
+      deactivateCommittedSpaceMembership({ spaceId, userId, memberId: removedMemberId }, () => {
+        // These functions queue their socket events synchronously, before their
+        // returned promises settle. Never add an await before this eviction:
+        // the lifecycle helper still owns the membership/re-add boundary here.
+        void publishGridMemberAccessRevoked(spaceId, userId)
+        void RealtimeUpdates.pushToUser(userId, [immediateMemberEviction(spaceId, userId)]).catch((error: unknown) => {
+          log.warn("Failed to publish committed member eviction", { spaceId, userId, error })
+        })
+        return undefined
+      }).catch((error: unknown) => {
+        log.warn("Failed to verify committed member-removal side effects", { spaceId, userId, error })
+        return false
+      }),
+    )
+    yield* Effect.promise(() => notifyGridChanged(gridRemovalState))
 
     // Push updates
     const { updates } = yield* Effect.promise(() =>
-      pushUpdatesForSpace({ spaceId, userId, currentUserId: context.currentUserId, persisted }),
+      pushUpdatesForSpace({
+        spaceId,
+        userId,
+        currentUserId: context.currentUserId,
+        persisted,
+        remainingMemberUserIds,
+      }),
     )
     for (const accessUpdate of accessUpdates) {
-      RealtimeUpdates.pushToUser(userId, [{
+      void RealtimeUpdates.pushToUser(userId, [{
         seq: accessUpdate.update.seq,
         date: encodeDateStrict(accessUpdate.update.date),
         update: {
           oneofKind: "userRemovedFromChat",
           userRemovedFromChat: { chatId: BigInt(accessUpdate.chatId) },
         },
-      }])
+      }]).catch((error: unknown) => {
+        log.warn("Failed to publish committed chat-access removal", { spaceId, userId, error })
+      })
     }
 
     // Return result
@@ -118,6 +132,8 @@ async function removeMemberAndGridPresence(
   gridRemovalState: GridPresenceRemovalState
   persisted: UpdateSeqAndDate
   accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
+  remainingMemberUserIds: number[]
+  removedMemberId: number
 }> {
   return db.transaction(async (tx) => {
     // Grid mutations use the process-wide advisory lock as their owner. Take
@@ -133,7 +149,7 @@ async function removeMemberAndGridPresence(
     await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update").limit(1)
 
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
-    if (!space) {
+    if (!space || space.deleted !== null) {
       throw new RealtimeRpcError(RealtimeRpcError.Code.SPACE_ID_INVALID, "Space not found", 404)
     }
 
@@ -161,7 +177,8 @@ async function removeMemberAndGridPresence(
       .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
       .returning({ id: members.id })
 
-    if (removed.length === 0) throw new MemberNotExistsError()
+    const removedMember = removed[0]
+    if (!removedMember) throw new MemberNotExistsError()
 
     if (space.isPublic || blockJoin) {
       await tx
@@ -223,7 +240,18 @@ async function removeMemberAndGridPresence(
       chatId,
       update: userAccessUpdates[index]!,
     }))
-    return { gridRemovalState, persisted, accessUpdates }
+    // Capture the positive Space-update recipients while the membership delete
+    // and Space row lock are still owned by this transaction. A re-add after
+    // commit must not make the formerly removed user eligible for this sequence.
+    const remainingMemberRows = await tx
+      .select({ userId: members.userId })
+      .from(members)
+      .innerJoin(users, eq(users.id, members.userId))
+      .where(and(eq(members.spaceId, spaceId), userNotDeleted()))
+    const remainingMemberUserIds = remainingMemberRows
+      .map((member) => member.userId)
+      .filter((remainingUserId) => remainingUserId !== userId)
+    return { gridRemovalState, persisted, accessUpdates, remainingMemberUserIds, removedMemberId: removedMember.id }
   })
 }
 
@@ -235,13 +263,15 @@ const pushUpdatesForSpace = async ({
   userId,
   currentUserId,
   persisted,
+  remainingMemberUserIds,
 }: {
   spaceId: number
   userId: number
   currentUserId: number
   persisted: UpdateSeqAndDate
+  remainingMemberUserIds: number[]
 }) => {
-  const update: Update = {
+  const sequencedSpaceUpdate: Update = {
     seq: persisted.seq,
     date: encodeDateStrict(persisted.date),
     update: {
@@ -253,20 +283,26 @@ const pushUpdatesForSpace = async ({
     },
   }
 
-  // Update for the space
-  const updateGroup = await getUpdateGroupForSpace(spaceId, { currentUserId })
-
-  updateGroup.userIds.forEach((userId) => {
-    RealtimeUpdates.pushToUser(userId, [update])
+  remainingMemberUserIds.forEach((remainingUserId) => {
+    void RealtimeUpdates.pushToUser(remainingUserId, [sequencedSpaceUpdate]).catch((error: unknown) => {
+      log.warn("Failed to publish committed Space member removal", { spaceId, userId: remainingUserId, error })
+    })
   })
 
-  // Also push directly to the removed user. They are no longer part of the space topic,
-  // but connected clients still need the realtime event even though they will only get
-  // the persisted user-bucket update on the next sync.
-  RealtimeUpdates.pushToUser(userId, [update])
-
-  return { updates: [update] }
+  // The removed user's immediate eviction was queued while the generation was
+  // locked. Do not repeat it in an RPC reply that can arrive after a re-add, or
+  // attach a Space sequence that the removed user can no longer catch up.
+  return {
+    updates: currentUserId === userId ? [] : [sequencedSpaceUpdate],
+  }
 }
+
+const immediateMemberEviction = (spaceId: number, userId: number): Update => ({
+  update: {
+    oneofKind: "spaceMemberDelete",
+    spaceMemberDelete: { spaceId: BigInt(spaceId), userId: BigInt(userId) },
+  },
+})
 
 const persistSpaceMemberDeleteUpdateInTransaction = async (
   tx: Transaction,

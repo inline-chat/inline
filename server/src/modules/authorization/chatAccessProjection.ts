@@ -48,8 +48,9 @@ export async function getSpaceRootChatIdsForAccessEvents(
 /**
  * Computes the effective users who can discover each chat from the same database
  * snapshot as the mutation that may change access. This mirrors AccessGuards:
- * an explicit grant on the target wins; otherwise a child inherits only from its
- * root chat, whose private/public/space membership rules remain authoritative.
+ * an explicit grant on the target wins only within current owning-Space
+ * authority; otherwise a child inherits from its root chat. Retained participant
+ * rows never preserve access after Space departure or soft deletion.
  */
 export async function getEffectiveChatAccessUserIds(
   tx: Transaction,
@@ -131,7 +132,7 @@ export async function getEffectiveChatAccessUserIds(
       where root.type = 'thread'
         and root.space_id is not null
         and root.public_thread is true
-        and m.can_access_public_chats is true
+        and m.can_access_public_chats is distinct from false
 
       union
 
@@ -159,6 +160,21 @@ export async function getEffectiveChatAccessUserIds(
     from access
     join users u on u.id = access."userId"
     where u.deleted is distinct from true
+      and not exists (
+        select 1
+        from ancestors a
+        join chats owning_chat on owning_chat.id = a."ancestorId"
+        where a."chatId" = access."chatId"
+          and owning_chat.space_id is not null
+          and not exists (
+            select 1
+            from members owning_member
+            join spaces owning_space on owning_space.id = owning_member.space_id
+            where owning_member.space_id = owning_chat.space_id
+              and owning_member.user_id = access."userId"
+              and owning_space.deleted is null
+          )
+      )
       ${userFilter}
     order by access."chatId", access."userId"
   `)

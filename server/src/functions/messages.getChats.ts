@@ -6,10 +6,15 @@ import { Log } from "@in/server/utils/log"
 import { db } from "@in/server/db"
 import { and, eq, inArray, isNull, or } from "drizzle-orm"
 import {
+  chatParticipantGroups,
   chats,
   dialogs,
   spaces,
   members,
+  userGroupMembers,
+  userGroups,
+  userNotDeleted,
+  users,
   type DbSpace,
   type DbChat,
   type DbDialog,
@@ -21,6 +26,7 @@ import { DialogsModel } from "@in/server/db/models/dialogs"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { getDialogFolders } from "@in/server/modules/dialogFolders"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 
 type Input = {}
 
@@ -166,7 +172,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
   spacesList = userSpaces
 
   // Fetch a list of public threads the user is a part of and don't have a dialog
-  const chats = await db.query.chats.findMany({
+  const candidates = await db.query.chats.findMany({
     where: {
       OR: [
         // DMs
@@ -229,6 +235,47 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
               },
             },
           },
+        },
+
+        // Private threads granted through one of the user's groups. Keep this correlated with
+        // the main fetch so a concurrent revocation cannot leak a stale discovery result.
+        {
+          type: "thread",
+          parentChatId: {
+            isNull: true,
+          },
+          publicThread: false,
+          space: {
+            deleted: {
+              isNull: true,
+            },
+            members: {
+              user: {
+                id: currentUserId,
+              },
+            },
+          },
+          RAW: (chat, { exists }) =>
+            exists(
+              db
+                .select({ id: chatParticipantGroups.id })
+                .from(chatParticipantGroups)
+                .innerJoin(userGroups, eq(userGroups.id, chatParticipantGroups.groupId))
+                .innerJoin(userGroupMembers, eq(userGroupMembers.groupId, userGroups.id))
+                .innerJoin(
+                  members,
+                  and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)),
+                )
+                .innerJoin(users, eq(users.id, userGroupMembers.userId))
+                .where(
+                  and(
+                    eq(chatParticipantGroups.chatId, chat.id),
+                    eq(userGroups.spaceId, chat.spaceId),
+                    eq(userGroupMembers.userId, currentUserId),
+                    userNotDeleted(),
+                  ),
+                ),
+            ),
         },
 
         // Home threads (non-space)
@@ -329,6 +376,16 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
       },
     },
   })
+
+  // A visible linked dialog is discovery state, not a current access grant. Reuse the same
+  // direct/inherited authority as getChat before exposing metadata, previews, or senders.
+  const linkedChatIds = candidates.filter((chat) => chat.parentChatId != null).map((chat) => chat.id)
+  const linkedAccess = linkedChatIds.length === 0
+    ? new Map<number, Set<number>>()
+    : await db.transaction((tx) => getEffectiveChatAccessUserIds(tx, linkedChatIds, { userIds: [currentUserId] }))
+  const chats = candidates.filter((chat) =>
+    chat.parentChatId == null || linkedAccess.get(chat.id)?.has(currentUserId) === true,
+  )
 
   // Create dialogs for all chats that don't have a dialog
   const chatsThatNeedDialogs = chats.filter((c) => c.parentChatId == null && c.dialogs.length === 0)

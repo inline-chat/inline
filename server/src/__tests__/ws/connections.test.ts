@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test"
+import { describe, expect, it, mock, spyOn } from "bun:test"
 
 const handleConnectionOpen = mock().mockResolvedValue(undefined)
 const handleConnectionClose = mock().mockResolvedValue(undefined)
@@ -12,6 +12,70 @@ mock.module("@in/server/ws/presence", () => ({
 }))
 
 describe("ConnectionManager", () => {
+  it("does not let a disconnected lifetime's pending membership read repopulate a reconnect", async () => {
+    const { ConnVersion, connectionManager } = await import("@in/server/ws/connections")
+    const membershipReader = connectionManager as unknown as {
+      getUserSpaceIds(userId: number): Promise<number[]>
+    }
+    let resolveOldRead!: (spaceIds: number[]) => void
+    const oldRead = new Promise<number[]>((resolve) => { resolveOldRead = resolve })
+    const read = spyOn(membershipReader, "getUserSpaceIds")
+      .mockImplementationOnce(() => oldRead)
+      .mockResolvedValueOnce([20])
+    const oldId = connectionManager.addConnection(
+      { id: "membership-old", close: mock(), subscribe: mock() } as unknown as Parameters<typeof connectionManager.addConnection>[0],
+      ConnVersion.REALTIME_V1,
+    )
+    connectionManager.authenticateConnection(oldId, 101, 1001)
+    connectionManager.removeConnection(oldId)
+    const newId = connectionManager.addConnection(
+      { id: "membership-new", close: mock(), subscribe: mock() } as unknown as Parameters<typeof connectionManager.addConnection>[0],
+      ConnVersion.REALTIME_V1,
+    )
+    connectionManager.authenticateConnection(newId, 101, 1001)
+    try {
+      resolveOldRead([10])
+      await oldRead
+      await Promise.resolve()
+      expect(connectionManager.getSpaceUserIds(10)).not.toContain(101)
+      expect(connectionManager.getSpaceUserIds(20)).toContain(101)
+    } finally {
+      connectionManager.removeConnection(newId)
+      read.mockRestore()
+    }
+    expect(connectionManager.getSpaceUserIds(20)).not.toContain(101)
+  })
+
+  it("refetches an in-flight membership snapshot after a committed membership projection", async () => {
+    const { ConnVersion, connectionManager } = await import("@in/server/ws/connections")
+    const membershipReader = connectionManager as unknown as {
+      getUserSpaceIds(userId: number): Promise<number[]>
+    }
+    let resolveOldRead!: (spaceIds: number[]) => void
+    const oldRead = new Promise<number[]>((resolve) => { resolveOldRead = resolve })
+    const read = spyOn(membershipReader, "getUserSpaceIds")
+      .mockImplementationOnce(() => oldRead)
+      .mockResolvedValueOnce([30])
+    const connectionId = connectionManager.addConnection(
+      { id: "membership-revision", close: mock(), subscribe: mock() } as unknown as Parameters<typeof connectionManager.addConnection>[0],
+      ConnVersion.REALTIME_V1,
+    )
+    connectionManager.authenticateConnection(connectionId, 102, 1002)
+    try {
+      connectionManager.activateSpaceMembership(102, 30)
+      resolveOldRead([10])
+      await oldRead
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(read).toHaveBeenCalledTimes(2)
+      expect(connectionManager.getSpaceUserIds(10)).not.toContain(102)
+      expect(connectionManager.getSpaceUserIds(30)).toContain(102)
+    } finally {
+      connectionManager.removeConnection(connectionId)
+      read.mockRestore()
+    }
+  })
+
   it("only marks a session inactive after the last connection for that session closes", async () => {
     const { ConnVersion, connectionManager } = await import("@in/server/ws/connections")
 

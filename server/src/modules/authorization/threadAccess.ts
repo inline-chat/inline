@@ -5,6 +5,7 @@ import {
   chatParticipants,
   chats,
   members,
+  spaces,
   userGroupMembers,
   userGroups,
   userNotDeleted,
@@ -12,7 +13,7 @@ import {
   type DbChat,
 } from "@in/server/db/schema"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
-import { and, eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 
 export async function getDirectParticipantUserIds(chatId: number): Promise<number[]> {
   const participants = await db
@@ -27,11 +28,22 @@ export async function getGroupParticipantUserIds(chatId: number): Promise<number
   const rows = await db
     .select({ userId: userGroupMembers.userId })
     .from(chatParticipantGroups)
+    .innerJoin(chats, eq(chatParticipantGroups.chatId, chats.id))
     .innerJoin(userGroups, eq(chatParticipantGroups.groupId, userGroups.id))
     .innerJoin(userGroupMembers, eq(userGroups.id, userGroupMembers.groupId))
     .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
     .innerJoin(users, eq(users.id, userGroupMembers.userId))
-    .where(and(eq(chatParticipantGroups.chatId, chatId), userNotDeleted()))
+    .innerJoin(spaces, eq(spaces.id, userGroups.spaceId))
+    .where(
+      and(
+        eq(chatParticipantGroups.chatId, chatId),
+        eq(chats.type, "thread"),
+        eq(chats.publicThread, false),
+        eq(chats.spaceId, userGroups.spaceId),
+        isNull(spaces.deleted),
+        userNotDeleted(),
+      ),
+    )
 
   return uniqueIds(rows.map((row) => row.userId))
 }
@@ -111,14 +123,20 @@ export async function hasGroupParticipantGrant(chatId: number, userId: number): 
   const rows = await db
     .select({ id: chatParticipantGroups.id })
     .from(chatParticipantGroups)
+    .innerJoin(chats, eq(chatParticipantGroups.chatId, chats.id))
     .innerJoin(userGroups, eq(chatParticipantGroups.groupId, userGroups.id))
     .innerJoin(userGroupMembers, eq(chatParticipantGroups.groupId, userGroupMembers.groupId))
     .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
     .innerJoin(users, eq(users.id, userGroupMembers.userId))
+    .innerJoin(spaces, eq(spaces.id, userGroups.spaceId))
     .where(
       and(
         eq(chatParticipantGroups.chatId, chatId),
         eq(userGroupMembers.userId, userId),
+        eq(chats.type, "thread"),
+        eq(chats.publicThread, false),
+        eq(chats.spaceId, userGroups.spaceId),
+        isNull(spaces.deleted),
         userNotDeleted(),
       ),
     )

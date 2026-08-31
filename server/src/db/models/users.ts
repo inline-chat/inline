@@ -2,7 +2,8 @@
 
 import { eq, inArray, and, not, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
-import { users, userNotDeleted, type DbUser, type DbFile, type DbUserWithProfile } from "@in/server/db/schema"
+import { files, users, userNotDeleted, type DbUser, type DbFile, type DbUserWithProfile } from "@in/server/db/schema"
+import type { Transaction } from "@in/server/db/types"
 import parsePhoneNumber from "libphonenumber-js"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { isValidEmail } from "@in/server/utils/validate"
@@ -219,7 +220,22 @@ export class UsersModel {
     return user
   }
 
-  static async getUsersWithPhotos(userIds: number[]): Promise<Array<{ user: DbUser; photoFile?: DbFile | undefined }>> {
+  static async getUsersWithPhotos(
+    userIds: number[],
+    options?: { tx?: Transaction },
+  ): Promise<Array<{ user: DbUser; photoFile?: DbFile | undefined }>> {
+    if (options?.tx) {
+      const rows = await options.tx
+        .select({ user: users, photoFile: files })
+        .from(users)
+        .leftJoin(files, eq(users.photoFileId, files.id))
+        .where(inArray(users.id, userIds))
+      return rows.map((row) => ({
+        user: row.user,
+        photoFile: row.photoFile ?? undefined,
+      }))
+    }
+
     const usersWithPhotos = await db._query.users.findMany({
       where: inArray(users.id, userIds),
       with: {

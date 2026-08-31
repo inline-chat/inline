@@ -1,7 +1,11 @@
-import { describe, expect, test, beforeEach } from "bun:test"
+import { describe, expect, test, beforeEach, spyOn } from "bun:test"
 import { createBot, MAX_BOTS_PER_USER } from "../../functions/createBot"
 import { setupTestLifecycle, defaultTestContext, testUtils } from "../setup"
 import type { FunctionContext } from "../../functions/_types"
+import { db } from "@in/server/db"
+import * as schema from "@in/server/db/schema"
+import { and, eq } from "drizzle-orm"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 describe("createBot", () => {
   // Setup test lifecycle
@@ -98,6 +102,11 @@ describe("createBot", () => {
     if (!space) {
       throw new Error("Failed to create test space")
     }
+    await db.insert(schema.members).values({
+      spaceId: space.id,
+      userId: testUser.id,
+      role: "owner",
+    })
 
     const input = {
       name: "Space Bot",
@@ -113,6 +122,55 @@ describe("createBot", () => {
     expect(result.bot?.bot).toBe(true)
     expect(result.token).toBeDefined()
     expect(typeof result.token).toBe("string")
+    expect(
+      await db
+        .select()
+        .from(schema.members)
+        .where(
+          and(
+            eq(schema.members.spaceId, space.id),
+            eq(schema.members.userId, Number(result.bot?.id)),
+          ),
+        ),
+    ).toHaveLength(1)
+  })
+
+  test("keeps bot creation successful when addToSpace admission is rejected without invite alerts", async () => {
+    const space = await testUtils.createSpace("Rejected Bot Space")
+    if (!space) throw new Error("Failed to create test space")
+    await db.insert(schema.members).values({
+      spaceId: space.id,
+      userId: testUser.id,
+      role: "member",
+    })
+    const inviteAlert = spyOn(BotAlerts, "spaceInvite")
+
+    try {
+      const result = await createBot(
+        {
+          name: "Rejected Space Bot",
+          username: "rejectedspacebot",
+          addToSpace: BigInt(space.id),
+        },
+        mockFunctionContext,
+      )
+
+      expect(result.bot?.username).toBe("rejectedspacebot")
+      expect(
+        await db
+          .select()
+          .from(schema.members)
+          .where(
+            and(
+              eq(schema.members.spaceId, space.id),
+              eq(schema.members.userId, Number(result.bot?.id)),
+            ),
+          ),
+      ).toHaveLength(0)
+      expect(inviteAlert).not.toHaveBeenCalled()
+    } finally {
+      inviteAlert.mockRestore()
+    }
   })
 
   test("should enforce bot limit per creator", async () => {

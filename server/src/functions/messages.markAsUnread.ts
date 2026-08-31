@@ -9,6 +9,8 @@ import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import { ModelError } from "@in/server/db/models/_errors"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 
 type Input = {
   peer: InputPeer
@@ -19,7 +21,16 @@ type Output = {
 }
 
 export const markAsUnread = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeer(input.peer, context).catch((error) => {
+    if (error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID) {
+      if (input.peer.type.oneofKind === "chat") throw RealtimeRpcError.ChatIdInvalid()
+      throw RealtimeRpcError.PeerIdInvalid()
+    }
+    throw error
+  })
+  // A stale dialog is only presentation state. Verify current server authorization first.
+  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  const chatId = chat.id
   const peer = encodePeerFromInputPeer({ inputPeer: input.peer, currentUserId: context.currentUserId })
 
   const result = await db.transaction(async (tx) => {

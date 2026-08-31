@@ -219,7 +219,7 @@ export const BotAlerts = {
   },
 
   spaceInvite(props: { inviterUserId: number; invitedUserId: number; spaceId: number; spaceName: string | null }) {
-    void (async () => {
+    return (async () => {
       const [inviter, invited] = await Promise.all([getAlertUser(props.inviterUserId), getAlertUser(props.invitedUserId)])
 
       const inviterText = inviter ? adminUserLink(inviter) : "Someone"

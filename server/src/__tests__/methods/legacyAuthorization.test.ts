@@ -9,6 +9,9 @@ import { setupTestLifecycle, testUtils } from "../setup"
 import { db } from "@in/server/db"
 import * as schema from "@in/server/db/schema"
 import type { HandlerContext } from "@in/server/controllers/helpers"
+import { and, asc, eq } from "drizzle-orm"
+import { UpdateBucket } from "@in/server/db/schema/updates"
+import { UpdatesModel } from "@in/server/db/models/updates"
 
 const makeContext = (userId: number): HandlerContext => ({
   currentUserId: userId,
@@ -24,6 +27,7 @@ describe("legacy method authorization", () => {
     const owner = await testUtils.createUser("legacy-add-owner@example.com")
     const member = await testUtils.createUser("legacy-add-member@example.com")
     const target = await testUtils.createUser("legacy-add-target@example.com")
+    const outsider = await testUtils.createUser("legacy-add-outsider@example.com")
     if (!space || !owner || !member || !target) throw new Error("Failed to create test data")
 
     await db.insert(schema.members).values([
@@ -34,9 +38,34 @@ describe("legacy method authorization", () => {
     await expect(
       addMember({ spaceId: space.id, userId: target.id }, makeContext(member.id)),
     ).rejects.toMatchObject({ type: "SPACE_ADMIN_REQUIRED" })
+    await expect(
+      addMember({ spaceId: space.id, userId: target.id }, makeContext(outsider.id)),
+    ).rejects.toMatchObject({ type: "SPACE_INVALID" })
 
     const result = await addMember({ spaceId: space.id, userId: target.id }, makeContext(owner.id))
     expect(result.member.userId).toBe(target.id)
+
+    const spaceUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, UpdateBucket.Space), eq(schema.updates.entityId, space.id)))
+      .orderBy(asc(schema.updates.seq))
+    expect(spaceUpdates.map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)).toEqual([
+      "spaceMemberAdd",
+    ])
+
+    const targetUpdates = await db
+      .select()
+      .from(schema.updates)
+      .where(and(eq(schema.updates.bucket, UpdateBucket.User), eq(schema.updates.entityId, target.id)))
+      .orderBy(asc(schema.updates.seq))
+    expect(targetUpdates.map((row) => UpdatesModel.decrypt(row).payload.update.oneofKind)).toEqual([
+      "userJoinSpace",
+    ])
+
+    await expect(
+      addMember({ spaceId: space.id, userId: target.id }, makeContext(owner.id)),
+    ).rejects.toMatchObject({ type: "INTERNAL" })
   })
 
   test("requires space membership to create legacy public threads", async () => {

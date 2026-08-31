@@ -130,6 +130,43 @@ describe("AccessGuards", () => {
     })
   })
 
+  it("rejects malformed cross-space and home-thread group grants", async () => {
+    const owner = requireUser(await testUtils.createUser("group-guard-owner@example.com"), "owner")
+    const member = requireUser(await testUtils.createUser("group-guard-member@example.com"), "member")
+    const groupSpace = requireSpace(await testUtils.createSpace("Group Space"), "group space")
+    const chatSpace = requireSpace(await testUtils.createSpace("Chat Space"), "chat space")
+    await MembersModel.addMemberToSpace(groupSpace.id, owner.id, "owner")
+    await MembersModel.addMemberToSpace(groupSpace.id, member.id, "member")
+    await MembersModel.addMemberToSpace(chatSpace.id, member.id, "member")
+
+    const [group] = await db
+      .insert(schema.userGroups)
+      .values({ spaceId: groupSpace.id, name: "Wrong Space", createdBy: owner.id })
+      .returning()
+    if (!group) throw new Error("Failed to create group")
+    await db.insert(schema.userGroupMembers).values({ groupId: group.id, userId: member.id })
+
+    const privateChat = requireChat(
+      await testUtils.createChat(chatSpace.id, "Cross-space private thread", "thread", false, owner.id),
+      "cross-space private thread",
+    )
+    const homeChat = requireChat(
+      await testUtils.createChat(null, "Malformed home thread", "thread", false, owner.id),
+      "malformed home thread",
+    )
+    await db.insert(schema.chatParticipantGroups).values([
+      { chatId: privateChat.id, groupId: group.id },
+      { chatId: homeChat.id, groupId: group.id },
+    ])
+
+    await expect(AccessGuards.ensureChatAccess(privateChat, member.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.PEER_ID_INVALID,
+    })
+    await expect(AccessGuards.ensureChatAccess(homeChat, member.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.PEER_ID_INVALID,
+    })
+  })
+
   it("validates space membership", async () => {
     const user = requireUser(await testUtils.createUser("space-member@example.com"), "space member")
     const outsider = requireUser(await testUtils.createUser("space-outsider@example.com"), "outsider")

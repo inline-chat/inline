@@ -7,7 +7,6 @@ import { Log } from "@in/server/utils/log"
 import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
 import { normalizeUsername } from "@in/server/utils/normalize"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { SpaceModel } from "@in/server/db/models/spaces"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
 import { and, eq, sql } from "drizzle-orm"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
@@ -18,6 +17,7 @@ import {
 
 import { type CreateBotInput, type CreateBotResult } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
+import { addSpaceMember } from "@in/server/functions/space.addMember.shared"
 
 const log = new Log("createBot")
 export const MAX_BOTS_PER_USER = 25
@@ -115,9 +115,13 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
     try {
       const spaceId = Number(input.addToSpace)
 
-      // Use the SpaceModel for better validation and error handling
-      await SpaceModel.addUserToSpace(spaceId, bot.id, "member", {
-        invitedBy: context.currentUserId,
+      await addSpaceMember({
+        spaceId,
+        actorUserId: context.currentUserId,
+        target: { kind: "userId", userId: bot.id },
+        admission: "manageMembers",
+        role: "member",
+        canAccessPublicChats: true,
       })
 
       log.info("Bot successfully added to space", {

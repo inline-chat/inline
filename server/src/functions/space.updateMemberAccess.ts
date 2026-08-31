@@ -2,12 +2,11 @@ import type { Update, UpdateMemberAccessInput, UpdateMemberAccessResult } from "
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { isValidSpaceId } from "@in/server/utils/validate"
-import { members, spaces } from "@in/server/db/schema"
+import { members, spaces, userNotDeleted, users } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { db } from "@in/server/db"
 import type { DbMemberRole } from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { getUpdateGroupForSpace } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
@@ -64,12 +63,32 @@ export const updateMemberAccess = async (
   // This prevents a delete/re-add on another connection from allowing this
   // request to update a newly-created membership or publish an out-of-order
   // member update after a delete update.
-  const { updatedMember, persisted, accessUpdates } = await db.transaction(async (tx) => {
+  const { updatedMember, persisted, accessUpdates, permissionUpdates, spaceRecipientUserIds } = await db.transaction(async (tx) => {
+    // User-bucket allocation serializes on the target user row. Take that
+    // owner before the space row so this path shares deleteMember's
+    // users -> space lock order instead of forming a space -> users cycle.
+    const [targetUser] = await tx
+      .select({ id: users.id, deleted: users.deleted })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("update")
+      .limit(1)
+
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
-    if (!space) {
+    if (!space || space.deleted !== null) {
       throw RealtimeRpcError.SpaceIdInvalid()
     }
 
+    const [targetMembership] = await tx
+      .select()
+      .from(members)
+      .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
+      .for("update")
+      .limit(1)
+
+    // Authority must be re-read only after the serialization owners above
+    // are held. A concurrent demotion cannot pass validation and then mutate
+    // under stale authority.
     const [ourMembership] = await tx
       .select()
       .from(members)
@@ -80,13 +99,7 @@ export const updateMemberAccess = async (
       throw RealtimeRpcError.SpaceAdminRequired()
     }
 
-    const [targetMembership] = await tx
-      .select()
-      .from(members)
-      .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
-      .for("update")
-      .limit(1)
-    if (!targetMembership) {
+    if (!targetUser || targetUser.deleted === true || !targetMembership) {
       throw RealtimeRpcError.UserIdInvalid()
     }
     if (targetMembership.role === "owner") {
@@ -160,11 +173,33 @@ export const updateMemberAccess = async (
       ...transition,
       update: persistedAccessUpdates[index]!,
     }))
+    const permissionUpdates = await prepareSpaceChatPermissionUpdates(
+      { userIds: [userId], spaceId },
+      { tx },
+    )
+    // Capture the audience for this sequenced Space update before commit
+    // instead of consulting a later delete/re-add state during fanout. Include
+    // the target while this membership generation exists so role changes are
+    // visible immediately; a later delete/re-add has strictly newer Space and
+    // User bucket sequences and therefore supersedes this update.
+    const spaceRecipients = await tx
+      .select({ userId: members.userId })
+      .from(members)
+      .innerJoin(users, eq(users.id, members.userId))
+      .where(
+        and(
+          eq(members.spaceId, spaceId),
+          userNotDeleted(),
+        ),
+      )
+      .orderBy(members.userId)
 
     return {
       updatedMember: updated,
       persisted: { seq: update.seq, date: update.date },
       accessUpdates,
+      permissionUpdates,
+      spaceRecipientUserIds: spaceRecipients.map((recipient) => recipient.userId),
     }
   })
 
@@ -173,10 +208,8 @@ export const updateMemberAccess = async (
   AccessGuardsCache.setSpaceMember(spaceId, userId)
   AccessGuardsCache.resetForUser(userId)
 
-  const permissionUpdates = await prepareSpaceChatPermissionUpdates({ userIds: [userId], spaceId })
-
-  const updates = await pushUpdatesForSpace(updatedMember, {
-    currentUserId: context.currentUserId,
+  const updates = pushUpdatesForSpace(updatedMember, {
+    recipientUserIds: spaceRecipientUserIds,
     seq: persisted.seq,
     date: persisted.date,
   })
@@ -210,14 +243,14 @@ function pushAccessUpdates(
 // ------------------------------------------------------------
 // Updates
 
-const pushUpdatesForSpace = async (
+const pushUpdatesForSpace = (
   member: typeof members.$inferSelect,
   {
-    currentUserId,
+    recipientUserIds,
     seq,
     date,
   }: {
-    currentUserId: number
+    recipientUserIds: number[]
     seq: number
     date: Date
   },
@@ -233,8 +266,7 @@ const pushUpdatesForSpace = async (
     },
   }
 
-  const updateGroup = await getUpdateGroupForSpace(member.spaceId, { currentUserId })
-  updateGroup.userIds.forEach((userId) => {
+  recipientUserIds.forEach((userId) => {
     RealtimeUpdates.pushToUser(userId, [update])
   })
 
