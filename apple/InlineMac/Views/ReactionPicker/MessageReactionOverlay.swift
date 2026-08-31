@@ -9,19 +9,22 @@ import SwiftUI
 class ReactionOverlayWindow: NSPanel {
   private static var activeByMessageView: [ObjectIdentifier: ReactionOverlayWindow] = [:]
 
-  static func show(messageView: NSView, fullMessage: FullMessage) {
+  @discardableResult
+  static func show(messageView: NSView, fullMessage: FullMessage, above anchorRect: NSRect? = nil) -> ReactionOverlayWindow {
     let key = ObjectIdentifier(messageView)
     activeByMessageView[key]?.close()
 
     let overlayWindow = ReactionOverlayWindow(
       messageView: messageView,
-      fullMessage: fullMessage
+      fullMessage: fullMessage,
+      above: anchorRect
     )
     activeByMessageView[key] = overlayWindow
 
     overlayWindow.ignoresMouseEvents = false
     overlayWindow.contentView?.wantsLayer = true
     overlayWindow.orderFront(nil)
+    return overlayWindow
   }
 
   static func dismiss(for messageView: NSView) {
@@ -36,8 +39,10 @@ class ReactionOverlayWindow: NSPanel {
   private var fullMessage: FullMessage
   private var isEmojiPickerActive = false
   private var isClosing = false
+  var onClose: (() -> Void)?
+  weak var toggleButton: NSButton?
 
-  init(messageView: NSView, fullMessage: FullMessage) {
+  init(messageView: NSView, fullMessage: FullMessage, above anchorRect: NSRect?) {
     self.messageView = messageView
     messageViewKey = ObjectIdentifier(messageView)
     self.fullMessage = fullMessage
@@ -84,7 +89,7 @@ class ReactionOverlayWindow: NSPanel {
     contentView?.acceptsTouchEvents = true
 
     // Position the window
-    positionWindow()
+    positionWindow(above: anchorRect)
 
     // Add mouse down monitor to dismiss on click outside
     setupMouseDownMonitor()
@@ -113,20 +118,26 @@ class ReactionOverlayWindow: NSPanel {
     )
   }
 
-  private func positionWindow() {
+  private func positionWindow(above anchorRect: NSRect?) {
     guard let hostingView else { return }
 
     let windowSize = hostingView.fittingSize
     let cursorLocation = NSEvent.mouseLocation
-    let bottomGapFromCursor: CGFloat = 6
+    let gap: CGFloat = 6
+    let anchorPoint = anchorRect.map { NSPoint(x: $0.midX, y: $0.maxY) } ?? cursorLocation
+    let preferredX = anchorPoint.x - (windowSize.width / 2)
+    // The SwiftUI view includes transparent shadow padding. Measure the gap to
+    // the visible reaction surface, not to the outside of its window.
+    var preferredY = anchorPoint.y + gap - (anchorRect == nil ? 0 : ReactionOverlayView.shadowPadding)
 
-    let preferredX = cursorLocation.x - (windowSize.width / 2)
-    let preferredY = cursorLocation.y + bottomGapFromCursor
-
-    let targetScreen = screen(containing: cursorLocation)
+    let targetScreen = screen(containing: anchorPoint)
       ?? messageView?.window?.screen
       ?? NSScreen.main
     guard let visibleFrame = targetScreen?.visibleFrame else { return }
+
+    if let anchorRect, preferredY + windowSize.height > visibleFrame.maxY {
+      preferredY = anchorRect.minY - gap - windowSize.height + ReactionOverlayView.shadowPadding
+    }
 
     // Clamp into the current screen so the picker stays fully visible near edges.
     let finalX = min(max(preferredX, visibleFrame.minX), visibleFrame.maxX - windowSize.width)
@@ -147,6 +158,14 @@ class ReactionOverlayWindow: NSPanel {
       guard let self else { return event }
 
       guard event.window === self else {
+        // Let the source button's mouse-up action close the picker. Dismissing
+        // on mouse-down could finish the fade before that action and reopen it.
+        if event.type == .leftMouseDown, !event.modifierFlags.contains(.control),
+           let toggleButton, toggleButton.isEnabled, !toggleButton.isHiddenOrHasHiddenAncestor,
+           event.window === toggleButton.window,
+           toggleButton.bounds.contains(toggleButton.convert(event.locationInWindow, from: nil)) {
+          return event
+        }
         if isEmojiPickerActive {
           return event
         }
@@ -186,11 +205,15 @@ class ReactionOverlayWindow: NSPanel {
   override func close() {
     isClosing = true
     isEmojiPickerActive = false
+    toggleButton = nil
     removeEventMonitors()
     if Self.activeByMessageView[messageViewKey] === self {
       Self.activeByMessageView[messageViewKey] = nil
     }
+    let onClose = self.onClose
+    self.onClose = nil
     super.close()
+    onClose?()
   }
 
   deinit {
@@ -302,13 +325,15 @@ extension MessageViewAppKit {
 }
 
 extension MinimalMessageViewAppKit {
-  func showReactionOverlay() {
+  @discardableResult
+  func showReactionOverlay(above anchorRect: NSRect? = nil) -> ReactionOverlayWindow? {
     // Don't show reactions for messages that are still sending
-    guard fullMessage.message.status != .sending else { return }
+    guard fullMessage.message.status != .sending else { return nil }
 
-    ReactionOverlayWindow.show(
+    return ReactionOverlayWindow.show(
       messageView: self,
-      fullMessage: fullMessage
+      fullMessage: fullMessage,
+      above: anchorRect
     )
   }
 }

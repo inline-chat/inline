@@ -6,6 +6,8 @@ import RealtimeV2
 import SwiftUI
 
 struct ReactionOverlayView: View {
+  static let shadowPadding: CGFloat = 5
+
   let fullMessage: FullMessage
   let onDismiss: () -> Void
   let onEmojiPickerActiveChanged: (Bool) -> Void
@@ -147,7 +149,7 @@ struct ReactionOverlayView: View {
 
       onEmojiPickerDismissed()
     }
-    .padding(5)
+    .padding(Self.shadowPadding)
   }
 
   private func reactionButton(_ emoji: String) -> some View {

@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import InlineMacUI
 import InlineUI
 import Logger
 import SwiftUI
@@ -102,6 +103,12 @@ class MessageListAppKit: NSViewController {
   private var hoveredMessageStableId: Int64?
   private weak var hoveredMessageCell: MessageTableCell?
   private var messageHoverRefreshScheduled = false
+  private var messageQuickActionsView: MessageQuickActionsView?
+  private var isQuickActionsMenuOpen = false
+  private weak var quickActionsReactionOverlay: ReactionOverlayWindow?
+  private var isQuickActionsPresentationOpen: Bool {
+    isQuickActionsMenuOpen || quickActionsReactionOverlay?.isVisible == true
+  }
   private var isDisposed = false
   private weak var observedToolbar: NSToolbar?
   private var toolbarDisplayModeObservation: NSKeyValueObservation?
@@ -236,6 +243,18 @@ class MessageListAppKit: NSViewController {
         self?.scheduleToolbarBackgroundUpdate()
       }
       .store(in: &cancellables)
+
+    if messageRenderStyle == .minimal {
+      AppSettings.shared.$minimalMessageQuickActionsEnabled
+        .removeDuplicates()
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _ in
+          guard let self, isViewLoaded, !isDisposed else { return }
+          hideMessageQuickActions()
+          scheduleMessageHoverRefresh()
+        }
+        .store(in: &cancellables)
+    }
   }
 
   @available(*, unavailable)
@@ -406,6 +425,8 @@ class MessageListAppKit: NSViewController {
 
   private func emitMessageSelectionChange(changedStableIds: Set<Int64>) {
     guard !changedStableIds.isEmpty else { return }
+    hideMessageQuickActions()
+    scheduleMessageHoverRefresh()
     onMessageSelectionChange?(
       MessageListSelectionUpdate(
         isActive: messageSelection.isActive,
@@ -1497,6 +1518,7 @@ class MessageListAppKit: NSViewController {
 
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
+    guard !isQuickActionsPresentationOpen else { return }
     clearHoveredMessage()
   }
 
@@ -1512,12 +1534,13 @@ class MessageListAppKit: NSViewController {
   }
 
   private func scheduleMessageHoverRefresh() {
-    guard messageRenderStyle == .minimal, !messageHoverRefreshScheduled else { return }
+    guard messageRenderStyle == .minimal, !isDisposed, !messageHoverRefreshScheduled else { return }
 
     messageHoverRefreshScheduled = true
     DispatchQueue.main.async(qos: .userInteractive) { [weak self] in
       guard let self else { return }
       self.messageHoverRefreshScheduled = false
+      guard !self.isDisposed else { return }
       self.updateHoveredMessageFromCurrentMouseLocation(force: true)
     }
   }
@@ -1549,6 +1572,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func updateHoveredMessage(at point: NSPoint, force: Bool = false) {
+    guard !isQuickActionsPresentationOpen else { return }
     guard let target = messageHoverTarget(at: point) else {
       setHoveredMessage(stableId: nil, cell: nil, force: force)
       return
@@ -1559,6 +1583,16 @@ class MessageListAppKit: NSViewController {
 
   private func messageHoverTarget(at point: NSPoint) -> (stableId: Int64, cell: MessageTableCell)? {
     guard tableView.visibleRect.contains(point) else { return nil }
+
+    // The capsule overlaps the preceding row. Keep ownership with its message while
+    // crossing that edge instead of letting NSTableView switch to the row underneath.
+    if let messageQuickActionsView, !messageQuickActionsView.isHidden,
+       messageQuickActionsView.frame.contains(point),
+       let stableId = hoveredMessageStableId, let cell = hoveredMessageCell,
+       cell.quickActionsMessageView?.fullMessage.message.stableId == stableId,
+       messageStableId(forRow: tableView.row(for: cell)) == stableId {
+      return (stableId, cell)
+    }
 
     let row = tableView.row(at: point)
     guard row >= 0, row < tableView.numberOfRows else { return nil }
@@ -1579,13 +1613,100 @@ class MessageListAppKit: NSViewController {
     hoveredMessageCell = cell
 
     if previousCell !== cell {
+      hideMessageQuickActions()
       previousCell?.setMessageHoverState(false)
     }
     cell?.setMessageHoverState(true)
+    updateMessageQuickActions()
   }
 
   private func clearHoveredMessage() {
+    hideMessageQuickActions()
     setHoveredMessage(stableId: nil, cell: nil)
+  }
+
+  private func hideMessageQuickActions() {
+    let reactionOverlay = quickActionsReactionOverlay
+    quickActionsReactionOverlay = nil
+    reactionOverlay?.close()
+    messageQuickActionsView?.setActiveAction(nil)
+    messageQuickActionsView?.hideTooltips()
+    messageQuickActionsView?.isHidden = true
+    messageQuickActionsView?.onAction = nil
+  }
+
+  private func updateMessageQuickActions() {
+    guard messageRenderStyle == .minimal,
+          AppSettings.shared.minimalMessageQuickActionsEnabled,
+          !isDisposed, !messageSelection.isActive, scrollState == .idle, !isUserScrolling,
+          let cell = hoveredMessageCell, let stableId = hoveredMessageStableId,
+          let renderer = cell.quickActionsMessageView,
+          renderer.fullMessage.message.stableId == stableId,
+          renderer.window != nil else {
+      hideMessageQuickActions()
+      return
+    }
+
+    let anchor = renderer.quickActionsAnchorRect(in: tableView)
+    let viewport = scrollView.effectiveVisibleRect().intersection(tableView.visibleRect)
+    let size = MessageQuickActionsView.preferredSize
+    guard anchor.intersects(viewport), viewport.width >= size.width + 16,
+          viewport.height >= size.height + 8 else {
+      hideMessageQuickActions()
+      return
+    }
+
+    let capsule: MessageQuickActionsView
+    if let existing = messageQuickActionsView {
+      capsule = existing
+    } else {
+      capsule = MessageQuickActionsView(frame: NSRect(origin: .zero, size: size))
+      messageQuickActionsView = capsule
+    }
+
+    capsule.setActionsEnabled(canReply: renderer.quickActionsCanReply, canReact: renderer.quickActionsCanReact)
+    capsule.frame = NSRect(
+      x: min(max(anchor.maxX - size.width - 8, viewport.minX + 8), viewport.maxX - size.width - 8),
+      y: min(max(anchor.minY - size.height / 2, viewport.minY + 4), viewport.maxY - size.height - 4),
+      width: size.width,
+      height: size.height
+    )
+    if tableView.subviews.last !== capsule {
+      tableView.addSubview(capsule, positioned: .above, relativeTo: nil)
+    }
+    capsule.isHidden = false
+    capsule.refreshHoverState()
+    capsule.onAction = { [weak self, weak cell, weak capsule] action, button in
+      guard let self, let cell, let capsule, !isDisposed,
+            AppSettings.shared.minimalMessageQuickActionsEnabled,
+            !messageSelection.isActive, hoveredMessageCell === cell,
+            let renderer = cell.quickActionsMessageView,
+            renderer.fullMessage.message.stableId == stableId,
+            messageStableId(forRow: tableView.row(for: cell)) == stableId else { return }
+      if action == .reaction, let overlay = quickActionsReactionOverlay, overlay.isVisible {
+        overlay.close()
+        return
+      }
+      // Protect hover during presentation as well as the synchronous menu loop.
+      isQuickActionsMenuOpen = action == .more || action == .reaction
+      quickActionsReactionOverlay?.close()
+      capsule.setActiveAction(isQuickActionsMenuOpen ? action : nil)
+      defer {
+        isQuickActionsMenuOpen = false
+        capsule.setActiveAction(quickActionsReactionOverlay?.isVisible == true ? .reaction : nil)
+        scheduleMessageHoverRefresh()
+      }
+      if let overlay = renderer.performQuickAction(action, from: button, capsule: capsule) {
+        quickActionsReactionOverlay = overlay
+        overlay.toggleButton = button
+        overlay.onClose = { [weak self, weak overlay] in
+          guard let self, quickActionsReactionOverlay === overlay else { return }
+          quickActionsReactionOverlay = nil
+          messageQuickActionsView?.setActiveAction(nil)
+          scheduleMessageHoverRefresh()
+        }
+      }
+    }
   }
 
   private func shouldHoverMessageCell(_ cell: MessageTableCell, stableId: Int64) -> Bool {
@@ -3431,7 +3552,10 @@ extension MessageListAppKit: NSTableViewDelegate {
     cell.identifier = identifier
     cell.setDependencies(dependencies)
     cell.setAvatarSwipeProvider { [weak self] sourceView in
-      self?.avatarOverlayView.grabAvatar(overlapping: sourceView)
+      if self?.messageQuickActionsView?.isHidden == false {
+        self?.clearHoveredMessage()
+      }
+      return self?.avatarOverlayView.grabAvatar(overlapping: sourceView)
     }
 
     let inputProps = messageProps(for: row)
