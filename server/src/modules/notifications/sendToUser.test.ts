@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { generateKeyPairSync } from "node:crypto"
-import { decryptSendMessagePushContentForTests, PUSH_CONTENT_ALGORITHM, PUSH_CONTENT_VERSION } from "./pushContentEncryption"
+import { decryptSendMessagePushContentForTests, encryptSendMessagePushContent, PUSH_CONTENT_ALGORITHM, PUSH_CONTENT_VERSION } from "./pushContentEncryption"
 import { maxNotificationNameBytes, messageNotificationBody, notificationText } from "./messagePreview"
 import {
   buildApnNotification,
@@ -165,6 +165,56 @@ describe("sendToUser Expo payloads", () => {
 })
 
 describe("sendToUser APN payloads", () => {
+  it("carries photo capabilities only inside encrypted Apple content", () => {
+    const recipient = generateKeyPairSync("x25519")
+    const payload = {
+      kind: "send_message" as const, senderUserId: 42, threadId: "chat_7", messageId: "19",
+      title: "Alex", body: "🖼️ Front\nentrance", photoUrl: "https://media.inline.chat/private-photo?sig=secret",
+    }
+    const session = {
+      pushContentKeyPublic: recipient.publicKey.export({ format: "der", type: "spki" }).subarray(-32),
+      pushContentKeyId: "ios-x25519-v1", pushContentVersion: PUSH_CONTENT_VERSION,
+      pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM,
+    }
+    const encrypted = buildApnNotification({ session, payload, recipientUserId: 12, silent: false,
+      topic: "chat.inline.Inline", nowSeconds: 100 })!
+    expect(JSON.stringify(encrypted)).not.toContain("private-photo")
+    const decrypted = decryptSendMessagePushContentForTests({ privateKey: recipient.privateKey,
+      envelope: encrypted.payload.encryptedContent })
+    expect(decrypted.photoUrl).toBe(payload.photoUrl)
+    expect(decrypted.body).toBe(payload.body)
+    const plaintext = buildApnNotification({ session: unencryptedSession, payload, recipientUserId: 12,
+      silent: false, topic: "chat.inline.Inline", nowSeconds: 100 })!
+    expect(JSON.stringify(plaintext)).not.toContain("private-photo")
+    expect(JSON.stringify(buildExpoPushMessage({ to: "ExponentPushToken[test]", payload, silent: false }))).not.toContain("private-photo")
+    const failed = buildApnNotification({ session, payload, recipientUserId: 12, silent: false,
+      topic: "chat.inline.Inline", nowSeconds: 100, encrypt: () => { throw new Error("no key") } })!
+    expect(JSON.stringify(failed)).not.toContain("private-photo")
+  })
+
+  it("drops an optional photo before losing an encrypted caption to the APNs size fallback", () => {
+    const recipient = generateKeyPairSync("x25519")
+    let encryptions = 0
+    const notification = buildApnNotification({
+      session: { pushContentKeyPublic: recipient.publicKey.export({ format: "der", type: "spki" }).subarray(-32),
+        pushContentKeyId: "ios-x25519-v1", pushContentVersion: PUSH_CONTENT_VERSION,
+        pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM },
+      recipientUserId: 12, silent: true, topic: "chat.inline.Inline", nowSeconds: 100,
+      payload: { kind: "send_message", senderUserId: 42, threadId: "chat_7", messageId: "19",
+        title: "Alex", body: "🖼️ Caption\nSecond line", photoUrl: "https://example.com/" + "a".repeat(4000) },
+      encrypt: (input) => { encryptions++; return encryptSendMessagePushContent(input) },
+    })!
+    expect(encryptions).toBe(2)
+    expect(Buffer.byteLength(JSON.stringify(notification))).toBeLessThanOrEqual(4096)
+    const decrypted = decryptSendMessagePushContentForTests({ privateKey: recipient.privateKey,
+      envelope: notification.payload.encryptedContent })
+    expect(decrypted.photoUrl).toBeUndefined()
+    expect(decrypted.body).toBe("🖼️ Caption\nSecond line")
+    expect(decrypted.messageId).toBe("19")
+    expect(notification.sound).toBeUndefined()
+    expect(notification.payload.recipientUserId).toBe("12")
+  })
+
   it("fits valid long Unicode identities and media captions into the actual encrypted APNs payload", () => {
     const recipient = generateKeyPairSync("x25519")
     const publicKey = recipient.publicKey.export({ format: "der", type: "spki" }).subarray(-32)

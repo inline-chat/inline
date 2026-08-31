@@ -45,6 +45,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { maxNotificationNameBytes, messageNotificationBody, notificationText } from "@in/server/modules/notifications/messagePreview"
+import { notificationPhotoUrl } from "@in/server/modules/notifications/notificationPhoto"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
@@ -1326,6 +1327,7 @@ async function sendNotificationToUser({
         senderProfilePhotoUrl,
         senderHasProfilePhoto,
         threadEmoji: chat?.emoji ?? undefined,
+        photoUrl: messageInfo.message.isSticker ? undefined : notificationPhotoUrl(messageInfo.photo),
       },
     })
   } else {

@@ -45,6 +45,8 @@ type SendMessagePushPayload = {
   senderProfilePhotoUrl?: string
   senderHasProfilePhoto?: boolean
   threadEmoji?: string
+  /** Capability carried only inside encrypted Apple push content. */
+  photoUrl?: string
 }
 
 type MessageDeletedPushPayload = {
@@ -266,6 +268,7 @@ export const buildApnNotification = ({
             isThread: payload.isThread ?? false,
             isReplyThread: payload.isReplyThread ?? false,
             threadEmoji: payload.threadEmoji,
+            photoUrl: payload.photoUrl,
           },
         })
       } catch (error) {
@@ -290,6 +293,14 @@ export const buildApnNotification = ({
       notification.alert = {
         title: genericEncryptedAlertTitle,
         body: genericEncryptedAlertBody,
+      }
+      notification.payload = { ...notification.payload, recipientUserId: String(recipientUserId) }
+      if (payload.photoUrl && encryptedContent && Buffer.byteLength(JSON.stringify(notification), "utf8") > 4_096) {
+        // The image is optional. Preserve the encrypted caption before using the generic fallback.
+        return buildApnNotification({
+          session, recipientUserId, payload: { ...payload, photoUrl: undefined },
+          silent, topic, nowSeconds, encrypt, onEncryptionError, onPayloadTooLarge,
+        })
       }
     } else {
       configurePlaintextSendMessageNotification({ notification, payload, silent })

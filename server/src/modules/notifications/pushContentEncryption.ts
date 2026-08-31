@@ -43,6 +43,7 @@ export type EncryptedSendMessagePushContent = {
   isThread: boolean
   isReplyThread?: boolean
   threadEmoji?: string
+  photoUrl?: string
 }
 
 const encodeBase64Url = (value: Buffer): string => value.toString("base64url")

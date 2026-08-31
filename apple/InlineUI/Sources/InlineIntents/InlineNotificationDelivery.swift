@@ -15,10 +15,13 @@ public final class InlineNotificationDelivery: @unchecked Sendable {
 
   public var isPending: Bool { lock.withLock { handler != nil } }
 
-  public func updateFallback(_ content: UNNotificationContent) {
+  @discardableResult
+  public func updateFallback(_ content: UNNotificationContent) -> Bool {
     let snapshot = content.copy() as! UNNotificationContent
-    lock.withLock {
-      if handler != nil { fallback = snapshot }
+    return lock.withLock {
+      guard handler != nil else { return false }
+      fallback = snapshot
+      return true
     }
   }
 

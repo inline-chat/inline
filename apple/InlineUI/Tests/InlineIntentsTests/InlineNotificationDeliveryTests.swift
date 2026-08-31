@@ -20,10 +20,10 @@ struct InlineNotificationDeliveryTests {
     var delivered: [String] = []
     let delivery = InlineNotificationDelivery(content: content) { delivered.append($0.body) }
     content.body = "Decrypted message"
-    delivery.updateFallback(content)
+    #expect(delivery.updateFallback(content))
     content.body = "Late mutation"
     delivery.finish()
-    delivery.updateFallback(content)
+    #expect(!delivery.updateFallback(content))
     delivery.finish(with: content)
     #expect(delivered == ["Decrypted message"])
   }
@@ -38,6 +38,26 @@ struct InlineNotificationDeliveryTests {
     #expect(cancelled.value == 1)
     delivery.cancelOnFinish { cancelled.increment() }
     #expect(cancelled.value == 2)
+  }
+
+  @Test func fallbackAcceptanceAgreesWithDeliveryWhenExpiryRaces() {
+    for _ in 0..<100 {
+      let accepted = Counter()
+      let delivered = Counter()
+      let delivery = InlineNotificationDelivery(content: UNMutableNotificationContent()) {
+        if $0.body == "photo" { delivered.increment() }
+      }
+      DispatchQueue.concurrentPerform(iterations: 2) { index in
+        if index == 0 {
+          let enriched = UNMutableNotificationContent()
+          enriched.body = "photo"
+          if delivery.updateFallback(enriched) { accepted.increment() }
+        } else {
+          delivery.finish()
+        }
+      }
+      #expect(accepted.value == delivered.value)
+    }
   }
 
   @Test func completionIsReentrantAndRequestsAreIndependent() {
