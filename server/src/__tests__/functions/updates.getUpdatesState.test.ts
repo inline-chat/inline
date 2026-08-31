@@ -180,7 +180,7 @@ describe("getUpdatesState", () => {
       .where(eq(spaces.id, space.id))
       .execute()
 
-    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(() => {})
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {})
     try {
       const result = await getUpdatesState(
         { date: inputDate },
@@ -215,7 +215,7 @@ describe("getUpdatesState", () => {
     }))
     const getChats = spyOn(ChatModel, "getUserChats").mockResolvedValue({ chats: [] } as never)
     const getSpaces = spyOn(SpaceModel, "getSpacesAfterUpdateDate").mockResolvedValue(changedSpaces as never)
-    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(() => {})
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {})
     try {
       const result = await getUpdatesState(
         { date: inputDate },
