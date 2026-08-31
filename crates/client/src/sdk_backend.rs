@@ -289,6 +289,60 @@ impl SdkBackend {
             })
     }
 
+    async fn resolve_agent_session_parent(
+        &self,
+        session: &StoredSession,
+        agent_session: &mut proto::AgentSession,
+    ) -> BackendResult<()> {
+        if agent_session.parent_chat_id.is_some() {
+            return Ok(());
+        }
+        // Older servers omit the parent on AgentSession. Resolve it
+        // from the existing authoritative chat API, never a partial
+        // dialog cache (which may mistake a reply thread for a root).
+        let chat_id = match agent_session
+            .peer_id
+            .as_ref()
+            .and_then(|peer| peer.r#type.as_ref())
+        {
+            Some(proto::peer::Type::Chat(peer)) if peer.chat_id > 0 => peer.chat_id,
+            _ => {
+                return Err(BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "agent session returned an invalid chat",
+                ));
+            }
+        };
+        let chat_result = self
+            .call_realtime(
+                session,
+                proto::GetChatInput {
+                    peer_id: Some(input_peer_for_chat(InlineId::new(chat_id))),
+                },
+            )
+            .await?;
+        let chat = chat_result
+            .chat
+            .filter(|chat| chat.id == chat_id)
+            .ok_or_else(|| {
+                BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "agent session chat metadata is missing or mismatched",
+                )
+            })?;
+        if chat
+            .parent_chat_id
+            .is_some_and(|parent| parent <= 0 || parent == chat_id)
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "agent session chat returned an invalid parent",
+            ));
+        }
+        agent_session.parent_chat_id = chat.parent_chat_id;
+        Ok(())
+    }
+
     async fn send_text_with_actions(
         &self,
         request: SendTextRequest,
@@ -1609,15 +1663,7 @@ impl ClientBackend for SdkBackend {
             let created = created_chat_from_proto(result.chat, result.dialog, None, None, None)?;
             backend
                 .store
-                .record_dialog(DialogRecord {
-                    chat_id: created.chat_id,
-                    peer_user_id: Some(request.user_id),
-                    title: created.title.clone(),
-                    last_message_id: None,
-                    synced_through_message_id: None,
-                    unread_count: Some(0),
-                    ..DialogRecord::new(created.chat_id)
-                })
+                .record_dialog(created_dialog_record(&created, Some(request.user_id)))
                 .await
                 .map_err(store_error_to_backend)?;
             Ok(created)
@@ -1657,17 +1703,7 @@ impl ClientBackend for SdkBackend {
             let created = created_chat_from_proto(result.chat, result.dialog, None, None, None)?;
             backend
                 .store
-                .record_dialog(DialogRecord {
-                    chat_id: created.chat_id,
-                    peer_user_id: None,
-                    title: created.title.clone(),
-                    last_message_id: None,
-                    synced_through_message_id: None,
-                    unread_count: Some(0),
-                    parent_chat_id: created.parent_chat_id,
-                    parent_message_id: created.parent_message_id,
-                    ..DialogRecord::new(created.chat_id)
-                })
+                .record_dialog(created_dialog_record(&created, None))
                 .await
                 .map_err(store_error_to_backend)?;
             Ok(created)
@@ -1717,15 +1753,7 @@ impl ClientBackend for SdkBackend {
             )?;
             backend
                 .store
-                .record_dialog(DialogRecord {
-                    chat_id: created.chat_id,
-                    peer_user_id: None,
-                    title: created.title.clone(),
-                    last_message_id: None,
-                    synced_through_message_id: None,
-                    unread_count: Some(0),
-                    ..DialogRecord::new(created.chat_id)
-                })
+                .record_dialog(created_dialog_record(&created, None))
                 .await
                 .map_err(store_error_to_backend)?;
             Ok(created)
@@ -2426,7 +2454,13 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            backend.call_realtime(&session, request).await
+            let mut result = backend.call_realtime(&session, request).await?;
+            if let Some(agent_session) = result.agent_session.as_mut() {
+                backend
+                    .resolve_agent_session_parent(&session, agent_session)
+                    .await?;
+            }
+            Ok(result)
         })
     }
 
@@ -2437,7 +2471,17 @@ impl ClientBackend for SdkBackend {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
-            backend.call_realtime(&session, request).await
+            let mut result = backend.call_realtime(&session, request).await?;
+            if let Some(agent_session) = result
+                .connection
+                .as_mut()
+                .and_then(|connection| connection.agent_session.as_mut())
+            {
+                backend
+                    .resolve_agent_session_parent(&session, agent_session)
+                    .await?;
+            }
+            Ok(result)
         })
     }
 
@@ -4511,6 +4555,20 @@ fn created_chat_from_proto(
         parent_chat_id,
         parent_message_id,
     })
+}
+
+fn created_dialog_record(created: &CreatedChat, peer_user_id: Option<InlineId>) -> DialogRecord {
+    DialogRecord {
+        chat_id: created.chat_id,
+        peer_user_id,
+        title: created.title.clone(),
+        last_message_id: None,
+        synced_through_message_id: None,
+        unread_count: Some(0),
+        parent_chat_id: created.parent_chat_id,
+        parent_message_id: created.parent_message_id,
+        ..DialogRecord::new(created.chat_id)
+    }
 }
 
 #[allow(dead_code)]
@@ -7035,6 +7093,136 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn agent_session_parent_recovery_uses_authoritative_chat_without_a_cache() {
+        // Missing cache, a legacy response, and a root chat must all resolve
+        // correctly. Missing/mismatched/invalid metadata must fail closed.
+        for use_get in [false, true] {
+            for (session_parent, chat, expected) in [
+                (Some(3), None, Ok(Some(3))),
+                (None, Some((7, Some(3))), Ok(Some(3))),
+                (None, Some((7, None)), Ok(None)),
+                (None, None, Err(())),
+                (None, Some((8, Some(3))), Err(())),
+                (None, Some((7, Some(0))), Err(())),
+                (None, Some((7, Some(7))), Err(())),
+            ] {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let addr = listener.local_addr().unwrap();
+                let server = tokio::spawn(async move {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut ws = accept_async(stream).await.unwrap();
+                    let _ = read_test_client_message(&mut ws).await;
+                    send_test_server_message(
+                        &mut ws,
+                        proto::ServerProtocolMessage {
+                            id: 1,
+                            body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                                proto::ConnectionOpen {},
+                            )),
+                        },
+                    )
+                    .await;
+                    let connect = read_test_client_message(&mut ws).await;
+                    let Some(proto::client_message::Body::RpcCall(call)) = &connect.body else {
+                        panic!("expected session RPC");
+                    };
+                    assert_eq!(
+                        call.method,
+                        if use_get {
+                            proto::Method::GetAgentSession
+                        } else {
+                            proto::Method::ConnectAgentSession
+                        } as i32
+                    );
+                    let agent_session = Some(proto::AgentSession {
+                        id: 42,
+                        peer_id: Some(proto::Peer {
+                            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+                        }),
+                        parent_chat_id: session_parent,
+                        ..Default::default()
+                    });
+                    let result = if use_get {
+                        proto::rpc_result::Result::GetAgentSession(proto::GetAgentSessionResult {
+                            connection: Some(proto::AgentSessionConnection {
+                                agent_session,
+                                ..Default::default()
+                            }),
+                        })
+                    } else {
+                        proto::rpc_result::Result::ConnectAgentSession(
+                            proto::ConnectAgentSessionResult {
+                                state: proto::ConnectAgentSessionState::AlreadyConnected as i32,
+                                agent_session,
+                            },
+                        )
+                    };
+                    send_test_server_message(&mut ws, rpc_result_message(2, connect.id, result))
+                        .await;
+                    if session_parent.is_none() {
+                        let get_chat = read_test_client_message(&mut ws).await;
+                        assert!(matches!(
+                            &get_chat.body,
+                            Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                                input: Some(proto::rpc_call::Input::GetChat(input)),
+                                ..
+                            })) if input.peer_id == Some(input_peer_for_chat(InlineId::new(7)))
+                        ));
+                        send_test_server_message(
+                            &mut ws,
+                            rpc_result_message(
+                                3,
+                                get_chat.id,
+                                proto::rpc_result::Result::GetChat(proto::GetChatResult {
+                                    chat: chat.map(|(id, parent_chat_id)| proto::Chat {
+                                        id,
+                                        parent_chat_id,
+                                        ..Default::default()
+                                    }),
+                                    ..Default::default()
+                                }),
+                            ),
+                        )
+                        .await;
+                    }
+                });
+                let store = InMemoryStore::new();
+                store.save_session(connect_session()).await.unwrap();
+                assert!(store.dialog(InlineId::new(7)).await.unwrap().is_none());
+                let backend = SdkBackend::builder()
+                    .store(store)
+                    .realtime_url(format!("ws://{addr}/realtime"))
+                    .without_realtime_handshake()
+                    .build()
+                    .unwrap();
+                let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                    if use_get {
+                        backend
+                            .get_agent_session(proto::GetAgentSessionInput::default())
+                            .await
+                            .map(|result| result.connection.unwrap().agent_session)
+                    } else {
+                        backend
+                            .connect_agent_session(proto::ConnectAgentSessionInput::default())
+                            .await
+                            .map(|result| result.agent_session)
+                    }
+                })
+                .await
+                .expect("session recovery should finish");
+                match expected {
+                    Ok(parent) => assert_eq!(result.unwrap().unwrap().parent_chat_id, parent),
+                    Err(()) => assert_eq!(
+                        result.unwrap_err().category,
+                        ClientErrorCategory::ProtocolMismatch
+                    ),
+                }
+                server.await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn sdk_backend_reuses_realtime_connection_for_multiple_rpc_calls() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -8231,6 +8419,21 @@ mod tests {
             Some("https://cdn.inline.test/ada.jpg")
         );
         assert_eq!(page.users[0].is_bot, Some(false));
+    }
+
+    #[test]
+    fn created_reply_thread_dialog_preserves_its_parent_anchor() {
+        let created = CreatedChat {
+            chat_id: InlineId::new(9),
+            title: Some("Resumed session".to_string()),
+            parent_chat_id: Some(InlineId::new(5)),
+            parent_message_id: Some(InlineId::new(6)),
+        };
+
+        let dialog = created_dialog_record(&created, None);
+
+        assert_eq!(dialog.parent_chat_id, Some(InlineId::new(5)));
+        assert_eq!(dialog.parent_message_id, Some(InlineId::new(6)));
     }
 
     #[tokio::test]

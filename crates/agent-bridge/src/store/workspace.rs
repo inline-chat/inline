@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use super::*;
 use crate::{InstallationId, WorkspaceId};
@@ -24,6 +24,12 @@ pub struct InstallationRecord {
 pub struct WorkspaceFilesystemIdentity {
     pub device_id: u64,
     pub file_id: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkspacePersistentIdentity {
+    volume_uuid: [u8; 16],
+    object_id: [u8; 8],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,8 +86,33 @@ impl BridgeStore {
         path: &Path,
         selected_at: i64,
     ) -> StoreResult<WorkspaceRecord> {
+        self.write_workspace(installation_id, workspace_id, path, selected_at, true)
+    }
+
+    /// Discovers a project without selecting it or replacing a saved filesystem
+    /// identity. An existing conversation must never move just because a
+    /// provider's project list changed.
+    pub fn discover_workspace(
+        &self,
+        installation_id: &InstallationId,
+        workspace_id: &WorkspaceId,
+        path: &Path,
+    ) -> StoreResult<()> {
+        self.write_workspace(installation_id, workspace_id, path, 0, false)
+            .map(|_| ())
+    }
+
+    fn write_workspace(
+        &self,
+        installation_id: &InstallationId,
+        workspace_id: &WorkspaceId,
+        path: &Path,
+        selected_at: i64,
+        select: bool,
+    ) -> StoreResult<WorkspaceRecord> {
         let canonical_path = canonical_workspace_path(path)?;
         let filesystem_identity = workspace_filesystem_identity(&canonical_path)?;
+        let persistent_identity = workspace_persistent_identity(&canonical_path);
         let path_text =
             canonical_path
                 .to_str()
@@ -93,12 +124,16 @@ impl BridgeStore {
         let parent_hint = workspace_parent_hint(&canonical_path);
         let connection = self.connection.lock().expect("bridge store poisoned");
         let transaction = connection.unchecked_transaction()?;
-        let selection_order = transaction.query_row(
-            "SELECT COALESCE(MAX(selection_order), 0) + 1 FROM workspaces
+        let selection_order = if select {
+            transaction.query_row(
+                "SELECT COALESCE(MAX(selection_order), 0) + 1 FROM workspaces
              WHERE installation_id = ?1",
-            params![installation_id.as_str()],
-            |row| row.get::<_, i64>(0),
-        )?;
+                params![installation_id.as_str()],
+                |row| row.get::<_, i64>(0),
+            )?
+        } else {
+            0
+        };
         let existing_id = transaction
             .query_row(
                 "SELECT workspace_id FROM workspaces
@@ -118,8 +153,9 @@ impl BridgeStore {
             "INSERT INTO workspaces (
                 installation_id, workspace_id, path, display_name, parent_hint,
                 last_selected_at, selection_order, missing_since,
-                filesystem_device_id, filesystem_file_id
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9)
+                filesystem_device_id, filesystem_file_id,
+                filesystem_volume_uuid, filesystem_object_id
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?10, ?11)
              ON CONFLICT(installation_id, workspace_id) DO UPDATE SET
                 path = excluded.path,
                 display_name = excluded.display_name,
@@ -128,7 +164,10 @@ impl BridgeStore {
                 selection_order = excluded.selection_order,
                 missing_since = NULL,
                 filesystem_device_id = excluded.filesystem_device_id,
-                filesystem_file_id = excluded.filesystem_file_id",
+                filesystem_file_id = excluded.filesystem_file_id,
+                filesystem_volume_uuid = excluded.filesystem_volume_uuid,
+                filesystem_object_id = excluded.filesystem_object_id
+             WHERE ?12",
             params![
                 installation_id.as_str(),
                 workspace_id.as_str(),
@@ -143,6 +182,13 @@ impl BridgeStore {
                 filesystem_identity
                     .as_ref()
                     .map(|identity| identity.file_id as i64),
+                persistent_identity
+                    .as_ref()
+                    .map(|identity| identity.volume_uuid.as_slice()),
+                persistent_identity
+                    .as_ref()
+                    .map(|identity| identity.object_id.as_slice()),
+                select,
             ],
         )?;
         transaction.commit()?;
@@ -233,26 +279,93 @@ impl BridgeStore {
         workspace_id: &WorkspaceId,
         checked_at: i64,
     ) -> StoreResult<WorkspaceRecord> {
-        let record = self
+        let mut record = self
             .workspace(installation_id, workspace_id)?
-            .filter(|record| record.missing_since.is_none())
             .ok_or_else(|| StoreError::WorkspaceUnavailable {
                 workspace_id: workspace_id.to_string(),
             })?;
-        let verified = fs::canonicalize(&record.path)
+        let verified_canonical_path = fs::canonicalize(&record.path)
             .ok()
-            .filter(|canonical| canonical == &record.path && canonical.is_dir())
-            .and_then(|canonical| {
-                let current = workspace_filesystem_identity(&canonical).ok()?;
-                (current == record.filesystem_identity).then_some(canonical)
+            .filter(|canonical| canonical == &record.path && canonical.is_dir());
+        let Some(verified_canonical_path) = verified_canonical_path else {
+            self.mark_workspace_unavailable(installation_id, workspace_id, checked_at)?;
+            return Err(StoreError::WorkspaceUnavailable {
+                workspace_id: workspace_id.to_string(),
             });
-        if verified.is_none() {
+        };
+        let current_identity = workspace_filesystem_identity(&verified_canonical_path)
+            .ok()
+            .flatten();
+        let stored_persistent_identity =
+            self.workspace_persistent_identity(installation_id, workspace_id)?;
+        let current_persistent_identity = workspace_persistent_identity(&verified_canonical_path);
+        if !workspace_filesystem_identity_matches(
+            record.filesystem_identity.as_ref(),
+            current_identity.as_ref(),
+            stored_persistent_identity.as_ref(),
+            current_persistent_identity.as_ref(),
+        ) {
             self.mark_workspace_unavailable(installation_id, workspace_id, checked_at)?;
             return Err(StoreError::WorkspaceUnavailable {
                 workspace_id: workspace_id.to_string(),
             });
         }
+
+        if record.missing_since.is_some()
+            || record.filesystem_identity != current_identity
+            || stored_persistent_identity != current_persistent_identity
+        {
+            let connection = self.connection.lock().expect("bridge store poisoned");
+            connection.execute(
+                "UPDATE workspaces SET missing_since = NULL,
+                    filesystem_device_id = ?3, filesystem_file_id = ?4,
+                    filesystem_volume_uuid = ?5, filesystem_object_id = ?6
+                 WHERE installation_id = ?1 AND workspace_id = ?2",
+                params![
+                    installation_id.as_str(),
+                    workspace_id.as_str(),
+                    current_identity
+                        .as_ref()
+                        .map(|identity| identity.device_id as i64),
+                    current_identity
+                        .as_ref()
+                        .map(|identity| identity.file_id as i64),
+                    current_persistent_identity
+                        .as_ref()
+                        .map(|identity| identity.volume_uuid.as_slice()),
+                    current_persistent_identity
+                        .as_ref()
+                        .map(|identity| identity.object_id.as_slice()),
+                ],
+            )?;
+            record.missing_since = None;
+            record.filesystem_identity = current_identity;
+        }
         Ok(record)
+    }
+
+    fn workspace_persistent_identity(
+        &self,
+        installation_id: &InstallationId,
+        workspace_id: &WorkspaceId,
+    ) -> StoreResult<Option<WorkspacePersistentIdentity>> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let raw = connection
+            .query_row(
+                "SELECT filesystem_volume_uuid, filesystem_object_id
+                 FROM workspaces WHERE installation_id = ?1 AND workspace_id = ?2",
+                params![installation_id.as_str(), workspace_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<Vec<u8>>>(0)?,
+                        row.get::<_, Option<Vec<u8>>>(1)?,
+                    ))
+                },
+            )
+            .optional()?;
+        raw.map(|(volume_uuid, object_id)| parse_persistent_identity(volume_uuid, object_id))
+            .transpose()
+            .map(Option::flatten)
     }
 
     /// Makes one workspace current for a conversation without removing that
@@ -265,8 +378,10 @@ impl BridgeStore {
         updated_at: i64,
     ) -> StoreResult<WorkspaceRecord> {
         let record = self.verified_workspace(installation_id, workspace_id, updated_at)?;
-        let connection = self.connection.lock().expect("bridge store poisoned");
-        connection.execute(
+        let mut connection = self.connection.lock().expect("bridge store poisoned");
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        reject_conflicting_session_workspace(&transaction, installation_id, chat_id, workspace_id)?;
+        transaction.execute(
             "INSERT INTO chat_workspaces (
                 installation_id, chat_id, workspace_id, updated_at
              ) VALUES (?1, ?2, ?3, ?4)
@@ -280,6 +395,7 @@ impl BridgeStore {
                 updated_at,
             ],
         )?;
+        transaction.commit()?;
         Ok(record)
     }
 
@@ -365,7 +481,15 @@ impl BridgeStore {
         installation_id: &InstallationId,
         limit: usize,
     ) -> StoreResult<Vec<WorkspaceRecord>> {
-        let limit = limit.clamp(1, MAX_RECENT_WORKSPACES) as i64;
+        self.workspace_records(installation_id, limit.clamp(1, MAX_RECENT_WORKSPACES))
+    }
+
+    fn workspace_records(
+        &self,
+        installation_id: &InstallationId,
+        limit: usize,
+    ) -> StoreResult<Vec<WorkspaceRecord>> {
+        let limit = limit as i64;
         let connection = self.connection.lock().expect("bridge store poisoned");
         let mut statement = connection.prepare(
             "SELECT workspace_id, path, display_name, parent_hint,
@@ -373,7 +497,7 @@ impl BridgeStore {
                     filesystem_device_id, filesystem_file_id
              FROM workspaces
              WHERE installation_id = ?1 AND missing_since IS NULL
-             ORDER BY selection_order DESC
+             ORDER BY selection_order DESC, display_name COLLATE NOCASE, workspace_id
              LIMIT ?2",
         )?;
         let rows = statement.query_map(params![installation_id.as_str(), limit], |row| {
@@ -428,6 +552,22 @@ impl BridgeStore {
         Ok(workspace_choices(records, selected_workspace_id))
     }
 
+    /// Full project browser, independent of the eight-entry quick picker.
+    pub fn project_workspace_choices(
+        &self,
+        installation_id: &InstallationId,
+        selected_workspace_id: Option<&WorkspaceId>,
+    ) -> StoreResult<Vec<WorkspaceChoice>> {
+        let records = self.workspace_records(installation_id, 1_001)?;
+        if records.len() > 1_000 {
+            return Err(StoreError::InvalidWorkspacePath {
+                path: "project catalog".to_string(),
+                reason: "the project catalog exceeds 1000 folders",
+            });
+        }
+        Ok(workspace_choices(records, selected_workspace_id))
+    }
+
     /// Marks one observed workspace unavailable while preserving its durable
     /// record and every session/chat binding that refers to it.
     pub fn mark_workspace_unavailable(
@@ -453,28 +593,33 @@ impl BridgeStore {
         installation_id: &InstallationId,
         checked_at: i64,
     ) -> StoreResult<Vec<WorkspaceRecord>> {
-        let connection = self.connection.lock().expect("bridge store poisoned");
-        let mut statement = connection.prepare(
-            "SELECT workspace_id, path, display_name, parent_hint,
-                    last_selected_at, selection_order, filesystem_device_id,
-                    filesystem_file_id
-             FROM workspaces
-             WHERE installation_id = ?1 AND missing_since IS NULL",
-        )?;
-        let rows = statement.query_map(params![installation_id.as_str()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<i64>>(6)?,
-                row.get::<_, Option<i64>>(7)?,
-            ))
-        })?;
+        let records = {
+            let connection = self.connection.lock().expect("bridge store poisoned");
+            let mut statement = connection.prepare(
+                "SELECT workspace_id, path, display_name, parent_hint,
+                        last_selected_at, selection_order, missing_since,
+                        filesystem_device_id, filesystem_file_id
+                 FROM workspaces
+                 WHERE installation_id = ?1",
+            )?;
+            statement
+                .query_map(params![installation_id.as_str()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, Option<i64>>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                        row.get::<_, Option<i64>>(8)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
         let mut missing = Vec::new();
-        for row in rows {
+        for row in records {
             let (
                 workspace_id,
                 path,
@@ -482,42 +627,60 @@ impl BridgeStore {
                 parent_hint,
                 last_selected_at,
                 selection_order,
+                previous_missing_since,
                 filesystem_device_id,
                 filesystem_file_id,
-            ) = row?;
-            let path = PathBuf::from(path);
-            if !path.is_dir() {
-                missing.push(WorkspaceRecord {
-                    installation_id: installation_id.clone(),
-                    workspace_id: parse_workspace_id(workspace_id)?,
-                    path,
-                    display_name,
-                    parent_hint,
-                    last_selected_at,
-                    selection_order,
-                    missing_since: Some(checked_at),
-                    filesystem_identity: parse_filesystem_identity(
-                        filesystem_device_id,
-                        filesystem_file_id,
-                    )?,
-                });
+            ) = row;
+            let workspace_id = parse_workspace_id(workspace_id)?;
+            match self.verified_workspace(installation_id, &workspace_id, checked_at) {
+                Ok(_) => {}
+                Err(StoreError::WorkspaceUnavailable { .. }) => {
+                    if previous_missing_since.is_none() {
+                        missing.push(WorkspaceRecord {
+                            installation_id: installation_id.clone(),
+                            workspace_id,
+                            path: PathBuf::from(path),
+                            display_name,
+                            parent_hint,
+                            last_selected_at,
+                            selection_order,
+                            missing_since: Some(checked_at),
+                            filesystem_identity: parse_filesystem_identity(
+                                filesystem_device_id,
+                                filesystem_file_id,
+                            )?,
+                        });
+                    }
+                }
+                Err(error) => return Err(error),
             }
-        }
-        drop(statement);
-        for record in &missing {
-            connection.execute(
-                "UPDATE workspaces SET missing_since = ?3
-                 WHERE installation_id = ?1 AND workspace_id = ?2
-                   AND missing_since IS NULL",
-                params![
-                    installation_id.as_str(),
-                    record.workspace_id.as_str(),
-                    checked_at,
-                ],
-            )?;
         }
         Ok(missing)
     }
+}
+
+pub(super) fn reject_conflicting_session_workspace(
+    transaction: &Transaction<'_>,
+    installation_id: &InstallationId,
+    chat_id: i64,
+    workspace_id: &WorkspaceId,
+) -> StoreResult<()> {
+    let conflicts = transaction.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM session_thread_bindings
+            WHERE installation_id = ?1
+              AND thread_chat_id = ?2
+              AND workspace_id <> ?3
+         )",
+        params![installation_id.as_str(), chat_id, workspace_id.as_str()],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if conflicts {
+        return Err(StoreError::SessionThreadBindingConflict {
+            thread_chat_id: chat_id,
+        });
+    }
+    Ok(())
 }
 
 fn workspace_choices(
@@ -638,6 +801,76 @@ pub(super) fn migrate_v12(connection: &Connection) -> StoreResult<()> {
     Ok(())
 }
 
+pub(super) fn migrate_v26(connection: &Connection) -> StoreResult<()> {
+    let rows = {
+        let mut statement = connection.prepare(
+            "SELECT installation_id, workspace_id, path,
+                    filesystem_device_id, filesystem_file_id
+             FROM workspaces",
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    // Filesystem and getattrlist calls can block on removable or network
+    // volumes. Resolve the optional backfill before opening SQLite's exclusive
+    // migration transaction so bridge state is never locked behind I/O.
+    let backfills = rows
+        .into_iter()
+        .filter_map(
+            |(installation_id, workspace_id, path, stored_device_id, stored_file_id)| {
+                let canonical = canonical_workspace_path(&PathBuf::from(path)).ok()?;
+                let current_identity = workspace_filesystem_identity(&canonical).ok().flatten()?;
+                if Some(current_identity.device_id as i64) != stored_device_id
+                    || Some(current_identity.file_id as i64) != stored_file_id
+                {
+                    return None;
+                }
+                let persistent_identity = workspace_persistent_identity(&canonical)?;
+                Some((
+                    installation_id,
+                    workspace_id,
+                    current_identity,
+                    persistent_identity,
+                ))
+            },
+        )
+        .collect::<Vec<_>>();
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute_batch(
+        "ALTER TABLE workspaces ADD COLUMN filesystem_volume_uuid BLOB;
+         ALTER TABLE workspaces ADD COLUMN filesystem_object_id BLOB;",
+    )?;
+    for (installation_id, workspace_id, current_identity, persistent_identity) in backfills {
+        transaction.execute(
+            "UPDATE workspaces
+                 SET filesystem_device_id = ?3, filesystem_file_id = ?4,
+                     filesystem_volume_uuid = ?5, filesystem_object_id = ?6,
+                     missing_since = NULL
+                 WHERE installation_id = ?1 AND workspace_id = ?2",
+            params![
+                installation_id,
+                workspace_id,
+                current_identity.device_id as i64,
+                current_identity.file_id as i64,
+                persistent_identity.volume_uuid.as_slice(),
+                persistent_identity.object_id.as_slice(),
+            ],
+        )?;
+    }
+    transaction.pragma_update(None, "user_version", 26)?;
+    transaction.commit()?;
+    Ok(())
+}
+
 fn canonical_workspace_path(path: &Path) -> StoreResult<PathBuf> {
     if !path.is_absolute() {
         return Err(StoreError::InvalidWorkspacePath {
@@ -679,6 +912,167 @@ fn workspace_filesystem_identity(path: &Path) -> StoreResult<Option<WorkspaceFil
         device_id: metadata.dev(),
         file_id: metadata.ino(),
     }))
+}
+
+fn workspace_filesystem_identity_matches(
+    stored: Option<&WorkspaceFilesystemIdentity>,
+    current: Option<&WorkspaceFilesystemIdentity>,
+    stored_persistent: Option<&WorkspacePersistentIdentity>,
+    current_persistent: Option<&WorkspacePersistentIdentity>,
+) -> bool {
+    match (stored_persistent, current_persistent) {
+        (Some(stored), Some(current)) => return stored == current,
+        (Some(_), None) => return false,
+        (None, Some(_)) | (None, None) => {}
+    }
+    stored == current
+}
+
+fn parse_persistent_identity(
+    volume_uuid: Option<Vec<u8>>,
+    object_id: Option<Vec<u8>>,
+) -> StoreResult<Option<WorkspacePersistentIdentity>> {
+    match (volume_uuid, object_id) {
+        (None, None) => Ok(None),
+        (Some(volume_uuid), Some(object_id)) => {
+            let volume_uuid =
+                volume_uuid
+                    .try_into()
+                    .map_err(|_| StoreError::InvalidWorkspacePath {
+                        path: "<stored workspace>".to_string(),
+                        reason: "persistent volume identity is malformed",
+                    })?;
+            let object_id = object_id
+                .try_into()
+                .map_err(|_| StoreError::InvalidWorkspacePath {
+                    path: "<stored workspace>".to_string(),
+                    reason: "persistent object identity is malformed",
+                })?;
+            Ok(Some(WorkspacePersistentIdentity {
+                volume_uuid,
+                object_id,
+            }))
+        }
+        _ => Err(StoreError::InvalidWorkspacePath {
+            path: "<stored workspace>".to_string(),
+            reason: "persistent filesystem identity is incomplete",
+        }),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn workspace_persistent_identity(path: &Path) -> Option<WorkspacePersistentIdentity> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[repr(C, align(8))]
+    struct AttributeBuffer<const N: usize>([u8; N]);
+
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut capability_attributes = libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: 0,
+        volattr: libc::ATTR_VOL_INFO | libc::ATTR_VOL_CAPABILITIES,
+        dirattr: 0,
+        fileattr: 0,
+        forkattr: 0,
+    };
+    let mut capability_buffer = AttributeBuffer::<36>([0; 36]);
+    // SAFETY: `path` is NUL-terminated, `attrlist` uses the Darwin C layout,
+    // and the aligned writable byte buffer has the exact requested size.
+    let capability_result = unsafe {
+        libc::getattrlist(
+            path.as_ptr(),
+            std::ptr::addr_of_mut!(capability_attributes).cast(),
+            capability_buffer.0.as_mut_ptr().cast(),
+            capability_buffer.0.len(),
+            libc::FSOPT_NOFOLLOW,
+        )
+    };
+    if capability_result != 0
+        || u32::from_ne_bytes(capability_buffer.0[..4].try_into().ok()?) as usize
+            != capability_buffer.0.len()
+    {
+        return None;
+    }
+    let format_capabilities = u32::from_ne_bytes(capability_buffer.0[4..8].try_into().ok()?);
+    let valid_format_capabilities =
+        u32::from_ne_bytes(capability_buffer.0[20..24].try_into().ok()?);
+    if valid_format_capabilities & libc::VOL_CAP_FMT_PERSISTENTOBJECTIDS == 0
+        || format_capabilities & libc::VOL_CAP_FMT_PERSISTENTOBJECTIDS == 0
+    {
+        return None;
+    }
+
+    let mut volume_attributes = libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: 0,
+        volattr: libc::ATTR_VOL_INFO | libc::ATTR_VOL_UUID,
+        dirattr: 0,
+        fileattr: 0,
+        forkattr: 0,
+    };
+    let mut volume_buffer = AttributeBuffer::<20>([0; 20]);
+    // SAFETY: `path` is NUL-terminated, `attrlist` uses the Darwin C layout,
+    // and the aligned writable byte buffer has the exact requested size.
+    let volume_result = unsafe {
+        libc::getattrlist(
+            path.as_ptr(),
+            std::ptr::addr_of_mut!(volume_attributes).cast(),
+            volume_buffer.0.as_mut_ptr().cast(),
+            volume_buffer.0.len(),
+            libc::FSOPT_NOFOLLOW,
+        )
+    };
+    if volume_result != 0
+        || u32::from_ne_bytes(volume_buffer.0[..4].try_into().ok()?) as usize
+            != volume_buffer.0.len()
+    {
+        return None;
+    }
+
+    let mut object_attributes = libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: libc::ATTR_CMN_OBJPERMANENTID,
+        volattr: 0,
+        dirattr: 0,
+        fileattr: 0,
+        forkattr: 0,
+    };
+    let mut object_buffer = AttributeBuffer::<12>([0; 12]);
+    // SAFETY: the same pointer and buffer guarantees as the volume request
+    // apply. `ATTR_CMN_OBJPERMANENTID` returns one eight-byte `fsobj_id_t`.
+    let object_result = unsafe {
+        libc::getattrlist(
+            path.as_ptr(),
+            std::ptr::addr_of_mut!(object_attributes).cast(),
+            object_buffer.0.as_mut_ptr().cast(),
+            object_buffer.0.len(),
+            libc::FSOPT_NOFOLLOW,
+        )
+    };
+    if object_result != 0
+        || u32::from_ne_bytes(object_buffer.0[..4].try_into().ok()?) as usize
+            != object_buffer.0.len()
+    {
+        return None;
+    }
+    let mut volume_uuid = [0; 16];
+    volume_uuid.copy_from_slice(&volume_buffer.0[4..20]);
+    let mut object_id = [0; 8];
+    object_id.copy_from_slice(&object_buffer.0[4..12]);
+    Some(WorkspacePersistentIdentity {
+        volume_uuid,
+        object_id,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn workspace_persistent_identity(_path: &Path) -> Option<WorkspacePersistentIdentity> {
+    None
 }
 
 #[cfg(not(unix))]
@@ -744,6 +1138,7 @@ fn normalize_display_component(value: &str, kind: &'static str) -> StoreResult<S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ProviderInstanceRef, ProviderSessionRef};
 
     fn installation() -> InstallationId {
         InstallationId::new("host-codex").expect("installation")
@@ -822,6 +1217,50 @@ mod tests {
                 .as_str(),
             "workspace-project",
             "binding a conversation must not rewrite the installation default"
+        );
+    }
+
+    #[test]
+    fn session_thread_workspace_cannot_be_rebound_by_chat_selection() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        put_installation(&store);
+        let directory = tempfile::tempdir().expect("workspaces");
+        let first_path = directory.path().join("first");
+        let second_path = directory.path().join("second");
+        fs::create_dir(&first_path).expect("first workspace");
+        fs::create_dir(&second_path).expect("second workspace");
+        let first = WorkspaceId::new("workspace-first").expect("workspace");
+        let second = WorkspaceId::new("workspace-second").expect("workspace");
+        store
+            .select_workspace(&installation(), &first, &first_path, 1)
+            .expect("select first");
+        store
+            .select_workspace(&installation(), &second, &second_path, 2)
+            .expect("select second");
+        let provider =
+            ProviderInstanceRef::new(installation(), ProviderId::new("codex").expect("provider"))
+                .expect("provider instance");
+        let session = ProviderSessionRef::new(
+            provider,
+            ProviderSessionId::new("session-1").expect("session"),
+        )
+        .expect("session ref");
+        let binding = SessionThreadBinding::new(session, first.clone(), 10, 42).expect("binding");
+        store
+            .bind_session_thread(&binding, None, 3)
+            .expect("bind session thread");
+
+        assert!(matches!(
+            store.bind_chat_workspace(&installation(), 42, &second, 4),
+            Err(StoreError::SessionThreadBindingConflict { thread_chat_id: 42 })
+        ));
+        assert_eq!(
+            store
+                .bound_chat_workspace(&installation(), 42)
+                .expect("bound workspace")
+                .expect("workspace")
+                .workspace_id,
+            first
         );
     }
 
@@ -911,6 +1350,7 @@ mod tests {
         fs::create_dir(&project).expect("project");
         let project = fs::canonicalize(project).expect("canonical project");
         let workspace_id = WorkspaceId::new("workspace-replaced").expect("id");
+        let original_persistent_identity = workspace_persistent_identity(&project);
         store
             .select_workspace(&installation(), &workspace_id, &project, 1)
             .expect("select workspace");
@@ -918,11 +1358,20 @@ mod tests {
         let original = parent.path().join("original-project");
         fs::rename(&project, &original).expect("move original root");
         fs::create_dir(&project).expect("replacement root");
+        assert_ne!(
+            original_persistent_identity,
+            workspace_persistent_identity(&project),
+            "replacement directory must have a distinct persistent identity"
+        );
 
-        assert!(matches!(
-            store.verified_workspace(&installation(), &workspace_id, 2),
-            Err(StoreError::WorkspaceUnavailable { .. })
-        ));
+        store
+            .discover_workspace(&installation(), &workspace_id, &project)
+            .expect("rediscovering must preserve the original filesystem identity");
+
+        let missing = store
+            .refresh_workspace_availability(&installation(), 2)
+            .expect("refresh workspaces");
+        assert_eq!(missing.len(), 1);
         assert_eq!(
             store
                 .workspace(&installation(), &workspace_id)
@@ -931,6 +1380,110 @@ mod tests {
                 .missing_since,
             Some(2)
         );
+    }
+
+    #[test]
+    fn verified_workspace_recovers_a_matching_folder_marked_unavailable() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        put_installation(&store);
+        let workspace_id = WorkspaceId::new("workspace-recovered").expect("id");
+        let cwd = std::env::current_dir().expect("cwd");
+        store
+            .select_workspace(&installation(), &workspace_id, &cwd, 1)
+            .expect("select");
+        store
+            .mark_workspace_unavailable(&installation(), &workspace_id, 2)
+            .expect("mark unavailable");
+
+        let newly_missing = store
+            .refresh_workspace_availability(&installation(), 3)
+            .expect("refresh matching workspace");
+        assert!(newly_missing.is_empty());
+        let recovered = store
+            .workspace(&installation(), &workspace_id)
+            .expect("workspace")
+            .expect("record");
+
+        assert_eq!(recovered.missing_since, None);
+        assert_eq!(
+            recovered.path,
+            fs::canonicalize(cwd).expect("canonical cwd")
+        );
+        assert_eq!(
+            store
+                .workspace(&installation(), &workspace_id)
+                .expect("workspace")
+                .expect("record")
+                .missing_since,
+            None
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn verified_workspace_repairs_boot_variant_device_identity() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        put_installation(&store);
+        let workspace_id = WorkspaceId::new("workspace-remounted").expect("id");
+        let cwd = std::env::current_dir().expect("cwd");
+        let selected = store
+            .select_workspace(&installation(), &workspace_id, &cwd, 1)
+            .expect("select");
+        let identity = selected.filesystem_identity.expect("filesystem identity");
+        let stale_device_id = (identity.device_id as i64).wrapping_add(1);
+        store
+            .connection
+            .lock()
+            .expect("store")
+            .execute(
+                "UPDATE workspaces SET filesystem_device_id = ?3, missing_since = 2
+                 WHERE installation_id = ?1 AND workspace_id = ?2",
+                params![
+                    installation().as_str(),
+                    workspace_id.as_str(),
+                    stale_device_id
+                ],
+            )
+            .expect("simulate reboot device drift");
+
+        let recovered = store
+            .verified_workspace(&installation(), &workspace_id, 3)
+            .expect("repair remounted workspace");
+
+        assert_eq!(recovered.missing_since, None);
+        assert_eq!(recovered.filesystem_identity, Some(identity));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn persistent_volume_identity_rejects_cross_volume_inode_collision() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        put_installation(&store);
+        let workspace_id = WorkspaceId::new("workspace-volume-replaced").expect("id");
+        let cwd = std::env::current_dir().expect("cwd");
+        store
+            .select_workspace(&installation(), &workspace_id, &cwd, 1)
+            .expect("select");
+        let changed = store
+            .connection
+            .lock()
+            .expect("store")
+            .execute(
+                "UPDATE workspaces SET filesystem_volume_uuid = ?3
+                 WHERE installation_id = ?1 AND workspace_id = ?2",
+                params![
+                    installation().as_str(),
+                    workspace_id.as_str(),
+                    vec![0xff_u8; 16]
+                ],
+            )
+            .expect("simulate another volume with a colliding inode");
+        assert_eq!(changed, 1);
+
+        assert!(matches!(
+            store.verified_workspace(&installation(), &workspace_id, 2),
+            Err(StoreError::WorkspaceUnavailable { .. })
+        ));
     }
 
     #[test]

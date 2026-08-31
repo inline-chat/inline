@@ -21,6 +21,15 @@ pub struct PendingFinalSend {
     pub final_text: String,
     pub output_attachments: Vec<OutputAttachment>,
     pub failure: Option<String>,
+    pub agent_output_session_id: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingAgentOutputLink {
+    pub event_id: String,
+    pub agent_session_id: i64,
+    pub provider_turn_id: TurnId,
+    pub message_id: i64,
 }
 
 impl BridgeStore {
@@ -46,6 +55,27 @@ impl BridgeStore {
         output_attachments: &[OutputAttachment],
         failure: Option<&str>,
     ) -> StoreResult<bool> {
+        self.stage_inbound_final_send_with_attachments_and_link(
+            event_id,
+            state,
+            final_text,
+            output_attachments,
+            failure,
+            None,
+        )
+    }
+
+    /// Atomically journals the terminal answer and, when this is a resumed
+    /// provider session, the server session that must own the final message.
+    pub fn stage_inbound_final_send_with_attachments_and_link(
+        &self,
+        event_id: &str,
+        state: InboundState,
+        final_text: &str,
+        output_attachments: &[OutputAttachment],
+        failure: Option<&str>,
+        agent_output_session_id: Option<i64>,
+    ) -> StoreResult<bool> {
         if !matches!(state, InboundState::Completed | InboundState::Failed) {
             return Err(StoreError::InvalidInboundFinalState(
                 state.as_str().to_string(),
@@ -57,6 +87,9 @@ impl BridgeStore {
         if output_attachments.len() > MAX_OUTPUT_ATTACHMENTS {
             return Err(StoreError::InvalidInboundOutputAttachments);
         }
+        if agent_output_session_id.is_some_and(|id| id <= 0) {
+            return Ok(false);
+        }
         let output_attachments_json = serde_json::to_string(output_attachments)?;
         if output_attachments_json.len() > MAX_OUTPUT_ATTACHMENTS_JSON_BYTES {
             return Err(StoreError::InvalidInboundOutputAttachments);
@@ -65,8 +98,12 @@ impl BridgeStore {
         let changed = connection.execute(
             "UPDATE inbound_directions SET
                 terminal_state = ?2, terminal_text = ?3,
-                terminal_output_attachments_json = ?4, terminal_failure = ?5
+                terminal_output_attachments_json = ?4, terminal_failure = ?5,
+                agent_output_session_id = COALESCE(agent_output_session_id, ?6)
              WHERE event_id = ?1 AND state = 'started'
+               AND (?6 IS NULL OR provider_turn_id IS NOT NULL)
+               AND (?6 IS NULL OR agent_output_session_id IS NULL
+                    OR agent_output_session_id = ?6)
                AND (
                     terminal_state IS NULL OR
                     (terminal_state = ?2 AND terminal_text = ?3
@@ -78,7 +115,8 @@ impl BridgeStore {
                 state.as_str(),
                 final_text,
                 output_attachments_json,
-                failure
+                failure,
+                agent_output_session_id,
             ],
         )?;
         Ok(changed == 1)
@@ -94,7 +132,8 @@ impl BridgeStore {
         let mut statement = connection.prepare(
             "SELECT event_id, chat_id, workspace_id, message_id, delivery_chat_id,
                     stream_message_id, terminal_random_id, terminal_state, terminal_text,
-                    terminal_output_attachments_json, terminal_failure
+                    terminal_output_attachments_json, terminal_failure,
+                    agent_output_session_id
              FROM inbound_directions
              WHERE installation_id = ?1 AND state = 'started'
                AND terminal_state IS NOT NULL
@@ -114,6 +153,7 @@ impl BridgeStore {
                     row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?,
                     row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<i64>>(11)?,
                 ))
             })?
             .map(|row| {
@@ -129,6 +169,7 @@ impl BridgeStore {
                     final_text,
                     output_attachments_json,
                     failure,
+                    agent_output_session_id,
                 ) = row?;
                 Ok(PendingFinalSend {
                     event_id,
@@ -145,9 +186,88 @@ impl BridgeStore {
                     final_text,
                     output_attachments: serde_json::from_str(&output_attachments_json)?,
                     failure,
+                    agent_output_session_id,
                 })
             })
             .collect()
+    }
+
+    /// Records the canonical Inline message returned by the stable final-send
+    /// transaction. A crash before this write simply repeats that transaction
+    /// and receives the same message identity during recovery.
+    pub fn attach_inbound_agent_output_message(
+        &self,
+        event_id: &str,
+        message_id: i64,
+    ) -> StoreResult<bool> {
+        if message_id <= 0 {
+            return Ok(false);
+        }
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let changed = connection.execute(
+            "UPDATE inbound_directions
+             SET agent_output_message_id = COALESCE(agent_output_message_id, ?2)
+             WHERE event_id = ?1 AND agent_output_session_id IS NOT NULL
+               AND agent_output_linked = 0
+               AND (agent_output_message_id IS NULL OR agent_output_message_id = ?2)",
+            params![event_id, message_id],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub fn pending_agent_output_links(
+        &self,
+        installation_id: &InstallationId,
+    ) -> StoreResult<Vec<PendingAgentOutputLink>> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let mut statement = connection.prepare(
+            "SELECT event_id, agent_output_session_id, provider_turn_id,
+                    agent_output_message_id
+             FROM inbound_directions
+             WHERE installation_id = ?1 AND agent_output_linked = 0
+               AND agent_output_session_id IS NOT NULL
+               AND agent_output_message_id IS NOT NULL
+               AND provider_turn_id IS NOT NULL
+             ORDER BY ingest_order ASC",
+        )?;
+        statement
+            .query_map(params![installation_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .map(|row| {
+                let (event_id, agent_session_id, provider_turn_id, message_id) = row?;
+                if agent_session_id <= 0 || message_id <= 0 {
+                    return Err(StoreError::InvalidIdentifier {
+                        kind: "agent output link",
+                        value: event_id,
+                    });
+                }
+                Ok(PendingAgentOutputLink {
+                    event_id,
+                    agent_session_id,
+                    provider_turn_id: parse_turn_id(provider_turn_id)?,
+                    message_id,
+                })
+            })
+            .collect()
+    }
+
+    pub fn mark_agent_output_linked(&self, event_id: &str) -> StoreResult<bool> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let changed = connection.execute(
+            "UPDATE inbound_directions SET agent_output_linked = 1
+             WHERE event_id = ?1 AND agent_output_linked = 0
+               AND agent_output_session_id IS NOT NULL
+               AND agent_output_message_id IS NOT NULL
+               AND provider_turn_id IS NOT NULL",
+            params![event_id],
+        )?;
+        Ok(changed == 1)
     }
 
     /// Persists the first non-zero final-send identity and returns it
@@ -208,6 +328,45 @@ pub(super) fn migrate_v22(connection: &Connection) -> StoreResult<()> {
          PRAGMA user_version = 22;
          COMMIT;",
     )?;
+    Ok(())
+}
+
+pub(super) fn migrate_v29(connection: &Connection) -> StoreResult<()> {
+    connection.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| -> StoreResult<()> {
+        if !table_has_column(connection, "inbound_directions", "agent_output_session_id")? {
+            connection.execute_batch(
+                "ALTER TABLE inbound_directions ADD COLUMN agent_output_session_id INTEGER
+                     CHECK (agent_output_session_id IS NULL OR agent_output_session_id > 0);",
+            )?;
+        }
+        if !table_has_column(connection, "inbound_directions", "agent_output_message_id")? {
+            connection.execute_batch(
+                "ALTER TABLE inbound_directions ADD COLUMN agent_output_message_id INTEGER
+                     CHECK (agent_output_message_id IS NULL OR agent_output_message_id > 0);",
+            )?;
+        }
+        if !table_has_column(connection, "inbound_directions", "agent_output_linked")? {
+            connection.execute_batch(
+                "ALTER TABLE inbound_directions ADD COLUMN agent_output_linked INTEGER NOT NULL DEFAULT 0
+                     CHECK (agent_output_linked IN (0, 1));",
+            )?;
+        }
+        connection.execute_batch(
+            "CREATE INDEX IF NOT EXISTS inbound_agent_output_link_recovery
+                 ON inbound_directions (installation_id, agent_output_linked, ingest_order)
+                 WHERE agent_output_session_id IS NOT NULL;
+             PRAGMA user_version = 29;",
+        )?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => connection.execute_batch("COMMIT;")?,
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK;");
+            return Err(error);
+        }
+    }
     Ok(())
 }
 
@@ -372,6 +531,60 @@ mod tests {
             store
                 .commit_inbound_final_send("event-output")
                 .expect("commit")
+        );
+    }
+
+    #[test]
+    fn agent_output_link_debt_survives_final_commit_until_linked() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        started(&store, "event-link");
+        assert!(
+            store
+                .stage_inbound_final_send_with_attachments_and_link(
+                    "event-link",
+                    InboundState::Completed,
+                    "Done.",
+                    &[],
+                    None,
+                    Some(77),
+                )
+                .expect("stage final and link")
+        );
+        assert!(
+            store
+                .attach_inbound_agent_output_message("event-link", 88)
+                .expect("attach message")
+        );
+        assert!(
+            store
+                .commit_inbound_final_send("event-link")
+                .expect("commit final")
+        );
+
+        let pending = store
+            .pending_agent_output_links(&binding().installation_id)
+            .expect("pending links");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event_id, "event-link");
+        assert_eq!(pending[0].agent_session_id, 77);
+        assert_eq!(pending[0].message_id, 88);
+        assert_eq!(pending[0].provider_turn_id.as_str(), "turn-event-link");
+
+        assert!(
+            store
+                .mark_agent_output_linked("event-link")
+                .expect("linked")
+        );
+        assert!(
+            store
+                .pending_agent_output_links(&binding().installation_id)
+                .expect("pending after link")
+                .is_empty()
+        );
+        assert!(
+            !store
+                .mark_agent_output_linked("event-link")
+                .expect("repeat")
         );
     }
 

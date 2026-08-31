@@ -2078,6 +2078,12 @@ export interface AgentSession {
      * @generated from protobuf field: optional int64 status_message_id = 5;
      */
     statusMessageId?: bigint;
+    /**
+     * Authoritative parent for a reply-thread session. Omitted for top-level chats.
+     *
+     * @generated from protobuf field: optional int64 parent_chat_id = 6;
+     */
+    parentChatId?: bigint;
 }
 /**
  * @generated from protobuf message ConnectAgentSessionInput
@@ -18307,7 +18313,8 @@ class AgentSession$Type extends MessageType<AgentSession> {
             { no: 2, name: "peer_id", kind: "message", T: () => Peer },
             { no: 3, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "provider", kind: "enum", T: () => ["AgentSessionProvider", AgentSessionProvider, "AGENT_SESSION_PROVIDER_"] },
-            { no: 5, name: "status_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 5, name: "status_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "parent_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<AgentSession>): AgentSession {
@@ -18339,6 +18346,9 @@ class AgentSession$Type extends MessageType<AgentSession> {
                 case /* optional int64 status_message_id */ 5:
                     message.statusMessageId = reader.int64().toBigInt();
                     break;
+                case /* optional int64 parent_chat_id */ 6:
+                    message.parentChatId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -18366,6 +18376,9 @@ class AgentSession$Type extends MessageType<AgentSession> {
         /* optional int64 status_message_id = 5; */
         if (message.statusMessageId !== undefined)
             writer.tag(5, WireType.Varint).int64(message.statusMessageId);
+        /* optional int64 parent_chat_id = 6; */
+        if (message.parentChatId !== undefined)
+            writer.tag(6, WireType.Varint).int64(message.parentChatId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

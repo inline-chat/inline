@@ -310,6 +310,33 @@ impl BridgeStore {
         read_by_chat(&connection, installation_id, thread_chat_id)
     }
 
+    /// Detects the reply-thread anchor that makes remote thread creation
+    /// idempotent before the returned child chat ID is checkpointed locally.
+    /// This lets inbound admission fail closed in the crash window between
+    /// those two operations.
+    pub fn session_thread_opening_matches_anchor(
+        &self,
+        installation_id: &crate::InstallationId,
+        parent_chat_id: i64,
+        anchor_message_id: i64,
+    ) -> StoreResult<bool> {
+        if parent_chat_id <= 0 || anchor_message_id <= 0 {
+            return Ok(false);
+        }
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM session_thread_openings
+                    WHERE installation_id = ?1 AND parent_chat_id = ?2
+                      AND anchor_message_id = ?3
+                 )",
+                params![installation_id.as_str(), parent_chat_id, anchor_message_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     /// All Inline conversations already forwarding into one provider session.
     /// A new reverse session-thread owner must not be created while a legacy
     /// or ordinary conversation still owns that same provider identity.
@@ -768,6 +795,24 @@ mod tests {
             .prepare_session_thread_opening(&first, 2)
             .expect("prepare first");
         assert_eq!(first_outcome.opening(), Some(&first));
+        assert!(
+            store
+                .session_thread_opening_matches_anchor(
+                    first.session().provider().installation_id(),
+                    first.parent_chat_id(),
+                    first.anchor_message_id(),
+                )
+                .expect("matching unresolved anchor")
+        );
+        assert!(
+            !store
+                .session_thread_opening_matches_anchor(
+                    first.session().provider().installation_id(),
+                    first.parent_chat_id(),
+                    first.anchor_message_id() + 1,
+                )
+                .expect("different anchor")
+        );
 
         let later_picker = opening(&binding, 12);
         let recovered = store
@@ -779,6 +824,15 @@ mod tests {
             .complete_session_thread_opening(&first, binding.thread_chat_id(), Some("tools-v1"), 4)
             .expect("complete opening");
         assert!(matches!(completed, SessionThreadBindOutcome::Created(_)));
+        assert!(
+            !store
+                .session_thread_opening_matches_anchor(
+                    first.session().provider().installation_id(),
+                    first.parent_chat_id(),
+                    first.anchor_message_id(),
+                )
+                .expect("completed anchor")
+        );
         let duplicate_completion = store
             .complete_session_thread_opening(&first, binding.thread_chat_id(), Some("tools-v1"), 5)
             .expect("repeat completion after a competing process committed");

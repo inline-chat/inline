@@ -222,7 +222,15 @@ impl BridgeStore {
             "UPDATE inbound_directions SET
                 terminal_state = 'failed', terminal_text = ?3, terminal_failure = ?2
              WHERE installation_id = ?1 AND state = 'started'
-               AND terminal_state IS NULL",
+               AND terminal_state IS NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM session_pickers
+                    WHERE session_pickers.installation_id = inbound_directions.installation_id
+                      AND session_pickers.origin_event_id = inbound_directions.event_id
+                      AND session_pickers.state IN (
+                          'publishing', 'active', 'opening', 'retryable', 'completed'
+                      )
+               )",
             params![installation_id.as_str(), failure, final_text],
         )?;
         Ok(changed)

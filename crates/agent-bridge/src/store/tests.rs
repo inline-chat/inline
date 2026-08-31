@@ -55,6 +55,79 @@ fn event_claim_is_idempotent() {
 }
 
 #[test]
+fn handoff_cancels_only_earlier_pending_work_and_replay_keeps_later_input() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let mut running = inbound("running", 1);
+    running.message_id = 1;
+    store.accept_inbound(&running).unwrap();
+    store.start_inbound(&running.event_id, 2).unwrap();
+    let mut queued = inbound("queued", 3);
+    queued.message_id = 2;
+    store.accept_inbound(&queued).unwrap();
+    let mut other = inbound("other-chat", 4);
+    other.binding.chat_id = 99;
+    other.delivery_chat_id = 99;
+    store.accept_inbound(&other).unwrap();
+    let mut other_workspace = inbound("other-workspace", 4);
+    other_workspace.message_id = 5;
+    other_workspace.binding.workspace_id = WorkspaceId::new("other-workspace").unwrap();
+    store.accept_inbound(&other_workspace).unwrap();
+    let mut stop = inbound("stop", 5);
+    stop.message_id = 3;
+    stop.direction.text = "/stop".into();
+    assert!(store.accept_session_handoff(&stop).unwrap());
+    let mut later = inbound("later", 6);
+    later.message_id = 4;
+    store.accept_inbound(&later).unwrap();
+    assert!(!store.accept_session_handoff(&stop).unwrap());
+    assert_eq!(
+        store.get_inbound("running").unwrap().unwrap().state,
+        InboundState::Started
+    );
+    assert_eq!(
+        store.get_inbound("queued").unwrap().unwrap().state,
+        InboundState::Failed
+    );
+    assert_eq!(
+        store.get_inbound("other-chat").unwrap().unwrap().state,
+        InboundState::Accepted
+    );
+    assert_eq!(
+        store.get_inbound("other-workspace").unwrap().unwrap().state,
+        InboundState::Accepted
+    );
+    assert_eq!(
+        store
+            .get_inbound("queued")
+            .unwrap()
+            .unwrap()
+            .failure
+            .as_deref(),
+        Some("cancelled for session handoff")
+    );
+    assert_eq!(
+        store.get_inbound("later").unwrap().unwrap().state,
+        InboundState::Accepted
+    );
+    assert_eq!(
+        store
+            .take_next_inbound(&stop.binding, 7)
+            .unwrap()
+            .unwrap()
+            .event_id,
+        "stop"
+    );
+    assert_eq!(
+        store
+            .take_next_inbound(&stop.binding, 8)
+            .unwrap()
+            .unwrap()
+            .event_id,
+        "later"
+    );
+}
+
+#[test]
 fn completed_provider_turns_become_snapshot_hydration_dedupe_keys() {
     let store = BridgeStore::open_in_memory().expect("store");
     let record = inbound("event-1", 10);
@@ -788,6 +861,9 @@ fn on_disk_migration_preserves_a_private_pre_upgrade_backup() {
             "BEGIN IMMEDIATE;
              DROP TABLE session_thread_openings;
              DROP TABLE session_thread_bindings;
+             DROP TABLE session_pickers;
+             ALTER TABLE workspaces DROP COLUMN filesystem_volume_uuid;
+             ALTER TABLE workspaces DROP COLUMN filesystem_object_id;
              INSERT INTO processed_events (event_id, accepted_at)
                  VALUES ('before-upgrade', 7);
              PRAGMA user_version = 23;
@@ -811,7 +887,7 @@ fn on_disk_migration_preserves_a_private_pre_upgrade_backup() {
 
     let backup = directory
         .path()
-        .join("bridge.sqlite.pre-schema-25-from-23.backup");
+        .join("bridge.sqlite.pre-schema-30-from-23.backup");
     let backup_connection = Connection::open_with_flags(&backup, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .expect("migration backup");
     let version: i64 = backup_connection
@@ -855,6 +931,239 @@ fn on_disk_migration_preserves_a_private_pre_upgrade_backup() {
 }
 
 #[test]
+fn repeated_old_schema_upgrade_preserves_a_fresh_backup_generation() {
+    let directory = tempfile::tempdir().expect("directory");
+    let database = directory.path().join("bridge.sqlite");
+    let connection = Connection::open(&database).expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch(
+            "ALTER TABLE session_pickers DROP COLUMN terminal_projected;
+             ALTER TABLE session_pickers DROP COLUMN status_pinned;
+             ALTER TABLE session_pickers DROP COLUMN catalog_cursor;
+             INSERT INTO processed_events (event_id, accepted_at)
+                 VALUES ('first-old-state', 1);
+             PRAGMA user_version = 27;",
+        )
+        .expect("first old schema state");
+    drop(connection);
+
+    drop(BridgeStore::open(&database).expect("first upgrade"));
+    let stable_backup = directory
+        .path()
+        .join("bridge.sqlite.pre-schema-30-from-27.backup");
+    assert!(stable_backup.is_file());
+
+    let connection = Connection::open(&database).expect("downgraded connection");
+    connection
+        .execute_batch(
+            "ALTER TABLE session_pickers DROP COLUMN terminal_projected;
+             ALTER TABLE session_pickers DROP COLUMN status_pinned;
+             ALTER TABLE session_pickers DROP COLUMN catalog_cursor;
+             INSERT INTO processed_events (event_id, accepted_at)
+                 VALUES ('second-old-state', 2);
+             PRAGMA user_version = 27;",
+        )
+        .expect("second old schema state");
+    drop(connection);
+
+    drop(BridgeStore::open(&database).expect("second upgrade"));
+    let backup_prefix = "bridge.sqlite.pre-schema-30-from-27.backup.";
+    let generated_backup = fs::read_dir(directory.path())
+        .expect("backup directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(backup_prefix))
+        })
+        .expect("fresh backup generation");
+    let generated =
+        Connection::open_with_flags(&generated_backup, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("generated backup");
+    let has_second_state: i64 = generated
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM processed_events WHERE event_id = 'second-old-state'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .expect("generated backup contents");
+    assert_eq!(has_second_state, 1);
+}
+
+#[test]
+fn version_twenty_six_database_adds_restart_safe_session_pickers() {
+    let directory = tempfile::tempdir().expect("directory");
+    let database = directory.path().join("bridge.sqlite");
+    let connection = Connection::open(&database).expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch(
+            "DROP TABLE session_pickers;
+             PRAGMA user_version = 26;",
+        )
+        .expect("simulate version twenty six");
+    drop(connection);
+
+    drop(BridgeStore::open(&database).expect("migrated store"));
+    let connection = Connection::open(&database).expect("reopen");
+    let table: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'session_pickers'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("session picker table");
+    assert_eq!(table, 1);
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    assert!(
+        directory
+            .path()
+            .join("bridge.sqlite.pre-schema-30-from-26.backup")
+            .is_file()
+    );
+}
+
+#[test]
+fn version_twenty_seven_database_adds_picker_projection_repair() {
+    let directory = tempfile::tempdir().expect("directory");
+    let database = directory.path().join("bridge.sqlite");
+    let connection = Connection::open(&database).expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch(
+            "ALTER TABLE session_pickers DROP COLUMN terminal_projected;
+             ALTER TABLE session_pickers DROP COLUMN status_pinned;
+             ALTER TABLE session_pickers DROP COLUMN catalog_cursor;
+             PRAGMA user_version = 27;",
+        )
+        .expect("simulate version twenty seven");
+    drop(connection);
+
+    drop(BridgeStore::open(&database).expect("migrated store"));
+    let connection = Connection::open(&database).expect("reopen");
+    for column in ["terminal_projected", "status_pinned"] {
+        assert!(
+            table_has_column(&connection, "session_pickers", column).expect("picker column"),
+            "missing {column}"
+        );
+    }
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    assert!(
+        directory
+            .path()
+            .join("bridge.sqlite.pre-schema-30-from-27.backup")
+            .is_file()
+    );
+}
+
+#[test]
+fn version_twenty_eight_database_adds_agent_output_link_repair() {
+    let directory = tempfile::tempdir().expect("directory");
+    let database = directory.path().join("bridge.sqlite");
+    let connection = Connection::open(&database).expect("connection");
+    migrate(&connection).expect("initial migration");
+    connection
+        .execute_batch(
+            "DROP INDEX inbound_agent_output_link_recovery;
+             ALTER TABLE inbound_directions DROP COLUMN agent_output_session_id;
+             ALTER TABLE inbound_directions DROP COLUMN agent_output_message_id;
+             ALTER TABLE inbound_directions DROP COLUMN agent_output_linked;
+             ALTER TABLE session_pickers DROP COLUMN catalog_cursor;
+             PRAGMA user_version = 28;",
+        )
+        .expect("simulate version twenty eight");
+    drop(connection);
+
+    drop(BridgeStore::open(&database).expect("migrated store"));
+    let connection = Connection::open(&database).expect("reopen");
+    for column in [
+        "agent_output_session_id",
+        "agent_output_message_id",
+        "agent_output_linked",
+    ] {
+        assert!(
+            table_has_column(&connection, "inbound_directions", column)
+                .expect("agent output column"),
+            "missing {column}"
+        );
+    }
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("schema version");
+    assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    assert!(
+        directory
+            .path()
+            .join("bridge.sqlite.pre-schema-30-from-28.backup")
+            .is_file()
+    );
+}
+
+#[test]
+fn version_twenty_five_workspace_backfill_fails_closed_on_device_drift() {
+    let directory = tempfile::tempdir().expect("directory");
+    let workspace = tempfile::tempdir().expect("workspace");
+    let database = directory.path().join("bridge.sqlite");
+    let installation_id = InstallationId::new("host-codex").expect("installation");
+    let workspace_id = WorkspaceId::new("workspace-1").expect("workspace id");
+    {
+        let store = BridgeStore::open(&database).expect("store");
+        store
+            .put_installation(&InstallationRecord {
+                installation_id: installation_id.clone(),
+                provider_id: ProviderId::new("codex").expect("provider"),
+                display_name: "Codex".to_string(),
+                created_at: 1,
+                updated_at: 1,
+            })
+            .expect("installation");
+        store
+            .select_workspace(&installation_id, &workspace_id, workspace.path(), 1)
+            .expect("workspace selection");
+    }
+    let connection = Connection::open(&database).expect("connection");
+    connection
+        .execute_batch(
+            "DROP TABLE session_pickers;
+             UPDATE workspaces
+             SET filesystem_device_id = filesystem_device_id + 1;
+             ALTER TABLE workspaces DROP COLUMN filesystem_volume_uuid;
+             ALTER TABLE workspaces DROP COLUMN filesystem_object_id;
+             PRAGMA user_version = 25;",
+        )
+        .expect("simulate drifted version twenty five");
+    migrate(&connection).expect("forward migration");
+    let stable_identity_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM workspaces
+             WHERE filesystem_volume_uuid IS NOT NULL
+                OR filesystem_object_id IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .expect("stable identity count");
+    assert_eq!(stable_identity_count, 0);
+    drop(connection);
+
+    let store = BridgeStore::open(&database).expect("reopen");
+    assert!(matches!(
+        store.verified_workspace(&installation_id, &workspace_id, 2),
+        Err(StoreError::WorkspaceUnavailable { .. })
+    ));
+}
+
+#[test]
 fn version_ten_database_adds_durable_questions_forward() {
     let connection = Connection::open_in_memory().expect("connection");
     migrate(&connection).expect("initial migration");
@@ -871,9 +1180,12 @@ fn version_ten_database_adds_durable_questions_forward() {
              DROP TABLE history_import_threads;
              DROP TABLE session_thread_openings;
              DROP TABLE session_thread_bindings;
+             DROP TABLE session_pickers;
              ALTER TABLE inbound_directions DROP COLUMN terminal_output_attachments_json;
              ALTER TABLE inbound_directions DROP COLUMN delivery_chat_id;
              ALTER TABLE session_bindings DROP COLUMN session_configuration_fingerprint;
+             ALTER TABLE workspaces DROP COLUMN filesystem_volume_uuid;
+             ALTER TABLE workspaces DROP COLUMN filesystem_object_id;
              ALTER TABLE workspaces DROP COLUMN filesystem_device_id;
              ALTER TABLE workspaces DROP COLUMN filesystem_file_id;
              PRAGMA user_version = 10;",
@@ -898,15 +1210,43 @@ fn version_ten_database_adds_durable_questions_forward() {
 }
 
 #[test]
+fn version_twenty_nine_preserves_data_and_adds_catalog_cursor() {
+    let connection = Connection::open_in_memory().expect("connection");
+    migrate(&connection).expect("current schema");
+    connection
+        .execute_batch(
+            "ALTER TABLE session_pickers DROP COLUMN catalog_cursor;
+         INSERT INTO processed_events(event_id, accepted_at) VALUES ('preserved', 1);
+         PRAGMA user_version = 29;",
+        )
+        .expect("old schema");
+    migrate(&connection).expect("upgrade");
+    assert!(table_has_column(&connection, "session_pickers", "catalog_cursor").expect("column"));
+    assert_eq!(
+        connection
+            .query_row("SELECT event_id FROM processed_events", [], |row| row
+                .get::<_, String>(0))
+            .expect("data"),
+        "preserved"
+    );
+    assert_eq!(
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .expect("version"),
+        CURRENT_SCHEMA_VERSION
+    );
+}
+
+#[test]
 fn newer_schema_version_is_rejected() {
     let connection = Connection::open_in_memory().expect("connection");
     connection
-        .execute_batch("PRAGMA user_version = 26;")
+        .execute_batch("PRAGMA user_version = 31;")
         .expect("set schema version");
     assert!(matches!(
         migrate(&connection),
         Err(StoreError::UnsupportedSchemaVersion {
-            found: 26,
+            found: 31,
             supported: CURRENT_SCHEMA_VERSION
         })
     ));
@@ -921,6 +1261,9 @@ fn version_twenty_two_database_adds_history_import_guards_forward() {
             "DROP TABLE session_thread_openings;
              DROP TABLE session_thread_bindings;
              DROP TABLE history_import_threads;
+             DROP TABLE session_pickers;
+             ALTER TABLE workspaces DROP COLUMN filesystem_volume_uuid;
+             ALTER TABLE workspaces DROP COLUMN filesystem_object_id;
              PRAGMA user_version = 22;",
         )
         .expect("simulate version twenty two");
@@ -950,6 +1293,9 @@ fn version_twenty_three_database_adds_session_thread_bindings_forward() {
         .execute_batch(
             "DROP TABLE session_thread_openings;
              DROP TABLE session_thread_bindings;
+             DROP TABLE session_pickers;
+             ALTER TABLE workspaces DROP COLUMN filesystem_volume_uuid;
+             ALTER TABLE workspaces DROP COLUMN filesystem_object_id;
              PRAGMA user_version = 23;",
         )
         .expect("simulate version twenty three");
@@ -978,6 +1324,9 @@ fn version_twenty_four_database_adds_session_thread_openings_forward() {
     connection
         .execute_batch(
             "DROP TABLE session_thread_openings;
+             DROP TABLE session_pickers;
+             ALTER TABLE workspaces DROP COLUMN filesystem_volume_uuid;
+             ALTER TABLE workspaces DROP COLUMN filesystem_object_id;
              PRAGMA user_version = 24;",
         )
         .expect("simulate version twenty four");

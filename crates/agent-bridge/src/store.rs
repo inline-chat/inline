@@ -26,6 +26,7 @@ mod question;
 #[path = "store/rejection.rs"]
 mod rejection;
 mod reply_threads;
+mod session_picker;
 mod session_thread;
 mod settings;
 mod workspace;
@@ -45,13 +46,19 @@ pub use operator_allowlist::{
     OperatorAllowlistClaimContext, OperatorAllowlistClaimOutcome, OperatorAllowlistDecision,
     OperatorAllowlistRequest, OperatorAllowlistState, PendingOperatorAllowlistRequest,
 };
-pub use pending_final_send::PendingFinalSend;
+pub use pending_final_send::{PendingAgentOutputLink, PendingFinalSend};
 pub use progress::DurableProgress;
 pub use question::{
     PendingQuestion, QuestionClaimContext, QuestionClaimLocator, QuestionClaimOutcome,
     QuestionRecord, QuestionResolution, QuestionState,
 };
 pub use reply_threads::{ReplyThreadMode, ReplyThreadOverride, ReplyThreadOverrideUpdateOutcome};
+pub use session_picker::{
+    MAX_ACTIVE_SESSION_PICKERS, MAX_SESSION_PICKER_ITEMS, PendingSessionPicker,
+    SESSION_PICKER_PAGE_SIZE, SessionPickerAction, SessionPickerClaimContext,
+    SessionPickerClaimOutcome, SessionPickerCompletion, SessionPickerRecord, SessionPickerState,
+    SessionPickerThreadGate,
+};
 pub use session_thread::{
     SessionThreadBindOutcome, SessionThreadBinding, SessionThreadOpening,
     SessionThreadPrepareOutcome,
@@ -62,7 +69,7 @@ pub use workspace::{
     WorkspaceRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: i64 = 25;
+const CURRENT_SCHEMA_VERSION: i64 = 30;
 const DEFAULT_QUEUE_LEASE_SECONDS: i64 = 300;
 const DEFAULT_INBOUND_LEASE_SECONDS: i64 = 300;
 
@@ -110,6 +117,8 @@ pub enum StoreError {
     UnknownCommandChoiceState(String),
     #[error("bridge state contains an unknown history import state: {0}")]
     UnknownHistoryImportState(String),
+    #[error("bridge state contains an unknown session picker state: {0}")]
+    UnknownSessionPickerState(String),
     #[error("history import thread {chat_id} is already owned by another import")]
     HistoryImportConflict { chat_id: i64 },
     #[error("bridge state contains an unknown reply-thread mode: {0}")]
@@ -307,6 +316,21 @@ impl BridgeStore {
     /// only after this method succeeds. Duplicate event IDs or stable Inline
     /// message identities are not inserted.
     pub fn accept_inbound(&self, record: &InboundRecord) -> StoreResult<bool> {
+        self.accept_inbound_inner(record, false)
+    }
+
+    /// Accepts an explicit handoff and cancels earlier queued work in this
+    /// conversation atomically. Retains every record and leaves running work,
+    /// other conversations, and later user input untouched.
+    pub fn accept_session_handoff(&self, record: &InboundRecord) -> StoreResult<bool> {
+        self.accept_inbound_inner(record, true)
+    }
+
+    fn accept_inbound_inner(
+        &self,
+        record: &InboundRecord,
+        cancel_earlier_pending: bool,
+    ) -> StoreResult<bool> {
         let attachments_json = serde_json::to_string(&record.direction.attachments)?;
         let mut connection = self.connection.lock().expect("bridge store poisoned");
         let transaction = connection.transaction()?;
@@ -372,6 +396,23 @@ impl BridgeStore {
             ],
         )?;
         if changed == 1 {
+            if cancel_earlier_pending {
+                transaction.execute(
+                    "UPDATE inbound_directions SET state = 'failed',
+                        failure = 'cancelled for session handoff'
+                     WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3
+                       AND state = 'accepted' AND terminal_state IS NULL
+                       AND ingest_order < (
+                           SELECT ingest_order FROM inbound_directions WHERE event_id = ?4
+                       )",
+                    params![
+                        record.binding.installation_id.as_str(),
+                        record.binding.chat_id,
+                        record.binding.workspace_id.as_str(),
+                        record.event_id,
+                    ],
+                )?;
+            }
             transaction.execute(
                 "INSERT OR IGNORE INTO processed_events (event_id, accepted_at) VALUES (?1, ?2)",
                 params![record.event_id, record.accepted_at],
@@ -622,8 +663,40 @@ impl BridgeStore {
         binding: &BindingKey,
         started_at: i64,
     ) -> StoreResult<Option<InboundRecord>> {
+        self.take_next_inbound_inner(binding, started_at, false)
+    }
+
+    /// Claims the oldest accepted direction only when no incomplete session
+    /// Open operation owns this conversation. Gate evaluation and the inbox
+    /// compare-and-set share one SQLite transaction, so Open cannot checkpoint
+    /// the target between those decisions.
+    pub fn take_next_inbound_if_session_ready(
+        &self,
+        binding: &BindingKey,
+        started_at: i64,
+    ) -> StoreResult<Option<InboundRecord>> {
+        self.take_next_inbound_inner(binding, started_at, true)
+    }
+
+    fn take_next_inbound_inner(
+        &self,
+        binding: &BindingKey,
+        started_at: i64,
+        require_session_ready: bool,
+    ) -> StoreResult<Option<InboundRecord>> {
         let mut connection = self.connection.lock().expect("bridge store poisoned");
         let transaction = connection.transaction()?;
+        if require_session_ready
+            && session_picker::session_picker_thread_gate_in_transaction(
+                &transaction,
+                &binding.installation_id,
+                binding.chat_id,
+                started_at,
+            )? != SessionPickerThreadGate::Ready
+        {
+            transaction.commit()?;
+            return Ok(None);
+        }
         let raw = transaction
             .query_row(
                 "SELECT event_id, message_id, delivery_chat_id, sender_user_id, direction_id,
@@ -1416,6 +1489,26 @@ fn migrate(connection: &Connection) -> StoreResult<()> {
     if version == 24 {
         session_thread::migrate_v25(connection)?;
     }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 25 {
+        workspace::migrate_v26(connection)?;
+    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 26 {
+        session_picker::migrate_v27(connection)?;
+    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 27 {
+        session_picker::migrate_v28(connection)?;
+    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 28 {
+        pending_final_send::migrate_v29(connection)?;
+    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 29 {
+        session_picker::migrate_v30(connection)?;
+    }
     Ok(())
 }
 
@@ -1497,7 +1590,7 @@ fn prepare_migration_backup(path: &Path, connection: &Connection) -> StoreResult
     backup_name.push(format!(
         ".pre-schema-{CURRENT_SCHEMA_VERSION}-from-{version}.backup"
     ));
-    let backup_path = path.with_file_name(backup_name);
+    let mut backup_path = path.with_file_name(backup_name);
 
     if backup_path.exists() {
         let metadata = fs::symlink_metadata(&backup_path)?;
@@ -1513,7 +1606,21 @@ fn prepare_migration_backup(path: &Path, connection: &Connection) -> StoreResult
         }
         set_file_permissions(&backup_path, 0o600)?;
         validate_migration_backup(&backup_path, version)?;
-        return Ok(Some(backup_path));
+
+        // A user may deliberately restore this rollback artifact, create new
+        // old-schema state, and later upgrade again. Never mistake the first
+        // backup for a copy of that newer source database. Preserve both by
+        // assigning every subsequent upgrade a private generation.
+        let generation = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut generated_name = backup_path
+            .file_name()
+            .map(|name| name.to_os_string())
+            .unwrap_or_else(|| "bridge.sqlite.backup".into());
+        generated_name.push(format!(".{}.{}", std::process::id(), generation));
+        backup_path = backup_path.with_file_name(generated_name);
     }
 
     let nonce = SystemTime::now()

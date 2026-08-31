@@ -1,8 +1,10 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::{BindingKey, InstallationId};
 
-use super::{BridgeStore, StoreError, StoreResult};
+use super::{
+    BridgeStore, StoreError, StoreResult, workspace::reject_conflicting_session_workspace,
+};
 
 const MAX_IMPORT_ID_BYTES: usize = 256;
 
@@ -47,7 +49,13 @@ impl BridgeStore {
         self.verified_workspace(&source.installation_id, &source.workspace_id, started_at)?;
 
         let mut connection = self.connection.lock().expect("bridge store poisoned");
-        let transaction = connection.transaction()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        reject_conflicting_session_workspace(
+            &transaction,
+            &source.installation_id,
+            target_chat_id,
+            &source.workspace_id,
+        )?;
         let changed = transaction.execute(
             "INSERT INTO history_import_threads (
                 installation_id, chat_id, workspace_id, import_id, state,

@@ -13,7 +13,12 @@ use crate::{
     TurnOptions,
 };
 
-type SessionSlot = Arc<Mutex<Option<ProviderSessionId>>>;
+struct ActiveSession {
+    session_id: ProviderSessionId,
+    history_ready: bool,
+}
+
+type SessionSlot = Arc<Mutex<Option<ActiveSession>>>;
 type ThreadTransitionKey = (crate::InstallationId, i64);
 type ThreadTransitionSlot = Arc<Mutex<()>>;
 type ProviderSessionClaimSlot = Arc<Mutex<()>>;
@@ -125,11 +130,27 @@ pub struct ProviderSessionManager<D> {
     store: Arc<BridgeStore>,
     provider_id: ProviderId,
     session_configuration_fingerprint: Option<String>,
-    slots: Mutex<HashMap<BindingKey, SessionSlot>>,
-    transition_slots: Mutex<HashMap<ThreadTransitionKey, ThreadTransitionSlot>>,
-    session_claim_slots: Mutex<HashMap<crate::ProviderSessionRef, ProviderSessionClaimSlot>>,
+    slots: Arc<Mutex<HashMap<BindingKey, SessionSlot>>>,
+    transition_slots: Arc<Mutex<HashMap<ThreadTransitionKey, ThreadTransitionSlot>>>,
+    session_claim_slots: Arc<Mutex<HashMap<crate::ProviderSessionRef, ProviderSessionClaimSlot>>>,
     epoch_gate: Arc<RwLock<()>>,
-    epoch_ended: AtomicBool,
+    epoch_ended: Arc<AtomicBool>,
+}
+
+impl<D> Clone for ProviderSessionManager<D> {
+    fn clone(&self) -> Self {
+        Self {
+            driver: self.driver.clone(),
+            store: self.store.clone(),
+            provider_id: self.provider_id.clone(),
+            session_configuration_fingerprint: self.session_configuration_fingerprint.clone(),
+            slots: self.slots.clone(),
+            transition_slots: self.transition_slots.clone(),
+            session_claim_slots: self.session_claim_slots.clone(),
+            epoch_gate: self.epoch_gate.clone(),
+            epoch_ended: self.epoch_ended.clone(),
+        }
+    }
 }
 
 impl<D> std::fmt::Debug for ProviderSessionManager<D> {
@@ -153,11 +174,11 @@ where
             store,
             provider_id,
             session_configuration_fingerprint: None,
-            slots: Mutex::new(HashMap::new()),
-            transition_slots: Mutex::new(HashMap::new()),
-            session_claim_slots: Mutex::new(HashMap::new()),
+            slots: Arc::new(Mutex::new(HashMap::new())),
+            transition_slots: Arc::new(Mutex::new(HashMap::new())),
+            session_claim_slots: Arc::new(Mutex::new(HashMap::new())),
             epoch_gate: Arc::new(RwLock::new(())),
-            epoch_ended: AtomicBool::new(false),
+            epoch_ended: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -224,7 +245,8 @@ where
         let slot = self.session_slot(binding).await;
         let mut active = slot.lock().await;
         let cwd = self.workspace_path(binding, now)?;
-        if let Some(session_id) = active.as_ref() {
+        if let Some(current) = active.as_ref() {
+            let session_id = &current.session_id;
             log::trace!(
                 target: "inline_agent_bridge::session",
                 "phase=session_active provider_id={:?} chat_id={} session_id={:?}",
@@ -324,7 +346,10 @@ where
                 SessionOpenOutcome::Created(self.replace_session(binding, now).await?)
             }
         };
-        *active = Some(outcome.session_id().clone());
+        *active = Some(ActiveSession {
+            session_id: outcome.session_id().clone(),
+            history_ready: false,
+        });
         Ok(outcome)
     }
 
@@ -342,6 +367,37 @@ where
     pub async fn session_is_active(&self, binding: &BindingKey) -> bool {
         let slot = self.session_slot(binding).await;
         slot.lock().await.is_some()
+    }
+
+    /// Writer ownership alone does not mean the client finished importing
+    /// history. Linked-session prompts require both in the current epoch.
+    pub async fn session_history_is_ready(&self, binding: &BindingKey) -> bool {
+        let slot = self.session_slot(binding).await;
+        slot.lock()
+            .await
+            .as_ref()
+            .is_some_and(|active| active.history_ready)
+            && !self.epoch_ended.load(Ordering::Acquire)
+    }
+
+    /// Acknowledges or invalidates history only for the active exact session.
+    /// Call with false before a refresh, then true only after sync succeeds.
+    pub async fn set_session_history_ready(
+        &self,
+        binding: &BindingKey,
+        session_id: &ProviderSessionId,
+        ready: bool,
+    ) -> bool {
+        let slot = self.session_slot(binding).await;
+        let mut slot = slot.lock().await;
+        let Some(active) = slot.as_mut() else {
+            return false;
+        };
+        if &active.session_id != session_id || self.epoch_ended.load(Ordering::Acquire) {
+            return false;
+        }
+        active.history_ready = ready;
+        true
     }
 
     async fn transition_slot(
@@ -569,6 +625,13 @@ where
         Ok(Some(ProviderWorkLease { _guard: guard }))
     }
 
+    /// Prevents newly detached control work from entering a provider
+    /// generation that the supervisor is replacing. Existing work is
+    /// cancelled and quiesced by the runtime before the new generation starts.
+    pub fn seal_provider_epoch(&self) {
+        self.epoch_ended.store(true, Ordering::Release);
+    }
+
     /// Ends the whole private provider epoch only when no turn is active in
     /// any Inline conversation. Once accepted, this manager stays sealed so a
     /// queued lane cannot race onto the driver after shutdown.
@@ -591,7 +654,10 @@ where
         let slot = self.session_slot(binding).await;
         let mut active = slot.lock().await;
         let session_id = self.replace_session(binding, now).await?;
-        *active = Some(session_id.clone());
+        *active = Some(ActiveSession {
+            session_id: session_id.clone(),
+            history_ready: false,
+        });
         Ok(session_id)
     }
 }
@@ -845,6 +911,66 @@ mod tests {
         assert_eq!(
             store.get_binding(&binding()).expect("binding"),
             Some((provider, rotated))
+        );
+    }
+
+    #[tokio::test]
+    async fn history_readiness_requires_exact_sync_and_is_reset_by_rotation_and_restart() {
+        let provider = ProviderId::new("codex").unwrap();
+        let (_workspace, store, _) = registered_store(&provider);
+        store
+            .put_binding(
+                &binding(),
+                &provider,
+                &ProviderSessionId::new("session-old").unwrap(),
+                1,
+            )
+            .unwrap();
+        let driver = Arc::new(FakeDriver::default());
+        let manager = ProviderSessionManager::new(driver.clone(), store.clone(), provider.clone());
+        assert!(!manager.session_history_is_ready(&binding()).await);
+        let session = manager
+            .ensure_session(&binding(), 10)
+            .await
+            .unwrap()
+            .session_id()
+            .clone();
+        assert!(manager.session_is_active(&binding()).await);
+        assert!(!manager.session_history_is_ready(&binding()).await);
+        assert!(
+            !manager
+                .set_session_history_ready(
+                    &binding(),
+                    &ProviderSessionId::new("wrong").unwrap(),
+                    true
+                )
+                .await
+        );
+        assert!(
+            manager
+                .set_session_history_ready(&binding(), &session, true)
+                .await
+        );
+        assert!(manager.session_history_is_ready(&binding()).await);
+        assert!(
+            manager
+                .set_session_history_ready(&binding(), &session, false)
+                .await
+        );
+        assert!(!manager.session_history_is_ready(&binding()).await);
+        assert!(
+            manager
+                .set_session_history_ready(&binding(), &session, true)
+                .await
+        );
+        let restarted = ProviderSessionManager::new(driver, store, provider);
+        assert!(!restarted.session_history_is_ready(&binding()).await);
+        manager.rotate_session(&binding(), 20).await.unwrap();
+        assert!(!manager.session_history_is_ready(&binding()).await);
+        assert!(
+            !manager
+                .set_session_history_ready(&binding(), &session, true)
+                .await
         );
     }
 
@@ -1539,6 +1665,21 @@ mod tests {
         assert!(shutdown.await.expect("shutdown task").expect("shutdown"));
         assert!(matches!(
             manager.try_begin_provider_work(),
+            Err(SessionManagerError::Driver(error)) if error.ends_epoch()
+        ));
+    }
+
+    #[test]
+    fn sealing_one_manager_clone_seals_the_whole_provider_generation() {
+        let provider = ProviderId::new("codex").expect("provider");
+        let (_workspace, store, _cwd) = registered_store(&provider);
+        let manager = ProviderSessionManager::new(Arc::new(FakeDriver::default()), store, provider);
+        let detached_clone = manager.clone();
+
+        manager.seal_provider_epoch();
+
+        assert!(matches!(
+            detached_clone.try_begin_provider_work(),
             Err(SessionManagerError::Driver(error)) if error.ends_epoch()
         ));
     }
