@@ -1007,6 +1007,8 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
   const chatIds = new Set<number>()
   const spaceIds = new Set<number>()
   const groupIds = new Set<number>()
+  const dmPeerUserIds = new Set<number>()
+  const peerRefs = { chatIds, userIds, spaceIds, dmPeerUserIds }
 
   if (input.updates.length === 0) {
     return emptySidecars()
@@ -1047,32 +1049,32 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
         break
 
       case "dialogArchived":
-        collectPeerSidecarRefs(update.update.dialogArchived.peerId, { chatIds, userIds, spaceIds })
+        collectPeerSidecarRefs(update.update.dialogArchived.peerId, peerRefs)
         break
 
       case "updateReadMaxId":
-        collectPeerSidecarRefs(update.update.updateReadMaxId.peerId, { chatIds, userIds, spaceIds })
+        collectPeerSidecarRefs(update.update.updateReadMaxId.peerId, peerRefs)
         break
 
       case "markAsUnread":
-        collectPeerSidecarRefs(update.update.markAsUnread.peerId, { chatIds, userIds, spaceIds })
+        collectPeerSidecarRefs(update.update.markAsUnread.peerId, peerRefs)
         break
 
       case "dialogNotificationSettings":
-        collectPeerSidecarRefs(update.update.dialogNotificationSettings.peerId, { chatIds, userIds, spaceIds })
+        collectPeerSidecarRefs(update.update.dialogNotificationSettings.peerId, peerRefs)
         break
 
       case "dialogFollowMode":
-        collectPeerSidecarRefs(update.update.dialogFollowMode.peerId, { chatIds, userIds, spaceIds })
+        collectPeerSidecarRefs(update.update.dialogFollowMode.peerId, peerRefs)
         break
 
       case "dialogCollapsedMaxId":
-        collectPeerSidecarRefs(update.update.dialogCollapsedMaxId.peerId, { chatIds, userIds, spaceIds })
+        collectPeerSidecarRefs(update.update.dialogCollapsedMaxId.peerId, peerRefs)
         break
 
       case "dialogFolder":
         for (const dialog of update.update.dialogFolder.dialogs) {
-          collectPeerSidecarRefs(dialog.peer, { chatIds, userIds, spaceIds })
+          collectPeerSidecarRefs(dialog.peer, peerRefs)
         }
         break
 
@@ -1087,6 +1089,20 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
       default:
         break
     }
+  }
+
+  if (dmPeerUserIds.size > 0) {
+    // User-bucket dialog updates name DMs by peer, not Chat ID. Resolve only
+    // this delivered page's peer pairs; profile dependencies are not DM work.
+    const peerIds = Array.from(dmPeerUserIds)
+    const dmRows = await db.select({ id: chats.id }).from(chats).where(and(
+      eq(chats.type, "private"),
+      or(
+        and(eq(chats.minUserId, input.userId), inArray(chats.maxUserId, peerIds)),
+        and(eq(chats.maxUserId, input.userId), inArray(chats.minUserId, peerIds)),
+      ),
+    ))
+    for (const chat of dmRows) chatIds.add(chat.id)
   }
 
   const groupSidecars = await getSidecarUserGroups(groupIds, input.userId)
@@ -1204,13 +1220,14 @@ function collectProtocolChatSidecarRefs(chat: ProtocolChat | undefined, refs: Ch
   }
 }
 
-function collectPeerSidecarRefs(peer: Peer | undefined, refs: ChatSidecarRefs) {
+function collectPeerSidecarRefs(peer: Peer | undefined, refs: ChatSidecarRefs & { dmPeerUserIds?: Set<number> }) {
   switch (peer?.type.oneofKind) {
     case "chat":
       addSafeId(refs.chatIds, peer.type.chat.chatId)
       break
     case "user":
       addSafeId(refs.userIds, peer.type.user.userId)
+      if (refs.dmPeerUserIds) addSafeId(refs.dmPeerUserIds, peer.type.user.userId)
       break
     case undefined:
       break

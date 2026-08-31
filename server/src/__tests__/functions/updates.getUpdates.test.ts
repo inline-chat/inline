@@ -1479,6 +1479,47 @@ describe("getUpdates", () => {
     expect(first.update.updateReadMaxId.unreadCount).toBe(3)
   })
 
+  test("includes Chat and Dialog sidecars only for the delivered user-read page's referenced DM pairs", async () => {
+    const lowerPeer = await testUtils.createUser("dm-read-lower@example.com")
+    const viewer = await testUtils.createUser("dm-read-viewer@example.com")
+    const higherPeer = await testUtils.createUser("dm-read-higher@example.com")
+    const withheldPeer = await testUtils.createUser("dm-read-withheld@example.com")
+    const lowerChat = await testUtils.createPrivateChat(viewer, lowerPeer)
+    const higherChat = await testUtils.createPrivateChat(viewer, higherPeer)
+    const withheldChat = await testUtils.createPrivateChat(viewer, withheldPeer)
+    const foreignChat = await testUtils.createPrivateChat(lowerPeer, higherPeer)
+    if (!lowerChat || !higherChat || !withheldChat || !foreignChat) throw new Error("Missing DM read fixtures")
+    await db.insert(dialogs).values([
+      { chatId: lowerChat.id, userId: viewer.id, peerUserId: lowerPeer.id, readInboxMaxId: 7 },
+      { chatId: higherChat.id, userId: viewer.id, peerUserId: higherPeer.id, readInboxMaxId: 9 },
+      { chatId: withheldChat.id, userId: viewer.id, peerUserId: withheldPeer.id, readInboxMaxId: 11 },
+    ])
+    const peers = [lowerPeer, higherPeer, lowerPeer, withheldPeer]
+    for (const [index, peer] of peers.entries()) {
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: viewer.id,
+        seq: index + 1,
+        payload: { oneofKind: "userReadMaxId", userReadMaxId: {
+          peerId: { type: { oneofKind: "user", user: { userId: BigInt(peer.id) } } },
+          readMaxId: 7n,
+          unreadCount: 0,
+        } },
+      })
+    }
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 3,
+    }, { currentUserId: viewer.id } as any)
+    expect(result.seq).toBe(3n)
+    expect(result.final).toBe(false)
+    expect(result.sidecars?.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual([lowerChat.id, higherChat.id].sort((a, b) => a - b))
+    expect(result.sidecars?.dialogs.map((dialog) => Number(dialog.chatId)).sort((a, b) => a - b)).toEqual([lowerChat.id, higherChat.id].sort((a, b) => a - b))
+    expect(result.sidecars?.dialogs.find((dialog) => dialog.chatId === BigInt(lowerChat.id))?.readMaxId).toBe(7n)
+    expect(result.sidecars?.dialogs.find((dialog) => dialog.chatId === BigInt(higherChat.id))?.readMaxId).toBe(9n)
+    expect(result.sidecars?.chats.some((chat) => chat.id === BigInt(foreignChat.id) || chat.id === BigInt(withheldChat.id))).toBe(false)
+  })
+
   test("inflates userMarkAsUnread to markAsUnread in user bucket", async () => {
     const user = await testUtils.createUser("unread-mark@example.com")
 
