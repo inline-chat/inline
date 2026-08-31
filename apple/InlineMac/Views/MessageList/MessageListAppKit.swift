@@ -4069,6 +4069,7 @@ extension MessageListAppKit {
 extension MessageListAppKit {
   func dispose() {
     isDisposed = true
+    cancellables.removeAll()
 
     // Cancel any tasks
     eventMonitorTask?.cancel()
