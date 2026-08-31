@@ -70,7 +70,11 @@ public final class MacDevtoolsLogStore {
       await self?.refresh()
 
       while Task.isCancelled == false {
-        try? await Task.sleep(for: .milliseconds(500))
+        do {
+          try await Task.sleep(for: .milliseconds(500))
+        } catch {
+          return
+        }
         await self?.refresh()
       }
     }

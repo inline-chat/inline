@@ -110,13 +110,15 @@ final class SystemMonitor: ObservableObject {
 
     if threadResult == KERN_SUCCESS, let threadList {
       for index in 0 ..< threadCount {
+        let thread = threadList[Int(index)]
+        defer { mach_port_deallocate(mach_task_self_, thread) }
         var threadInfo = thread_basic_info()
         var threadInfoCount = mach_msg_type_number_t(THREAD_INFO_MAX)
 
         let infoResult = withUnsafeMutablePointer(to: &threadInfo) {
           $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
             thread_info(
-              threadList[Int(index)],
+              thread,
               thread_flavor_t(THREAD_BASIC_INFO),
               $0,
               &threadInfoCount
