@@ -643,12 +643,11 @@ private final class BotPresenceViewModel: ObservableObject {
       }
 
       animationTask = Task { @MainActor [weak self] in
-        guard let self else { return }
         var index = 0
         while !Task.isCancelled {
-          guard self.configureGeneration == generation else { return }
+          guard self?.configureGeneration == generation else { return }
           let frameIndex = index
-          self.frame = frames[frameIndex]
+          self?.frame = frames[frameIndex]
           index = (frameIndex + 1) % frames.count
           try? await Task.sleep(nanoseconds: BotAvatarAnimation.delay(for: animation, frameIndex: frameIndex))
         }
