@@ -4919,39 +4919,56 @@ async fn run_agents_setup_command(
     json: bool,
     json_format: output::JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let resolved = agents::resolve_setup(args, json)?;
+    let resolved = match agents::resolve_setup(args.clone(), json) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            return agents::report_setup_preflight_failure(error, &args, json, json_format);
+        }
+    };
     if resolved.args.dry_run {
         return agents::setup(config, None, resolved, json, json_format).await;
     }
-    let owner_auth = match owner_session::resolve_owner_credential(auth_store)? {
-        Some(credential) => credential,
-        None if resolved.non_interactive => {
-            return Err(CliError::not_authenticated().into());
+    let owner_auth: Result<_, Box<dyn std::error::Error>> = async {
+        match owner_session::resolve_owner_credential(auth_store)? {
+            Some(credential) => Ok(credential),
+            None if resolved.non_interactive => Err(CliError::not_authenticated().into()),
+            None => {
+                handle_login(
+                    AuthLoginArgs {
+                        browser: false,
+                        no_open: false,
+                        email: None,
+                        phone: None,
+                        send_code: false,
+                        code: None,
+                        code_stdin: false,
+                        challenge_token: None,
+                        mac_app_bootstrap: false,
+                        expected_user_id: None,
+                    },
+                    api,
+                    auth_store,
+                    &config.realtime_url,
+                    local_db,
+                    json,
+                    json_format,
+                )
+                .await?;
+                owner_session::resolve_owner_credential(auth_store)?
+                    .ok_or_else(|| CliError::not_authenticated().into())
+            }
         }
-        None => {
-            handle_login(
-                AuthLoginArgs {
-                    browser: false,
-                    no_open: false,
-                    email: None,
-                    phone: None,
-                    send_code: false,
-                    code: None,
-                    code_stdin: false,
-                    challenge_token: None,
-                    mac_app_bootstrap: false,
-                    expected_user_id: None,
-                },
-                api,
-                auth_store,
-                &config.realtime_url,
-                local_db,
+    }
+    .await;
+    let owner_auth = match owner_auth {
+        Ok(credential) => credential,
+        Err(error) => {
+            return agents::report_setup_preflight_failure(
+                error,
+                &resolved.args,
                 json,
                 json_format,
-            )
-            .await?;
-            owner_session::resolve_owner_credential(auth_store)?
-                .ok_or_else(CliError::not_authenticated)?
+            );
         }
     };
     agents::setup(config, Some(owner_auth), resolved, json, json_format).await

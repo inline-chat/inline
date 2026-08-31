@@ -143,11 +143,17 @@ access mode is owner-only; automation can use `--access allowlist` with repeated
 as their workspace unless `--folder` is provided explicitly.
 
 Unified discovery and setup JSON include `protocolVersion` and
-`documentationUrl`. Setup failures also include `status`, `failedPhase`,
+`documentationUrl`. Setup target, option and authentication failures also include `status`, `failedPhase`,
 `changes`, and `retry`; `status: "partial"` means setup may have changed state,
 while `changes` contains only confirmed completed work. Errors use stable codes and safe hints so an app or agent
 can offer a retry or send the user to the setup guide without parsing terminal
-output. The JSON never includes bot tokens or local executable/workspace paths.
+output. Preflight failures report no completed changes, and `target` is `null`
+when target selection has not completed. Retry commands preserve supplied flags;
+correct invalid arguments identified by the error before retrying. Output omits
+bot tokens and discovered local paths; the retry command can include workspace
+paths explicitly supplied by the user. Native app protocol errors stay on one
+JSON line even without `--compact`. Global argument-parsing and CLI-configuration
+errors retain the generic CLI error envelope.
 
 For gateway targets, `~/.inline/config.toml` stores only the target, profile
 instance, bot user ID, and bot username needed for idempotent reconciliation.

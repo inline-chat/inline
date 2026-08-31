@@ -122,7 +122,7 @@ pub(crate) enum AccessMode {
     Disabled,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub(crate) struct AgentsSetupArgs {
     /// Agent harness to configure. Prompts from installed harnesses when omitted.
     #[arg(long, value_enum)]
@@ -174,11 +174,12 @@ pub(crate) struct ResolvedSetup {
     pub(crate) non_interactive: bool,
 }
 
-fn setup_retry_command(target: AgentTarget, args: &AgentsSetupArgs) -> String {
-    let mut command = format!(
-        "inline agents setup --target {} --non-interactive --verbose",
-        target.descriptor().id
-    );
+fn setup_retry_command(args: &AgentsSetupArgs) -> String {
+    let mut command = "inline agents setup".to_string();
+    if let Some(target) = args.target {
+        command.push_str(&format!(" --target {}", target.descriptor().id));
+    }
+    command.push_str(" --non-interactive --verbose");
     // Setup options affect identity, workspace, and permissions. A retry must
     // never silently switch to the default profile/bot or broaden its scope.
     let mut value = |flag: &str, value: String| {
@@ -433,7 +434,7 @@ pub(crate) async fn setup(
     let target = resolved.installed.descriptor.target;
     let app_protocol = resolved.args.app_protocol;
     let mut progress = SetupProgressReporter::new(app_protocol);
-    progress.retry = setup_retry_command(target, &resolved.args);
+    progress.retry = setup_retry_command(&resolved.args);
     if resolved.args.dry_run {
         let preflight = match target {
             AgentTarget::Openclaw => openclaw::preflight(&resolved.installed, &resolved.args)
@@ -562,9 +563,38 @@ pub(crate) async fn setup(
     }
 }
 
+pub(crate) fn report_setup_preflight_failure(
+    error: Box<dyn std::error::Error>,
+    args: &AgentsSetupArgs,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut progress = SetupProgressReporter::new(args.app_protocol);
+    progress.retry = setup_retry_command(args);
+    report_setup_failure_for_target(error, args.target, &progress, false, json, json_format)
+}
+
 fn report_setup_failure(
     error: Box<dyn std::error::Error>,
     target: AgentTarget,
+    progress: &SetupProgressReporter,
+    may_have_mutated: bool,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    report_setup_failure_for_target(
+        error,
+        Some(target),
+        progress,
+        may_have_mutated,
+        json,
+        json_format,
+    )
+}
+
+fn report_setup_failure_for_target(
+    error: Box<dyn std::error::Error>,
+    target: Option<AgentTarget>,
     progress: &SetupProgressReporter,
     may_have_mutated: bool,
     json: bool,
@@ -578,7 +608,7 @@ fn report_setup_failure(
         action: &'static str,
         status: &'static str,
         documentation_url: &'static str,
-        target: &'a str,
+        target: Option<&'a str>,
         failed_phase: &'static str,
         changes: &'a [String],
         retry: String,
@@ -586,15 +616,16 @@ fn report_setup_failure(
     }
 
     let phase = progress.phase.get();
+    let target_id = target.map(|target| target.descriptor().id);
     let changes = progress.changes.borrow();
     let payload = crate::diagnostics::error_payload(error.as_ref());
     crate::diagnostics::log_error(error.as_ref());
     log::debug!(
         "setup failed target={} phase={phase} completed_changes={:?}",
-        target.descriptor().id,
+        target_id.unwrap_or("unselected"),
         &*changes
     );
-    crate::telemetry::report(&payload.code, Some(target.descriptor().id), Some(phase));
+    crate::telemetry::report(&payload.code, target_id, Some(phase));
     let retry = progress.retry.clone();
     let status = if may_have_mutated || !changes.is_empty() {
         "partial"
@@ -602,13 +633,18 @@ fn report_setup_failure(
         "failed"
     };
     if json {
+        let json_format = if progress.protocol_version.is_some() {
+            JsonFormat::Compact
+        } else {
+            json_format
+        };
         let output = FailureOutput {
             protocol_version: AGENTS_PROTOCOL_VERSION,
             ok: false,
             action: "agents.setup",
             status,
             documentation_url: AGENTS_DOCUMENTATION_URL,
-            target: target.descriptor().id,
+            target: target_id,
             failed_phase: phase,
             changes: &changes,
             retry,
@@ -1036,7 +1072,7 @@ mod app_protocol_tests {
         else {
             panic!("setup");
         };
-        let retry = setup_retry_command(AgentTarget::Codex, &args);
+        let retry = setup_retry_command(&args);
         for flag in [
             "--allow-user '42'",
             "--no-install",
