@@ -3,18 +3,22 @@ import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { chatParticipantGroups } from "@in/server/db/schema/userGroups"
 import { Log } from "@in/server/utils/log"
 import { and, eq } from "drizzle-orm"
-import { ChatParticipant, ChatParticipantGroup, Update, User, UserGroup } from "@inline-chat/protocol/core"
+import {
+  ChatParticipant,
+  ChatParticipantGroup,
+  User,
+  UserGroup,
+} from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { userNotDeleted, users } from "@in/server/db/schema/users"
-import type { UpdateGroup } from "../modules/updates"
-import { getUpdateGroup } from "../modules/updates"
-import { RealtimeUpdates } from "../realtime/message"
 import { UpdateBucket } from "@in/server/db/schema"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { retryParticipantMutation } from "@in/server/modules/updates/participantMutationRetry"
+import { pushChatCatchupHintsBestEffort, pushParticipantUserUpdateBestEffort } from "@in/server/modules/updates/participantLiveUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import {
   prepareChatPermissionUpdates,
@@ -67,9 +71,10 @@ export async function addChatParticipant(
       throw RealtimeRpcError.BadRequest()
     }
 
-    const result = await db.transaction(async (tx): Promise<{
+    const result = await retryParticipantMutation(() => db.transaction(async (tx): Promise<{
       participant: ChatParticipant
       update: UpdateSeqAndDate | null
+      chatSeq: number
       accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
@@ -110,6 +115,7 @@ export async function addChatParticipant(
             date: encodeDateStrict(participant.date),
           },
           update: null,
+          chatSeq: chat.updateSeq ?? 0,
           accessUpdates: [],
           permissionUpdates: [],
         }
@@ -186,32 +192,49 @@ export async function addChatParticipant(
       return {
         participant: participantForUpdate,
         update,
+        chatSeq: update.seq,
         accessUpdates,
         permissionUpdates,
       }
-    })
+    }))
 
-    AccessGuardsCache.setChatParticipant(input.chatId, userId)
+    try {
+      AccessGuardsCache.setChatParticipant(input.chatId, userId)
 
-    if (result.update) {
-      await pushUpdates({
+      if (result.update) {
+        await pushChatCatchupHintsBestEffort({
+          chatId: input.chatId,
+          currentUserId: context.currentUserId,
+          updateSeq: result.update.seq,
+        })
+        for (const accessUpdate of result.accessUpdates) {
+          await pushUserAddedToChat(
+            userId,
+            accessUpdate.chatId,
+            accessUpdate.chatId === input.chatId ? result.participant : undefined,
+            undefined,
+            accessUpdate.update,
+          )
+        }
+        await pushChatPermissionUpdates(result.permissionUpdates)
+        const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
+        if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: true })
+      } else if (result.chatSeq > 0) {
+        await pushChatCatchupHintsBestEffort({
+          chatId: input.chatId,
+          currentUserId: context.currentUserId,
+          updateSeq: result.chatSeq,
+        })
+      }
+    } catch (error) {
+      // The mutation is already durable. A live projection must not turn a
+      // successful add into an ambiguous failed RPC; replay owns recovery.
+      Log.shared.warn("Participant live projection failed after commit", { chatId: input.chatId, error })
+      await pushChatCatchupHintsBestEffort({
         chatId: input.chatId,
         currentUserId: context.currentUserId,
-        participant: result.participant,
-        update: result.update,
+        updateSeq: result.chatSeq,
       })
-      for (const accessUpdate of result.accessUpdates) {
-        pushUserAddedToChat(
-          userId,
-          accessUpdate.chatId,
-          accessUpdate.chatId === input.chatId ? result.participant : undefined,
-          undefined,
-          accessUpdate.update,
-        )
-      }
-      pushChatPermissionUpdates(result.permissionUpdates)
-      const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
-      if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: true })
     }
 
     return { participant: result.participant, users: [] }
@@ -228,10 +251,11 @@ async function addChatParticipantGroup(
   input: { chatId: number; groupId: number },
   context: FunctionContext,
 ): Promise<AddChatParticipantOutput> {
-  const result = await db.transaction(
+  const result = await retryParticipantMutation(() => db.transaction(
     async (tx): Promise<{
       groupParticipant: ChatParticipantGroup
       update: UpdateSeqAndDate | null
+      chatSeq: number
       accessUpdates: { userId: number; chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
     }> => {
@@ -257,6 +281,7 @@ async function addChatParticipantGroup(
         return {
           groupParticipant: encodeChatParticipantGroup(existing),
           update: null,
+          chatSeq: chat.updateSeq ?? 0,
           accessUpdates: [],
           permissionUpdates: [],
         }
@@ -331,30 +356,50 @@ async function addChatParticipantGroup(
         { tx },
       )
 
-      return { groupParticipant, update, accessUpdates, permissionUpdates }
+      return { groupParticipant, update, chatSeq: update.seq, accessUpdates, permissionUpdates }
     },
-  )
+  ))
 
-  const sidecars = await loadGroupsByIdsWithUsers([input.groupId], context.currentUserId)
-  const [group] = sidecars.groups
-
-  if (result.update) {
-    await pushGroupUpdates({
+  if (result.chatSeq > 0) {
+    await pushChatCatchupHintsBestEffort({
       chatId: input.chatId,
       currentUserId: context.currentUserId,
-      groupParticipant: result.groupParticipant,
-      update: result.update,
+      updateSeq: result.chatSeq,
     })
-    for (const accessUpdate of result.accessUpdates) {
-      pushUserAddedToChat(
-        accessUpdate.userId,
-        accessUpdate.chatId,
-        undefined,
-        accessUpdate.chatId === input.chatId ? result.groupParticipant : undefined,
-        accessUpdate.update,
-      )
+  }
+
+  let sidecars: Awaited<ReturnType<typeof loadGroupsByIdsWithUsers>> = { groups: [], users: [] }
+  try {
+    sidecars = await loadGroupsByIdsWithUsers([input.groupId], context.currentUserId)
+  } catch (error) {
+    Log.shared.warn("Participant group dependencies unavailable after commit", {
+      chatId: input.chatId,
+      groupId: input.groupId,
+      error,
+    })
+  }
+  const [group] = sidecars.groups
+
+  try {
+    if (result.update) {
+      for (const accessUpdate of result.accessUpdates) {
+        await pushUserAddedToChat(
+          accessUpdate.userId,
+          accessUpdate.chatId,
+          undefined,
+          accessUpdate.chatId === input.chatId ? result.groupParticipant : undefined,
+          accessUpdate.update,
+        )
+      }
+      await pushChatPermissionUpdates(result.permissionUpdates)
     }
-    pushChatPermissionUpdates(result.permissionUpdates)
+  } catch (error) {
+    Log.shared.warn("Participant group live projection failed after commit", { chatId: input.chatId, error })
+    await pushChatCatchupHintsBestEffort({
+      chatId: input.chatId,
+      currentUserId: context.currentUserId,
+      updateSeq: result.chatSeq,
+    })
   }
 
   return {
@@ -370,8 +415,8 @@ function pushUserAddedToChat(
   participant: ChatParticipant | undefined,
   group: ChatParticipantGroup | undefined,
   update: UpdateSeqAndDate,
-): void {
-  RealtimeUpdates.pushToUser(userId, [{
+): Promise<void> {
+  return pushParticipantUserUpdateBestEffort(userId, {
     seq: update.seq,
     date: encodeDateStrict(update.date),
     update: {
@@ -382,83 +427,5 @@ function pushUserAddedToChat(
         group,
       },
     },
-  }])
-}
-
-/** Push participant-add updates to currently connected clients. */
-const pushUpdates = async ({
-  chatId,
-  currentUserId,
-  participant,
-  update,
-}: {
-  chatId: number
-  currentUserId: number
-  participant: ChatParticipant
-  update: UpdateSeqAndDate
-}): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
-  const updateGroup = await getUpdateGroup({ threadId: chatId }, { currentUserId })
-
-  let selfUpdates: Update[] = []
-
-  updateGroup.userIds.forEach((userId) => {
-    const chatParticipantAdd: Update = {
-      seq: update.seq,
-      date: encodeDateStrict(update.date),
-      update: {
-        oneofKind: "participantAdd",
-        participantAdd: {
-          chatId: BigInt(chatId),
-          participant: participant,
-        },
-      },
-    }
-
-    RealtimeUpdates.pushToUser(userId, [chatParticipantAdd])
-
-    if (userId === currentUserId) {
-      selfUpdates = [chatParticipantAdd]
-    }
   })
-
-  return { selfUpdates, updateGroup }
-}
-
-/** Push group participant-add updates to currently connected clients. */
-const pushGroupUpdates = async ({
-  chatId,
-  currentUserId,
-  groupParticipant,
-  update,
-}: {
-  chatId: number
-  currentUserId: number
-  groupParticipant: ChatParticipantGroup
-  update: UpdateSeqAndDate
-}): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
-  const updateGroup = await getUpdateGroup({ threadId: chatId }, { currentUserId })
-
-  let selfUpdates: Update[] = []
-
-  updateGroup.userIds.forEach((userId) => {
-    const chatParticipantGroupAdd: Update = {
-      seq: update.seq,
-      date: encodeDateStrict(update.date),
-      update: {
-        oneofKind: "participantGroupAdd",
-        participantGroupAdd: {
-          chatId: BigInt(chatId),
-          groupParticipant,
-        },
-      },
-    }
-
-    RealtimeUpdates.pushToUser(userId, [chatParticipantGroupAdd])
-
-    if (userId === currentUserId) {
-      selfUpdates = [chatParticipantGroupAdd]
-    }
-  })
-
-  return { selfUpdates, updateGroup }
 }

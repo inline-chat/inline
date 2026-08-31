@@ -122,7 +122,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     return authoritativeRepairResult(latestSeq, latestDate)
   }
 
-  const pageGap = findDatabasePageGap(dbUpdates, seqStart)
+  const pageGap = findDatabasePageGap(dbUpdates, seqStart, latestSeq, pageLimit)
   if (pageGap) {
     log.warn("Non-contiguous durable sync page; requesting authoritative repair", {
       scope: descriptor.scope,
@@ -172,7 +172,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     }
 
     case "user": {
-      const page = Sync.inflateUserUpdatesPage(dbUpdates)
+      const page = await Sync.prepareUserUpdatesPage(dbUpdates, context.currentUserId)
       inflatedUpdates = page.updates
       skippedSequences = page.skippedSequences
       break
@@ -234,13 +234,20 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
 const findDatabasePageGap = (
   dbUpdates: Awaited<ReturnType<typeof Sync.getUpdates>>["updates"],
   seqStart: number,
-): { expectedSeq: number; actualSeq: number } | undefined => {
+  latestSeq: number,
+  pageLimit: number,
+): { expectedSeq: number; actualSeq?: number } | undefined => {
   for (let index = 0; index < dbUpdates.length; index += 1) {
     const expectedSeq = seqStart + index + 1
     const actualSeq = dbUpdates[index]!.seq
     if (actualSeq !== expectedSeq) {
       return { expectedSeq, actualSeq }
     }
+  }
+  // A short/empty retained page is not caught-up when its owning entity still
+  // advertises a later sequence. Never let retention become silent data loss.
+  if (dbUpdates.length < pageLimit && seqStart + dbUpdates.length < latestSeq) {
+    return { expectedSeq: seqStart + dbUpdates.length + 1 }
   }
 }
 
@@ -390,8 +397,9 @@ const resolveBucket = async (
       const chat = await getChatOrThrow(inputPeer, context)
       await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
-      const peer = Encoders.peerFromInputPeer({
-        inputPeer,
+      // Always replay a canonical output peer. A DM bucket may be addressed by
+      // chat ID, but message/update identity on clients is the other user's peer.
+      const peer = Encoders.peerFromChat(chat, {
         currentUserId: context.currentUserId,
       })
 

@@ -6,6 +6,7 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { resolveChatPermissionsForUsers } from "@in/server/modules/authorization/chatPermissions"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { Log } from "@in/server/utils/log"
 import { and, eq, inArray, isNotNull, or } from "drizzle-orm"
 
 type QueryExecutor = Pick<typeof db, "select"> | Pick<Transaction, "select">
@@ -105,7 +106,7 @@ export async function prepareSpaceChatPermissionUpdates(
   )
 }
 
-export function pushChatPermissionUpdates(updates: PreparedChatPermissionUpdate[]): void {
+export async function pushChatPermissionUpdates(updates: PreparedChatPermissionUpdate[]): Promise<void> {
   const updatesByUserId = new Map<number, Update[]>()
   for (const prepared of updates) {
     const userUpdates = updatesByUserId.get(prepared.userId) ?? []
@@ -114,7 +115,21 @@ export function pushChatPermissionUpdates(updates: PreparedChatPermissionUpdate[
   }
 
   for (const [userId, userUpdates] of updatesByUserId) {
-    RealtimeUpdates.pushToUser(userId, userUpdates)
+    try {
+      await RealtimeUpdates.pushToUser(userId, userUpdates)
+    } catch {
+      // This exact durable batch is sequence-idempotent. There is no separate
+      // user-bucket hint in the protocol; do not invent a chat frontier for it.
+      try {
+        await RealtimeUpdates.pushToUser(userId, userUpdates)
+      } catch {
+        Log.shared.warn("Permission live delivery failed; durable user replay retained", {
+          userId,
+          firstSeq: userUpdates[0]?.seq,
+          lastSeq: userUpdates[userUpdates.length - 1]?.seq,
+        })
+      }
+    }
   }
 }
 

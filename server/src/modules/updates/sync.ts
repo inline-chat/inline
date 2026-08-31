@@ -19,6 +19,8 @@ import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateBoxInput, type DecryptedUpdate } from "@in/server/db/models/updates"
 import {
   UpdateBucket,
+  chatParticipantGroups,
+  chatParticipants,
   chats,
   dialogs,
   members,
@@ -35,9 +37,10 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, asc, desc, eq, gt, inArray, lte } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lte, or } from "drizzle-orm"
 import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 
 const log = new Log("Sync", LogLevel.DEBUG)
 const missingMessageLogs = new BoundedLogAggregator(15 * 60 * 1000, 1_024)
@@ -68,6 +71,7 @@ export const Sync = {
   inflateUserUpdates: inflateUserUpdates,
   inflateSpaceUpdatesPage: inflateSpaceUpdatesPage,
   inflateUserUpdatesPage: inflateUserUpdatesPage,
+  prepareUserUpdatesPage,
 }
 
 export type InflatedUpdatesPage = {
@@ -128,10 +132,27 @@ async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
         .orderBy(desc(updatesTable.seq))
         .limit(1)
 
+      // Retention can remove every journal row. The owning entity is the
+      // durable tail, read in the same snapshot as the page, not the journal.
+      const entityTable = bucket.type === UpdateBucket.Chat
+        ? chats
+        : bucket.type === UpdateBucket.Space ? spaces : usersTable
+      const [entity] = await tx
+        .select({ seq: entityTable.updateSeq, date: entityTable.lastUpdateDate })
+        .from(entityTable)
+        .where(eq(entityTable.id, entityId))
+        .limit(1)
+      const entitySeq = entity?.seq ?? 0
+      const boundedEntitySeq = seqEnd === undefined ? entitySeq : Math.min(entitySeq, seqEnd)
+      const latestSeq = Math.max(latest?.seq ?? 0, boundedEntitySeq, seqStart)
+      const latestDate = latest?.seq === latestSeq
+        ? latest.date
+        : entitySeq === latestSeq ? entity?.date ?? null : null
+
       return {
         updates: list,
-        latestSeq: Math.max(latest?.seq ?? seqStart, seqStart),
-        latestDate: latest !== undefined && latest.seq >= seqStart ? latest.date : null,
+        latestSeq,
+        latestDate,
       }
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
@@ -184,7 +205,10 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
 
   // Find attached nodes (later we'll support for types)
   let messageIds: Set<bigint> = new Set()
-  let attachmentIds: Set<number> = new Set()
+  const attachmentIds: number[] = []
+  const attachmentMessageIds = new Map<number, Set<number>>()
+  const participantUserIds = new Set<number>()
+  const participantGroupIds = new Set<number>()
   let needsChat = false
   let needsNewChatUser = false
 
@@ -196,7 +220,22 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
     } else if (serverUpdate.oneofKind === "editMessage") {
       messageIds.add(serverUpdate.editMessage.msgId)
     } else if (serverUpdate.oneofKind === "messageAttachment") {
-      attachmentIds.add(Number(serverUpdate.messageAttachment.attachmentId))
+      const attachmentId = safePositiveId(serverUpdate.messageAttachment.attachmentId)
+      const messageId = safePositiveId(serverUpdate.messageAttachment.msgId)
+      if (serverUpdate.messageAttachment.chatId === BigInt(chatId) && attachmentId !== undefined && messageId !== undefined) {
+        attachmentIds.push(attachmentId)
+        const expectedMessageIds = attachmentMessageIds.get(attachmentId) ?? new Set<number>()
+        expectedMessageIds.add(messageId)
+        attachmentMessageIds.set(attachmentId, expectedMessageIds)
+      }
+    } else if (serverUpdate.oneofKind === "participantAdd") {
+      if (serverUpdate.participantAdd.chatId === BigInt(chatId)) {
+        addSafeId(participantUserIds, serverUpdate.participantAdd.participant?.userId)
+      }
+    } else if (serverUpdate.oneofKind === "participantGroupAdd") {
+      if (serverUpdate.participantGroupAdd.chatId === BigInt(chatId)) {
+        addSafeId(participantGroupIds, serverUpdate.participantGroupAdd.groupParticipant?.groupId)
+      }
     } else if (serverUpdate.oneofKind === "newChat") {
       needsChat = true
       needsNewChatUser = true
@@ -233,63 +272,108 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
     ? await Encoders.chatForUser(chatRecord, { encodingForUserId: userId })
     : undefined
 
+  const validParticipantUserIds = new Set<number>()
+  if (participantUserIds.size > 0) {
+    const rows = await db
+      .select({ userId: chatParticipants.userId })
+      .from(chatParticipants)
+      .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
+      .innerJoin(usersTable, eq(usersTable.id, chatParticipants.userId))
+      .leftJoin(members, and(eq(members.userId, chatParticipants.userId), eq(members.spaceId, chats.spaceId)))
+      .where(and(
+        eq(chatParticipants.chatId, chatId),
+        inArray(chatParticipants.userId, Array.from(participantUserIds)),
+        userNotDeleted(),
+        or(
+          isNull(chats.spaceId),
+          and(
+            eq(members.userId, chatParticipants.userId),
+            or(eq(chats.publicThread, false), isNull(chats.publicThread), eq(members.canAccessPublicChats, true), isNull(members.canAccessPublicChats)),
+          ),
+        ),
+      ))
+    for (const row of rows) validParticipantUserIds.add(row.userId)
+  }
+
+  const validParticipantGroupIds = new Set<number>()
+  if (participantGroupIds.size > 0) {
+    const rows = await db
+      .select({ groupId: chatParticipantGroups.groupId })
+      .from(chatParticipantGroups)
+      .innerJoin(chats, eq(chats.id, chatParticipantGroups.chatId))
+      .innerJoin(
+        userGroups,
+        and(eq(userGroups.id, chatParticipantGroups.groupId), eq(userGroups.spaceId, chats.spaceId)),
+      )
+      .where(and(
+        eq(chatParticipantGroups.chatId, chatId),
+        inArray(chatParticipantGroups.groupId, Array.from(participantGroupIds)),
+        or(eq(chats.publicThread, false), isNull(chats.publicThread)),
+      ))
+    for (const row of rows) validParticipantGroupIds.add(row.groupId)
+  }
+
   // Fetch from db
   const dbMessages = await MessageModel.getMessagesByIds(chatId, Array.from(messageIds))
-  const dbAttachments = attachmentIds.size > 0
-    ? (
-        await Promise.all(
-          Array.from(attachmentIds).map((attachmentId) =>
-            db._query.messageAttachments.findFirst({
-              where: eq(messageAttachments.id, attachmentId),
-              with: {
-                externalTask: true,
-                linkEmbed: {
-                  with: {
-                    photo: {
-                      with: {
-                        photoSizes: {
-                          with: {
-                            file: true,
-                          },
-                        },
-                      },
+  const uniqueAttachmentIds = Array.from(new Set(attachmentIds))
+  const fetchedAttachments = uniqueAttachmentIds.length > 0
+    ? await db._query.messageAttachments.findMany({
+        where: inArray(messageAttachments.id, uniqueAttachmentIds),
+        with: {
+          externalTask: true,
+          message: true,
+          linkEmbed: {
+            with: {
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
                     },
-                    video: {
-                      with: {
-                        file: true,
-                        photo: {
-                          with: {
-                            photoSizes: {
-                              with: {
-                                file: true,
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                    document: {
-                      with: {
-                        file: true,
-                        photo: {
-                          with: {
-                            photoSizes: {
-                              with: {
-                                file: true,
-                              },
-                            },
-                          },
+                  },
+                },
+              },
+              video: {
+                with: {
+                  file: true,
+                  photo: {
+                    with: {
+                      photoSizes: {
+                        with: {
+                          file: true,
                         },
                       },
                     },
                   },
                 },
               },
-            }),
-          ),
-        )
-      ).filter((attachment) => attachment !== undefined)
+              document: {
+                with: {
+                  file: true,
+                  photo: {
+                    with: {
+                      photoSizes: {
+                        with: {
+                          file: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
     : []
+  const fetchedAttachmentById = new Map(fetchedAttachments.map((attachment) => [Number(attachment.id), attachment]))
+  const dbAttachments = uniqueAttachmentIds.flatMap((attachmentId) => {
+    const attachment = fetchedAttachmentById.get(attachmentId)
+    const expectedMessageIds = attachmentMessageIds.get(attachmentId)
+    return attachment?.message?.chatId === chatId && expectedMessageIds?.has(attachment.message.messageId)
+      ? [attachment]
+      : []
+  })
   const repliesMap = await getMessageRepliesMap({
     parentChatId: chatId,
     parentMessageIds: dbMessages.map((message) => message.messageId),
@@ -307,11 +391,23 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
     msgs.set(encoded.id, encoded)
   }
 
-  const attachments = new Map(
-    MessageModel.processAttachments(dbAttachments)
-      .map((attachment) => [Number(attachment.id), encodeMessageAttachment(attachment)] as const)
-      .filter((entry): entry is readonly [number, NonNullable<ReturnType<typeof encodeMessageAttachment>>] => entry[1] !== null),
-  )
+  const attachments = new Map<number, MessageAttachment>()
+  const corruptAttachmentIds = new Set<number>()
+  for (const dbAttachment of dbAttachments) {
+    try {
+      const [processed] = MessageModel.processAttachments([dbAttachment])
+      if (!processed) continue
+      const encoded = encodeMessageAttachment(processed)
+      if (encoded) attachments.set(Number(dbAttachment.id), encoded)
+    } catch {
+      const attachmentId = Number(dbAttachment.id)
+      corruptAttachmentIds.add(attachmentId)
+      log.warn("Skipping corrupt message attachment during replay", {
+        chatId,
+        attachmentId,
+      })
+    }
+  }
 
   // Encode updates
   const inflatedUpdates: Update[] = []
@@ -370,10 +466,45 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       }
 
       case "messageAttachment": {
-        const attachmentId = serverUpdate.update.messageAttachment.attachmentId
+        const payload = serverUpdate.update.messageAttachment
+        const attachmentId = safePositiveId(payload.attachmentId)
+        const messageId = safePositiveId(payload.msgId)
+        if (payload.chatId !== BigInt(chatId) || attachmentId === undefined || messageId === undefined) {
+          log.warn("Skipping malformed message attachment replay reference", {
+            bucketChatId: chatId,
+            payloadChatId: String(payload.chatId),
+            messageId: String(payload.msgId),
+            attachmentId: String(payload.attachmentId),
+            seq: update.seq,
+          })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
+          break
+        }
+
+        const storedAttachment = fetchedAttachmentById.get(attachmentId)
+        if (
+          storedAttachment !== undefined &&
+          (storedAttachment.message?.chatId !== chatId || storedAttachment.message.messageId !== messageId)
+        ) {
+          log.warn("Skipping message attachment replay reference with mismatched ownership", {
+            bucketChatId: chatId,
+            payloadMessageId: messageId,
+            attachmentId,
+            ownerChatId: storedAttachment.message?.chatId,
+            ownerMessageId: storedAttachment.message?.messageId,
+            seq: update.seq,
+          })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
+          break
+        }
+        if (corruptAttachmentIds.has(attachmentId)) {
+          inflatedUpdates.push(chatSkipPts(update, chatId))
+          break
+        }
+
         const attachment: MessageAttachment =
-          attachments.get(Number(attachmentId)) ?? {
-            id: attachmentId,
+          attachments.get(attachmentId) ?? {
+            id: payload.attachmentId,
             attachment: { oneofKind: undefined },
           }
 
@@ -383,8 +514,8 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
           update: {
             oneofKind: "messageAttachment",
             messageAttachment: {
-              messageId: serverUpdate.update.messageAttachment.msgId,
-              chatId: serverUpdate.update.messageAttachment.chatId,
+              messageId: payload.msgId,
+              chatId: payload.chatId,
               peerId,
               attachment,
             },
@@ -443,6 +574,21 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         break
 
       case "participantAdd":
+        const participantUserId = safePositiveId(serverUpdate.update.participantAdd.participant?.userId)
+        if (
+          serverUpdate.update.participantAdd.chatId !== BigInt(chatId) ||
+          participantUserId === undefined ||
+          !validParticipantUserIds.has(participantUserId)
+        ) {
+          log.warn("Skipping malformed participantAdd replay reference", {
+            bucketChatId: chatId,
+            payloadChatId: String(serverUpdate.update.participantAdd.chatId),
+            participantUserId: String(serverUpdate.update.participantAdd.participant?.userId ?? 0),
+            seq: update.seq,
+          })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
+          break
+        }
         inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
@@ -471,6 +617,23 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         break
 
       case "participantGroupAdd":
+        const participantGroupId = safePositiveId(
+          serverUpdate.update.participantGroupAdd.groupParticipant?.groupId,
+        )
+        if (
+          serverUpdate.update.participantGroupAdd.chatId !== BigInt(chatId) ||
+          participantGroupId === undefined ||
+          !validParticipantGroupIds.has(participantGroupId)
+        ) {
+          log.warn("Skipping malformed participantGroupAdd replay reference", {
+            bucketChatId: chatId,
+            payloadChatId: String(serverUpdate.update.participantGroupAdd.chatId),
+            participantGroupId: String(serverUpdate.update.participantGroupAdd.groupParticipant?.groupId ?? 0),
+            seq: update.seq,
+          })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
+          break
+        }
         inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
@@ -747,7 +910,13 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
         break
 
       case "participantGroupAdd":
+        chatIds.add(input.chatId)
         addSafeId(groupIds, update.update.participantGroupAdd.groupParticipant?.groupId)
+        break
+
+      case "participantAdd":
+        chatIds.add(input.chatId)
+        addSafeId(userIds, update.update.participantAdd.participant?.userId)
         break
 
       default:
@@ -928,7 +1097,12 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
     userIds.add(userId)
   }
 
-  const chatRows = await getSidecarChats(undefined, chatIds)
+  const candidateChatRows = await getSidecarChats(undefined, chatIds)
+  const accessibleChatIds = await getAccessibleReplayChatIds(candidateChatRows.map((chat) => chat.id), input.userId)
+  const chatRows = candidateChatRows.filter((chat) => accessibleChatIds.has(chat.id))
+  // Historical chatOpen payloads are not authority to enrich their old Space
+  // with current metadata; rebuild Space references from admitted chats only.
+  spaceIds.clear()
   const encodedChats = await Encoders.chatsForUser(chatRows, { encodingForUserId: input.userId })
   for (const [index, chat] of chatRows.entries()) {
     collectChatSidecarRefs(chat, input.userId, { chatIds, userIds, spaceIds })
@@ -1075,15 +1249,18 @@ function collectMessageSidecarRefs(message: Message | undefined, refs: ChatSidec
   // minimal local placeholder during catch-up if needed.
 }
 
-function addSafeId(ids: Set<number>, id: bigint | number | undefined) {
+function safePositiveId(id: bigint | number | undefined): number | undefined {
   if (id === undefined) {
-    return
+    return undefined
   }
 
   const value = typeof id === "bigint" ? Number(id) : id
-  if (Number.isSafeInteger(value) && value > 0) {
-    ids.add(value)
-  }
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+function addSafeId(ids: Set<number>, id: bigint | number | undefined) {
+  const value = safePositiveId(id)
+  if (value !== undefined) ids.add(value)
 }
 
 async function getSidecarUserGroups(
@@ -1095,7 +1272,12 @@ async function getSidecarUserGroups(
     return { groups: [], userIds: new Set() }
   }
 
-  const groupRows = await db.select().from(userGroups).where(inArray(userGroups.id, ids)).orderBy(asc(userGroups.name))
+  const rows = await db.select({ group: userGroups }).from(userGroups)
+    .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, currentUserId)))
+    .innerJoin(spaces, eq(spaces.id, userGroups.spaceId))
+    .where(and(inArray(userGroups.id, ids), isNull(spaces.deleted)))
+    .orderBy(asc(userGroups.name))
+  const groupRows = rows.map((row) => row.group)
   if (groupRows.length === 0) {
     return { groups: [], userIds: new Set() }
   }
@@ -1227,6 +1409,96 @@ function inflateUserUpdatesPage(dbUpdates: DbUpdate[]): InflatedUpdatesPage {
   return inflateUpdatesPage(dbUpdates, (dbUpdate) =>
     convertUserUpdate(UpdatesModel.decrypt(dbUpdate), dbUpdate.entityId),
   )
+}
+
+async function getAccessibleReplayChatIds(chatIds: number[], userId: number): Promise<Set<number>> {
+  if (chatIds.length === 0) return new Set()
+  const access = await db.transaction(
+    (tx) => getEffectiveChatAccessUserIds(tx, chatIds, { userIds: [userId] }),
+    { accessMode: "read only" },
+  )
+  return new Set(Array.from(access).flatMap(([chatId, users]) => users.has(userId) ? [chatId] : []))
+}
+
+/** An obsolete access grant must be accounted without reviving a cached grant
+ * or requiring dependencies that current access no longer allows us to send. */
+async function prepareUserUpdatesPage(dbUpdates: DbUpdate[], userId: number): Promise<InflatedUpdatesPage> {
+  const page = inflateUserUpdatesPage(dbUpdates)
+  const accessAddRef = (update: Update): { chatId: bigint; userId?: bigint; groupId?: bigint; valid: boolean } | undefined => {
+    switch (update.update.oneofKind) {
+      case "userAddedToChat": {
+        const added = update.update.userAddedToChat
+        return { chatId: added.chatId, userId: added.participant?.userId, groupId: added.group?.groupId, valid: true }
+      }
+      case "participantAdd": {
+        const added = update.update.participantAdd
+        return { chatId: added.chatId, userId: added.participant?.userId, valid: added.participant !== undefined }
+      }
+      case "participantGroupAdd": {
+        const added = update.update.participantGroupAdd
+        return { chatId: added.chatId, groupId: added.groupParticipant?.groupId, valid: added.groupParticipant !== undefined }
+      }
+      default: return undefined
+    }
+  }
+  const ids = new Set<number>()
+  const userIds = new Set<number>()
+  const groupIds = new Set<number>()
+  for (const update of page.updates) {
+    const ref = accessAddRef(update)
+    addSafeId(ids, ref?.chatId)
+    addSafeId(userIds, ref?.userId)
+    addSafeId(groupIds, ref?.groupId)
+  }
+  const accessible = await getAccessibleReplayChatIds(Array.from(ids), userId)
+  const validUsers = new Set<string>()
+  const validGroups = new Set<string>()
+  if (ids.size > 0 && userIds.size > 0) {
+    const rows = await db.select({ chatId: chatParticipants.chatId, userId: chatParticipants.userId })
+      .from(chatParticipants)
+      .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
+      .innerJoin(usersTable, eq(usersTable.id, chatParticipants.userId))
+      .leftJoin(members, and(eq(members.userId, chatParticipants.userId), eq(members.spaceId, chats.spaceId)))
+      .where(and(
+        inArray(chatParticipants.chatId, Array.from(ids)), inArray(chatParticipants.userId, Array.from(userIds)), userNotDeleted(),
+        or(isNull(chats.spaceId), eq(members.userId, chatParticipants.userId)),
+      ))
+    for (const row of rows) validUsers.add(`${row.chatId}:${row.userId}`)
+  }
+  if (ids.size > 0 && groupIds.size > 0) {
+    const rows = await db.select({ chatId: chatParticipantGroups.chatId, groupId: chatParticipantGroups.groupId })
+      .from(chatParticipantGroups)
+      .innerJoin(chats, eq(chats.id, chatParticipantGroups.chatId))
+      .innerJoin(userGroups, and(eq(userGroups.id, chatParticipantGroups.groupId), eq(userGroups.spaceId, chats.spaceId)))
+      .where(and(
+        inArray(chatParticipantGroups.chatId, Array.from(ids)), inArray(chatParticipantGroups.groupId, Array.from(groupIds)),
+        or(eq(chats.publicThread, false), isNull(chats.publicThread)),
+      ))
+    for (const row of rows) validGroups.add(`${row.chatId}:${row.groupId}`)
+  }
+  const updates: Update[] = []
+  for (const update of page.updates) {
+    const ref = accessAddRef(update)
+    const validUser = ref?.userId === undefined || validUsers.has(`${ref.chatId}:${ref.userId}`)
+    const validGroup = ref?.groupId === undefined || validGroups.has(`${ref.chatId}:${ref.groupId}`)
+    if (ref !== undefined && ref.valid && accessible.has(Number(ref.chatId)) && update.update.oneofKind === "userAddedToChat") {
+      // Access may now come from a different grant. Preserve chat discovery,
+      // but never resurrect an obsolete optional participant/group edge.
+      updates.push({ ...update, update: { oneofKind: "userAddedToChat", userAddedToChat: {
+        ...update.update.userAddedToChat,
+        participant: validUser ? update.update.userAddedToChat.participant : undefined,
+        group: validGroup ? update.update.userAddedToChat.group : undefined,
+      } } })
+    } else if (ref === undefined || (ref.valid && accessible.has(Number(ref.chatId)) && validUser && validGroup)) {
+      updates.push(update)
+    } else {
+      page.skippedSequences.push({
+        seq: BigInt(update.seq ?? 0),
+        reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET,
+      })
+    }
+  }
+  return { updates, skippedSequences: page.skippedSequences }
 }
 
 function inflateUpdatesPage(
