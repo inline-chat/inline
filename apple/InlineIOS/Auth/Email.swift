@@ -1,4 +1,6 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 import SwiftUI
 
 struct Email: View {
@@ -8,93 +10,89 @@ struct Email: View {
   @FormState var formState
   @State private var errorMsg: String = ""
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @EnvironmentObject var nav: OnboardingNavigation
+  #if !IOS_ONBOARDING_GALLERY_APP
   @EnvironmentObject var api: ApiClient
+  #endif
 
   init(prevEmail: String? = nil) {
     self.prevEmail = prevEmail
   }
 
   var body: some View {
-    VStack(spacing: 20) {
-      Spacer()
-
+    OnboardingFormPage(focus: $isFocused) {
       // Icon and title section
-      VStack(spacing: 12) {
-        Image(systemName: "at.circle.fill")
-          .resizable()
-          .scaledToFit()
-          .frame(width: 34, height: 34)
-          .foregroundColor(.primary)
-
-        Text(NSLocalizedString("Sign in with email", comment: "Email sign in title"))
-          .font(.onboardingIOSTitle.weight(.medium))
-          .foregroundStyle(.primary)
-      }
-
-      // Email input field
-      VStack(spacing: 8) {
-        TextField(NSLocalizedString("Your Email", comment: "Email input placeholder"), text: $email)
-          .focused($isFocused)
-          .onboardingEmailInput()
-          .autocorrectionDisabled(true)
-          .font(.body)
-          .padding(.horizontal, 20)
-          .padding(.vertical, 16)
-          .background(
-            RoundedRectangle(cornerRadius: 16)
-              .fill(.ultraThinMaterial)
-              .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                  .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
-              )
-          )
-          .clipShape(RoundedRectangle(cornerRadius: 16))
-          .disabled(formState.isLoading)
-          .onSubmit {
-            sendCode()
-          }
-          .onChange(of: email) { _, _ in
-            if !errorMsg.isEmpty {
-              errorMsg = ""
-            }
-          }
-
-        if !errorMsg.isEmpty {
-          Text(errorMsg)
-            .font(.callout)
-            .foregroundColor(.red)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-      }
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-
-      Spacer()
-    }
-    .safeAreaInset(edge: .bottom) {
-      Button(
-        formState
-          .isLoading ? NSLocalizedString("Sending Code...", comment: "Sending code button loading state") :
-          NSLocalizedString("Continue", comment: "Continue button")
-      ) {
-        sendCode()
-      }
-      .buttonStyle(OnboardingAccentButtonStyle())
-      .frame(maxWidth: .infinity)
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-      .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-      .disabled(formState.isLoading)
-      .opacity(formState.isLoading ? 0.5 : 1)
+      OnboardingFormHeader(
+        title: Text(NSLocalizedString("Sign in with email", comment: "Email sign in title")),
+        systemImage: "at"
+      )
+      emailField
+    } actions: {
+      continueButton
+        .disabled(formState.isLoading)
     }
     .onAppear {
       if let prevEmail {
         email = prevEmail
       }
-      isFocused = true
     }
   }
 
+  // Email input field
+  private var emailField: some View {
+    VStack(spacing: 8) {
+      TextField(NSLocalizedString("Your Email", comment: "Email input placeholder"), text: $email)
+        .focused($isFocused)
+        .onboardingEmailInput()
+        .autocorrectionDisabled(true)
+        .onboardingFormField()
+        .disabled(formState.isLoading)
+        .onSubmit {
+          sendCode()
+        }
+        .onChange(of: email) { _, _ in
+          if !errorMsg.isEmpty {
+            errorMsg = ""
+          }
+        }
+
+      if !errorMsg.isEmpty {
+        Text(errorMsg)
+          .font(.callout)
+          .foregroundColor(.red)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 20)
+          .contentTransition(.opacity)
+          .transition(.opacity)
+      }
+    }
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: errorMsg)
+  }
+
+  private var continueButton: some View {
+    Button {
+      sendCode()
+    } label: {
+      Text(
+        formState
+          .isLoading ? NSLocalizedString("Sending Code...", comment: "Sending code button loading state") :
+          NSLocalizedString("Continue", comment: "Continue button")
+      )
+    }
+    .buttonStyle(OnboardingFormButtonStyle())
+  }
+
   func sendCode() {
+    guard !formState.isLoading else { return }
+    errorMsg = ""
+    #if IOS_ONBOARDING_GALLERY_APP
+    guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      errorMsg = "Enter an email address to preview the next page."
+      return
+    }
+    nav.push(.code(email: email))
+    #else
     formState.startLoading()
 
     Task {
@@ -107,17 +105,18 @@ struct Email: View {
         } else {
           nav.push(.code(email: email, challengeToken: response.challengeToken))
         }
-      } catch let error as APIError {
-        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isEmail: true)
+      } catch is CancellationError {
         formState.reset()
       } catch {
-        errorMsg = error.localizedDescription
+        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
         formState.reset()
       }
     }
+    #endif
   }
 }
 
+#if !IOS_ONBOARDING_GALLERY_APP
 #Preview("Email - Light Mode") {
   Email()
     .preferredColorScheme(.light)
@@ -145,3 +144,4 @@ struct Email: View {
     .environmentObject(OnboardingNavigation())
     .environmentObject(ApiClient.shared)
 }
+#endif

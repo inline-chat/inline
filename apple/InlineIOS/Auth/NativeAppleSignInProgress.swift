@@ -1,45 +1,44 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 import SwiftUI
 
 struct NativeAppleSignInProgress: View {
   @EnvironmentObject private var navigation: OnboardingNavigation
+  #if IOS_ONBOARDING_GALLERY_APP
+  @EnvironmentObject private var coordinator: OnboardingGalleryProviderState
+  #else
   @ObservedObject private var coordinator = ProviderSignInCoordinator.shared
+  #endif
 
   var body: some View {
-    VStack(spacing: 16) {
-      Spacer()
-
-      Image(systemName: "apple.logo")
-        .font(.system(size: 32, weight: .medium))
-
+    OnboardingFormPage {
       if let error = coordinator.errorMessage {
-        Text("Apple Sign-In couldn’t finish")
-          .font(.onboardingIOSTitle.weight(.medium))
-          .multilineTextAlignment(.center)
+        VStack(spacing: 12) {
+          OnboardingFormHeader(title: Text("Apple Sign-In couldn’t finish"), systemImage: "apple.logo")
 
-        Text(error)
-          .foregroundStyle(.secondary)
-          .multilineTextAlignment(.center)
-          .frame(maxWidth: 340)
-
-        Button("Try Again") {
-          coordinator.clearError()
-          coordinator.cancelNativeAppleAuthorization()
-          navigation.pop()
+          Text(error)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
         }
-        .buttonStyle(OnboardingAccentButtonStyle())
-        .frame(maxWidth: 340)
       } else {
-        Text("Finishing Apple Sign-In…")
-          .font(.onboardingIOSTitle.weight(.medium))
-          .multilineTextAlignment(.center)
+        OnboardingFormHeader(title: Text("Finishing Apple Sign-In…"), systemImage: "apple.logo")
 
         ProgressView()
           .controlSize(.large)
       }
-
-      Spacer()
+    } actions: {
+      if coordinator.errorMessage != nil {
+        Button("Try Again") {
+          coordinator.clearError()
+          #if !IOS_ONBOARDING_GALLERY_APP
+          coordinator.cancelNativeAppleAuthorization()
+          #endif
+          navigation.pop()
+        }
+        .buttonStyle(OnboardingFormButtonStyle())
+      }
     }
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
   }
 }

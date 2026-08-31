@@ -1,7 +1,9 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import Auth
 import GRDBQuery
 import InlineKit
 import Logger
+#endif
 import SwiftUI
 
 struct PhoneNumberCode: View {
@@ -18,13 +20,16 @@ struct PhoneNumberCode: View {
   @FocusState private var isFocused: Bool
   @FormState var formState
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @EnvironmentObject var nav: OnboardingNavigation
+  #if !IOS_ONBOARDING_GALLERY_APP
   @EnvironmentObject var api: ApiClient
   @EnvironmentObject var userData: UserData
   @EnvironmentObject var mainViewRouter: MainViewRouter
   @Environment(\.appDatabase) var database
   @Environment(\.auth) private var auth
   @Environment(\.realtime) private var realtime
+  #endif
 
   init(phoneNumber: String, inviteCode: String? = nil) {
     self.phoneNumber = phoneNumber
@@ -32,21 +37,12 @@ struct PhoneNumberCode: View {
   }
 
   var body: some View {
-    VStack(spacing: 20) {
-      Spacer()
-
+    OnboardingFormPage(focus: $isFocused) {
       // Icon and title section
-      VStack(spacing: 12) {
-        Image(systemName: "numbers.rectangle.fill")
-          .resizable()
-          .scaledToFit()
-          .frame(width: 34, height: 34)
-          .foregroundColor(.primary)
-
-        Text(NSLocalizedString("Enter confirmation code", comment: "Code input title"))
-          .font(.onboardingIOSTitle.weight(.medium))
-          .foregroundStyle(.primary)
-      }
+      OnboardingFormHeader(
+        title: Text(NSLocalizedString("Enter confirmation code", comment: "Code input title")),
+        systemImage: "numbers.rectangle"
+      )
 
       // Code input field
       VStack(spacing: 8) {
@@ -57,17 +53,14 @@ struct PhoneNumberCode: View {
             .font(.callout)
             .foregroundColor(.red)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .contentTransition(.opacity)
+            .transition(.opacity)
         }
       }
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-
-      Spacer()
-    }
-    .safeAreaInset(edge: .bottom) {
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: errorMsg)
+    } actions: {
       bottomArea
-    }
-    .onAppear {
-      isFocused = true
     }
   }
 }
@@ -81,9 +74,18 @@ extension PhoneNumberCode {
   }
 
   func submitCode() {
+    guard !formState.isLoading else { return }
+    guard code.count == characterLimit else {
+      errorMsg = String(localized: "Enter the 6-digit code.")
+      return
+    }
+    errorMsg = ""
+    #if IOS_ONBOARDING_GALLERY_APP
+    nav.push(.profile(userId: OnboardingGallerySession.userID))
+    #else
+    formState.startLoading()
     Task {
       do {
-        formState.startLoading()
         let bearerLoginAttempt = InlineProtocolNativeLogin.shared.isAvailable
           ? nil
           : try await auth.beginLoginAttempt()
@@ -143,17 +145,13 @@ extension PhoneNumberCode {
         nav.push(.inviteCodeForPhone(phoneNumber: phoneNumber))
       } catch is CancellationError {
         formState.reset()
-      } catch let error as APIError {
-        errorMsg = NSLocalizedString("Please try again.", comment: "Error message for code verification")
+      } catch {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
         formState.reset()
-        isInputValid = false
-      } catch {
-        Log.shared.error("Unexpected error", error: error)
-        formState.reset()
-        isInputValid = false
+        isFocused = true
       }
     }
+    #endif
   }
 }
 
@@ -168,19 +166,9 @@ extension PhoneNumberCode {
       .monospaced()
       .kerning(5)
       .autocorrectionDisabled(true)
-      .font(.title2)
       .multilineTextAlignment(.center)
-      .padding(.horizontal, 20)
-      .padding(.vertical, 16)
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(.ultraThinMaterial)
-          .overlay(
-            RoundedRectangle(cornerRadius: 16)
-              .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
-          )
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 16))
+      .onboardingFormField()
+      .disabled(formState.isLoading)
       .onSubmit {
         submitCode()
       }
@@ -197,11 +185,12 @@ extension PhoneNumberCode {
 
   @ViewBuilder
   var bottomArea: some View {
-    VStack(alignment: .center) {
+    VStack(alignment: .center, spacing: 12) {
       HStack(spacing: 2) {
         Text(String(format: NSLocalizedString("Code sent to %@.", comment: "Code sent confirmation"), phoneNumber))
           .font(.callout)
           .foregroundColor(.secondary)
+          .multilineTextAlignment(.center)
         Button(NSLocalizedString("Edit", comment: "Edit button")) {
           nav.pop()
         }
@@ -211,20 +200,18 @@ extension PhoneNumberCode {
       Button(
         formState
           .isLoading ? NSLocalizedString("Verifying...", comment: "Verifying code button loading state") :
-          NSLocalizedString("Continue", comment: "Continue button")
+          errorMsg.isEmpty ? NSLocalizedString("Continue", comment: "Continue button") :
+          NSLocalizedString("Try Again", comment: "Retry code verification button")
       ) {
         submitCode()
       }
-      .buttonStyle(OnboardingAccentButtonStyle())
-      .frame(maxWidth: .infinity)
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-      .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+      .buttonStyle(OnboardingFormButtonStyle())
       .disabled(!isInputValid || formState.isLoading)
-      .opacity((!isInputValid || formState.isLoading) ? 0.5 : 1)
     }
   }
 }
 
+#if !IOS_ONBOARDING_GALLERY_APP
 #Preview("PhoneNumberCode - Light Mode") {
   PhoneNumberCode(phoneNumber: "+15555555555")
     .preferredColorScheme(.light)
@@ -275,3 +262,4 @@ extension PhoneNumberCode {
     .environment(\.appDatabase, AppDatabase.empty())
     .previewDevice("iPhone SE (3rd generation)")
 }
+#endif

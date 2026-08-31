@@ -5,7 +5,8 @@ struct PhoneNumberField: View {
   @Binding var selectedCountry: Country
   @State private var showingCountryPicker = false
   @State private var searchText = ""
-  @FocusState private var isFocused: Bool
+  @FocusState.Binding var isFocused: Bool
+  @ScaledMetric(relativeTo: .body) private var onboardingHeight = OnboardingFormMetrics.controlHeight
 
   enum Size {
     case small
@@ -15,9 +16,15 @@ struct PhoneNumberField: View {
 
   var size: Size = .large
 
-  init(phoneNumber: Binding<String>, country: Binding<Country>, size: Size = .large) {
+  init(
+    phoneNumber: Binding<String>,
+    country: Binding<Country>,
+    focus: FocusState<Bool>.Binding,
+    size: Size = .large
+  ) {
     _phoneNumber = phoneNumber
     _selectedCountry = country
+    _isFocused = focus
     self.size = size
   }
 
@@ -35,7 +42,7 @@ struct PhoneNumberField: View {
     switch size {
       case .small: 32
       case .medium: 40
-      case .large: 48
+      case .large: onboardingHeight
     }
   }
 
@@ -43,7 +50,7 @@ struct PhoneNumberField: View {
     switch size {
       case .small: 8
       case .medium: 10
-      case .large: 12
+      case .large: height / 2
     }
   }
 
@@ -51,14 +58,17 @@ struct PhoneNumberField: View {
     switch size {
       case .small: .body
       case .medium: .system(size: 16, weight: .regular)
-      case .large: .system(size: 17, weight: .regular)
+      case .large: .onboardingIOSBody
     }
   }
 
   var body: some View {
     HStack(spacing: 0) {
       // Country Code Button
-      Button(action: { showingCountryPicker.toggle() }) {
+      Button(action: {
+        isFocused = false
+        showingCountryPicker = true
+      }) {
         HStack(spacing: 6) {
           Text(selectedCountry.flag)
             .font(.system(size: 18))
@@ -67,6 +77,7 @@ struct PhoneNumberField: View {
             .font(font.monospacedDigit())
         }
         .padding(.horizontal, 12)
+        .frame(maxHeight: .infinity)
         .contentShape(.rect)
       }
       .buttonStyle(.plain)
@@ -127,10 +138,12 @@ struct PhoneNumberField: View {
 
       // Phone Number TextField
       TextField("Phone number", text: $phoneNumber)
+        .textFieldStyle(.plain)
         .font(font.monospacedDigit())
         .keyboardType(.phonePad)
         .focused($isFocused)
         .padding(.leading, 12)
+        .padding(.trailing, size == .large ? 20 : 0)
         .frame(maxWidth: .infinity)
         .onChange(of: phoneNumber) { _, newValue in
           phoneNumber = newValue.filter(\.isNumber)
@@ -140,10 +153,12 @@ struct PhoneNumberField: View {
     .background(
       RoundedRectangle(cornerRadius: cornerRadius)
         .fill(.ultraThinMaterial)
-        .overlay(
-          RoundedRectangle(cornerRadius: cornerRadius)
-            .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
-        )
+        .overlay {
+          if size != .large {
+            RoundedRectangle(cornerRadius: cornerRadius)
+              .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
+          }
+        }
     )
   }
 }
@@ -151,15 +166,18 @@ struct PhoneNumberField: View {
 #Preview {
   @Previewable @State var phoneNumber = ""
   @Previewable @State var country = Country.getCurrentCountry()
+  @Previewable @FocusState var largeFieldFocused: Bool
+  @Previewable @FocusState var mediumFieldFocused: Bool
+  @Previewable @FocusState var smallFieldFocused: Bool
 
   return VStack {
-    PhoneNumberField(phoneNumber: $phoneNumber, country: $country)
+    PhoneNumberField(phoneNumber: $phoneNumber, country: $country, focus: $largeFieldFocused)
       .padding()
 
-    PhoneNumberField(phoneNumber: $phoneNumber, country: $country, size: .medium)
+    PhoneNumberField(phoneNumber: $phoneNumber, country: $country, focus: $mediumFieldFocused, size: .medium)
       .padding()
 
-    PhoneNumberField(phoneNumber: $phoneNumber, country: $country, size: .small)
+    PhoneNumberField(phoneNumber: $phoneNumber, country: $country, focus: $smallFieldFocused, size: .small)
       .padding()
   }
 }
