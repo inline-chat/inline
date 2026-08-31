@@ -551,7 +551,7 @@ class MinimalMessageViewAppKit: NSView {
     switch action.action {
       case .callback:
         MessageGestureTrace.debug(
-          "MinimalMessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=callback"
+          "MinimalMessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=callback"
         )
         invokeMessageCallbackAction(action)
       case let .copyText(copyText):
@@ -559,11 +559,11 @@ class MinimalMessageViewAppKit: NSView {
         NSPasteboard.general.setString(copyText.text, forType: .string)
         ToastCenter.shared.showSuccess("Copied")
         MessageGestureTrace.debug(
-          "MinimalMessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=copyText"
+          "MinimalMessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=copyText"
         )
       case nil:
         MessageGestureTrace.debug(
-          "MinimalMessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=nil"
+          "MinimalMessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=nil"
         )
         break
     }
@@ -4740,7 +4740,7 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
 
   private func eventSummary(_ event: NSEvent) -> String {
     let point = convert(event.locationInWindow, from: nil)
-    return "type=\(event.type.rawValue) clicks=\(event.clickCount) point=\(MessageGestureTrace.point(point)) modifiers=\(event.modifierFlags.rawValue)"
+    return "\(MessageGestureTrace.eventDescription(event)) local=\(MessageGestureTrace.point(point))"
   }
 }
 

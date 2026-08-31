@@ -600,7 +600,7 @@ class MessageViewAppKit: NSView {
     switch action.action {
       case .callback:
         MessageGestureTrace.debug(
-          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=callback"
+          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=callback"
         )
         invokeMessageCallbackAction(action)
       case let .copyText(copyText):
@@ -608,11 +608,11 @@ class MessageViewAppKit: NSView {
         NSPasteboard.general.setString(copyText.text, forType: .string)
         ToastCenter.shared.showSuccess("Copied")
         MessageGestureTrace.debug(
-          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=copyText"
+          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=copyText"
         )
       case nil:
         MessageGestureTrace.debug(
-          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionId=\(action.actionID) type=nil"
+          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=nil"
         )
         break
     }
@@ -4771,7 +4771,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
 
   private func eventSummary(_ event: NSEvent) -> String {
     let point = convert(event.locationInWindow, from: nil)
-    return "type=\(event.type.rawValue) clicks=\(event.clickCount) point=\(MessageGestureTrace.point(point)) modifiers=\(event.modifierFlags.rawValue)"
+    return "\(MessageGestureTrace.eventDescription(event)) local=\(MessageGestureTrace.point(point))"
   }
 }
 
