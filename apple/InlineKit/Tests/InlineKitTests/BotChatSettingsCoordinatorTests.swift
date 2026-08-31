@@ -1,11 +1,47 @@
 @testable import InlineKit
 import Foundation
+import GRDB
 import InlineProtocol
 import Testing
 
 @Suite("Bot chat settings coordinator", .serialized)
 @MainActor
 struct BotChatSettingsCoordinatorTests {
+  @Test("cancelled discovery callbacks cannot invalidate a restarted observation")
+  func cancelledDiscoveryCallbackDoesNotInvalidateRestartedObservation() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let database = try AppDatabase(queue)
+    let discoveries = InvocationCounter()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .user(id: 20),
+      discoveryFetcher: { _ in
+        await discoveries.increment()
+        return .init()
+      },
+      settingsRequester: { _, _ in documentResponse(revision: "one") },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "two") }
+    )
+    defer { coordinator.cancel() }
+
+    // Initial GRDB snapshots enqueue callbacks on the main actor. Cancel and
+    // restart without suspension so the old callback is still pending.
+    coordinator.startObservingDiscoveryScope(in: database)
+    coordinator.cancel()
+    coordinator.startObservingDiscoveryScope(in: database)
+
+    await waitUntilAsync { await discoveries.count > 0 }
+    #expect(await discoveries.count == 0)
+
+    // The current observation must still invalidate discovery on a real change.
+    try await queue.write { db in
+      var bot = User(id: 20, email: nil, firstName: "Bot")
+      bot.bot = true
+      try bot.insert(db)
+    }
+    await waitUntilAsync { await discoveries.count == 1 }
+    #expect(await discoveries.count == 1)
+  }
+
   @Test("selects the suggested V1 bot and loads its document")
   func discoveryAndWarmUp() async {
     let coordinator = BotChatSettingsCoordinator(
@@ -402,7 +438,10 @@ struct BotChatSettingsCoordinatorTests {
     #expect(coordinator.selectedState.surfaceStatus == .refreshing)
 
     await request.resolve(with: .with {
-      $0.result = .document(.with { $0.revision = "fresh-empty" })
+      $0.result = .document(.with {
+        $0.version = 1
+        $0.revision = "fresh-empty"
+      })
     })
     await waitUntil { coordinator.selectedState.document?.revision == "fresh-empty" }
 
@@ -786,7 +825,10 @@ private func settingsDocument(revision: String) throws -> BotChatSettingsModel.D
 }
 
 private func emptySettingsDocument(revision: String) throws -> BotChatSettingsModel.Document {
-  try BotChatSettingsModel.Document(protocolDocument: .with { $0.revision = revision })
+  try BotChatSettingsModel.Document(protocolDocument: .with {
+    $0.version = 1
+    $0.revision = revision
+  })
 }
 
 private enum SettingsDocumentFixtureError: Error {

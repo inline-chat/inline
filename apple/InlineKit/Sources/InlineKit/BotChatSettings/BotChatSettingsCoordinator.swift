@@ -341,6 +341,7 @@ public final class BotChatSettingsCoordinator {
   public func startObservingDiscoveryScope(in database: AppDatabase) {
     discoveryObservation?.cancel()
     hasReceivedDiscoverySnapshot = false
+    let currentGeneration = generation
     database.warnIfInMemoryDatabaseForObservation("BotChatSettingsCoordinator.discoveryScope")
     discoveryObservation = ValueObservation
       .tracking { [peer] db in try BotChatSettingsDiscoverySnapshot.fetch(db, peer: peer) }
@@ -349,11 +350,14 @@ public final class BotChatSettingsCoordinator {
       .sink(
         receiveCompletion: { [weak self] completion in
           guard case let .failure(error) = completion else { return }
-          Task { @MainActor [weak self] in self?.log.error("Discovery observation failed", error: error) }
+          Task { @MainActor [weak self] in
+            guard let self, currentGeneration == self.generation else { return }
+            self.log.error("Discovery observation failed", error: error)
+          }
         },
         receiveValue: { [weak self] _ in
           Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, currentGeneration == self.generation else { return }
             if self.hasReceivedDiscoverySnapshot { self.invalidateDiscovery() }
             self.hasReceivedDiscoverySnapshot = true
           }
