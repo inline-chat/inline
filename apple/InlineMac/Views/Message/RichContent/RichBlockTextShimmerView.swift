@@ -16,7 +16,7 @@ final class RichBlockTextShimmerView: NSView {
     layer?.masksToBounds = true
     shine.contents = NSImage(named: "shine")
     shine.contentsGravity = .resizeAspect
-    shine.opacity = 0.68
+    shine.opacity = 1
     shine.transform = CATransform3DMakeRotation(15 * .pi / 180, 0, 0, 1)
     maskedContainer.mask = textMask
     maskedContainer.addSublayer(shine)
@@ -30,7 +30,7 @@ final class RichBlockTextShimmerView: NSView {
 
   func apply(color: NSColor) {
     if shine.contents == nil {
-      shine.backgroundColor = color.withAlphaComponent(0.3).cgColor
+      shine.backgroundColor = color.cgColor
     }
   }
 

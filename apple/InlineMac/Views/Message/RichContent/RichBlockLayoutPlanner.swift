@@ -240,7 +240,7 @@ final class RichBlockLayoutPlanner {
     case .disclosureSummary:
       value.addAttribute(
         .font,
-        value: ChatTypography.current.font(sized: baseFontSize, weight: .semibold),
+        value: ChatTypography.current.font(sized: baseFontSize, weight: .regular),
         range: fullRange
       )
     case .listMarker:

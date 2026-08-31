@@ -5,7 +5,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
   private let surface = RichBlockTextSurface(frame: .zero)
   private let chevron: NSImageView = {
     let view = NSImageView()
-    view.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+    view.symbolConfiguration = .init(pointSize: 11, weight: .regular)
     return view
   }()
   private let shimmer = RichBlockTextShimmerView(frame: .zero)
@@ -43,14 +43,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     guard case let .text(text) = node.kind,
           case let .disclosureSummary(progress, expanded) = text.role
     else { return }
-    let attributed = NSMutableAttributedString(attributedString: context.text(for: text))
-    if progress {
-      attributed.addAttribute(
-        .foregroundColor,
-        value: context.palette.primary.withAlphaComponent(0.78),
-        range: NSRange(location: 0, length: attributed.length)
-      )
-    }
+    let attributed = context.text(for: text)
     self.path = node.path
     self.progress = progress
     self.expanded = expanded

@@ -77,8 +77,11 @@ struct RichBlockRenderContext {
     }
 
     let fullRange = NSRange(location: 0, length: value.length)
-    if case .footer = node.role {
+    switch node.role {
+    case .footer, .disclosureSummary:
       value.addAttribute(.foregroundColor, value: palette.secondary, range: fullRange)
+    default:
+      break
     }
     value.enumerateAttribute(.link, in: fullRange) { link, range, _ in
       guard link != nil else { return }
