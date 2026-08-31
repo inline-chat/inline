@@ -66,6 +66,7 @@ const COPY = {
     links: {
       twitter: "X",
       github: "GitHub",
+      youtube: "YouTube",
       status: "Status",
       download: "Downloads",
       docs: "Docs",
@@ -366,6 +367,16 @@ export function Landing() {
               {...stylex.props(styles.footerLink)}
             >
               {COPY.footer.links.github}
+            </a>
+          </div>
+          <div>
+            <a
+              href="https://www.youtube.com/@inlinechat"
+              target="_blank"
+              rel="noopener noreferrer"
+              {...stylex.props(styles.footerLink)}
+            >
+              {COPY.footer.links.youtube}
             </a>
           </div>
           <div>

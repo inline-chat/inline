@@ -32,6 +32,9 @@ export const PageFooter = () => {
             <a href="https://x.com/inline_chat" {...stylex.props(styles.link)}>
               X
             </a>
+            <a href="https://www.youtube.com/@inlinechat" {...stylex.props(styles.link)}>
+              YouTube
+            </a>
             <a href="https://status.inline.chat" {...stylex.props(styles.link)}>
               Status
             </a>
