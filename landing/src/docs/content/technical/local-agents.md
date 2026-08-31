@@ -14,11 +14,15 @@ description: "Process, workspace, ownership, and security boundaries for local c
 
 ## Security
 
+The bridge authorizes the sender by stable user ID before routing work to a provider or workspace. Owner-only routing is the default; allowing another operator is an explicit policy decision. A mention or membership in a shared chat does not grant permission to run local commands.
+
 - The bridge is local and should not expose a public listener.
 - Provider credentials remain owned by the provider installation.
 - Inline tokens and local control credentials must not appear in status output or logs.
 - Shared and public chats do not expand local filesystem or command authority.
 - A provider can request approval, but the bridge preserves the provider's exact approval or rejection scope.
+
+[Bridge ownership and authorization reference](https://github.com/inline-chat/inline/blob/main/docs/local-agent-bridge.md)
 
 ## Compatibility
 

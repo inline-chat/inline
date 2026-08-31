@@ -28,17 +28,38 @@ npm install @inline-chat/realtime-sdk
 
 ## Bearer-Token Quick Start
 
+This example uses **V2 compatibility**, not V3. For a bot integration, [create a bot](/docs/creating-a-bot) and provide its token as `INLINE_TOKEN`. Set `INLINE_CHAT_ID` to a chat the bot can access. A CLI login does not automatically provide a token to this program.
+
+Save as `send-realtime.ts`:
+
 ```ts
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
 
-const client = new InlineSdkClient({
-  token: process.env.INLINE_TOKEN!,
-})
+const token = process.env.INLINE_TOKEN
+const chatId = process.env.INLINE_CHAT_ID
+if (!token || !chatId) throw new Error("Set INLINE_TOKEN and INLINE_CHAT_ID")
 
-await client.connect()
-await client.sendMessage({ chatId: 42, text: "hello" })
-await client.close()
+const client = new InlineSdkClient({ token })
+try {
+  await client.connect()
+  await client.sendMessage({ chatId: BigInt(chatId), text: "Hello over Realtime" })
+  console.log("Message accepted. Verify it in Inline.")
+} finally {
+  await client.close()
+}
 ```
+
+Run with [Bun](https://bun.sh):
+
+```bash
+bun run send-realtime.ts
+```
+
+Confirm the message appears in the intended chat. Connection success alone does not prove the send succeeded. Before adding retries or a persistent cache, read [RPC semantics](/docs/technical/rpc) and [Sync](/docs/technical/sync).
+
+## Using V3
+
+V3 requires `inlineProtocol.credentials` with Inline Protocol authorization keys. A bearer token and a different endpoint are not sufficient. Follow the [V3 authentication lifecycle](/docs/technical/realtime#authentication-lifecycle) and the SDK's [V3 client implementation](https://github.com/inline-chat/inline/blob/main/sdk/src/realtime/v3-client.ts).
 
 ## Reference
 

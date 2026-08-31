@@ -199,7 +199,7 @@ final class AgentSetupWizardModel {
   }
 
   var remoteSetupPrompt: String {
-    "Set up Inline for this agent on this machine by following \(agentInstructionsURL.absoluteString)"
+    "Set up this agent as a bot in Inline by following \(agentInstructionsURL.absoluteString)"
   }
 
   func chooseLocalSetup() {

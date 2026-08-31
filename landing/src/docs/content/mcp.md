@@ -42,12 +42,32 @@ Add the URL as a remote Streamable HTTP server. The client should discover OAuth
 
 Agents see only the spaces selected during consent. DMs and home threads require separate grants. Every call enforces read/write scopes and allowed chat context.
 
+## Verify Access
+
+After signing in, ask your agent:
+
+```text
+Use Inline to list the conversations I have allowed you to access.
+Do not send or change anything.
+```
+
+Then select one returned conversation and ask for a summary of its recent messages with message links. Confirm it is the intended chat before authorizing a write. Installing a skill alone does not grant access; OAuth consent still applies.
+
+## Tool Conventions
+
+- MCP v2 uses string IDs, including numeric-looking values. Pass the resolved `chatId` for DMs as well as threads.
+- Resolve people and spaces, list conversations, and inspect the selected conversation before sending. Do not guess a destination ID from a title.
+- `messages.search` searches one conversation at a time, not the whole account.
+- `files.upload` accepts base64 or an HTTPS URL, with a 25 MiB limit. This is separate from native Realtime upload limits.
+
 ## Troubleshooting
 
 - **Sign-in expired:** reconnect the server and complete OAuth again.
 - **Missing conversations:** reconnect and expand the spaces or conversation types allowed during consent.
 - **Write is blocked:** reconnect and grant write access.
 - **Session not found:** reconnect so the client creates a new session.
+
+Clients should honor the OAuth challenge in `_meta["mcp/www_authenticate"]` when a tool reports insufficient scope. Changing IDs or switching credentials does not resolve a missing grant.
 
 ## Reference
 

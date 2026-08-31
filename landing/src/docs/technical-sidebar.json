@@ -7,10 +7,12 @@
         { "slug": "technical/index", "label": "Overview" },
         "technical/protocol",
         "technical/realtime",
+        "technical/rpc",
         "technical/sync",
         "technical/files",
         "technical/schema",
-        "technical/security"
+        "technical/security",
+        "technical/local-agents"
       ]
     },
     {

@@ -11,11 +11,11 @@ Every durable update maps to one inferred bucket; the update does not carry the 
 
 | Bucket | Owns |
 | --- | --- |
-| User | Account, settings, profile, dialog open/archive/follow/read state, space join/leave, and top-level chat access. |
+| User | Account, settings, profile, dialog open/archive/follow/read/unread state, space join/leave, and top-level chat access. |
 | Space | Membership and space settings. |
 | Chat | Messages, attachments, pins, metadata, visibility, participants, groups, moves, deletion, and scoped history clearing. |
 
-Reactions, compose and presence state, and new-message notifications are ephemeral.
+Reactions, compose and presence state, new-message notifications, `GridEvent`, and `BotEvent` are ephemeral. They do not share the durable bucket replay contract.
 
 ## Cursor and Target
 
@@ -27,17 +27,23 @@ contiguous               seq = cursor + 1   apply and commit
 gap                      seq > cursor + 1   fence bucket and fetch
 ```
 
-Only the affected bucket pauses. Unknown future updates are accounted no-ops; known reducer failures do not advance the cursor.
+Only the affected bucket pauses. An unsupported update kind may be an application no-op only when the authenticated page provides complete `updates + skipped_sequences` coverage for the interval. A malformed update the client claims to support is an apply failure; do not advance the cursor past it.
 
 ## Catch-Up
 
-Clients replay bounded pages for ordinary gaps. Beyond the replay window, `TOO_LONG` requires an authoritative snapshot. A snapshot sequence is a target, not permission to fast-forward without installing its projection.
+Clients replay pages of at most 100 logical updates for gaps through the 10,000-update replay ceiling. Larger gaps return `TOO_LONG` and require an authoritative snapshot. The returned sequence is a target, not permission to fast-forward without installing its projection.
 
 - User repair fetches the current checkpoint, chats, user, and settings.
 - Space repair fetches the space, current membership, and small space settings rather than the full member list.
 - Chat repair fetches the chat and bounded recent history while preserving cached messages and user-owned dialog preferences.
 
 Snapshot identity and sequence are validated before projection and cursor commit together. A failed repair preserves the previous cursor.
+
+## Reconnect Discovery
+
+Install the update collector before discovery. `GET_UPDATES_STATE` emits targeted chat and space hints; fetch those buckets plus the user bucket rather than enumerating every stored cursor.
+
+The server queues a discovery call's hints before its RPC result on the same stream. Hand those preceding batches to the sync owner before closing target collection. A socket opening, an RPC completing, or an event-loop delay does not prove the targeted buckets have converged.
 
 ## History Gaps
 

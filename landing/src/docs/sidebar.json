@@ -5,17 +5,21 @@
       "title": "Getting Started",
       "pages": [
         { "slug": "index", "label": "Get Started" },
+        "using-inline",
+        "chats-and-threads",
         { "slug": "changelog", "label": "What's New" },
         "downloads",
         "cli",
-        "applescript"
+        "applescript",
+        "troubleshooting",
+        "whats-inline"
       ]
     },
     {
       "title": "Agents",
       "pages": [
-        { "slug": "agents", "label": "Overview" },
-        { "slug": "add-inline", "label": "Add Inline" },
+        { "slug": "agents", "label": "Set Up an Agent" },
+        { "slug": "add-inline", "label": "Add Inline to Your Agent" },
         "mcp",
         "openclaw",
         "hermes"
@@ -28,7 +32,9 @@
         "realtime-api",
         "rust-sdk",
         "bot-api",
-        "creating-a-bot"
+        "creating-a-bot",
+        "bot-updates",
+        { "label": "Technical Docs", "href": "/docs/technical" }
       ]
     },
     {

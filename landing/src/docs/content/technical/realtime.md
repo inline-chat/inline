@@ -17,6 +17,16 @@ Realtime V3 carries Inline Schema through Inline Protocol v1 at `wss://api.inlin
 
 V3 uses permanent and bound temporary authorization keys; bearer tokens do not authorize V3 sessions.
 
+## Authentication Lifecycle
+
+1. Establish a permanent authorization key using the protocol handshake and pinned server verification keys.
+2. Run the native `authBegin` / `authComplete` login flow inside that encrypted session. The challenge is bound to the permanent key; completion binds the key to an Inline account session without returning a bearer token.
+3. Create a temporary key and bind it to the permanent key before sending ordinary application RPCs. Rotate temporary keys before expiry.
+
+A bearer token in HTTP headers or `ConnectionInit` cannot replace this flow. Use the SDK's V3 implementation rather than pointing a V2 bearer-token client at `/realtime/v3`.
+
+The carrier uses binary WebSocket frames with compression disabled. Protocol acknowledgements and resend recovery belong to Inline Protocol, not to WebSocket connection status. [Handshake and carrier contract](https://github.com/inline-chat/inline/blob/main/packages/protocol/docs/realtime-v3.md)
+
 ## SDK Entry Points
 
 - TypeScript: [`InlineSdkClient`](https://github.com/inline-chat/inline/blob/main/sdk/src/sdk/inline-sdk-client.ts), [V3 connection](https://github.com/inline-chat/inline/blob/main/sdk/src/realtime/v3-connection.ts), and [V3 transport](https://github.com/inline-chat/inline/blob/main/sdk/src/realtime/v3-transport.ts).
@@ -27,13 +37,16 @@ V3 uses permanent and bound temporary authorization keys; bearer tokens do not a
 
 | Outcome | Meaning |
 | --- | --- |
-| Not sent | Safe to retry; the request was not dispatched. |
+| Not sent | The request was rejected before carrier dispatch. Correct the cause before retrying. |
+| Rejected before execution | The owner proved application execution did not begin, such as a capacity rejection. |
 | Accepted | Dispatched, but not yet confirmed as user-visible success. |
-| Confirmed | An authenticated result or authoritative update confirmed the result. |
-| Commit unknown | The connection was lost after dispatch; blind retry may duplicate work. |
+| Confirmed | A matching authenticated result or application error arrived. Inspect it; confirmation does not always mean success. |
+| Commit unknown | Execution may have begun, but no authoritative result arrived; blind retry may duplicate work. |
 | Reconciled | A stable identity or query determined the committed result. |
 
 [Method replay and reconciliation map](/docs/technical/rpc)
+
+Cancellation stops waiting for an answer; it does not prove the server stopped executing. Reconcile mutations through their stable identity or an authoritative query/update before deciding to retry.
 
 ## Related Contracts
 

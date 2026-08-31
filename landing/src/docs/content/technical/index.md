@@ -9,10 +9,12 @@ Wire contracts, implementation references, and integration boundaries.
 
 - [Protocol](/docs/technical/protocol) — MTProto 2.0 basis, cryptographic records, authorization keys, carrier, and source.
 - [Realtime](/docs/technical/realtime) — V3 application RPCs, endpoints, SDK entry points, outcomes, and V2 compatibility.
+- [RPC semantics](/docs/technical/rpc) — retry policy, stable operation identities, cancellation, and uncertain commits.
 - [Sync](/docs/technical/sync) — updates, cursors, catch-up, snapshots, and history gaps.
 - [Files](/docs/technical/files) — native resumable uploads, file identity, authorization, and recovery.
 - [Schema](/docs/technical/schema) — Bot API OpenAPI and Realtime Protocol Buffers.
 - [Security](/docs/technical/security) — layered transport, trust roots, authorization, and device database encryption.
+- [Local agents](/docs/technical/local-agents) — process ownership, workspace selection, and operator authorization.
 
 ## Primary References
 

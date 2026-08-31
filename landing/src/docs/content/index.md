@@ -1,24 +1,29 @@
 ---
 title: "Get Started"
-description: "Install Inline and connect your first agent."
+description: "Start using Inline, connect an agent, or build an integration."
 ---
 
 Inline is a fast work chat for teams and agents.
 
-## Start with Inline
+## Choose a Starting Point
 
-- **[Download Inline](/docs/downloads)**
+| I want to… | Start here |
+| --- | --- |
+| Use Inline with other people | [Download the app](/docs/downloads), then [start a conversation](/docs/using-inline). |
+| Understand Home, spaces, and threads | [Chats and threads](/docs/chats-and-threads). |
+| Give my existing agent access to Inline | [Add Inline to your agent](/docs/add-inline#setup-prompt): MCP, CLI, skills, and plugin setup. |
+| Talk to an agent from an Inline chat | [Set up an agent](/docs/agents#setup-prompt): create a bot and connect its bridge or gateway. |
+| Read, search, or send from a terminal | [CLI guide](/docs/cli). |
+| Build a bot or integration | [Choose an API](/docs/developers). |
 
-  Install the macOS app or join the iOS TestFlight.
-- **[Install the CLI](/docs/cli)**
+## About Inline
 
-  Use Inline from a terminal, script, or coding agent.
-- **[Connect an agent](/docs/agents)**
+[What's Inline](/docs/whats-inline) explains the product's goals. [What's New](/docs/changelog) records releases; [Security](/docs/security) explains encryption and access boundaries.
 
-  Bring Codex, Claude, OpenCode, OpenClaw, or Hermes into your chats.
-- **[Build with Inline](/docs/developers)**
+Need help? Start with [Troubleshooting](/docs/troubleshooting).
 
-  Use the Bot API, Realtime API, or an official SDK.
-- **[Read the technical documentation](/docs/technical)**
+## Reference and Markdown
 
-  Review protocols, sync, files, schemas, security, and API contracts.
+[Technical documentation](/docs/technical) covers protocols, sync, files, schemas, and RPC contracts.
+
+For an agent or offline reader, use the [Markdown index](/llms.txt) or [full docs corpus](/llms-full.txt). Individual pages are also available as Markdown, such as [the CLI guide](/docs/cli.md). These are generated from the same source as the website.
