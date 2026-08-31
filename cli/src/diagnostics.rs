@@ -152,6 +152,12 @@ mod tests {
             "token: private-value",
             "--token private-value",
             "api_key: private-value",
+            r#"{"refreshToken":"private-value"}"#,
+            r#"{"apiKey":"private-value"}"#,
+            "accessToken = private-value",
+            "--providerApiKey private-value",
+            "sessionToken: private-value",
+            "PRIVATE_KEY: private-value",
             "Authorization: Bearer private-value",
         ] {
             assert!(!safe_text(message).contains("private-value"), "{message}");

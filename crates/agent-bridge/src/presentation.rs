@@ -688,7 +688,11 @@ fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
             }
         }
         let normalized = token.trim_matches(['\'', '"', '`']).to_ascii_lowercase();
-        if SECRET_FLAGS.contains(&normalized.as_str()) {
+        if SECRET_FLAGS.contains(&normalized.as_str())
+            || normalized
+                .strip_prefix("--")
+                .is_some_and(standalone_sensitive_assignment_name)
+        {
             redact_next = true;
             output.push(token);
             continue;
@@ -886,30 +890,29 @@ fn redact_absolute_local_path(token: &str) -> String {
 }
 
 fn sensitive_assignment_name(name: &str) -> bool {
+    // Providers use snake_case, kebab-case, camelCase and uppercase keys.
+    // Compare their compact spelling so opaque values cannot evade redaction.
     let normalized = name
-        .trim_matches(['\'', '"', '`'])
-        .replace('-', "_")
-        .to_ascii_lowercase();
-    let exact_or_suffix = [
-        "access_token",
-        "api_key",
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .map(|character| character.to_ascii_lowercase())
+        .collect::<String>();
+    [
+        "apikey",
         "authorization",
         "password",
-        "refresh_token",
         "secret",
         "token",
+        "accesskey",
+        "privatekey",
+        "cookie",
+        "otp",
     ]
     .iter()
-    .any(|component| normalized == *component || normalized.ends_with(&format!("_{component}")));
-    exact_or_suffix
+    .any(|component| normalized.ends_with(component))
         || normalized.contains("secret")
         || normalized.contains("password")
         || normalized.contains("credential")
-        || normalized.ends_with("access_key")
-        || normalized.ends_with("private_key")
-        || normalized.ends_with("auth_token")
-        || normalized.ends_with("cookie")
-        || normalized.ends_with("otp")
 }
 
 fn standalone_sensitive_assignment_name(name: &str) -> bool {
@@ -1203,6 +1206,36 @@ mod tests {
         assert_eq!(
             VisibilityPolicy.render(VisibilityMode::Verbose, &activity),
             "Running focused checks crates/agent-bridge · `cargo test`"
+        );
+    }
+
+    #[test]
+    fn credential_naming_styles_are_scrubbed_in_commands_and_diagnostics() {
+        for input in [
+            "--providerApiKey opaque-private-value",
+            "--apiKey 'opaque-private-value'",
+            "--refreshToken=opaque-private-value",
+            "-H 'xApiKey: opaque-private-value'",
+            "--header 'refreshToken: opaque-private-value'",
+            "--header=apiKey:opaque-private-value",
+            r#"{"refreshToken":"opaque-private-value"}"#,
+            "config.apiKey=opaque-private-value",
+        ] {
+            for redacted in [
+                sanitize_visible_command(input),
+                sanitize_diagnostic_text(input),
+            ] {
+                let redacted = redacted.expect("nonempty redacted text");
+                assert!(
+                    !redacted.contains("opaque-private-value"),
+                    "{input}: {redacted}"
+                );
+                assert!(redacted.contains("redacted"), "{input}: {redacted}");
+            }
+        }
+        assert_eq!(
+            sanitize_diagnostic_text("No token found").as_deref(),
+            Some("No token found")
         );
     }
 

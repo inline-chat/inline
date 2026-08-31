@@ -2186,17 +2186,18 @@ fn main() {
                 std::process::exit(err.exit_code());
             }
 
+            let diagnostic = diagnostics::safe_text(&err.to_string());
             if flags.json {
                 let payload = JsonErrorEnvelope {
-                    error: JsonCliError::invalid_args(err.to_string()),
+                    error: JsonCliError::invalid_args(diagnostic.clone()),
                 };
                 if let Ok(text) = output::json_string(&payload, flags.json_format) {
                     eprintln!("{text}");
                 } else {
-                    eprintln!("{}", err);
+                    eprintln!("{diagnostic}");
                 }
             } else {
-                let _ = err.print();
+                eprintln!("{diagnostic}");
             }
             std::process::exit(err.exit_code());
         }
