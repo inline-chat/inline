@@ -18,6 +18,8 @@ type PendingRequest = {
 
 export type BotChatSettingsOperation = "request" | "mutation"
 
+export type BotChatSettingsAnswerOutcome = "answered" | "missing" | "wrong_bot"
+
 export type BotChatSettingsRequestScope = {
   botUserId: number
   actorUserId: number
@@ -138,19 +140,33 @@ export class BotChatSettingsBroker {
     return true
   }
 
-  answer(requestId: bigint, botUserId: number, response: BotChatSettingsResponse): boolean {
+  answer(
+    requestId: bigint,
+    botUserId: number,
+    response: BotChatSettingsResponse,
+  ): BotChatSettingsAnswerOutcome {
     const pending = this.pending.get(requestId)
-    if (!pending || pending.botUserId !== botUserId) {
+    if (!pending) {
       this.emit({
         phase: "answer_rejected",
-        operation: pending?.operation ?? "unknown",
+        operation: "unknown",
         pendingCount: this.pending.size,
-        ...(pending ? { elapsedMs: this.elapsedMs(pending) } : {}),
+        outcome: "missing",
       })
-      return false
+      return "missing"
+    }
+    if (pending.botUserId !== botUserId) {
+      this.emit({
+        phase: "answer_rejected",
+        operation: pending.operation,
+        pendingCount: this.pending.size,
+        elapsedMs: this.elapsedMs(pending),
+        outcome: "wrong_bot",
+      })
+      return "wrong_bot"
     }
     this.resolve(requestId, pending, response, "answer")
-    return true
+    return "answered"
   }
 
   resolveSystem(

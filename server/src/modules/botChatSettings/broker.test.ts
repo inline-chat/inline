@@ -21,9 +21,9 @@ describe("BotChatSettingsBroker", () => {
     let nextId = 1n
     const broker = new BotChatSettingsBroker({ generateId: () => nextId++ })
     const pending = broker.create(scope(42))
-    expect(broker.answer(pending.requestId, 99, documentResponse("wrong-bot"))).toBe(false)
-    expect(broker.answer(pending.requestId, 42, documentResponse("one"))).toBe(true)
-    expect(broker.answer(pending.requestId, 42, documentResponse("two"))).toBe(false)
+    expect(broker.answer(pending.requestId, 99, documentResponse("wrong-bot"))).toBe("wrong_bot")
+    expect(broker.answer(pending.requestId, 42, documentResponse("one"))).toBe("answered")
+    expect(broker.answer(pending.requestId, 42, documentResponse("two"))).toBe("missing")
     expect((await pending.response).result).toMatchObject({
       oneofKind: "document",
       document: { revision: "one" },
@@ -68,9 +68,9 @@ describe("BotChatSettingsBroker", () => {
       problem: { code: BotChatSettingsProblem_Code.UNREACHABLE },
     })
     expect(broker.pendingCount).toBe(3)
-    expect(broker.answer(unrelated.requestId, 2, documentResponse("unrelated"))).toBe(true)
-    expect(broker.answer(second.requestId, 1, documentResponse("second"))).toBe(true)
-    expect(broker.answer(third.requestId, 1, documentResponse("third"))).toBe(true)
+    expect(broker.answer(unrelated.requestId, 2, documentResponse("unrelated"))).toBe("answered")
+    expect(broker.answer(second.requestId, 1, documentResponse("second"))).toBe("answered")
+    expect(broker.answer(third.requestId, 1, documentResponse("third"))).toBe("answered")
   })
 
   test("emits privacy-safe dispatch and terminal diagnostics", async () => {
@@ -85,7 +85,7 @@ describe("BotChatSettingsBroker", () => {
 
     expect(broker.markDispatched(pending.requestId, 2)).toBe(true)
     now = 1_600
-    expect(broker.answer(pending.requestId, 42, documentResponse("done"))).toBe(true)
+    expect(broker.answer(pending.requestId, 42, documentResponse("done"))).toBe("answered")
     await pending.response
 
     expect(diagnostics).toEqual([

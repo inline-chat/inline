@@ -20,7 +20,8 @@ export async function answerBotChatSettings(
     botChatSettingsBroker.answer(input.requestId, bot.id, invalidBotChatSettingsResponse())
     throw error
   }
-  if (!botChatSettingsBroker.answer(input.requestId, bot.id, response)) {
+  const outcome = botChatSettingsBroker.answer(input.requestId, bot.id, response)
+  if (outcome === "wrong_bot") {
     throw RealtimeRpcError.BadRequest()
   }
   return {}

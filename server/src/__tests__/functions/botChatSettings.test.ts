@@ -4,10 +4,14 @@ import { db, schema } from "../../db"
 import { BotCapabilitiesModel } from "../../db/models/botCapabilities"
 import { ChatModel } from "../../db/models/chats"
 import type { FunctionContext } from "../../functions/_types"
+import { answerBotChatSettings } from "../../functions/bot.answerChatSettings"
 import { getPeerBots } from "../../functions/bot.getPeerBots"
 import { createBotAgent } from "../../functions/bot.agents"
 import { createBot } from "../../functions/createBot"
 import { createSubthread } from "../../functions/messages.createSubthread"
+import { botChatSettingsBroker } from "../../modules/botChatSettings/broker"
+import { unreachableBotChatSettingsResponse } from "../../modules/botChatSettings/validation"
+import { RealtimeRpcError } from "../../realtime/errors"
 import { defaultTestContext, setupTestLifecycle, testUtils } from "../setup"
 
 describe("bot chat settings discovery", () => {
@@ -152,5 +156,62 @@ describe("bot chat settings discovery", () => {
 
     expect(result.bots.map((bot) => bot.bot?.id)).toEqual([BigInt(botUserId)])
     expect(result.bots[0]?.capabilities).toEqual([{ kind: 1, version: 1 }])
+  })
+
+  test("accepts a valid late settings answer after its broker request expired", async () => {
+    const created = await createBot(
+      { name: "Late Settings Bot", username: "latesettingsbot" },
+      creatorContext,
+    )
+    const botUserId = Number(created.bot?.id ?? 0n)
+    const result = await answerBotChatSettings({
+      requestId: 9_999_999n,
+      response: {
+        result: {
+          oneofKind: "document",
+          document: { version: 1, revision: "late", sections: [] },
+        },
+      },
+    }, {
+      currentSessionId: defaultTestContext.sessionId,
+      currentUserId: botUserId,
+    })
+
+    expect(result).toEqual({})
+  })
+
+  test("still rejects a settings answer from the wrong bot", async () => {
+    const created = await createBot(
+      { name: "Wrong Settings Bot", username: "wrongsettingsbot" },
+      creatorContext,
+    )
+    const botUserId = Number(created.bot?.id ?? 0n)
+    const pending = botChatSettingsBroker.create({
+      botUserId: botUserId + 1,
+      actorUserId: creator.id,
+      chatId: 77,
+      operation: "request",
+    })
+    try {
+      await expect(answerBotChatSettings({
+        requestId: pending.requestId,
+        response: {
+          result: {
+            oneofKind: "document",
+            document: { version: 1, revision: "wrong-bot", sections: [] },
+          },
+        },
+      }, {
+        currentSessionId: defaultTestContext.sessionId,
+        currentUserId: botUserId,
+      })).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    } finally {
+      botChatSettingsBroker.resolveSystem(
+        pending.requestId,
+        unreachableBotChatSettingsResponse(),
+        "shutdown",
+      )
+      await pending.response
+    }
   })
 })
