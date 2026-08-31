@@ -14,6 +14,7 @@ struct DebugSettingsDetailView: View {
   @State private var showDatabaseError = false
 #if DEBUG || DEBUG_BUILD
   @State private var showThemeWorkshop = false
+  @State private var messageGestureTracing = MessageGestureTrace.isEnabled
 #endif
 #if (DEBUG || DEBUG_BUILD) && SPARKLE
   @State private var updatePreview = DebugSoftwareUpdatePreview.updateAvailable
@@ -135,6 +136,20 @@ struct DebugSettingsDetailView: View {
         SettingsSectionHeader("Recovery")
       }
 #if DEBUG || DEBUG_BUILD
+      Section {
+        Toggle("Trace Message Mouse Events", isOn: Binding(
+          get: { messageGestureTracing },
+          set: { enabled in
+            MessageGestureTrace.setEnabled(enabled)
+            messageGestureTracing = enabled
+          }
+        ))
+      } header: {
+        SettingsSectionHeader("Message Input")
+      } footer: {
+        Text("Streams event routing and selection decisions through the MessageGesture log category. Does not include message text.")
+      }
+
       Section {
         LabeledContent {
           Button("Open") {

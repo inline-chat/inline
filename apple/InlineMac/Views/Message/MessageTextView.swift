@@ -3,32 +3,92 @@ import InlineKit
 import Logger
 import TextProcessing
 
+@MainActor
 enum MessageGestureTrace {
   static let prefix = "[MessageGestureTrace]"
   private static let traceDefaultsKey = "messageGestureTraceEnabled"
-  private static let log = Log.scoped(
-    "MessageGesture",
-    enableTracing: UserDefaults.standard.bool(forKey: traceDefaultsKey)
-  )
+  private static let log = Log.scoped("MessageGesture", enableTracing: true)
+  private(set) static var isEnabled = false
+  private static var eventMonitor: Any?
 
-  static func trace(_ message: @autoclosure () -> String) {
-    log.trace("\(prefix) \(message())")
+  static func restoreSetting() {
+    setEnabled(UserDefaults.standard.bool(forKey: traceDefaultsKey))
   }
 
-  static func debug(_ message: @autoclosure () -> String) {
-    log.trace("\(prefix) \(message())")
+  static func setEnabled(_ enabled: Bool) {
+    #if DEBUG || DEBUG_BUILD
+    UserDefaults.standard.set(enabled, forKey: traceDefaultsKey)
+    guard enabled != isEnabled else { return }
+    if enabled {
+      isEnabled = true
+      eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [
+        .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+        .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+        .otherMouseDown, .otherMouseUp, .otherMouseDragged, .scrollWheel,
+      ]) { event in
+        trace("dispatch \(eventDescription(event)) firstResponder=\(event.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")")
+        return event
+      }
+      trace("enabled")
+    } else {
+      trace("disabled")
+      if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+      eventMonitor = nil
+      isEnabled = false
+    }
+    #endif
   }
 
-  static func point(_ point: NSPoint) -> String {
+  nonisolated static func trace(_ message: @autoclosure () -> String) {
+    // Some legacy hold helpers are not actor annotated. Never inspect AppKit
+    // event state if one of those helpers is torn down off the UI thread.
+    guard Thread.isMainThread else { return }
+    MainActor.assumeIsolated {
+      guard isEnabled else { return }
+      let event = NSApp.currentEvent
+      let line = "\(prefix) event=\(event.map(eventNumber) ?? -1) time=\(event?.timestamp ?? 0) \(message())"
+      log.trace(line)
+    }
+  }
+
+  nonisolated static func debug(_ message: @autoclosure () -> String) {
+    trace(message())
+  }
+
+  static func eventDescription(_ event: NSEvent) -> String {
+    let clicks: Int = switch event.type {
+    case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
+      event.clickCount
+    default: 0
+    }
+    return "type=\(event.type.rawValue) number=\(eventNumber(event)) clicks=\(clicks) window=\(event.windowNumber) key=\(event.window?.isKeyWindow == true) point=\(point(event.locationInWindow)) modifiers=\(event.modifierFlags.rawValue)"
+  }
+
+  private static func eventNumber(_ event: NSEvent) -> Int {
+    switch event.type {
+    case .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+         .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+         .otherMouseDown, .otherMouseUp, .otherMouseDragged, .mouseMoved:
+      event.eventNumber
+    default: -1
+    }
+  }
+
+  static func view(_ view: NSView?) -> String {
+    guard let view else { return "nil" }
+    return "\(type(of: view))@\(ObjectIdentifier(view)) frame=\(NSStringFromRect(view.frame)) bounds=\(NSStringFromRect(view.bounds))"
+  }
+
+  nonisolated static func point(_ point: NSPoint) -> String {
     "(\(String(format: "%.1f", point.x)),\(String(format: "%.1f", point.y)))"
   }
 
-  static func range(_ range: NSRange?) -> String {
+  nonisolated static func range(_ range: NSRange?) -> String {
     guard let range else { return "nil" }
     return "{loc:\(range.location),len:\(range.length)}"
   }
 
-  static func url(_ url: URL?) -> String {
+  nonisolated static func url(_ url: URL?) -> String {
     guard let url else { return "nil" }
     let scheme = url.scheme ?? "nil"
     let host = url.host ?? "nil"

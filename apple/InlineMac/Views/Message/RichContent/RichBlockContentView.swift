@@ -5,6 +5,7 @@ import InlineProtocol
 final class RichBlockContentView: NSView {
   var onDisclosureToggle: ((BlockContentPath, Bool) -> Void)?
   var onTextEntityClick: ((MessageTextEntityHit, NSAttributedString) -> Bool)?
+  var onTextLongPress: ((NSEvent) -> Void)?
 
   private var nodeViews: [BlockContentPath: RichBlockRenderableView] = [:]
   private var previousContent: InlineProtocol.BlockContent?
@@ -17,6 +18,8 @@ final class RichBlockContentView: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     clipsToBounds = true
+    setAccessibilityElement(true)
+    setAccessibilityRole(.group)
   }
 
   @available(*, unavailable)
@@ -93,6 +96,17 @@ final class RichBlockContentView: NSView {
         view.frame = node.frame
       }
       view.apply(node: node, context: context)
+      // Rich child text views perform their own native tracking. Connect their
+      // existing hold timer independently of the optional selection experiment.
+      let supportsTextHold: Bool = switch node.reuseKind {
+      case .disclosure, .code: false
+      default: onTextLongPress != nil
+      }
+      for surface in view.orderedTextSurfaces {
+        surface.configureTextLongPress(supportsTextHold ? { [weak self] event in
+          self?.onTextLongPress?(event)
+        } : nil)
+      }
       view.setContentVisible(isContentVisible)
       if shouldAnimate, view.frame != .zero, view.frame != node.frame {
         frameChanges.append((view, node.frame))
@@ -130,7 +144,8 @@ final class RichBlockContentView: NSView {
   func consumeNestedHorizontalScroll(_ event: NSEvent) -> Bool {
     guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return false }
     let point = convert(event.locationInWindow, from: nil)
-    guard bounds.contains(point), var candidate = hitTest(point) else { return false }
+    guard bounds.contains(point),
+          var candidate = hitTest(convert(point, to: superview)) else { return false }
     while candidate !== self {
       // Native nested scroll views already applied AppKit's natural direction,
       // momentum, and edge behavior. If the event continues up the responder
@@ -147,6 +162,30 @@ final class RichBlockContentView: NSView {
     return false
   }
 
+  /// Route native controls and selectable text within their actual bounds.
+  func interactiveTextHitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, bounds.contains(point) else { return nil }
+    func find(in view: NSView) -> NSView? {
+      let local = view.convert(point, from: self)
+      // visibleRect can extend outside a non-clipping view's bounds. Without
+      // this check, an earlier paragraph steals clicks from following blocks.
+      guard !view.isHidden, view.bounds.contains(local), view.visibleRect.contains(local) else { return nil }
+      if let disclosure = view as? RichBlockDisclosureNodeView {
+        return disclosure.interactiveHitTest(local)
+      }
+      if let text = view as? NSTextView, text.isSelectable { return text }
+      if view is NSControl { return view }
+      for child in view.subviews.reversed() {
+        if let hit = find(in: child) { return hit }
+      }
+      return nil
+    }
+    for node in currentPlan?.nodes ?? [] {
+      if let view = nodeViews[node.path], let hit = find(in: view) { return hit }
+    }
+    return nil
+  }
+
   override func prepareForReuse() {
     super.prepareForReuse()
     for view in nodeViews.values {
@@ -161,6 +200,11 @@ final class RichBlockContentView: NSView {
 
   private func animate(_ changes: [(RichBlockRenderableView, CGRect)]) {
     guard !changes.isEmpty else { return }
+    // Honor the enclosing row's immediate layout for local disclosure clicks.
+    guard NSAnimationContext.current.duration > 0 else {
+      for (view, frame) in changes { view.frame = frame }
+      return
+    }
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.16
       context.timingFunction = CAMediaTimingFunction(name: .easeOut)

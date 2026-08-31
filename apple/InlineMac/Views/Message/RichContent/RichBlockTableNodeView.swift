@@ -22,6 +22,10 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
   private var cells: [RichBlockLayoutPlan.TableNode.Cell] = []
   private var contentWidth: CGFloat = 0
 
+  override var orderedTextSurfaces: [RichBlockTextSurface] {
+    cells.indices.compactMap { cellViews[$0] }
+  }
+
   init() {
     super.init(reuseKind: .table)
     wantsLayer = true

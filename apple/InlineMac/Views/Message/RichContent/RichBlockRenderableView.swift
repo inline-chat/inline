@@ -19,6 +19,10 @@ class RichBlockRenderableView: NSView {
 
   func apply(node _: RichBlockLayoutPlan.Node, context _: RichBlockRenderContext) {}
 
+  /// Canonical visual order for text holds and optional message-local selection.
+  /// Most rich nodes are not text and intentionally return no surfaces.
+  var orderedTextSurfaces: [RichBlockTextSurface] { [] }
+
   /// Refreshes width-dependent geometry without reapplying content or starting
   /// asynchronous work. Composite nodes override this when their child frames
   /// are carried inside the layout-plan payload.

@@ -1,6 +1,12 @@
 import AppKit
 
 class MessageListScrollView: NSScrollView {
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    let hit = super.hitTest(point)
+    MessageGestureTrace.trace("MessageListScrollView.hitTest parentPoint=\(MessageGestureTrace.point(point)) hit=\(MessageGestureTrace.view(hit))")
+    return hit
+  }
+
   override func flashScrollers() {
     // Do nothing to prevent flashing
   }

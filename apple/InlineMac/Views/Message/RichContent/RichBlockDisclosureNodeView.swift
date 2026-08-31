@@ -15,6 +15,8 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     button.isTransparent = true
     button.focusRingType = .none
     button.setButtonType(.momentaryChange)
+    button.setAccessibilityElement(true)
+    button.setAccessibilityRole(.button)
     return button
   }()
 
@@ -98,10 +100,15 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    guard bounds.contains(point) else { return nil }
+    interactiveHitTest(convert(point, from: superview))
+  }
+
+  /// Manual message routing supplies node-local coordinates.
+  func interactiveHitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, bounds.contains(point) else { return nil }
     let surfacePoint = surface.convert(point, from: self)
     if surface.hasInteractiveEntity(at: surfacePoint) {
-      return surface.hitTest(surfacePoint) ?? toggleButton
+      return surface.hitTest(point) ?? toggleButton
     }
     return toggleButton
   }
@@ -112,6 +119,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
   }
 
   @objc private func toggleDisclosure() {
+    MessageGestureTrace.debug("Disclosure.toggle path=\(path) from=\(expanded) callback=\(onToggle != nil)")
     expanded.toggle()
     updateChevron()
     toggleButton.setAccessibilityValue(expanded ? "Expanded" : "Collapsed")
@@ -129,4 +137,17 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
 
 private final class RichBlockDisclosureButton: NSButton {
   override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
+
+  override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.debug("DisclosureButton.mouseDown \(MessageGestureTrace.eventDescription(event)) button=\(MessageGestureTrace.view(self))")
+    super.mouseDown(with: event)
+    MessageGestureTrace.debug("DisclosureButton.mouseDown returned")
+  }
+
+  override func accessibilityPerformPress() -> Bool {
+    guard isEnabled, let action else { return false }
+    let handled = NSApp.sendAction(action, to: target, from: self)
+    MessageGestureTrace.debug("DisclosureButton.accessibilityPress handled=\(handled)")
+    return handled
+  }
 }

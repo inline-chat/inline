@@ -3,6 +3,8 @@ import AppKit
 final class RichBlockTextNodeView: RichBlockRenderableView {
   private let surface = RichBlockTextSurface(frame: .zero)
 
+  override var orderedTextSurfaces: [RichBlockTextSurface] { [surface] }
+
   init() {
     super.init(reuseKind: .text)
     addSubview(surface)

@@ -78,6 +78,14 @@ final class RichBlockTextSurface: NSView {
     }
   }
 
+  func configureTextLongPress(_ handler: ((NSEvent) -> Void)?) {
+    guard let handler else {
+      label.onTextLongPress = nil
+      return
+    }
+    label.onTextLongPress = { _, event in handler(event) }
+  }
+
   func updateInteraction(
     _ onEntityClick: @escaping (MessageTextEntityHit, NSAttributedString) -> Bool
   ) {

@@ -97,6 +97,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_: Notification) {
+    MessageGestureTrace.restoreSetting()
     initializeServices()
     setupAppearanceSetting()
     setupThemeSetting()

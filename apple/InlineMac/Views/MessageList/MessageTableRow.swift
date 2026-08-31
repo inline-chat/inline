@@ -40,6 +40,57 @@ class MessageTableCell: NSView {
   private var dependencies: AppDependencies?
   private var avatarSwipeProvider: MessageAvatarSwipeProvider?
 
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    let hit = super.hitTest(point)
+    MessageGestureTrace.trace("MessageTableCell.hitTest messageId=\(currentContent?.message.message.messageId ?? 0) parentPoint=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(convert(point, from: superview))) cell=\(MessageGestureTrace.view(self)) rendered=\(MessageGestureTrace.view(messageView)) hit=\(MessageGestureTrace.view(hit))")
+    return hit
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.mouseDown messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.mouseDown(with: event)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.mouseUp messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.mouseUp(with: event)
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.mouseDragged messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.mouseDragged(with: event)
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.rightMouseDown messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.rightMouseDown(with: event)
+  }
+
+  override func rightMouseUp(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.rightMouseUp messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.rightMouseUp(with: event)
+  }
+
+  override func rightMouseDragged(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.rightMouseDragged messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.rightMouseDragged(with: event)
+  }
+
+  override func otherMouseDragged(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.otherMouseDragged messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.otherMouseDragged(with: event)
+  }
+
+  override func otherMouseDown(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.otherMouseDown messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.otherMouseDown(with: event)
+  }
+
+  override func otherMouseUp(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTableCell.otherMouseUp messageId=\(currentContent?.message.message.messageId ?? 0) \(MessageGestureTrace.eventDescription(event))")
+    super.otherMouseUp(with: event)
+  }
+
   override init(frame: NSRect) {
     super.init(frame: frame)
     setupView()

@@ -1452,11 +1452,17 @@ class MessageListAppKit: NSViewController {
     let rows = IndexSet(integer: row)
     NSAnimationContext.runAnimationGroup { [weak self] context in
       guard let self else { return }
-      context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.16
-      tableView.beginUpdates()
+      // A moving header can leave NSButton's tracking rect between mouse-down
+      // and mouse-up when the next disclosure is clicked quickly.
+      let isDisclosureToggle = notification.object is RichBlockLocalStateStore
+      context.duration = isDisclosureToggle || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.16
+      MessageGestureTrace.debug("MessageList.richLayout row=\(row) disclosure=\(isDisclosureToggle) duration=\(context.duration)")
+      // Do not wrap a reload plus height invalidation in begin/endUpdates.
+      // AppKit applies the height delta twice to the reloaded cell, leaving
+      // its hit-test bounds smaller or larger than the visible message row.
       tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
       tableView.noteHeightOfRows(withIndexesChanged: rows)
-      tableView.endUpdates()
+      tableView.layoutSubtreeIfNeeded()
     } completionHandler: { [weak self] in
       self?.syncAvatarOverlayAfterTableLayout()
       self?.refreshMessageHoverAfterGeometryChange()
@@ -3477,7 +3483,9 @@ extension MessageListAppKit: NSTableViewDataSource {
 
 extension MessageListAppKit: NSTableViewDelegate {
   func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-    chatRows.canSelect(row: row)
+    let allowed = chatRows.canSelect(row: row)
+    MessageGestureTrace.trace("MessageList.shouldSelectRow row=\(row) allow=\(allowed)")
+    return allowed
   }
 
   func isFirstInGroup(at row: Int) -> Bool {
@@ -3621,7 +3629,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     )
 
     cell.setScrollState(scrollState)
-    cell.configure(with: message, props: props, animate: animateUpdates)
+    cell.configure(with: message, props: props, animate: animateUpdates && NSAnimationContext.current.duration > 0)
     let shouldHover = shouldHoverMessageCell(cell, stableId: stableId)
     cell.setMessageHoverState(shouldHover)
     if shouldHover {

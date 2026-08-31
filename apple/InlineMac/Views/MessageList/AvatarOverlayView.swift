@@ -144,12 +144,14 @@ final class MessageAvatarOverlayView: NSView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
+    MessageGestureTrace.trace("AvatarOverlay.hitTest parentPoint=\(MessageGestureTrace.point(point)) overlay=\(MessageGestureTrace.view(self))")
     guard !isHidden, alphaValue > 0 else { return nil }
 
     for view in subviews.reversed() {
       guard !view.isHidden, view.alphaValue > 0, view.frame.contains(point) else { continue }
       let localPoint = view.convert(point, from: self)
       if let hit = view.hitTest(localPoint) {
+        MessageGestureTrace.trace("AvatarOverlay.hitTest hit=\(MessageGestureTrace.view(hit))")
         return hit
       }
     }

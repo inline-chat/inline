@@ -989,8 +989,54 @@ class MinimalMessageViewAppKit: NSView {
     setupScrollStateObserver()
   }
 
+  override func mouseDown(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.mouseDown messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.mouseDown(with: event)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.mouseUp messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.mouseUp(with: event)
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.mouseDragged messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.mouseDragged(with: event)
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.rightMouseDown messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.rightMouseDown(with: event)
+  }
+
+  override func rightMouseUp(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.rightMouseUp messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.rightMouseUp(with: event)
+  }
+
+  override func rightMouseDragged(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.rightMouseDragged messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.rightMouseDragged(with: event)
+  }
+
+  override func otherMouseDragged(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.otherMouseDragged messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.otherMouseDragged(with: event)
+  }
+
+  override func otherMouseDown(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.otherMouseDown messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.otherMouseDown(with: event)
+  }
+
+  override func otherMouseUp(with event: NSEvent) {
+    MessageGestureTrace.trace("MinimalMessageView.otherMouseUp messageId=\(message.messageId) \(MessageGestureTrace.eventDescription(event))")
+    super.otherMouseUp(with: event)
+  }
+
   override func hitTest(_ point: NSPoint) -> NSView? {
-    if let result = interactiveHitTestResult(point) {
+    let localPoint = convert(point, from: superview)
+    if !isHidden, bounds.contains(localPoint), let result = interactiveHitTestResult(localPoint) {
       MessageGestureTrace.trace(
         "MinimalMessageView.hitTest messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) interactive=\(result.name) view=\(type(of: result.view))"
       )
@@ -1394,6 +1440,12 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func isTextEntityPoint(_ locationInSelf: NSPoint) -> Bool {
+    if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden,
+       let hit = richBlockContentView.interactiveTextHitTest(
+         richBlockContentView.convert(locationInSelf, from: self)
+       ) as? MessageTextView {
+      return hit.entityHit(at: hit.convert(locationInSelf, from: self), extraTextRanges: []) != nil
+    }
     guard textView.superview != nil, !textView.isHidden else { return false }
 
     let locationInText = textView.convert(locationInSelf, from: self)
@@ -1409,10 +1461,12 @@ class MinimalMessageViewAppKit: NSView {
     )
 
     if let result = interactiveHitTestResult(locationInSelf) {
-      MessageGestureTrace.debug(
-        "MinimalMessageView.handleTextLongPress messageId=\(message.messageId) blocked=interactive target=\(result.name)"
-      )
-      return
+      guard let text = result.view as? MessageTextView, text.onTextLongPress != nil else {
+        MessageGestureTrace.debug(
+          "MinimalMessageView.handleTextLongPress messageId=\(message.messageId) blocked=interactive target=\(result.name)"
+        )
+        return
+      }
     }
 
     if isTextEntityPoint(locationInSelf) {
@@ -1809,7 +1863,9 @@ class MinimalMessageViewAppKit: NSView {
     MessageGestureTrace.debug(
       "MinimalMessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) action=\(action.rawValue) point=\(MessageGestureTrace.point(location))"
     )
-    if let result = interactiveHitTestResult(location) {
+    if let result = interactiveHitTestResult(location),
+       blocksText || !(result.view is NSTextView)
+    {
       MessageGestureTrace.debug(
         "MinimalMessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=interactive target=\(result.name)"
       )
@@ -2935,6 +2991,10 @@ class MinimalMessageViewAppKit: NSView {
       richView.onTextEntityClick = { [weak self] hit, text in
         self?.handleTextEntityClick(hit, attributedString: text) ?? false
       }
+      richView.onTextLongPress = { [weak self] event in
+        guard let self else { return }
+        handleTextLongPress(at: textView.convert(event.locationInWindow, from: nil), event: event)
+      }
       richView.onDisclosureToggle = { [weak self] path, expanded in
         guard let self else { return }
         RichBlockMessageActions.toggleDisclosure(
@@ -2953,6 +3013,9 @@ class MinimalMessageViewAppKit: NSView {
         richView.removeFromSuperview()
         textView.addSubview(richView)
       }
+      textView.setAccessibilityElement(true)
+      textView.setAccessibilityRole(.group)
+      textView.setAccessibilityChildren([richView])
       richView.frame = CGRect(origin: .zero, size: richBlockPlan.size)
       richView.update(
         plan: richBlockPlan,
@@ -2971,6 +3034,9 @@ class MinimalMessageViewAppKit: NSView {
 
     richBlockContentView?.prepareForReuse()
     richBlockContentView?.removeFromSuperview()
+    textView.setAccessibilityElement(true)
+    textView.setAccessibilityRole(.textArea)
+    textView.setAccessibilityChildren(nil)
     textView.setMessageAttributedString(
       attributedString,
       isRtl: props.isRtl,
@@ -4362,6 +4428,11 @@ extension MinimalMessageViewAppKit {
   }
 
   private func interactiveHitTestResult(_ point: NSPoint) -> InteractiveHitResult? {
+    if let richBlockContentView, richBlockContentView.superview != nil,
+       let hit = richBlockContentView.interactiveTextHitTest(richBlockContentView.convert(point, from: self)) {
+      return InteractiveHitResult(name: "rich-text", view: hit)
+    }
+
     if let reactionsView {
       let pointInReactions = reactionsView.convert(point, from: self)
       if let hit = reactionsView.interactiveHitTest(pointInReactions) {
