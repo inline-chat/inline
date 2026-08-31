@@ -93,7 +93,7 @@ struct UnreadReplayGuardTests {
   func replayedMessageDoesNotIncrementUnread() throws {
     let dbQueue = try makeInMemoryDB()
 
-    try dbQueue.write { db in
+    try dbQueue.write { (db: Database) throws in
       try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
       let update = makeNewMessageUpdate(messageId: 10)
       try update.apply(db, publishChanges: false, suppressNotifications: true)
@@ -108,7 +108,7 @@ struct UnreadReplayGuardTests {
   func newerMessageStillIncrementsUnread() throws {
     let dbQueue = try makeInMemoryDB()
 
-    try dbQueue.write { db in
+    try dbQueue.write { (db: Database) throws in
       try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
       let update = makeNewMessageUpdate(messageId: 21)
       try update.apply(db, publishChanges: false, suppressNotifications: true)
@@ -119,26 +119,23 @@ struct UnreadReplayGuardTests {
   }
 
   @Test("sync catch-up message does not increment sidecar unread total")
-  func catchupMessageDoesNotIncrementSidecarUnreadTotal() throws {
+  func catchupMessageDoesNotIncrementSidecarUnreadTotal() async throws {
     let dbQueue = try makeInMemoryDB()
+    let engine = UpdatesEngine(database: try AppDatabase(dbQueue))
 
-    try dbQueue.write { db in
+    try await dbQueue.write { (db: Database) throws in
       try seedDialog(db, readInboxMaxId: nil, unreadCount: 1)
+    }
 
-      var update = InlineProtocol.Update()
-      update.seq = 1
-      update.date = 2
-      update.update = .newMessage(makeNewMessageUpdate(messageId: 1))
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 2
+    update.update = .newMessage(makeNewMessageUpdate(messageId: 1))
+    let applied = await engine.applyBatch(updates: [update], source: .syncCatchup)
 
-      var reloadPeers = Set<InlineKit.Peer>()
-      let applied = UpdatesEngine.shared.apply(
-        update: update,
-        db: db,
-        source: .syncCatchup,
-        reloadPeers: &reloadPeers
-      )
-
-      #expect(applied)
+    #expect(applied.succeeded)
+    #expect(applied.appliedCount == 1)
+    try await dbQueue.read { (db: Database) throws in
       let dialog = try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)
       #expect(dialog?.unreadCount == 1)
 
@@ -151,7 +148,7 @@ struct UnreadReplayGuardTests {
   func threadMessageMaterializesMissingChatReferences() throws {
     let dbQueue = try makeInMemoryDB()
 
-    try dbQueue.write { db in
+    try dbQueue.write { (db: Database) throws in
       let update = makeNewMessageUpdate(messageId: 1)
       try update.apply(
         db,
@@ -176,7 +173,7 @@ struct UnreadReplayGuardTests {
   func liveThreadMessageKeepsMissingChatStrict() throws {
     let dbQueue = try makeInMemoryDB()
 
-    try dbQueue.write { db in
+    try dbQueue.write { (db: Database) throws in
       let update = makeNewMessageUpdate(messageId: 1)
       var didThrow = false
 
@@ -193,22 +190,17 @@ struct UnreadReplayGuardTests {
   }
 
   @Test("updates engine live message materializes missing chat references")
-  func updatesEngineLiveMessageMaterializesMissingChatReferences() throws {
+  func updatesEngineLiveMessageMaterializesMissingChatReferences() async throws {
     let dbQueue = try makeInMemoryDB()
+    let engine = UpdatesEngine(database: try AppDatabase(dbQueue))
 
-    try dbQueue.write { db in
-      var update = InlineProtocol.Update()
-      update.update = .newMessage(makeNewMessageUpdate(messageId: 1))
-      var reloadPeers = Set<InlineKit.Peer>()
+    var update = InlineProtocol.Update()
+    update.update = .newMessage(makeNewMessageUpdate(messageId: 1))
+    let applied = await engine.applyBatch(updates: [update], source: .realtime)
 
-      let didApply = UpdatesEngine.shared.apply(
-        update: update,
-        db: db,
-        source: .realtime,
-        reloadPeers: &reloadPeers
-      )
-
-      #expect(didApply)
+    #expect(applied.succeeded)
+    #expect(applied.appliedCount == 1)
+    try await dbQueue.read { (db: Database) throws in
       let chat = try #require(try Chat.fetchOne(db, id: chatId))
       #expect(chat.type == .thread)
       let sender = try User.fetchOne(db, id: senderId)
@@ -222,7 +214,7 @@ struct UnreadReplayGuardTests {
   func catchupMessageMaterializesMissingForwardedReferences() throws {
     let dbQueue = try makeInMemoryDB()
 
-    try dbQueue.write { db in
+    try dbQueue.write { (db: Database) throws in
       let forwardThreadId: Int64 = 2_000
       let forwardUserId: Int64 = 101
       let update = makeNewMessageUpdate(
@@ -254,7 +246,7 @@ struct UnreadReplayGuardTests {
   func sidecarChatsKeepInBatchParentBeforeChild() throws {
     let dbQueue = try makeInMemoryDB()
 
-    try dbQueue.write { db in
+    try dbQueue.write { (db: Database) throws in
       let parent = makeProtocolChat(id: 2_000)
       let child = makeProtocolChat(id: 2_001, parentChatId: 2_000)
 
@@ -270,7 +262,7 @@ struct UnreadReplayGuardTests {
   func sidecarChatClearsAbsentParentReference() throws {
     let dbQueue = try makeInMemoryDB()
 
-    try dbQueue.write { db in
+    try dbQueue.write { (db: Database) throws in
       let child = makeProtocolChat(id: 2_001, parentChatId: 2_000)
 
       let chats = try preparedSidecarChats([child], db: db)
@@ -282,28 +274,22 @@ struct UnreadReplayGuardTests {
   }
 
   @Test("chatSkipPts applies as a catch-up no-op")
-  func chatSkipPtsAppliesAsCatchupNoop() throws {
+  func chatSkipPtsAppliesAsCatchupNoop() async throws {
     let dbQueue = try makeInMemoryDB()
+    let engine = UpdatesEngine(database: try AppDatabase(dbQueue))
 
-    try dbQueue.write { db in
-      var payload = InlineProtocol.UpdateChatSkipPts()
-      payload.chatID = chatId
+    var payload = InlineProtocol.UpdateChatSkipPts()
+    payload.chatID = chatId
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 1
+    update.update = .chatSkipPts(payload)
+    let applied = await engine.applyBatch(updates: [update], source: .syncCatchup)
 
-      var update = InlineProtocol.Update()
-      update.seq = 1
-      update.date = 1
-      update.update = .chatSkipPts(payload)
-
-      var reloadPeers = Set<InlineKit.Peer>()
-      let applied = UpdatesEngine.shared.apply(
-        update: update,
-        db: db,
-        source: .syncCatchup,
-        reloadPeers: &reloadPeers
-      )
-
-      #expect(applied)
-      #expect(reloadPeers.isEmpty)
+    #expect(applied.succeeded)
+    #expect(applied.appliedCount == 1)
+    try await dbQueue.read { (db: Database) throws -> Void in
+      #expect(try Message.fetchCount(db) == 0)
     }
   }
 }

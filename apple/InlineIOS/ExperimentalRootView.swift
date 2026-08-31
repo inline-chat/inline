@@ -46,6 +46,12 @@ private struct PendingSearchExit {
   let createsThread: Bool
 }
 
+private enum HomeBootstrapOutcome: Sendable {
+  case success
+  case failure
+  case cancelled
+}
+
 struct ExperimentalRootView: View {
   @StateObject private var onboardingNavigation = OnboardingNavigation()
   @StateObject private var api = ApiClient()
@@ -140,6 +146,12 @@ private struct ExperimentalAuthedRootView: View {
   @State private var isCreatingThread = false
   @State private var isCleaningOpenChats = false
   @State private var isNotificationSettingsPresented = false
+  @State private var homeBootstrapTask: Task<HomeBootstrapOutcome, Never>?
+  @State private var homeBootstrapRetryTask: Task<Void, Never>?
+  @State private var homeBootstrapGeneration: UInt64 = 0
+  @State private var homeBootstrapRetryAttempt = 0
+  @State private var didFetchBootstrapUser = false
+  @State private var didFetchBootstrapCatalog = false
   @State private var didRestoreSceneHomeState = false
   @SceneStorage("ios.home.activeSpaceID.v1")
   private var sceneActiveSpaceIDRaw = ""
@@ -216,10 +228,11 @@ private struct ExperimentalAuthedRootView: View {
       .environmentObject(homeListStore)
       .environment(homeActions)
       .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
+        let previousBootstrap = invalidateHomeBootstrap(resetProgress: true)
         nav.resetHomeDataState()
         homeListStore.refresh()
         Task {
-          await refetchCoreDataAfterLocalDataCleared()
+          await refetchCoreDataAfterLocalDataCleared(after: previousBootstrap)
         }
       }
       .task {
@@ -229,7 +242,6 @@ private struct ExperimentalAuthedRootView: View {
       .onChange(of: compactSpaceList.spaces) { _, _ in
         nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
         ensureActiveSpaceExists()
-        Task { await refreshDialogsForCurrentSelection() }
       }
       .onChange(of: homeListStore.state.revision) { _, _ in
         translationCoordinator.process(
@@ -371,7 +383,6 @@ private struct ExperimentalAuthedRootView: View {
     .onChange(of: nav.activeSpaceId) { _, _ in
       sceneActiveSpaceIDRaw = nav.activeSpaceId.map(String.init) ?? ""
       configureHomeList()
-      Task { await reloadHomeData(forceDialogs: true) }
     }
     .onChange(of: sortModeRaw) { _, _ in
       configureHomeList()
@@ -697,47 +708,79 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private func loadHomeDataOnAppear() async {
-    let shouldBootstrap = nav.consumeNeedsHomeBootstrap()
-    await reloadHomeData(
-      includeBootstrapData: shouldBootstrap,
-      forceDialogs: nav.activeSpaceId != nil
-    )
+    guard nav.consumeNeedsHomeBootstrap() else { return }
+    homeBootstrapRetryTask?.cancel()
+    homeBootstrapRetryTask = nil
+    homeBootstrapGeneration &+= 1
+    let generation = homeBootstrapGeneration
+    let task = Task { @MainActor in
+      await performHomeBootstrap(generation: generation)
+    }
+    homeBootstrapTask = task
+
+    let outcome = await withTaskCancellationHandler {
+      await task.value
+    } onCancel: {
+      task.cancel()
+    }
+
+    guard homeBootstrapGeneration == generation else { return }
+    homeBootstrapTask = nil
+
+    switch outcome {
+    case .success:
+      homeBootstrapRetryAttempt = 0
+    case .failure:
+      nav.resetHomeDataState()
+      scheduleHomeBootstrapRetry(generation: generation, accountID: auth.currentUserId)
+    case .cancelled:
+      nav.resetHomeDataState()
+    }
   }
 
-  private func reloadHomeData(
-    includeBootstrapData: Bool = false,
-    forceDialogs: Bool = false
-  ) async {
-    let refreshRevision = nav.homeRefreshRevision
-    var availableSpaces = compactSpaceList.spaces
+  private func performHomeBootstrap(generation: UInt64) async -> HomeBootstrapOutcome {
+    guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
+    notificationHandler.setAuthenticated(value: true)
+    var remoteFailure = false
 
-    if includeBootstrapData {
-      notificationHandler.setAuthenticated(value: true)
-
-      _ = await performHomeLoadRequest(stage: .getMe) {
+    if !didFetchBootstrapUser {
+      let result = await performHomeLoadRequest(stage: .getMe) {
         try await realtimeV2.send(.getMe())
       }
-
-      _ = await performHomeLoadRequest(stage: .getChats) {
-        try await realtimeV2.send(.getChats())
-      }
-
-      if let spaces = await performHomeLoadRequest(
-        stage: .getSpaces,
-        operation: { try await data.getSpaces() }
-      ) {
-        availableSpaces = spaces
-        nav.pruneDialogFetchState(validSpaceIds: Set(availableSpaces.map(\.id)))
-        reconcileActiveSpace(with: availableSpaces)
+      guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
+      if result.succeeded {
+        didFetchBootstrapUser = true
+      } else {
+        remoteFailure = true
       }
     }
 
-    guard !Task.isCancelled else { return }
-    await refreshDialogsForCurrentSelection(
-      force: forceDialogs,
-      availableSpaces: availableSpaces,
-      refreshRevision: refreshRevision
+    if !remoteFailure, !didFetchBootstrapCatalog {
+      let result = await performHomeLoadRequest(stage: .getChats) {
+        let expectedUserState = try await GRDBSyncStorage(db: compactSpaceList.db)
+          .getBucketState(for: .user)
+        try await realtimeV2.send(
+          GetChatsTransaction(expectedUserBucketState: expectedUserState)
+        )
+      }
+      guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
+      if result.succeeded {
+        didFetchBootstrapCatalog = true
+      } else {
+        remoteFailure = true
+      }
+    }
+
+    guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
+    let localSpaces = await performHomeLoadRequest(
+      stage: .localInitialRead,
+      operation: { try await InviteDirectory.spaces(database: compactSpaceList.db) }
     )
+    guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
+    guard localSpaces.succeeded, let spaces = localSpaces.value else { return .failure }
+    nav.pruneDialogFetchState(validSpaceIds: Set(spaces.map(\.id)))
+    reconcileActiveSpace(with: spaces)
+    return remoteFailure ? .failure : .success
   }
 
   private func reconcileActiveSpace(with spaces: [Space]) {
@@ -747,60 +790,12 @@ private struct ExperimentalAuthedRootView: View {
     }
   }
 
-  private func refreshDialogsForCurrentSelection(
-    force: Bool = false,
-    availableSpaces: [Space]? = nil,
-    refreshRevision: Int? = nil
-  ) async {
-    let revision = refreshRevision ?? nav.homeRefreshRevision
-    if let spaceID = nav.activeSpaceId {
-      await fetchDialogsIfNeeded(spaceID: spaceID, force: force)
-    } else {
-      // Cached rows remain interactive while remote reconciliation continues.
-      let spaceIDs = (availableSpaces ?? compactSpaceList.spaces).map(\.id)
-      for batchStart in stride(from: 0, to: spaceIDs.count, by: 4) {
-        guard !Task.isCancelled, revision == nav.homeRefreshRevision else { return }
-        let batchEnd = min(batchStart + 4, spaceIDs.count)
-        let batch = spaceIDs[batchStart ..< batchEnd]
-        await withTaskGroup(of: Void.self) { group in
-          for spaceID in batch {
-            group.addTask { @MainActor in
-              await fetchDialogsIfNeeded(
-                spaceID: spaceID,
-                force: force
-              )
-            }
-          }
-        }
-      }
-    }
-  }
-
-  private func fetchDialogsIfNeeded(
-    spaceID: Int64,
-    force: Bool = false
-  ) async {
-    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceID, force: force) else { return }
-    do {
-      try await data.getDialogs(spaceId: spaceID)
-      nav.completeDialogsFetch(spaceId: spaceID, succeeded: true)
-    } catch {
-      nav.completeDialogsFetch(spaceId: spaceID, succeeded: false)
-      ExperimentalHomeLoadDiagnostics.reportFailure(
-        stage: .getDialogs,
-        error: error,
-        taskIsCancelled: Task.isCancelled,
-        context: homeLoadDiagnosticContext()
-      )
-    }
-  }
-
   private func performHomeLoadRequest<Value>(
     stage: ExperimentalHomeLoadStage,
     operation: () async throws -> Value
-  ) async -> Value? {
+  ) async -> (succeeded: Bool, value: Value?) {
     do {
-      return try await operation()
+      return (true, try await operation())
     } catch {
       ExperimentalHomeLoadDiagnostics.reportFailure(
         stage: stage,
@@ -808,7 +803,7 @@ private struct ExperimentalAuthedRootView: View {
         taskIsCancelled: Task.isCancelled,
         context: homeLoadDiagnosticContext()
       )
-      return nil
+      return (false, nil)
     }
   }
 
@@ -894,7 +889,9 @@ private struct ExperimentalAuthedRootView: View {
       do {
         // Reconcile first so deleting a locally empty folder starts from the
         // current server snapshot rather than an old folder projection.
-        _ = try await realtimeV2.send(.getChats())
+        let expectedUserState = try await GRDBSyncStorage(db: compactSpaceList.db)
+          .getBucketState(for: .user)
+        _ = try await realtimeV2.send(.getChats(expectedUserBucketState: expectedUserState))
 
         let now = Date()
         let candidates = try await OpenChatsCleanup.candidates(
@@ -1137,21 +1134,51 @@ private struct ExperimentalAuthedRootView: View {
     return compactSpaceList.spaces.first(where: { $0.id == activeSpaceId })
   }
 
-  private func refetchCoreDataAfterLocalDataCleared() async {
-    _ = await performHomeLoadRequest(stage: .getMe) {
-      try await realtimeV2.send(.getMe())
+  private func invalidateHomeBootstrap(
+    resetProgress: Bool
+  ) -> Task<HomeBootstrapOutcome, Never>? {
+    homeBootstrapGeneration &+= 1
+    let previousTask = homeBootstrapTask
+    homeBootstrapTask = nil
+    previousTask?.cancel()
+    homeBootstrapRetryTask?.cancel()
+    homeBootstrapRetryTask = nil
+    if resetProgress {
+      didFetchBootstrapUser = false
+      didFetchBootstrapCatalog = false
+      homeBootstrapRetryAttempt = 0
     }
+    return previousTask
+  }
 
-    _ = await performHomeLoadRequest(stage: .getChats) {
-      try await realtimeV2.send(.getChats())
+  private func scheduleHomeBootstrapRetry(
+    generation: UInt64,
+    accountID: Int64?
+  ) {
+    guard homeBootstrapRetryAttempt == 0, homeBootstrapRetryTask == nil,
+          let accountID
+    else { return }
+    homeBootstrapRetryAttempt = 1
+    homeBootstrapRetryTask = Task { @MainActor in
+      do {
+        try await Task.sleep(for: .seconds(2))
+      } catch {
+        return
+      }
+      guard generation == homeBootstrapGeneration,
+            auth.currentUserId == accountID,
+            !Task.isCancelled
+      else { return }
+      homeBootstrapRetryTask = nil
+      await loadHomeDataOnAppear()
     }
+  }
 
-    if let spaces = await performHomeLoadRequest(
-      stage: .getSpaces,
-      operation: { try await data.getSpaces() }
-    ) {
-      reconcileActiveSpace(with: spaces)
-    }
+  private func refetchCoreDataAfterLocalDataCleared(
+    after previousTask: Task<HomeBootstrapOutcome, Never>?
+  ) async {
+    await previousTask?.value
+    await loadHomeDataOnAppear()
   }
 }
 

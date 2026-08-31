@@ -169,46 +169,22 @@ public class DataManager: ObservableObject {
     /// }
   }
 
-  /// Get list of user spaces and saves them
+  /// Returns the user-space catalog already owned by realtime sync.
+  ///
+  /// Screens observe this same table, so this compatibility method must not
+  /// start an independent account snapshot or fan out one roster request per
+  /// space.
   @discardableResult
   public func getSpaces() async throws -> [Space] {
     log.trace("getSpaces")
     let mutationToken = try beginAccountMutation()
-    do {
+    let auth = self.auth
+    let spaces = try await database.reader.read { db in
       try auth.validateAccountMutation(mutationToken)
-      let result = try await InlineRPCClient.shared.getChats()
-      let auth = self.auth
-      let memberResults = try await withThrowingTaskGroup(of: InlineProtocol.GetSpaceMembersResult.self) { group in
-        for space in result.spaces {
-          group.addTask {
-            try auth.validateAccountMutation(mutationToken)
-            return try await InlineRPCClient.shared.getSpaceMembers(spaceID: space.id)
-          }
-        }
-        var values: [InlineProtocol.GetSpaceMembersResult] = []
-        for try await value in group { values.append(value) }
-        return values
-      }
-
-      let spaces = try await writeAccountProjection(token: mutationToken) { db in
-        let spaces = result.spaces.map { space in
-          Space(from: space)
-        }
-        try spaces.forEach { space in
-          try space.save(db)
-        }
-
-        for result in memberResults {
-          for user in result.users { _ = try User.save(db, user: user) }
-          for member in result.members { try Member(from: member).save(db, onConflict: .replace) }
-        }
-        return spaces
-      }
-
-      return spaces
-    } catch {
-      throw error
+      return try Space.fetchAll(db)
     }
+    try auth.validateAccountMutation(mutationToken)
+    return spaces
   }
 
   /// Get one user
@@ -281,124 +257,32 @@ public class DataManager: ObservableObject {
   public func getPrivateChats() async throws -> [Chat] {
     log.trace("getPrivateChats")
     let mutationToken = try beginAccountMutation()
-    do {
+    let auth = self.auth
+    let chats = try await database.reader.read { db in
       try auth.validateAccountMutation(mutationToken)
-      let result = try await InlineRPCClient.shared.getChats()
-
-      let chats = try await writeAccountProjection(token: mutationToken) { db in
-        // First save peer users if they exist
-        try result.users.forEach { user in
-          _ = try User.save(db, user: user)
-        }
-
-        // Then save chats with lastMsgId set to nil
-        let privateChats = result.chats.filter {
-          if case .user? = $0.peerID.type { return true }
-          return false
-        }
-        let chats = privateChats.map { chat in
-          var chat = Chat(from: chat)
-          chat.lastMsgId = nil
-          return chat
-        }
-        try chats.forEach { chat in
-          var chat = chat
-          try chat.saveWithValidLastMsg(db)
-        }
-
-        // Save messages
-        try result.messages.forEach { message in
-          var message = Message(from: message)
-          try message.saveMessage(db)
-        }
-
-        // TODO: Optimize
-        // Update chat's last message ids now
-        let chats_ = privateChats.map { chat in Chat(from: chat) }
-        try chats_.forEach { chat in
-          var chat = chat
-          try chat.saveWithValidLastMsg(db)
-        }
-
-        try result.dialogs.filter {
-          if case .user? = $0.peer.type { return true }
-          return false
-        }.forEach { dialog in
-          try Dialog(from: dialog).save(db, onConflict: .replace)
-        }
-
-        return chats
-      }
-      log.trace("fetched private chats")
-      return chats
-    } catch {
-      log.error("Failed to get private chats", error: error)
-      throw error
+      return try Chat
+        .filter(Chat.Columns.type == ChatType.privateChat.rawValue)
+        .fetchAll(db)
     }
+    try auth.validateAccountMutation(mutationToken)
+    return chats
   }
 
-  public func getDialogs(spaceId: Int64) async throws {
-    log.trace("get dialogs")
+  /// Returns the local dialog projection for one space. Realtime sync is the
+  /// sole network owner of this catalog.
+  @discardableResult
+  public func getDialogs(spaceId: Int64) async throws -> [Dialog] {
+    log.trace("get local dialogs for space \(spaceId)")
     let mutationToken = try beginAccountMutation()
-    do {
-      // Fetch
-      let result = try await InlineRPCClient.shared.getChats()
-
-      // log.debug("fetched dialogs \(result)")
-
-      // Save
-      try await writeAccountProjection(token: mutationToken) { db in
-        // Save users
-        try result.users.forEach { user in
-          _ = try User.save(db, user: user)
-        }
-
-        // Save chats
-        let spaceChats = result.chats.filter { $0.hasSpaceID && $0.spaceID == spaceId }
-        let chats = spaceChats.map { chat in
-
-          var chat = Chat(from: chat)
-          // to avoid foriegn key constraint
-          chat.lastMsgId = nil // TODO: fix
-
-          return chat
-        }
-        try chats.forEach { chat in
-          var chat = chat
-          try chat.saveWithValidLastMsg(db)
-        }
-
-        // Save messages
-        let messages = result.messages.map { message in
-          Message(from: message)
-        }
-        try messages.forEach { message in
-          var mutableMessage = message
-          try mutableMessage.saveMessage(db)
-        }
-
-        // Set last messages
-        let chats_ = spaceChats.map { chat in
-          let chat = Chat(from: chat)
-
-          return chat
-        }
-        try chats_.forEach { chat in
-          var chat = chat
-          try chat.saveWithValidLastMsg(db)
-        }
-
-        // Save dialogs (merge with existing local-only fields such as drafts/settings).
-        try result.dialogs.filter { $0.hasSpaceID && $0.spaceID == spaceId }.forEach { dialog in
-          try Dialog(from: dialog).save(db, onConflict: .replace)
-        }
-      }
-
-      log.trace("saved dialogs")
-    } catch {
-      log.error("Failed to get dialogs", error: error)
-      throw error
+    let auth = self.auth
+    let dialogs = try await database.reader.read { db in
+      try auth.validateAccountMutation(mutationToken)
+      return try Dialog
+        .filter(Dialog.Columns.spaceId == spaceId)
+        .fetchAll(db)
     }
+    try auth.validateAccountMutation(mutationToken)
+    return dialogs
   }
 
   public func getChatHistory(
@@ -732,34 +616,94 @@ public class DataManager: ObservableObject {
 
   public func getSpace(spaceId: Int64) async throws {
     let mutationToken = try beginAccountMutation()
-    let result = try await InlineRPCClient.shared.getChats()
-    guard let protocolSpace = result.spaces.first(where: { $0.id == spaceId }) else {
+    let result = try await InlineRPCClient.shared.getSpace(spaceID: spaceId)
+    let imported = try await writeAccountProjection(token: mutationToken) { db in
+      try Self.applyTargetedSpaceSnapshot(
+        result,
+        expectedSpaceID: spaceId,
+        authenticatedUserID: mutationToken.userID,
+        in: db
+      )
+    }
+    try auth.validateAccountMutation(mutationToken)
+    guard let target = imported.catchUpTarget else { return }
+    _ = try await Api.realtime.installSnapshotOutcome(
+      seededStates: [:],
+      catchUpTargets: [.space(id: spaceId): target],
+      expectedAccount: mutationToken
+    )
+  }
+
+  struct TargetedSpaceSnapshotImport: Sendable, Equatable {
+    var applied: Bool
+    var catchUpTarget: Int64?
+  }
+
+  @discardableResult
+  nonisolated static func applyTargetedSpaceSnapshot(
+    _ result: InlineProtocol.GetSpaceResult,
+    expectedSpaceID spaceId: Int64,
+    authenticatedUserID: Int64,
+    in db: Database
+  ) throws -> TargetedSpaceSnapshotImport {
+    guard result.hasSpace,
+          result.hasMembership,
+          result.space.id == spaceId,
+          result.space.id > 0,
+          result.membership.id > 0,
+          result.membership.spaceID == spaceId,
+          result.membership.userID == authenticatedUserID
+    else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    try await writeAccountProjection(token: mutationToken) { db in
-      let space = Space(from: protocolSpace)
-      try space.save(db, onConflict: .replace)
 
-//      do {
-//      for member in result.members {
-//        let member = Member(from: member)
-//        try member.save(db, onConflict: .ignore)
-//      }
-      //  } catch {
-      // // todo handle error
-      // }
+    let bucketKey = BucketKey.space(id: spaceId)
+    let durableCursorSequence = try DbBucketState
+      .filter(
+        DbBucketState.Columns.bucketType == bucketKey.getBucket()
+          && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+      )
+      .fetchOne(db)?
+      .seq
+    let existing = try Space.fetchOne(db, key: spaceId)
+    let durableSequence = durableCursorSequence ?? 0
+    let existingSequence = existing?.seq.flatMap { $0 >= 0 ? Int64($0) : nil }
 
-//      for dialog in result.dialogs {
-//        let dialog = Dialog(from: dialog)
-//
-//        try dialog.save(db, onConflict: .replace)
-//      }
-//
-//      for chat in result.chats {
-//        let chat = Chat(from: chat)
-//        try chat.save(db, onConflict: .replace)
-//      }
+    // A targeted metadata refresh does not own the bucket cursor. If live
+    // replay has already advanced beyond this response, keep the newer
+    // projection and let the normal bucket owner continue.
+    let catchUpTarget: Int64?
+    let shouldSave: Bool
+    if result.space.hasSeq {
+      let snapshotSequence = Int64(result.space.seq)
+      guard snapshotSequence >= 0 else { throw InlineRPCClientError.unexpectedResponse }
+      let knownSequence = max(existingSequence ?? 0, snapshotSequence)
+      catchUpTarget = knownSequence > durableSequence ? knownSequence : nil
+      shouldSave = snapshotSequence >= durableSequence
+        && snapshotSequence >= (existingSequence ?? 0)
+    } else {
+      // An unsequenced response is only safe to import into a genuinely
+      // pristine projection. Every unsequenced response still gets one
+      // targeted authoritative-latest request, never an account-wide sweep.
+      catchUpTarget = 0
+      shouldSave = existing == nil && durableCursorSequence == nil
     }
+
+    guard shouldSave else {
+      if catchUpTarget != nil, var existing, existing.memberRosterComplete {
+        existing.memberRosterComplete = false
+        try existing.save(db)
+      }
+      return TargetedSpaceSnapshotImport(applied: false, catchUpTarget: catchUpTarget)
+    }
+
+    var space = Space(from: result.space)
+    space.memberRosterComplete = catchUpTarget == nil
+      ? existing?.memberRosterComplete ?? false
+      : false
+    try space.save(db)
+    try Member(from: result.membership).save(db)
+    return TargetedSpaceSnapshotImport(applied: true, catchUpTarget: catchUpTarget)
   }
 
   public func addMember(spaceId: Int64, userId: Int64) async throws {

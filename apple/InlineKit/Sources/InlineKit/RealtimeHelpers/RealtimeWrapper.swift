@@ -551,70 +551,29 @@ public extension Realtime {
   ) async throws {
     log.trace("getChats result: \(result)")
 
-    try await writeAccountProjection(token: mutationToken) { db in
-      // Save spaces
-      for space in result.spaces {
-        do {
-          let spaceModel = Space(from: space)
-          try spaceModel.save(db)
-        } catch {
-          Log.shared.error("Failed to save space", error: error)
-        }
+    let imported = try await writeAccountProjection(token: mutationToken) { db in
+      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      // The legacy handler has no safe partial-import contract. Throwing from
+      // the outer writer rolls back every savepoint committed by the shared
+      // importer, so callers never observe a divergent half snapshot.
+      if let failure = imported.failures.first {
+        throw failure
       }
-
-      // Save users
-      for user in result.users {
-        do {
-          _ = try User.save(db, user: user)
-        } catch {
-          Log.shared.error("Failed to save user", error: error)
-        }
-      }
-
-      // First save chats without lastMsgId to avoid foreign key constraint
-      var chatsToUpdate: [(Chat, Int64?)] = []
-      for chat in result.chats {
-        do {
-          var chatModel = Chat(from: chat)
-          let lastMsgId = chatModel.lastMsgId
-          chatModel.lastMsgId = nil // Temporarily remove lastMsgId
-          _ = try chatModel.saveFull(db)
-          chatsToUpdate.append((chatModel, lastMsgId))
-        } catch {
-          Log.shared.error("Failed to save chat", error: error)
-        }
-      }
-
-      // Save messages
-      for message in result.messages {
-        do {
-          _ = try Message.save(db, protocolMessage: message, publishChanges: false)
-        } catch {
-          Log.shared.error("Failed to save message", error: error)
-        }
-      }
-
-      // Now update chats with lastMsgId since messages exist
-      for (chat, lastMsgId) in chatsToUpdate {
-        do {
-          var updatedChat = chat
-          updatedChat.lastMsgId = lastMsgId
-          _ = try updatedChat.saveFull(db)
-        } catch {
-          Log.shared.error("Failed to update chat with lastMsgId", error: error)
-        }
-      }
-
-      // Save dialogs
-      for dialog in result.dialogs {
-        do {
-          _ = try dialog.saveFull(db)
-
-        } catch {
-          Log.shared.error("Failed to save dialog", error: error)
-        }
-      }
+      return imported
     }
+    if !imported.catchUpTargets.isEmpty {
+      // A generic account snapshot is catalog-only. The shared importer left
+      // populated children untouched; exceptional user repair is the sole
+      // owner allowed to launch these child demands.
+      log.debug(
+        "legacy getChats ignored \(imported.catchUpTargets.count) child catch-up targets"
+      )
+    }
+    _ = try await Api.realtime.installSnapshotOutcome(
+      seededStates: imported.seededStates,
+      catchUpTargets: [:],
+      expectedAccount: mutationToken
+    )
 
     log.trace("getChats saved successfully")
   }

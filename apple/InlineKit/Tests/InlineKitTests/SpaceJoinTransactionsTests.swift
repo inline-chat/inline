@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 
 @testable import InlineKit
@@ -7,6 +8,71 @@ import RealtimeV2
 
 @Suite("Space Join Transactions")
 struct SpaceJoinTransactionsTests {
+  @Test("a delayed join response cannot recreate membership after a newer user update")
+  func delayedJoinResponseLosesAdmission() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    let expected = SpaceJoinSnapshotAdmission(
+      userID: 42,
+      userState: .init(BucketState(date: 100, seq: 10))
+    )
+    let space = InlineProtocol.Space.with { $0.id = 7; $0.name = "Joined"; $0.seq = 5 }
+    let member = InlineProtocol.Member.with { $0.spaceID = 7; $0.userID = 42 }
+    try queue.write { (db: Database) throws in
+      try User(id: 42, email: "join@example.com", firstName: "Join").insert(db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .user, state: BucketState(date: 101, seq: 11), in: db)
+      #expect(try !SpaceJoinSnapshotAdmission.apply(
+        space: space, member: member, admission: expected, currentUserID: 42, in: db
+      ))
+      #expect(try Space.fetchOne(db, id: 7) == nil)
+      #expect(try Member.fetchCount(db) == 0)
+    }
+  }
+
+  @Test("matching request-time user state admits join without advancing a child cursor")
+  func matchingJoinResponseAdmitsProjection() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    let expected = SpaceJoinSnapshotAdmission(
+      userID: 42, userState: .init(BucketState(date: 100, seq: 10))
+    )
+    let space = InlineProtocol.Space.with { $0.id = 7; $0.name = "Joined"; $0.seq = 5 }
+    let member = InlineProtocol.Member.with { $0.spaceID = 7; $0.userID = 42 }
+    try queue.write { (db: Database) throws in
+      try User(id: 42, email: "join@example.com", firstName: "Join").insert(db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .user, state: BucketState(date: 100, seq: 10), in: db)
+      #expect(try SpaceJoinSnapshotAdmission.apply(
+        space: space, member: member, admission: expected, currentUserID: 42, in: db
+      ))
+      #expect(try Space.fetchOne(db, id: 7)?.name == "Joined")
+      #expect(try Member.fetchCount(db) == 1)
+      #expect(try DbBucketState.filter(DbBucketState.Columns.bucketType == BucketKey.space(id: 7).getBucket())
+        .fetchCount(db) == 0)
+    }
+  }
+
+  @Test("a delayed join cannot regress a newer Space-bucket member role")
+  func delayedJoinPreservesNewerSpaceMember() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    let expected = SpaceJoinSnapshotAdmission(
+      userID: 42, userState: .init(BucketState(date: 100, seq: 10))
+    )
+    let oldSpace = InlineProtocol.Space.with { $0.id = 7; $0.name = "Old"; $0.seq = 5 }
+    let oldMember = InlineProtocol.Member.with { $0.id = 8; $0.spaceID = 7; $0.userID = 42; $0.role = .member }
+    try queue.write { (db: Database) throws in
+      try User(id: 42, email: "join@example.com", firstName: "Join").insert(db)
+      try Space(from: oldSpace).save(db)
+      try Member(id: 8, date: .init(timeIntervalSince1970: 100), userId: 42, spaceId: 7, role: .admin).save(db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .user, state: BucketState(date: 100, seq: 10), in: db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .space(id: 7), state: BucketState(date: 101, seq: 6), in: db)
+      #expect(try !SpaceJoinSnapshotAdmission.apply(
+        space: oldSpace, member: oldMember, admission: expected, currentUserID: 42, in: db
+      ))
+      #expect(try Member.fetchOne(db, id: 8)?.role == .admin)
+    }
+  }
+
   @Test("encodes private join without opting into durable credential storage")
   func privateJoinInput() {
     let token = "iv1_\(String(repeating: "a", count: 43))"

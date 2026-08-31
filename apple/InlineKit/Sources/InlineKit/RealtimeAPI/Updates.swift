@@ -10,22 +10,47 @@ public actor UpdatesEngine: Sendable {
 
   private let database: AppDatabase
   private let authenticatedUserID: @Sendable () -> Int64?
+  private let validateAccountMutation: @Sendable (AuthAccountMutationToken) throws -> Void
+  private let applyUserSettings:
+    @MainActor @Sendable (InlineProtocol.UserSettings, Int64, AuthAccountMutationToken) async throws -> Void
+  private let applyDeferredEffects: @Sendable ([DeferredUpdateEffect]) async -> Void
+  private var userBucketCriticalSectionOwned = false
   private let log = Log.scoped("RealtimeUpdates")
 
   init(
     database: AppDatabase = .shared,
-    authenticatedUserID: @escaping @Sendable () -> Int64? = { Auth.shared.getCurrentUserId() }
+    authenticatedUserID: @escaping @Sendable () -> Int64? = { Auth.shared.getCurrentUserId() },
+    validateAccountMutation: @escaping @Sendable (AuthAccountMutationToken) throws -> Void = {
+      try Auth.shared.handle.validateAccountMutation($0)
+    },
+    applyUserSettings: @escaping @MainActor @Sendable (
+      InlineProtocol.UserSettings,
+      Int64,
+      AuthAccountMutationToken
+    ) async throws -> Void = { settings, userID, mutationToken in
+      try Auth.shared.handle.validateAccountMutation(mutationToken)
+      INUserSettings.current.updateFromServer(settings, receivingUserID: userID)
+    },
+    applyDeferredEffects: @escaping @Sendable ([DeferredUpdateEffect]) async -> Void = { effects in
+      for effect in effects {
+        effect.perform()
+      }
+    }
   ) {
     self.database = database
     self.authenticatedUserID = authenticatedUserID
+    self.validateAccountMutation = validateAccountMutation
+    self.applyUserSettings = applyUserSettings
+    self.applyDeferredEffects = applyDeferredEffects
   }
 
-  public nonisolated func apply(
+  private nonisolated func apply(
     update: InlineProtocol.Update,
     db: Database,
     source: UpdateApplySource,
     batchIndex: Int? = nil,
-    reloadPeers: inout Set<Peer>
+    reloadPeers: inout Set<Peer>,
+    deferredEffects: inout [DeferredUpdateEffect]
   ) -> Bool {
     log.trace("apply realtime update")
     // log.debug("Received update type: \(update.update)")
@@ -60,7 +85,9 @@ public actor UpdatesEngine: Sendable {
           try updateUserStatus.apply(db)
 
         case let .updateComposeAction(updateComposeAction):
-          updateComposeAction.apply()
+          if source != .syncCatchup {
+            deferredEffects.append(.composeAction(updateComposeAction))
+          }
 
         case let .deleteMessages(deleteMessages):
           if source == .syncCatchup {
@@ -195,7 +222,9 @@ public actor UpdatesEngine: Sendable {
           try chatOpen.apply(db)
 
         case let .messageActionAnswered(messageActionAnswered):
-          messageActionAnswered.apply()
+          if source != .syncCatchup {
+            deferredEffects.append(.messageActionAnswered(messageActionAnswered))
+          }
 
         case .messageActionInvoked, .spaceSettings:
           // These records are durable so Sync must account for their sequence.
@@ -205,7 +234,9 @@ public actor UpdatesEngine: Sendable {
           break
 
         case let .botPresence(botPresence):
-          BotPresenceNotifications.post(botPresence)
+          if source != .syncCatchup {
+            deferredEffects.append(.botPresence(botPresence))
+          }
 
         default:
           break
@@ -249,6 +280,9 @@ public actor UpdatesEngine: Sendable {
     mutationToken: AuthAccountMutationToken? = nil
   ) async -> UpdateApplyResult {
     let receivingUserID = mutationToken?.userID ?? Auth.shared.getCurrentUserId()
+    let validateAccountMutation = validateAccountMutation
+    let applyUserSettings = applyUserSettings
+    let applyDeferredEffects = applyDeferredEffects
     let batchStartedAt = Date()
     let batchSpan = PerformanceTrace.begin(
       "UpdateApplyBatch",
@@ -256,6 +290,76 @@ public actor UpdatesEngine: Sendable {
       "source=\(source.traceLabel) updates=\(updates.count) sidecars=\(sidecars?.traceCount ?? 0)"
     )
     log.debug("applying \(updates.count) updates (source=\(source))")
+
+    if let bucketCommit, validatedBucketCoordinates(bucketCommit.key) == nil {
+      let failedCount = max(updates.count, 1)
+      log.error("Refusing update batch with an invalid bucket")
+      batchSpan.end(
+        "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
+      )
+      return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+    }
+
+    let bucketSettingsUpdates: [InlineProtocol.UpdateUserSettings] = updates.compactMap { update in
+      guard case let .updateUserSettings(settings) = update.update else {
+        return nil
+      }
+      return settings
+    }
+    if let bucketCommit,
+       !bucketSettingsUpdates.isEmpty,
+       (bucketCommit.key != .user || bucketSettingsUpdates.contains(where: { !$0.hasSettings })) {
+      let failedCount = max(updates.count, 1)
+      log.error("Refusing malformed or non-user bucket settings apply")
+      batchSpan.end(
+        "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
+      )
+      return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+    }
+    let bucketSettings = bucketCommit == nil ? [] : bucketSettingsUpdates.map(\.settings)
+    let isUserBucket = bucketCommit?.key == .user
+    let touchesUserProjection = isUserBucket || !bucketSettings.isEmpty
+    if touchesUserProjection, userBucketCriticalSectionOwned {
+      let failedCount = max(updates.count, 1)
+      log.error("Refusing reentrant user-bucket apply during settings repair")
+      batchSpan.end(
+        "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
+      )
+      return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+    }
+    let ownsUserBucketCriticalSection = !bucketSettings.isEmpty
+    if ownsUserBucketCriticalSection {
+      userBucketCriticalSectionOwned = true
+    }
+    defer {
+      if ownsUserBucketCriticalSection {
+        userBucketCriticalSectionOwned = false
+      }
+    }
+    if !bucketSettings.isEmpty {
+      guard let mutationToken, let receivingUserID, receivingUserID == mutationToken.userID else {
+        let failedCount = max(updates.count, 1)
+        log.error("Refusing bucket settings apply without an account mutation token")
+        batchSpan.end(
+          "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
+        )
+        return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+      }
+      do {
+        try validateAccountMutation(mutationToken)
+        for settings in bucketSettings {
+          try await applyUserSettings(settings, receivingUserID, mutationToken)
+        }
+      } catch {
+        let failedCount = max(updates.count, 1)
+        log.error("Refusing bucket settings apply for a stale account generation", error: error)
+        batchSpan.end(
+          "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
+        )
+        return UpdateApplyResult(appliedCount: 0, failedCount: failedCount)
+      }
+    }
+
     // A bucket-owned batch must commit all GRDB model changes and its cursor in one writer
     // transaction. Non-bucket catch-up work keeps the existing bounded chunks so unrelated
     // refreshes do not monopolize the writer lock.
@@ -277,12 +381,6 @@ public actor UpdatesEngine: Sendable {
       let applySidecarsInChunk = !didApplySidecars
       let isFinalChunk = end == updates.endIndex
       let priorFailedCount = failedCount
-      let hasExternalProjection = chunk.contains { update in
-        if case .updateUserSettings = update.update {
-          return true
-        }
-        return false
-      }
       chunkIndex += 1
       let chunkStartedAt = Date()
       let chunkSpan = PerformanceTrace.begin(
@@ -296,8 +394,26 @@ public actor UpdatesEngine: Sendable {
       do {
         let chunkResult = try await database.dbWriter.write { db in
           if let mutationToken {
-            try Auth.shared.handle.validateAccountMutation(mutationToken)
+            try validateAccountMutation(mutationToken)
           }
+          if let bucketCommit {
+            guard validatedBucketCoordinates(bucketCommit.key) != nil else {
+              throw DurableUpdateApplyError.invalidBucket(bucketCommit.key)
+            }
+            if let expectedStartState = bucketCommit.expectedStartState {
+              try requireExpectedBucketState(
+                expectedStartState,
+                advancingTo: bucketCommit.state,
+                for: bucketCommit.key,
+                in: db
+              )
+            }
+            try requireUserAdmissionForMissingChild(
+              bucketCommit.key, expectedUserState: bucketCommit.expectedUserStateForMissingChild, in: db
+            )
+          }
+          var chunkReloadPeers = Set<Peer>()
+          var chunkDeferredEffects: [DeferredUpdateEffect] = []
           if applySidecarsInChunk, let sidecars, hasSidecars(sidecars) {
             let sidecarSpan = PerformanceTrace.begin(
               "UpdateApplySidecars",
@@ -312,31 +428,42 @@ public actor UpdatesEngine: Sendable {
             try self.apply(sidecars: sidecars, db: db)
           }
 
-          var chunkReloadPeers = Set<Peer>()
           var writeApplied = 0
           var writeFailed = 0
           for (offset, update) in chunk.enumerated() {
             if case .updateUserSettings = update.update {
-              // This projection is MainActor-owned. Count it here, then apply
-              // it after the database transaction so applyBatch can await it.
+              // This projection is MainActor-owned and is ordered outside this
+              // writer. Count the accounted constructor without a DB reducer.
               writeApplied += 1
             } else if self.apply(
               update: update,
               db: db,
               source: source,
               batchIndex: chunkStartOffset + offset,
-              reloadPeers: &chunkReloadPeers
+              reloadPeers: &chunkReloadPeers,
+              deferredEffects: &chunkDeferredEffects
             ) {
               writeApplied += 1
             } else {
+              if bucketCommit != nil {
+                throw DurableUpdateApplyError.reducerFailed(
+                  kind: RealtimeUpdateDiagnostics.kind(of: update.update),
+                  batchIndex: chunkStartOffset + offset
+                )
+              }
               writeFailed += 1
             }
+          }
+          if bucketCommit?.key == .user, let sidecars {
+            // A User read reducer can reach the frontier that rejected this
+            // count before apply. Recheck only counts in this same writer;
+            // structural sidecars and User-owned fields must not replay.
+            try self.applyDialogSidecarCounts(sidecars, db: db)
           }
           let committedState: BucketState?
           if isFinalChunk,
              priorFailedCount == 0,
              writeFailed == 0,
-             !hasExternalProjection,
              let bucketCommit {
             committedState = try GRDBSyncStorage.advanceBucketState(
               for: bucketCommit.key,
@@ -344,13 +471,17 @@ public actor UpdatesEngine: Sendable {
               in: db
             )
           } else {
-            // User settings are projected into account-owned preferences on the
-            // MainActor below. Leave their cursor for the caller to advance only
-            // after that idempotent projection has completed.
             committedState = nil
           }
-          return (chunkReloadPeers, writeApplied, writeFailed, committedState)
+          return (
+            chunkReloadPeers,
+            writeApplied,
+            writeFailed,
+            committedState,
+            chunkDeferredEffects
+          )
         }
+        await applyDeferredEffects(chunkResult.4)
         if applySidecarsInChunk {
           didApplySidecars = true
         }
@@ -360,12 +491,14 @@ public actor UpdatesEngine: Sendable {
         committedBucketState = chunkResult.3 ?? committedBucketState
         appliedCount += chunkApplied
         failedCount += chunkFailed
-        for update in chunk {
+        for update in chunk where bucketCommit == nil {
           if case let .updateUserSettings(userSettings) = update.update {
-            if let mutationToken {
-              try Auth.shared.handle.validateAccountMutation(mutationToken)
+            if let mutationToken, userSettings.hasSettings, let receivingUserID {
+              try validateAccountMutation(mutationToken)
+              try await applyUserSettings(userSettings.settings, receivingUserID, mutationToken)
+            } else {
+              await userSettings.apply(receivingUserID: receivingUserID)
             }
-            await userSettings.apply(receivingUserID: receivingUserID)
           }
         }
       } catch {
@@ -398,18 +531,37 @@ public actor UpdatesEngine: Sendable {
 
     if updates.isEmpty, let bucketCommit {
       do {
-        committedBucketState = try await database.dbWriter.write { db in
+        let state = try await database.dbWriter.write { db in
           if let mutationToken {
-            try Auth.shared.handle.validateAccountMutation(mutationToken)
+            try validateAccountMutation(mutationToken)
           }
-          return try GRDBSyncStorage.advanceBucketState(
+          guard validatedBucketCoordinates(bucketCommit.key) != nil else {
+            throw DurableUpdateApplyError.invalidBucket(bucketCommit.key)
+          }
+          if let expectedStartState = bucketCommit.expectedStartState {
+            try requireExpectedBucketState(
+              expectedStartState,
+              advancingTo: bucketCommit.state,
+              for: bucketCommit.key,
+              in: db
+            )
+          }
+          try requireUserAdmissionForMissingChild(
+            bucketCommit.key, expectedUserState: bucketCommit.expectedUserStateForMissingChild, in: db
+          )
+          if let sidecars, hasSidecars(sidecars) {
+            try self.apply(sidecars: sidecars, db: db)
+          }
+          let state = try GRDBSyncStorage.advanceBucketState(
             for: bucketCommit.key,
             state: bucketCommit.state,
             in: db
           )
+          return state
         }
+        committedBucketState = state
       } catch {
-        log.error("Failed to commit empty update batch cursor", error: error)
+        log.error("Failed to atomically apply empty update batch sidecars and cursor", error: error)
         failedCount += 1
       }
     }
@@ -423,7 +575,10 @@ public actor UpdatesEngine: Sendable {
       )
       await MainActor.run {
         for peer in reloadPeers {
-          MessagesPublisher.shared.messagesReload(peer: peer, animated: false)
+          MessagesPublisher.shared.messagesReload(
+            peer: peer,
+            animated: false
+          )
         }
       }
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: reloadStartedAt)
@@ -467,16 +622,23 @@ public actor UpdatesEngine: Sendable {
 
   @discardableResult
   public func applyChatRepair(_ snapshot: ChatRepairSnapshot) async -> BucketState? {
-    guard snapshot.chat.hasChat, snapshot.chat.hasDialog else {
+    guard snapshot.chat.hasChat,
+          snapshot.chat.hasDialog,
+          let expectedUserID = authenticatedUserID(),
+          expectedUserID > 0,
+          snapshot.mutationToken.userID == expectedUserID,
+          let peer = validatedPeer(snapshot.peer)
+    else {
       log.error("Chat repair missing chat or dialog")
       return nil
     }
     let bucketKey = BucketKey.chat(peer: snapshot.peer)
-    let peer = snapshot.peer.toPeer()
     guard snapshot.chat.chat.id > 0,
-          BucketKey.chat(peer: snapshot.chat.chat.peerID) == bucketKey,
+          let responsePeer = validatedPeer(snapshot.chat.chat.peerID),
+          responsePeer == peer,
           snapshot.chat.dialog.hasPeer,
-          snapshot.chat.dialog.peer.toPeer() == peer,
+          let dialogPeer = validatedPeer(snapshot.chat.dialog.peer),
+          dialogPeer == peer,
           snapshot.chat.dialog.hasChatID,
           snapshot.chat.dialog.chatID == snapshot.chat.chat.id
     else {
@@ -489,24 +651,54 @@ public actor UpdatesEngine: Sendable {
       log.error("Chat repair snapshot sequence is below the frozen recovery target")
       return nil
     }
+    let pinnedIDs = snapshot.chat.pinnedMessageIds
+    guard pinnedIDs.count <= 100,
+          pinnedIDs.allSatisfy({ $0 > 0 }),
+          Set(pinnedIDs).count == pinnedIDs.count,
+          snapshot.pinnedMessages.count == pinnedIDs.count,
+          Set(snapshot.pinnedMessages.map(\.id)) == Set(pinnedIDs),
+          snapshot.pinnedMessages.allSatisfy({
+            $0.id > 0 &&
+              $0.chatID == snapshot.chat.chat.id &&
+              validatedPeer($0.peerID) == peer
+          })
+    else {
+      log.error("Chat repair snapshot does not contain the exact pinned-message payload")
+      return nil
+    }
 
     let startedAt = Date()
+    let validateAccountMutation = validateAccountMutation
     let span = PerformanceTrace.begin(
       "UpdateApplyChatRepair",
       category: .updates,
-      "reason=\(snapshot.reason) messages=\(snapshot.history.messages.count)"
+      "reason=\(snapshot.reason) pins=\(snapshot.pinnedMessages.count)"
     )
 
     do {
+      try validateAccountMutation(snapshot.mutationToken)
       let committedState = try await database.dbWriter.write { db in
+        try validateAccountMutation(snapshot.mutationToken)
+        try requireUserAdmissionForMissingChild(
+          bucketKey, expectedUserState: snapshot.expectedUserStateForMissingChild, in: db
+        )
         if let existing = try DbBucketState
           .filter(
             DbBucketState.Columns.bucketType == bucketKey.getBucket()
               && DbBucketState.Columns.entityId == bucketKey.getEntityId()
           )
           .fetchOne(db),
-          existing.seq >= snapshot.targetState.seq {
-          return BucketState(date: existing.date, seq: existing.seq)
+          existing.seq >= Int64(snapshot.chat.chat.seq) {
+          if try Chat.fetchOne(db, id: snapshot.chat.chat.id) != nil {
+            return BucketState(date: existing.date, seq: existing.seq)
+          }
+          guard existing.seq == Int64(snapshot.chat.chat.seq) else {
+            throw DurableUpdateApplyError.cursorRegression(
+              bucket: bucketKey,
+              expected: .init(date: existing.date, seq: existing.seq),
+              proposed: .init(date: snapshot.targetState.date, seq: Int64(snapshot.chat.chat.seq))
+            )
+          }
         }
 
         let chatID = snapshot.chat.chat.id
@@ -516,49 +708,55 @@ public actor UpdatesEngine: Sendable {
         }
         var chat = Chat(from: snapshot.chat.chat)
         chat.participantRosterComplete = false
-        try self.clearMissingOptionalReferences(in: &chat, db: db)
+        if snapshot.chat.hasAnchorMessage {
+          let anchor = snapshot.chat.anchorMessage
+          guard let parentChatID = chat.parentChatId,
+                let parentMessageID = chat.parentMessageId,
+                anchor.id == parentMessageID,
+                anchor.chatID == parentChatID,
+                validatedPeer(anchor.peerID) != nil
+          else {
+            throw DurableUpdateApplyError.invalidParentReference(chatID: chat.id)
+          }
+          _ = try Message.save(
+            db,
+            protocolMessage: anchor,
+            publishChanges: false,
+            materializeMissingReferences: true
+          )
+        }
+        try self.requireStructuralReferences(for: chat, db: db)
         try chat.saveWithValidLastMsg(db)
-        try GetChatParticipantsTransaction.apply(
-          snapshot.participants,
-          chatID: chatID,
-          in: db
-        )
 
         let dialogID = Dialog.getDialogId(peerId: peer)
         if try Dialog.fetchOne(db, id: dialogID) == nil {
           _ = try snapshot.chat.dialog.saveFull(db)
         }
 
-        if snapshot.chat.hasAnchorMessage {
+        for pinnedMessage in snapshot.pinnedMessages {
           _ = try Message.save(
             db,
-            protocolMessage: snapshot.chat.anchorMessage,
+            protocolMessage: pinnedMessage,
             publishChanges: false,
             materializeMissingReferences: true
           )
         }
 
+        // Repair proves current chat metadata and the exact pin rows, not any
+        // contiguous history interval. Preserve cached messages while marking
+        // the full numeric history range uncertain for a later bounded refill.
         try MessageHistoryCoverageStore.invalidate(db, chatId: chatID)
-        let historyContext = GetChatHistoryTransaction.Context(
-          peer: peer,
-          offsetID: nil,
-          limit: 100,
-          modeRawValue: InlineProtocol.GetChatHistoryMode.historyModeLatest.rawValue,
-          anchorID: nil,
-          beforeID: nil,
-          afterID: nil,
-          beforeLimit: nil,
-          afterLimit: nil,
-          includeAnchor: nil
-        )
-        try GetChatHistoryTransaction.apply(snapshot.history, context: historyContext, db: db)
 
-        let knownPinnedIds = try self.knownPinnedMessageIds(
+        try self.requirePinnedMessages(
           db,
           chatId: chatID,
           messageIds: snapshot.chat.pinnedMessageIds
         )
-        try PinnedMessage.replaceAll(db, chatId: chatID, messageIds: knownPinnedIds)
+        try PinnedMessage.replaceAll(
+          db,
+          chatId: chatID,
+          messageIds: snapshot.chat.pinnedMessageIds
+        )
 
         return try GRDBSyncStorage.advanceBucketState(
           for: bucketKey,
@@ -577,7 +775,10 @@ public actor UpdatesEngine: Sendable {
         "reason=\(snapshot.reason)"
       )
       await MainActor.run {
-        MessagesPublisher.shared.messagesReload(peer: peer, animated: false)
+        MessagesPublisher.shared.messagesReload(
+          peer: peer,
+          animated: false
+        )
       }
       let reloadDurationMs = PerformanceTrace.elapsedMilliseconds(since: reloadStartedAt)
       reloadSpan.end("duration_ms=\(reloadDurationMs)")
@@ -600,7 +801,7 @@ public actor UpdatesEngine: Sendable {
         thresholdMs: 400,
         data: [
           "reason": snapshot.reason,
-          "messages": snapshot.history.messages.count,
+          "pins": snapshot.pinnedMessages.count,
         ]
       )
       return committedState
@@ -617,6 +818,12 @@ public actor UpdatesEngine: Sendable {
     let snapshot = repair.snapshot
     guard snapshot.hasSpace,
           snapshot.hasMembership,
+          let expectedUserID = authenticatedUserID(),
+          expectedUserID > 0,
+          repair.mutationToken.userID == expectedUserID,
+          repair.spaceID > 0,
+          snapshot.membership.id > 0,
+          snapshot.membership.userID == expectedUserID,
           snapshot.space.id == repair.spaceID,
           snapshot.membership.spaceID == repair.spaceID,
           snapshot.space.hasSeq,
@@ -627,8 +834,14 @@ public actor UpdatesEngine: Sendable {
     }
 
     let bucketKey = BucketKey.space(id: repair.spaceID)
+    let validateAccountMutation = validateAccountMutation
     do {
+      try validateAccountMutation(repair.mutationToken)
       return try await database.dbWriter.write { db in
+        try validateAccountMutation(repair.mutationToken)
+        try requireUserAdmissionForMissingChild(
+          bucketKey, expectedUserState: repair.expectedUserStateForMissingChild, in: db
+        )
         if let existing = try DbBucketState
           .filter(
             DbBucketState.Columns.bucketType == bucketKey.getBucket()
@@ -636,17 +849,22 @@ public actor UpdatesEngine: Sendable {
           )
           .fetchOne(db),
           existing.seq >= Int64(snapshot.space.seq) {
-          return BucketState(date: existing.date, seq: existing.seq)
+          if try Space.fetchOne(db, id: repair.spaceID) != nil {
+            return BucketState(date: existing.date, seq: existing.seq)
+          }
+          guard existing.seq == Int64(snapshot.space.seq) else {
+            throw DurableUpdateApplyError.cursorRegression(
+              bucket: bucketKey,
+              expected: .init(date: existing.date, seq: existing.seq),
+              proposed: .init(date: repair.targetState.date, seq: Int64(snapshot.space.seq))
+            )
+          }
         }
 
         var space = Space(from: snapshot.space)
         space.memberRosterComplete = false
         try space.save(db)
-        try GetSpaceMembersTransaction.apply(
-          repair.members,
-          spaceID: repair.spaceID,
-          in: db
-        )
+        try Member(from: snapshot.membership).save(db)
         if snapshot.hasSettings {
           try SpaceRecoverySettings(spaceId: repair.spaceID, settings: snapshot.settings).save(db)
         }
@@ -667,116 +885,336 @@ public actor UpdatesEngine: Sendable {
   }
 
   @discardableResult
-  public func applyUserRepair(_ repair: UserRepairSnapshot) async -> BucketState? {
+  public func applyUserRepair(_ repair: UserRepairSnapshot) async -> UserRepairOutcome? {
     guard repair.me.hasUser,
           let expectedUserID = authenticatedUserID(),
+          expectedUserID > 0,
           repair.me.user.id == expectedUserID,
-          repair.settings.hasUserSettings,
+          repair.mutationToken.userID == expectedUserID,
           repair.checkpointState.date > 0,
           repair.checkpointState.seq >= repair.targetState.seq
     else {
       log.error("User repair snapshot identity or checkpoint is invalid")
       return nil
     }
+    guard !userBucketCriticalSectionOwned else {
+      log.error("Refusing reentrant user repair during a user-bucket apply")
+      return nil
+    }
+    userBucketCriticalSectionOwned = true
+    defer { userBucketCriticalSectionOwned = false }
+
     let bucketKey = BucketKey.user
+    let validateAccountMutation = validateAccountMutation
+    let applyUserSettings = applyUserSettings
     do {
-      let (state, snapshotStates) = try await database.dbWriter.write { db in
-        if let existing = try DbBucketState
+      try validateAccountMutation(repair.mutationToken)
+      let expectedCursor = try await database.reader.read { db in
+        DurableBucketAdmissionState(try DbBucketState
           .filter(
             DbBucketState.Columns.bucketType == bucketKey.getBucket()
               && DbBucketState.Columns.entityId == bucketKey.getEntityId()
           )
-          .fetchOne(db),
-          existing.seq >= repair.checkpointState.seq {
-          return (
-            BucketState(date: existing.date, seq: existing.seq),
-            [BucketKey: BucketState]()
+          .fetchOne(db))
+      }
+      let checkpointAlreadyReached = expectedCursor.state.seq >= repair.checkpointState.seq
+      if checkpointAlreadyReached, !repair.requiresProjectionAudit {
+        return .superseded(currentState: expectedCursor.state)
+      }
+
+      if !checkpointAlreadyReached {
+        guard repair.settings.hasUserSettings else {
+          log.error("User repair snapshot is missing required settings")
+          return nil
+        }
+        try await applyUserSettings(
+          repair.settings.userSettings,
+          expectedUserID,
+          repair.mutationToken
+        )
+      }
+
+      return try await database.dbWriter.write { db in
+        try validateAccountMutation(repair.mutationToken)
+        let currentCursor = DurableBucketAdmissionState(try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == bucketKey.getBucket()
+              && DbBucketState.Columns.entityId == bucketKey.getEntityId()
           )
+          .fetchOne(db))
+        guard currentCursor == expectedCursor else {
+          return .superseded(currentState: currentCursor.state)
         }
 
-        let imported = try GetChatsTransaction.applySnapshot(repair.chats, in: db)
+        // A regression audit may finish after live user events passed the
+        // checkpoint it fetched. Audit child evidence without overwriting
+        // those newer user-owned rows at a cursor that replay already passed.
+        let userProjectionIsCurrent = currentCursor.state.seq <= repair.checkpointState.seq
+        let imported = try GetChatsTransaction.applySnapshot(
+          repair.chats,
+          userProjectionAdmission: userProjectionIsCurrent ? .alreadyValidated : .missingOnly,
+          in: db
+        )
         guard imported.failures.isEmpty else {
           throw TransactionExecutionError.invalid
         }
-        _ = try User.save(db, user: repair.me.user)
-        let state = try GRDBSyncStorage.advanceBucketState(
-          for: bucketKey,
-          state: repair.checkpointState,
-          in: db
-        )
-        return (state, imported.bucketStates)
-      }
-      await Api.realtime.installSnapshotBucketStates(snapshotStates)
-      if repair.settings.hasUserSettings {
-        await MainActor.run {
-          INUserSettings.current.updateFromServer(repair.settings.userSettings)
+        if userProjectionIsCurrent {
+          _ = try User.save(db, user: repair.me.user)
         }
+        let proposedUserState = checkpointAlreadyReached
+          ? expectedCursor.state
+          : repair.checkpointState
+        if imported.catchUpTargets.isEmpty {
+          let state: BucketState
+          if checkpointAlreadyReached {
+            state = currentCursor.state
+          } else {
+            state = try GRDBSyncStorage.advanceBucketState(
+              for: bucketKey,
+              state: repair.checkpointState,
+              in: db
+            )
+          }
+          return .applied(
+            state: state,
+            seededStates: imported.seededStates
+          )
+        }
+        return .pending(
+          finalization: UserRepairFinalization(
+            expectedUserState: expectedCursor.state,
+            expectedUserStateExists: expectedCursor.exists,
+            proposedUserState: proposedUserState,
+            catchUpTargets: imported.catchUpTargets,
+            mutationToken: repair.mutationToken
+          ),
+          seededStates: imported.seededStates
+        )
       }
-      return state
     } catch {
       log.error("Failed to apply user repair", error: error)
       return nil
     }
   }
 
-  private nonisolated func apply(sidecars: InlineProtocol.UpdateSidecars, db: Database) throws {
+  @discardableResult
+  public func finalizeUserRepair(
+    _ finalization: UserRepairFinalization,
+    resolvedTargets: [BucketKey: UserRepairTargetResolution]
+  ) async -> BucketState? {
+    guard let expectedUserID = authenticatedUserID(),
+          expectedUserID > 0,
+          finalization.mutationToken.userID == expectedUserID,
+          finalization.proposedUserState.date > 0,
+          finalization.proposedUserState.seq >= finalization.expectedUserState.seq,
+          !finalization.catchUpTargets.isEmpty,
+          Set(resolvedTargets.keys) == Set(finalization.catchUpTargets.keys),
+          finalization.catchUpTargets.allSatisfy({ key, requestedSequence in
+            guard key != .user,
+                  validatedBucketCoordinates(key) != nil,
+                  requestedSequence >= 0,
+                  let resolution = resolvedTargets[key],
+                  resolution.state.seq >= 0
+            else { return false }
+            return requestedSequence == 0
+              ? resolution.authoritative
+              : resolution.state.seq >= requestedSequence
+          })
+    else {
+      log.error("Refusing invalid user repair finalization")
+      return nil
+    }
+    guard !userBucketCriticalSectionOwned else {
+      log.error("Refusing reentrant user repair finalization")
+      return nil
+    }
+    userBucketCriticalSectionOwned = true
+    defer { userBucketCriticalSectionOwned = false }
+
+    let validateAccountMutation = validateAccountMutation
+    do {
+      try validateAccountMutation(finalization.mutationToken)
+      return try await database.dbWriter.write { db in
+        try validateAccountMutation(finalization.mutationToken)
+        guard try User.fetchOne(db, id: expectedUserID) != nil else {
+          throw DurableUpdateApplyError.unresolvedUserRepairAccount(expectedUserID)
+        }
+        let currentUserCursor = DurableBucketAdmissionState(try DbBucketState
+          .filter(
+            DbBucketState.Columns.bucketType == BucketKey.user.getBucket()
+              && DbBucketState.Columns.entityId == BucketKey.user.getEntityId()
+          )
+          .fetchOne(db))
+        let cursorAlreadyFinalized =
+          currentUserCursor.state.seq >= finalization.proposedUserState.seq
+        let expectedCursor = DurableBucketAdmissionState(
+          exists: finalization.expectedUserStateExists,
+          state: finalization.expectedUserState
+        )
+        guard cursorAlreadyFinalized || currentUserCursor == expectedCursor else {
+          throw DurableUpdateApplyError.cursorChanged(
+            bucket: .user,
+            expected: expectedCursor.state,
+            actual: currentUserCursor.state
+          )
+        }
+
+        for (key, targetSequence) in finalization.catchUpTargets {
+          guard let resolution = resolvedTargets[key],
+                let coordinates = validatedBucketCoordinates(key)
+          else {
+            throw DurableUpdateApplyError.unresolvedUserRepairTarget(key)
+          }
+          let durableTarget = DurableBucketAdmissionState(try DbBucketState
+            .filter(
+              DbBucketState.Columns.bucketType == coordinates.bucket
+                && DbBucketState.Columns.entityId == coordinates.entityID
+            )
+            .fetchOne(db))
+          guard durableTarget.exists,
+                durableTarget.state.seq >= max(targetSequence, resolution.state.seq),
+                durableTarget.state.date >= resolution.state.date
+          else {
+            throw DurableUpdateApplyError.unresolvedUserRepairTarget(key)
+          }
+        }
+        if cursorAlreadyFinalized {
+          return currentUserCursor.state
+        }
+
+        return try GRDBSyncStorage.advanceBucketState(
+          for: .user,
+          state: finalization.proposedUserState,
+          in: db
+        )
+      }
+    } catch {
+      log.error("Failed to finalize user repair", error: error)
+      return nil
+    }
+  }
+
+  private nonisolated func apply(
+    sidecars: InlineProtocol.UpdateSidecars,
+    db: Database
+  ) throws {
     for user in sidecars.users {
       _ = try User.save(db, user: user)
     }
 
     for protoSpace in sidecars.spaces {
-      var space = Space(from: protoSpace)
-      space.memberRosterComplete = try Space.fetchOne(db, id: space.id)?.memberRosterComplete ?? false
-      try space.save(db)
+      try saveMissingSidecarSpace(protoSpace, db: db)
     }
 
     for userGroup in sidecars.userGroups {
       try UserGroup.save(db, from: userGroup)
     }
 
-    for var chat in try preparedSidecarChats(sidecars.chats, db: db) {
-      try chat.saveWithValidLastMsg(db)
+    let chatSnapshots = Dictionary(sidecars.chats.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+    for chat in try preparedSidecarChats(sidecars.chats, db: db) {
+      guard let snapshot = chatSnapshots[chat.id] else { continue }
+      try saveMissingSidecarChat(snapshot, preparedChat: chat, db: db)
     }
 
     for dialog in sidecars.dialogs {
-      _ = try dialog.saveFull(db)
+      guard let peer = validatedPeer(dialog.peer) else {
+        throw DurableUpdateApplyError.invalidBucket(.chat(peer: dialog.peer))
+      }
+      if try Dialog.get(peerId: peer).fetchOne(db) == nil {
+        _ = try dialog.saveFull(db)
+      }
+    }
+    try applyDialogSidecarCounts(sidecars, db: db)
+  }
+
+  private nonisolated func applyDialogSidecarCounts(
+    _ sidecars: InlineProtocol.UpdateSidecars,
+    db: Database
+  ) throws {
+    let chatSnapshots = Dictionary(sidecars.chats.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+    for dialog in sidecars.dialogs {
+      guard let peer = validatedPeer(dialog.peer),
+            var existing = try Dialog.get(peerId: peer).fetchOne(db) else { continue }
+      // Enrichment has no User-bucket sequence. Never let a delayed Chat page
+      // undo newer archive/read/open/folder state owned by that bucket. Its
+      // count is usable only for the same read frontier and a matching Chat
+      // snapshot which is not behind the durable Chat cursor.
+      guard dialog.hasUnreadCount, dialog.unreadCount >= 0,
+            dialog.hasReadMaxID, dialog.readMaxID >= 0,
+            dialog.readMaxID == max(0, existing.readInboxMaxId ?? 0),
+            dialog.hasChatID, existing.chatId == dialog.chatID,
+            let snapshot = chatSnapshots[dialog.chatID],
+            validatedPeer(snapshot.peerID) == peer,
+            let chat = try Chat.fetchOne(db, id: dialog.chatID),
+            validatedPeer(chat.peerId) == peer,
+            snapshot.hasSeq, snapshot.seq >= 0,
+            try admitsSidecarSnapshot(
+              sequence: Int64(snapshot.seq),
+              for: .chat(peer: snapshot.peerID),
+              db: db
+            ) else { continue }
+      existing.unreadCount = Int(dialog.unreadCount)
+      try existing.update(db)
     }
   }
 
-  private nonisolated func clearMissingOptionalReferences(in chat: inout Chat, db: Database) throws {
+  private nonisolated func requireStructuralReferences(for chat: Chat, db: Database) throws {
     if let spaceId = chat.spaceId, try Space.fetchOne(db, id: spaceId) == nil {
-      log.warning("Dropping missing space reference while applying chat repair for chat \(chat.id)")
-      chat.spaceId = nil
+      throw DurableUpdateApplyError.unresolvedSpace(chatID: chat.id, spaceID: spaceId)
     }
 
     if let createdBy = chat.createdBy, try User.fetchOne(db, id: createdBy) == nil {
-      log.warning("Dropping missing creator reference while applying chat repair for chat \(chat.id)")
-      chat.createdBy = nil
+      throw DurableUpdateApplyError.unresolvedCreator(chatID: chat.id, userID: createdBy)
     }
 
-    if let parentChatId = chat.parentChatId, try Chat.fetchOne(db, id: parentChatId) == nil {
-      log.warning("Dropping missing parent chat reference while applying chat repair for chat \(chat.id)")
-      chat.parentChatId = nil
-      chat.parentMessageId = nil
+    guard (chat.parentChatId == nil) == (chat.parentMessageId == nil) else {
+      throw DurableUpdateApplyError.invalidParentReference(chatID: chat.id)
+    }
+
+    if let parentChatId = chat.parentChatId, let parentMessageId = chat.parentMessageId {
+      guard parentChatId > 0,
+            parentMessageId > 0,
+            parentChatId != chat.id,
+            try Chat.fetchOne(db, id: parentChatId) != nil
+      else {
+        throw DurableUpdateApplyError.unresolvedParentChat(
+          chatID: chat.id,
+          parentChatID: parentChatId
+        )
+      }
+      guard try Message
+        .filter(Message.Columns.chatId == parentChatId)
+        .filter(Message.Columns.messageId == parentMessageId)
+        .fetchCount(db) > 0
+      else {
+        throw DurableUpdateApplyError.unresolvedParentMessage(
+          chatID: chat.id,
+          parentChatID: parentChatId,
+          parentMessageID: parentMessageId
+        )
+      }
     }
   }
 
-  private nonisolated func knownPinnedMessageIds(
+  private nonisolated func requirePinnedMessages(
     _ db: Database,
     chatId: Int64,
     messageIds: [Int64]
-  ) throws -> [Int64] {
-    guard !messageIds.isEmpty else { return [] }
+  ) throws {
+    guard !messageIds.isEmpty else { return }
 
     let known = try Message
       .filter(Message.Columns.chatId == chatId)
       .filter(messageIds.contains(Message.Columns.messageId))
       .fetchAll(db)
     let knownIds = Set(known.map(\.messageId))
-    if knownIds.count < messageIds.count {
-      log.warning("Skipping unknown pinned message ids while applying chat repair for chat \(chatId)")
+    let missingIds = Set(messageIds).subtracting(knownIds).sorted()
+    if !missingIds.isEmpty {
+      throw DurableUpdateApplyError.missingPinnedMessages(
+        chatID: chatId,
+        messageIDs: missingIds
+      )
     }
-    return messageIds.filter(knownIds.contains)
   }
 }
 
@@ -841,6 +1279,187 @@ private func hasSidecars(_ sidecars: InlineProtocol.UpdateSidecars) -> Bool {
     !sidecars.dialogs.isEmpty ||
     !sidecars.spaces.isEmpty ||
     !sidecars.userGroups.isEmpty
+}
+
+private enum DurableUpdateApplyError: Error {
+  case reducerFailed(kind: String, batchIndex: Int)
+  case invalidBucket(BucketKey)
+  case cursorChanged(bucket: BucketKey, expected: BucketState, actual: BucketState)
+  case cursorRegression(bucket: BucketKey, expected: BucketState, proposed: BucketState)
+  case unresolvedSpace(chatID: Int64, spaceID: Int64)
+  case unresolvedCreator(chatID: Int64, userID: Int64)
+  case unresolvedParentChat(chatID: Int64, parentChatID: Int64)
+  case unresolvedParentMessage(chatID: Int64, parentChatID: Int64, parentMessageID: Int64)
+  case invalidParentReference(chatID: Int64)
+  case missingPinnedMessages(chatID: Int64, messageIDs: [Int64])
+  case unresolvedUserRepairAccount(Int64)
+  case unresolvedUserRepairTarget(BucketKey)
+}
+
+enum DeferredUpdateEffect: Sendable {
+  case composeAction(InlineProtocol.UpdateComposeAction)
+  case messageActionAnswered(InlineProtocol.UpdateMessageActionAnswered)
+  case botPresence(InlineProtocol.UpdateBotPresence)
+
+  nonisolated func perform() {
+    switch self {
+      case let .composeAction(update):
+        update.apply()
+      case let .messageActionAnswered(update):
+        update.apply()
+      case let .botPresence(update):
+        BotPresenceNotifications.post(update)
+    }
+  }
+}
+
+private func requireExpectedBucketState(
+  _ expected: BucketState,
+  advancingTo proposed: BucketState,
+  for key: BucketKey,
+  in db: Database
+) throws {
+  guard let coordinates = validatedBucketCoordinates(key) else {
+    throw DurableUpdateApplyError.invalidBucket(key)
+  }
+  let record = try DbBucketState
+    .filter(
+      DbBucketState.Columns.bucketType == coordinates.bucket
+        && DbBucketState.Columns.entityId == coordinates.entityID
+    )
+    .fetchOne(db)
+  let actual = BucketState(date: record?.date ?? 0, seq: record?.seq ?? 0)
+  guard actual.date == expected.date, actual.seq == expected.seq else {
+    throw DurableUpdateApplyError.cursorChanged(
+      bucket: key,
+      expected: expected,
+      actual: actual
+    )
+  }
+  guard proposed.seq >= expected.seq else {
+    throw DurableUpdateApplyError.cursorRegression(
+      bucket: key,
+      expected: expected,
+      proposed: proposed
+    )
+  }
+}
+
+private func requireUserAdmissionForMissingChild(
+  _ key: BucketKey,
+  expectedUserState: BucketState?,
+  in db: Database
+) throws {
+  guard let expectedUserState else { return }
+  let isMissing: Bool
+  switch key {
+    case let .chat(peer):
+      guard let peer = validatedPeer(peer) else { throw DurableUpdateApplyError.invalidBucket(key) }
+      isMissing = try Chat.getByPeerId(db: db, peerId: peer) == nil
+    case let .space(id):
+      isMissing = try Space.fetchOne(db, id: id) == nil
+    case .user:
+      return
+  }
+  guard isMissing else { return }
+  // Absence at seq=0 is ambiguous: it can be pristine or a User removal that
+  // committed while the first child page was in flight. The request-time User
+  // cursor disambiguates without a durable tombstone or an account-wide sweep.
+  try requireExpectedBucketState(expectedUserState, advancingTo: expectedUserState, for: .user, in: db)
+}
+
+private func validatedPeer(_ protoPeer: InlineProtocol.Peer) -> Peer? {
+  switch protoPeer.type {
+    case let .user(value) where value.userID > 0:
+      .user(id: value.userID)
+    case let .chat(value) where value.chatID > 0:
+      .thread(id: value.chatID)
+    default:
+      nil
+  }
+}
+
+private func validatedBucketCoordinates(
+  _ key: BucketKey
+) -> (bucket: Int, entityID: Int64)? {
+  switch key {
+    case .user:
+      return (2, 0)
+    case let .space(id) where id > 0:
+      return (3, id)
+    case let .chat(peer):
+      guard let peer = validatedPeer(peer) else { return nil }
+      switch peer {
+        case let .user(id): return (1, id)
+        case let .thread(id): return (1, -id)
+      }
+    default:
+      return nil
+  }
+}
+
+private struct DurableBucketAdmissionState: Equatable, Sendable {
+  let exists: Bool
+  let state: BucketState
+
+  init(exists: Bool, state: BucketState) {
+    self.exists = exists
+    self.state = state
+  }
+
+  init(_ record: DbBucketState?) {
+    exists = record != nil
+    state = BucketState(date: record?.date ?? 0, seq: record?.seq ?? 0)
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.exists == rhs.exists &&
+      lhs.state.date == rhs.state.date &&
+      lhs.state.seq == rhs.state.seq
+  }
+}
+
+// Foreign-bucket snapshots supply missing structural references, not a second
+// projection owner. In particular, do not put an old model behind a retained
+// cursor: replay would then have no reason to restore the overwritten fields.
+private func admitsSidecarSnapshot(sequence: Int64?, for key: BucketKey, db: Database) throws -> Bool {
+  guard let coordinates = validatedBucketCoordinates(key),
+        sequence.map({ $0 >= 0 }) ?? true else { return false }
+  let cursor = try DbBucketState
+    .filter(
+      DbBucketState.Columns.bucketType == coordinates.bucket
+        && DbBucketState.Columns.entityId == coordinates.entityID
+    )
+    .fetchOne(db)
+  guard let cursor, cursor.seq > 0 else { return true }
+  return sequence.map { $0 >= cursor.seq } ?? false
+}
+
+private func saveMissingSidecarSpace(_ snapshot: InlineProtocol.Space, db: Database) throws {
+  guard try Space.fetchOne(db, id: snapshot.id) == nil,
+        try admitsSidecarSnapshot(
+          sequence: snapshot.hasSeq ? Int64(snapshot.seq) : nil,
+          for: .space(id: snapshot.id),
+          db: db
+        ) else { return }
+  try Space(from: snapshot).save(db)
+}
+
+private func saveMissingSidecarChat(
+  _ snapshot: InlineProtocol.Chat,
+  preparedChat: Chat,
+  db: Database
+) throws {
+  guard snapshot.id > 0, let peer = validatedPeer(snapshot.peerID),
+        peer == validatedPeer(preparedChat.peerId),
+        try Chat.fetchOne(db, id: snapshot.id) == nil,
+        try admitsSidecarSnapshot(
+          sequence: snapshot.hasSeq ? Int64(snapshot.seq) : nil,
+          for: .chat(peer: snapshot.peerID),
+          db: db
+        ) else { return }
+  var chat = preparedChat
+  try chat.saveWithValidLastMsg(db)
 }
 
 func preparedSidecarChats(_ protoChats: [InlineProtocol.Chat], db: Database) throws -> [Chat] {
@@ -927,12 +1546,14 @@ func deleteLocalChatData(_ db: Database, chatId: Int64) throws {
   try Chat.filter(Column("id") == chatId).deleteAll(db)
   try deleteChatSyncBucket(db, chatId: chatId)
 
-  Task.detached {
-    NotificationCenter.default.post(
-      name: Notification.Name("chatDeletedNotification"),
-      object: nil,
-      userInfo: ["chatId": chatId]
-    )
+  db.afterNextTransaction { _ in
+    Task.detached {
+      NotificationCenter.default.post(
+        name: Notification.Name("chatDeletedNotification"),
+        object: nil,
+        userInfo: ["chatId": chatId]
+      )
+    }
   }
 }
 
@@ -1009,8 +1630,8 @@ extension InlineProtocol.UpdateNewMessage {
   ) throws {
     // Avoid double-applying side effects when the same message is replayed (eg. sync catch-up,
     // duplicate delivery, history prefill).
-    let hadMessage =
-      (try? Message.fetchOne(db, key: ["messageId": message.id, "chatId": message.chatID])) != nil
+    let hadMessage = try Message
+      .fetchOne(db, key: ["messageId": message.id, "chatId": message.chatID]) != nil
 
     let msg = try Message.save(
       db,
@@ -1027,7 +1648,7 @@ extension InlineProtocol.UpdateNewMessage {
     // totals for delivered messages; applying this local delta too would double
     // count missed messages.
     if msg.out == false {
-      let dialogBefore = try? Dialog.get(peerId: msg.peerId).fetchOne(db)
+      let dialogBefore = try Dialog.get(peerId: msg.peerId).fetchOne(db)
       var didIncrement = false
       var reason = "not_newer_than_read_max"
 
@@ -1237,8 +1858,10 @@ extension InlineProtocol.UpdateDeleteMessages {
     }
 
     if publishChanges {
-      Task(priority: .userInitiated) { @MainActor in
-        MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+      db.afterNextTransaction { _ in
+        Task(priority: .userInitiated) { @MainActor in
+          MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+        }
       }
     }
   }
@@ -1458,85 +2081,42 @@ extension InlineProtocol.UpdateSpaceMemberDelete {
   func apply(_ db: Database) throws {
     Log.shared.debug("update space member delete user \(userID) from space \(spaceID)")
 
-    do {
-      // Delete the member from the database
-      try Member
-        .filter(Column("userId") == userID)
-        .filter(Column("spaceId") == spaceID)
+    try Member
+      .filter(Column("userId") == userID)
+      .filter(Column("spaceId") == spaceID)
+      .deleteAll(db)
+
+    guard userID == Auth.shared.getCurrentUserId() else { return }
+
+    Log.shared.info("Current user was removed from space, cleaning up local data")
+    let chatsInSpace = try Chat.filter(Column("spaceId") == spaceID).fetchAll(db)
+    let chatIds = chatsInSpace.map(\.id)
+
+    if !chatIds.isEmpty {
+      try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+      try Dialog.filter(chatIds.contains(Column("peerThreadId"))).deleteAll(db)
+      let chatBucketIds = chatIds.map { -$0 }
+      try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == 1 && chatBucketIds.contains(DbBucketState.Columns.entityId))
         .deleteAll(db)
+    }
 
-      // If the removed user is the current user, clean up local data
-      if userID == Auth.shared.getCurrentUserId() {
-        // Remove all dialogs and chats for this space
-        Log.shared.info("Current user was removed from space, cleaning up local data")
+    try Dialog.filter(Column("spaceId") == spaceID).deleteAll(db)
+    try Chat.filter(Column("spaceId") == spaceID).deleteAll(db)
+    try Member.filter(Column("spaceId") == spaceID).deleteAll(db)
+    try DbBucketState
+      .filter(DbBucketState.Columns.bucketType == 3 && DbBucketState.Columns.entityId == spaceID)
+      .deleteAll(db)
+    try Space.filter(Column("id") == spaceID).deleteAll(db)
 
-        // Run each cleanup step independently so one failure doesn't block the rest.
-        func cleanupStep(_ label: String, _ block: () throws -> Void) {
-          do {
-            try block()
-          } catch {
-            Log.shared.error("Space cleanup failed: \(label)", error: error)
-          }
-        }
-
-        // 1. Collect all chats that belong to the removed space
-        let chatsInSpace: [Chat] = (try? Chat.filter(Column("spaceId") == spaceID).fetchAll(db)) ?? []
-        let chatIds = chatsInSpace.map(\.id)
-
-        // 2. Drop dialogs tied to those chats (both chatId and peerThreadId columns)
-        cleanupStep("delete dialogs for chatIds") {
-          guard !chatIds.isEmpty else { return }
-          try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-          try Dialog.filter(chatIds.contains(Column("peerThreadId"))).deleteAll(db)
-        }
-
-        // 3. Remove sync bucket state for chats in this space (bucketType = 1)
-        cleanupStep("delete sync buckets for chats") {
-          guard !chatIds.isEmpty else { return }
-          let chatBucketIds = chatIds.map { -$0 } // matches BucketKey.chat entityId encoding
-          try DbBucketState
-            .filter(DbBucketState.Columns.bucketType == 1 && chatBucketIds.contains(DbBucketState.Columns.entityId))
-            .deleteAll(db)
-        }
-
-        // 4. Delete any dialogs associated directly with the space (safety)
-        cleanupStep("delete dialogs for space") {
-          try Dialog.filter(Column("spaceId") == spaceID).deleteAll(db)
-        }
-
-        // 5. Remove the chats themselves (cascades will drop messages, reactions, translations, etc.)
-        cleanupStep("delete chats in space") {
-          try Chat.filter(Column("spaceId") == spaceID).deleteAll(db)
-        }
-
-        // 6. Remove all remaining members for this space (if any)
-        cleanupStep("delete members in space") {
-          try Member.filter(Column("spaceId") == spaceID).deleteAll(db)
-        }
-
-        // 7. Remove sync bucket state for the space (bucketType = 3)
-        cleanupStep("delete sync bucket for space") {
-          try DbBucketState
-            .filter(DbBucketState.Columns.bucketType == 3 && DbBucketState.Columns.entityId == spaceID)
-            .deleteAll(db)
-        }
-
-        // 8. Finally delete the space record
-        cleanupStep("delete space record") {
-          try Space.filter(Column("id") == spaceID).deleteAll(db)
-        }
-
-        // Notify UI so that any views related to this space can be dismissed
-        Task.detached {
-          NotificationCenter.default.post(
-            name: Notification.Name("spaceDeletedNotification"),
-            object: nil,
-            userInfo: ["spaceId": spaceID]
-          )
-        }
+    db.afterNextTransaction { _ in
+      Task.detached {
+        NotificationCenter.default.post(
+          name: Notification.Name("spaceDeletedNotification"),
+          object: nil,
+          userInfo: ["spaceId": spaceID]
+        )
       }
-    } catch {
-      Log.shared.error("Failed to delete space member", error: error)
     }
   }
 }
@@ -1558,52 +2138,41 @@ extension InlineProtocol.UpdateSpaceMemberUpdate {
     if updatedMember.userId == currentUserId,
        previousCanAccessPublic == true,
        updatedMember.canAccessPublicChats == false {
-      removePublicThreadsForSpace(spaceId: updatedMember.spaceId, db: db)
+      try removePublicThreadsForSpace(spaceId: updatedMember.spaceId, db: db)
     }
   }
 
-  private func removePublicThreadsForSpace(spaceId: Int64, db: Database) {
-    func cleanupStep(_ label: String, _ block: () throws -> Void) {
-      do { try block() } catch {
-        Log.shared.error("Public threads cleanup failed: \(label)", error: error)
-      }
-    }
-
-    let publicThreads: [Chat] = (try? Chat
+  private func removePublicThreadsForSpace(spaceId: Int64, db: Database) throws {
+    let publicThreads = try Chat
       .filter(Chat.Columns.spaceId == spaceId)
       .filter(Chat.Columns.type == ChatType.thread.rawValue)
       .filter(Chat.Columns.isPublic == true)
-      .fetchAll(db)) ?? []
+      .fetchAll(db)
 
     let chatIds = publicThreads.map(\.id)
     guard !chatIds.isEmpty else { return }
 
-    cleanupStep("delete messages for public threads") {
-      try Message.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-    }
-
-    cleanupStep("delete dialogs for public threads") {
-      try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-      try Dialog.filter(chatIds.contains(Column("peerThreadId"))).deleteAll(db)
-    }
-
-    cleanupStep("delete sync buckets for public threads") {
-      let chatBucketIds = chatIds.map { -$0 }
-      try DbBucketState
-        .filter(DbBucketState.Columns.bucketType == 1 && chatBucketIds.contains(DbBucketState.Columns.entityId))
-        .deleteAll(db)
-    }
-
-    cleanupStep("delete public thread chats") {
-      try Chat.filter(chatIds.contains(Column("id"))).deleteAll(db)
-    }
+    try Message.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+    try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+    try Dialog.filter(chatIds.contains(Column("peerThreadId"))).deleteAll(db)
+    let chatBucketIds = chatIds.map { -$0 }
+    try DbBucketState
+      .filter(DbBucketState.Columns.bucketType == 1 && chatBucketIds.contains(DbBucketState.Columns.entityId))
+      .deleteAll(db)
+    try Chat.filter(chatIds.contains(Column("id"))).deleteAll(db)
   }
 }
 
 extension InlineProtocol.UpdateJoinSpace {
   func apply(_ db: Database) throws {
-    let space = Space(from: space)
-    try space.save(db)
+    try saveMissingSidecarSpace(space, db: db)
+    // The User journal embeds the membership at join time. Its role/access may
+    // already have advanced through the independent Space journal.
+    guard try admitsSidecarSnapshot(
+      sequence: space.hasSeq ? Int64(space.seq) : nil,
+      for: .space(id: space.id),
+      db: db
+    ) else { return }
     let member = Member(from: member)
     try member.save(db)
   }
@@ -1849,8 +2418,9 @@ extension InlineProtocol.UpdateChatOpen {
       _ = try User.save(db, user: user)
     }
 
-    var updatedChat = Chat(from: chat)
-    try updatedChat.saveWithValidLastMsg(db)
+    for preparedChat in try preparedSidecarChats([chat], db: db) {
+      try saveMissingSidecarChat(chat, preparedChat: preparedChat, db: db)
+    }
     _ = try dialog.saveFull(db)
   }
 }
@@ -1884,6 +2454,18 @@ extension InlineProtocol.UpdateReadMaxId {
     )
 
     if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
+      let currentReadMaxID = max(0, dialog.readInboxMaxId ?? 0)
+      guard readMaxID > currentReadMaxID else {
+        // Direct transaction results and sequenced User-bucket replay can
+        // deliver the same read projection through different paths. Treat an
+        // equal marker as already applied so it cannot erase a later explicit
+        // mark-unread; reject a lower marker so neither frontier nor count can
+        // regress.
+        Log.shared.debug(
+          "Ignored non-advancing read max id for peer \(peerID.toPeer()) current: \(currentReadMaxID) incoming: \(readMaxID)"
+        )
+        return
+      }
       dialog.readInboxMaxId = readMaxID
       dialog.unreadCount = Int(unreadCount)
       dialog.unreadMark = false

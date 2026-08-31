@@ -5,13 +5,18 @@ import Testing
 
 @Suite("RealtimeV2.RealtimeStateDisplay", .serialized)
 final class RealtimeStateDisplayTests {
-  @Test("default display policy uses longer cold start and reconnect delays")
+  @Test("default display policy follows platform connection-status timing")
   func testDefaultDisplayPolicy() {
     let policy = RealtimeConnectionDisplayPolicy.default
 
-    #expect(policy.showDelaySeconds(for: .coldStart) == 2)
-    #expect(policy.showDelaySeconds(for: .reconnect) == 4)
-    #expect(policy.hideDelaySeconds == 1)
+    #if os(macOS)
+    #expect(policy.showDelaySeconds(for: .coldStart) == 1)
+    #expect(policy.showDelaySeconds(for: .reconnect) == 1)
+    #else
+    #expect(policy.showDelaySeconds(for: .coldStart) == 0)
+    #expect(policy.showDelaySeconds(for: .reconnect) == 0.3)
+    #endif
+    #expect(policy.hideDelaySeconds == 0)
   }
 
   @Test("cold start uses cold display delay")

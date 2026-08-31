@@ -51,7 +51,17 @@ struct InlineApplyUpdates: ApplyUpdates {
     await UpdatesEngine.shared.applySpaceRepair(snapshot)
   }
 
-  func repairUser(_ snapshot: UserRepairSnapshot) async -> BucketState? {
+  func repairUser(_ snapshot: UserRepairSnapshot) async -> UserRepairOutcome? {
     await UpdatesEngine.shared.applyUserRepair(snapshot)
+  }
+
+  func finalizeUserRepair(
+    _ finalization: UserRepairFinalization,
+    resolvedTargets: [BucketKey: UserRepairTargetResolution]
+  ) async -> BucketState? {
+    await UpdatesEngine.shared.finalizeUserRepair(
+      finalization,
+      resolvedTargets: resolvedTargets
+    )
   }
 }
