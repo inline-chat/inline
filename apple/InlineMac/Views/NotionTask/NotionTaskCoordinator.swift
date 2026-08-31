@@ -14,6 +14,8 @@ class NotionTaskCoordinator: ObservableObject {
 
   func handleWillDo(message: Message, spaceId: Int64?, window: NSWindow) async {
     guard !isCreatingTask else { return }
+    isCreatingTask = true
+    defer { isCreatingTask = false }
 
     if message.peerId.isThread, let spaceId = spaceId {
       await createTask(message: message, spaceId: spaceId, window: window)
@@ -68,12 +70,10 @@ class NotionTaskCoordinator: ObservableObject {
   }
 
   private func showLoadingToast() {
-    isCreatingTask = true
     ToastCenter.shared.showLoading("Creating Notion task…")
   }
 
   private func hideLoadingToast() {
-    isCreatingTask = false
     ToastCenter.shared.dismiss()
   }
 
@@ -103,6 +103,8 @@ final class LinearIssueCoordinator: ObservableObject {
   func handleCreateLinearIssue(message: Message, spaceId: Int64?, window: NSWindow) async {
     guard !isCreatingIssue else { return }
     guard let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
+    isCreatingIssue = true
+    defer { isCreatingIssue = false }
 
     if message.peerId.isThread, let spaceId {
       await createIssue(text: text, message: message, spaceId: spaceId)
@@ -201,12 +203,10 @@ final class LinearIssueCoordinator: ObservableObject {
   }
 
   private func showLoadingToast() {
-    isCreatingIssue = true
     ToastCenter.shared.showLoading("Creating Linear issue…")
   }
 
   private func hideLoadingToast() {
-    isCreatingIssue = false
     ToastCenter.shared.dismiss()
   }
 }
