@@ -24,6 +24,7 @@ public final class CLIInstallerController {
 
   public func refresh() async {
     guard !phase.isBusy else { return }
+    phase = .checkingLocal
 
     do {
       let plan = try await service.check(progress: apply)
@@ -57,6 +58,7 @@ public final class CLIInstallerController {
       )
     }
 
+    phase = .checkingLocal
     do {
       let outcome: CLIServiceInstallOutcome
       if forAgentSetup {

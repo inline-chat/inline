@@ -57,18 +57,58 @@ struct CLIInstallerControllerTests {
 
     #expect(installation?.version == "1.2.3")
   }
+
+  @Test("reserves an operation before service progress arrives", arguments: [false, true])
+  func reservesOperationBeforeProgress(installFirst: Bool) async {
+    let service = MockCLIInstaller(pausesBeforeFirstProgress: true)
+    let controller = CLIInstallerController(service: service)
+    let firstOperation = Task {
+      if installFirst {
+        _ = await controller.install()
+      } else {
+        await controller.refresh()
+      }
+    }
+    await service.waitForFirstCheck()
+
+    #expect(controller.phase == .checkingLocal)
+    await controller.refresh()
+    let overlappingInstall = await controller.installForAgentSetup()
+    if case let .failed(failure) = overlappingInstall {
+      #expect(failure.kind == .operationInProgress)
+    } else {
+      Issue.record("Expected the overlapping installation to be rejected")
+    }
+    #expect(await service.numberOfChecks() == 1)
+    #expect(await service.agentSetupInstallCalls() == 0)
+
+    await service.releaseFirstCheck()
+    await firstOperation.value
+    #expect(!controller.phase.isBusy)
+  }
 }
 
 private actor MockCLIInstaller: CLIInstalling {
   private let installFailure: CLIInstallerFailure?
   private var phases: [CLIInstallerPhase] = []
   private var agentSetupCalls = 0
+  private let pausesBeforeFirstProgress: Bool
+  private var checkCalls = 0
+  private var firstCheckStarted: CheckedContinuation<Void, Never>?
+  private var firstCheckRelease: CheckedContinuation<Void, Never>?
 
-  init(installFailure: CLIInstallerFailure? = nil) {
+  init(installFailure: CLIInstallerFailure? = nil, pausesBeforeFirstProgress: Bool = false) {
     self.installFailure = installFailure
+    self.pausesBeforeFirstProgress = pausesBeforeFirstProgress
   }
 
   func check(progress: @escaping CLIInstallerProgress) async throws -> CLIInstallPlan {
+    checkCalls += 1
+    if pausesBeforeFirstProgress, checkCalls == 1 {
+      firstCheckStarted?.resume()
+      firstCheckStarted = nil
+      await withCheckedContinuation { firstCheckRelease = $0 }
+    }
     await publish(.checkingLocal, progress: progress)
     await publish(.checkingRemote, progress: progress)
     return Self.plan
@@ -103,6 +143,20 @@ private actor MockCLIInstaller: CLIInstalling {
 
   func observedPhases() -> [CLIInstallerPhase] {
     phases
+  }
+
+  func numberOfChecks() -> Int {
+    checkCalls
+  }
+
+  func waitForFirstCheck() async {
+    guard checkCalls == 0 else { return }
+    await withCheckedContinuation { firstCheckStarted = $0 }
+  }
+
+  func releaseFirstCheck() {
+    firstCheckRelease?.resume()
+    firstCheckRelease = nil
   }
 
   private func publish(_ phase: CLIInstallerPhase, progress: CLIInstallerProgress) async {
