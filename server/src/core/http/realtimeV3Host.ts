@@ -499,7 +499,7 @@ export const makeInlineProtocolRealtimeTransport = (
     accountSessionId: number,
   ): void => {
     const state = socket.data.state
-    if (!state || state.registered) return
+    if (!accepting || socket.data.closed || !state || state.registered) return
     const compatibilitySocket = {
       id: socket.data.id,
       close: (code?: number, reason?: string) => socket.close(code, reason),

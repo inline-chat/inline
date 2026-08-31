@@ -35,6 +35,7 @@ import {
   makeRsaPublicKey,
   type EstablishedAuthorizationKey,
   type LoadedServerAuthorizationKey,
+  type ServerApplicationAuthorization,
   type ServerAuthorizationKeyRepository,
   type ServerReplayRepository,
 } from "@inline-chat/protocol/server"
@@ -623,6 +624,98 @@ describe("Inline Protocol WebSocket carrier", () => {
     expect(runtimeClosed).toBeTrue()
     expect(sent).toHaveLength(sentAfterClose)
 
+  })
+
+  test("does not register a compatibility connection after the socket closes", async () => {
+    let authorize: ((authorization: ServerApplicationAuthorization) => void) | undefined
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorize = onAuthorized
+        return {
+          dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }),
+        }
+      },
+    })
+    const data = upgrade(transport)
+    const socket = {
+      data,
+      close: () => {},
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    const register = authorize
+    if (!register) throw new Error("Expected authorization callback")
+    const addConnection = spyOn(connectionManager, "addConnection")
+    const authenticateConnection = spyOn(connectionManager, "authenticateConnection")
+
+    try {
+      transport.websocket.close?.(socket, 1000, "test close")
+      register({
+        authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+        permanent: false,
+        temporaryBound: true,
+        userId: 42,
+        accountSessionId: 84,
+      })
+
+      expect(addConnection).not.toHaveBeenCalled()
+      expect(authenticateConnection).not.toHaveBeenCalled()
+      expect(connectionManager.getConnection(data.id)).toBeUndefined()
+      expect(data.state?.registered).toBeFalse()
+    } finally {
+      addConnection.mockRestore()
+      authenticateConnection.mockRestore()
+      connectionManager.removeConnection(data.id)
+      await transport.shutdown()
+    }
+  })
+
+  test("does not register a compatibility connection after shutdown begins", async () => {
+    let authorize: ((authorization: ServerApplicationAuthorization) => void) | undefined
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorize = onAuthorized
+        return {
+          dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }),
+        }
+      },
+    })
+    const data = upgrade(transport)
+    let closeCount = 0
+    const socket = {
+      data,
+      close: () => { closeCount += 1 },
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    transport.websocket.open?.(socket)
+    const register = authorize
+    if (!register) throw new Error("Expected authorization callback")
+    const addConnection = spyOn(connectionManager, "addConnection")
+    const authenticateConnection = spyOn(connectionManager, "authenticateConnection")
+
+    let shutdown: Promise<void> | undefined
+    try {
+      shutdown = transport.shutdown()
+      expect(closeCount).toBe(1)
+      expect(data.closed).toBeFalse()
+      register({
+        authKeyId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+        permanent: false,
+        temporaryBound: true,
+        userId: 42,
+        accountSessionId: 84,
+      })
+
+      expect(addConnection).not.toHaveBeenCalled()
+      expect(authenticateConnection).not.toHaveBeenCalled()
+      expect(connectionManager.getConnection(data.id)).toBeUndefined()
+      expect(data.state?.registered).toBeFalse()
+    } finally {
+      await shutdown
+      addConnection.mockRestore()
+      authenticateConnection.mockRestore()
+      connectionManager.removeConnection(data.id)
+    }
   })
 
   test("reserves compatibility fanout bytes before queueing retained updates", async () => {
