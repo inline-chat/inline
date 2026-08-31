@@ -18,7 +18,7 @@ pub(super) enum IdleCommandResolution {
 
 pub(super) fn static_command_help(provider_id: &ProviderId) -> String {
     let provider_commands = match provider_id.as_str() {
-        "codex" => ", /sessions, /open, /close",
+        "codex" => ", /sessions, /open, /resume, /close",
         "claude" => ", /history",
         _ => "",
     };
@@ -31,8 +31,35 @@ pub(super) fn is_provider_epoch_release_command(text: &str, bot_username: &str) 
     let Ok(Some(command)) = parse_command(text, bot_username) else {
         return false;
     };
-    command.name == "close"
+    matches!(command.name.as_str(), "close" | "stop")
         && command.arguments.trim().is_empty()
+        && (!command.explicit_target || command.targets_this_bot)
+}
+
+pub(super) fn is_linked_codex_stop(
+    route: &InboundRoute,
+    record: &InboundRecord,
+) -> Result<bool, StoreError> {
+    Ok(route.provider_id.as_str() == "codex"
+        && record.sender_user_id == route.owner_user_id
+        && matches!(parse_command(&record.direction.text, &route.bot_username),
+            Ok(Some(command)) if command.name == "stop"
+                && command.arguments.trim().is_empty()
+                && (!command.explicit_target || command.targets_this_bot))
+        && route
+            .store
+            .session_thread_binding_for_chat(
+                &record.binding.installation_id,
+                record.binding.chat_id,
+            )?
+            .is_some())
+}
+
+pub(super) fn is_workspace_recovery_command(text: &str, bot_username: &str) -> bool {
+    let Ok(Some(command)) = parse_command(text, bot_username) else {
+        return false;
+    };
+    matches!(command.name.as_str(), "folder" | "projects")
         && (!command.explicit_target || command.targets_this_bot)
 }
 
@@ -84,10 +111,20 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
     {
         return handled(format!("/{name} doesn’t take arguments. Try /help."));
     }
+    let linked_codex_session = if sessions.provider_id().as_str() == "codex" {
+        match store.session_thread_binding_for_chat(&binding.installation_id, binding.chat_id) {
+            Ok(linked) => linked.is_some(),
+            Err(error) => return failed("I couldn’t read this session thread.", error, false),
+        }
+    } else {
+        false
+    };
+    let needs_resume = linked_codex_session && !sessions.session_history_is_ready(binding).await;
     match name {
         "help" => {
             let mut message = static_command_help(sessions.provider_id());
-            if let Ok(commands) = provider_commands(sessions, binding).await
+            if !needs_resume
+                && let Ok(commands) = provider_commands(sessions, binding).await
                 && !commands.is_empty()
             {
                 let names = commands
@@ -140,17 +177,27 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                 Ok(policy) => format!("{} ({})", policy.mode.as_str(), policy.source.label()),
                 Err(_) => "unavailable".to_string(),
             };
-            let permissions_catalog = match sessions.settings_catalog(binding, now_seconds()).await
-            {
-                Ok(catalog) => Some(catalog),
-                Err(error) if session_error_ends_epoch(&error) => {
-                    return failed(
-                        "I couldn’t load the current permission settings.",
-                        error,
-                        true,
-                    );
+            let permissions_catalog = if settings.turn_active {
+                // A cancelled provider read can close its connection epoch.
+                // Status must never put a running turn at risk.
+                None
+            } else {
+                match tokio::time::timeout(
+                    SETTINGS_DEADLINE,
+                    sessions.settings_catalog(binding, now_seconds()),
+                )
+                .await
+                {
+                    Ok(Ok(catalog)) => Some(catalog),
+                    Ok(Err(error)) if session_error_ends_epoch(&error) => {
+                        return failed(
+                            "I couldn’t load the current permission settings.",
+                            error,
+                            true,
+                        );
+                    }
+                    Ok(Err(_)) | Err(_) => None,
                 }
-                Err(_) => None,
             };
             let permissions = permission_selection_label(
                 current.permissions.as_deref(),
@@ -193,10 +240,13 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                 failed("I couldn’t start a fresh agent session.", error, fatal)
             }
         },
-        "close" if settings.turn_active => {
+        "close" | "stop" if settings.turn_active => {
             handled("Wait for the current turn to finish, or stop it first.")
         }
-        "close" => {
+        "close" | "stop" if name == "close" || linked_codex_session => {
+            if actor_user_id != settings.identity.owner_user_id {
+                return handled("Only the bot owner can release the provider connection.");
+            }
             let session_thread = match store
                 .session_thread_binding_for_chat(&binding.installation_id, binding.chat_id)
             {
@@ -212,10 +262,10 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
             }
             match sessions.shutdown_epoch_if_idle().await {
                 Ok(false) => handled(
-                    "Another Inline Codex operation is still in progress. Wait for it to finish, or stop an active turn, then try /close again.",
+                    "Another Inline Codex operation is still in progress, so this session has not been released. Wait for it to finish, then use /stop again. Other tasks were not interrupted.",
                 ),
                 Ok(true) => IdleCommandResolution::Handled {
-                    message: "Inline released its Codex connection and loaded sessions. Continue in Codex now; if Codex still says the session is closing, retry in a moment. Send here later to resume this session in Inline.".to_string(),
+                    message: "Released from Inline. Continue this same session in ChatGPT Desktop or Codex CLI. If Codex says it is still closing, retry in a moment. When you’re ready to return, close the session there and use /resume here.".to_string(),
                     failure: None,
                     provider_epoch_ended: true,
                     choices: None,
@@ -231,6 +281,9 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
         }
         "compact" if settings.turn_active => {
             handled("Wait for the current turn to finish, or stop it first.")
+        }
+        "compact" if needs_resume => {
+            handled("Use /resume to sync recent history before compacting this session.")
         }
         "compact" => {
             if !sessions.driver().capabilities().compact_session {
@@ -295,6 +348,9 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
         }
         "allowlist" => handled("Use /allowlist <userid> to choose a user to allow."),
         "" => handled("I couldn’t parse that command. Try /help."),
+        _ if needs_resume => {
+            handled("Use /resume to sync recent history before sending provider commands.")
+        }
         _ => match provider_commands(sessions, binding).await {
             Ok(commands) => {
                 let Some(command) = commands.iter().find(|command| command.name == name) else {
@@ -435,7 +491,17 @@ mod tests {
     }
 
     #[test]
-    fn only_an_exact_close_for_this_bot_skips_the_provider_work_lease() {
+    fn only_an_exact_release_for_this_bot_skips_the_provider_work_lease() {
+        assert!(is_provider_epoch_release_command("/stop", "codex_bot"));
+        assert!(is_provider_epoch_release_command(
+            "/stop@codex_bot",
+            "codex_bot"
+        ));
+        assert!(!is_provider_epoch_release_command(
+            "/stop@other_bot",
+            "codex_bot"
+        ));
+        assert!(!is_provider_epoch_release_command("/stop now", "codex_bot"));
         assert!(is_provider_epoch_release_command("/close", "codex_bot"));
         assert!(is_provider_epoch_release_command(
             "/close@codex_bot",
@@ -454,7 +520,7 @@ mod tests {
     #[test]
     fn help_advertises_only_each_providers_real_session_surface() {
         let codex = static_command_help(&ProviderId::new("codex").expect("provider"));
-        assert!(codex.contains("/sessions, /open, /close"));
+        assert!(codex.contains("/sessions, /open, /resume, /close"));
         assert!(!codex.contains("/history"));
 
         let claude = static_command_help(&ProviderId::new("claude").expect("provider"));
@@ -478,6 +544,7 @@ mod tests {
         compact_session: bool,
         resume_session: bool,
         settings_catalog_process_exited: bool,
+        settings_catalog_pending: bool,
     }
 
     impl AgentDriver for FakeDriver {
@@ -496,6 +563,9 @@ mod tests {
             &'a self,
             _cwd: &'a Path,
         ) -> DriverFuture<'a, DriverSettingsCatalog> {
+            if self.settings_catalog_pending {
+                return Box::pin(std::future::pending());
+            }
             if self.settings_catalog_process_exited {
                 return Box::pin(async {
                     Err(DriverError::ProcessExited("provider exited".to_string()))
@@ -682,6 +752,8 @@ mod tests {
                 host_installation_id: "host-test".to_string(),
                 host_label: "Test Mac".to_string(),
                 workspace_picker: None,
+                codex_projects_path: None,
+                codex_project_rpc: None,
                 bot_store: SqliteStore::open_in_memory().expect("bot store"),
                 reply_thread_default: ReplyThreadDefault {
                     mode: ReplyThreadMode::Auto,
@@ -1055,6 +1127,25 @@ mod tests {
             turn_active: false,
         };
 
+        for command in ["/help", "/compact", "/providercommand"] {
+            let result = resolve_idle_command(
+                &manager,
+                &store,
+                &binding,
+                &workspace,
+                &runtime,
+                identity.owner_user_id,
+                "mo_codex_bot",
+                command,
+            )
+            .await;
+            let IdleCommandResolution::Handled { message, .. } = result else {
+                panic!("paused command must be handled locally");
+            };
+            assert!(message.contains("/resume"), "{command}: {message}");
+        }
+        assert!(!manager.session_is_active(&binding).await);
+
         let new_session = resolve_idle_command(
             &manager,
             &store,
@@ -1102,7 +1193,7 @@ mod tests {
             &runtime,
             99,
             "mo_codex_bot",
-            "/close",
+            "/stop",
         )
         .await;
         let IdleCommandResolution::Handled { message, .. } = delegated_close else {
@@ -1138,7 +1229,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn close_refuses_dequeued_provider_work_before_turn_start() {
+    async fn stop_refuses_dequeued_provider_work_before_turn_start() {
         let (_directory, driver, store, manager, binding, workspace) = fixture(false);
         let provider = ProviderInstanceRef::new(
             binding.installation_id.clone(),
@@ -1181,7 +1272,7 @@ mod tests {
             },
             identity.owner_user_id,
             "mo_codex_bot",
-            "/close",
+            "/stop",
         )
         .await;
 
@@ -1277,6 +1368,52 @@ mod tests {
         assert!(message.contains("current turn"));
         assert!(failure.is_none());
         assert!(driver.starts.lock().expect("starts").is_empty());
+    }
+
+    #[tokio::test]
+    async fn status_returns_when_the_provider_catalog_stalls() {
+        let (_directory, _driver, store, _manager, binding, workspace) = fixture(false);
+        let driver = Arc::new(FakeDriver {
+            settings_catalog_pending: true,
+            ..Default::default()
+        });
+        let manager = ProviderSessionManager::new(
+            driver,
+            Arc::clone(&store),
+            ProviderId::new("codex").expect("provider"),
+        );
+        let (active, identity) = settings_fixture(&binding, &workspace);
+        for turn_active in [true, false] {
+            let deadline = if turn_active {
+                Duration::from_millis(250)
+            } else {
+                SETTINGS_DEADLINE + Duration::from_secs(1)
+            };
+            let resolution = tokio::time::timeout(
+                deadline,
+                resolve_idle_command(
+                    &manager,
+                    &store,
+                    &binding,
+                    &workspace,
+                    &SettingsRuntime {
+                        sessions: &manager,
+                        store: &store,
+                        active: &active,
+                        identity: &identity,
+                        turn_active,
+                    },
+                    identity.owner_user_id,
+                    "mo_codex_bot",
+                    "/status",
+                ),
+            )
+            .await
+            .expect("bounded status");
+            assert!(
+                matches!(resolution, IdleCommandResolution::Handled { failure: None, provider_epoch_ended: false, message, .. } if message.contains("provider default"))
+            );
+        }
     }
 
     #[tokio::test]

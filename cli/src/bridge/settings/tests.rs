@@ -192,6 +192,8 @@ impl Fixture {
                 host_installation_id: "host-test".to_string(),
                 host_label: "Test Mac".to_string(),
                 workspace_picker: None,
+                codex_projects_path: None,
+                codex_project_rpc: None,
                 bot_store: SqliteStore::open_in_memory().expect("bot store"),
                 reply_thread_default: ReplyThreadDefault {
                     mode: ReplyThreadMode::Auto,
@@ -209,6 +211,33 @@ impl Fixture {
             active: &self.active,
             identity: &self.identity,
             turn_active: false,
+        }
+    }
+
+    fn route(&self) -> InboundRoute {
+        let (_deferred_tx, _deferred_rx) = tokio::sync::mpsc::channel(1);
+        InboundRoute {
+            store: Arc::clone(&self.store),
+            installation_id: self.snapshot.binding.installation_id.clone(),
+            provider_id: ProviderId::new("codex").expect("provider"),
+            policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(
+                self.identity.owner_user_id,
+            ))),
+            owner_user_id: self.identity.owner_user_id,
+            host_label: self.identity.host_label.clone(),
+            owner_dm_chat_id: self.snapshot.binding.chat_id,
+            bot_user_id: self.identity.bot_user_id,
+            bot_username: "test_codex_bot".to_string(),
+            bot_store: self.identity.bot_store.clone(),
+            attachment_cache_dir: self._directory.path().join("attachments"),
+            owner_control: None,
+            accept_messages_after: 0,
+            deferred_inbound_tx: _deferred_tx,
+            pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            claude_history: None,
+            control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+            control_epoch: ControlTaskEpoch::new(),
+            bot_agent_resolver: BotAgentResolver::disabled(),
         }
     }
 
@@ -236,6 +265,194 @@ impl Fixture {
             document_revision,
         }
     }
+}
+
+#[test]
+fn provider_restart_settings_keep_project_selection_local_and_usable() {
+    let fixture = Fixture::new(CatalogBehavior::ProcessExited, false);
+    fixture
+        .store
+        .bind_chat_workspace(
+            &fixture.snapshot.binding.installation_id,
+            fixture.snapshot.binding.chat_id,
+            &fixture.snapshot.binding.workspace_id,
+            1,
+        )
+        .expect("initial chat workspace");
+    let route = fixture.route();
+    let second_workspace_id = WorkspaceId::new("workspace-two").expect("workspace id");
+    let second_workspace = fixture._directory.path().join("project-two");
+    std::fs::create_dir(&second_workspace).expect("second workspace");
+    fixture
+        .store
+        .select_workspace(
+            &fixture.snapshot.binding.installation_id,
+            &second_workspace_id,
+            &second_workspace,
+            2,
+        )
+        .expect("second workspace registration");
+
+    let first = provider_unavailable_project_document(&route, fixture.snapshot.binding.chat_id)
+        .expect("restart document");
+    assert_eq!(first.sections.len(), 2);
+    let folder = &first.sections[0].items[0];
+    assert_eq!(folder.id, ITEM_FOLDER);
+    let BotChatSettingsControl::Folder(folder) = &folder.control else {
+        panic!("project row must remain a folder selector");
+    };
+    assert!(!folder.allows_local_picker);
+    assert!(
+        folder
+            .recent_folders
+            .iter()
+            .any(|option| option.value == second_workspace_id.as_str())
+    );
+
+    let response = resolve_provider_unavailable_project_settings(
+        &BotInteractionEvent::ChatSettingsItemInvoked {
+            request_id: 1,
+            chat_id: InlineId::new(fixture.snapshot.binding.chat_id),
+            actor_user_id: InlineId::new(fixture.identity.owner_user_id),
+            version: SETTINGS_VERSION,
+            item_id: ITEM_FOLDER.to_string(),
+            value: Some(BotSettingsValue::String(second_workspace_id.to_string())),
+            document_revision: first.revision,
+        },
+        &route,
+        fixture.snapshot.binding.chat_id,
+    );
+    let BotChatSettingsResponse::Document(document) = response else {
+        panic!("selection should return the refreshed reduced document");
+    };
+    let BotChatSettingsControl::Folder(folder) = &document.sections[0].items[0].control else {
+        panic!("refreshed project row must remain a folder selector");
+    };
+    assert_eq!(folder.value, second_workspace_id.as_str());
+    assert_eq!(
+        fixture
+            .store
+            .chat_workspace(
+                &fixture.snapshot.binding.installation_id,
+                fixture.snapshot.binding.chat_id,
+            )
+            .expect("chat workspace")
+            .expect("bound workspace")
+            .workspace_id,
+        second_workspace_id
+    );
+}
+
+#[tokio::test]
+async fn project_browser_pages_all_projects_and_selects_beyond_quick_choices() {
+    let fixture = Fixture::new(CatalogBehavior::Ready, false);
+    let installation = &fixture.snapshot.binding.installation_id;
+    for index in 0..120 {
+        let path = fixture._directory.path().join(format!("saved-{index:03}"));
+        std::fs::create_dir(&path).unwrap();
+        fixture
+            .store
+            .discover_workspace(
+                installation,
+                &WorkspaceId::new(format!("saved-{index:03}")).unwrap(),
+                &path,
+            )
+            .unwrap();
+    }
+    let settings = fixture
+        .store
+        .chat_settings(&fixture.snapshot.binding, 2)
+        .unwrap();
+    let base = build_settings_document(&fixture.runtime(), &fixture.snapshot, &settings, None)
+        .await
+        .unwrap();
+    let items = base
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .collect::<Vec<_>>();
+    let BotChatSettingsControl::Folder(folder) = &items
+        .iter()
+        .find(|item| item.id == ITEM_FOLDER)
+        .unwrap()
+        .control
+    else {
+        panic!("folder")
+    };
+    assert_eq!(folder.recent_folders.len(), 8);
+    assert!(items.iter().any(|item| item.id == ITEM_PROJECTS));
+    let mut values = HashSet::new();
+    for page in 0..2 {
+        let response = resolve_settings_interaction(
+            &fixture.invocation(
+                &format!("{PROJECT_PAGE_PREFIX}{page}"),
+                None,
+                base.revision.clone(),
+            ),
+            &fixture.runtime(),
+            fixture.snapshot.clone(),
+        )
+        .await;
+        let BotChatSettingsResponse::Document(document) = response.response else {
+            panic!("project page")
+        };
+        let BotChatSettingsControl::Select { value, options } =
+            &document.sections[0].items[0].control
+        else {
+            panic!("project select")
+        };
+        assert!(options.len() <= 100);
+        assert!(options.iter().any(|option| option.value == *value));
+        values.extend(options.iter().map(|option| option.value.clone()));
+    }
+    assert_eq!(values.len(), 121, "no clipping at eight or 100 projects");
+    assert!(
+        project_settings_document(&fixture.runtime(), &fixture.snapshot, &base, usize::MAX)
+            .is_err()
+    );
+    let invalid = resolve_settings_interaction(
+        &fixture.invocation(
+            &format!("{PROJECT_PAGE_PREFIX}invalid"),
+            None,
+            base.revision.clone(),
+        ),
+        &fixture.runtime(),
+        fixture.snapshot.clone(),
+    )
+    .await;
+    assert!(matches!(
+        invalid.response,
+        BotChatSettingsResponse::Problem(_)
+    ));
+    let busy = SettingsRuntime {
+        turn_active: true,
+        ..fixture.runtime()
+    };
+    let selection = Some(BotSettingsValue::String("saved-119".to_string()));
+    let rejected = resolve_settings_interaction(
+        &fixture.invocation(ITEM_PROJECT, selection.clone(), base.revision.clone()),
+        &busy,
+        fixture.snapshot.clone(),
+    )
+    .await;
+    assert!(matches!(
+        rejected.response,
+        BotChatSettingsResponse::Problem(_)
+    ));
+    let selected = resolve_settings_interaction(
+        &fixture.invocation(ITEM_PROJECT, selection, base.revision.clone()),
+        &fixture.runtime(),
+        fixture.snapshot.clone(),
+    )
+    .await;
+    assert!(matches!(
+        selected.response,
+        BotChatSettingsResponse::Document(_)
+    ));
+    assert_eq!(
+        fixture.active.snapshot().binding.workspace_id.as_str(),
+        "saved-119"
+    );
 }
 
 fn expect_problem(response: BotChatSettingsResponse) -> BotChatSettingsProblem {
@@ -452,6 +669,47 @@ async fn invalid_toolbar_option_is_rejected_without_mutating_settings() {
 }
 
 #[tokio::test]
+async fn linked_compaction_requires_history_sync_without_acquiring_a_writer() {
+    let fixture = Fixture::new(CatalogBehavior::Ready, true);
+    let binding = &fixture.snapshot.binding;
+    let session = inline_agent_bridge::ProviderSessionRef::new(
+        inline_agent_bridge::ProviderInstanceRef::new(
+            binding.installation_id.clone(),
+            ProviderId::new("codex").unwrap(),
+        )
+        .unwrap(),
+        ProviderSessionId::new("linked-session").unwrap(),
+    )
+    .unwrap();
+    fixture
+        .sessions
+        .bind_session_thread(
+            &inline_agent_bridge::SessionThreadBinding::new(
+                session,
+                binding.workspace_id.clone(),
+                43,
+                binding.chat_id,
+            )
+            .unwrap(),
+            1,
+        )
+        .await
+        .unwrap();
+    let response = resolve_settings_interaction(
+        &fixture.invocation(ITEM_COMPACT, None, fixture.revision()),
+        &fixture.runtime(),
+        fixture.snapshot.clone(),
+    )
+    .await;
+    assert!(
+        expect_problem(response.response)
+            .message
+            .contains("/resume")
+    );
+    assert!(!fixture.sessions.session_is_active(binding).await);
+}
+
+#[tokio::test]
 async fn unsupported_compaction_returns_truthful_problem() {
     let fixture = Fixture::new(CatalogBehavior::Ready, false);
     let response = resolve_settings_interaction(
@@ -540,6 +798,101 @@ async fn unset_permission_selection_names_the_effective_default() {
     );
 }
 
+#[tokio::test]
+async fn missing_selected_workspace_remains_in_recovery_document_as_disabled() {
+    let fixture = Fixture::new(CatalogBehavior::Ready, false);
+    std::fs::rename(
+        &fixture.snapshot.workspace,
+        fixture._directory.path().join("moved-project"),
+    )
+    .expect("make the selected root unavailable");
+    fixture
+        .store
+        .mark_workspace_unavailable(
+            &fixture.snapshot.binding.installation_id,
+            &fixture.snapshot.binding.workspace_id,
+            3,
+        )
+        .expect("mark unavailable");
+    let recents_root = tempfile::tempdir().expect("recent workspaces root");
+    for index in 0..MAX_RECENT_WORKSPACES {
+        let path = recents_root.path().join(format!("recent-{index}"));
+        std::fs::create_dir(&path).expect("create recent workspace");
+        fixture
+            .store
+            .select_workspace(
+                &fixture.snapshot.binding.installation_id,
+                &WorkspaceId::new(format!("recent-{index}")).expect("workspace id"),
+                &path,
+                10 + index as i64,
+            )
+            .expect("select recent workspace");
+    }
+    let settings = fixture
+        .store
+        .chat_settings(&fixture.snapshot.binding, 4)
+        .expect("settings");
+
+    let document = build_settings_document(&fixture.runtime(), &fixture.snapshot, &settings, None)
+        .await
+        .expect("recovery document");
+
+    let folder = document
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .find(|item| item.id == ITEM_FOLDER)
+        .expect("folder item");
+    let BotChatSettingsControl::Folder(folder) = &folder.control else {
+        panic!("expected folder control");
+    };
+    assert!(folder.recent_folders.len() <= MAX_RECENT_WORKSPACES);
+    let selected = folder
+        .recent_folders
+        .iter()
+        .find(|choice| choice.value == folder.value)
+        .expect("selected recovery option");
+    assert!(selected.disabled);
+}
+
+#[tokio::test]
+async fn invalid_saved_catalog_does_not_disable_folder_recovery() {
+    let mut fixture = Fixture::new(CatalogBehavior::Ready, false);
+    let state = fixture._directory.path().join("invalid-project-state.json");
+    std::fs::write(&state, b"{").unwrap();
+    fixture.identity.codex_projects_path = Some(state);
+    let settings = fixture
+        .store
+        .chat_settings(&fixture.snapshot.binding, 2)
+        .unwrap();
+    let document = build_settings_document(&fixture.runtime(), &fixture.snapshot, &settings, None)
+        .await
+        .unwrap();
+    let section = document
+        .sections
+        .iter()
+        .find(|section| section.id == "project")
+        .unwrap();
+    assert!(
+        section
+            .description
+            .as_deref()
+            .unwrap()
+            .contains("could not be refreshed")
+    );
+    assert!(
+        !section
+            .items
+            .iter()
+            .find(|item| item.id == ITEM_FOLDER)
+            .unwrap()
+            .disabled
+    );
+    assert!(
+        project_settings_document(&fixture.runtime(), &fixture.snapshot, &document, 0).is_err()
+    );
+}
+
 #[test]
 fn permission_status_and_reset_copy_name_the_effective_default() {
     let catalog = DriverSettingsCatalog {
@@ -573,6 +926,17 @@ async fn slash_settings_catalog_epoch_loss_is_fatal() {
         "Provider options are temporarily unavailable."
     );
     assert!(result.failure.is_some());
+}
+
+#[tokio::test]
+async fn project_picker_remains_local_when_provider_catalog_is_down() {
+    let fixture = Fixture::new(CatalogBehavior::ProcessExited, false);
+    let result = resolve_settings_command(&fixture.runtime(), "folder", "").await;
+
+    assert!(!result.provider_epoch_ended);
+    assert!(result.failure.is_none());
+    assert!(result.message.contains("Current project: project"));
+    assert!(result.choices.is_some());
 }
 
 #[tokio::test]

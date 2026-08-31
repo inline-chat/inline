@@ -45,7 +45,7 @@ pub(in crate::bridge) fn conversation_for_chat(
         .store
         .bound_chat_workspace(&route.installation_id, chat_id)?
     {
-        Some(workspace) if workspace.missing_since.is_none() => route
+        Some(workspace) => route
             .store
             .verified_workspace(
                 &route.installation_id,
@@ -58,7 +58,6 @@ pub(in crate::bridge) fn conversation_for_chat(
                 }
                 error => ConversationResolutionError::Store(error),
             })?,
-        Some(_) => return Err(ConversationResolutionError::MissingWorkspace),
         None => {
             let workspace = default_workspace_or_home(route)?;
             bind_chat_workspace(route, chat_id, workspace)?
@@ -147,10 +146,17 @@ pub(in crate::bridge) fn conversation_for_settings_event(
     {
         return Ok(SettingsConversationResolution::Ready(existing.clone()));
     }
+    conversation_for_workspace_selection(route, chat_id).map(SettingsConversationResolution::Ready)
+}
+
+pub(in crate::bridge) fn conversation_for_workspace_selection(
+    route: &InboundRoute,
+    chat_id: i64,
+) -> Result<ActiveConversation, ConversationResolutionError> {
     match conversation_for_chat(route, chat_id) {
-        Ok(conversation) => Ok(SettingsConversationResolution::Ready(conversation)),
+        Ok(conversation) => Ok(conversation),
         Err(ConversationResolutionError::MissingWorkspace) => {
-            // Settings are the explicit recovery surface for a disappeared or
+            // Settings and /projects are recovery surfaces for a disappeared or
             // replaced folder. Preserve the unavailable binding for display
             // and folder selection only; normal turns still fail closed in
             // `conversation_for_chat` until the owner chooses a verified path.
@@ -160,15 +166,13 @@ pub(in crate::bridge) fn conversation_for_settings_event(
             else {
                 return Err(ConversationResolutionError::MissingWorkspace);
             };
-            Ok(SettingsConversationResolution::Ready(
-                ActiveConversation::new(
-                    BindingKey {
-                        installation_id: route.installation_id.clone(),
-                        chat_id,
-                        workspace_id: workspace.workspace_id,
-                    },
-                    workspace.path,
-                ),
+            Ok(ActiveConversation::new(
+                BindingKey {
+                    installation_id: route.installation_id.clone(),
+                    chat_id,
+                    workspace_id: workspace.workspace_id,
+                },
+                workspace.path,
             ))
         }
         Err(error) => Err(error),

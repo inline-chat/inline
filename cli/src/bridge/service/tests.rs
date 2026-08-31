@@ -391,6 +391,57 @@ fn launchd_state_distinguishes_loaded_stopped_from_running() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn lifecycle_waits_for_every_provider_and_its_inline_connection() {
+    let root = tempfile::Builder::new()
+        .prefix("ib-ready-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let (mut account, mut second, mut paths) = fixture();
+    second.installation_id = "claude".to_string();
+    second.provider_id = "claude".to_string();
+    account.providers.push(second);
+    paths.control_socket = root.path().join("control.sock");
+    let secrets = AccountBridgeSecrets {
+        version: 1,
+        owner_user_id: 42,
+        control_token: "test-control".to_string(),
+        owner_auth: None,
+        owner_token: "test-owner".to_string(),
+        providers: vec![],
+    };
+    let health = RuntimeHealth::starting(["codex".to_string(), "claude".to_string()]);
+    let server = ControlServer::bind(
+        &paths.control_socket,
+        secrets.control_token.clone(),
+        health.clone(),
+    )
+    .await
+    .unwrap();
+    let wait = wait_for_all_providers_ready(&paths, &account, &secrets);
+    tokio::pin!(wait);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), &mut wait)
+            .await
+            .is_err()
+    );
+    health.mark_provider_state("codex", ProviderRuntimeState::Ready);
+    health.mark_inline_connected("codex");
+    health.mark_provider_state("claude", ProviderRuntimeState::Ready);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(250), &mut wait)
+            .await
+            .is_err()
+    );
+    health.mark_inline_connected("claude");
+    tokio::time::timeout(Duration::from_secs(2), &mut wait)
+        .await
+        .unwrap()
+        .unwrap();
+    server.close().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn control_socket_authenticates_status_and_shutdown() {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -34,6 +34,8 @@ pub(super) async fn recover_provider_inbox(
     installation_id: &InstallationId,
     interruption: InterruptionKind,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    store.recover_session_pickers(installation_id, now_seconds())?;
+    recover_session_picker_commands(bot, store, installation_id).await?;
     for request in store
         .expire_open_command_choice_requests_for_installation(installation_id, now_seconds())?
     {
@@ -150,7 +152,35 @@ pub(super) async fn recover_provider_inbox(
         installation_id,
         message_retry_delay,
     )
-    .await
+    .await?;
+    recover_pending_agent_output_links(bot, store, installation_id).await?;
+    Ok(())
+}
+
+async fn recover_pending_agent_output_links(
+    bot: &InlineClient,
+    store: &BridgeStore,
+    installation_id: &InstallationId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for pending in store.pending_agent_output_links(installation_id)? {
+        match link_agent_session_assistant_output(
+            bot,
+            pending.agent_session_id,
+            &pending.provider_turn_id,
+            pending.message_id,
+        )
+        .await
+        {
+            Ok(()) => {
+                store.mark_agent_output_linked(&pending.event_id)?;
+            }
+            Err(error) => eprintln!(
+                "Agent session response linkage still needs repair: {}",
+                safe_diagnostic(&error.to_string())
+            ),
+        }
+    }
+    Ok(())
 }
 
 pub(super) async fn resolve_interaction_message(
@@ -241,7 +271,7 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
         {
             store.attach_inbound_stream_message(&pending.event_id, message_id.get())?;
         }
-        deliver_pending_final_with_attachments_transport(
+        let mutation = deliver_pending_final_with_attachments_transport(
             transport,
             &pending.event_id,
             pending.delivery_chat_id,
@@ -256,6 +286,18 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
             retry_delay,
         )
         .await?;
+        if pending.agent_output_session_id.is_some() {
+            let message_id = mutation.message_id.ok_or_else(|| {
+                io::Error::other("agent-session final recovery is missing its message identity")
+            })?;
+            if !store.attach_inbound_agent_output_message(&pending.event_id, message_id.get())? {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "agent-output link disappeared during final-send recovery",
+                )
+                .into());
+            }
+        }
         if !store.commit_inbound_final_send(&pending.event_id)? {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,

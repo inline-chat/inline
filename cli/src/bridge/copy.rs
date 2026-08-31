@@ -59,7 +59,7 @@ impl BridgeNotice {
                 "The previous agent session was unavailable, so I started a new one."
             }
             Self::SessionActiveElsewhere => {
-                "This Codex session is active in another app or CLI. Close it there, then resend here."
+                "This Codex session is open in another interface. Close it there, then retry /resume or your message here."
             }
             Self::InlineReconnecting => {
                 "Inline is reconnecting. Accepted work will resume automatically."

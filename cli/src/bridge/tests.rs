@@ -1,5 +1,17 @@
 use super::*;
 
+#[tokio::test]
+async fn advancing_control_epoch_cancels_detached_generation_watchers() {
+    let epoch = ControlTaskEpoch::new();
+    let mut watcher = epoch.subscribe();
+    assert_eq!(*watcher.borrow(), 0);
+
+    epoch.advance();
+    watcher.changed().await.expect("control epoch stays open");
+
+    assert_eq!(*watcher.borrow(), 1);
+}
+
 #[test]
 fn debug_settings_output_redacts_picker_capabilities_recursively() {
     let secret = "capability-that-must-never-be-printed";
@@ -752,7 +764,7 @@ fn agent_command_catalog_is_stable_and_within_server_limits() {
         .into_iter()
         .map(|command| command.command)
         .collect::<Vec<_>>();
-    for required in ["projects", "sessions", "open", "close"] {
+    for required in ["projects", "sessions", "open", "resume", "stop", "close"] {
         assert!(codex_names.iter().any(|name| name == required));
     }
 }

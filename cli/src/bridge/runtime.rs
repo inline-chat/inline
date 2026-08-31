@@ -46,18 +46,23 @@ pub(super) async fn send_inbound_response(
 
 mod admission;
 pub(super) use admission::accept_provider_unavailable_delivery;
-use admission::{handle_follow_command, handle_queue_undo_action};
+use admission::{
+    accept_inbound_or_session_handoff, handle_follow_command, handle_queue_undo_action,
+};
 mod conversation;
 pub(in crate::bridge) use conversation::*;
 mod content;
 use content::*;
 mod queue_ui;
 pub(in crate::bridge) use queue_ui::*;
+#[cfg(test)]
+mod authorization_tests;
+#[cfg(test)]
+mod release_acceptance;
 
 const APPROVAL_TTL_SECONDS: i64 = 15 * 60;
 const QUESTION_TTL_SECONDS: i64 = 15 * 60;
 const ACTIVE_STOP_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(5);
-const UNAUTHORIZED_DM_NOTICE_WINDOW_SECONDS: i64 = 10 * 60;
 const VOICE_TRANSCRIPT_WAIT: Duration = Duration::from_secs(10);
 const BOT_AGENT_CACHE_TTL: Duration = Duration::from_secs(60);
 const BOT_AGENT_NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(15);
@@ -136,8 +141,37 @@ pub(super) struct InboundRoute {
     pub deferred_inbound_tx: tokio::sync::mpsc::Sender<InboundRecord>,
     pub pending_voice_messages: Arc<std::sync::Mutex<HashSet<(i64, i64)>>>,
     pub claude_history: Option<ClaudeHistoryRuntime>,
-    pub session_browser: SessionBrowserRuntime,
+    pub control_lane: Arc<tokio::sync::Semaphore>,
+    pub control_epoch: ControlTaskEpoch,
     pub bot_agent_resolver: BotAgentResolver,
+}
+
+#[derive(Clone)]
+pub(super) struct ControlTaskEpoch {
+    version: tokio::sync::watch::Sender<u64>,
+}
+
+impl ControlTaskEpoch {
+    pub fn new() -> Self {
+        let (version, _) = tokio::sync::watch::channel(0);
+        Self { version }
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.version.subscribe()
+    }
+
+    pub fn advance(&self) {
+        self.version.send_modify(|version| {
+            *version = version.wrapping_add(1);
+        });
+    }
+}
+
+impl std::fmt::Debug for ControlTaskEpoch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ControlTaskEpoch(<generation>)")
+    }
 }
 
 #[derive(Clone)]
@@ -395,7 +429,7 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
             return Ok(());
         }
         if !handle_follow_command(bot, &record, route).await?
-            && accept_or_resume_queued_confirmation(&route.store, &record)?
+            && accept_inbound_or_session_handoff(route, &record)?
             && deferred_by_capacity
         {
             send_text_reply(
@@ -428,40 +462,56 @@ pub(super) async fn inbound_from_delivery(
     if message.timestamp < route.accept_messages_after {
         return Ok(None);
     }
-    let sender_is_bot = message_sender_is_bot(&route.bot_store, message).await?;
+    // This boundary applies equally to humans and bots. Unknown senders must
+    // not trigger even a denial reply, routing lookup, or response delay.
     if !route.allows(message.sender_id.get()) {
-        tokio::time::sleep_until(response_not_before).await;
-        let is_direct_message = !sender_is_bot
-            && route
-                .bot_store
-                .dialog(message.chat_id)
-                .await?
-                .is_some_and(|dialog| dialog.peer_user_id == Some(message.sender_id));
-        let now = now_seconds();
-        if is_direct_message
-            && route.store.claim_unauthorized_dm_notice(
-                message.sender_id.get(),
-                now,
-                UNAUTHORIZED_DM_NOTICE_WINDOW_SECONDS,
-            )?
-        {
+        return Ok(None);
+    }
+    tokio::time::sleep_until(response_not_before).await;
+    let event_id = format!("inline-message-{}-{}", message.chat_id, message.message_id);
+    match route.store.session_picker_thread_gate(
+        &route.installation_id,
+        message.chat_id.get(),
+        now_seconds(),
+    )? {
+        SessionPickerThreadGate::Ready => {}
+        SessionPickerThreadGate::Opening => {
             send_text_reply(
                 bot,
                 message.chat_id.get(),
                 message.message_id.get(),
-                "You are not allowed to use this bot.",
-                &format!(
-                    "unauthorized-{}-{}",
-                    message.sender_id.get(),
-                    now.div_euclid(UNAUTHORIZED_DM_NOTICE_WINDOW_SECONDS)
-                ),
-                BridgeNotificationClass::RoutineStatus,
+                "This Codex session is still importing and opening. Return to the bot’s private DM, finish Open, then resend this message.",
+                &format!("{event_id}-session-picker-opening"),
+                BridgeNotificationClass::ImportantFailure,
             )
             .await?;
+            return Ok(None);
         }
+        SessionPickerThreadGate::Failed => {
+            send_text_reply(
+                bot,
+                message.chat_id.get(),
+                message.message_id.get(),
+                "This Codex session did not finish opening. Return to the bot’s private DM, open it again from /sessions, then resend this message.",
+                &format!("{event_id}-session-picker-failed"),
+                BridgeNotificationClass::ImportantFailure,
+            )
+            .await?;
+            return Ok(None);
+        }
+    }
+    if let Some(anchor_message_id) = unresolved_session_thread_anchor(route, message).await? {
+        send_text_reply(
+            bot,
+            message.chat_id.get(),
+            message.message_id.get(),
+            "This Codex session has not finished opening. Return to the bot’s private DM, open it again from /sessions, then resend this message.",
+            &format!("{event_id}-session-opening-{anchor_message_id}"),
+            BridgeNotificationClass::ImportantFailure,
+        )
+        .await?;
         return Ok(None);
     }
-    tokio::time::sleep_until(response_not_before).await;
     let Some(content) = normalize_inbound_content(&message.content) else {
         return Ok(None);
     };
@@ -576,7 +626,16 @@ pub(super) async fn inbound_from_delivery(
         .await?;
         return Ok(None);
     }
-    let conversation = match conversation_for_chat(route, message.chat_id.get()) {
+    let resolved = if is_command
+        && message.sender_id.get() == route.owner_user_id
+        && (is_workspace_recovery_command(&direction.text, &route.bot_username)
+            || is_provider_epoch_release_command(&direction.text, &route.bot_username))
+    {
+        conversation_for_workspace_selection(route, message.chat_id.get())
+    } else {
+        conversation_for_chat(route, message.chat_id.get())
+    };
+    let conversation = match resolved {
         Ok(conversation) => conversation.snapshot(),
         Err(ConversationResolutionError::MissingWorkspace) => {
             let notice = BridgeNotice::MissingWorkspace.message().to_string();
@@ -675,6 +734,36 @@ pub(super) async fn inbound_from_delivery(
             Some(record)
         }
     }))
+}
+
+async fn unresolved_session_thread_anchor(
+    route: &InboundRoute,
+    message: &MessageRecord,
+) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+    if route
+        .store
+        .session_thread_binding_for_chat(&route.installation_id, message.chat_id.get())?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let Some(dialog) = route.bot_store.dialog(message.chat_id).await? else {
+        return Ok(None);
+    };
+    let (Some(parent_chat_id), Some(anchor_message_id)) =
+        (dialog.parent_chat_id, dialog.parent_message_id)
+    else {
+        return Ok(None);
+    };
+    route
+        .store
+        .session_thread_opening_matches_anchor(
+            &route.installation_id,
+            parent_chat_id.get(),
+            anchor_message_id.get(),
+        )
+        .map(|matches| matches.then_some(anchor_message_id.get()))
+        .map_err(Into::into)
 }
 
 pub(super) fn mentioned_agent_id(
@@ -1023,12 +1112,12 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     }
     let workspace = source_workspace;
     let binding = &binding;
-    let agent_session_id = match link_agent_session_input(
-        bot, sessions, store, route, binding, &record,
+    let prepared_agent_input = match prepare_agent_session_input(
+        sessions, store, route, binding, &record,
     )
     .await
     {
-        Ok(agent_session_id) => agent_session_id,
+        Ok(prepared) => prepared,
         Err(error) => {
             let diagnostic = safe_diagnostic(&error.to_string());
             publish_inbound_final_send(
@@ -1046,6 +1135,31 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             return Ok(());
         }
     };
+    let agent_session_id = prepared_agent_input
+        .as_ref()
+        .map(|input| input.agent_session_id);
+    if sessions.provider_id().as_str() == "codex"
+        && agent_session_id.is_some()
+        && !sessions.session_history_is_ready(binding).await
+    {
+        publish_inbound_final_send(
+            bot,
+            store,
+            &record.event_id,
+            binding.chat_id,
+            None,
+            "",
+            if record.sender_user_id == route.owner_user_id {
+                "This session needs /resume before you can send prompts. Use /resume to reconnect and sync recent history, then send your prompt again. This message was not sent to Codex."
+            } else {
+                "This session needs /resume before you can send prompts. Ask the bot owner to use /resume to sync recent history, then send your prompt again. This message was not sent to Codex."
+            },
+            InboundState::Completed,
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
     let mut initial_progress = ActivityTracker::default();
     initial_progress.set_workspace(workspace);
     if let Some(ref acknowledgement) = command_acknowledgement {
@@ -1178,11 +1292,12 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         session_open,
         turn_started_at.elapsed().as_millis()
     );
-    if let Err(error) = store.attach_inbound_turn(
+    let tracked = store.attach_inbound_turn(
         &record.event_id,
         &turn.turn_id,
         stream_message_id.map(InlineId::get),
-    ) {
+    );
+    if !matches!(tracked, Ok(true)) {
         typing.stop().await;
         if let Err(cancel_error) = sessions
             .driver()
@@ -1194,6 +1309,13 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                 safe_diagnostic(&cancel_error.to_string())
             );
         }
+        let error: Box<dyn std::error::Error> = match tracked {
+            Err(error) => error.into(),
+            _ => {
+                io::Error::other("started turn disappeared before provider acceptance was recorded")
+                    .into()
+            }
+        };
         let diagnostic = safe_diagnostic(&error.to_string());
         let _ = publish_inbound_final_send(
             bot,
@@ -1207,7 +1329,18 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             Some(&diagnostic),
         )
         .await;
-        return Err(error.into());
+        return Err(error);
+    }
+    let mut input_link_needs_repair = false;
+    if let Some(prepared) = prepared_agent_input.as_ref()
+        && let Err(error) =
+            link_accepted_agent_session_input(bot, prepared, record.message_id).await
+    {
+        input_link_needs_repair = true;
+        eprintln!(
+            "Accepted agent input linkage needs resync: {}",
+            safe_diagnostic(&error.to_string())
+        );
     }
     let mut presenter = StreamingPresenter::new(now_millis(), 750);
     let mut coordinator = TurnCoordinator::running(turn.turn_id.clone());
@@ -1919,23 +2052,40 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         &final_text,
         &output_attachments,
         agent_session_id.map(|_| assistant_final_random_id(&turn.turn_id)),
+        agent_session_id,
         final_state,
         terminal_failure.as_deref(),
     )
     .await?;
-    if let (Some(agent_session_id), Some(message_id)) = (agent_session_id, final_message_id)
-        && let Err(error) = link_agent_session_assistant_output(
+    if input_link_needs_repair
+        && let Some(prepared) = prepared_agent_input.as_ref()
+        && let Err(error) =
+            link_accepted_agent_session_input(bot, prepared, record.message_id).await
+    {
+        eprintln!(
+            "Accepted agent input linkage still needs resync: {}",
+            safe_diagnostic(&error.to_string())
+        );
+    }
+    if let (Some(agent_session_id), Some(message_id)) = (agent_session_id, final_message_id) {
+        match link_agent_session_assistant_output(
             bot,
             agent_session_id,
             &turn.turn_id,
             message_id.get(),
         )
         .await
-    {
-        eprintln!(
-            "Agent session response linkage needs repair: {}",
-            safe_diagnostic(&error.to_string())
-        );
+        {
+            Ok(()) => {
+                store.mark_agent_output_linked(&record.event_id)?;
+            }
+            Err(error) => {
+                eprintln!(
+                    "Agent session response linkage needs repair: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+            }
+        }
     }
     if let Some(message_id) = final_message_id {
         attach_changed_file_actions(
@@ -2550,7 +2700,15 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                     );
                     let mut cancel_turn = false;
                     let mut acknowledgement = None;
-                    if store.claim_event(&record.event_id, now_seconds())? {
+                    let handoff = is_linked_codex_stop(route, &record)?;
+                    let accepted = if handoff {
+                        // The same command becomes idle release work after
+                        // this turn's terminal cleanup drops its provider leases.
+                        store.accept_session_handoff(&record)?
+                    } else {
+                        store.claim_event(&record.event_id, now_seconds())?
+                    };
+                    if accepted {
                         let effects = coordinator.stop();
                         acknowledgement = Some(
                             coordinator_acknowledgement(&effects)
@@ -2580,7 +2738,11 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                 route,
                                 &record,
                                 binding.chat_id,
-                                acknowledgement.message(),
+                                if handoff {
+                                    "Stop requested. Once stopping is confirmed, Inline will try to release Codex. Earlier queued messages in this thread were cancelled. Wait for the release confirmation before continuing elsewhere."
+                                } else {
+                                    acknowledgement.message()
+                                },
                                 &acknowledgement_external_id,
                                 BridgeNotificationClass::RoutineStatus,
                             ),
@@ -2875,15 +3037,16 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                     DirectionDisposition::Steered => {
                         let accepted = store.accept_inbound(&record)?;
                         if accepted && store.start_inbound(&record.event_id, now_seconds())? {
-                            store.attach_inbound_turn(&record.event_id, turn_id, None)?;
-                            if let Err(error) = link_agent_session_input(
-                                bot, sessions, store, route, binding, &record,
+                            let prepared = match prepare_agent_session_input(
+                                sessions, store, route, binding, &record,
                             )
                             .await
                             {
-                                let diagnostic = safe_diagnostic(&error.to_string());
-                                store.fail_inbound(&record.event_id, &diagnostic)?;
-                                send_text_reply(
+                                Ok(prepared) => prepared,
+                                Err(error) => {
+                                    let diagnostic = safe_diagnostic(&error.to_string());
+                                    store.fail_inbound(&record.event_id, &diagnostic)?;
+                                    send_text_reply(
                                     bot,
                                     binding.chat_id,
                                     record.message_id,
@@ -2892,9 +3055,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                     BridgeNotificationClass::ImportantFailure,
                                 )
                                 .await?;
-                                delivery.ack().await?;
-                                return Ok(());
-                            }
+                                    delivery.ack().await?;
+                                    return Ok(());
+                                }
+                            };
                             let steered = sessions
                                 .driver()
                                 .steer_turn(
@@ -2909,6 +3073,29 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                                 .await;
                             match steered {
                                 Ok(()) => {
+                                    if !store.attach_inbound_turn(
+                                        &record.event_id,
+                                        turn_id,
+                                        None,
+                                    )? {
+                                        return Err(io::Error::other(
+                                            "accepted steering input lost its durable record",
+                                        )
+                                        .into());
+                                    }
+                                    if let Some(prepared) = prepared.as_ref()
+                                        && let Err(error) = link_accepted_agent_session_input(
+                                            bot,
+                                            prepared,
+                                            record.message_id,
+                                        )
+                                        .await
+                                    {
+                                        eprintln!(
+                                            "Accepted steering linkage needs resync: {}",
+                                            safe_diagnostic(&error.to_string())
+                                        );
+                                    }
                                     // Native steering is intentionally silent. The running
                                     // agent's updated output is the acknowledgement.
                                     store.complete_inbound(&record.event_id)?;

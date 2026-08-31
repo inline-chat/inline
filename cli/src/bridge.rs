@@ -17,18 +17,21 @@ use inline_agent_bridge::{
     DirectionId, DriverError, DriverSettingsCatalog, FileChange, HistoryImportState, HostToolCall,
     HostToolCallClaim, HostToolCallRecord, HostToolConfiguration, HostToolHandler, HostToolResult,
     HostToolSpec, HostToolTransport, InboundEnvelope, InboundRecord, InboundState,
-    InboundUndoOutcome, InstallationId, InstallationRecord, OperatorAllowlistClaimContext,
-    OperatorAllowlistClaimOutcome, OperatorAllowlistDecision, OperatorPolicy, OutputAttachment,
-    OutputAttachmentKind, PendingApproval, PendingCommandChoiceRequest,
-    PendingOperatorAllowlistRequest, PendingQuestion, PlanStep, PlanStepStatus, ProviderId,
-    ProviderSessionManager, Question, QuestionAnswer, QuestionClaimContext, QuestionClaimLocator,
-    QuestionClaimOutcome, QuestionRequest, QuestionResolution, QuestionState, QueueItemId,
-    ReplyThreadMode, ReplyThreadOverrideUpdateOutcome, SessionManagerError, SettingsUpdateOutcome,
-    SteeringSupport, StoreError, StreamingPresenter, TriggerDecision, TriggerResolver,
-    TurnCoordinator, TurnInput, TurnOptions, TurnOutcome, TurnTiming, UpdatePriority,
-    ValidationSummary, VisibilityMode, WORKING_CONTINUED_STATUS, WORKING_STATUS, WorkspaceChoice,
-    WorkspaceId, WorkspaceRecord, format_elapsed_compact, parse_command, reap_stale_process_host,
-    sanitize_visible_command, sanitize_visible_transcript,
+    InboundUndoOutcome, InstallationId, InstallationRecord, MAX_RECENT_WORKSPACES,
+    MAX_SESSION_PICKER_ITEMS, OperatorAllowlistClaimContext, OperatorAllowlistClaimOutcome,
+    OperatorAllowlistDecision, OperatorPolicy, OutputAttachment, OutputAttachmentKind,
+    PendingApproval, PendingCommandChoiceRequest, PendingOperatorAllowlistRequest, PendingQuestion,
+    PendingSessionPicker, PlanStep, PlanStepStatus, ProviderId, ProviderSessionManager, Question,
+    QuestionAnswer, QuestionClaimContext, QuestionClaimLocator, QuestionClaimOutcome,
+    QuestionRequest, QuestionResolution, QuestionState, QueueItemId, ReplyThreadMode,
+    ReplyThreadOverrideUpdateOutcome, SESSION_PICKER_PAGE_SIZE, SessionManagerError,
+    SessionPickerAction, SessionPickerClaimContext, SessionPickerClaimOutcome,
+    SessionPickerCompletion, SessionPickerRecord, SessionPickerState, SessionPickerThreadGate,
+    SettingsUpdateOutcome, SteeringSupport, StoreError, StreamingPresenter, TriggerDecision,
+    TriggerResolver, TurnCoordinator, TurnInput, TurnOptions, TurnOutcome, TurnTiming,
+    UpdatePriority, ValidationSummary, VisibilityMode, WORKING_CONTINUED_STATUS, WORKING_STATUS,
+    WorkspaceChoice, WorkspaceId, WorkspaceRecord, format_elapsed_compact, parse_command,
+    reap_stale_process_host, sanitize_visible_command, sanitize_visible_transcript,
 };
 use inline_client::{
     AnswerBotChatSettingsRequest, AuthCredential, AuthToken, BotCapability, BotCapabilityKind,
@@ -40,9 +43,9 @@ use inline_client::{
     ConnectRequest, CreateReplyThreadRequest, CreateThreadRequest, DialogFollowMode, DialogsOrder,
     DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, ExternalId, HistoryRequest,
     InlineClient, InlineId, LosslessEventDelivery, MediaKind, MessageActionButton,
-    MessageActionKind, MessageActionRow, MessageActions, MessageContent, PeerRef, RandomId,
-    ReactRequest, SdkBackend, SendInteractiveTextRequest, SendNotificationMode, SendTextRequest,
-    SqliteStore, TypingRequest, UploadRequest, UploadThumbnail,
+    MessageActionKind, MessageActionRow, MessageActions, MessageContent, MessageRecord, PeerRef,
+    RandomId, ReactRequest, SdkBackend, SendInteractiveTextRequest, SendNotificationMode,
+    SendTextRequest, SqliteStore, TypingRequest, UploadRequest, UploadThumbnail,
 };
 use inline_protocol::proto;
 use rand::{RngCore, rngs::OsRng};
@@ -110,6 +113,7 @@ use session_browser::*;
 mod settings;
 use settings::*;
 mod owner_control;
+mod projects;
 use owner_control::{OwnerControl, owner_control_error_invalidates_authentication};
 mod workspace_rpc;
 use workspace_rpc::*;
@@ -456,11 +460,10 @@ pub async fn run_service(
                 )
                 .into());
             }
-            eprintln!(
-                "Owner follow controls are unavailable: {}",
-                safe_diagnostic(&error.to_string())
-            );
-            None
+            // Owner authorization is required for every prompt. Do not start
+            // healthy-looking providers with a permanently missing connection;
+            // the service manager retries startup after bounded local retries.
+            return Err(error);
         }
     };
     let mut owner_authentication_invalidation = owner_control
@@ -750,8 +753,12 @@ pub fn workspace_list(
     let default_workspace_id = store
         .default_workspace(&installation_id)?
         .map(|workspace| workspace.workspace_id);
-    let choices =
-        store.recent_workspace_choices(&installation_id, default_workspace_id.as_ref())?;
+    let choices = projects::project_choices(
+        &store,
+        &installation_id,
+        default_workspace_id.as_ref(),
+        projects::codex_projects_path(&provider.provider_id).as_deref(),
+    )?;
     let output = choices
         .into_iter()
         .map(|choice| WorkspaceOutput {
@@ -818,6 +825,7 @@ pub async fn start(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let loaded = load_installation(config)?;
     service::start_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
+    service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     let results = provider_statuses(&loaded).await;
     print_provider_statuses(&results, json, json_format)?;
     ensure_provider_statuses_healthy(&results)
@@ -848,6 +856,7 @@ pub async fn restart(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let loaded = load_installation(config)?;
     service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
+    service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     let results = provider_statuses(&loaded).await;
     print_provider_statuses(&results, json, json_format)?;
     ensure_provider_statuses_healthy(&results)
@@ -861,6 +870,8 @@ pub async fn refresh_after_update(
         validate_account(&loaded.account, &loaded.secrets)?;
         service::refresh_stable_binary(&loaded.paths, updated_binary)?;
         service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
+        service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets)
+            .await?;
     }
     Ok(())
 }
@@ -1152,7 +1163,12 @@ async fn run_provider_installation(
     }
     let owns_owner_control = !owner_control_managed;
     let owner_control = if owner_control_managed {
-        shared_owner_control
+        Some(shared_owner_control.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "shared owner authorization must be connected before starting agents",
+            )
+        })?)
     } else {
         let owner_control_seed_required = !account.owner_control_cursor_seeded;
         let owner_auth = owner_credential(&secrets)?;
@@ -1176,11 +1192,15 @@ async fn run_provider_installation(
                 Some(Arc::new(control))
             }
             Err(error) => {
-                eprintln!(
-                    "Owner follow controls are unavailable: {}",
-                    safe_diagnostic(&error.to_string())
-                );
-                None
+                if owner_control_error_invalidates_authentication(error.as_ref()) {
+                    let _ = clear_bridge_owner_authority(&paths, &owner_auth)?;
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "bridge owner authorization expired; run Inline agent setup again",
+                    )
+                    .into());
+                }
+                return Err(error);
             }
         }
     };
@@ -1266,7 +1286,7 @@ async fn run_provider_installation(
     let active = ActiveConversation::new(binding.clone(), workspace.clone());
     let reply_thread_default =
         reply_thread_default_for_provider(&account, &installation.provider_id)?;
-    let settings_identity = SettingsIdentity {
+    let mut settings_identity = SettingsIdentity {
         owner_user_id: account.owner_user_id,
         owner_dm_chat_id: dm_chat_id.get(),
         bot_user_id: installation.bot_user_id,
@@ -1281,6 +1301,8 @@ async fn run_provider_installation(
             account.host_label.clone()
         },
         workspace_picker,
+        codex_projects_path: projects::codex_projects_path(&installation.provider_id),
+        codex_project_rpc: None,
         bot_store: bot_store.clone(),
         reply_thread_default,
     };
@@ -1321,7 +1343,8 @@ async fn run_provider_installation(
         deferred_inbound_tx,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history,
-        session_browser: SessionBrowserRuntime::default(),
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
         bot_agent_resolver: BotAgentResolver::new(
             config.realtime_url.clone(),
             credentials.bot_token.clone(),
@@ -1361,6 +1384,7 @@ async fn run_provider_installation(
     let session_configuration_fingerprint =
         configure_provider_inline_tools(&spawned.driver, inline_tools.clone())?;
     let mut driver = Arc::new(spawned.driver);
+    settings_identity.codex_project_rpc = projects::codex_driver(&driver);
     let mut sessions = Arc::new(
         ProviderSessionManager::new(driver.clone(), bridge_store.clone(), provider_id.clone())
             .with_session_configuration_fingerprint(session_configuration_fingerprint.clone()),
@@ -1452,6 +1476,7 @@ async fn run_provider_installation(
 
     let run_result: Result<(), Box<dyn std::error::Error>> = async {
         const TURN_EVENT_QUEUE_CAPACITY: usize = 32;
+        const TURN_EVENT_DISPATCH_DEADLINE: Duration = Duration::from_secs(2);
 
         let mut conversations = HashMap::from([(dm_chat_id.get(), active.clone())]);
         let mut active_turns =
@@ -1462,10 +1487,49 @@ async fn run_provider_installation(
 
         let loop_result: Result<(), Box<dyn std::error::Error>> = 'runtime: loop {
             while active_turns.len() < MAX_ACCOUNT_CONCURRENT_TURNS {
-                let pending_binding = bridge_store
-                    .pending_inbound_bindings(&binding.installation_id, 64)?
-                    .into_iter()
-                    .find(|candidate| !active_turns.contains_key(&candidate.chat_id));
+                let mut pending_binding = None;
+                let mut incomplete_session_binding = None;
+                for candidate in
+                    bridge_store.pending_inbound_bindings(&binding.installation_id, 64)?
+                {
+                    if active_turns.contains_key(&candidate.chat_id) {
+                        continue;
+                    }
+                    match bridge_store.session_picker_thread_gate(
+                            &candidate.installation_id,
+                            candidate.chat_id,
+                            now_seconds(),
+                        )? {
+                        SessionPickerThreadGate::Ready => {
+                            pending_binding = Some(candidate);
+                            break;
+                        }
+                        SessionPickerThreadGate::Opening => continue,
+                        SessionPickerThreadGate::Failed => {
+                            incomplete_session_binding = Some(candidate);
+                            break;
+                        }
+                    }
+                }
+                if let Some(binding) = incomplete_session_binding {
+                    if let Some(record) =
+                        bridge_store.take_next_inbound(&binding, now_seconds())?
+                    {
+                        publish_inbound_final_send(
+                            &bot,
+                            &bridge_store,
+                            &record.event_id,
+                            record.binding.chat_id,
+                            record.stream_message_id.map(InlineId::new),
+                            "Failed.",
+                            "This Codex session did not finish opening. Send /sessions in the bot's private DM and open it again before sending more messages here.",
+                            InboundState::Failed,
+                            Some("session thread setup is incomplete"),
+                        )
+                        .await?;
+                    }
+                    continue;
+                }
                 let Some(pending_binding) = pending_binding else {
                     break;
                 };
@@ -1481,17 +1545,31 @@ async fn run_provider_installation(
                     break;
                 };
                 let Some(record) =
-                    bridge_store.take_next_inbound(&pending_binding, now_seconds())?
+                    bridge_store
+                        .take_next_inbound_if_session_ready(&pending_binding, now_seconds())?
                 else {
                     continue;
                 };
+                let provider_epoch_release = record.sender_user_id == inbound_route.owner_user_id
+                    && is_provider_epoch_release_command(
+                        &record.direction.text,
+                        &inbound_route.bot_username,
+                    )
+                    && (matches!(parse_command(&record.direction.text, &inbound_route.bot_username),
+                            Ok(Some(command)) if command.name == "close")
+                        || is_linked_codex_stop(&inbound_route, &record)?);
                 let workspace = bridge_store
                     .workspace(
                         &pending_binding.installation_id,
                         &pending_binding.workspace_id,
                     )?
                     .filter(|workspace| {
-                        workspace.missing_since.is_none() && workspace.path.is_dir()
+                        provider_epoch_release || (record.sender_user_id == inbound_route.owner_user_id
+                            && is_workspace_recovery_command(
+                                &record.direction.text,
+                                &inbound_route.bot_username,
+                            ))
+                            || (workspace.missing_since.is_none() && workspace.path.is_dir())
                     });
                 let Some(workspace) = workspace else {
                     publish_inbound_final_send(
@@ -1508,11 +1586,6 @@ async fn run_provider_installation(
                     .await?;
                     continue;
                 };
-                let provider_epoch_release = record.sender_user_id == inbound_route.owner_user_id
-                    && is_provider_epoch_release_command(
-                        &record.direction.text,
-                        &inbound_route.bot_username,
-                    );
                 let provider_work_lease = if provider_epoch_release {
                     drop(provider_admission_lease);
                     None
@@ -1634,11 +1707,24 @@ async fn run_provider_installation(
                     if let Some(dispatch_chat_id) = dispatch_chat_id
                         && let Some(sender) = active_turns.get(&dispatch_chat_id).cloned()
                     {
-                        match sender.send(delivery).await {
-                            Ok(()) => continue 'runtime,
-                            Err(error) => {
+                        match tokio::time::timeout(
+                            TURN_EVENT_DISPATCH_DEADLINE,
+                            sender.send(delivery),
+                        )
+                        .await
+                        {
+                            Ok(Ok(())) => continue 'runtime,
+                            Ok(Err(error)) => {
                                 active_turns.remove(&dispatch_chat_id);
                                 delivery = error.0;
+                            }
+                            Err(_) => {
+                                active_turns.remove(&dispatch_chat_id);
+                                return Err(io::Error::new(
+                                    io::ErrorKind::ConnectionAborted,
+                                    "active turn stopped accepting Inline events; restarting its provider epoch",
+                                )
+                                .into());
                             }
                         }
                     }
@@ -1712,6 +1798,14 @@ async fn run_provider_installation(
                 }
                 description = &mut provider_exit => {
                     health.mark_provider_unavailable();
+                    sessions.seal_provider_epoch();
+                    inbound_route.control_epoch.advance();
+                    let control_lane_quiesced = inbound_route
+                        .control_lane
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .map_err(|_| io::Error::other("session control lane closed"))?;
                     if let Some(readiness) = shared_provider_readiness.as_ref() {
                         readiness.mark_restarting(&installation.installation_id);
                     }
@@ -1735,14 +1829,15 @@ async fn run_provider_installation(
                     {
                         eprintln!("Timed out while interrupting turns for provider restart.");
                         turns = futures_util::stream::FuturesUnordered::new();
-                        recover_provider_inbox(
-                            &bot,
-                            &bridge_store,
-                            &binding.installation_id,
-                            InterruptionKind::ProviderRestart,
-                        )
-                        .await?;
                     }
+                    recover_provider_inbox(
+                        &bot,
+                        &bridge_store,
+                        &binding.installation_id,
+                        InterruptionKind::ProviderRestart,
+                    )
+                    .await?;
+                    drop(control_lane_quiesced);
                     if let Err(error) = shutdown_provider_driver(
                         driver.as_ref(),
                         &installation,
@@ -1847,6 +1942,7 @@ async fn run_provider_installation(
                                     inline_tools.clone(),
                                 )?;
                                 driver = Arc::new(spawned.driver);
+                                settings_identity.codex_project_rpc = projects::codex_driver(&driver);
                                 sessions = Arc::new(
                                     ProviderSessionManager::new(
                                         driver.clone(),
@@ -1903,6 +1999,14 @@ async fn run_provider_installation(
     }
     .await;
 
+    sessions.seal_provider_epoch();
+    inbound_route.control_epoch.advance();
+    let _control_lane_quiesced = inbound_route
+        .control_lane
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| io::Error::other("session control lane closed during shutdown"))?;
     if let Some(readiness) = shared_provider_readiness.as_ref() {
         readiness.mark_unavailable(&installation.installation_id);
     }

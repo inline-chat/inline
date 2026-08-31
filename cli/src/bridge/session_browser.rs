@@ -1,18 +1,18 @@
 //! Provider-session browsing and bounded reply-thread hydration.
 //!
-//! Codex uses an exclusive-worker beta contract: bounded history is hydrated
+//! Codex uses a sequential-continuation beta contract: bounded history is hydrated
 //! before the exact provider session is resumed by the existing turn driver.
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use inline_agent_bridge::{
     AgentSessionCatalog, DriverError, DriverResult, HistoryWindow, MAX_HISTORY_MESSAGE_LIMIT,
     MAX_HISTORY_TEXT_BYTES, ProviderInstanceRef, ProviderSessionId, ProviderSessionRef,
     SessionAvailability, SessionCapabilities, SessionItem, SessionItemPayload, SessionMessageRole,
-    SessionPageSize, SessionQuery, SessionReadRequest, SessionSnapshot, SessionSummary,
-    SessionThreadBindOutcome, SessionThreadBinding, SessionThreadOpening, TurnId,
+    SessionPage, SessionPageCursor, SessionPageSize, SessionQuery, SessionReadRequest,
+    SessionSnapshot, SessionSummary, SessionThreadBindOutcome, SessionThreadBinding,
+    SessionThreadOpening, TurnId,
 };
 use inline_agent_driver_codex::CodexSessionCatalog;
 use serde::{Deserialize, Serialize};
@@ -22,9 +22,13 @@ use super::*;
 const CALLBACK_VERSION: u32 = 1;
 const ACTION_PREFIX: &str = "bridge_agent_sessions_";
 const PICKER_TTL_SECONDS: i64 = 10 * 60;
-const MAX_PICKERS: usize = 32;
-const PICKER_PAGE_SIZE: usize = 6;
+const PICKER_PAGE_SIZE: usize = SESSION_PICKER_PAGE_SIZE;
 const MAX_SESSION_RESULTS: usize = 50;
+const SESSION_OPEN_LEASE_SECONDS: i64 = 2 * 60;
+const SESSION_OPEN_DEADLINE: Duration = Duration::from_secs(90);
+const SESSION_PAGE_DEADLINE: Duration = Duration::from_secs(10);
+const SESSION_CATALOG_DEADLINE: Duration = Duration::from_secs(5);
+const MAX_CATALOG_PAGE_READS: usize = 5;
 const MAX_INLINE_TEXT_UTF16: usize = 12_000;
 const MAX_INLINE_TEXT_BYTES: usize = 20_000;
 const MAX_BUTTON_TEXT_UTF16: usize = 64;
@@ -59,33 +63,12 @@ impl SessionCatalogSource for ProviderDriver {
     }
 }
 
-#[derive(Clone, Default)]
-pub(super) struct SessionBrowserRuntime {
-    registry: Arc<Mutex<SessionBrowserRegistry>>,
-}
-
-impl std::fmt::Debug for SessionBrowserRuntime {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("SessionBrowserRuntime(<private registry>)")
-    }
-}
-
-#[derive(Default)]
-struct SessionBrowserRegistry {
-    pickers: HashMap<String, SessionBrowserPicker>,
-}
-
 #[derive(Clone)]
 struct SessionBrowserPicker {
-    installation_id: InstallationId,
     provider_id: ProviderId,
-    owner_user_id: i64,
-    chat_id: i64,
-    message_id: Option<i64>,
-    workspace_id: WorkspaceId,
     workspace_label: String,
     sessions: Vec<SessionSummary>,
-    expires_at: i64,
+    has_older: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -94,6 +77,7 @@ enum SessionBrowserCallbackAction {
     Open { index: usize },
     Confirm { index: usize },
     Page { page: usize },
+    LoadOlder { expected_count: usize },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -106,120 +90,34 @@ struct SessionBrowserCallback {
 #[derive(Clone)]
 struct SessionBrowserOpen {
     token: String,
+    lease_owner: String,
     parent_chat_id: i64,
     picker_message_id: i64,
     workspace_id: WorkspaceId,
     workspace_label: String,
     session: SessionSummary,
     session_index: usize,
+    thread_chat_id: Option<i64>,
     confirmed: bool,
 }
 
-enum SessionBrowserClaim {
-    Open(SessionBrowserOpen),
-    Page(SessionBrowserPicker, usize),
-    Unauthorized,
-    Stale,
+struct ClaimedSessionBrowserAction {
+    lease_owner: String,
+    outcome: SessionPickerClaimOutcome,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SessionBrowserCommand {
     Sessions,
+    Resume,
 }
 
-impl SessionBrowserRuntime {
-    fn insert_picker(&self, token: String, picker: SessionBrowserPicker, now: i64) -> bool {
-        let mut registry = self.registry.lock().expect("session browser poisoned");
-        registry.prune(now);
-        if registry.pickers.len() >= MAX_PICKERS || registry.pickers.contains_key(&token) {
-            return false;
-        }
-        registry.pickers.insert(token, picker);
-        true
-    }
-
-    fn attach_picker_message(&self, token: &str, message_id: i64) -> bool {
-        if message_id <= 0 {
-            return false;
-        }
-        let mut registry = self.registry.lock().expect("session browser poisoned");
-        let Some(picker) = registry.pickers.get_mut(token) else {
-            return false;
-        };
-        picker.message_id = Some(message_id);
-        true
-    }
-
-    fn remove_picker(&self, token: &str) {
-        self.registry
-            .lock()
-            .expect("session browser poisoned")
-            .pickers
-            .remove(token);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn claim(
-        &self,
-        callback: &SessionBrowserCallback,
-        installation_id: &InstallationId,
-        provider_id: &ProviderId,
-        owner_user_id: i64,
-        actor_user_id: i64,
-        chat_id: i64,
-        message_id: i64,
-        workspace_id: Option<&WorkspaceId>,
-        now: i64,
-    ) -> SessionBrowserClaim {
-        let mut registry = self.registry.lock().expect("session browser poisoned");
-        registry.prune(now);
-        let Some(picker) = registry.pickers.get(&callback.token).cloned() else {
-            return SessionBrowserClaim::Stale;
-        };
-        if actor_user_id != owner_user_id || actor_user_id != picker.owner_user_id {
-            return SessionBrowserClaim::Unauthorized;
-        }
-        if &picker.installation_id != installation_id
-            || &picker.provider_id != provider_id
-            || picker.chat_id != chat_id
-            || picker.message_id != Some(message_id)
-            || workspace_id != Some(&picker.workspace_id)
-        {
-            return SessionBrowserClaim::Stale;
-        }
-        match callback.action {
-            SessionBrowserCallbackAction::Open { index }
-            | SessionBrowserCallbackAction::Confirm { index } => {
-                let Some(session) = picker.sessions.get(index).cloned() else {
-                    return SessionBrowserClaim::Stale;
-                };
-                SessionBrowserClaim::Open(SessionBrowserOpen {
-                    token: callback.token.clone(),
-                    parent_chat_id: picker.chat_id,
-                    picker_message_id: message_id,
-                    workspace_id: picker.workspace_id.clone(),
-                    workspace_label: picker.workspace_label.clone(),
-                    session,
-                    session_index: index,
-                    confirmed: matches!(
-                        callback.action,
-                        SessionBrowserCallbackAction::Confirm { .. }
-                    ),
-                })
-            }
-            SessionBrowserCallbackAction::Page { page } => {
-                if picker_page(&picker.sessions, page).is_none() {
-                    return SessionBrowserClaim::Stale;
-                }
-                SessionBrowserClaim::Page(picker, page)
-            }
-        }
-    }
-}
-
-impl SessionBrowserRegistry {
-    fn prune(&mut self, now: i64) {
-        self.pickers.retain(|_, picker| picker.expires_at > now);
+fn presentation_picker(record: &SessionPickerRecord) -> SessionBrowserPicker {
+    SessionBrowserPicker {
+        provider_id: record.provider_id.clone(),
+        workspace_label: record.workspace_label.clone(),
+        sessions: record.sessions.clone(),
+        has_older: record.catalog_cursor.is_some(),
     }
 }
 
@@ -249,12 +147,62 @@ where
             Ok(true)
         }
         Err(error) => {
-            route
+            if let Some(picker) = route
                 .store
-                .fail_inbound(&record.event_id, "session browser command failed")?;
-            Err(error)
+                .session_picker_for_origin_event(&route.installation_id, &record.event_id)?
+                && picker.state == SessionPickerState::Publishing
+            {
+                route.store.record_session_picker_publication_failure(
+                    &picker.callback_token,
+                    "Session picker publication failed",
+                    now_seconds(),
+                )?;
+            }
+            let diagnostic = safe_diagnostic(&error.to_string());
+            eprintln!("Session browser command failed: {diagnostic}");
+            // Keep the failure notice in the same durable final-send journal
+            // as turn results. A missing send acknowledgement must not consume
+            // the command without either a picker or a recoverable response.
+            if let Err(delivery_error) = publish_inbound_final_send(
+                bot,
+                &route.store,
+                &record.event_id,
+                record.binding.chat_id,
+                None,
+                "",
+                if command == SessionBrowserCommand::Resume {
+                    "I couldn’t finish resuming and refreshing this session. Its link is unchanged and no prompt was sent. Try /resume again, or /stop to release Inline’s connection."
+                } else {
+                    "I couldn’t load provider sessions. If the agent connection restarted, wait a moment and try /sessions again."
+                },
+                InboundState::Failed,
+                Some("session browser command failed"),
+            )
+            .await
+            {
+                eprintln!(
+                    "Session command failure notice needs recovery: {}",
+                    safe_diagnostic(&delivery_error.to_string())
+                );
+            }
+            if session_command_ends_provider_epoch(error.as_ref()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "provider connection ended during session command",
+                )
+                .into());
+            }
+            Ok(true)
         }
     }
+}
+
+fn session_command_ends_provider_epoch(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<DriverError>()
+        .is_some_and(DriverError::ends_epoch)
+        || matches!(error.downcast_ref::<SessionManagerError>(),
+            Some(SessionManagerError::Driver(error)) if error.ends_epoch())
 }
 
 pub(super) async fn handle_session_browser_action<D>(
@@ -270,6 +218,131 @@ where
         interaction_id,
         chat_id,
         message_id,
+        action_id,
+        data,
+        ..
+    } = event
+    else {
+        return Ok(false);
+    };
+    let Some(callback) = parse_session_browser_callback(action_id, data) else {
+        return Ok(false);
+    };
+    let is_navigation = matches!(
+        callback.action,
+        SessionBrowserCallbackAction::Page { .. } | SessionBrowserCallbackAction::LoadOlder { .. }
+    );
+    // Local pages never touch Codex. Loading older results does: cancelling
+    // a timed-out provider read must not interrupt a running turn.
+    if session_action_uses_provider(callback.action) && settings.turn_active {
+        let _ = answer_session_action(
+            bot,
+            *interaction_id,
+            "Finish the active Codex turn, then try this session action again.",
+        )
+        .await;
+        return Ok(true);
+    }
+    let permit = match route.control_lane.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            let _ = answer_session_action(
+                bot,
+                *interaction_id,
+                "Another session operation is finishing. Try Open again in a moment.",
+            )
+            .await;
+            return Ok(true);
+        }
+    };
+    let Some(claimed) = claim_session_browser_action(route, event, callback.clone())? else {
+        drop(permit);
+        return handle_session_browser_action_inner(bot, event, route, settings, None).await;
+    };
+    if !matches!(
+        &claimed.outcome,
+        SessionPickerClaimOutcome::Claimed(_)
+            | SessionPickerClaimOutcome::Resumable(_)
+            | SessionPickerClaimOutcome::Navigated(_)
+            | SessionPickerClaimOutcome::LoadRequested(_)
+    ) {
+        drop(permit);
+        return handle_session_browser_action_inner(bot, event, route, settings, Some(claimed))
+            .await;
+    }
+    let bot = bot.clone();
+    let event = event.clone();
+    let route = route.clone();
+    let sessions = settings.sessions.clone();
+    let active = settings.active.clone();
+    let identity = settings.identity.clone();
+    let action_chat_id = *chat_id;
+    let action_message_id = *message_id;
+    let action_interaction_id = *interaction_id;
+    let operation_deadline = if is_navigation {
+        SESSION_PAGE_DEADLINE
+    } else {
+        SESSION_OPEN_DEADLINE
+    };
+    let mut control_epoch = route.control_epoch.subscribe();
+    let _ = control_epoch.borrow_and_update();
+    tokio::spawn(async move {
+        let _permit = permit;
+        let runtime = SettingsRuntime {
+            sessions: &sessions,
+            store: &route.store,
+            active: &active,
+            identity: &identity,
+            turn_active: false,
+        };
+        let diagnostic = tokio::select! {
+            biased;
+            changed = control_epoch.changed() => {
+                let _ = changed;
+                eprintln!("Cancelled a session control operation because the provider epoch ended.");
+                return;
+            }
+            result = tokio::time::timeout(
+                operation_deadline,
+                handle_session_browser_action_inner(&bot, &event, &route, &runtime, Some(claimed)),
+            ) => match result {
+                Ok(Ok(_)) => return,
+                Ok(Err(error)) => safe_diagnostic(&error.to_string()),
+                Err(_) => {
+                    // Cancellation cannot tell whether the last remote mutation
+                    // committed. Keep Open in its leased state; once the lease
+                    // expires, the next tap reconciles durable checkpoints and
+                    // idempotent server identities instead of starting blind.
+                    eprintln!("Session control operation reached its deadline; waiting for durable reconciliation.");
+                    return;
+                }
+            }
+        };
+        {
+            repair_failed_session_action(
+                &bot,
+                &route,
+                &callback,
+                action_chat_id,
+                action_message_id,
+                action_interaction_id,
+                diagnostic,
+            )
+            .await;
+        }
+    });
+    Ok(true)
+}
+
+pub(super) async fn handle_provider_unavailable_session_browser_action(
+    bot: &InlineClient,
+    event: &ClientEvent,
+    route: &InboundRoute,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let ClientEvent::MessageActionInvoked {
+        interaction_id,
+        chat_id,
+        message_id,
         actor_user_id,
         action_id,
         data,
@@ -281,29 +354,206 @@ where
     let Some(callback) = parse_session_browser_callback(action_id, data) else {
         return Ok(false);
     };
-    let workspace = match route
+    let picker = route.store.session_picker(&callback.token)?;
+    let bound_workspace = route
         .store
-        .chat_workspace(&route.installation_id, chat_id.get())
-    {
-        Ok(workspace) => workspace,
-        Err(StoreError::WorkspaceUnavailable { .. }) => None,
-        Err(error) => return Err(error.into()),
+        .bound_chat_workspace(&route.installation_id, chat_id.get())?;
+    let authorized = picker.as_ref().is_some_and(|picker| {
+        actor_user_id.get() == route.owner_user_id
+            && actor_user_id.get() == picker.owner_user_id
+            && picker.installation_id == route.installation_id
+            && picker.provider_id == route.provider_id
+            && picker.chat_id == chat_id.get()
+            && picker.picker_message_id == Some(message_id.get())
+            && bound_workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.workspace_id == picker.workspace_id)
+    });
+    let toast = if actor_user_id.get() != route.owner_user_id {
+        "Only the bot owner can open these sessions."
+    } else if !authorized {
+        "This session picker is no longer active. Run /sessions again."
+    } else {
+        "The local provider is restarting. Try this action again when Codex reconnects."
     };
-    let claim = route.session_browser.claim(
-        &callback,
-        &route.installation_id,
-        &route.provider_id,
-        route.owner_user_id,
-        actor_user_id.get(),
-        chat_id.get(),
-        message_id.get(),
-        workspace.as_ref().map(|workspace| &workspace.workspace_id),
+    answer_session_action(bot, *interaction_id, toast).await?;
+    Ok(true)
+}
+
+fn claim_session_browser_action(
+    route: &InboundRoute,
+    event: &ClientEvent,
+    callback: SessionBrowserCallback,
+) -> Result<Option<ClaimedSessionBrowserAction>, Box<dyn std::error::Error>> {
+    let ClientEvent::MessageActionInvoked {
+        interaction_id,
+        chat_id,
+        message_id,
+        actor_user_id,
+        ..
+    } = event
+    else {
+        return Ok(None);
+    };
+    let Some(bound_workspace) = route
+        .store
+        .bound_chat_workspace(&route.installation_id, chat_id.get())?
+    else {
+        return Ok(None);
+    };
+    let now = now_seconds();
+    let lease_owner = format!("session-open-{}", interaction_id.get());
+    let action = match callback.action {
+        SessionBrowserCallbackAction::Open { index }
+        | SessionBrowserCallbackAction::Confirm { index } => SessionPickerAction::Open { index },
+        SessionBrowserCallbackAction::Page { page } => SessionPickerAction::Page { page },
+        SessionBrowserCallbackAction::LoadOlder { expected_count } => {
+            SessionPickerAction::LoadOlder { expected_count }
+        }
+    };
+    let outcome = route.store.claim_session_picker(
+        &callback.token,
+        action,
+        &SessionPickerClaimContext {
+            installation_id: route.installation_id.clone(),
+            provider_id: route.provider_id.clone(),
+            owner_user_id: route.owner_user_id,
+            actor_user_id: actor_user_id.get(),
+            chat_id: chat_id.get(),
+            message_id: message_id.get(),
+            workspace_id: bound_workspace.workspace_id,
+            lease_owner: lease_owner.clone(),
+            now,
+            lease_expires_at: now.saturating_add(SESSION_OPEN_LEASE_SECONDS),
+        },
+    )?;
+    Ok(Some(ClaimedSessionBrowserAction {
+        lease_owner,
+        outcome,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn repair_failed_session_action(
+    bot: &InlineClient,
+    route: &InboundRoute,
+    callback: &SessionBrowserCallback,
+    chat_id: InlineId,
+    message_id: InlineId,
+    interaction_id: InlineId,
+    diagnostic: String,
+) {
+    let lease_owner = format!("session-open-{}", interaction_id.get());
+    let repaired = route.store.retry_session_picker_open(
+        &callback.token,
+        &lease_owner,
+        &diagnostic,
         now_seconds(),
     );
+    eprintln!("Session picker action failed: {diagnostic}");
+    if !matches!(repaired, Ok(true)) {
+        return;
+    }
+    if let Ok(Some(record)) = route.store.session_picker(&callback.token) {
+        let card = session_picker_record_card(&record).ok();
+        if let Some((text, actions)) = card {
+            let _ = edit_interactive_message_with_retry(
+                bot,
+                EditInteractiveMessageRequest {
+                    message: EditMessageRequest {
+                        chat_id,
+                        message_id,
+                        text,
+                        external_id: None,
+                        parse_markdown: true,
+                    },
+                    actions,
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_session_browser_action_inner<D>(
+    bot: &InlineClient,
+    event: &ClientEvent,
+    route: &InboundRoute,
+    settings: &SettingsRuntime<'_, D>,
+    claimed: Option<ClaimedSessionBrowserAction>,
+) -> Result<bool, Box<dyn std::error::Error>>
+where
+    D: AgentDriver + SessionCatalogSource + 'static,
+{
+    let ClientEvent::MessageActionInvoked {
+        interaction_id,
+        chat_id,
+        message_id,
+        actor_user_id: _,
+        action_id,
+        data,
+        ..
+    } = event
+    else {
+        return Ok(false);
+    };
+    let Some(callback) = parse_session_browser_callback(action_id, data) else {
+        return Ok(false);
+    };
+    let claimed = match claimed {
+        Some(claimed) => claimed,
+        None => {
+            let Some(claimed) = claim_session_browser_action(route, event, callback.clone())?
+            else {
+                answer_session_action(
+                    bot,
+                    *interaction_id,
+                    "This session picker is no longer active.",
+                )
+                .await?;
+                return Ok(true);
+            };
+            claimed
+        }
+    };
+    let lease_owner = claimed.lease_owner;
+    let claim = claimed.outcome;
     match claim {
-        SessionBrowserClaim::Page(picker, page) => {
-            let (text, actions) = session_picker_card(&callback.token, &picker, page)?;
-            answer_session_action(bot, *interaction_id, "Updated").await?;
+        SessionPickerClaimOutcome::LoadRequested(record) => {
+            let result = load_older_session_picker_page(route, settings, &record)
+                .await
+                .map_err(|error| safe_diagnostic(&error.to_string()));
+            let updated = match result {
+                Ok(Some(updated)) => updated,
+                Ok(None) => {
+                    answer_session_action(
+                        bot,
+                        *interaction_id,
+                        "This list changed. Use its latest buttons.",
+                    )
+                    .await?;
+                    return Ok(true);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "Session catalog pagination failed: {}",
+                        safe_diagnostic(&error.to_string())
+                    );
+                    answer_session_action(
+                        bot,
+                        *interaction_id,
+                        "Couldn’t load older sessions. The current list is unchanged; try again.",
+                    )
+                    .await?;
+                    return Ok(true);
+                }
+            };
+            let (text, actions) = session_picker_card(
+                &callback.token,
+                &presentation_picker(&updated),
+                updated.page,
+            )?;
+            let _ = answer_session_action(bot, *interaction_id, "Updated").await;
             edit_interactive_message_with_retry(
                 bot,
                 EditInteractiveMessageRequest {
@@ -319,20 +569,81 @@ where
             )
             .await?;
         }
-        SessionBrowserClaim::Open(open) => {
-            let Some(workspace) = workspace else {
-                answer_session_action(bot, *interaction_id, "This project is unavailable.").await?;
-                return Ok(true);
+        SessionPickerClaimOutcome::Navigated(record) => {
+            let (text, actions) = session_picker_record_card(&record)?;
+            let _ = answer_session_action(bot, *interaction_id, "Updated").await;
+            edit_interactive_message_with_retry(
+                bot,
+                EditInteractiveMessageRequest {
+                    message: EditMessageRequest {
+                        chat_id: *chat_id,
+                        message_id: *message_id,
+                        text,
+                        external_id: None,
+                        parse_markdown: true,
+                    },
+                    actions,
+                },
+            )
+            .await?;
+        }
+        SessionPickerClaimOutcome::Claimed(record)
+        | SessionPickerClaimOutcome::Resumable(record) => {
+            let session_index = record
+                .selected_index
+                .ok_or_else(|| io::Error::other("claimed session picker has no selection"))?;
+            let session =
+                record.sessions.get(session_index).cloned().ok_or_else(|| {
+                    io::Error::other("claimed session picker selection is invalid")
+                })?;
+            let open = SessionBrowserOpen {
+                token: callback.token.clone(),
+                lease_owner: lease_owner.clone(),
+                parent_chat_id: record.chat_id,
+                picker_message_id: message_id.get(),
+                workspace_id: record.workspace_id,
+                workspace_label: record.workspace_label,
+                session,
+                session_index,
+                thread_chat_id: record.thread_chat_id,
+                confirmed: matches!(
+                    callback.action,
+                    SessionBrowserCallbackAction::Confirm { .. }
+                ),
+            };
+            let _ = answer_session_action(bot, *interaction_id, "Opening…").await;
+            let workspace = match route.store.verified_workspace(
+                &route.installation_id,
+                &open.workspace_id,
+                now_seconds(),
+            ) {
+                Ok(workspace) => workspace,
+                Err(StoreError::WorkspaceUnavailable { .. }) => {
+                    route.store.retry_session_picker_open(
+                        &open.token,
+                        &open.lease_owner,
+                        "The selected project is unavailable.",
+                        now_seconds(),
+                    )?;
+                    return Ok(true);
+                }
+                Err(error) => return Err(error.into()),
             };
             let _provider_work_lease = match settings.sessions.try_begin_provider_work() {
                 Ok(Some(lease)) => lease,
                 Ok(None) => {
-                    answer_session_action(
+                    route.store.retry_session_picker_open(
+                        &open.token,
+                        &open.lease_owner,
+                        "The provider connection is closing.",
+                        now_seconds(),
+                    )?;
+                    let _ = answer_session_action(
                         bot,
                         *interaction_id,
                         "Inline is releasing the provider connection. Try Open again in a moment.",
                     )
-                    .await?;
+                    .await;
                     return Ok(true);
                 }
                 Err(error) => {
@@ -345,13 +656,89 @@ where
                     return Err(error.into());
                 }
             };
+            let reverse_binding = route.store.session_thread_binding(open.session.session())?;
+            if let Some(binding) = reverse_binding.as_ref()
+                && binding.workspace_id() != &open.workspace_id
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "the local session binding belongs to another project",
+                )
+                .into());
+            }
+            if reverse_binding.is_none()
+                && !route
+                    .store
+                    .provider_session_binding_chats(open.session.session())?
+                    .is_empty()
+            {
+                route.store.retry_session_picker_open(
+                    &open.token,
+                    &open.lease_owner,
+                    "The session is already open in another Inline conversation.",
+                    now_seconds(),
+                )?;
+                let _ = answer_session_action(
+                    bot,
+                    *interaction_id,
+                    "This session is already open in another Inline conversation.",
+                )
+                .await;
+                return Ok(true);
+            }
+            let mut checkpoint_thread_chat_id = open.thread_chat_id;
+            if let Some(binding) = reverse_binding.as_ref() {
+                let canonical_thread_chat_id = binding.thread_chat_id();
+                if let Some(checkpoint) = checkpoint_thread_chat_id
+                    && checkpoint != canonical_thread_chat_id
+                    && !route.store.reconcile_session_picker_open_thread(
+                        &open.token,
+                        &open.lease_owner,
+                        checkpoint,
+                        canonical_thread_chat_id,
+                        now_seconds(),
+                    )?
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "the session picker conflicts with its canonical local thread",
+                    )
+                    .into());
+                }
+                checkpoint_thread_chat_id = Some(canonical_thread_chat_id);
+            } else if checkpoint_thread_chat_id.is_none()
+                && open.parent_chat_id != route.owner_dm_chat_id
+                && open.confirmed
+            {
+                checkpoint_thread_chat_id = Some(open.parent_chat_id);
+            }
+            if let Some(thread_chat_id) = checkpoint_thread_chat_id
+                && !route.store.update_session_picker_open_progress(
+                    &open.token,
+                    &open.lease_owner,
+                    Some(thread_chat_id),
+                    None,
+                    None,
+                    now_seconds(),
+                )?
+            {
+                return Err(
+                    io::Error::other("session picker could not persist its target thread").into(),
+                );
+            }
             let Some(catalog) = enabled_catalog(settings, &workspace)? else {
-                answer_session_action(
+                route.store.retry_session_picker_open(
+                    &open.token,
+                    &open.lease_owner,
+                    "Session continuation is unavailable.",
+                    now_seconds(),
+                )?;
+                let _ = answer_session_action(
                     bot,
                     *interaction_id,
                     "Session continuation is not available yet.",
                 )
-                .await?;
+                .await;
                 return Ok(true);
             };
             let provider_health = match classify_session_open_catalog_result(
@@ -360,46 +747,24 @@ where
             )? {
                 Ok(health) => health,
                 Err(toast) => {
-                    answer_session_action(bot, *interaction_id, &toast).await?;
+                    route.store.retry_session_picker_open(
+                        &open.token,
+                        &open.lease_owner,
+                        &toast,
+                        now_seconds(),
+                    )?;
+                    let _ = answer_session_action(bot, *interaction_id, &toast).await;
                     return Ok(true);
                 }
             };
             if let Some(toast) = session_open_health_toast(&route.provider_id, provider_health) {
-                answer_session_action(bot, *interaction_id, &toast).await?;
-                return Ok(true);
-            }
-            let snapshot = match classify_session_open_catalog_result(
-                &route.provider_id,
-                catalog
-                    .read_session(SessionReadRequest {
-                        session: open.session.session().clone(),
-                        workspace_id: open.workspace_id.clone(),
-                        window: HistoryWindow::new(
-                            MAX_HISTORY_MESSAGE_LIMIT,
-                            MAX_HISTORY_TEXT_BYTES,
-                        ),
-                    })
-                    .await,
-            )? {
-                Ok(snapshot) => snapshot,
-                Err(toast) => {
-                    answer_session_action(bot, *interaction_id, &toast).await?;
-                    return Ok(true);
-                }
-            };
-            let reverse_binding = route.store.session_thread_binding(open.session.session())?;
-            if reverse_binding.is_none()
-                && !route
-                    .store
-                    .provider_session_binding_chats(open.session.session())?
-                    .is_empty()
-            {
-                answer_session_action(
-                    bot,
-                    *interaction_id,
-                    "This session is already open in another Inline conversation.",
-                )
-                .await?;
+                route.store.retry_session_picker_open(
+                    &open.token,
+                    &open.lease_owner,
+                    &toast,
+                    now_seconds(),
+                )?;
+                let _ = answer_session_action(bot, *interaction_id, &toast).await;
                 return Ok(true);
             }
             let owner_control = route.owner_control.as_ref().ok_or_else(|| {
@@ -409,14 +774,17 @@ where
                 )
             })?;
             let server_canonical_session = if reverse_binding.is_none() {
-                owner_control
-                    .connect_agent_session(agent_session_lookup_input(
-                        route,
-                        open.session.session(),
-                        &open.workspace_id,
-                    )?)
-                    .await?
-                    .agent_session
+                canonical_agent_session_lookup(
+                    owner_control
+                        .connect_agent_session(agent_session_lookup_input(
+                            route,
+                            open.session.session(),
+                            &open.workspace_id,
+                        )?)
+                        .await?,
+                    route.bot_user_id,
+                    agent_session_provider(&route.provider_id)?,
+                )?
             } else {
                 None
             };
@@ -447,17 +815,50 @@ where
                     },
                 )
                 .await?;
+                route.store.retry_session_picker_open(
+                    &open.token,
+                    &open.lease_owner,
+                    "Waiting for explicit connection confirmation.",
+                    now_seconds(),
+                )?;
                 return Ok(true);
             }
             let mut prepared = None;
             let mut binding_parent_chat_id = open.parent_chat_id;
-            let candidate_thread_id = if let Some(binding) = reverse_binding.as_ref() {
-                binding_parent_chat_id = binding.parent_chat_id();
-                binding.thread_chat_id()
+            let canonical_target = if let Some(binding) = reverse_binding.as_ref() {
+                Some((binding.thread_chat_id(), binding.parent_chat_id()))
             } else if let Some(agent_session) = server_canonical_session.as_ref() {
                 let thread_id = connected_agent_session_chat_id(agent_session)?;
-                binding_parent_chat_id =
-                    session_thread_parent_chat_id(&route.bot_store, thread_id).await?;
+                Some((
+                    thread_id,
+                    session_thread_parent_chat_id(agent_session, thread_id)?,
+                ))
+            } else {
+                None
+            };
+            if let (Some(checkpoint), Some((canonical_thread_chat_id, _))) =
+                (checkpoint_thread_chat_id, canonical_target)
+                && checkpoint != canonical_thread_chat_id
+            {
+                if !route.store.reconcile_session_picker_open_thread(
+                    &open.token,
+                    &open.lease_owner,
+                    checkpoint,
+                    canonical_thread_chat_id,
+                    now_seconds(),
+                )? {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "the session picker conflicts with Inline’s canonical session thread",
+                    )
+                    .into());
+                }
+                checkpoint_thread_chat_id = Some(canonical_thread_chat_id);
+            }
+            let candidate_thread_id = if let Some((thread_id, parent_chat_id)) = canonical_target {
+                binding_parent_chat_id = parent_chat_id;
+                thread_id
+            } else if let Some(thread_id) = checkpoint_thread_chat_id {
                 thread_id
             } else if open.parent_chat_id != route.owner_dm_chat_id {
                 // An ordinary unbound conversation adopts itself. The owner DM
@@ -502,6 +903,43 @@ where
                     thread_id
                 }
             };
+            if !route.store.update_session_picker_open_progress(
+                &open.token,
+                &open.lease_owner,
+                Some(candidate_thread_id),
+                None,
+                None,
+                now_seconds(),
+            )? {
+                return Err(
+                    io::Error::other("session picker could not persist its target thread").into(),
+                );
+            }
+            let snapshot = match classify_session_open_catalog_result(
+                &route.provider_id,
+                catalog
+                    .read_session(SessionReadRequest {
+                        session: open.session.session().clone(),
+                        workspace_id: open.workspace_id.clone(),
+                        window: HistoryWindow::new(
+                            MAX_HISTORY_MESSAGE_LIMIT,
+                            MAX_HISTORY_TEXT_BYTES,
+                        ),
+                    })
+                    .await,
+            )? {
+                Ok(snapshot) => snapshot,
+                Err(toast) => {
+                    route.store.retry_session_picker_open(
+                        &open.token,
+                        &open.lease_owner,
+                        &toast,
+                        now_seconds(),
+                    )?;
+                    let _ = answer_session_action(bot, *interaction_id, &toast).await;
+                    return Ok(true);
+                }
+            };
             let connected = owner_control
                 .connect_agent_session(agent_session_connect_input(
                     route,
@@ -511,15 +949,65 @@ where
                     None,
                 )?)
                 .await?;
-            let connected_state = proto::ConnectAgentSessionState::try_from(connected.state)
-                .unwrap_or(proto::ConnectAgentSessionState::Unspecified);
-            let agent_session = connected.agent_session.ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Inline returned an empty agent session connection",
+            let connected_state = connect_agent_session_state(&connected)?;
+            if connected_state == proto::ConnectAgentSessionState::ConnectedElsewhere {
+                route.store.retry_session_picker_open(
+                    &open.token,
+                    &open.lease_owner,
+                    "The session is already open in another Inline conversation.",
+                    now_seconds(),
+                )?;
+                let _ = answer_session_action(
+                    bot,
+                    *interaction_id,
+                    "This session is already open in another Inline conversation.",
                 )
-            })?;
-            let thread_id = connected_agent_session_chat_id(&agent_session)?;
+                .await;
+                return Ok(true);
+            }
+            let (agent_session, connected_state) = validated_agent_session_connection(
+                connected,
+                candidate_thread_id,
+                route.bot_user_id,
+                agent_session_provider(&route.provider_id)?,
+            )?;
+            let thread_id = candidate_thread_id;
+            if !route.store.update_session_picker_open_progress(
+                &open.token,
+                &open.lease_owner,
+                Some(thread_id),
+                Some(agent_session.id),
+                None,
+                now_seconds(),
+            )? {
+                return Err(io::Error::other(
+                    "session picker could not persist its agent session connection",
+                )
+                .into());
+            }
+            let correlation_for_direction = |direction_id: &DirectionId| {
+                settings
+                    .sessions
+                    .driver()
+                    .session_input_correlation(direction_id)
+                    .map(|correlation| correlation.as_str().to_owned())
+            };
+            sync_agent_session_snapshot(
+                bot,
+                agent_session.id,
+                &snapshot,
+                &AgentSessionHistoryContext {
+                    store: &route.store,
+                    installation_id: &route.installation_id,
+                    workspace_id: &open.workspace_id,
+                    thread_id,
+                    correlation_for_direction: &correlation_for_direction,
+                },
+            )
+            .await?;
+            // Keep the durable picker gate authoritative until history has
+            // converged. Exposing the local session binding earlier would let
+            // an ordinary phone turn interleave with a partial import.
             let local_outcome = if let Some(opening) = prepared {
                 Some(
                     settings
@@ -554,26 +1042,6 @@ where
                 thread_id,
                 &open.workspace_id,
             )?;
-            let correlation_for_direction = |direction_id: &DirectionId| {
-                settings
-                    .sessions
-                    .driver()
-                    .session_input_correlation(direction_id)
-                    .map(|correlation| correlation.as_str().to_owned())
-            };
-            sync_agent_session_snapshot(
-                bot,
-                agent_session.id,
-                &snapshot,
-                &AgentSessionHistoryContext {
-                    store: &route.store,
-                    installation_id: &route.installation_id,
-                    workspace_id: &open.workspace_id,
-                    thread_id,
-                    correlation_for_direction: &correlation_for_direction,
-                },
-            )
-            .await?;
             let status_message_id = match agent_session.status_message_id {
                 Some(message_id) => message_id,
                 None => {
@@ -582,6 +1050,7 @@ where
                         thread_id,
                         &open.workspace_label,
                         &open.session,
+                        snapshot.has_older(),
                     )
                     .await?;
                     let repaired = owner_control
@@ -593,65 +1062,377 @@ where
                             Some(message_id),
                         )?)
                         .await?;
-                    if connected_agent_session_chat_id(
-                        repaired.agent_session.as_ref().ok_or_else(|| {
-                            io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                "Inline returned an empty repaired agent session",
-                            )
-                        })?,
-                    )? != thread_id
-                    {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "agent session moved while its status card was being attached",
-                        )
-                        .into());
-                    }
+                    validated_agent_session_connection(
+                        repaired,
+                        thread_id,
+                        route.bot_user_id,
+                        agent_session_provider(&route.provider_id)?,
+                    )?;
                     message_id
                 }
             };
-            let pin_needs_repair = bot
+            edit_message_with_retry(
+                bot,
+                EditMessageRequest {
+                    chat_id: InlineId::new(thread_id),
+                    message_id: InlineId::new(status_message_id),
+                    text: agent_session_status_text(
+                        &open.workspace_label,
+                        &open.session,
+                        snapshot.has_older(),
+                    ),
+                    external_id: None,
+                    parse_markdown: true,
+                },
+            )
+            .await?;
+            if !route.store.update_session_picker_open_progress(
+                &open.token,
+                &open.lease_owner,
+                Some(thread_id),
+                Some(agent_session.id),
+                Some(status_message_id),
+                now_seconds(),
+            )? {
+                return Err(io::Error::other(
+                    "session picker could not persist its status projection",
+                )
+                .into());
+            }
+            let status_pinned = bot
                 .pin_message(inline_client::PinMessageRequest {
                     chat_id: InlineId::new(thread_id),
                     message_id: InlineId::new(status_message_id),
                     unpin: false,
                 })
                 .await
-                .is_err();
-            route.session_browser.remove_picker(&open.token);
-            answer_session_action(
-                bot,
-                *interaction_id,
-                if pin_needs_repair {
-                    "Connected; the status pin needs repair"
-                } else if created {
-                    "Connected"
-                } else {
-                    "Already connected"
+                .is_ok();
+            if !route.store.complete_session_picker_open(
+                &open.token,
+                &open.lease_owner,
+                SessionPickerCompletion {
+                    thread_chat_id: thread_id,
+                    agent_session_id: agent_session.id,
+                    status_message_id,
+                    status_pinned,
+                    completed_at: now_seconds(),
                 },
-            )
-            .await?;
+            )? {
+                return Err(
+                    io::Error::other("session picker completion lost its durable lease").into(),
+                );
+            }
+            if !status_pinned {
+                eprintln!(
+                    "warning: connected session status pin needs repair for thread {thread_id}"
+                );
+            } else if created {
+                eprintln!("connected provider session in Inline thread {thread_id}");
+            }
             edit_session_opened(bot, chat_id.get(), message_id.get(), thread_id).await?;
+            if !route
+                .store
+                .mark_session_picker_terminal_projected(&open.token, now_seconds())?
+            {
+                return Err(io::Error::other(
+                    "session picker terminal projection was not persisted",
+                )
+                .into());
+            }
         }
-        SessionBrowserClaim::Unauthorized => {
-            answer_session_action(
+        SessionPickerClaimOutcome::InProgress(_) => {
+            let _ = answer_session_action(bot, *interaction_id, "Opening…").await;
+        }
+        SessionPickerClaimOutcome::Completed(record) => {
+            let _ = answer_session_action(bot, *interaction_id, "Already opened").await;
+            repair_completed_session_picker(bot, &route.store, &record).await?;
+        }
+        SessionPickerClaimOutcome::Unauthorized => {
+            let _ = answer_session_action(
                 bot,
                 *interaction_id,
                 "Only the bot owner can open sessions.",
             )
-            .await?;
+            .await;
         }
-        SessionBrowserClaim::Stale => {
-            answer_session_action(
+        SessionPickerClaimOutcome::Expired(_) => {
+            let _ = answer_session_action(
+                bot,
+                *interaction_id,
+                "This session picker has expired. Send /sessions for a fresh list.",
+            )
+            .await;
+        }
+        SessionPickerClaimOutcome::Failed(_) => {
+            let _ = answer_session_action(
+                bot,
+                *interaction_id,
+                "This session picker failed. Send /sessions for a fresh list.",
+            )
+            .await;
+        }
+        SessionPickerClaimOutcome::InvalidChoice => {
+            let _ = answer_session_action(bot, *interaction_id,
+                "This choice is unavailable or the list changed. Active sessions must finish before opening; send /sessions to refresh.").await;
+        }
+        SessionPickerClaimOutcome::Unknown | SessionPickerClaimOutcome::WrongContext => {
+            let _ = answer_session_action(
                 bot,
                 *interaction_id,
                 "This session picker is no longer active.",
             )
-            .await?;
+            .await;
         }
     }
     Ok(true)
+}
+
+fn session_action_uses_provider(action: SessionBrowserCallbackAction) -> bool {
+    !matches!(action, SessionBrowserCallbackAction::Page { .. })
+}
+
+async fn read_catalog_page(
+    catalog: &dyn AgentSessionCatalog,
+    mut query: SessionQuery,
+    known: &[SessionSummary],
+) -> DriverResult<SessionPage> {
+    let known = known
+        .iter()
+        .map(|summary| summary.session().session_id().as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut seen = std::collections::HashSet::new();
+    if let Some(cursor) = query.cursor.as_ref() {
+        seen.insert(cursor.to_string());
+    }
+    for attempt in 0..MAX_CATALOG_PAGE_READS {
+        let page = catalog.list_sessions(query.clone()).await?;
+        if let Some(cursor) = page.next_cursor()
+            && !seen.insert(cursor.to_string())
+        {
+            return Err(DriverError::Protocol(
+                "Codex repeated a session catalog cursor".into(),
+            ));
+        }
+        let has_new = page
+            .sessions()
+            .iter()
+            .any(|summary| !known.contains(summary.session().session_id().as_str()));
+        if has_new || page.next_cursor().is_none() || attempt + 1 == MAX_CATALOG_PAGE_READS {
+            return Ok(page);
+        }
+        query.cursor = page.next_cursor().cloned();
+    }
+    unreachable!("catalog page budget is nonzero")
+}
+
+async fn load_older_session_picker_page<D>(
+    route: &InboundRoute,
+    settings: &SettingsRuntime<'_, D>,
+    record: &SessionPickerRecord,
+) -> Result<Option<SessionPickerRecord>, Box<dyn std::error::Error>>
+where
+    D: AgentDriver + SessionCatalogSource + 'static,
+{
+    let _provider_work = settings
+        .sessions
+        .try_begin_provider_work()?
+        .ok_or_else(|| io::Error::other("provider connection is closing"))?;
+    let workspace = route.store.verified_workspace(
+        &route.installation_id,
+        &record.workspace_id,
+        now_seconds(),
+    )?;
+    let catalog = enabled_catalog(settings, &workspace)?
+        .ok_or_else(|| io::Error::other("session catalog is unavailable"))?;
+    let cursor = record
+        .catalog_cursor
+        .clone()
+        .ok_or_else(|| io::Error::other("session catalog is exhausted"))?;
+    let remaining = MAX_SESSION_PICKER_ITEMS.saturating_sub(record.sessions.len());
+    if remaining == 0 {
+        return Ok(None);
+    }
+    let page = tokio::time::timeout(
+        SESSION_CATALOG_DEADLINE,
+        read_catalog_page(
+            catalog.as_ref(),
+            SessionQuery {
+                provider: ProviderInstanceRef::new(
+                    route.installation_id.clone(),
+                    route.provider_id.clone(),
+                )?,
+                workspace_id: record.workspace_id.clone(),
+                cursor: Some(SessionPageCursor::new(cursor)?),
+                page_size: SessionPageSize::new(remaining.min(MAX_SESSION_RESULTS)),
+            },
+            &record.sessions,
+        ),
+    )
+    .await??;
+    Ok(route.store.append_session_picker_sessions(
+        record,
+        page.sessions(),
+        page.next_cursor().map(ToString::to_string),
+        now_seconds(),
+    )?)
+}
+
+async fn resume_linked_session<D>(
+    bot: &InlineClient,
+    record: &InboundRecord,
+    route: &InboundRoute,
+    settings: &SettingsRuntime<'_, D>,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    D: AgentDriver + SessionCatalogSource + 'static,
+{
+    if settings.turn_active {
+        return send_session_reply(
+            bot,
+            record,
+            "This session is already running in Inline. Use /stop to stop and release it.",
+            "resume-running",
+        )
+        .await;
+    }
+    let Ok(_control) = route.control_lane.clone().try_acquire_owned() else {
+        return send_session_reply(
+            bot,
+            record,
+            "Another session operation is finishing. Try /resume again in a moment.",
+            "resume-busy",
+        )
+        .await;
+    };
+    let _work = match settings.sessions.try_begin_provider_work()? {
+        Some(work) => work,
+        None => {
+            return send_session_reply(
+                bot,
+                record,
+                "Inline is releasing its Codex connection. Try /resume again in a moment.",
+                "resume-closing",
+            )
+            .await;
+        }
+    };
+    let Some(linked) = route
+        .store
+        .session_thread_binding_for_chat(&record.binding.installation_id, record.binding.chat_id)?
+    else {
+        return send_session_reply(bot, record,
+            "Open a Codex session from /sessions in the bot’s private DM first, then use /resume in its linked thread.",
+            "resume-unlinked").await;
+    };
+    if linked.workspace_id() != &record.binding.workspace_id
+        || linked.session().provider().installation_id() != &route.installation_id
+        || linked.session().provider().provider_id() != &route.provider_id
+        || route.store.get_binding(&record.binding)?
+            != Some((
+                route.provider_id.clone(),
+                linked.session().session_id().clone(),
+            ))
+    {
+        return Err(
+            io::Error::other("saved session link does not match its provider binding").into(),
+        );
+    }
+    settings
+        .sessions
+        .set_session_history_ready(&record.binding, linked.session().session_id(), false)
+        .await;
+    let workspace = route.store.verified_workspace(
+        &record.binding.installation_id,
+        &record.binding.workspace_id,
+        now_seconds(),
+    )?;
+    let Some(catalog) = enabled_catalog(settings, &workspace)? else {
+        return send_session_reply(
+            bot,
+            record,
+            "This Codex version cannot safely resume linked sessions. Update Codex and try again.",
+            "resume-unsupported",
+        )
+        .await;
+    };
+    // Validate the saved identity and workspace before acquiring its writer.
+    // Read again after acquisition so external work completed at the boundary
+    // is included in the snapshot we publish.
+    let request = SessionReadRequest {
+        session: linked.session().clone(),
+        workspace_id: linked.workspace_id().clone(),
+        window: HistoryWindow::new(MAX_HISTORY_MESSAGE_LIMIT, MAX_HISTORY_TEXT_BYTES),
+    };
+    let result: Result<_, Box<dyn std::error::Error>> = async {
+        tokio::time::timeout(
+            SESSION_CATALOG_DEADLINE,
+            catalog.read_session(request.clone()),
+        )
+        .await??;
+        let prepared = prepare_agent_session_input(
+            settings.sessions,
+            &route.store,
+            route,
+            &record.binding,
+            record,
+        )
+        .await?
+        .ok_or_else(|| io::Error::other("linked session disappeared"))?;
+        let opened = settings
+            .sessions
+            .ensure_session(&record.binding, now_seconds())
+            .await?;
+        if opened.session_id() != linked.session().session_id() {
+            return Err(io::Error::other("resume returned a different provider session").into());
+        }
+        let snapshot =
+            tokio::time::timeout(SESSION_CATALOG_DEADLINE, catalog.read_session(request)).await??;
+        let correlation_for_direction = |direction_id: &DirectionId| {
+            settings
+                .sessions
+                .driver()
+                .session_input_correlation(direction_id)
+                .map(|correlation| correlation.as_str().to_owned())
+        };
+        sync_agent_session_snapshot(
+            bot,
+            prepared.agent_session_id,
+            &snapshot,
+            &AgentSessionHistoryContext {
+                store: &route.store,
+                installation_id: &route.installation_id,
+                workspace_id: linked.workspace_id(),
+                thread_id: record.binding.chat_id,
+                correlation_for_direction: &correlation_for_direction,
+            },
+        )
+        .await?;
+        if !settings
+            .sessions
+            .set_session_history_ready(&record.binding, linked.session().session_id(), true)
+            .await
+        {
+            return Err(
+                io::Error::other("session changed before history refresh completed").into(),
+            );
+        }
+        Ok(())
+    }
+    .await;
+    match result {
+        Ok(()) => send_session_reply(bot, record,
+            "Resumed in Inline and refreshed recent history. Send your next message here. Use /stop to release this session for ChatGPT Desktop or Codex CLI.",
+            "resumed").await,
+        Err(error) => {
+            let busy = matches!(error.downcast_ref::<DriverError>(), Some(DriverError::SessionBusy(_)))
+                || matches!(error.downcast_ref::<SessionManagerError>(), Some(SessionManagerError::Driver(DriverError::SessionBusy(_))));
+            if busy {
+                return send_session_reply(bot, record,
+                    BridgeNotice::SessionActiveElsewhere.message(), "resume-active-elsewhere").await;
+            }
+            Err(error)
+        }
+    }
 }
 
 async fn handle_session_browser_command_inner<D>(
@@ -659,7 +1440,7 @@ async fn handle_session_browser_command_inner<D>(
     record: &InboundRecord,
     route: &InboundRoute,
     settings: &SettingsRuntime<'_, D>,
-    _command: SessionBrowserCommand,
+    command: SessionBrowserCommand,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     D: AgentDriver + SessionCatalogSource + 'static,
@@ -681,6 +1462,49 @@ where
             record,
             "Only the bot owner can browse provider sessions.",
             "owner-only",
+        )
+        .await;
+    }
+    if command == SessionBrowserCommand::Resume {
+        return resume_linked_session(bot, record, route, settings).await;
+    }
+    if record.binding.chat_id != route.owner_dm_chat_id {
+        return send_session_reply(
+            bot,
+            record,
+            "For privacy, browse provider sessions in your direct chat with this bot.",
+            "owner-dm-only",
+        )
+        .await;
+    }
+    if let Some(existing) = route
+        .store
+        .session_picker_for_origin_event(&route.installation_id, &record.event_id)?
+    {
+        return match existing.state {
+            SessionPickerState::Publishing | SessionPickerState::Active => {
+                publish_session_picker(bot, record, &route.store, &existing).await
+            }
+            SessionPickerState::Opening
+            | SessionPickerState::Retryable
+            | SessionPickerState::Completed => Ok(()),
+            SessionPickerState::Expired | SessionPickerState::Failed => {
+                send_session_reply(
+                    bot,
+                    record,
+                    "That session picker operation is no longer active. Send /sessions again.",
+                    "picker-terminal",
+                )
+                .await
+            }
+        };
+    }
+    if settings.turn_active {
+        return send_session_reply(
+            bot,
+            record,
+            "Wait for the current agent response or use /stop, then send /sessions again.",
+            "turn-active",
         )
         .await;
     }
@@ -732,9 +1556,27 @@ where
         )
         .await;
     };
-    let provider_health = match catalog.provider_health(&workspace.workspace_id).await {
-        Ok(health) => health,
-        Err(DriverError::Transient(_)) => {
+    let provider =
+        ProviderInstanceRef::new(route.installation_id.clone(), route.provider_id.clone())?;
+    let query = SessionQuery {
+        provider,
+        workspace_id: workspace.workspace_id.clone(),
+        cursor: None,
+        page_size: SessionPageSize::new(MAX_SESSION_RESULTS),
+    };
+    let catalog_result = tokio::time::timeout(SESSION_CATALOG_DEADLINE, async {
+        let health = catalog.provider_health(&workspace.workspace_id).await?;
+        let page = if health == inline_agent_bridge::ProviderHealth::Ready {
+            Some(read_catalog_page(catalog.as_ref(), query, &[]).await?)
+        } else {
+            None
+        };
+        Ok::<_, DriverError>((health, page))
+    })
+    .await;
+    let (provider_health, page) = match catalog_result {
+        Ok(Ok(result)) => result,
+        Err(_) | Ok(Err(DriverError::Transient(_))) => {
             return send_session_reply(
                 bot,
                 record,
@@ -743,7 +1585,7 @@ where
             )
             .await;
         }
-        Err(error) => return Err(error.into()),
+        Ok(Err(error)) => return Err(error.into()),
     };
     match provider_health {
         inline_agent_bridge::ProviderHealth::Ready => {}
@@ -781,39 +1623,25 @@ where
             .await;
         }
     }
-    let provider =
-        ProviderInstanceRef::new(route.installation_id.clone(), route.provider_id.clone())?;
-    let query = SessionQuery {
-        provider,
-        workspace_id: workspace.workspace_id.clone(),
-        cursor: None,
-        page_size: SessionPageSize::new(MAX_SESSION_RESULTS),
-    };
-    let page = match catalog.list_sessions(query).await {
-        Ok(page) => page,
-        Err(DriverError::Transient(_)) => {
+    let page = page.expect("ready provider catalog returns a page");
+    // Discovery includes busy sessions; only a provider-confirmed available
+    // choice can be claimed for Open. Never make running work disappear.
+    let sessions = page.sessions().to_vec();
+    if sessions.is_empty() {
+        if page.next_cursor().is_some() {
             return send_session_reply(
                 bot,
                 record,
-                &session_catalog_timeout_message(&route.provider_id),
-                "catalog-timeout",
+                "Codex’s session catalog is still catching up. Try /sessions again in a moment.",
+                "catalog-incomplete",
             )
             .await;
         }
-        Err(error) => return Err(error.into()),
-    };
-    let sessions = page
-        .sessions()
-        .iter()
-        .filter(|session| session.availability() != SessionAvailability::Unavailable)
-        .cloned()
-        .collect::<Vec<_>>();
-    if sessions.is_empty() {
         return send_session_reply(
             bot,
             record,
             &format!(
-                "No resumable {} sessions were found for this project.",
+                "No {} sessions were found for this project. You can chat here to start a new session, or choose another project with /projects.",
                 session_provider_label(&route.provider_id)
             ),
             "empty",
@@ -821,22 +1649,32 @@ where
         .await;
     }
     let token = generate_control_token();
-    let picker = SessionBrowserPicker {
+    let picker_created_at = now_seconds();
+    if !route.store.insert_session_picker(&PendingSessionPicker {
+        callback_token: token.clone(),
+        origin_event_id: record.event_id.clone(),
         installation_id: route.installation_id.clone(),
         provider_id: route.provider_id.clone(),
         owner_user_id: route.owner_user_id,
         chat_id: record.binding.chat_id,
-        message_id: None,
         workspace_id: workspace.workspace_id,
         workspace_label: workspace.display_name,
         sessions,
-        expires_at: now_seconds().saturating_add(PICKER_TTL_SECONDS),
-    };
-    let (text, actions) = session_picker_card(&token, &picker, 0)?;
-    if !route
-        .session_browser
-        .insert_picker(token.clone(), picker, now_seconds())
-    {
+        catalog_cursor: page.next_cursor().map(ToString::to_string),
+        created_at: picker_created_at,
+        expires_at: picker_created_at.saturating_add(PICKER_TTL_SECONDS),
+    })? {
+        if let Some(existing) = route
+            .store
+            .session_picker_for_origin_event(&route.installation_id, &record.event_id)?
+        {
+            return match existing.state {
+                SessionPickerState::Publishing => {
+                    publish_session_picker(bot, record, &route.store, &existing).await
+                }
+                _ => Ok(()),
+            };
+        }
         return send_session_reply(
             bot,
             record,
@@ -845,6 +1683,21 @@ where
         )
         .await;
     }
+    let stored = route
+        .store
+        .session_picker(&token)?
+        .ok_or_else(|| io::Error::other("session picker disappeared before publication"))?;
+    publish_session_picker(bot, record, &route.store, &stored).await
+}
+
+async fn publish_session_picker(
+    bot: &InlineClient,
+    record: &InboundRecord,
+    store: &BridgeStore,
+    picker: &SessionPickerRecord,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let presentation = presentation_picker(picker);
+    let (text, actions) = session_picker_card(&picker.callback_token, &presentation, picker.page)?;
     let reconcile_text = text.clone();
     let reconcile_actions = actions.clone();
     let mut message = SendTextRequest::new(
@@ -858,31 +1711,49 @@ where
         "agent-bridge",
         format!("{}-provider-sessions", record.event_id),
     )?);
-    message.random_id = Some(interaction_random_id("provider-sessions", &token));
+    message.random_id = Some(interaction_random_id(
+        "provider-sessions",
+        &picker.callback_token,
+    ));
     message.parse_markdown = true;
     message.notification_mode = SendNotificationMode::Silent;
-    let mutation = match send_interactive_text_with_retry(
-        bot,
-        SendInteractiveTextRequest { message, actions },
-    )
-    .await
-    {
-        Ok(mutation) => mutation,
-        Err(error) => {
-            route.session_browser.remove_picker(&token);
-            return Err(error);
+    let request = SendInteractiveTextRequest { message, actions };
+    let mut confirmed = None;
+    let mut last_error: Option<Box<dyn std::error::Error>> = None;
+    for attempt in 0..3 {
+        match bot.send_interactive_text(request.clone()).await {
+            Ok(mutation) if mutation.message_id.is_some() => {
+                confirmed = Some(mutation);
+                break;
+            }
+            Ok(_) => {
+                last_error = Some(
+                    io::Error::other(
+                        "session picker send was acknowledged without a message identity",
+                    )
+                    .into(),
+                );
+            }
+            Err(error) => last_error = Some(error.into()),
         }
-    };
+        if attempt < 2 {
+            tokio::time::sleep(message_retry_delay(attempt)).await;
+        }
+    }
+    let mutation = confirmed.ok_or_else(|| {
+        last_error.unwrap_or_else(|| io::Error::other("session picker was not delivered").into())
+    })?;
     let message_id = mutation.message_id.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::ConnectionAborted,
             "session picker has no message identity",
         )
     })?;
-    if !route
-        .session_browser
-        .attach_picker_message(&token, message_id.get())
-    {
+    if !store.attach_session_picker_message(
+        &picker.callback_token,
+        message_id.get(),
+        now_seconds(),
+    )? {
         return Err(io::Error::other("session picker expired before publication").into());
     }
     edit_interactive_message_with_retry(
@@ -900,6 +1771,162 @@ where
     )
     .await?;
     Ok(())
+}
+
+pub(super) async fn recover_session_picker_commands(
+    bot: &InlineClient,
+    store: &BridgeStore,
+    installation_id: &InstallationId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for picker in store.session_picker_recovery_cards(installation_id)? {
+        if let Err(error) = repair_recovered_session_picker_card(bot, store, &picker).await {
+            eprintln!(
+                "Could not repair an interrupted session picker card: {}",
+                safe_diagnostic(&error.to_string())
+            );
+        }
+    }
+    for picker in store.recoverable_session_picker_commands(installation_id)? {
+        let Some(record) = store.get_inbound(&picker.origin_event_id)? else {
+            continue;
+        };
+        if matches!(
+            picker.state,
+            SessionPickerState::Publishing | SessionPickerState::Active
+        ) && let Err(error) = publish_session_picker(bot, &record, store, &picker).await
+        {
+            eprintln!(
+                "Could not recover a pending session picker publication: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            continue;
+        }
+        let published_or_terminal = picker.state != SessionPickerState::Publishing
+            || store
+                .session_picker(&picker.callback_token)?
+                .is_some_and(|picker| picker.state == SessionPickerState::Active);
+        if published_or_terminal {
+            let _ = store.complete_inbound(&picker.origin_event_id)?;
+        }
+    }
+    for picker in store.session_picker_projection_repairs(installation_id)? {
+        if let Err(error) = repair_completed_session_picker(bot, store, &picker).await {
+            eprintln!(
+                "Could not repair a completed session picker projection: {}",
+                safe_diagnostic(&error.to_string())
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn repair_recovered_session_picker_card(
+    bot: &InlineClient,
+    store: &BridgeStore,
+    picker: &SessionPickerRecord,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let message_id = picker.picker_message_id.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "session picker recovery is missing its message identity",
+        )
+    })?;
+    let (text, actions, terminal) = match picker.state {
+        SessionPickerState::Retryable => {
+            let (card, actions) = session_picker_record_card(picker)?;
+            (card, actions, false)
+        }
+        SessionPickerState::Failed => (
+            "This session did not finish opening. Run /sessions again before sending more messages in its reply thread."
+                .to_string(),
+            MessageActions { rows: Vec::new() },
+            true,
+        ),
+        SessionPickerState::Expired => (
+            "This session picker expired. Run /sessions to load a fresh list.".to_string(),
+            MessageActions { rows: Vec::new() },
+            true,
+        ),
+        _ => return Ok(()),
+    };
+    edit_interactive_message_with_retry(
+        bot,
+        EditInteractiveMessageRequest {
+            message: EditMessageRequest {
+                chat_id: InlineId::new(picker.chat_id),
+                message_id: InlineId::new(message_id),
+                text,
+                external_id: None,
+                parse_markdown: true,
+            },
+            actions,
+        },
+    )
+    .await?;
+    if terminal {
+        store.mark_session_picker_terminal_projected(&picker.callback_token, now_seconds())?;
+    }
+    Ok(())
+}
+
+async fn repair_completed_session_picker(
+    bot: &InlineClient,
+    store: &BridgeStore,
+    picker: &SessionPickerRecord,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let thread_id = picker
+        .thread_chat_id
+        .ok_or_else(|| io::Error::other("completed session picker is missing its thread"))?;
+    let picker_message_id = picker
+        .picker_message_id
+        .ok_or_else(|| io::Error::other("completed session picker is missing its card message"))?;
+    let mut first_error = None;
+    if !picker.status_pinned {
+        let status_message_id = picker.status_message_id.ok_or_else(|| {
+            io::Error::other("completed session picker is missing its status message")
+        })?;
+        let pin_result = async {
+            bot.pin_message(inline_client::PinMessageRequest {
+                chat_id: InlineId::new(thread_id),
+                message_id: InlineId::new(status_message_id),
+                unpin: false,
+            })
+            .await?;
+            if !store.mark_session_picker_status_pinned(&picker.callback_token, now_seconds())? {
+                return Err(
+                    io::Error::other("session status pin repair lost its operation").into(),
+                );
+            }
+            Ok::<_, Box<dyn std::error::Error>>(())
+        }
+        .await;
+        if let Err(error) = pin_result {
+            first_error = Some(safe_diagnostic(&error.to_string()));
+        }
+    }
+    if !picker.terminal_projected {
+        let projection_result = async {
+            edit_session_opened(bot, picker.chat_id, picker_message_id, thread_id).await?;
+            if !store
+                .mark_session_picker_terminal_projected(&picker.callback_token, now_seconds())?
+            {
+                return Err(
+                    io::Error::other("session picker card repair lost its operation").into(),
+                );
+            }
+            Ok::<_, Box<dyn std::error::Error>>(())
+        }
+        .await;
+        if let Err(error) = projection_result
+            && first_error.is_none()
+        {
+            first_error = Some(safe_diagnostic(&error.to_string()));
+        }
+    }
+    match first_error {
+        Some(error) => Err(io::Error::other(error).into()),
+        None => Ok(()),
+    }
 }
 
 fn enabled_catalog<D>(
@@ -939,7 +1966,7 @@ fn session_browser_enabled(
 }
 
 fn session_browser_command(
-    _provider_id: &ProviderId,
+    provider_id: &ProviderId,
     text: &str,
     bot_username: &str,
 ) -> Option<SessionBrowserCommand> {
@@ -949,6 +1976,7 @@ fn session_browser_command(
     }
     match command.name.as_str() {
         "sessions" | "open" => Some(SessionBrowserCommand::Sessions),
+        "resume" if provider_id.as_str() == "codex" => Some(SessionBrowserCommand::Resume),
         _ => None,
     }
 }
@@ -987,6 +2015,53 @@ fn ensure_session_command_started(
     }
 }
 
+fn session_picker_record_card(
+    record: &SessionPickerRecord,
+) -> Result<(String, MessageActions), Box<dyn std::error::Error>> {
+    if record.state == SessionPickerState::Retryable {
+        let index = record
+            .selected_index
+            .ok_or_else(|| io::Error::other("retryable picker has no selection"))?;
+        let session = record
+            .sessions
+            .get(index)
+            .ok_or_else(|| io::Error::other("retryable picker selection is invalid"))?;
+        return retry_session_picker_card(&record.callback_token, session, index);
+    }
+    session_picker_card(
+        &record.callback_token,
+        &presentation_picker(record),
+        record.page,
+    )
+}
+
+fn retry_session_picker_card(
+    token: &str,
+    session: &SessionSummary,
+    index: usize,
+) -> Result<(String, MessageActions), Box<dyn std::error::Error>> {
+    Ok((
+        format!(
+            "Opening **{}** did not finish. Tap **Retry Open** to continue with this session. Run /sessions to choose another session.",
+            markdown_escape(&session_thread_title(session))
+        ),
+        MessageActions {
+            rows: vec![MessageActionRow {
+                actions: vec![MessageActionButton {
+                    action_id: session_open_action_id(index),
+                    text: "Retry Open".to_string(),
+                    kind: MessageActionKind::Callback {
+                        data: session_browser_callback_data(
+                            token,
+                            SessionBrowserCallbackAction::Open { index },
+                        )?,
+                    },
+                }],
+            }],
+        },
+    ))
+}
+
 fn session_picker_card(
     token: &str,
     picker: &SessionBrowserPicker,
@@ -995,12 +2070,21 @@ fn session_picker_card(
     let (start, end, page_count) = picker_page(&picker.sessions, page)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid session page"))?;
     let text = format!(
-        "Recent {} sessions for **{}** — page {} of {}. Opening one reuses its Inline reply thread and loads bounded recent context without taking control. Your first message there resumes the exact provider session in Inline.",
+        "Recent {} sessions for **{}** — page {} of {}.\n\nChoose a session to open its recent history, then send a message in the linked thread to continue. Use /projects to switch projects.",
         session_provider_label(&picker.provider_id),
         markdown_escape(&picker.workspace_label),
         page + 1,
         page_count,
     );
+    let text = if picker.has_older && picker.sessions.len() >= MAX_SESSION_PICKER_ITEMS {
+        format!(
+            "{text}\n\nShowing the first {MAX_SESSION_PICKER_ITEMS} sessions for this project; older sessions remain in Codex."
+        )
+    } else if picker.has_older {
+        format!("{text}\n\nOlder sessions are available after the last loaded page.")
+    } else {
+        text
+    };
     let mut rows = picker.sessions[start..end]
         .iter()
         .enumerate()
@@ -1041,6 +2125,19 @@ fn session_picker_card(
                 data: session_browser_callback_data(
                     token,
                     SessionBrowserCallbackAction::Page { page: page + 1 },
+                )?,
+            },
+        });
+    } else if picker.has_older && picker.sessions.len() < MAX_SESSION_PICKER_ITEMS {
+        navigation.push(MessageActionButton {
+            action_id: format!("{ACTION_PREFIX}older"),
+            text: "Load Older Sessions".to_string(),
+            kind: MessageActionKind::Callback {
+                data: session_browser_callback_data(
+                    token,
+                    SessionBrowserCallbackAction::LoadOlder {
+                        expected_count: picker.sessions.len(),
+                    },
                 )?,
             },
         });
@@ -1123,7 +2220,8 @@ fn session_button_text(session: &SessionSummary, ordinal: usize) -> String {
         SessionAvailability::Active => " · Active",
         SessionAvailability::ActiveElsewhere => " · Active elsewhere",
         SessionAvailability::Unavailable => " · Unavailable",
-        SessionAvailability::Unknown | SessionAvailability::Available => "",
+        SessionAvailability::Unknown => " · Status unavailable",
+        SessionAvailability::Available => "",
     };
     truncate_utf16(
         &label,
@@ -1161,7 +2259,7 @@ fn provider_sign_in_message(provider_id: &ProviderId) -> String {
 
 fn session_catalog_timeout_message(provider_id: &ProviderId) -> String {
     format!(
-        "{} took too long to load sessions. The agent is still connected; try /sessions again.",
+        "{} took too long to load sessions, so its connection is restarting. Try /sessions again in a moment.",
         session_provider_label(provider_id)
     )
 }
@@ -1228,6 +2326,9 @@ fn parse_session_browser_callback(action_id: &str, data: &[u8]) -> Option<Sessio
             action_id == format!("{ACTION_PREFIX}back")
                 || action_id == format!("{ACTION_PREFIX}more")
         }
+        SessionBrowserCallbackAction::LoadOlder { .. } => {
+            action_id == format!("{ACTION_PREFIX}older")
+        }
     };
     matching_action.then_some(callback)
 }
@@ -1261,9 +2362,12 @@ fn agent_session_connect_input(
     workspace_id: &WorkspaceId,
     chat_id: i64,
     status_message_id: Option<i64>,
-) -> Result<proto::ConnectAgentSessionInput, Box<dyn std::error::Error>> {
+) -> io::Result<proto::ConnectAgentSessionInput> {
     if chat_id <= 0 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid Inline thread").into());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid Inline thread",
+        ));
     }
     let provider = agent_session_provider(session.provider().provider_id())?;
     Ok(proto::ConnectAgentSessionInput {
@@ -1281,7 +2385,7 @@ fn agent_session_lookup_input(
     route: &InboundRoute,
     session: &ProviderSessionRef,
     workspace_id: &WorkspaceId,
-) -> Result<proto::ConnectAgentSessionInput, Box<dyn std::error::Error>> {
+) -> io::Result<proto::ConnectAgentSessionInput> {
     let provider = agent_session_provider(session.provider().provider_id())?;
     Ok(proto::ConnectAgentSessionInput {
         peer_id: None,
@@ -1294,9 +2398,7 @@ fn agent_session_lookup_input(
     })
 }
 
-fn agent_session_provider(
-    provider_id: &ProviderId,
-) -> Result<proto::AgentSessionProvider, Box<dyn std::error::Error>> {
+fn agent_session_provider(provider_id: &ProviderId) -> io::Result<proto::AgentSessionProvider> {
     let provider = match provider_id.as_str() {
         "codex" => proto::AgentSessionProvider::Codex,
         "codex-cloud" | "codex_cloud" => proto::AgentSessionProvider::CodexCloud,
@@ -1307,8 +2409,7 @@ fn agent_session_provider(
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "this provider does not implement Inline agent sessions",
-            )
-            .into());
+            ));
         }
     };
     Ok(provider)
@@ -1343,26 +2444,124 @@ fn connected_agent_session_chat_id(
     Ok(chat_id)
 }
 
-async fn session_thread_parent_chat_id(
-    store: &SqliteStore,
-    thread_chat_id: i64,
-) -> Result<i64, Box<dyn std::error::Error>> {
-    Ok(store
-        .dialog(InlineId::new(thread_chat_id))
-        .await?
-        .and_then(|dialog| dialog.parent_chat_id)
-        .map(InlineId::get)
-        .unwrap_or(thread_chat_id))
+fn connect_agent_session_state(
+    result: &proto::ConnectAgentSessionResult,
+) -> Result<proto::ConnectAgentSessionState, Box<dyn std::error::Error>> {
+    proto::ConnectAgentSessionState::try_from(result.state).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Inline returned an unknown agent session connection state",
+        )
+        .into()
+    })
 }
 
-pub(super) async fn link_agent_session_input<D: AgentDriver + 'static>(
-    bot: &InlineClient,
+fn canonical_agent_session_lookup(
+    result: proto::ConnectAgentSessionResult,
+    expected_bot_user_id: i64,
+    expected_provider: proto::AgentSessionProvider,
+) -> Result<Option<proto::AgentSession>, Box<dyn std::error::Error>> {
+    match (connect_agent_session_state(&result)?, result.agent_session) {
+        (proto::ConnectAgentSessionState::Unspecified, None) => Ok(None),
+        (proto::ConnectAgentSessionState::AlreadyConnected, Some(session)) => {
+            connected_agent_session_chat_id(&session)?;
+            validate_agent_session_identity(&session, expected_bot_user_id, expected_provider)?;
+            Ok(Some(session))
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Inline returned an inconsistent agent session lookup",
+        )
+        .into()),
+    }
+}
+
+fn validated_agent_session_connection(
+    result: proto::ConnectAgentSessionResult,
+    expected_chat_id: i64,
+    expected_bot_user_id: i64,
+    expected_provider: proto::AgentSessionProvider,
+) -> Result<(proto::AgentSession, proto::ConnectAgentSessionState), Box<dyn std::error::Error>> {
+    let state = connect_agent_session_state(&result)?;
+    if !matches!(
+        state,
+        proto::ConnectAgentSessionState::Created
+            | proto::ConnectAgentSessionState::AlreadyConnected
+    ) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Inline did not confirm the requested agent session connection",
+        )
+        .into());
+    }
+    let session = result.agent_session.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Inline returned an empty agent session connection",
+        )
+    })?;
+    validate_agent_session_identity(&session, expected_bot_user_id, expected_provider)?;
+    if connected_agent_session_chat_id(&session)? != expected_chat_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Inline returned an agent session for another conversation",
+        )
+        .into());
+    }
+    Ok((session, state))
+}
+
+fn validate_agent_session_identity(
+    session: &proto::AgentSession,
+    expected_bot_user_id: i64,
+    expected_provider: proto::AgentSessionProvider,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if session.id <= 0
+        || session.bot_user_id != expected_bot_user_id
+        || session.provider != expected_provider as i32
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Inline returned an agent session for another bot or provider",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn session_thread_parent_chat_id(
+    session: &proto::AgentSession,
+    thread_chat_id: i64,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    if let Some(parent_chat_id) = session.parent_chat_id {
+        if parent_chat_id <= 0 || parent_chat_id == thread_chat_id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Inline returned an invalid agent session parent",
+            )
+            .into());
+        }
+        return Ok(parent_chat_id);
+    }
+    // SdkBackend resolves absent parent metadata through GetChat for older
+    // servers. Absence now means an authoritative top-level conversation.
+    Ok(thread_chat_id)
+}
+
+pub(super) struct PreparedAgentSessionInput {
+    pub(super) agent_session_id: i64,
+    correlation: inline_agent_bridge::SessionInputCorrelation,
+}
+
+/// Resolve and validate the exact session before sending provider work, without
+/// claiming that the provider has accepted this prompt yet.
+pub(super) async fn prepare_agent_session_input<D: AgentDriver + 'static>(
     sessions: &ProviderSessionManager<D>,
     store: &BridgeStore,
     route: &InboundRoute,
     binding: &BindingKey,
     record: &InboundRecord,
-) -> Result<Option<i64>, Box<dyn std::error::Error>> {
+) -> Result<Option<PreparedAgentSessionInput>, Box<dyn std::error::Error>> {
     let owner_control = route.owner_control.as_ref().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotConnected,
@@ -1397,46 +2596,49 @@ pub(super) async fn link_agent_session_input<D: AgentDriver + 'static>(
     let agent_session = if let Some(agent_session) = recovered_agent_session {
         agent_session
     } else {
-        owner_control
-            .connect_agent_session(agent_session_connect_input(
-                route,
-                session_thread.session(),
-                session_thread.workspace_id(),
-                binding.chat_id,
-                None,
-            )?)
-            .await?
-            .agent_session
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Inline returned an empty agent session connection",
-                )
-            })?
+        validated_agent_session_connection(
+            owner_control
+                .connect_agent_session(agent_session_connect_input(
+                    route,
+                    session_thread.session(),
+                    session_thread.workspace_id(),
+                    binding.chat_id,
+                    None,
+                )?)
+                .await?,
+            binding.chat_id,
+            route.bot_user_id,
+            agent_session_provider(&route.provider_id)?,
+        )?
+        .0
     };
-    if connected_agent_session_chat_id(&agent_session)? != binding.chat_id {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "this provider session is connected to another Inline thread",
-        )
-        .into());
-    }
+    Ok(Some(PreparedAgentSessionInput {
+        agent_session_id: agent_session.id,
+        correlation,
+    }))
+}
+
+/// Only called after provider acceptance. If this projection RPC fails, the
+/// existing durable inbound/correlation is repaired by the next history resync.
+pub(super) async fn link_accepted_agent_session_input(
+    bot: &InlineClient,
+    prepared: &PreparedAgentSessionInput,
+    message_id: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
     let result = bot
         .sync_agent_session_messages(proto::SyncAgentSessionMessagesInput {
-            agent_session_id: agent_session.id,
+            agent_session_id: prepared.agent_session_id,
             mode: proto::AgentSessionSyncMode::Live as i32,
             messages: vec![proto::AgentSessionMessageSync {
                 role: proto::AgentSessionMessageRole::User as i32,
                 item_ref: None,
-                correlation_ref: Some(correlation.as_str().to_owned()),
+                correlation_ref: Some(prepared.correlation.as_str().to_owned()),
                 source_date: None,
                 revision_ref: None,
                 base_revision_ref: None,
                 complete: false,
                 operation: Some(proto::agent_session_message_sync::Operation::Link(
-                    proto::AgentSessionMessageLink {
-                        message_id: record.message_id,
-                    },
+                    proto::AgentSessionMessageLink { message_id },
                 )),
             }],
         })
@@ -1454,7 +2656,7 @@ pub(super) async fn link_agent_session_input<D: AgentDriver + 'static>(
         )
         .into());
     }
-    Ok(Some(agent_session.id))
+    Ok(())
 }
 
 async fn recover_agent_session_binding(
@@ -1477,6 +2679,11 @@ async fn recover_agent_session_binding(
             "Inline returned an incomplete agent session connection",
         )
     })?;
+    validate_agent_session_identity(
+        &agent_session,
+        route.bot_user_id,
+        agent_session_provider(&route.provider_id)?,
+    )?;
     if connected_agent_session_chat_id(&agent_session)? != binding.chat_id
         || agent_session.provider != agent_session_provider(&route.provider_id)? as i32
         || connection.instance_ref != route.installation_id.as_str()
@@ -1495,7 +2702,7 @@ async fn recover_agent_session_binding(
     let session_thread = SessionThreadBinding::new(
         session,
         binding.workspace_id.clone(),
-        binding.chat_id,
+        session_thread_parent_chat_id(&agent_session, binding.chat_id)?,
         binding.chat_id,
     )?;
     Ok(Some((session_thread, agent_session)))
@@ -1568,7 +2775,7 @@ struct AgentSessionHistoryContext<'a> {
     installation_id: &'a InstallationId,
     workspace_id: &'a WorkspaceId,
     thread_id: i64,
-    correlation_for_direction: &'a dyn Fn(&DirectionId) -> Option<String>,
+    correlation_for_direction: &'a (dyn Fn(&DirectionId) -> Option<String> + Send + Sync),
 }
 
 async fn sync_agent_session_snapshot(
@@ -1792,17 +2999,17 @@ fn known_inline_user_history(
     }
     let same_thread =
         record.binding.chat_id == context.thread_id && record.delivery_chat_id == context.thread_id;
-    let correlation_ref = same_thread
-        .then(|| {
-            item.confirmed_inline_correlation()
-                .map(|correlation| correlation.as_str().to_owned())
-                .or_else(|| (context.correlation_for_direction)(&record.direction.id))
-        })
-        .flatten();
+    if !same_thread {
+        return Ok(None);
+    }
+    let correlation_ref = item
+        .confirmed_inline_correlation()
+        .map(|correlation| correlation.as_str().to_owned())
+        .or_else(|| (context.correlation_for_direction)(&record.direction.id));
     Ok(Some(KnownInlineUserHistory {
         text: record.direction.text,
         correlation_ref,
-        linked_message_id: same_thread.then_some(record.message_id),
+        linked_message_id: Some(record.message_id),
     }))
 }
 
@@ -1909,19 +3116,14 @@ async fn send_agent_session_status_card(
     chat_id: i64,
     workspace_label: &str,
     summary: &SessionSummary,
+    history_incomplete: bool,
 ) -> Result<i64, Box<dyn std::error::Error>> {
-    let provider_label = session_provider_label(summary.session().provider().provider_id());
-    let session_title = session_thread_title(summary);
     let session_token = stable_session_token(summary.session());
     let mut request = SendTextRequest::new(
         PeerRef::Chat {
             chat_id: InlineId::new(chat_id),
         },
-        format!(
-            "**Connected to {provider_label}**\n\nSession: **{}**\nProject: **{}**",
-            markdown_escape(&session_title),
-            markdown_escape(workspace_label),
-        ),
+        agent_session_status_text(workspace_label, summary, history_incomplete),
     );
     request.external_id = Some(ExternalId::try_new(
         "agent-bridge",
@@ -1936,6 +3138,24 @@ async fn send_agent_session_status_card(
         .ok_or_else(|| {
             io::Error::other("Inline did not confirm the agent session status message").into()
         })
+}
+
+fn agent_session_status_text(
+    workspace_label: &str,
+    summary: &SessionSummary,
+    history_incomplete: bool,
+) -> String {
+    let provider_label = session_provider_label(summary.session().provider().provider_id());
+    let history_note = if history_incomplete {
+        "Recent user messages and final answers only. Older or unsupported content was omitted; the full transcript remains in Codex."
+    } else {
+        "User messages and final answers are shown here. Tool activity and intermediate responses remain in Codex."
+    };
+    format!(
+        "**{provider_label} session linked**\n\nSession: **{}**\nProject: **{}**\n\n/resume — sync recent history, then enable prompts in Inline.\n/stop — stop and release for ChatGPT Desktop or Codex CLI.\n\nUse /resume before sending prompts after opening or reconnecting. Use one interface at a time; close the session in the other interface before /resume. Wait for Inline’s release confirmation before continuing elsewhere. Other running Inline tasks may delay release.\n\n{history_note}",
+        markdown_escape(&session_thread_title(summary)),
+        markdown_escape(workspace_label),
+    )
 }
 
 async fn send_session_reply(
@@ -1956,7 +3176,12 @@ async fn send_session_reply(
         format!("{}-provider-sessions-{suffix}", record.event_id),
     )?);
     request.notification_mode = SendNotificationMode::Silent;
-    send_text_with_retry(bot, request).await?;
+    send_text_with_retry(bot, request)
+        .await?
+        .message_id
+        .ok_or_else(|| {
+            io::Error::other("session command reply has no confirmed message identity")
+        })?;
     Ok(())
 }
 
@@ -1986,7 +3211,7 @@ async fn edit_session_opened(
                 chat_id: InlineId::new(chat_id),
                 message_id: InlineId::new(message_id),
                 text: format!(
-                    "Session history opened in [Open thread](inline://thread?id={thread_id}). Send there to resume it in Inline."
+                    "Session history opened in [Open thread](inline://thread?id={thread_id}). Use /resume there to sync history and enable prompts."
                 ),
                 external_id: None,
                 parse_markdown: true,
@@ -2075,6 +3300,127 @@ mod tests {
         .expect("session ref")
     }
 
+    fn connected_session(chat_id: i64, bot_user_id: i64) -> proto::AgentSession {
+        proto::AgentSession {
+            id: 30,
+            peer_id: Some(proto::Peer {
+                r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id })),
+            }),
+            bot_user_id,
+            provider: proto::AgentSessionProvider::Codex as i32,
+            ..Default::default()
+        }
+    }
+
+    fn connection_result(
+        state: proto::ConnectAgentSessionState,
+        session: Option<proto::AgentSession>,
+    ) -> proto::ConnectAgentSessionResult {
+        proto::ConnectAgentSessionResult {
+            agent_session: session,
+            state: state as i32,
+        }
+    }
+
+    #[test]
+    fn session_thread_parent_uses_authoritative_metadata_without_a_dialog_cache() {
+        let mut session = connected_session(20, 7);
+        session.parent_chat_id = Some(10);
+        assert_eq!(session_thread_parent_chat_id(&session, 20).unwrap(), 10);
+        session.parent_chat_id = None;
+        assert_eq!(session_thread_parent_chat_id(&session, 20).unwrap(), 20);
+        for invalid in [0, -1, 20] {
+            session.parent_chat_id = Some(invalid);
+            assert!(session_thread_parent_chat_id(&session, 20).is_err());
+        }
+    }
+
+    #[test]
+    fn agent_session_connections_fail_closed_on_state_scope_and_identity_drift() {
+        let valid = connected_session(20, 7);
+        assert!(
+            canonical_agent_session_lookup(
+                connection_result(
+                    proto::ConnectAgentSessionState::AlreadyConnected,
+                    Some(valid.clone()),
+                ),
+                7,
+                proto::AgentSessionProvider::Codex,
+            )
+            .expect("canonical lookup")
+            .is_some()
+        );
+        assert!(
+            validated_agent_session_connection(
+                connection_result(
+                    proto::ConnectAgentSessionState::Created,
+                    Some(valid.clone()),
+                ),
+                20,
+                7,
+                proto::AgentSessionProvider::Codex,
+            )
+            .is_ok()
+        );
+
+        let mut wrong_bot = valid.clone();
+        wrong_bot.bot_user_id = 8;
+        assert!(
+            validated_agent_session_connection(
+                connection_result(
+                    proto::ConnectAgentSessionState::AlreadyConnected,
+                    Some(wrong_bot),
+                ),
+                20,
+                7,
+                proto::AgentSessionProvider::Codex,
+            )
+            .is_err()
+        );
+        let mut wrong_provider = valid.clone();
+        wrong_provider.provider = proto::AgentSessionProvider::Claude as i32;
+        assert!(
+            canonical_agent_session_lookup(
+                connection_result(
+                    proto::ConnectAgentSessionState::AlreadyConnected,
+                    Some(wrong_provider),
+                ),
+                7,
+                proto::AgentSessionProvider::Codex,
+            )
+            .is_err()
+        );
+        assert!(
+            validated_agent_session_connection(
+                connection_result(
+                    proto::ConnectAgentSessionState::ConnectedElsewhere,
+                    Some(valid.clone()),
+                ),
+                20,
+                7,
+                proto::AgentSessionProvider::Codex,
+            )
+            .is_err()
+        );
+        assert!(
+            validated_agent_session_connection(
+                connection_result(
+                    proto::ConnectAgentSessionState::Created,
+                    Some(valid.clone()),
+                ),
+                21,
+                7,
+                proto::AgentSessionProvider::Codex,
+            )
+            .is_err()
+        );
+        let unknown = proto::ConnectAgentSessionResult {
+            agent_session: Some(valid),
+            state: 99,
+        };
+        assert!(connect_agent_session_state(&unknown).is_err());
+    }
+
     fn summary(value: &str, title: &str) -> SessionSummary {
         SessionSummary::new(
             provider_session(value),
@@ -2085,6 +3431,143 @@ mod tests {
             SessionAvailability::Available,
         )
         .expect("summary")
+    }
+
+    struct PagedCatalog {
+        pages: std::sync::Mutex<std::collections::VecDeque<(Option<String>, SessionPage)>>,
+    }
+
+    impl AgentSessionCatalog for PagedCatalog {
+        fn session_capabilities(&self) -> SessionCapabilities {
+            enabled_capabilities().0
+        }
+
+        fn provider_health<'a>(
+            &'a self,
+            _: &'a WorkspaceId,
+        ) -> inline_agent_bridge::DriverFuture<'a, inline_agent_bridge::ProviderHealth> {
+            Box::pin(async { Err(DriverError::Unsupported("health in paging test")) })
+        }
+
+        fn list_sessions<'a>(
+            &'a self,
+            query: SessionQuery,
+        ) -> inline_agent_bridge::DriverFuture<'a, SessionPage> {
+            Box::pin(async move {
+                let (cursor, page) = self
+                    .pages
+                    .lock()
+                    .expect("pages")
+                    .pop_front()
+                    .expect("unexpected catalog request");
+                assert_eq!(query.cursor.as_ref().map(ToString::to_string), cursor);
+                Ok(page)
+            })
+        }
+
+        fn read_session<'a>(
+            &'a self,
+            _: SessionReadRequest,
+        ) -> inline_agent_bridge::DriverFuture<'a, SessionSnapshot> {
+            Box::pin(async { Err(DriverError::Unsupported("history in paging test")) })
+        }
+    }
+
+    fn catalog_query() -> SessionQuery {
+        SessionQuery {
+            provider: provider_session("session").provider().clone(),
+            workspace_id: WorkspaceId::new("workspace-1").expect("workspace"),
+            cursor: None,
+            page_size: SessionPageSize::new(MAX_SESSION_RESULTS),
+        }
+    }
+
+    fn catalog_page(sessions: Vec<SessionSummary>, next: Option<&str>) -> SessionPage {
+        SessionPage::new(
+            &catalog_query(),
+            sessions,
+            next.map(|cursor| SessionPageCursor::new(cursor).expect("cursor")),
+        )
+        .expect("page")
+    }
+
+    #[tokio::test]
+    async fn catalog_skips_empty_and_duplicate_pages_without_losing_new_sessions() {
+        let known = summary("known", "Known");
+        let older = summary("older", "Older");
+        let catalog = PagedCatalog {
+            pages: std::sync::Mutex::new(
+                [
+                    (None, catalog_page(vec![], Some("2"))),
+                    (
+                        Some("2".into()),
+                        catalog_page(vec![known.clone()], Some("3")),
+                    ),
+                    (Some("3".into()), catalog_page(vec![older.clone()], None)),
+                ]
+                .into(),
+            ),
+        };
+        let page = read_catalog_page(&catalog, catalog_query(), &[known])
+            .await
+            .expect("page");
+        assert_eq!(page.sessions(), &[older]);
+        assert!(page.next_cursor().is_none());
+        assert!(catalog.pages.lock().expect("pages").is_empty());
+    }
+
+    #[tokio::test]
+    async fn catalog_rejects_cursor_cycles() {
+        let catalog = PagedCatalog {
+            pages: std::sync::Mutex::new(
+                [
+                    (None, catalog_page(vec![], Some("2"))),
+                    (Some("2".into()), catalog_page(vec![], Some("3"))),
+                    (Some("3".into()), catalog_page(vec![], Some("2"))),
+                ]
+                .into(),
+            ),
+        };
+        assert!(matches!(
+            read_catalog_page(&catalog, catalog_query(), &[]).await,
+            Err(DriverError::Protocol(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn catalog_empty_page_search_has_a_request_budget_and_preserves_the_next_cursor() {
+        let pages = (0..MAX_CATALOG_PAGE_READS)
+            .map(|index| {
+                (
+                    (index > 0).then(|| index.to_string()),
+                    catalog_page(vec![], Some(&(index + 1).to_string())),
+                )
+            })
+            .collect();
+        let catalog = PagedCatalog {
+            pages: std::sync::Mutex::new(pages),
+        };
+        let page = read_catalog_page(&catalog, catalog_query(), &[])
+            .await
+            .expect("bounded page");
+        assert!(page.sessions().is_empty());
+        assert_eq!(
+            page.next_cursor().map(ToString::to_string),
+            Some(MAX_CATALOG_PAGE_READS.to_string())
+        );
+    }
+
+    #[test]
+    fn only_local_page_navigation_can_run_during_a_turn() {
+        assert!(!session_action_uses_provider(
+            SessionBrowserCallbackAction::Page { page: 1 }
+        ));
+        assert!(session_action_uses_provider(
+            SessionBrowserCallbackAction::LoadOlder { expected_count: 50 }
+        ));
+        assert!(session_action_uses_provider(
+            SessionBrowserCallbackAction::Open { index: 0 }
+        ));
     }
 
     fn enabled_capabilities() -> (SessionCapabilities, DriverCapabilities) {
@@ -2150,6 +3633,24 @@ mod tests {
         chat_id: i64,
         event_id: &str,
     ) {
+        accept_inline_history_with_state(
+            store,
+            installation_id,
+            workspace_id,
+            chat_id,
+            event_id,
+            InboundState::Completed,
+        );
+    }
+
+    fn accept_inline_history_with_state(
+        store: &BridgeStore,
+        installation_id: &InstallationId,
+        workspace_id: &WorkspaceId,
+        chat_id: i64,
+        event_id: &str,
+        state: InboundState,
+    ) {
         assert!(
             store
                 .accept_inbound(&InboundRecord {
@@ -2166,7 +3667,7 @@ mod tests {
                         DirectionId::new(event_id).expect("direction"),
                         "clean Inline prompt",
                     ),
-                    state: InboundState::Completed,
+                    state,
                     accepted_at: 1,
                     started_at: Some(1),
                     lease_expires_at: None,
@@ -2199,7 +3700,34 @@ mod tests {
     }
 
     #[test]
-    fn known_inline_history_uses_clean_text_and_scopes_correlation_to_the_same_thread() {
+    fn confirmed_provider_echo_repairs_an_ambiguous_start_without_a_local_turn_id() {
+        for state in [InboundState::Started, InboundState::Failed] {
+            let store = BridgeStore::open_in_memory().expect("store");
+            let installation_id = InstallationId::new("installation-1").expect("installation");
+            let workspace_id = WorkspaceId::new("workspace-1").expect("workspace");
+            let event_id = "ambiguous-start";
+            accept_inline_history_with_state(
+                &store,
+                &installation_id,
+                &workspace_id,
+                10,
+                event_id,
+                state,
+            );
+            let repaired = known_inline_user_history(
+                &inline_user_history_item(event_id),
+                false,
+                &history_context(&store, &installation_id, &workspace_id, 10),
+            )
+            .expect("repair")
+            .expect("confirmed echo");
+            assert_eq!(repaired.linked_message_id, Some(11));
+            assert_eq!(repaired.text, "clean Inline prompt");
+        }
+    }
+
+    #[test]
+    fn known_inline_history_links_only_within_the_same_thread() {
         let store = BridgeStore::open_in_memory().expect("store");
         let installation_id = InstallationId::new("installation-1").expect("installation");
         let workspace_id = WorkspaceId::new("workspace-1").expect("workspace");
@@ -2227,11 +3755,7 @@ mod tests {
                 &history_context(&store, &installation_id, &workspace_id, 20),
             )
             .expect("different thread"),
-            Some(KnownInlineUserHistory {
-                text: "clean Inline prompt".to_string(),
-                correlation_ref: None,
-                linked_message_id: None,
-            })
+            None
         );
     }
 
@@ -2431,6 +3955,21 @@ mod tests {
 
     #[test]
     fn provider_session_commands_are_claimed_but_unrelated_commands_are_not() {
+        for (provider, text, expected) in [
+            ("codex", "/resume", Some(SessionBrowserCommand::Resume)),
+            (
+                "codex",
+                "/resume@codex_bot",
+                Some(SessionBrowserCommand::Resume),
+            ),
+            ("codex", "/resume@other_bot", None),
+            ("claude", "/resume", None),
+        ] {
+            assert_eq!(
+                session_browser_command(&ProviderId::new(provider).unwrap(), text, "codex_bot"),
+                expected
+            );
+        }
         assert_eq!(
             session_browser_command(
                 &ProviderId::new("claude").expect("provider"),
@@ -2462,6 +4001,32 @@ mod tests {
     }
 
     #[test]
+    fn session_command_restarts_dead_connections_but_keeps_retryable_failures_local() {
+        for error in [
+            DriverError::ProcessExited("closed".into()),
+            DriverError::EpochEnded("closed".into()),
+        ] {
+            assert!(session_command_ends_provider_epoch(&error));
+            assert!(session_command_ends_provider_epoch(
+                &SessionManagerError::Driver(error)
+            ));
+        }
+        for error in [
+            DriverError::SessionBusy("other interface".into()),
+            DriverError::Transient("retry".into()),
+            DriverError::InvalidSession("missing".into()),
+        ] {
+            assert!(!session_command_ends_provider_epoch(&error));
+            assert!(!session_command_ends_provider_epoch(
+                &SessionManagerError::Driver(error)
+            ));
+        }
+        assert!(!session_command_ends_provider_epoch(&io::Error::other(
+            "Inline history sync failed"
+        )));
+    }
+
+    #[test]
     fn callback_contains_only_token_and_index() {
         let data = session_browser_callback_data(
             "opaque-picker-token",
@@ -2483,21 +4048,63 @@ mod tests {
     #[test]
     fn picker_actions_never_embed_provider_session_identity() {
         let picker = SessionBrowserPicker {
-            installation_id: InstallationId::new("installation-1").expect("installation"),
             provider_id: ProviderId::new("codex").expect("provider"),
-            owner_user_id: 7,
-            chat_id: 10,
-            message_id: None,
-            workspace_id: WorkspaceId::new("workspace-1").expect("workspace"),
             workspace_label: "Project".to_string(),
+            has_older: false,
             sessions: vec![summary("private-provider-session", "Fix tests")],
-            expires_at: 100,
         };
         let (text, actions) = session_picker_card("opaque-token", &picker, 0).expect("card");
         let actions = serde_json::to_string(&actions).expect("actions");
         assert!(!text.contains("private-provider-session"));
         assert!(!actions.contains("private-provider-session"));
         assert!(text.starts_with("Recent Codex sessions"));
+    }
+
+    #[test]
+    fn retry_card_exposes_only_the_original_open_target() {
+        let (text, actions) =
+            retry_session_picker_card("opaque", &summary("private-id", "Selected task"), 49)
+                .expect("card");
+        assert!(text.contains("Selected task"));
+        assert!(text.contains("/sessions"));
+        assert_eq!(actions.rows.len(), 1);
+        assert_eq!(actions.rows[0].actions.len(), 1);
+        let button = &actions.rows[0].actions[0];
+        assert_eq!(button.text, "Retry Open");
+        let MessageActionKind::Callback { data } = &button.kind else {
+            panic!("callback")
+        };
+        let callback =
+            parse_session_browser_callback(&button.action_id, data).expect("valid action");
+        assert!(matches!(
+            callback.action,
+            SessionBrowserCallbackAction::Open { index: 49 }
+        ));
+        assert!(!String::from_utf8_lossy(data).contains("private-id"));
+    }
+
+    #[test]
+    fn last_loaded_page_offers_an_opaque_restart_safe_older_action() {
+        let picker = SessionBrowserPicker {
+            provider_id: ProviderId::new("codex").expect("provider"),
+            workspace_label: "Project".into(),
+            sessions: vec![summary("private-session", "Work")],
+            has_older: true,
+        };
+        let (text, actions) = session_picker_card("opaque-token", &picker, 0).expect("card");
+        assert!(text.contains("Older sessions"));
+        let button = &actions.rows.last().expect("navigation").actions[0];
+        assert_eq!(button.text, "Load Older Sessions");
+        let MessageActionKind::Callback { data } = &button.kind else {
+            panic!("callback")
+        };
+        assert!(!String::from_utf8_lossy(data).contains("private-session"));
+        let callback = parse_session_browser_callback(&button.action_id, data).expect("parse");
+        assert!(matches!(
+            callback.action,
+            SessionBrowserCallbackAction::LoadOlder { expected_count: 1 }
+        ));
+        assert!(parse_session_browser_callback(&session_open_action_id(0), data).is_none());
     }
 
     #[test]
@@ -2526,15 +4133,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let picker = SessionBrowserPicker {
-            installation_id: InstallationId::new("installation-1").expect("installation"),
             provider_id: ProviderId::new("codex").expect("provider"),
-            owner_user_id: 7,
-            chat_id: 10,
-            message_id: None,
-            workspace_id: WorkspaceId::new("workspace-1").expect("workspace"),
             workspace_label: "Project".to_string(),
+            has_older: false,
             sessions,
-            expires_at: 100,
         };
 
         let (_, first_page) = session_picker_card("opaque-token", &picker, 0).expect("first page");
@@ -2572,131 +4174,6 @@ mod tests {
             session_open_action_id(49)
         );
         assert_eq!(last_page_actions.rows[2].actions[0].text, "Back");
-    }
-
-    #[test]
-    fn picker_registry_is_bounded_and_prunes_expired_entries() {
-        let runtime = SessionBrowserRuntime::default();
-        for index in 0..MAX_PICKERS {
-            let picker = SessionBrowserPicker {
-                installation_id: InstallationId::new("installation-1").expect("installation"),
-                provider_id: ProviderId::new("codex").expect("provider"),
-                owner_user_id: 7,
-                chat_id: 10,
-                message_id: None,
-                workspace_id: WorkspaceId::new("workspace-1").expect("workspace"),
-                workspace_label: "Project".to_string(),
-                sessions: vec![summary(&format!("session-{index}"), "Fix tests")],
-                expires_at: 10,
-            };
-            assert!(runtime.insert_picker(format!("token-{index}"), picker, 1));
-        }
-        let extra = SessionBrowserPicker {
-            installation_id: InstallationId::new("installation-1").expect("installation"),
-            provider_id: ProviderId::new("codex").expect("provider"),
-            owner_user_id: 7,
-            chat_id: 10,
-            message_id: None,
-            workspace_id: WorkspaceId::new("workspace-1").expect("workspace"),
-            workspace_label: "Project".to_string(),
-            sessions: vec![summary("extra-session", "Fix tests")],
-            expires_at: 20,
-        };
-        assert!(!runtime.insert_picker("extra".to_string(), extra.clone(), 1));
-        assert!(runtime.insert_picker("extra".to_string(), extra, 10));
-    }
-
-    #[test]
-    fn picker_claim_is_bound_and_remains_retryable_until_publication() {
-        let runtime = SessionBrowserRuntime::default();
-        let picker = SessionBrowserPicker {
-            installation_id: InstallationId::new("installation-1").expect("installation"),
-            provider_id: ProviderId::new("codex").expect("provider"),
-            owner_user_id: 7,
-            chat_id: 10,
-            message_id: Some(11),
-            workspace_id: WorkspaceId::new("workspace-1").expect("workspace"),
-            workspace_label: "Project".to_string(),
-            sessions: vec![summary("private-provider-session", "Fix tests")],
-            expires_at: 100,
-        };
-        assert!(runtime.insert_picker("token".to_string(), picker, 1));
-        let callback = SessionBrowserCallback {
-            version: CALLBACK_VERSION,
-            token: "token".to_string(),
-            action: SessionBrowserCallbackAction::Open { index: 0 },
-        };
-        assert!(matches!(
-            runtime.claim(
-                &callback,
-                &InstallationId::new("installation-1").expect("installation"),
-                &ProviderId::new("codex").expect("provider"),
-                7,
-                8,
-                10,
-                11,
-                Some(&WorkspaceId::new("workspace-1").expect("workspace")),
-                2,
-            ),
-            SessionBrowserClaim::Unauthorized
-        ));
-        assert!(matches!(
-            runtime.claim(
-                &callback,
-                &InstallationId::new("installation-1").expect("installation"),
-                &ProviderId::new("codex").expect("provider"),
-                7,
-                7,
-                10,
-                12,
-                Some(&WorkspaceId::new("workspace-1").expect("workspace")),
-                2,
-            ),
-            SessionBrowserClaim::Stale
-        ));
-        assert!(matches!(
-            runtime.claim(
-                &callback,
-                &InstallationId::new("installation-1").expect("installation"),
-                &ProviderId::new("codex").expect("provider"),
-                7,
-                7,
-                10,
-                11,
-                Some(&WorkspaceId::new("workspace-1").expect("workspace")),
-                2,
-            ),
-            SessionBrowserClaim::Open(_)
-        ));
-        assert!(matches!(
-            runtime.claim(
-                &callback,
-                &InstallationId::new("installation-1").expect("installation"),
-                &ProviderId::new("codex").expect("provider"),
-                7,
-                7,
-                10,
-                11,
-                Some(&WorkspaceId::new("workspace-1").expect("workspace")),
-                2,
-            ),
-            SessionBrowserClaim::Open(_)
-        ));
-        runtime.remove_picker("token");
-        assert!(matches!(
-            runtime.claim(
-                &callback,
-                &InstallationId::new("installation-1").expect("installation"),
-                &ProviderId::new("codex").expect("provider"),
-                7,
-                7,
-                10,
-                11,
-                Some(&WorkspaceId::new("workspace-1").expect("workspace")),
-                2,
-            ),
-            SessionBrowserClaim::Stale
-        ));
     }
 
     #[test]

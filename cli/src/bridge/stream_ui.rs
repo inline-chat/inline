@@ -503,6 +503,7 @@ pub(super) async fn publish_inbound_final_send(
         final_text,
         &[],
         None,
+        None,
         state,
         failure,
     )
@@ -520,15 +521,17 @@ pub(super) async fn publish_inbound_final_send_with_attachments(
     final_text: &str,
     output_attachments: &[OutputAttachment],
     preferred_random_id: Option<RandomId>,
+    agent_output_session_id: Option<i64>,
     state: InboundState,
     failure: Option<&str>,
 ) -> Result<Option<InlineId>, Box<dyn std::error::Error>> {
-    if !store.stage_inbound_final_send_with_attachments(
+    if !store.stage_inbound_final_send_with_attachments_and_link(
         event_id,
         state,
         final_text,
         output_attachments,
         failure,
+        agent_output_session_id,
     )? {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -552,6 +555,18 @@ pub(super) async fn publish_inbound_final_send_with_attachments(
         output_attachments,
     )
     .await?;
+    if agent_output_session_id.is_some() {
+        let message_id = mutation.message_id.ok_or_else(|| {
+            io::Error::other("agent-session final send completed without a message identity")
+        })?;
+        if !store.attach_inbound_agent_output_message(event_id, message_id.get())? {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "agent-output link disappeared before message attachment",
+            )
+            .into());
+        }
+    }
     if !store.commit_inbound_final_send(event_id)? {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -672,9 +687,14 @@ pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMe
         let mut last_error = None;
         for attempt in 0..3 {
             match transport.send_media(request.clone(), bytes.clone()).await {
-                Ok(_) => {
+                Ok(mutation) if mutation.message_id.is_some() => {
                     last_error = None;
                     break;
+                }
+                Ok(_) => {
+                    last_error = Some(Box::new(io::Error::other(
+                        "Inline attachment send was acknowledged without a message identity",
+                    )) as Box<dyn std::error::Error>);
                 }
                 Err(error) => last_error = Some(error),
             }
@@ -699,7 +719,12 @@ pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMe
     let mut last_error = None;
     for attempt in 0..3 {
         match transport.send(request.clone()).await {
-            Ok(mutation) => return Ok(mutation),
+            Ok(mutation) if mutation.message_id.is_some() => return Ok(mutation),
+            Ok(_) => {
+                last_error = Some(Box::new(io::Error::other(
+                    "Inline final send was acknowledged without a message identity",
+                )) as Box<dyn std::error::Error>);
+            }
             Err(error) => last_error = Some(error),
         }
         if attempt < 2 {

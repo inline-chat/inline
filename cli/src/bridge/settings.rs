@@ -6,7 +6,7 @@ use super::*;
 
 const SETTINGS_VERSION: u32 = 1;
 const DEFAULT_VALUE: &str = "__inline_provider_default__";
-const SETTINGS_DEADLINE: Duration = Duration::from_secs(4);
+pub(super) const SETTINGS_DEADLINE: Duration = Duration::from_secs(4);
 const COMMAND_CHOICE_TTL_SECONDS: i64 = 10 * 60;
 const COMMAND_CHOICE_PAGE_SIZE: usize = 6;
 const MAX_COMMAND_CHOICES: usize = 60;
@@ -21,6 +21,11 @@ const ITEM_NEW: &str = "session.new";
 const ITEM_CLEAR: &str = "session.clear";
 const ITEM_COMPACT: &str = "session.compact";
 const ITEM_FOLDER: &str = "workspace.folder";
+const ITEM_PROJECT: &str = "workspace.project";
+const ITEM_PROJECTS: &str = "workspace.projects";
+const ITEM_PROJECTS_BACK: &str = "workspace.projects.back";
+const PROJECT_PAGE_PREFIX: &str = "workspace.projects.page:";
+const PROJECT_PAGE_SIZE: usize = 99;
 
 pub(super) struct SettingsCommandResult {
     pub message: String,
@@ -185,6 +190,12 @@ pub(super) struct SettingsIdentity {
     pub host_installation_id: String,
     pub host_label: String,
     pub workspace_picker: Option<WorkspacePickerEndpoint>,
+    pub codex_projects_path: Option<PathBuf>,
+    pub codex_project_rpc: Option<
+        inline_agent_driver_codex::CodexAppServerDriver<
+            inline_agent_driver_codex::CodexDriverWriter,
+        >,
+    >,
     pub bot_store: SqliteStore,
     pub reply_thread_default: ReplyThreadDefault,
 }
@@ -397,44 +408,50 @@ pub(super) async fn handle_settings_command_action<D: AgentDriver + 'static>(
         )
         .await;
     }
-    let _provider_work_lease = match runtime.sessions.try_begin_provider_work() {
-        Ok(Some(lease)) => lease,
-        Ok(None) => {
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id: *interaction_id,
-                toast: Some(
-                    "Inline is releasing the agent connection. Try again in a moment.".to_string(),
-                ),
-            })
-            .await?;
-            return Ok(SettingsCommandActionOutcome::Handled {
-                provider_epoch_ended: false,
-            });
-        }
-        Err(error) => {
-            let provider_epoch_ended = session_error_ends_provider_epoch(&error);
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id: *interaction_id,
-                toast: Some("The agent connection restarted. Try again.".to_string()),
-            })
-            .await?;
-            return Ok(SettingsCommandActionOutcome::Handled {
-                provider_epoch_ended,
-            });
-        }
-    };
-    let catalog = match load_catalog(runtime, &snapshot).await {
-        Ok(catalog) => catalog,
-        Err(result) => {
-            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-                interaction_id: *interaction_id,
-                toast: Some(result.message),
-            })
-            .await?;
-            return Ok(SettingsCommandActionOutcome::Handled {
-                provider_epoch_ended: result.provider_epoch_ended,
-            });
-        }
+    let (_provider_work_lease, catalog) = if request.item_id == ITEM_FOLDER {
+        (None, None)
+    } else {
+        let lease = match runtime.sessions.try_begin_provider_work() {
+            Ok(Some(lease)) => lease,
+            Ok(None) => {
+                bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                    interaction_id: *interaction_id,
+                    toast: Some(
+                        "Inline is releasing the agent connection. Try again in a moment."
+                            .to_string(),
+                    ),
+                })
+                .await?;
+                return Ok(SettingsCommandActionOutcome::Handled {
+                    provider_epoch_ended: false,
+                });
+            }
+            Err(error) => {
+                let provider_epoch_ended = session_error_ends_provider_epoch(&error);
+                bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                    interaction_id: *interaction_id,
+                    toast: Some("The agent connection restarted. Try again.".to_string()),
+                })
+                .await?;
+                return Ok(SettingsCommandActionOutcome::Handled {
+                    provider_epoch_ended,
+                });
+            }
+        };
+        let catalog = match load_catalog(runtime, &snapshot).await {
+            Ok(catalog) => catalog,
+            Err(result) => {
+                bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                    interaction_id: *interaction_id,
+                    toast: Some(result.message),
+                })
+                .await?;
+                return Ok(SettingsCommandActionOutcome::Handled {
+                    provider_epoch_ended: result.provider_epoch_ended,
+                });
+            }
+        };
+        (Some(lease), catalog)
     };
     let current = runtime.store.chat_settings(&snapshot.binding, now)?;
     let Some(current_choices) = settings_command_choices_for_item(
@@ -673,6 +690,30 @@ async fn handle_provider_command_choice_action<D: AgentDriver + 'static>(
         .item_id
         .strip_prefix(PROVIDER_COMMAND_ITEM_PREFIX)
         .unwrap_or_default();
+    if runtime.sessions.provider_id().as_str() == "codex"
+        && runtime
+            .store
+            .session_thread_binding_for_chat(
+                &snapshot.binding.installation_id,
+                snapshot.binding.chat_id,
+            )?
+            .is_some()
+        && !runtime
+            .sessions
+            .session_history_is_ready(&snapshot.binding)
+            .await
+    {
+        bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+            interaction_id,
+            toast: Some(
+                "Use /resume to sync recent history before sending provider commands.".to_string(),
+            ),
+        })
+        .await?;
+        return Ok(SettingsCommandActionOutcome::Handled {
+            provider_epoch_ended: false,
+        });
+    }
     let _provider_work_lease = match runtime.sessions.try_begin_provider_work() {
         Ok(Some(lease)) => lease,
         Ok(None) => {
@@ -1210,7 +1251,7 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
             if actor_user_id == runtime.identity.owner_user_id
                 && chat_id == snapshot.binding.chat_id
                 && successful_document
-                && ((item_id == ITEM_FOLDER
+                && ((matches!(item_id.as_str(), ITEM_FOLDER | ITEM_PROJECT)
                     && next_snapshot.binding.workspace_id != snapshot.binding.workspace_id)
                     || matches!(item_id.as_str(), ITEM_NEW | ITEM_CLEAR)) =>
         {
@@ -1218,14 +1259,26 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
         }
         _ => None,
     };
-    answer_settings_compatibly(
+    if let Err(error) = answer_settings_compatibly(
         bot,
         AnswerBotChatSettingsRequest {
             request_id,
             response: resolution.response,
         },
     )
-    .await?;
+    .await
+    {
+        // Malformed or unauthorized responses remain real server errors. They
+        // are isolated at this control-plane boundary so they cannot restart
+        // the provider or interrupt an unrelated agent turn.
+        eprintln!(
+            "Inline rejected a bot settings response; kept the local provider connected: {}",
+            safe_diagnostic(&error.to_string())
+        );
+        return Ok(SettingsEventOutcome::Handled {
+            provider_epoch_ended: resolution.provider_epoch_ended,
+        });
+    }
     if let Some(message) = working_directory_announcement
         && let Err(error) = send_silent_text(
             bot,
@@ -1259,6 +1312,260 @@ pub(super) async fn handle_unavailable_settings_event(
     .await
 }
 
+/// Keeps the host-owned project selector usable while the provider process is
+/// restarting. Provider-owned controls are intentionally omitted from this
+/// reduced document, so recovery never waits for or mutates a dead epoch.
+pub(super) async fn handle_provider_unavailable_settings_event(
+    bot: &InlineClient,
+    event: &ClientEvent,
+    route: &InboundRoute,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let ClientEvent::BotInteraction(interaction) = event else {
+        return Ok(false);
+    };
+    let (request_id, chat_id, actor_user_id, version) = match interaction {
+        BotInteractionEvent::ChatSettingsRequested {
+            request_id,
+            chat_id,
+            actor_user_id,
+            version,
+        }
+        | BotInteractionEvent::ChatSettingsItemInvoked {
+            request_id,
+            chat_id,
+            actor_user_id,
+            version,
+            ..
+        } => (*request_id, chat_id.get(), actor_user_id.get(), *version),
+        _ => return Ok(false),
+    };
+    let response = if actor_user_id != route.owner_user_id {
+        problem(
+            BotChatSettingsProblemCode::Unavailable,
+            "Only the bot owner can view or change these settings.",
+            None,
+        )
+    } else if version != SETTINGS_VERSION {
+        problem(
+            BotChatSettingsProblemCode::Unavailable,
+            "This settings version is not supported. Update Inline and try again.",
+            None,
+        )
+    } else {
+        resolve_provider_unavailable_project_settings(interaction, route, chat_id)
+    };
+    if let Err(error) = answer_settings_compatibly(
+        bot,
+        AnswerBotChatSettingsRequest {
+            request_id,
+            response,
+        },
+    )
+    .await
+    {
+        eprintln!(
+            "Inline rejected a provider-restart settings response: {}",
+            safe_diagnostic(&error.to_string())
+        );
+    }
+    Ok(true)
+}
+
+fn resolve_provider_unavailable_project_settings(
+    interaction: &BotInteractionEvent,
+    route: &InboundRoute,
+    chat_id: i64,
+) -> BotChatSettingsResponse {
+    let current_document = match provider_unavailable_project_document(route, chat_id) {
+        Ok(document) => document,
+        Err(error) => {
+            eprintln!(
+                "Provider-restart project settings unavailable: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            return problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "Project settings are temporarily unavailable.",
+                None,
+            );
+        }
+    };
+    let BotInteractionEvent::ChatSettingsItemInvoked {
+        item_id,
+        value,
+        document_revision,
+        ..
+    } = interaction
+    else {
+        return BotChatSettingsResponse::Document(current_document);
+    };
+    if document_revision != &current_document.revision {
+        return problem(
+            BotChatSettingsProblemCode::Stale,
+            "Projects changed. Review the latest folders and try again.",
+            Some(current_document),
+        );
+    }
+    if item_id != ITEM_FOLDER {
+        return problem(
+            BotChatSettingsProblemCode::Unavailable,
+            "That provider setting is unavailable while the local provider restarts.",
+            Some(current_document),
+        );
+    }
+    match route
+        .store
+        .session_thread_binding_for_chat(&route.installation_id, chat_id)
+    {
+        Ok(Some(_)) => {
+            return problem(
+                BotChatSettingsProblemCode::Failed,
+                "This session thread is pinned to its Codex project. Choose a project in the bot DM, then open another session.",
+                Some(current_document),
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!(
+                "Provider-restart project binding check failed: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            return problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "I couldn't verify this session thread's project binding.",
+                Some(current_document),
+            );
+        }
+    }
+    let Some(BotSettingsValue::String(value)) = value else {
+        return problem(
+            BotChatSettingsProblemCode::InvalidValue,
+            "Choose a recent project folder.",
+            Some(current_document),
+        );
+    };
+    let Ok(workspace_id) = WorkspaceId::new(value.clone()) else {
+        return problem(
+            BotChatSettingsProblemCode::InvalidValue,
+            "That project folder is not available.",
+            Some(current_document),
+        );
+    };
+    let legal_choice = route
+        .store
+        .recent_workspace_choices(&route.installation_id, None)
+        .is_ok_and(|choices| {
+            choices
+                .iter()
+                .any(|choice| choice.workspace_id == workspace_id)
+        });
+    if !legal_choice {
+        return problem(
+            BotChatSettingsProblemCode::InvalidValue,
+            "That recent project folder is no longer available.",
+            Some(current_document),
+        );
+    }
+    if let Err(error) = route.store.bind_chat_workspace(
+        &route.installation_id,
+        chat_id,
+        &workspace_id,
+        now_seconds(),
+    ) {
+        eprintln!(
+            "Provider-restart project selection failed: {}",
+            safe_diagnostic(&error.to_string())
+        );
+        return problem(
+            BotChatSettingsProblemCode::Failed,
+            "I couldn't select that project folder.",
+            Some(current_document),
+        );
+    }
+    match provider_unavailable_project_document(route, chat_id) {
+        Ok(document) => BotChatSettingsResponse::Document(document),
+        Err(error) => {
+            eprintln!(
+                "Provider-restart project settings refresh failed: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            problem(
+                BotChatSettingsProblemCode::Failed,
+                "The project changed, but settings could not be refreshed.",
+                None,
+            )
+        }
+    }
+}
+
+fn provider_unavailable_project_document(
+    route: &InboundRoute,
+    chat_id: i64,
+) -> Result<BotChatSettingsDocument, Box<dyn std::error::Error>> {
+    let current = route
+        .store
+        .bound_chat_workspace(&route.installation_id, chat_id)?
+        .ok_or_else(|| io::Error::other("conversation has no project binding"))?;
+    let choices = route
+        .store
+        .recent_workspace_choices(&route.installation_id, Some(&current.workspace_id))?;
+    let pinned = route
+        .store
+        .session_thread_binding_for_chat(&route.installation_id, chat_id)?
+        .is_some();
+    let unavailable_workspace_id = current.missing_since.map(|_| current.workspace_id.clone());
+    Ok(BotChatSettingsDocument {
+        version: SETTINGS_VERSION,
+        revision: format!(
+            "provider-restart-project-v1-{}-{}",
+            current.workspace_id, current.selection_order
+        ),
+        sections: vec![
+            BotChatSettingsSection {
+                id: "project".to_string(),
+                title: Some("Project".to_string()),
+                description: Some(
+                    "Project selection stays available while the local provider restarts."
+                        .to_string(),
+                ),
+                items: vec![BotChatSettingsItem {
+                    id: ITEM_FOLDER.to_string(),
+                    label: Some("Folder".to_string()),
+                    description: Some("Recent folders on the bridge host.".to_string()),
+                    disabled: pinned,
+                    disabled_reason: pinned
+                        .then(|| "This session thread is pinned to its Codex project.".to_string()),
+                    control: BotChatSettingsControl::Folder(BotChatSettingsFolder {
+                        value: current.workspace_id.to_string(),
+                        recent_folders: folder_options(choices, unavailable_workspace_id.as_ref()),
+                        host_installation_id: route.installation_id.to_string(),
+                        host_label: route.host_label.clone(),
+                        allows_local_picker: false,
+                        local_picker_port: None,
+                        local_picker_capability: None,
+                    }),
+                }],
+            },
+            BotChatSettingsSection {
+                id: "status".to_string(),
+                title: Some("Status".to_string()),
+                description: None,
+                items: vec![BotChatSettingsItem {
+                    id: "status.bridge".to_string(),
+                    label: Some("Provider".to_string()),
+                    description: None,
+                    disabled: true,
+                    disabled_reason: None,
+                    control: BotChatSettingsControl::Info {
+                        text: "Restarting; new work stays queued.".to_string(),
+                        tone: BotChatSettingsInfoTone::Warning,
+                    },
+                }],
+            },
+        ],
+    })
+}
+
 pub(super) async fn handle_unavailable_settings_event_with_message(
     bot: &InlineClient,
     event: &ClientEvent,
@@ -1281,14 +1588,20 @@ pub(super) async fn handle_unavailable_settings_event_with_message(
         } => (*request_id, actor_user_id.get()),
         _ => return Ok(false),
     };
-    answer_settings_compatibly(
+    if let Err(error) = answer_settings_compatibly(
         bot,
         AnswerBotChatSettingsRequest {
             request_id,
             response: unavailable_settings_response(actor_user_id, owner_user_id, owner_message),
         },
     )
-    .await?;
+    .await
+    {
+        eprintln!(
+            "Inline rejected an unavailable-settings response: {}",
+            safe_diagnostic(&error.to_string())
+        );
+    }
     Ok(true)
 }
 
@@ -1480,6 +1793,7 @@ pub(super) async fn resolve_settings_command<D: AgentDriver + 'static>(
     arguments: &str,
 ) -> SettingsCommandResult {
     let snapshot = runtime.active.snapshot();
+    let mut projects_unavailable = false;
     if name == "folder" {
         match runtime.store.session_thread_binding_for_chat(
             &snapshot.binding.installation_id,
@@ -1495,9 +1809,22 @@ pub(super) async fn resolve_settings_command<D: AgentDriver + 'static>(
             Err(error) => return command_failed("I couldn’t read this session thread.", error),
         }
     }
-    let catalog = match load_catalog(runtime, &snapshot).await {
-        Ok(catalog) => catalog,
-        Err(result) => return result,
+    if name == "folder"
+        && let Err(error) = projects::refresh_provider_projects(runtime, &snapshot).await
+    {
+        eprintln!(
+            "Codex project discovery failed: {}",
+            safe_diagnostic(&error.to_string())
+        );
+        projects_unavailable = true;
+    }
+    let catalog = if name == "folder" {
+        None
+    } else {
+        match load_catalog(runtime, &snapshot).await {
+            Ok(catalog) => catalog,
+            Err(result) => return result,
+        }
     };
     let current = match runtime
         .store
@@ -1517,7 +1844,11 @@ pub(super) async fn resolve_settings_command<D: AgentDriver + 'static>(
         arguments
     };
     if arguments.is_empty() {
-        return command_status(runtime, &snapshot, &current, catalog.as_ref(), name).await;
+        let mut result = command_status(runtime, &snapshot, &current, catalog.as_ref(), name).await;
+        if projects_unavailable {
+            result.message.push_str("\n\nCodex project discovery is temporarily unavailable. Showing saved and previously loaded folders; retry to refresh the full list.");
+        }
+        return result;
     }
 
     let (item_id, value, confirmation) = match command_value(
@@ -1631,13 +1962,11 @@ async fn command_status<D: AgentDriver + 'static>(
             "Verbose is {}. Use `/verbose on` or `/verbose off`.",
             if settings.verbose { "on" } else { "off" }
         ),
-        "folder" => match runtime.store.recent_workspace_choices(
-            &snapshot.binding.installation_id,
-            Some(&snapshot.binding.workspace_id),
-        ) {
+        "folder" => match full_project_choices(runtime, snapshot) {
             Ok(choices) => {
                 let list = choices
                     .iter()
+                    .take(COMMAND_CHOICE_PAGE_SIZE)
                     .enumerate()
                     .map(|(index, choice)| {
                         let hint = choice
@@ -1649,13 +1978,14 @@ async fn command_status<D: AgentDriver + 'static>(
                     .collect::<Vec<_>>()
                     .join("; ");
                 format!(
-                    "Current project: {}. Recent: {list}. Use `/folder <number|name>`, or choose Pick a Folder… in settings on {}.",
+                    "Current project: {}. {} project folders available; first page: {list}. Use the page buttons or `/folder <number|name>`. Pick a Folder… in settings adds a folder on {}.",
                     workspace_label(&snapshot.workspace),
+                    choices.len(),
                     runtime.identity.host_label
                 )
             }
             Err(error) => {
-                return command_failed("I couldn’t list recent project folders.", error);
+                return command_failed("I couldn’t load saved projects.", error);
             }
         },
         _ => "Unknown settings command. Try /help.".to_string(),
@@ -1719,14 +2049,12 @@ async fn settings_command_choices_for_item<D: AgentDriver + 'static>(
                 label: option.label.clone(),
             })
             .collect::<Vec<_>>(),
-        BotChatSettingsControl::Folder(folder) => folder
-            .recent_folders
-            .iter()
-            .filter(|option| !option.disabled)
-            .take(MAX_COMMAND_CHOICES)
+        BotChatSettingsControl::Folder(_) => full_project_choices(runtime, snapshot)
+            .ok()?
+            .into_iter()
             .map(|option| SettingsCommandChoice {
-                value: option.value.clone(),
-                label: option.label.clone(),
+                value: option.workspace_id.to_string(),
+                label: project_choice_label(&option),
             })
             .collect::<Vec<_>>(),
         _ => return None,
@@ -1876,13 +2204,8 @@ fn command_value<D: AgentDriver + 'static>(
             ))
         }
         "folder" => {
-            let choices = runtime
-                .store
-                .recent_workspace_choices(
-                    &snapshot.binding.installation_id,
-                    Some(&snapshot.binding.workspace_id),
-                )
-                .map_err(|_| "I couldn’t list recent project folders.".to_string())?;
+            let choices = full_project_choices(runtime, snapshot)
+                .map_err(|_| "I couldn’t load saved projects.".to_string())?;
             let choice = resolve_workspace_argument(argument, &choices)?;
             let label = choice.display_name.clone();
             Ok((
@@ -1928,7 +2251,7 @@ fn kind_command(kind: &str) -> &str {
     }
 }
 
-fn resolve_workspace_argument<'a>(
+pub(in crate::bridge) fn resolve_workspace_argument<'a>(
     argument: &str,
     choices: &'a [WorkspaceChoice],
 ) -> Result<&'a WorkspaceChoice, String> {
@@ -2061,8 +2384,18 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
                     BridgeNotice::AgentConnectionLost.message(),
                     None,
                 ),
-                provider_epoch_ended: true,
+                provider_epoch_ended: session_error_ends_provider_epoch(&error),
             };
+        }
+    };
+    let projects_unavailable = match projects::refresh_provider_projects(runtime, &snapshot).await {
+        Ok(()) => false,
+        Err(error) => {
+            eprintln!(
+                "Codex project discovery failed: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            true
         }
     };
     let catalog = match tokio::time::timeout(
@@ -2117,7 +2450,7 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
             ));
         }
     };
-    let current_document =
+    let mut current_document =
         match build_settings_document(runtime, &snapshot, &current, catalog.as_ref()).await {
             Ok(document) => document,
             Err(error) => {
@@ -2132,6 +2465,14 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
                 ));
             }
         };
+    if projects_unavailable
+        && let Some(section) = current_document
+            .sections
+            .iter_mut()
+            .find(|section| section.id == "project")
+    {
+        section.description = Some("Codex project discovery is temporarily unavailable. Previously loaded folders and Pick a Folder remain available. Reopen settings to retry.".to_string());
+    }
     let BotInteractionEvent::ChatSettingsItemInvoked {
         item_id,
         value,
@@ -2149,6 +2490,43 @@ async fn resolve_settings_interaction_with_deadline<D: AgentDriver + 'static>(
             "Settings changed. Review the latest values and try again.",
             Some(current_document),
         ));
+    }
+
+    if item_id == ITEM_PROJECTS_BACK && value.is_none() {
+        return SettingsInteractionResolution::normal(BotChatSettingsResponse::Document(
+            current_document,
+        ));
+    }
+    if item_id == ITEM_PROJECTS || item_id.starts_with(PROJECT_PAGE_PREFIX) {
+        if projects_unavailable {
+            return SettingsInteractionResolution::normal(problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "Codex projects could not be refreshed. Try again in a moment.",
+                Some(current_document),
+            ));
+        }
+        let page = if item_id == ITEM_PROJECTS {
+            Some(0)
+        } else {
+            item_id
+                .strip_prefix(PROJECT_PAGE_PREFIX)
+                .and_then(|page| page.parse::<usize>().ok())
+        };
+        let result = page
+            .filter(|_| value.is_none())
+            .ok_or_else(|| io::Error::other("invalid project page"))
+            .map_err(|error| -> Box<dyn std::error::Error> { error.into() })
+            .and_then(|page| {
+                project_settings_document(runtime, &snapshot, &current_document, page)
+            });
+        return SettingsInteractionResolution::normal(match result {
+            Ok(document) => BotChatSettingsResponse::Document(document),
+            Err(_) => problem(
+                BotChatSettingsProblemCode::Failed,
+                "I couldn’t load that project page. Try /projects again.",
+                Some(current_document),
+            ),
+        });
     }
 
     match apply_invocation(
@@ -2365,6 +2743,28 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                     None,
                 )));
             }
+            if runtime.sessions.provider_id().as_str() == "codex"
+                && runtime
+                    .store
+                    .session_thread_binding_for_chat(
+                        &snapshot.binding.installation_id,
+                        snapshot.binding.chat_id,
+                    )
+                    .map_err(|error| {
+                        operation_failed("Couldn’t read this session thread.", error, false)
+                    })?
+                    .is_some()
+                && !runtime
+                    .sessions
+                    .session_history_is_ready(&snapshot.binding)
+                    .await
+            {
+                return Err(SettingsInvocationFailure::normal(problem(
+                    BotChatSettingsProblemCode::Failed,
+                    "Use /resume to sync recent history before compacting this session.",
+                    None,
+                )));
+            }
             let _provider_work_lease = reserve_provider_mutation(runtime)?;
             if !runtime.sessions.driver().capabilities().compact_session {
                 return Err(SettingsInvocationFailure::normal(problem(
@@ -2407,7 +2807,7 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                 })?;
             return Ok(snapshot.clone());
         }
-        ITEM_FOLDER => {
+        ITEM_FOLDER | ITEM_PROJECT => {
             if runtime.turn_active {
                 return Err(SettingsInvocationFailure::normal(problem(
                     BotChatSettingsProblemCode::Failed,
@@ -2433,7 +2833,7 @@ async fn apply_invocation<D: AgentDriver + 'static>(
                 )));
             }
             let Some(BotSettingsValue::String(value)) = value else {
-                return Err(invalid_value("Choose a recent project folder.").into());
+                return Err(invalid_value("Choose an available project folder.").into());
             };
             let workspace_id = WorkspaceId::new(value.clone())
                 .map_err(|_| invalid_value("That project folder is not available."))?;
@@ -2515,6 +2915,122 @@ fn reserve_provider_mutation<D: AgentDriver + 'static>(
     }
 }
 
+fn full_project_choices<D: AgentDriver + 'static>(
+    runtime: &SettingsRuntime<'_, D>,
+    snapshot: &ConversationSnapshot,
+) -> Result<Vec<WorkspaceChoice>, Box<dyn std::error::Error>> {
+    projects::project_choices(
+        runtime.store,
+        &snapshot.binding.installation_id,
+        Some(&snapshot.binding.workspace_id),
+        runtime.identity.codex_projects_path.as_deref(),
+    )
+}
+
+fn project_choice_label(choice: &WorkspaceChoice) -> String {
+    match &choice.parent_hint {
+        Some(parent) => format!("{} — {parent}", choice.display_name),
+        None => choice.display_name.clone(),
+    }
+}
+
+fn project_settings_document<D: AgentDriver + 'static>(
+    runtime: &SettingsRuntime<'_, D>,
+    snapshot: &ConversationSnapshot,
+    settings_document: &BotChatSettingsDocument,
+    page: usize,
+) -> Result<BotChatSettingsDocument, Box<dyn std::error::Error>> {
+    let choices = full_project_choices(runtime, snapshot)?;
+    let page_count = choices.len().max(1).div_ceil(PROJECT_PAGE_SIZE);
+    if page >= page_count {
+        return Err(io::Error::other("project page is out of range").into());
+    }
+    let disabled_reason = settings_document
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .find(|item| item.id == ITEM_FOLDER)
+        .and_then(|item| item.disabled_reason.clone());
+    let mut options = choices
+        .iter()
+        .skip(page * PROJECT_PAGE_SIZE)
+        .take(PROJECT_PAGE_SIZE)
+        .map(|choice| BotChatSettingsSelectOption {
+            value: choice.workspace_id.to_string(),
+            label: project_choice_label(choice),
+            description: None,
+            disabled: false,
+        })
+        .collect::<Vec<_>>();
+    // The select wire contract always includes its current value. Reserve one
+    // of its 100 options for a selection on another page or an unavailable root.
+    if !options
+        .iter()
+        .any(|option| option.value == snapshot.binding.workspace_id.as_str())
+    {
+        let current = runtime
+            .store
+            .workspace(
+                &snapshot.binding.installation_id,
+                &snapshot.binding.workspace_id,
+            )?
+            .ok_or_else(|| io::Error::other("current project is unavailable"))?;
+        options.insert(
+            0,
+            BotChatSettingsSelectOption {
+                value: current.workspace_id.to_string(),
+                label: current.display_name,
+                description: Some("Current project".to_string()),
+                disabled: current.missing_since.is_some(),
+            },
+        );
+    }
+    let mut items = vec![BotChatSettingsItem {
+        id: ITEM_PROJECT.to_string(),
+        label: Some("Project".to_string()),
+        description: Some(format!(
+            "{} project folders · page {} of {page_count}",
+            choices.len(),
+            page + 1
+        )),
+        disabled: disabled_reason.is_some(),
+        disabled_reason,
+        control: BotChatSettingsControl::Select {
+            value: snapshot.binding.workspace_id.to_string(),
+            options,
+        },
+    }];
+    if page > 0 {
+        items.push(button_item(
+            &format!("{PROJECT_PAGE_PREFIX}{}", page - 1),
+            "Previous projects",
+            None,
+        ));
+    }
+    if page + 1 < page_count {
+        items.push(button_item(
+            &format!("{PROJECT_PAGE_PREFIX}{}", page + 1),
+            "Next projects",
+            None,
+        ));
+    }
+    items.push(button_item(
+        ITEM_PROJECTS_BACK,
+        "Back to Agent Settings",
+        None,
+    ));
+    Ok(BotChatSettingsDocument {
+        version: SETTINGS_VERSION,
+        revision: settings_document.revision.clone(),
+        sections: vec![BotChatSettingsSection {
+            id: "projects".to_string(),
+            title: Some("All Projects".to_string()),
+            description: Some("Choose a project folder saved on the bridge host.".to_string()),
+            items,
+        }],
+    })
+}
+
 async fn build_settings_document<D: AgentDriver + 'static>(
     runtime: &SettingsRuntime<'_, D>,
     snapshot: &ConversationSnapshot,
@@ -2529,10 +3045,50 @@ async fn build_settings_document<D: AgentDriver + 'static>(
         snapshot.binding.chat_id,
     )
     .await?;
-    let choices = runtime.store.recent_workspace_choices(
-        &snapshot.binding.installation_id,
-        Some(&snapshot.binding.workspace_id),
-    )?;
+    let (mut choices, project_warning) = match full_project_choices(runtime, snapshot) {
+        Ok(choices) => (choices, None),
+        Err(error) => {
+            eprintln!(
+                "Saved project discovery failed: {}",
+                safe_diagnostic(&error.to_string())
+            );
+            (runtime.store.recent_workspace_choices(
+                &snapshot.binding.installation_id,
+                Some(&snapshot.binding.workspace_id),
+            )?, Some("Saved Codex projects could not be refreshed. Pick a Folder remains available; reopen settings to retry.".to_string()))
+        }
+    };
+    // Keep the selected folder visible even when it is not among the quick
+    // choices; the complete catalog lives in the project browser below.
+    if let Some(index) = choices.iter().position(|choice| choice.selected) {
+        let selected = choices.remove(index);
+        choices.insert(0, selected);
+    }
+    choices.truncate(MAX_RECENT_WORKSPACES);
+    let unavailable_workspace_id = runtime
+        .store
+        .workspace(
+            &snapshot.binding.installation_id,
+            &snapshot.binding.workspace_id,
+        )?
+        .filter(|workspace| workspace.missing_since.is_some())
+        .map(|workspace| {
+            if !choices
+                .iter()
+                .any(|choice| choice.workspace_id == workspace.workspace_id)
+            {
+                if choices.len() >= MAX_RECENT_WORKSPACES {
+                    choices.pop();
+                }
+                choices.push(WorkspaceChoice {
+                    workspace_id: workspace.workspace_id.clone(),
+                    display_name: workspace.display_name,
+                    parent_hint: workspace.parent_hint,
+                    selected: true,
+                });
+            }
+            workspace.workspace_id
+        });
     let model = selected_model(catalog, settings.model.as_deref());
     let model_options = select_options(
         catalog.map(|catalog| {
@@ -2737,16 +3293,19 @@ async fn build_settings_document<D: AgentDriver + 'static>(
             BotChatSettingsSection {
                 id: "project".to_string(),
                 title: Some("Project".to_string()),
-                description: None,
+                description: project_warning,
                 items: vec![BotChatSettingsItem {
                     id: ITEM_FOLDER.to_string(),
                     label: Some("Folder".to_string()),
-                    description: Some("Recent folders on the bridge host.".to_string()),
+                    description: Some("Quick choices from saved projects and folders on the bridge host.".to_string()),
                     disabled: project_reason.is_some(),
                     disabled_reason: project_reason,
                     control: BotChatSettingsControl::Folder(BotChatSettingsFolder {
                         value: snapshot.binding.workspace_id.to_string(),
-                        recent_folders: folder_options(choices),
+                        recent_folders: folder_options(
+                            choices,
+                            unavailable_workspace_id.as_ref(),
+                        ),
                         host_installation_id: runtime.identity.host_installation_id.clone(),
                         host_label: runtime.identity.host_label.clone(),
                         allows_local_picker: runtime.identity.workspace_picker.is_some(),
@@ -2761,7 +3320,7 @@ async fn build_settings_document<D: AgentDriver + 'static>(
                             .as_ref()
                             .map(|endpoint| endpoint.capability.clone()),
                     }),
-                }],
+                }, button_item(ITEM_PROJECTS, "Browse all projects…", None)],
             },
             BotChatSettingsSection {
                 id: "status".to_string(),
@@ -2862,14 +3421,17 @@ fn button_item(id: &str, label: &str, disabled_reason: Option<String>) -> BotCha
     }
 }
 
-fn folder_options(choices: Vec<WorkspaceChoice>) -> Vec<BotChatSettingsFolderOption> {
+fn folder_options(
+    choices: Vec<WorkspaceChoice>,
+    unavailable_workspace_id: Option<&WorkspaceId>,
+) -> Vec<BotChatSettingsFolderOption> {
     choices
         .into_iter()
         .map(|choice| BotChatSettingsFolderOption {
             value: choice.workspace_id.to_string(),
             label: choice.display_name,
             parent_hint: choice.parent_hint,
-            disabled: false,
+            disabled: unavailable_workspace_id == Some(&choice.workspace_id),
         })
         .collect()
 }

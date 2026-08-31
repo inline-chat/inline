@@ -28,7 +28,7 @@ use inline_agent_driver_codex::CodexVersionPolicy;
 use inline_agent_driver_codex::{
     CodexAppServerDriver, CodexAppServerTransport, CodexDriverWriter, CodexLaunchConfig,
     CodexProcessStatus, CodexRuntimeDiscoveryConfig, RedactedStderrTail,
-    discover_codex_turn_runtime, discover_codex_turn_runtime_in_paths, is_certified_codex_version,
+    discover_codex_turn_runtime, discover_codex_turn_runtime_in_paths, is_compatible_codex_version,
     parse_codex_version, should_scrub_codex_environment_name, spawn_codex_driver,
 };
 use sha2::{Digest, Sha256};
@@ -199,12 +199,7 @@ pub(super) async fn prepare_setup_provider(
         .map_err(|error| {
             format!("{error}; install or update Codex/ChatGPT or Inline, sign in there, then retry")
         })?;
-        if !runtime.capabilities().existing_turn_driver {
-            return Err(format!(
-                "Codex {} is not certified for this Inline bridge; update Inline or Codex/ChatGPT, then retry",
-                runtime.version()
-            ));
-        }
+        debug_assert!(runtime.capabilities().existing_turn_driver);
         return probe_configured_provider_async(provider_id, runtime.executable()).await;
     }
     let Some(support) = provider_support(provider_id) else {
@@ -260,9 +255,9 @@ fn probe_configured_provider_with_runtime(
         }
         let parsed_version = parse_codex_version(&version)
             .map_err(|error| format!("Codex version is invalid: {error}"))?;
-        if !is_certified_codex_version(&parsed_version) {
+        if !is_compatible_codex_version(&parsed_version) {
             return Err(format!(
-                "Codex {parsed_version} is not certified for this Inline bridge; update Inline or Codex/ChatGPT, then retry"
+                "Codex {parsed_version} is too old for this Inline bridge; update Codex/ChatGPT, then retry"
             ));
         }
         let auth = probe_command(
@@ -406,9 +401,10 @@ pub(super) async fn probe_configured_provider_async(
 }
 
 /// Revalidates the exact persisted runtime immediately before the background
-/// service launches it. Codex discovery includes exact-version protocol
-/// certification and, for a ChatGPT-bundled executable, OpenAI signature
-/// verification; it must not silently fall through to another installation.
+/// service launches it. Codex discovery checks the version floor and, for a
+/// ChatGPT-bundled executable, OpenAI signature verification. The selected
+/// app-server validates its read-only contract at launch; discovery must not
+/// silently fall through to another installation.
 pub(super) async fn probe_service_provider_async(
     provider_id: &str,
     executable: &std::path::Path,
@@ -1101,7 +1097,7 @@ mod tests {
         };
         assert_eq!(config.executable, PathBuf::from("/opt/codex"));
         assert_eq!(config.transport, CodexAppServerTransport::PrivateStdio);
-        assert_eq!(config.version_policy, CodexVersionPolicy::Certified);
+        assert_eq!(config.version_policy, CodexVersionPolicy::Compatible);
         assert_eq!(
             config.process_host.expect("process host").lock_file,
             PathBuf::from("/tmp/providers/codex/provider.process.lock")

@@ -942,6 +942,27 @@ pub(super) async fn wait_for_provider_ready(
     wait_for_provider_ready_with_timeout(paths, account, installation, secrets, READY_TIMEOUT).await
 }
 
+pub(super) async fn wait_for_all_providers_ready(
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+    secrets: &AccountBridgeSecrets,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // The control socket starts before providers. A lifecycle command succeeds
+    // only when every configured provider is ready, within one startup budget.
+    let deadline = Instant::now() + READY_TIMEOUT;
+    for installation in &account.providers {
+        wait_for_provider_ready_with_timeout(
+            paths,
+            account,
+            installation,
+            secrets,
+            deadline.saturating_duration_since(Instant::now()),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 async fn wait_for_provider_ready_with_timeout(
     paths: &BridgePaths,
     account: &AccountBridgeConfig,

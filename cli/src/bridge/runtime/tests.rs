@@ -126,7 +126,8 @@ fn pending_voice_registry_deduplicates_replacements_and_cancels_per_chat() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
-        session_browser: SessionBrowserRuntime::default(),
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
         bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
@@ -166,7 +167,8 @@ fn pending_voice_registry_is_bounded() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
-        session_browser: SessionBrowserRuntime::default(),
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
         bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
@@ -262,7 +264,8 @@ fn unbound_chat_without_a_default_workspace_binds_the_user_home() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
-        session_browser: SessionBrowserRuntime::default(),
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
         bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
@@ -320,7 +323,8 @@ fn unbound_chat_with_a_replaced_default_workspace_binds_the_user_home() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
-        session_browser: SessionBrowserRuntime::default(),
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
         bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
@@ -366,7 +370,8 @@ fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
-        session_browser: SessionBrowserRuntime::default(),
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
         bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
@@ -478,6 +483,10 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
     let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
     let installation_id = InstallationId::new("codex").expect("installation");
     let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace");
+    let workspace_root = tempfile::tempdir().expect("workspace root");
+    let workspace_path = workspace_root.path().join("inline");
+    let moved_workspace_path = workspace_root.path().join("inline-original");
+    std::fs::create_dir(&workspace_path).expect("create workspace");
     store
         .put_installation(&InstallationRecord {
             installation_id: installation_id.clone(),
@@ -488,12 +497,7 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
         })
         .expect("put installation");
     store
-        .select_workspace(
-            &installation_id,
-            &workspace_id,
-            &std::env::current_dir().expect("cwd"),
-            1,
-        )
+        .select_workspace(&installation_id, &workspace_id, &workspace_path, 1)
         .expect("select workspace");
     store
         .bind_chat_workspace(&installation_id, 706, &workspace_id, 1)
@@ -503,6 +507,8 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
             .mark_workspace_unavailable(&installation_id, &workspace_id, 2)
             .expect("mark unavailable")
     );
+    std::fs::rename(&workspace_path, &moved_workspace_path).expect("move original workspace");
+    std::fs::create_dir(&workspace_path).expect("replace workspace path");
     let route = InboundRoute {
         store: store.clone(),
         installation_id: installation_id.clone(),
@@ -520,7 +526,8 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
         deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
         pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
         claude_history: None,
-        session_browser: SessionBrowserRuntime::default(),
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
         bot_agent_resolver: BotAgentResolver::disabled(),
     };
 
@@ -560,10 +567,75 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
     );
 }
 
+#[test]
+fn conversation_routing_heals_a_stale_workspace_marker() {
+    let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
+    let installation_id = InstallationId::new("codex").expect("installation");
+    let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace");
+    store
+        .put_installation(&InstallationRecord {
+            installation_id: installation_id.clone(),
+            provider_id: ProviderId::new("codex").expect("provider"),
+            display_name: "Codex".to_string(),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .expect("put installation");
+    store
+        .select_workspace(
+            &installation_id,
+            &workspace_id,
+            &std::env::current_dir().expect("cwd"),
+            1,
+        )
+        .expect("select workspace");
+    store
+        .bind_chat_workspace(&installation_id, 706, &workspace_id, 1)
+        .expect("bind workspace");
+    assert!(
+        store
+            .mark_workspace_unavailable(&installation_id, &workspace_id, 2)
+            .expect("mark unavailable")
+    );
+    let route = InboundRoute {
+        store: store.clone(),
+        installation_id,
+        provider_id: ProviderId::new("codex").expect("provider"),
+        policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
+        owner_user_id: 7,
+        host_label: "Test Mac".to_string(),
+        owner_dm_chat_id: 706,
+        bot_user_id: 17,
+        bot_username: "mo_codex_bot".to_string(),
+        bot_store: SqliteStore::open_in_memory().expect("bot store"),
+        attachment_cache_dir: PathBuf::from("/tmp/inline-agent-bridge-test-attachments"),
+        owner_control: None,
+        accept_messages_after: 0,
+        deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
+        pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
+    };
+
+    let healed = conversation_for_chat(&route, 706).expect("workspace should heal");
+    assert_eq!(healed.snapshot().binding.workspace_id, workspace_id);
+    assert!(
+        store
+            .bound_chat_workspace(&route.installation_id, 706)
+            .expect("bound workspace")
+            .expect("workspace")
+            .missing_since
+            .is_none()
+    );
+}
+
 #[derive(Debug)]
 struct FaultingStreamTransport {
     remaining_edit_failures: AtomicUsize,
     remaining_send_failures: AtomicUsize,
+    remaining_unconfirmed_sends: AtomicUsize,
     edits: AtomicUsize,
     sends: AtomicUsize,
     media_sends: AtomicUsize,
@@ -579,6 +651,7 @@ impl FaultingStreamTransport {
         Self {
             remaining_edit_failures: AtomicUsize::new(edit_failures),
             remaining_send_failures: AtomicUsize::new(send_failures),
+            remaining_unconfirmed_sends: AtomicUsize::new(0),
             edits: AtomicUsize::new(0),
             sends: AtomicUsize::new(0),
             media_sends: AtomicUsize::new(0),
@@ -640,7 +713,7 @@ impl StreamMessageTransport for FaultingStreamTransport {
                 request.random_id.unwrap_or(RandomId::new(1)),
             )
             .with_final_message_id(message_id),
-            message_id: Some(message_id),
+            message_id: (!Self::fail_once(&self.remaining_unconfirmed_sends)).then_some(message_id),
             state: None,
             failure: None,
         })
@@ -665,11 +738,39 @@ impl StreamMessageTransport for FaultingStreamTransport {
                 request.random_id.unwrap_or(RandomId::new(1)),
             )
             .with_final_message_id(self.normal_message_id),
-            message_id: Some(self.normal_message_id),
+            message_id: (!Self::fail_once(&self.remaining_unconfirmed_sends))
+                .then_some(self.normal_message_id),
             state: None,
             failure: None,
         })
     }
+}
+
+#[tokio::test]
+async fn unconfirmed_final_sends_retry_without_claiming_delivery() {
+    let transport = FaultingStreamTransport::new(0, 0, 40);
+    transport
+        .remaining_unconfirmed_sends
+        .store(3, Ordering::Relaxed);
+    let result = deliver_pending_final_with_transport(
+        &transport,
+        "unconfirmed-final",
+        42,
+        None,
+        "Completed.",
+        RandomId::new(77),
+        "Done.",
+        |_| Duration::ZERO,
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(transport.sends.load(Ordering::Relaxed), 3);
+    let requests = transport.send_requests.lock().expect("requests");
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.random_id == Some(RandomId::new(77)))
+    );
 }
 
 #[tokio::test]
@@ -706,6 +807,48 @@ async fn final_delivery_uploads_a_verified_generated_image_before_text() {
     assert_eq!(transport.media_sends.load(Ordering::Relaxed), 1);
     assert_eq!(transport.sends.load(Ordering::Relaxed), 2);
     assert_eq!(mutation.message_id, Some(transport.normal_message_id));
+}
+
+#[tokio::test]
+async fn unconfirmed_attachment_sends_prevent_final_commit() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("generated.png");
+    let bytes = b"\x89PNG\r\n\x1a\nverified-output";
+    fs::write(&path, bytes).expect("write output");
+    let attachment = OutputAttachment {
+        id: "image-1".to_string(),
+        kind: OutputAttachmentKind::Image,
+        path,
+        mime_type: "image/png".to_string(),
+        file_name: "generated-image.png".to_string(),
+        size_bytes: bytes.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(bytes)),
+    };
+    let transport = FaultingStreamTransport::new(0, 0, 40);
+    transport
+        .remaining_unconfirmed_sends
+        .store(3, Ordering::Relaxed);
+    let result = deliver_pending_final_with_attachments_transport(
+        &transport,
+        "unconfirmed-media",
+        42,
+        None,
+        "Completed.",
+        RandomId::new(77),
+        "Done.",
+        &[attachment],
+        |_| Duration::ZERO,
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(transport.media_sends.load(Ordering::Relaxed), 3);
+    assert!(
+        transport
+            .send_requests
+            .lock()
+            .expect("no final text")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -1670,9 +1813,17 @@ async fn recovery_sends_pending_final_results_in_ingest_order() {
                 )
                 .expect("attach")
         );
+        let agent_output_session_id = (event_id == "event-first").then_some(77);
         assert!(
             store
-                .stage_inbound_final_send(event_id, InboundState::Completed, final_text, None,)
+                .stage_inbound_final_send_with_attachments_and_link(
+                    event_id,
+                    InboundState::Completed,
+                    final_text,
+                    &[],
+                    None,
+                    agent_output_session_id,
+                )
                 .expect("stage")
         );
     }
@@ -1702,4 +1853,11 @@ async fn recovery_sends_pending_final_results_in_ingest_order() {
             .expect("pending")
             .is_empty()
     );
+    let pending_links = store
+        .pending_agent_output_links(&installation_id)
+        .expect("pending output links");
+    assert_eq!(pending_links.len(), 1);
+    assert_eq!(pending_links[0].event_id, "event-first");
+    assert_eq!(pending_links[0].agent_session_id, 77);
+    assert_eq!(pending_links[0].message_id, 100);
 }

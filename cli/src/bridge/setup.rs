@@ -611,7 +611,7 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
         ("follow", "Follow this chat"),
         ("unfollow", "Stop following this chat"),
         ("queue", "Queue work after the active turn"),
-        ("stop", "Stop the active turn"),
+        ("stop", if provider_id == "codex" { "Stop and release a linked Codex session" } else { "Stop the active turn" }),
         ("model", "Show or choose the model"),
         ("reasoning", "Show or choose reasoning effort"),
         ("permissions", "Show or choose permission mode"),
@@ -623,8 +623,9 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
         commands.splice(
             2..2,
             [
-                ("sessions", "Browse recent Codex sessions"),
-                ("open", "Browse recent Codex sessions"),
+                ("sessions", "Browse Codex sessions"),
+                ("open", "Browse Codex sessions"),
+                ("resume", "Resume this linked Codex session"),
                 ("close", "Release Codex from Inline"),
             ],
         );

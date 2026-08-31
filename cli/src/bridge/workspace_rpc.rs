@@ -52,7 +52,9 @@ impl std::fmt::Debug for WorkspacePickerEndpoint {
 struct WorkspaceRegistrationRequest {
     version: u32,
     action: WorkspaceRegistrationAction,
+    #[serde(alias = "hostInstallationID")]
     host_installation_id: String,
+    #[serde(alias = "botUserID")]
     bot_user_id: i64,
     capability: String,
     path: Option<PathBuf>,
@@ -88,6 +90,14 @@ struct WorkspaceRegistrationResponse {
     version: u32,
     status: String,
     workspace_id: Option<String>,
+    // Released Mac clients used Swift's synthesized ID spelling. Keep their
+    // folder chooser functional while newer clients use the canonical key.
+    #[serde(
+        rename = "workspaceID",
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    legacy_workspace_id: Option<String>,
     display_name: Option<String>,
     parent_hint: Option<String>,
     detail: Option<String>,
@@ -100,6 +110,7 @@ impl WorkspaceRegistrationResponse {
             version: WORKSPACE_RPC_VERSION,
             status: "available".to_string(),
             workspace_id: None,
+            legacy_workspace_id: None,
             display_name: None,
             parent_hint: None,
             detail: None,
@@ -111,6 +122,7 @@ impl WorkspaceRegistrationResponse {
             version: WORKSPACE_RPC_VERSION,
             status: "registered".to_string(),
             workspace_id: Some(record.workspace_id.to_string()),
+            legacy_workspace_id: Some(record.workspace_id.to_string()),
             display_name: Some(record.display_name.clone()),
             parent_hint: record.parent_hint.clone(),
             detail: None,
@@ -122,6 +134,7 @@ impl WorkspaceRegistrationResponse {
             version: WORKSPACE_RPC_VERSION,
             status: status.to_string(),
             workspace_id: None,
+            legacy_workspace_id: None,
             display_name: None,
             parent_hint: None,
             detail: Some(safe_diagnostic(&detail.into())),
@@ -600,6 +613,37 @@ mod tests {
             assert!(!request_debug.contains("request-secret"));
             assert!(!request_debug.contains("/private/project"));
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn workspace_wire_supports_released_and_corrected_mac_id_keys() {
+        for (host_key, bot_key) in [
+            ("hostInstallationId", "botUserId"),
+            ("hostInstallationID", "botUserID"),
+        ] {
+            let request: WorkspaceRegistrationRequest = serde_json::from_value(serde_json::json!({
+                "version": 1, "action": "probe", host_key: "host-test", bot_key: 42,
+                "capability": "test-capability"
+            }))
+            .expect("both native spellings deserialize");
+            assert_eq!(request.host_installation_id, "host-test");
+            assert_eq!(request.bot_user_id, 42);
+        }
+        let mut response = WorkspaceRegistrationResponse::available();
+        response.workspace_id = Some("workspace-test".to_string());
+        response.legacy_workspace_id = response.workspace_id.clone();
+        let encoded = serde_json::to_value(response).unwrap();
+        assert_eq!(encoded["workspaceId"], "workspace-test");
+        assert_eq!(encoded["workspaceID"], encoded["workspaceId"]);
+        // Reject ambiguous aliases rather than accepting one identity silently.
+        assert!(
+            serde_json::from_value::<WorkspaceRegistrationRequest>(serde_json::json!({
+                "version": 1, "action": "probe", "hostInstallationId": "host-a",
+                "hostInstallationID": "host-b", "botUserId": 42, "capability": "test"
+            }))
+            .is_err()
+        );
     }
 
     #[cfg(target_os = "macos")]

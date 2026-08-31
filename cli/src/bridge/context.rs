@@ -358,7 +358,8 @@ mod tests {
             deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
             pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
             claude_history: None,
-            session_browser: SessionBrowserRuntime::default(),
+            control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+            control_epoch: ControlTaskEpoch::new(),
             bot_agent_resolver: BotAgentResolver::disabled(),
         };
 
