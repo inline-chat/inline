@@ -28,7 +28,6 @@ final class ImageViewerController: UIViewController {
 
   private let isVideo: Bool
   private var didNotifyDismiss = false
-  private var isDismissalInProgress = false
   private var audioSessionSnapshot: AudioSessionSnapshot?
   private var playerViewController: AVPlayerViewController?
   private var didRestoreAudioSession = false
@@ -76,10 +75,6 @@ final class ImageViewerController: UIViewController {
     activityIndicator.color = .white
     activityIndicator.startAnimating()
     imageView.placeholderView = activityIndicator
-    imageView.isAccessibilityElement = !isVideo
-    imageView.accessibilityLabel = NSLocalizedString("Photo", comment: "Accessible label for a photo viewer image")
-    imageView.accessibilityTraits = .image
-    imageView.imageView.isAccessibilityElement = false
       
     return imageView
   }()
@@ -112,7 +107,6 @@ final class ImageViewerController: UIViewController {
     button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
     button.layer.cornerRadius = 20
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.accessibilityLabel = NSLocalizedString("Close", comment: "Image viewer close button")
     button.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
     return button
   }()
@@ -124,7 +118,6 @@ final class ImageViewerController: UIViewController {
     button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
     button.layer.cornerRadius = 20
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.accessibilityLabel = NSLocalizedString("Share", comment: "Image viewer share button")
     button.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
     return button
   }()
@@ -141,7 +134,6 @@ final class ImageViewerController: UIViewController {
     button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
     button.semanticContentAttribute = .forceLeftToRight
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.accessibilityLabel = NSLocalizedString("Show in Chat", comment: "Image viewer show-in-chat button")
     button.addTarget(self, action: #selector(showInChatButtonTapped), for: .touchUpInside)
     button.isHidden = showInChatAction == nil
     return button
@@ -153,8 +145,6 @@ final class ImageViewerController: UIViewController {
     view.layer.cornerRadius = 12
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isHidden = imageItems.count <= 1
-    view.isAccessibilityElement = false
-    view.accessibilityElementsHidden = true
     return view
   }()
 
@@ -263,7 +253,6 @@ final class ImageViewerController: UIViewController {
     setupViews()
     setupGestures()
     updatePageIndicator()
-    view.accessibilityViewIsModal = true
 
     keepTransitionImageUntilLoad = !isVideo && sourceImage != nil
 
@@ -280,11 +269,7 @@ final class ImageViewerController: UIViewController {
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
     animateImageIn { [weak self] in
-      guard let self else { return }
-      if UIAccessibility.isVoiceOverRunning {
-        UIAccessibility.post(notification: .screenChanged, argument: self.closeButton)
-      }
-      self.loadMedia()
+      self?.loadMedia()
     }
   }
 
@@ -299,11 +284,6 @@ final class ImageViewerController: UIViewController {
   }
 
   override var prefersStatusBarHidden: Bool {
-    return true
-  }
-
-  override func accessibilityPerformEscape() -> Bool {
-    closeButtonTapped()
     return true
   }
     
@@ -460,22 +440,9 @@ final class ImageViewerController: UIViewController {
   }
 
   private func updatePageIndicator() {
-    let position = imageItems.isEmpty ? nil : String(
-      format: NSLocalizedString("Photo, %1$d of %2$d", comment: "Accessible position in a photo gallery"),
-      currentIndex + 1,
-      imageItems.count
-    )
-    imageView.accessibilityLabel = position
-      ?? NSLocalizedString("Photo", comment: "Accessible label for a photo viewer image")
-    guard imageItems.count > 1, let position else {
-      pageIndicatorView.isHidden = true
-      return
-    }
+    guard imageItems.count > 1 else { return }
     pageIndicatorLabel.text = "\(currentIndex + 1) / \(imageItems.count)"
     pageIndicatorView.isHidden = false
-    if UIAccessibility.isVoiceOverRunning, viewIfLoaded?.window != nil {
-      UIAccessibility.post(notification: .pageScrolled, argument: position)
-    }
   }
 
   private func updateSourceViewForCurrentItem() {
@@ -785,7 +752,7 @@ final class ImageViewerController: UIViewController {
   }
     
   @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
-    guard !isDismissalInProgress, scrollView.zoomScale == scrollView.minimumZoomScale else { return }
+    guard scrollView.zoomScale == scrollView.minimumZoomScale else { return }
         
     let translation = gesture.translation(in: view)
     let velocity = gesture.velocity(in: view)
@@ -802,7 +769,6 @@ final class ImageViewerController: UIViewController {
             
     case .ended:
       if abs(translation.y) > 100 || abs(velocity.y) > 500 {
-        isDismissalInProgress = true
         let currentFrame = mediaContentView.convert(mediaContentView.bounds, to: view)
         
         scrollView.alpha = 0
@@ -870,8 +836,6 @@ final class ImageViewerController: UIViewController {
   }
     
   @objc private func closeButtonTapped() {
-    guard !isDismissalInProgress else { return }
-    isDismissalInProgress = true
     animateImageOut {
       self.stopVideoPlaybackIfNeeded()
       self.dismiss(animated: false) {
@@ -918,8 +882,7 @@ final class ImageViewerController: UIViewController {
   }
 
   @objc private func showInChatButtonTapped() {
-    guard let showInChatAction, !isDismissalInProgress else { return }
-    isDismissalInProgress = true
+    guard let showInChatAction else { return }
 
     animateImageOut { [weak self] in
       guard let self else {

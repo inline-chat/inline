@@ -15,18 +15,6 @@ final class NewPhotoView: UIView {
 
   private var fullMessage: FullMessage
 
-  var messageStableID: Int64 {
-    fullMessage.id
-  }
-
-  var photoStableID: Int64? {
-    fullMessage.photoInfo?.id
-  }
-
-  var contextMenuVisiblePath: UIBezierPath? {
-    maskLayer.path.map(UIBezierPath.init(cgPath:))
-  }
-
   private let maxWidth: CGFloat = 280
   private let maxHeight: CGFloat = 400
   private let minWidth: CGFloat = 180
@@ -59,8 +47,6 @@ final class NewPhotoView: UIView {
     view.contentMode = .scaleAspectFit
     view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.isAccessibilityElement = false
-    view.imageView.isAccessibilityElement = false
 
     let activityIndicator = UIActivityIndicatorView(style: .medium)
     activityIndicator.startAnimating()
@@ -85,11 +71,7 @@ final class NewPhotoView: UIView {
   }()
 
   private var imageConstraints: [NSLayoutConstraint] = []
-  var onTap: ((FullMessage, UIView, UIImage?, URL) -> Void)? {
-    didSet {
-      updateAccessibility()
-    }
-  }
+  var onTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
 
   // MARK: - Initialization
 
@@ -103,11 +85,6 @@ final class NewPhotoView: UIView {
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
-  }
-
-  override func didMoveToWindow() {
-    super.didMoveToWindow()
-    updateAccessibility()
   }
 
   // MARK: - Setup
@@ -283,7 +260,6 @@ final class NewPhotoView: UIView {
     setupImageConstraints()
     setupGestures()
     setupMask()
-    updateAccessibility()
     updateTinyThumbnailBackground()
     updateImage()
   }
@@ -341,7 +317,6 @@ final class NewPhotoView: UIView {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
     updateMask()
-    updateAccessibility()
     updateTinyThumbnailBackground()
 
     if
@@ -434,34 +409,6 @@ final class NewPhotoView: UIView {
     )
 
     findViewController()?.present(imageViewer, animated: false)
-  }
-
-  override func accessibilityActivate() -> Bool {
-    guard !isSticker, imageLocalUrl() != nil || imageCdnUrl() != nil else { return false }
-    guard onTap != nil || findViewController() != nil else { return false }
-    handleTap()
-    return true
-  }
-
-  private func updateAccessibility() {
-    guard !isSticker else {
-      isAccessibilityElement = false
-      accessibilityLabel = nil
-      accessibilityHint = nil
-      accessibilityTraits = []
-      return
-    }
-
-    let isAvailable = imageLocalUrl() != nil || imageCdnUrl() != nil
-    let isActionable = isAvailable && (onTap != nil || findViewController() != nil)
-    isAccessibilityElement = true
-    accessibilityLabel = isAvailable
-      ? NSLocalizedString("Photo", comment: "Accessible label for a message photo")
-      : NSLocalizedString("Photo unavailable", comment: "Accessible label for an unavailable message photo")
-    accessibilityHint = isActionable
-      ? NSLocalizedString("Opens photo", comment: "Accessible hint for opening a message photo")
-      : nil
-    accessibilityTraits = isActionable ? [.image, .button] : [.image]
   }
 
   @objc func image(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
