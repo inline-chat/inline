@@ -14,7 +14,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 
   // MARK: - Public observable state (UI)
 
-  // Initialized with safe defaults and then synced from the snapshot cache on the MainActor.
+  // Initialized with safe defaults, then updated by the ordered snapshot stream on the MainActor.
   @MainActor @Published public private(set) var status: AuthStatus = .hydrating
   @MainActor @Published public private(set) var didHydrateCredentials: Bool = false
   @MainActor @Published public private(set) var isLoggedIn: Bool = false
@@ -35,7 +35,6 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     handle = AuthHandle(cache: cache, store: store)
 
     startListening()
-    syncUIFromCache()
     repairUserIdHintOnLaunch()
   }
 
@@ -65,7 +64,6 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     handle = AuthHandle(cache: cache, store: store)
 
     startListening()
-    syncUIFromCache()
   }
 
   deinit {
@@ -74,6 +72,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   }
 
   private func startListening() {
+    // Subscription synchronously replays the current snapshot and buffers later changes.
+    // A separate queued cache seed could duplicate or overwrite a newer stream update.
     let snapshots = store.snapshots()
     snapshotsTask?.cancel()
     snapshotsTask = Task { [weak self] in
@@ -83,13 +83,6 @@ public final class Auth: ObservableObject, @unchecked Sendable {
           self.apply(snapshot)
         }
       }
-    }
-  }
-
-  private func syncUIFromCache() {
-    let snapshot = cache.snapshot()
-    Task { @MainActor [weak self] in
-      self?.apply(snapshot)
     }
   }
 

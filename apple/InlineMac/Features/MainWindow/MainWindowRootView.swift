@@ -149,7 +149,7 @@ struct MainWindowRootView: View {
   @ViewBuilder private var topLevelContent: some View {
     switch topLevelRoute {
     case .loading:
-      MainWindowLoadingView()
+      MainWindowLoadingView(viewModel: viewModel)
 
     case .onboarding:
       Onboarding(
@@ -320,15 +320,105 @@ private final class NativeWindowTabModel {
 }
 
 private struct MainWindowLoadingView: View {
+  @ObservedObject var viewModel: MainWindowViewModel
+  @State private var showsRecovery = false
+
   var body: some View {
     VStack(spacing: 12) {
       ProgressView()
-      Text("Loading...")
-        .font(.headline)
-        .foregroundStyle(.secondary)
+      if showsRecovery {
+        Text("Inline is taking longer to open")
+          .font(.headline)
+        explanation
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: 360)
+
+        HStack(spacing: 12) {
+          if viewModel.startupLoadingReason.allowsCredentialRetry {
+            Button("Try Again") {
+              viewModel.retryStartupCredentials()
+            }
+            .disabled(viewModel.isRetryingStartup)
+          }
+          Button("Quit Inline") {
+            NSApp.terminate(nil)
+          }
+        }
+        .padding(.top, 4)
+
+        if let diagnostics = viewModel.startupLoadingDiagnostics {
+          StartupLoadingDetails(diagnostics: diagnostics)
+            .frame(maxWidth: 380)
+            .padding(.top, 6)
+        }
+      } else {
+        Text("Loading...")
+          .font(.headline)
+          .foregroundStyle(.secondary)
+      }
     }
+    .padding(24)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color.clear)
+    .task {
+      showsRecovery = false
+      let clock = ContinuousClock()
+      let started = clock.now
+      do {
+        try await Task.sleep(for: .seconds(5))
+      } catch {
+        return
+      }
+      guard !Task.isCancelled else { return }
+      viewModel.reportStartupLoadingDelay(elapsedSeconds: Int(started.duration(to: clock.now).components.seconds))
+      showsRecovery = true
+    }
+  }
+
+  @ViewBuilder private var explanation: some View {
+    switch viewModel.startupLoadingReason {
+    case .credentials, .keychain:
+      Text("Inline can’t access your saved sign-in details. If macOS is showing a permission prompt, respond to it, then try again.")
+    case .database:
+      Text("Inline is still opening your local data. Quit and reopen Inline if this continues. Your saved data won’t be reset.")
+    case .accountRecovery:
+      Text("Inline is finishing account recovery. Quit and reopen Inline to continue recovery safely.")
+    case .presentation:
+      Text("Inline couldn’t finish opening this window. Quit and reopen Inline to try again.")
+    }
+  }
+}
+
+private struct StartupLoadingDetails: View {
+  let diagnostics: StartupLoadingDiagnostics
+  @State private var isExpanded = false
+  @State private var copied = false
+
+  var body: some View {
+    DisclosureGroup("Technical Details", isExpanded: $isExpanded) {
+      VStack(alignment: .leading, spacing: 10) {
+        Text(verbatim: diagnostics.text)
+          .font(.system(.caption, design: .monospaced))
+          .textSelection(.enabled)
+          .fixedSize(horizontal: false, vertical: true)
+        HStack {
+          Text("No message content or credentials")
+            .foregroundStyle(.secondary)
+          Button {
+            NSPasteboard.general.clearContents()
+            copied = NSPasteboard.general.setString(diagnostics.text, forType: .string)
+          } label: {
+            if copied { Text("Copied") } else { Text("Copy Details") }
+          }
+          .buttonStyle(.link)
+        }
+        .font(.caption)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.top, 8)
+    }
+    .font(.caption)
   }
 }
 
