@@ -2816,6 +2816,15 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     clearTitleTooltip()
     installedTooltipTitle = title
     titleField.setInlineTooltip(verbatim: title, placement: .right)
+    if let window = titleField.window {
+      let mouseLocation = titleField.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+      if titleField.bounds.contains(mouseLocation) {
+        // Truncation can begin while the pointer is already over the title,
+        // such as when the close control appears. A newly installed tracking
+        // area will not emit mouseEntered until the pointer moves.
+        titleField.showInlineTooltip()
+      }
+    }
   }
 
   private func clearTitleTooltip() {
