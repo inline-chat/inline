@@ -202,6 +202,21 @@ export class RealtimeRpcError extends Error {
         return RealtimeRpcError.PeerIdInvalid()
       case "MSG_ID_INVALID":
         return RealtimeRpcError.MessageIdInvalid()
+      case "EMAIL_INVALID":
+        return new RealtimeRpcError(RpcError_Code.EMAIL_INVALID, error.description ?? error.message, error.code)
+      case "PHONE_INVALID":
+        return new RealtimeRpcError(RpcError_Code.PHONE_NUMBER_INVALID, error.description ?? error.message, error.code)
+      case "EMAIL_CODE_INVALID":
+      case "EMAIL_CODE_EMPTY":
+      case "SMS_CODE_INVALID":
+      case "SMS_CODE_EMPTY":
+      case "INVITE_CODE_REQUIRED":
+      case "INVITE_CODE_INVALID":
+      case "INVITE_CODE_NOT_FOUND":
+      case "INVITE_CODE_TAKEN":
+      case "SIGNUPS_DISABLED":
+        // These login failures have public copy but no dedicated RPC enum case.
+        return new RealtimeRpcError(RpcError_Code.BAD_REQUEST, error.description ?? error.message, error.code)
       // TODO
       default:
         return RealtimeRpcError.InternalError()
