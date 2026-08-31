@@ -905,10 +905,46 @@ pub struct AuthenticationRequired {
     pub message: String,
 }
 
+/// Public assistant-message classification, never private reasoning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMessagePhase {
+    /// An explanation of ongoing work, retained in progress.
+    Commentary,
+    /// The answer published separately at the turn's terminal boundary.
+    FinalAnswer,
+    /// A future provider phase; only terminal legacy selection may use it.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Item lifecycle snapshots are authoritative; deltas only append to that item.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "operation", content = "text", rename_all = "snake_case")]
+pub enum AgentMessageUpdate {
+    /// Reserve the item's chronological position before any text arrives.
+    Started,
+    /// Append text to the identified, still-active item.
+    Delta(String),
+    /// Replace that item's text with the provider's authoritative snapshot.
+    Completed(String),
+}
+
 /// Normalized stream events emitted by a provider turn.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
+    /// Identified assistant output for providers exposing message boundaries.
+    AgentMessage {
+        /// Turn producing this item.
+        turn_id: TurnId,
+        /// Opaque item identity, scoped to this turn.
+        item_id: String,
+        /// Omitted metadata does not erase a previously observed phase.
+        phase: Option<AgentMessagePhase>,
+        /// Current lifecycle event for this item only.
+        update: AgentMessageUpdate,
+    },
     /// The provider assigned an identity to the new turn.
     TurnStarted {
         /// Provider-normalized turn identity.
@@ -1124,6 +1160,32 @@ impl AgentEventSender {
 
 fn enqueue_agent_event(queue: &mut AgentEventQueue, event: AgentEvent) {
     let event = match event {
+        AgentEvent::AgentMessage {
+            turn_id,
+            item_id,
+            phase,
+            update,
+        } => {
+            let update = match update {
+                AgentMessageUpdate::Started => AgentMessageUpdate::Started,
+                AgentMessageUpdate::Delta(text) => {
+                    let mut bounded = String::new();
+                    append_bounded_delta(&mut bounded, &text);
+                    AgentMessageUpdate::Delta(bounded)
+                }
+                AgentMessageUpdate::Completed(text) => {
+                    let mut bounded = String::new();
+                    append_bounded_delta(&mut bounded, &text);
+                    AgentMessageUpdate::Completed(bounded)
+                }
+            };
+            AgentEvent::AgentMessage {
+                turn_id,
+                item_id,
+                phase,
+                update,
+            }
+        }
         AgentEvent::AgentTextDelta { turn_id, text } => {
             let mut bounded = String::new();
             append_bounded_delta(&mut bounded, &text);
@@ -1150,6 +1212,25 @@ fn enqueue_agent_event(queue: &mut AgentEventQueue, event: AgentEvent) {
         },
         event => event,
     };
+    if let AgentEvent::AgentMessage {
+        turn_id,
+        item_id,
+        phase,
+        update: AgentMessageUpdate::Delta(text),
+    } = &event
+        && let Some(Ok(AgentEvent::AgentMessage {
+            turn_id: pending_turn,
+            item_id: pending_item,
+            phase: pending_phase,
+            update: AgentMessageUpdate::Delta(pending_text),
+        })) = queue.entries.back_mut()
+        && pending_turn == turn_id
+        && pending_item == item_id
+        && pending_phase == phase
+    {
+        append_bounded_delta(pending_text, text);
+        return;
+    }
     if let AgentEvent::AgentTextDelta { turn_id, text } = &event
         && let Some(Ok(AgentEvent::AgentTextDelta {
             turn_id: pending_turn,
@@ -1270,6 +1351,10 @@ fn is_coalescible_event(event: &DriverResult<AgentEvent>) -> bool {
     matches!(
         event,
         Ok(AgentEvent::AgentTextDelta { .. }
+            | AgentEvent::AgentMessage {
+                update: AgentMessageUpdate::Delta(_),
+                ..
+            }
             | AgentEvent::Activity { .. }
             | AgentEvent::ActivityUpsert { .. }
             | AgentEvent::PlanUpdated { .. }
@@ -1582,6 +1667,45 @@ mod tests {
             }])
             .compatibility_fingerprint()
         );
+    }
+
+    #[tokio::test]
+    async fn identified_deltas_coalesce_only_with_the_same_item_and_phase() {
+        let (sender, mut receiver) = AgentEventReceiver::channel(8);
+        for (id, phase, update) in [
+            (
+                "a",
+                Some(AgentMessagePhase::Commentary),
+                AgentMessageUpdate::Started,
+            ),
+            ("a", None, AgentMessageUpdate::Delta("one".into())),
+            ("a", None, AgentMessageUpdate::Delta(" two".into())),
+            ("b", None, AgentMessageUpdate::Delta("other".into())),
+            ("a", None, AgentMessageUpdate::Completed("rewritten".into())),
+            (
+                "a",
+                Some(AgentMessagePhase::FinalAnswer),
+                AgentMessageUpdate::Delta("final".into()),
+            ),
+        ] {
+            assert!(sender.send(Ok(AgentEvent::AgentMessage {
+                turn_id: turn_id(),
+                item_id: id.into(),
+                phase,
+                update
+            })));
+        }
+        for expected in [
+            AgentMessageUpdate::Started,
+            AgentMessageUpdate::Delta("one two".into()),
+            AgentMessageUpdate::Delta("other".into()),
+            AgentMessageUpdate::Completed("rewritten".into()),
+            AgentMessageUpdate::Delta("final".into()),
+        ] {
+            assert!(
+                matches!(receiver.next().await, Some(Ok(AgentEvent::AgentMessage { update, .. })) if update == expected)
+            );
+        }
     }
 
     #[tokio::test]

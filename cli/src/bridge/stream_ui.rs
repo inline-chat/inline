@@ -896,13 +896,22 @@ const MAX_TRACKED_PROGRESS_FILES: usize = 64;
 const MAX_TRACKED_LEGACY_ACTIVITIES: usize = 32;
 const MAX_TRACKED_PLAN_STEPS: usize = 64;
 const MAX_TRACKED_PATHS_PER_ACTIVITY: usize = 4;
-const MAX_PROGRESS_CHUNKS: usize = 4;
+const MAX_TRACKED_MESSAGES: usize = 32;
+const MAX_MESSAGE_TEXT_BYTES: usize = 16 * 1024;
+const MESSAGE_OMITTED_MARKER: &str = "\n\n[additional output omitted]";
+
 const MAX_PROGRESS_CHUNK_BYTES: usize = 12 * 1024;
 const PROGRESS_OMITTED_MARKER: &str = "- [additional activity omitted]";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ProgressEntry {
+    Message {
+        key: String,
+        phase: Option<AgentMessagePhase>,
+        text: String,
+        complete: bool,
+    },
     Activity {
         key: String,
         semantic_kind: ActivitySemanticKind,
@@ -936,6 +945,7 @@ pub(super) struct ActivityTracker {
     omitted: bool,
     visibility_verbose: bool,
     terminal_header: Option<String>,
+    workspace_line: Option<String>,
 }
 
 #[derive(Debug)]
@@ -946,6 +956,102 @@ pub(super) struct ActivityProjection {
 }
 
 impl ActivityTracker {
+    pub(super) fn set_workspace(&mut self, workspace: &Path) {
+        let line = working_directory_message(workspace)
+            .chars()
+            .filter(|character| !character.is_control())
+            .collect::<String>();
+        self.workspace_line = Some(truncate(&line, 1024));
+    }
+
+    pub(super) fn apply_message(
+        &mut self,
+        item_id: &str,
+        incoming_phase: Option<AgentMessagePhase>,
+        update: AgentMessageUpdate,
+    ) {
+        if !self
+            .entries
+            .iter()
+            .any(|entry| matches!(entry, ProgressEntry::Message { key, .. } if key == item_id))
+        {
+            if self
+                .entries
+                .iter()
+                .filter(|entry| matches!(entry, ProgressEntry::Message { .. }))
+                .count()
+                >= MAX_TRACKED_MESSAGES
+            {
+                // Keep the latest answer eligible even after a long turn overflows.
+                if let Some(index) = self
+                    .entries
+                    .iter()
+                    .position(|entry| matches!(entry, ProgressEntry::Message { .. }))
+                {
+                    self.entries.remove(index);
+                }
+                self.omitted = true;
+            }
+            self.entries.push(ProgressEntry::Message {
+                key: item_id.to_string(),
+                phase: incoming_phase,
+                text: String::new(),
+                complete: false,
+            });
+        }
+        if let Some(ProgressEntry::Message {
+            phase,
+            text,
+            complete,
+            ..
+        }) = self
+            .entries
+            .iter_mut()
+            .find(|entry| matches!(entry, ProgressEntry::Message { key, .. } if key == item_id))
+        {
+            if incoming_phase.is_some() {
+                *phase = incoming_phase;
+            }
+            match update {
+                AgentMessageUpdate::Started => {}
+                AgentMessageUpdate::Delta(delta) if !*complete => append_message_text(text, &delta),
+                AgentMessageUpdate::Delta(_) => {}
+                AgentMessageUpdate::Completed(snapshot) => {
+                    text.clear();
+                    append_message_text(text, &snapshot);
+                    *complete = true;
+                }
+            }
+        }
+    }
+
+    fn final_message(&self) -> Option<(&str, &str)> {
+        let explicit = self.entries.iter().rev().find_map(|entry| match entry {
+            ProgressEntry::Message {
+                key,
+                phase: Some(AgentMessagePhase::FinalAnswer),
+                text,
+                ..
+            } if !text.trim().is_empty() => Some((key.as_str(), text.as_str())),
+            _ => None,
+        });
+        explicit.or_else(|| {
+            self.entries.iter().rev().find_map(|entry| match entry {
+                ProgressEntry::Message {
+                    key,
+                    phase: None | Some(AgentMessagePhase::Unknown),
+                    text,
+                    complete: true,
+                } if !text.trim().is_empty() => Some((key.as_str(), text.as_str())),
+                _ => None,
+            })
+        })
+    }
+
+    pub(super) fn final_message_text(&self) -> Option<&str> {
+        self.final_message().map(|(_, text)| text)
+    }
+
     pub(super) fn apply(
         &mut self,
         activity: ActivityUpsert,
@@ -954,17 +1060,29 @@ impl ActivityTracker {
     ) -> ActivityProjection {
         self.set_visibility(mode);
         let validation = activity_validation(&activity);
+        // Reasoning is a transient provider state, not a public transcript row.
+        if activity.kind == ActivitySemanticKind::Think {
+            return ActivityProjection {
+                status: self.render(mode, WORKING_STATUS, workspace),
+                priority: UpdatePriority::Ordinary,
+                validation,
+            };
+        }
         let paths = activity
             .paths
             .iter()
             .filter_map(|path| normalized_progress_path(path, workspace))
             .take(MAX_TRACKED_PATHS_PER_ACTIVITY)
             .collect::<Vec<_>>();
-        let title = truncate(&activity.title, 240);
+        let incoming_title = truncate(
+            &sanitize_visible_transcript(&activity.title).unwrap_or_else(|| "Tool activity".into()),
+            240,
+        );
         let incoming_detail = activity
             .detail
             .as_deref()
-            .map(|detail| truncate(detail, 512));
+            .and_then(sanitize_visible_transcript)
+            .map(|detail| truncate(&detail, 512));
         if let Some(existing) = self.entries.iter_mut().find(|entry| {
             matches!(entry, ProgressEntry::Activity { key, .. } if key == &activity.activity_id)
         }) {
@@ -980,7 +1098,7 @@ impl ActivityTracker {
             {
                 *semantic_kind = activity.kind;
                 *status = activity.status;
-                *title = title.clone();
+                *title = incoming_title.clone();
                 if incoming_detail.is_some() {
                     *existing_detail = incoming_detail.clone();
                 }
@@ -998,7 +1116,7 @@ impl ActivityTracker {
                 key: activity.activity_id.clone(),
                 semantic_kind: activity.kind,
                 status: activity.status,
-                title,
+                title: incoming_title,
                 detail: incoming_detail,
                 paths,
                 exit_code: activity.exit_code,
@@ -1052,8 +1170,18 @@ impl ActivityTracker {
         workspace: &Path,
     ) -> Option<String> {
         self.set_visibility(mode);
+        if summary
+            .trim_end_matches(['.', '…'])
+            .eq_ignore_ascii_case("thinking")
+        {
+            return self.render(mode, WORKING_STATUS, workspace);
+        }
+        let safe_summary = sanitize_visible_transcript(summary).unwrap_or_default();
         let summary = truncate(
-            &summary.split_whitespace().collect::<Vec<_>>().join(" "),
+            &safe_summary
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
             160,
         );
         if !summary.is_empty()
@@ -1154,20 +1282,6 @@ impl ActivityTracker {
         self.terminal_header = Some(header.into());
     }
 
-    pub(super) fn terminalize_active(&mut self, terminal_status: ActivityStatus) {
-        debug_assert!(matches!(
-            terminal_status,
-            ActivityStatus::Completed | ActivityStatus::Cancelled | ActivityStatus::Failed
-        ));
-        for entry in &mut self.entries {
-            if let ProgressEntry::Activity { status, .. } = entry
-                && matches!(status, ActivityStatus::Pending | ActivityStatus::InProgress)
-            {
-                *status = terminal_status;
-            }
-        }
-    }
-
     pub(super) fn terminal_header(&self) -> Option<&str> {
         self.terminal_header.as_deref()
     }
@@ -1178,9 +1292,6 @@ impl ActivityTracker {
         header: &str,
         _workspace: &Path,
     ) -> Option<String> {
-        if matches!(mode, VisibilityMode::Normal) {
-            return Some(header.to_string());
-        }
         self.render_chunks(mode, header, Some(WORKING_CONTINUED_STATUS))
             .into_iter()
             .next()
@@ -1190,17 +1301,49 @@ impl ActivityTracker {
         &self,
         mode: VisibilityMode,
         header: &str,
-        continuation_header: Option<&str>,
+        _continuation_header: Option<&str>,
     ) -> Vec<String> {
-        if matches!(mode, VisibilityMode::Normal) {
-            return vec![header.to_string()];
-        }
+        let terminal = self.terminal_header.is_some();
+        let final_key = terminal
+            .then(|| self.final_message().map(|(key, _)| key))
+            .flatten();
         let blocks = self
             .entries
             .iter()
-            .map(render_progress_entry)
+            .filter(|entry| !matches!(entry, ProgressEntry::Message { key, phase, .. } if *phase == Some(AgentMessagePhase::FinalAnswer) || final_key == Some(key.as_str())))
+            .map(|entry| render_progress_entry(entry, mode, terminal))
+            .filter(|block| !block.is_empty())
             .collect::<Vec<_>>();
-        bounded_progress_chunks(blocks, header, continuation_header, self.omitted)
+        let open = if terminal { "" } else { " open" };
+        let kind = if terminal { "" } else { " kind=\"progress\"" };
+        let prefix = format!(
+            "<details{open}>\n<summary{kind}>{}</summary>",
+            progress_literal(header.trim_end_matches(['.', '…']))
+        );
+        let footer = self.workspace_line.as_deref().unwrap_or("");
+        let suffix = if footer.is_empty() {
+            "\n</details>".to_string()
+        } else {
+            format!("\n\n<footer>{footer}</footer>\n</details>")
+        };
+        let mut text = prefix;
+        let limit = MAX_PROGRESS_CHUNK_BYTES
+            .saturating_sub(suffix.len() + PROGRESS_OMITTED_MARKER.len() + 4);
+        let mut omitted = self.omitted;
+        for block in blocks {
+            if text.len() + block.len() + 2 > limit {
+                omitted = true;
+                continue;
+            }
+            text.push_str("\n\n");
+            text.push_str(&block);
+        }
+        if omitted {
+            text.push_str("\n\n");
+            text.push_str(PROGRESS_OMITTED_MARKER);
+        }
+        text.push_str(&suffix);
+        vec![text]
     }
 
     fn activity_count(&self) -> usize {
@@ -1239,8 +1382,9 @@ fn normalized_progress_path(path: &Path, workspace: &Path) -> Option<String> {
         .then(|| value.to_string())
 }
 
-fn render_progress_entry(entry: &ProgressEntry) -> String {
+fn render_progress_entry(entry: &ProgressEntry, mode: VisibilityMode, terminal: bool) -> String {
     match entry {
+        ProgressEntry::Message { text, .. } => progress_commentary(text),
         ProgressEntry::Activity {
             semantic_kind,
             status,
@@ -1250,106 +1394,157 @@ fn render_progress_entry(entry: &ProgressEntry) -> String {
             exit_code,
             ..
         } => {
-            let marker = match status {
-                ActivityStatus::Failed => "!",
-                ActivityStatus::Completed if exit_code.is_some_and(|code| code != 0) => "!",
-                ActivityStatus::Completed => "✓",
-                ActivityStatus::Declined | ActivityStatus::Cancelled => "×",
-                ActivityStatus::Pending | ActivityStatus::InProgress => "→",
+            let state = match status {
+                ActivityStatus::Failed => " · failed".to_string(),
+                ActivityStatus::Completed if exit_code.is_some_and(|code| code != 0) => {
+                    format!(" · exit {}", exit_code.unwrap())
+                }
+                ActivityStatus::Completed => String::new(),
+                ActivityStatus::Declined => " · declined".to_string(),
+                ActivityStatus::Cancelled => " · cancelled".to_string(),
+                ActivityStatus::Pending | ActivityStatus::InProgress if terminal => {
+                    " · completion unconfirmed".to_string()
+                }
+                ActivityStatus::Pending | ActivityStatus::InProgress => " · running".to_string(),
             };
-            let mut summary = title.trim_end_matches('…').to_string();
-            if let Some(detail) = detail.as_deref().filter(|detail| !detail.trim().is_empty()) {
+            let mut summary = progress_literal(title.trim_end_matches('…'));
+            if !state.is_empty() && state != " · running" {
+                summary.push_str(&state);
+            }
+            let mut details = Vec::new();
+            if matches!(mode, VisibilityMode::Verbose)
+                && let Some(detail) = detail.as_deref().filter(|detail| !detail.trim().is_empty())
+            {
                 let rendered_detail = if *semantic_kind == ActivitySemanticKind::Execute {
                     sanitize_visible_command(detail).map(|detail| markdown_code_span(&detail))
                 } else {
-                    Some(detail.to_string())
+                    Some(progress_literal(detail))
                 };
                 if let Some(rendered_detail) = rendered_detail {
-                    if title.trim() == detail.trim() {
-                        summary = rendered_detail;
-                    } else {
-                        summary.push_str(" · ");
-                        summary.push_str(&rendered_detail);
-                    }
+                    details.push(rendered_detail);
                 }
             }
-            if let Some(exit_code) = exit_code {
-                summary.push_str(&format!(" · exit {exit_code}"));
+            if matches!(mode, VisibilityMode::Verbose) {
+                details.extend(paths.iter().map(|path| markdown_code_span(path)));
             }
-            let mut block = format!("- {marker} {summary}");
-            for path in paths {
-                block.push_str("\n  - ");
-                block.push_str(&markdown_code_span(path));
+            if details.is_empty() {
+                let status = if state.is_empty() {
+                    "Completed"
+                } else if state.contains("unconfirmed") {
+                    "No terminal event was received for this tool."
+                } else {
+                    state.trim_start_matches(" ·")
+                };
+                format!(
+                    "<details>\n<summary>{summary}</summary>\n\n{}\n</details>",
+                    progress_literal(status)
+                )
+            } else {
+                format!(
+                    "<details>\n<summary>{summary}</summary>\n\n{}{}\n</details>",
+                    details.join("\n\n"),
+                    if state != " · running" {
+                        String::new()
+                    } else {
+                        format!("\n\nStatus:{}", state.trim_start_matches(" ·"))
+                    }
+                )
             }
-            block
         }
         ProgressEntry::Plan { text, status, .. } => {
             let marker = match status {
                 PlanStepStatus::Completed => "✓",
+                PlanStepStatus::InProgress if terminal => "?",
                 PlanStepStatus::InProgress => "→",
                 PlanStepStatus::Pending => "·",
             };
-            format!("- {marker} {text}")
+            format!("- {marker} {}", progress_literal(text))
         }
-        ProgressEntry::Legacy { summary, .. } => format!("- {summary}"),
+        ProgressEntry::Legacy { summary, .. } => progress_literal(summary),
         ProgressEntry::File { path } => {
             format!("- Updated {}", markdown_code_span(path))
         }
     }
 }
 
-fn bounded_progress_chunks(
-    blocks: Vec<String>,
-    header: &str,
-    continuation_header: Option<&str>,
-    already_omitted: bool,
-) -> Vec<String> {
-    let mut chunks = Vec::new();
-    let mut current = header.to_string();
-    let mut overflowed = already_omitted;
-    let content_limit = MAX_PROGRESS_CHUNK_BYTES.saturating_sub(PROGRESS_OMITTED_MARKER.len() + 2);
-    for block in blocks {
-        let separator = if current.is_empty() {
-            ""
-        } else if current.lines().count() == 1 {
-            "\n\n"
+fn append_message_text(text: &mut String, delta: &str) {
+    if text.ends_with(MESSAGE_OMITTED_MARKER) {
+        return;
+    }
+    let available =
+        MAX_MESSAGE_TEXT_BYTES.saturating_sub(MESSAGE_OMITTED_MARKER.len() + text.len());
+    if delta.len() <= available {
+        text.push_str(delta);
+        return;
+    }
+    let mut end = available.min(delta.len());
+    while !delta.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.push_str(&delta[..end]);
+    text.push_str(MESSAGE_OMITTED_MARKER);
+}
+
+// Literal labels cannot introduce formatting or structural wrapper syntax.
+fn progress_literal(value: &str) -> String {
+    let mut result = String::new();
+    for c in value.chars().filter(|c| !c.is_control()) {
+        match c {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            c if c.is_ascii_punctuation() => {
+                result.push('\\');
+                result.push(c);
+            }
+            c => result.push(c),
+        }
+    }
+    result
+}
+
+// Provider prose keeps its Markdown. Escape structural HTML outside code and
+// close an unfinished fence so the next tool and outer close remain siblings.
+fn progress_commentary(text: &str) -> String {
+    let text = if text.len() > 4096 {
+        let mut end = 4096;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}\n\n[additional commentary omitted]", &text[..end])
+    } else {
+        text.to_string()
+    };
+    let text = sanitize_visible_transcript(&text).unwrap_or_default();
+    let mut fence: Option<(char, usize)> = None;
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start_matches(' ');
+        let indent = line.len() - trimmed.len();
+        let marker = trimmed.chars().next().filter(|c| matches!(c, '`' | '~'));
+        let run = marker.map_or(0, |c| trimmed.chars().take_while(|next| *next == c).count());
+        if let Some((character, length)) = fence {
+            if indent <= 3
+                && marker == Some(character)
+                && run >= length
+                && trimmed[run..].trim().is_empty()
+            {
+                fence = None;
+            }
+            lines.push(line.to_string());
         } else {
-            "\n"
-        };
-        if current.len() + separator.len() + block.len() <= content_limit {
-            current.push_str(separator);
-            current.push_str(&block);
-            continue;
-        }
-        chunks.push(std::mem::take(&mut current));
-        if chunks.len() >= MAX_PROGRESS_CHUNKS {
-            overflowed = true;
-            break;
-        }
-        current = continuation_header.unwrap_or_default().to_string();
-        let separator = if current.is_empty() { "" } else { "\n\n" };
-        if current.len() + separator.len() + block.len() <= content_limit {
-            current.push_str(separator);
-            current.push_str(&block);
-        } else {
-            overflowed = true;
-            break;
+            if indent <= 3 && run >= 3 && !(marker == Some('`') && trimmed[run..].contains('`')) {
+                fence = marker.map(|c| (c, run));
+                lines.push(line.to_string());
+            } else {
+                lines.push(line.replace('<', "&lt;").replace('>', "&gt;"));
+            }
         }
     }
-    if chunks.len() < MAX_PROGRESS_CHUNKS && !current.is_empty() {
-        chunks.push(current);
+    if let Some((character, length)) = fence {
+        lines.push(character.to_string().repeat(length));
     }
-    if chunks.is_empty() {
-        chunks.push(header.to_string());
-    }
-    if overflowed {
-        let last = chunks.last_mut().expect("progress always has one chunk");
-        if !last.ends_with(PROGRESS_OMITTED_MARKER) {
-            last.push('\n');
-            last.push_str(PROGRESS_OMITTED_MARKER);
-        }
-    }
-    chunks
+    lines.join("\n")
 }
 
 fn activity_failed(activity: &ActivityUpsert) -> bool {
@@ -1596,3 +1791,237 @@ pub(super) fn markdown_code_span(value: &str) -> String {
 #[cfg(test)]
 #[path = "runtime/tests.rs"]
 mod presentation_tests;
+
+#[cfg(test)]
+mod disclosure_tests {
+    use super::*;
+
+    fn snapshot(tracker: &ActivityTracker) -> String {
+        tracker
+            .render_chunks(
+                VisibilityMode::Verbose,
+                tracker.terminal_header().unwrap_or(WORKING_STATUS),
+                None,
+            )
+            .remove(0)
+    }
+
+    #[test]
+    fn commentary_tools_and_final_have_independent_item_identity() {
+        let mut tracker = ActivityTracker::default();
+        tracker.set_workspace(Path::new("/workspace/project"));
+        tracker.apply_message(
+            "a",
+            Some(AgentMessagePhase::Commentary),
+            AgentMessageUpdate::Started,
+        );
+        tracker.apply_message("a", None, AgentMessageUpdate::Delta("First draft".into()));
+        tracker.apply(
+            ActivityUpsert::new(
+                "tool",
+                ActivitySemanticKind::Read,
+                ActivityStatus::InProgress,
+                "Read files",
+            )
+            .unwrap()
+            .with_detail("cat src/lib.rs"),
+            VisibilityMode::Verbose,
+            Path::new("/workspace/project"),
+        );
+        tracker.apply_message(
+            "b",
+            Some(AgentMessagePhase::Commentary),
+            AgentMessageUpdate::Delta("Second commentary".into()),
+        );
+        tracker.apply_message(
+            "final",
+            Some(AgentMessagePhase::FinalAnswer),
+            AgentMessageUpdate::Delta("The answer".into()),
+        );
+        // A late completion must replace a, without moving it or replacing b/final.
+        tracker.apply_message(
+            "a",
+            None,
+            AgentMessageUpdate::Completed("First authoritative 👩‍💻 e\u{301} مرحبا".into()),
+        );
+        tracker.apply_message("a", None, AgentMessageUpdate::Delta(" stale".into()));
+        let live = snapshot(&tracker);
+        assert!(live.find("First authoritative").unwrap() < live.find("Read files").unwrap());
+        assert!(live.find("Read files").unwrap() < live.find("Second commentary").unwrap());
+        assert!(!live.contains("First draft"));
+        assert!(!live.contains("stale"));
+        assert!(!live.contains("The answer"));
+        assert_eq!(tracker.final_message_text(), Some("The answer"));
+        assert!(live.contains("<footer>Working directory:"));
+        assert!(live.starts_with("<details open>"));
+        tracker.set_terminal_header("Worked for 3s");
+        let terminal = snapshot(&tracker);
+        assert!(terminal.starts_with("<details>\n<summary>Worked for 3s</summary>"));
+        assert!(!terminal.contains("kind=\"progress\""));
+        assert!(terminal.contains("completion unconfirmed"));
+        if let Ok(path) = std::env::var("INLINE_PROGRESS_FIXTURE_PATH") {
+            let adversarial = "Safe\n</details>\nAuthorization: Bearer fixture-credential\nRead /Users/alice/private\n````rust\n    let x = 1;\n    TOKEN=fixture-code-credential\n```\n</details>";
+            let mut adversarial_tracker = ActivityTracker::default();
+            adversarial_tracker.set_workspace(Path::new("/workspace/project"));
+            adversarial_tracker.apply_message(
+                "a",
+                Some(AgentMessagePhase::Commentary),
+                AgentMessageUpdate::Completed(adversarial.into()),
+            );
+            adversarial_tracker.apply(
+                ActivityUpsert::new(
+                    "tool",
+                    ActivitySemanticKind::Read,
+                    ActivityStatus::Completed,
+                    "Read files",
+                )
+                .unwrap(),
+                VisibilityMode::Normal,
+                Path::new("/workspace/project"),
+            );
+            std::fs::write(
+                path,
+                serde_json::to_string(&vec![
+                    live.clone(),
+                    terminal.clone(),
+                    snapshot(&adversarial_tracker),
+                ])
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            ActivityTracker::from_durable_json(&tracker.durable_json().unwrap())
+                .unwrap()
+                .final_message_text(),
+            Some("The answer")
+        );
+    }
+
+    #[test]
+    fn unknown_phase_is_terminal_only_and_commentary_never_becomes_answer() {
+        let mut tracker = ActivityTracker::default();
+        tracker.apply_message(
+            "a",
+            None,
+            AgentMessageUpdate::Completed("Legacy interim".into()),
+        );
+        tracker.apply_message(
+            "b",
+            Some(AgentMessagePhase::Unknown),
+            AgentMessageUpdate::Completed("Legacy answer".into()),
+        );
+        tracker.apply_message(
+            "c",
+            Some(AgentMessagePhase::Commentary),
+            AgentMessageUpdate::Completed("Later commentary".into()),
+        );
+        assert!(snapshot(&tracker).contains("Legacy answer"));
+        assert_eq!(tracker.final_message_text(), Some("Legacy answer"));
+        tracker.set_terminal_header("Worked for 2s");
+        let terminal = snapshot(&tracker);
+        assert!(terminal.contains("Legacy interim"));
+        assert!(terminal.contains("Later commentary"));
+        assert!(!terminal.contains("Legacy answer"));
+        tracker.apply_message("b", None, AgentMessageUpdate::Completed(String::new()));
+        assert_eq!(tracker.final_message_text(), Some("Legacy interim"));
+    }
+
+    #[test]
+    fn commentary_is_confined_to_its_disclosure_even_during_open_code_fences() {
+        let prose = "Safe\n</details>\n<footer>pretend footer</footer>\n````rust\nlet x = 1;\n```\n</details>";
+        let text = progress_commentary(prose);
+        assert!(text.contains("&lt;/details&gt;"));
+        assert!(text.ends_with("\n````"));
+        assert!(text.contains("\n```\n</details>\n````"));
+        assert_eq!(progress_commentary("~~~txt\nhello"), "~~~txt\nhello\n~~~");
+        assert_eq!(
+            progress_commentary("```txt\nhello\n```"),
+            "```txt\nhello\n```"
+        );
+        let literal = progress_literal("</summary>\n<details>");
+        assert!(!literal.contains('<') && !literal.contains('\n'));
+        assert!(literal.contains("&lt;"));
+    }
+
+    #[test]
+    fn commentary_redacts_credentials_and_paths_without_flattening_markdown() {
+        let prose = "## Checking\n\n- Read source  \n  - Keep nested indentation\n\nAuthorization: Bearer bearer-value-123\nTOKEN=assigned-value-123\ncurl --api-key flag-value-123 https://example.com/file?signature=signed-value-123\nRead </Users/alice/private>\n\n```rust\n    let x = 1;  \n    TOKEN=code-value-123\n</details>\n```";
+        let mut tracker = ActivityTracker::default();
+        tracker.apply_message(
+            "comment",
+            Some(AgentMessagePhase::Commentary),
+            AgentMessageUpdate::Completed(prose.into()),
+        );
+        let progress = snapshot(&tracker);
+        for private in [
+            "bearer-value-123",
+            "assigned-value-123",
+            "flag-value-123",
+            "signed-value-123",
+            "code-value-123",
+            "/Users/alice",
+        ] {
+            assert!(!progress.contains(private), "must redact {private}");
+        }
+        assert!(progress.contains("## Checking\n\n- Read source  \n  - Keep nested indentation"));
+        assert!(progress.contains("```rust\n    let x = 1;  \n    TOKEN= [redacted]\n</details>\n```"));
+        assert!(progress.contains("[local-path]"));
+        assert!(progress.contains("https://example.com/file?[redacted]"));
+    }
+
+    #[test]
+    fn message_overflow_keeps_final_answer_and_one_complete_progress_message() {
+        let mut tracker = ActivityTracker::default();
+        for i in 0..MAX_TRACKED_MESSAGES + 8 {
+            tracker.apply_message(
+                &format!("comment-{i}"),
+                Some(AgentMessagePhase::Commentary),
+                AgentMessageUpdate::Completed("α".repeat(20_000)),
+            );
+        }
+        tracker.apply_message(
+            "answer",
+            Some(AgentMessagePhase::FinalAnswer),
+            AgentMessageUpdate::Completed("Final survives".into()),
+        );
+        let chunks = tracker.render_chunks(VisibilityMode::Normal, WORKING_STATUS, None);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].len() <= MAX_PROGRESS_CHUNK_BYTES);
+        assert!(chunks[0].ends_with("</details>"));
+        assert_eq!(
+            chunks[0].matches("[additional activity omitted]").count(),
+            1
+        );
+        assert_eq!(tracker.final_message_text(), Some("Final survives"));
+        assert!(tracker.durable_json().unwrap().len() < 600_000);
+    }
+
+    #[test]
+    fn completion_does_not_fabricate_tool_success_and_normal_hides_details() {
+        let mut tracker = ActivityTracker::default();
+        for (id, status) in [
+            ("done", ActivityStatus::Completed),
+            ("pending", ActivityStatus::InProgress),
+            ("failed", ActivityStatus::Failed),
+        ] {
+            tracker.apply(
+                ActivityUpsert::new(id, ActivitySemanticKind::Execute, status, id)
+                    .unwrap()
+                    .with_detail("private verbose detail")
+                    .with_exit_code((id == "done").then_some(0)),
+                VisibilityMode::Normal,
+                Path::new("/workspace"),
+            );
+        }
+        tracker.set_terminal_header("Failed after 4s");
+        let normal = tracker
+            .render_chunks(VisibilityMode::Normal, "Failed after 4s", None)
+            .remove(0);
+        assert!(!normal.contains("private verbose detail"));
+        assert!(!normal.contains("exit 0"));
+        assert_eq!(normal.matches("completion unconfirmed").count(), 1);
+        assert!(normal.contains("Completed"));
+        assert!(normal.contains("failed"));
+    }
+}

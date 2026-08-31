@@ -72,6 +72,7 @@ const INITIAL_RESPONSE_DELAY: Duration = Duration::from_millis(10);
 fn runtime_agent_event_kind(event: &AgentEvent) -> &'static str {
     match event {
         AgentEvent::TurnStarted { .. } => "turn_started",
+        AgentEvent::AgentMessage { .. } => "agent_message",
         AgentEvent::AgentTextDelta { .. } => "agent_text_delta",
         AgentEvent::AgentTextCompleted { .. } => "agent_text_completed",
         AgentEvent::Activity { .. } => "activity",
@@ -1045,8 +1046,14 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             return Ok(());
         }
     };
-    let acknowledgement_text =
-        command_acknowledgement.unwrap_or_else(|| WORKING_STATUS.to_string());
+    let mut initial_progress = ActivityTracker::default();
+    initial_progress.set_workspace(workspace);
+    if let Some(ref acknowledgement) = command_acknowledgement {
+        initial_progress.apply_legacy(acknowledgement, VisibilityMode::Normal, workspace);
+    }
+    let acknowledgement_text = initial_progress
+        .render_chunks(VisibilityMode::Normal, WORKING_STATUS, None)
+        .remove(0);
     let acknowledgement = send_silent_text(
         bot,
         binding.chat_id,
@@ -1221,6 +1228,7 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         .and_then(|ledger| ActivityTracker::from_durable_json(ledger).ok())
         .unwrap_or_default();
     activities.set_visibility(visibility_mode);
+    activities.set_workspace(workspace);
     persist_progress_ledger(store, &record.event_id, &activities)?;
     let mut pending_approvals = HashSet::<String>::new();
     let mut pending_questions = HashMap::<i64, PendingQuestionUi>::new();
@@ -1230,15 +1238,6 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     let mut last_lease_renewal = now_seconds();
     let mut turn_timing = TurnTiming::default();
     let terminal_result: Result<_, Box<dyn std::error::Error>> = async {
-        if !matches!(&session_open, inline_agent_bridge::SessionOpenOutcome::Active(_)) {
-            send_silent_text(
-                bot,
-                binding.chat_id,
-                &working_directory_message(workspace),
-                &format!("{}-session-working-directory", record.event_id),
-            )
-            .await?;
-        }
         if let Some(notice) = session_open_notice(&session_open) {
             send_text_reply(
                 bot,
@@ -1263,6 +1262,25 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                     );
                 }
                 match event {
+                    Some(Ok(AgentEvent::AgentMessage { item_id, phase, update, .. })) => {
+                        activities.apply_message(&item_id, phase, update);
+                        if !presenter.ordinary_update_ready(now_millis()) {
+                            continue;
+                        }
+                        let status = activities
+                            .render(visibility_mode, WORKING_STATUS, workspace)
+                            .unwrap_or_default();
+                        if presenter.show_transient(
+                            now_millis(), status, UpdatePriority::Ordinary,
+                        ).is_some() {
+                            persist_progress_ledger(store, &record.event_id, &activities)?;
+                            let chunks = activities.render_chunks(visibility_mode, WORKING_STATUS, None);
+                            sync_turn_progress(
+                                bot, store, &record.event_id, binding.chat_id, stream_message_id,
+                                &mut progress_message_ids, &chunks, WORKING_CONTINUED_STATUS,
+                            ).await?;
+                        }
+                    }
                     Some(Ok(AgentEvent::AgentTextDelta { text, .. })) => {
                         let _ = presenter.push_delta(now_millis(), &text);
                     }
@@ -1534,7 +1552,10 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                             ).await?;
                         }
                     }
-                    Some(Ok(AgentEvent::PlanUpdated { steps, .. })) => {
+                    Some(Ok(AgentEvent::PlanUpdated { explanation, steps, .. })) => {
+                        if let Some(explanation) = explanation {
+                            activities.apply_legacy(&explanation, visibility_mode, workspace);
+                        }
                         let status = activities.apply_plan(
                             steps,
                             visibility_mode,
@@ -1638,6 +1659,18 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                 }
             }
             _ = heartbeat.tick() => {
+                // Flush the latest coalesced snapshot even if the provider goes quiet.
+                let status = activities
+                    .render(visibility_mode, WORKING_STATUS, workspace)
+                    .unwrap_or_default();
+                if presenter.show_transient(now_millis(), status, UpdatePriority::Ordinary).is_some() {
+                    persist_progress_ledger(store, &record.event_id, &activities)?;
+                    let chunks = activities.render_chunks(visibility_mode, WORKING_STATUS, None);
+                    sync_turn_progress(
+                        bot, store, &record.event_id, binding.chat_id, stream_message_id,
+                        &mut progress_message_ids, &chunks, WORKING_CONTINUED_STATUS,
+                    ).await?;
+                }
                 let now = now_seconds();
                 if now.saturating_sub(last_lease_renewal) >= 60 {
                     let _ = store.renew_inbound_lease(&record.event_id, now)?;
@@ -1828,6 +1861,11 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             store.mark_question_ui_cleared(&token, now_seconds())?;
         }
     }
+    if let Some(text) = activities.final_message_text() {
+        let _ = presenter.replace_snapshot_with_priority(
+            now_millis(), text, UpdatePriority::Terminal,
+        );
+    }
     let final_text = final_turn_text(
         presenter.content(),
         terminal.0,
@@ -1856,13 +1894,6 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         }
     };
     activities.set_visibility(visibility_mode);
-    activities.terminalize_active(match terminal.0 {
-        TurnOutcome::Completed => ActivityStatus::Completed,
-        TurnOutcome::Interrupted => ActivityStatus::Cancelled,
-        TurnOutcome::Failed | TurnOutcome::ConnectionLost | TurnOutcome::AuthenticationRequired => {
-            ActivityStatus::Failed
-        }
-    });
     activities.set_terminal_header(progress_header.clone());
     persist_progress_ledger(store, &record.event_id, &activities)?;
     let progress_chunks = activities.render_chunks(visibility_mode, &progress_header, None);

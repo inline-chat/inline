@@ -136,10 +136,10 @@ the original Claude session. `/sessions` and `/open` remain reserved for future
 native continuity and return an explicit unavailable message if typed.
 
 Each provider has a distinct bot and session namespace. A thread is a session
-for the selected project by default. After a 100 ms ordering gate, the bot
-acknowledges every accepted provider direction with one silent `Working...`
-message. It terminalizes that message with elapsed-time copy such as
-`Worked for 2m 14s`, `Stopped after 12s`, or `Failed after 8s`, then sends the
+for the selected project by default. After a brief ordering gate, the bot
+acknowledges every accepted provider direction with one silent, initially open
+`Working` disclosure. It collapses that same message with elapsed-time copy such
+as `Worked for 2m 14s`, `Stopped after 12s`, or `Failed after 8s`, then sends the
 actual result as a separate message with changed-file and check summaries plus
 a local **Copy Path** action for every safely representable relative path. These
 ordinary messages arrive in the active conversation without quoting the
@@ -153,19 +153,23 @@ after a retry or restart; the retained status plus final answer are an intention
 two-message beta design. A failed progress edit never creates another progress
 message or prevents the final answer; after a crash the bridge resolves the
 original progress send by its stable local transaction identity before recovery.
-Normal mode remains exactly `Working...` while a turn runs and never invents task
-counts or plan summaries. `/verbose` toggles a per-conversation, live view of
-safe structured provider activity. That view keeps first-seen work, normalized
-command labels, plan steps, and validated relative file paths in emission order;
-updates change the existing row without clearing earlier work. Bounded silent
-continuation messages preserve prior rows on overflow, and recovery restores the
-same durable ledger. Raw reasoning, terminal output, tool payloads, environment
-values, secrets, and absolute paths are never progress content. The explicit
-`/verbose on` and `/verbose off` forms remain available for automation.
+Normal mode shows safe commentary, tool summaries, and provider plan steps
+inside that disclosure. Codex preserves assistant item identity and phase:
+commentary and nested tools stay in first-seen order; the final answer is kept
+out of progress. `/verbose` adds sanitized details and validated relative file
+paths. Updates replace the existing item without clearing earlier work.
+One bounded progress message explicitly marks omitted overflow; new turns do
+not create continuation messages. Recovery restores the same durable ledger.
+Raw reasoning, terminal output, and tool payloads are excluded. Commentary uses
+the same credential, signed-URL, and absolute-path redaction as tool details,
+while preserving Markdown whitespace. Missing tool completion remains
+unconfirmed, even when the turn succeeds. The explicit `/verbose on` and
+`/verbose off` forms remain available for automation.
 
-When a provider session is first created, resumed after a bridge process
-restart, or automatically replaced, the bot also sends one silent status such
-as `Working directory: ~/dev/inline` (with the path rendered as inline code).
+The progress disclosure includes a footer such as
+`Working directory: ~/dev/inline` (with the path rendered as inline code),
+instead of sending a separate working-directory message on session creation or
+resume. An actual session replacement still has its own explanatory notice.
 `/new`, `/clear`, and a successful project-folder change report the same
 working directory immediately. Paths below the host user's home are shortened
 to `~/…`; workspaces elsewhere use only their final folder name so shared chats

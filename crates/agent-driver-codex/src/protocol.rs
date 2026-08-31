@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use inline_agent_bridge::{
-    ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent, ApprovalOption,
-    ApprovalRequest, FileChange, OutputAttachment, OutputAttachmentKind, PlanStep, PlanStepStatus,
-    Question, QuestionAnswer, QuestionOption, QuestionRequest, TurnId, TurnOutcome, TurnTiming,
-    native_tool_activity, sanitize_visible_command,
+    ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent, AgentMessagePhase,
+    AgentMessageUpdate, ApprovalOption, ApprovalRequest, FileChange, OutputAttachment,
+    OutputAttachmentKind, PlanStep, PlanStepStatus, Question, QuestionAnswer, QuestionOption,
+    QuestionRequest, TurnId, TurnOutcome, TurnTiming, native_tool_activity,
+    sanitize_visible_command,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -294,6 +295,18 @@ pub fn normalize_notification(
         "item/agentMessage/delta" => {
             let turn_id = turn_id_at(&method, &params, &["turnId"])?;
             let text = bounded_agent_text(&string_at(&method, &params, &["delta"])?);
+            if let Some(item_id) = params
+                .get("itemId")
+                .and_then(Value::as_str)
+                .filter(|id| safe_provider_id(id))
+            {
+                return Ok(vec![AgentEvent::AgentMessage {
+                    turn_id,
+                    item_id: item_id.to_string(),
+                    phase: message_phase(&params),
+                    update: AgentMessageUpdate::Delta(text),
+                }]);
+            }
             Ok(vec![AgentEvent::AgentTextDelta { turn_id, text }])
         }
         "turn/plan/updated" => normalize_plan_update(&method, &params),
@@ -324,7 +337,18 @@ pub fn unsupported_notification_diagnostic(method: &str, params: &Value) -> Opti
                 .and_then(Value::as_str)?;
             if matches!(
                 item_type,
-                "agentMessage" | "fileChange" | "commandExecution" | "imageGeneration"
+                "agentMessage"
+                    | "fileChange"
+                    | "commandExecution"
+                    | "imageGeneration"
+                    | "mcpToolCall"
+                    | "dynamicToolCall"
+                    | "webSearch"
+                    | "reasoning"
+                    | "collabAgentToolCall"
+                    | "enteredReviewMode"
+                    | "exitedReviewMode"
+                    | "contextCompaction"
             ) {
                 None
             } else {
@@ -614,10 +638,23 @@ fn normalize_completed_item(
     let item = value_at(method, params, &["item"])?;
     let item_type = string_at(method, item, &["type"])?;
     match item_type.as_str() {
-        "agentMessage" => Ok(vec![AgentEvent::AgentTextCompleted {
-            turn_id,
-            text: bounded_agent_text(&string_at(method, item, &["text"]).unwrap_or_default()),
-        }]),
+        "agentMessage" => {
+            let text = bounded_agent_text(&string_at(method, item, &["text"]).unwrap_or_default());
+            Ok(vec![if let Some(item_id) = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| safe_provider_id(id))
+            {
+                AgentEvent::AgentMessage {
+                    turn_id,
+                    item_id: item_id.to_string(),
+                    phase: message_phase(item),
+                    update: AgentMessageUpdate::Completed(text),
+                }
+            } else {
+                AgentEvent::AgentTextCompleted { turn_id, text }
+            }])
+        }
         "fileChange" => {
             let files = item
                 .get("changes")
@@ -651,50 +688,20 @@ fn normalize_completed_item(
             Ok(events)
         }
         "imageGeneration" => normalize_image_generation(method, item, turn_id),
-        "commandExecution" => {
-            let command = item
-                .get("command")
-                .and_then(Value::as_str)
-                .and_then(sanitize_visible_command);
-            let status = item
-                .get("status")
-                .and_then(Value::as_str)
-                .unwrap_or("completed");
-            let activity_status = codex_command_status(status);
-            let activity = ActivityUpsert::new(
-                string_at(method, item, &["id"])?,
-                ActivitySemanticKind::Execute,
-                activity_status,
-                "Running command",
+        "commandExecution"
+        | "mcpToolCall"
+        | "dynamicToolCall"
+        | "webSearch"
+        | "collabAgentToolCall"
+        | "enteredReviewMode"
+        | "exitedReviewMode"
+        | "contextCompaction" => {
+            Ok(
+                codex_item_activity(method, &turn_id, item, ActivityStatus::Completed)?
+                    .map(|activity| AgentEvent::ActivityUpsert { turn_id, activity })
+                    .into_iter()
+                    .collect(),
             )
-            .map(|activity| {
-                let activity = if let Some(command) = command {
-                    activity.with_detail(command)
-                } else {
-                    activity
-                };
-                activity
-                    .with_paths(item.get("cwd").and_then(Value::as_str).map(PathBuf::from))
-                    .with_exit_code(
-                        item.get("exitCode")
-                            .and_then(Value::as_i64)
-                            .and_then(|code| i32::try_from(code).ok())
-                            .or_else(|| {
-                                item.get("exit_code")
-                                    .and_then(Value::as_i64)
-                                    .and_then(|code| i32::try_from(code).ok())
-                            }),
-                    )
-            });
-            let events = if let Some(activity) = activity {
-                vec![AgentEvent::ActivityUpsert { turn_id, activity }]
-            } else {
-                vec![AgentEvent::Activity {
-                    turn_id,
-                    summary: "Agent command activity.".to_string(),
-                }]
-            };
-            Ok(events)
         }
         _ => Ok(Vec::new()),
     }
@@ -778,6 +785,20 @@ fn is_png(bytes: &[u8]) -> bool {
 fn normalize_started_item(method: &str, params: &Value) -> Result<Vec<AgentEvent>, ProtocolError> {
     let turn_id = turn_id_at(method, params, &["turnId"])?;
     let item = value_at(method, params, &["item"])?;
+    if item.get("type").and_then(Value::as_str) == Some("agentMessage") {
+        return Ok(item
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| safe_provider_id(id))
+            .map(|item_id| AgentEvent::AgentMessage {
+                turn_id,
+                item_id: item_id.to_string(),
+                phase: message_phase(item),
+                update: AgentMessageUpdate::Started,
+            })
+            .into_iter()
+            .collect());
+    }
     let Some(activity) = codex_item_activity(method, &turn_id, item, ActivityStatus::InProgress)?
     else {
         return Ok(Vec::new());
@@ -786,23 +807,10 @@ fn normalize_started_item(method: &str, params: &Value) -> Result<Vec<AgentEvent
 }
 
 fn normalize_command_output_progress(
-    method: &str,
-    params: &Value,
+    _method: &str,
+    _params: &Value,
 ) -> Result<Vec<AgentEvent>, ProtocolError> {
-    let turn_id = turn_id_at(method, params, &["turnId"])?;
-    let activity_id = string_at(method, params, &["itemId"])?;
-    Ok(ActivityUpsert::new(
-        activity_id,
-        ActivitySemanticKind::Execute,
-        ActivityStatus::InProgress,
-        "Running command",
-    )
-    // Output bytes may contain secrets, terminal control sequences, or pages of
-    // logs. Preserve the existing command detail in the tracker by omitting a
-    // replacement detail here; only the lifecycle update crosses the boundary.
-    .map(|activity| AgentEvent::ActivityUpsert { turn_id, activity })
-    .into_iter()
-    .collect())
+    Ok(Vec::new())
 }
 
 fn normalize_file_change_progress(
@@ -838,15 +846,20 @@ fn codex_item_activity(
 ) -> Result<Option<ActivityUpsert>, ProtocolError> {
     let item_type = string_at(method, item, &["type"])?;
     let id = string_at(method, item, &["id"])?;
+    let status = item
+        .get("status")
+        .and_then(Value::as_str)
+        .map(codex_item_status)
+        .unwrap_or(fallback_status);
     let activity = match item_type.as_str() {
         "commandExecution" => ActivityUpsert::new(
             id,
-            ActivitySemanticKind::Execute,
+            command_semantics(item).0,
             item.get("status")
                 .and_then(Value::as_str)
                 .map(codex_command_status)
                 .unwrap_or(fallback_status),
-            "Running command",
+            command_semantics(item).1,
         )
         .map(|activity| {
             // Explicit per-chat verbose mode remains secret-safe. Command output
@@ -877,20 +890,55 @@ fn codex_item_activity(
                 .or_else(|| item.get("server").and_then(Value::as_str))
                 .unwrap_or_default();
             let presentation = native_tool_activity(name, ActivitySemanticKind::Other);
-            ActivityUpsert::new(id, presentation.kind, fallback_status, presentation.title)
+            ActivityUpsert::new(
+                id,
+                presentation.kind,
+                if item.get("success").and_then(Value::as_bool) == Some(false)
+                    || item.get("error").is_some_and(|error| !error.is_null())
+                {
+                    ActivityStatus::Failed
+                } else {
+                    status
+                },
+                presentation.title,
+            )
         }
-        "webSearch" => ActivityUpsert::new(
-            id,
-            ActivitySemanticKind::Search,
-            fallback_status,
-            "Searching the web",
-        ),
-        "reasoning" => {
-            ActivityUpsert::new(id, ActivitySemanticKind::Think, fallback_status, "Thinking")
+        "webSearch" => {
+            ActivityUpsert::new(id, ActivitySemanticKind::Search, status, "Search the web")
         }
+        "collabAgentToolCall" => {
+            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Delegate to agent")
+        }
+        "enteredReviewMode" | "exitedReviewMode" => {
+            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Review changes")
+        }
+        "contextCompaction" => {
+            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Compact context")
+        }
+        "reasoning" => None,
         _ => None,
     };
     Ok(activity)
+}
+
+fn command_semantics(item: &Value) -> (ActivitySemanticKind, &'static str) {
+    let actions = item.get("commandActions").and_then(Value::as_array);
+    let Some(actions) = actions.filter(|actions| !actions.is_empty() && actions.len() <= 32) else {
+        return (ActivitySemanticKind::Execute, "Run command");
+    };
+    let first = actions[0].get("type").and_then(Value::as_str);
+    if !actions
+        .iter()
+        .all(|action| action.get("type").and_then(Value::as_str) == first)
+    {
+        return (ActivitySemanticKind::Execute, "Run command");
+    }
+    match first {
+        Some("read") => (ActivitySemanticKind::Read, "Read files"),
+        Some("search") => (ActivitySemanticKind::Search, "Search files"),
+        Some("listFiles") => (ActivitySemanticKind::Read, "List files"),
+        _ => (ActivitySemanticKind::Execute, "Run command"),
+    }
 }
 
 fn codex_file_change_activity(
@@ -931,6 +979,16 @@ fn codex_item_status(status: &str) -> ActivityStatus {
         "pending" => ActivityStatus::Pending,
         _ => ActivityStatus::InProgress,
     }
+}
+
+fn message_phase(item: &Value) -> Option<AgentMessagePhase> {
+    item.get("phase")
+        .and_then(Value::as_str)
+        .map(|phase| match phase {
+            "commentary" => AgentMessagePhase::Commentary,
+            "final_answer" => AgentMessagePhase::FinalAnswer,
+            _ => AgentMessagePhase::Unknown,
+        })
 }
 
 fn codex_command_status(status: &str) -> ActivityStatus {
@@ -1321,11 +1379,76 @@ mod tests {
         .expect("normalize delta");
         assert_eq!(
             events,
-            vec![AgentEvent::AgentTextDelta {
+            vec![AgentEvent::AgentMessage {
                 turn_id: TurnId::new("turn-1").expect("turn id"),
-                text: "Hello".to_string()
+                item_id: "item-1".into(),
+                phase: None,
+                update: AgentMessageUpdate::Delta("Hello".into()),
             }]
         );
+    }
+
+    #[test]
+    fn assistant_lifecycle_preserves_identity_phase_and_empty_authoritative_snapshot() {
+        for (method, phase, expected) in [
+            ("item/started", "commentary", AgentMessageUpdate::Started),
+            (
+                "item/completed",
+                "final_answer",
+                AgentMessageUpdate::Completed(String::new()),
+            ),
+            (
+                "item/completed",
+                "future_phase",
+                AgentMessageUpdate::Completed(String::new()),
+            ),
+        ] {
+            let events = normalize_notification(CodexNotification {
+                method: method.into(), params: json!({"turnId": "turn-1", "item": {"id": "message-1", "type": "agentMessage", "phase": phase, "text": ""}}),
+            }).unwrap();
+            let expected_phase = match phase {
+                "commentary" => AgentMessagePhase::Commentary,
+                "final_answer" => AgentMessagePhase::FinalAnswer,
+                _ => AgentMessagePhase::Unknown,
+            };
+            assert_eq!(
+                events,
+                vec![AgentEvent::AgentMessage {
+                    turn_id: TurnId::new("turn-1").unwrap(),
+                    item_id: "message-1".into(),
+                    phase: Some(expected_phase),
+                    update: expected
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn command_actions_and_tool_completions_use_safe_semantics() {
+        let events = normalize_notification(CodexNotification {
+            method: "item/started".into(), params: json!({"turnId":"turn-1", "item": {"id":"cmd", "type":"commandExecution", "command":"cat src/lib.rs", "commandActions":[{"type":"read","name":"lib.rs","path":"/private/project/src/lib.rs"}]}}),
+        }).unwrap();
+        assert!(
+            matches!(&events[0], AgentEvent::ActivityUpsert { activity, .. } if activity.kind == ActivitySemanticKind::Read && activity.title == "Read files")
+        );
+        for kind in [
+            "mcpToolCall",
+            "dynamicToolCall",
+            "webSearch",
+            "collabAgentToolCall",
+            "contextCompaction",
+        ] {
+            let events = normalize_notification(CodexNotification {
+                method: "item/completed".into(), params: json!({"turnId":"turn-1", "item": {"id":"tool", "type":kind, "status":"completed", "tool":"read_file", "arguments":{"token":"secret-should-not-appear"}, "result":"private output"}}),
+            }).unwrap();
+            assert!(
+                matches!(&events[0], AgentEvent::ActivityUpsert { activity, .. } if activity.status == ActivityStatus::Completed)
+            );
+            assert!(!format!("{events:?}").contains("secret-should-not-appear"));
+            assert!(!format!("{events:?}").contains("private output"));
+        }
+        let events = normalize_notification(CodexNotification { method: "item/started".into(), params: json!({"turnId":"turn-1", "item":{"id":"think", "type":"reasoning", "text":"private reasoning"}}) }).unwrap();
+        assert!(events.is_empty());
     }
 
     #[test]
@@ -1455,11 +1578,10 @@ mod tests {
             }),
         })
         .expect("progress");
-        assert!(matches!(
-            progress.as_slice(),
-            [AgentEvent::ActivityUpsert { activity, .. }]
-                if activity.detail.is_none()
-        ));
+        assert!(
+            progress.is_empty(),
+            "raw output does not replace semantic activity metadata"
+        );
 
         let completed = normalize_notification(CodexNotification {
             method: "item/completed".to_string(),
@@ -1502,13 +1624,7 @@ mod tests {
             }),
         })
         .expect("normalize malformed command identity");
-        assert_eq!(
-            events,
-            vec![AgentEvent::Activity {
-                turn_id: TurnId::new("turn-1").expect("turn id"),
-                summary: "Agent command activity.".to_string(),
-            }]
-        );
+        assert!(events.is_empty());
     }
 
     #[test]

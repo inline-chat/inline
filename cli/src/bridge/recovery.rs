@@ -197,7 +197,7 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
         .map(RandomId::new)
         .ok_or_else(|| io::Error::other("staged final send is missing its random identity"))?;
         let durable_progress = store.inbound_progress(&pending.event_id)?;
-        let tracker = durable_progress
+        let mut tracker = durable_progress
             .ledger_json
             .as_deref()
             .and_then(|ledger| ActivityTracker::from_durable_json(ledger).ok())
@@ -207,8 +207,9 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
             InboundState::Failed => "Failed",
             _ => "Stopped",
         };
-        let progress_header = tracker.terminal_header().unwrap_or(fallback_header);
-        let chunks = tracker.render_chunks(tracker.visibility_mode(), progress_header, None);
+        let progress_header = tracker.terminal_header().unwrap_or(fallback_header).to_string();
+        tracker.set_terminal_header(progress_header.clone());
+        let chunks = tracker.render_chunks(tracker.visibility_mode(), &progress_header, None);
         let mut progress_message_ids = durable_progress
             .message_ids
             .into_iter()
@@ -248,7 +249,7 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
             chunks
                 .first()
                 .map(String::as_str)
-                .unwrap_or(progress_header),
+                .unwrap_or(&progress_header),
             terminal_random_id,
             &pending.final_text,
             &pending.output_attachments,

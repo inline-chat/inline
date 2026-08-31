@@ -187,10 +187,14 @@ providers can coexist under one supervised background service. See
 [Local coding-agent bridge](../docs/local-agent-bridge.md) for provider support,
 folder switching, lifecycle, and security details.
 
-During a turn the bot silently edits one progress message, leaves it as a short
-terminal status, then sends the final answer as a separate normally-notifying
-message. Its persisted send identity is reused across retries and service
-restarts so an ambiguous response does not create another final answer.
+During a turn the bot silently edits one open **Working** disclosure. Codex
+commentary and tools stay in order, with the working directory in its footer;
+verbose mode adds sanitized tool details. Completion collapses that message and
+sends the final answer separately with normal notifications. Progress is bounded
+to one message, with an explicit omission notice for long turns. It remains
+ordinary chat history; approvals, questions, and attachments keep their existing
+delivery paths. The persisted final-send identity is reused across retries and
+service restarts so an ambiguous response does not create another final answer.
 
 ## Output
 

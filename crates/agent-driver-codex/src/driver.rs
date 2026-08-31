@@ -1552,6 +1552,7 @@ fn route_event(
 fn agent_event_kind(event: &AgentEvent) -> &'static str {
     match event {
         AgentEvent::TurnStarted { .. } => "turn_started",
+        AgentEvent::AgentMessage { .. } => "agent_message",
         AgentEvent::AgentTextDelta { .. } => "agent_text_delta",
         AgentEvent::AgentTextCompleted { .. } => "agent_text_completed",
         AgentEvent::Activity { .. } => "activity",
@@ -1585,6 +1586,7 @@ fn is_coalescible_event(event: &AgentEvent) -> bool {
     matches!(
         event,
         AgentEvent::AgentTextDelta { .. }
+            | AgentEvent::AgentMessage { update: inline_agent_bridge::AgentMessageUpdate::Delta(_), .. }
             | AgentEvent::Activity { .. }
             | AgentEvent::ActivityUpsert { .. }
             | AgentEvent::PlanUpdated { .. }
@@ -1594,7 +1596,7 @@ fn is_coalescible_event(event: &AgentEvent) -> bool {
 
 fn event_turn_id(event: &AgentEvent) -> &TurnId {
     match event {
-        AgentEvent::TurnStarted { turn_id }
+        AgentEvent::AgentMessage { turn_id, .. } | AgentEvent::TurnStarted { turn_id }
         | AgentEvent::AgentTextDelta { turn_id, .. }
         | AgentEvent::AgentTextCompleted { turn_id, .. }
         | AgentEvent::Activity { turn_id, .. }
@@ -2278,6 +2280,25 @@ mod tests {
             .shutdown()
             .await
             .expect("explicit shutdown should not use the shortened ambiguous-outcome budget");
+    }
+
+    #[test]
+    fn identified_deltas_do_not_overflow_the_unclaimed_control_backlog() {
+        let routing = Arc::new(StdMutex::new(EventRouting::default()));
+        let approvals = Arc::new(StdMutex::new(HashMap::new()));
+        let questions = Arc::new(StdMutex::new(HashMap::new()));
+        let turn_id = TurnId::new("turn-before-registration").unwrap();
+        for update in std::iter::once(inline_agent_bridge::AgentMessageUpdate::Started)
+            .chain((0..MAX_UNCLAIMED_EVENTS_PER_TURN * 2).map(|_| inline_agent_bridge::AgentMessageUpdate::Delta("x".into())))
+            .chain(std::iter::once(inline_agent_bridge::AgentMessageUpdate::Completed("authoritative".into()))) {
+            route_event(AgentEvent::AgentMessage { turn_id: turn_id.clone(), item_id: "item".into(), phase: Some(inline_agent_bridge::AgentMessagePhase::Commentary), update }, &routing, &approvals, &questions);
+        }
+        let routing = routing.lock().unwrap();
+        let backlog = &routing.backlog[&turn_id];
+        assert!(!backlog.overflowed);
+        assert_eq!(backlog.events.len(), MAX_UNCLAIMED_EVENTS_PER_TURN);
+        assert!(matches!(backlog.events.first(), Some(AgentEvent::AgentMessage { update: inline_agent_bridge::AgentMessageUpdate::Started, .. })));
+        assert!(matches!(backlog.events.last(), Some(AgentEvent::AgentMessage { update: inline_agent_bridge::AgentMessageUpdate::Completed(text), .. }) if text == "authoritative"));
     }
 
     #[test]

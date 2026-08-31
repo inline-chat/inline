@@ -385,6 +385,12 @@ impl StreamingPresenter {
         self.maybe_update(now_ms, UpdatePriority::Ordinary)
     }
 
+    /// Whether an ordinary progress snapshot may be published now. Callers can
+    /// avoid formatting a growing ledger for every token inside the edit window.
+    pub fn ordinary_update_ready(&self, now_ms: u64) -> bool {
+        now_ms.saturating_sub(self.last_edit_at_ms) >= self.minimum_edit_interval_ms
+    }
+
     pub fn replace_snapshot(
         &mut self,
         now_ms: u64,
@@ -580,7 +586,7 @@ pub fn sanitize_visible_command(value: &str) -> Option<String> {
 }
 
 /// Sanitizes multiline provider text before it is copied into an Inline
-/// transcript. This preserves line boundaries while applying the same
+/// transcript. This preserves Markdown whitespace while applying the same
 /// credential, signed-URL, and local-path redaction used for visible commands.
 pub fn sanitize_visible_transcript(value: &str) -> Option<String> {
     sanitize_multiline_text(value, true)
@@ -600,8 +606,8 @@ fn sanitize_multiline_text(value: &str, redact_bare_values: bool) -> Option<Stri
         .map(|line| redact_sensitive_transcript_line(line, redact_bare_values))
         .collect::<Vec<_>>()
         .join("\n");
-    let redacted = redacted.trim();
-    (!redacted.is_empty()).then(|| redacted.to_string())
+    let redacted = redacted.trim_matches('\n');
+    (!redacted.trim().is_empty()).then(|| redacted.to_string())
 }
 
 fn redact_sensitive_transcript_line(line: &str, redact_bare_values: bool) -> String {
@@ -650,7 +656,9 @@ fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
     let mut inspect_header_next = false;
     let mut redact_header_tail = 0_usize;
     let mut sensitive_key_waiting_for_separator = false;
-    for token in shellish_command_words(command) {
+    let words = shellish_command_words(command);
+    for (_, original) in &words {
+        let token = original.to_string();
         if redact_next || redact_header_tail > 0 {
             redact_next = false;
             redact_header_tail = redact_header_tail.saturating_sub(1);
@@ -749,7 +757,17 @@ fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
         let token = redact_url_credentials(&token);
         output.push(redact_absolute_local_path(&token));
     }
-    output.join(" ")
+    // Each word has exactly one replacement. Keep the original separators so
+    // prose, nested lists, indented code, and Markdown hard breaks survive.
+    let mut redacted = String::with_capacity(command.len());
+    let mut cursor = 0;
+    for ((start, original), replacement) in words.into_iter().zip(output) {
+        redacted.push_str(&command[cursor..start]);
+        redacted.push_str(&replacement);
+        cursor = start + original.len();
+    }
+    redacted.push_str(&command[cursor..]);
+    redacted
 }
 
 fn sensitive_header_value(value: &str) -> Option<usize> {
@@ -797,24 +815,22 @@ fn sensitive_header_value(value: &str) -> Option<usize> {
     None
 }
 
-fn shellish_command_words(command: &str) -> Vec<String> {
+fn shellish_command_words(command: &str) -> Vec<(usize, &str)> {
     let mut words = Vec::new();
-    let mut word = String::new();
+    let mut start = None;
     let mut quote = None;
     let mut escaped = false;
-    for character in command.chars() {
+    for (index, character) in command.char_indices() {
         if escaped {
-            word.push(character);
             escaped = false;
             continue;
         }
         if character == '\\' {
-            word.push(character);
+            start.get_or_insert(index);
             escaped = true;
             continue;
         }
         if let Some(active_quote) = quote {
-            word.push(character);
             if character == active_quote {
                 quote = None;
             }
@@ -822,17 +838,17 @@ fn shellish_command_words(command: &str) -> Vec<String> {
         }
         if matches!(character, '\'' | '"') {
             quote = Some(character);
-            word.push(character);
+            start.get_or_insert(index);
         } else if character.is_whitespace() {
-            if !word.is_empty() {
-                words.push(std::mem::take(&mut word));
+            if let Some(start) = start.take() {
+                words.push((start, &command[start..index]));
             }
         } else {
-            word.push(character);
+            start.get_or_insert(index);
         }
     }
-    if !word.is_empty() {
-        words.push(word);
+    if let Some(start) = start {
+        words.push((start, &command[start..]));
     }
     words
 }
@@ -860,7 +876,15 @@ fn redact_absolute_local_path(token: &str) -> String {
         )
         .chain(token.char_indices().filter_map(|(index, character)| {
             let suffix = &token[index..];
-            ((character == '/' && boundary_before(index))
+            // A closing HTML tag is prose syntax, not an absolute path.
+            // Paths such as </Users/alice> still fail this tag-name check.
+            let closing_tag = character == '/'
+                && token[..index].ends_with('<')
+                && suffix[1..].split_once('>').is_some_and(|(name, _)| {
+                    name.starts_with(|c: char| c.is_ascii_alphabetic())
+                        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                });
+            ((character == '/' && boundary_before(index) && !closing_tag)
                 || (character == '~' && suffix.starts_with("~/") && boundary_before(index))
                 || (character.is_ascii_alphabetic()
                     && suffix

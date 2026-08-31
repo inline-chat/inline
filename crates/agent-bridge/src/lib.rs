@@ -21,6 +21,7 @@ mod turn;
 pub use command::{CommandParseError, parse_command};
 pub use driver::{
     ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentDriver, AgentEvent,
+    AgentMessagePhase, AgentMessageUpdate,
     AgentEventReceiver, AgentEventSender, ApplyTiming, ApprovalDecision, ApprovalOption,
     ApprovalRequest, AuthenticationRequired, DriverCapabilities, DriverCommand,
     DriverCommandChoice, DriverCommandInput, DriverError, DriverFuture, DriverModelOption,
