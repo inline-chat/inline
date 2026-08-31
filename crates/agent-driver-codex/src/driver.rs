@@ -13,6 +13,7 @@ use inline_agent_bridge::{
     ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, SteeringSupport, TurnId, TurnInput,
     TurnOptions,
 };
+use semver::Version;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::io::AsyncWrite;
@@ -29,9 +30,7 @@ use crate::protocol::{
     unsupported_notification_diagnostic,
 };
 use crate::session_connection::SharedSessionObservers;
-use crate::session_wire::{
-    ThreadListResponse, ThreadLoadedListResponse, ThreadReadResponse, ThreadUnsubscribeResponse,
-};
+use crate::session_wire::{ThreadListResponse, ThreadReadResponse, ThreadUnsubscribeResponse};
 
 const DEFAULT_MODE_REQUEST_USER_INPUT: &str = "features.default_mode_request_user_input";
 const MAX_CODEX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
@@ -40,6 +39,7 @@ const CODEX_IMAGE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 async fn codex_attachment_inputs(
     attachments: Vec<InputAttachment>,
+    native_audio_supported: bool,
 ) -> DriverResult<Vec<UserInput>> {
     let mut inputs = Vec::with_capacity(attachments.len().saturating_mul(2));
     for attachment in attachments {
@@ -64,6 +64,12 @@ async fn codex_attachment_inputs(
                 }
             }
             InputAttachmentKind::Audio => {
+                if !native_audio_supported {
+                    return Err(DriverError::Rejected(
+                        "this Codex runtime does not support audio inputs; update Codex or ChatGPT"
+                            .to_string(),
+                    ));
+                }
                 if let Some(local_uri) = attachment.local_uri.as_deref() {
                     inputs.push(UserInput::LocalAudio {
                         path: resolve_local_codex_media(
@@ -100,6 +106,20 @@ async fn codex_attachment_inputs(
         });
     }
     Ok(inputs)
+}
+
+fn native_audio_inputs_supported(server_user_agent: &str) -> bool {
+    let version = server_user_agent.split_whitespace().find_map(|component| {
+        let (_, raw_version) = component.split_once('/')?;
+        Version::parse(raw_version.trim_end_matches([';', ')'])).ok()
+    });
+    // Audio inputs were added after the oldest supported catalog protocol.
+    // Known older app-servers fail this feature explicitly; unknown future
+    // user-agent formats stay eligible and the real turn request fails closed
+    // if a breaking runtime removed the additive wire variant.
+    version.is_none_or(|version| {
+        version >= Version::parse("0.151.0-alpha.7.2").expect("static Codex audio version")
+    })
 }
 
 async fn resolve_codex_image(attachment: &InputAttachment) -> DriverResult<String> {
@@ -438,6 +458,10 @@ where
         &self.server_user_agent
     }
 
+    fn native_audio_inputs_supported(&self) -> bool {
+        native_audio_inputs_supported(&self.server_user_agent)
+    }
+
     pub async fn initialize(peer: CodexPeer<W>, version: &str) -> DriverResult<Self> {
         Self::initialize_with_shutdown(peer, version, None).await
     }
@@ -497,46 +521,44 @@ where
         })
     }
 
-    /// Bounded compatibility probe used before the runtime advertises the
-    /// stable session catalog. Reads are decoded against the consumed schema;
-    /// mutating method presence is checked only with the reserved nil UUID, so
-    /// no user session can be changed by discovery.
-    pub(crate) async fn verify_session_catalog_contract(&self) -> DriverResult<()> {
-        self.verify_catalog_read::<ThreadListResponse>(
-            "thread/list",
-            json!({
-                "limit": 1,
-                "sortKey": "updated_at",
-                "sortDirection": "desc",
-                "archived": false
-            }),
-        )
-        .await?;
-        self.verify_catalog_read::<ThreadLoadedListResponse>(
-            "thread/loaded/list",
-            json!({ "limit": 1 }),
-        )
-        .await?;
-
-        const NIL_THREAD_ID: &str = "00000000-0000-0000-0000-000000000000";
-        self.verify_catalog_method::<ThreadReadResponse>(
-            "thread/read",
-            json!({ "threadId": NIL_THREAD_ID, "includeTurns": false }),
-        )
-        .await?;
-        self.verify_catalog_method::<Value>(
-            "thread/name/set",
-            json!({ "threadId": NIL_THREAD_ID, "name": "Inline capability probe" }),
-        )
-        .await?;
-        self.verify_catalog_method::<ThreadUnsubscribeResponse>(
-            "thread/unsubscribe",
-            json!({ "threadId": NIL_THREAD_ID }),
-        )
-        .await
+    /// Bounded, read-only compatibility probe used before Inline exposes a
+    /// Codex runtime. Reads are decoded against the response shapes Inline
+    /// consumes. Turn and thread mutations are deliberately not probed: their
+    /// real requests fail closed at the operation boundary without risking a
+    /// future runtime interpreting synthetic probe input as user work.
+    /// Unknown additive fields remain forward-compatible through Serde's
+    /// default unknown-field behavior.
+    pub async fn verify_runtime_contract(&self) -> DriverResult<()> {
+        let threads = self
+            .verify_catalog_read::<ThreadListResponse>(
+                "thread/list",
+                json!({
+                    "limit": 1,
+                    "sortKey": "updated_at",
+                    "sortDirection": "desc",
+                    "archived": false,
+                    "useStateDbOnly": true
+                }),
+            )
+            .await?;
+        if let Some(thread) = threads.data.first() {
+            self.verify_catalog_read::<ThreadReadResponse>(
+                "thread/read",
+                json!({ "threadId": thread.id, "includeTurns": false }),
+            )
+            .await?;
+            Ok(())
+        } else {
+            const NIL_THREAD_ID: &str = "00000000-0000-0000-0000-000000000000";
+            self.verify_catalog_method::<ThreadReadResponse>(
+                "thread/read",
+                json!({ "threadId": NIL_THREAD_ID, "includeTurns": false }),
+            )
+            .await
+        }
     }
 
-    async fn verify_catalog_read<R>(&self, method: &'static str, params: Value) -> DriverResult<()>
+    async fn verify_catalog_read<R>(&self, method: &'static str, params: Value) -> DriverResult<R>
     where
         R: DeserializeOwned,
     {
@@ -546,7 +568,6 @@ where
             .await
             .map_err(driver_error)?;
         serde_json::from_value::<R>(response)
-            .map(|_| ())
             .map_err(|error| incompatible_catalog_response(method, error))
     }
 
@@ -571,10 +592,14 @@ where
                     "Codex stable session method is unavailable: {method}"
                 )))
             }
-            // A reserved non-existent thread is expected to be rejected. Any
-            // remote application error other than method-not-found proves the
-            // stable method is installed without changing provider state.
-            Err(PeerError::Remote(_)) => Ok(()),
+            // Codex uses structured invalid-request (-32600) for a valid read
+            // of a non-existent thread. Invalid-params (-32602) instead means
+            // Inline's request shape drifted and must fail negotiation.
+            Err(PeerError::Remote(error)) if error.code == Some(-32600) => Ok(()),
+            Err(PeerError::Remote(error)) => Err(DriverError::Protocol(format!(
+                "Codex stable session method rejected Inline's request shape: {method} ({})",
+                error.code.unwrap_or_default()
+            ))),
             Err(error) => Err(driver_error(error)),
         }
     }
@@ -834,7 +859,7 @@ where
                 label: display_option_id(&option.id),
                 value: option.id,
                 description: option.description.and_then(nonempty),
-                disabled: !option.allowed,
+                disabled: option.allowed == Some(false),
             }));
             let Some(next_cursor) = response.next_cursor.filter(|value| !value.is_empty()) else {
                 break;
@@ -982,7 +1007,14 @@ where
                                 serde_json::from_value::<ThreadUnsubscribeResponse>(response)
                                     .map_err(PeerError::Json)
                             });
-                        if cleanup.is_err() {
+                        if !matches!(
+                            cleanup,
+                            Ok(ThreadUnsubscribeResponse {
+                                status: crate::session_wire::ThreadUnsubscribeStatus::NotLoaded
+                                    | crate::session_wire::ThreadUnsubscribeStatus::NotSubscribed
+                                    | crate::session_wire::ThreadUnsubscribeStatus::Unsubscribed,
+                            })
+                        ) {
                             log::warn!("Codex busy-session subscription cleanup failed");
                             return Err(self.stop_ambiguous_epoch("thread/unsubscribe").await);
                         }
@@ -1002,9 +1034,10 @@ where
     ) -> DriverFuture<'a, StartedTurn> {
         Box::pin(async move {
             let mut params = StartTurnParams::text(session_id.to_string(), input.text);
-            params
-                .input
-                .extend(codex_attachment_inputs(input.attachments).await?);
+            params.input.extend(
+                codex_attachment_inputs(input.attachments, self.native_audio_inputs_supported())
+                    .await?,
+            );
             params.client_user_message_id = input
                 .client_message_id
                 .map(|id| format!("{INLINE_CLIENT_MESSAGE_ID_PREFIX}{id}"));
@@ -1037,7 +1070,13 @@ where
                         .client_message_id
                         .map(|id| format!("{INLINE_CLIENT_MESSAGE_ID_PREFIX}{id}")),
                     input: std::iter::once(UserInput::Text { text: input.text })
-                        .chain(codex_attachment_inputs(input.attachments).await?)
+                        .chain(
+                            codex_attachment_inputs(
+                                input.attachments,
+                                self.native_audio_inputs_supported(),
+                            )
+                            .await?,
+                        )
                         .collect(),
                     expected_turn_id: turn_id.to_string(),
                 })?,
@@ -1745,11 +1784,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn native_audio_inputs_are_feature_gated_without_version_locking_future_runtimes() {
+        assert!(!native_audio_inputs_supported(
+            "codex_app_server/0.150.0-alpha.8"
+        ));
+        assert!(native_audio_inputs_supported(
+            "codex_app_server/0.151.0-alpha.7.2"
+        ));
+        assert!(native_audio_inputs_supported(
+            "Codex App Server future-channel"
+        ));
+    }
+
+    #[tokio::test]
+    async fn older_catalog_runtime_rejects_audio_before_sending_an_unknown_wire_variant() {
+        let mut attachment = image_attachment("https://cdn.inline.chat/voice.m4a");
+        attachment.kind = InputAttachmentKind::Audio;
+        attachment.mime_type = Some("audio/mp4".to_string());
+
+        let error = codex_attachment_inputs(vec![attachment], false)
+            .await
+            .expect_err("old Codex audio support");
+        assert_eq!(
+            error,
+            DriverError::Rejected(
+                "this Codex runtime does not support audio inputs; update Codex or ChatGPT"
+                    .to_string()
+            )
+        );
+    }
+
     #[tokio::test]
     async fn existing_image_data_urls_pass_through_without_network_access() {
-        let inputs = codex_attachment_inputs(vec![image_attachment("data:image/png;base64,YWJj")])
-            .await
-            .expect("image inputs");
+        let inputs =
+            codex_attachment_inputs(vec![image_attachment("data:image/png;base64,YWJj")], true)
+                .await
+                .expect("image inputs");
         assert_eq!(
             inputs,
             vec![UserInput::Image {
@@ -1770,7 +1841,7 @@ mod tests {
                 .to_string(),
         );
 
-        let inputs = codex_attachment_inputs(vec![attachment])
+        let inputs = codex_attachment_inputs(vec![attachment], true)
             .await
             .expect("image inputs");
         assert!(matches!(
@@ -1807,7 +1878,7 @@ mod tests {
             duration_ms: Some(1_000),
         };
 
-        let inputs = codex_attachment_inputs(vec![attachment])
+        let inputs = codex_attachment_inputs(vec![attachment], true)
             .await
             .expect("audio inputs");
         assert!(matches!(
@@ -1822,9 +1893,10 @@ mod tests {
 
     #[tokio::test]
     async fn remote_codex_images_require_https() {
-        let error = codex_attachment_inputs(vec![image_attachment("http://example.test/a.png")])
-            .await
-            .expect_err("insecure image URL must fail");
+        let error =
+            codex_attachment_inputs(vec![image_attachment("http://example.test/a.png")], true)
+                .await
+                .expect_err("insecure image URL must fail");
         assert_eq!(
             error,
             DriverError::Rejected("attached image URL must use HTTPS".to_string())
@@ -2737,7 +2809,7 @@ mod tests {
             assert_eq!(permissions_request["params"]["cwd"], "/tmp");
             writer
                 .write_all(
-                    b"{\"id\":3,\"result\":{\"data\":[{\"id\":\":workspace\",\"description\":\"Workspace access\",\"allowed\":true},{\"id\":\"admin_mode\",\"description\":null,\"allowed\":false}],\"nextCursor\":null}}\n",
+                    b"{\"id\":3,\"result\":{\"data\":[{\"id\":\":workspace\",\"description\":\"Workspace access\"},{\"id\":\"admin_mode\",\"description\":null,\"allowed\":false}],\"nextCursor\":null}}\n",
                 )
                 .await
                 .expect("permissions response");

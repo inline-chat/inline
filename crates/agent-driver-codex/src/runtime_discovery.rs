@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 
 use semver::Version;
 
-use inline_agent_bridge::AgentDriver;
-
-use crate::{CodexLaunchConfig, CodexVersionProbe, probe_codex_version, spawn_codex_driver};
+use crate::{CodexLaunchConfig, CodexVersionProbe, probe_codex_version};
 
 const FIRST_STABLE_CATALOG_VERSION: (u64, u64, u64) = (0, 146, 0);
 #[cfg(target_os = "macos")]
@@ -23,11 +21,11 @@ pub enum CodexRuntimeSource {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CodexRuntimeCapabilities {
-    /// Stable request-only session catalog verified by fail-closed response
-    /// decoding at runtime.
+    /// Version is eligible for the catalog. The owned app-server must still
+    /// pass its read-only method/response check after launch.
     pub stable_session_catalog: bool,
-    /// Existing Inline turn driver remains exact-version certified until its
-    /// full streamed-event fixture is advanced separately.
+    /// Version is eligible for the turn driver. Discovery does not execute
+    /// mutations; each real operation validates its response and fails closed.
     pub existing_turn_driver: bool,
 }
 
@@ -157,11 +155,7 @@ pub async fn discover_codex_turn_runtime_in_paths(
     config: &CodexRuntimeDiscoveryConfig,
     paths: impl IntoIterator<Item = PathBuf>,
 ) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
-    discover_candidates(
-        runtime_candidates_in_paths(config, paths),
-        CodexRuntimeRequirement::ExistingTurnDriver,
-    )
-    .await
+    discover_candidates(runtime_candidates_in_paths(config, paths)).await
 }
 
 /// Finds an already-authenticated local Codex runtime without owning login or
@@ -170,35 +164,18 @@ pub async fn discover_codex_turn_runtime_in_paths(
 pub async fn discover_codex_runtime(
     config: &CodexRuntimeDiscoveryConfig,
 ) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
-    discover_codex_runtime_with_requirement(config, CodexRuntimeRequirement::StableSessionCatalog)
-        .await
+    discover_candidates(runtime_candidates(config)).await
 }
 
-/// Finds a runtime that satisfies both the additive session-catalog contract
-/// and Inline's exact fixture certification for streamed turn execution.
+/// Finds a runtime that satisfies Inline's additive app-server contract.
 pub async fn discover_codex_turn_runtime(
     config: &CodexRuntimeDiscoveryConfig,
 ) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
-    discover_codex_runtime_with_requirement(config, CodexRuntimeRequirement::ExistingTurnDriver)
-        .await
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CodexRuntimeRequirement {
-    StableSessionCatalog,
-    ExistingTurnDriver,
-}
-
-async fn discover_codex_runtime_with_requirement(
-    config: &CodexRuntimeDiscoveryConfig,
-    requirement: CodexRuntimeRequirement,
-) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
-    discover_candidates(runtime_candidates(config), requirement).await
+    discover_candidates(runtime_candidates(config)).await
 }
 
 async fn discover_candidates(
     candidates: Vec<RuntimeCandidate>,
-    requirement: CodexRuntimeRequirement,
 ) -> Result<CodexRuntime, CodexRuntimeDiscoveryError> {
     let mut attempts = Vec::new();
     let started = std::time::Instant::now();
@@ -249,7 +226,7 @@ async fn discover_candidates(
         };
         let capabilities = runtime_capabilities(&probe.version);
         log::debug!(
-            "Codex runtime probe source={:?} version={} turn_certified={}",
+            "Codex runtime probe source={:?} version={} version_compatible={}",
             candidate.source,
             probe.version,
             capabilities.existing_turn_driver
@@ -265,28 +242,11 @@ async fn discover_candidates(
             });
             continue;
         }
-        if requirement == CodexRuntimeRequirement::ExistingTurnDriver
-            && !capabilities.existing_turn_driver
-        {
-            attempts.push(CodexRuntimeAttempt {
-                source: candidate.source,
-                failure: CodexRuntimeFailure::UnsupportedTurnDriverVersion,
-                detail: format!("Codex {} is not certified for this Inline bridge; update Inline or use a supported Codex version", probe.version),
-            });
-            continue;
-        }
-        if let Err(error) = probe_stable_session_catalog(&executable).await {
-            attempts.push(CodexRuntimeAttempt {
-                source: candidate.source,
-                failure: CodexRuntimeFailure::IncompatibleCatalog,
-                detail: format!(
-                    "Codex {} session API probe failed: {}",
-                    probe.version,
-                    safe_probe_detail(&error)
-                ),
-            });
-            continue;
-        }
+        // Discovery verifies executable identity, provenance, and the minimum
+        // protocol generation only. The selected long-lived app-server performs
+        // the read-only shape probe on its own connection during launch. This
+        // avoids starting a throwaway app-server that scans or contends with the
+        // user's active Codex state before the real bridge process starts.
         return Ok(CodexRuntime {
             executable: probe.executable,
             version: probe.version,
@@ -415,33 +375,6 @@ async fn probe_candidate(executable: &Path) -> Result<CodexVersionProbe, String>
         .map_err(|error| error.to_string())
 }
 
-async fn probe_stable_session_catalog(executable: &Path) -> Result<(), String> {
-    use std::time::Duration;
-
-    let config = CodexLaunchConfig {
-        executable: executable.to_owned(),
-        transport: crate::CodexAppServerTransport::PrivateStdio,
-        version_policy: crate::CodexVersionPolicy::Any,
-        ..CodexLaunchConfig::default()
-    };
-    let spawned = tokio::time::timeout(
-        Duration::from_secs(15),
-        spawn_codex_driver(config, env!("CARGO_PKG_VERSION")),
-    )
-    .await
-    .map_err(|_| "Codex app-server startup timed out".to_string())?
-    .map_err(|error| error.to_string())?;
-    let contract = tokio::time::timeout(
-        Duration::from_secs(15),
-        spawned.driver.verify_session_catalog_contract(),
-    )
-    .await
-    .map_err(|_| "Codex session API probe timed out".to_string());
-    let shutdown = spawned.driver.shutdown().await;
-    contract?.map_err(|error| error.to_string())?;
-    shutdown.map_err(|error| error.to_string())
-}
-
 fn runtime_capabilities(version: &Version) -> CodexRuntimeCapabilities {
     let minimum = Version::new(
         FIRST_STABLE_CATALOG_VERSION.0,
@@ -449,8 +382,8 @@ fn runtime_capabilities(version: &Version) -> CodexRuntimeCapabilities {
         FIRST_STABLE_CATALOG_VERSION.2,
     );
     CodexRuntimeCapabilities {
-        stable_session_catalog: version >= &minimum && version.major == 0,
-        existing_turn_driver: crate::is_certified_codex_version(version),
+        stable_session_catalog: version >= &minimum,
+        existing_turn_driver: version >= &minimum,
     }
 }
 
@@ -531,7 +464,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_compatibility_is_additive_but_turn_driver_requires_a_fixture() {
+    fn runtime_compatibility_accepts_the_minimum_and_all_future_versions() {
         assert_eq!(
             runtime_capabilities(&Version::new(0, 145, 0)),
             CodexRuntimeCapabilities::default()
@@ -547,17 +480,23 @@ mod tests {
             runtime_capabilities(&Version::parse("0.149.0-alpha.4.3").expect("version")),
             CodexRuntimeCapabilities {
                 stable_session_catalog: true,
-                existing_turn_driver: false,
+                existing_turn_driver: true,
             }
         );
         assert_eq!(
-            runtime_capabilities(&crate::latest_certified_codex_version()),
+            runtime_capabilities(&Version::parse("0.151.0-alpha.7.2").expect("future prerelease")),
             CodexRuntimeCapabilities {
                 stable_session_catalog: true,
                 existing_turn_driver: true,
             }
         );
-        assert!(!runtime_capabilities(&Version::new(1, 0, 0)).stable_session_catalog);
+        assert_eq!(
+            runtime_capabilities(&Version::new(1, 0, 0)),
+            CodexRuntimeCapabilities {
+                stable_session_catalog: true,
+                existing_turn_driver: true,
+            }
+        );
     }
 
     #[test]
@@ -627,30 +566,16 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn fake_codex_runtime(catalog_response: &str) -> (tempfile::TempDir, PathBuf) {
+    fn fake_codex_runtime(_catalog_response: &str) -> (tempfile::TempDir, PathBuf) {
         let directory = tempfile::tempdir().expect("temp directory");
         let executable = directory.path().join("codex");
-        let script = format!(
-            "#!/bin/sh\n\
-             if [ \"$1\" = \"--version\" ]; then\n\
-               printf '%s\\n' 'codex-cli 0.146.0'\n\
-               exit 0\n\
-             fi\n\
-             IFS= read -r initialize\n\
-             printf '%s\\n' '{{\"id\":1,\"result\":{{\"userAgent\":\"codex_app_server/0.146.0\"}}}}'\n\
-             IFS= read -r initialized\n\
-             IFS= read -r catalog\n\
-             printf '%s\\n' '{catalog_response}'\n\
-             IFS= read -r loaded\n\
-             printf '%s\\n' '{{\"id\":3,\"result\":{{\"data\":[],\"nextCursor\":null}}}}'\n\
-             IFS= read -r read_thread\n\
-             printf '%s\\n' '{{\"id\":4,\"error\":{{\"code\":-32000,\"message\":\"not found\"}}}}'\n\
-             IFS= read -r rename_thread\n\
-             printf '%s\\n' '{{\"id\":5,\"error\":{{\"code\":-32000,\"message\":\"not found\"}}}}'\n\
-             IFS= read -r unsubscribe_thread\n\
-             printf '%s\\n' '{{\"id\":6,\"result\":{{\"status\":\"notLoaded\"}}}}'\n\
-             while IFS= read -r line; do :; done\n"
-        );
+        let script = "#!/bin/sh\n\
+            if [ \"$1\" = \"--version\" ]; then\n\
+              printf '%s\\n' 'codex-cli 0.146.0'\n\
+              exit 0\n\
+            fi\n\
+            printf '%s\\n' 'unexpected app-server launch during discovery' >&2\n\
+            exit 99\n";
         std::fs::write(&executable, script).expect("fake Codex runtime");
         let mut permissions = std::fs::metadata(&executable)
             .expect("fake runtime metadata")
@@ -724,7 +649,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn discovery_advertises_catalog_only_after_live_schema_probe() {
+    async fn discovery_defers_live_shape_validation_to_the_owned_app_server() {
         let (_compatible_directory, compatible) = fake_codex_runtime(
             "{\"id\":2,\"result\":{\"data\":[],\"nextCursor\":null,\"backwardsCursor\":null}}",
         );
@@ -738,21 +663,40 @@ mod tests {
         assert!(runtime.capabilities().stable_session_catalog);
         assert!(runtime.executable().is_absolute());
 
-        let (_incompatible_directory, incompatible) =
+        let (_different_shape_directory, different_shape) =
             fake_codex_runtime("{\"id\":2,\"result\":{}}");
-        let error = discover_codex_runtime(&CodexRuntimeDiscoveryConfig {
-            configured_executable: Some(incompatible),
+        let runtime = discover_codex_runtime(&CodexRuntimeDiscoveryConfig {
+            configured_executable: Some(different_shape),
             search_path: false,
             search_chatgpt_app: false,
         })
         .await
-        .expect_err("incompatible catalog");
-        assert_eq!(error.attempts.len(), 1);
-        assert_eq!(
-            error.attempts[0].failure,
-            CodexRuntimeFailure::IncompatibleCatalog
+        .expect("discovery does not launch a throwaway app-server");
+        assert!(runtime.capabilities().stable_session_catalog);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn future_versions_are_selected_for_live_contract_negotiation() {
+        let (_directory, executable) = fake_codex_runtime(
+            "{\"id\":2,\"result\":{\"data\":[],\"nextCursor\":null,\"backwardsCursor\":null}}",
         );
-        assert!(error.to_string().contains("session API probe failed"));
+        let script = std::fs::read_to_string(&executable)
+            .expect("future runtime script")
+            .replace("0.146.0", "1.7.3");
+        std::fs::write(&executable, script).expect("future runtime script");
+
+        let runtime = discover_codex_turn_runtime(&CodexRuntimeDiscoveryConfig {
+            configured_executable: Some(executable),
+            search_path: false,
+            search_chatgpt_app: false,
+        })
+        .await
+        .expect("future capability-compatible runtime");
+
+        assert_eq!(runtime.version(), &Version::new(1, 7, 3));
+        assert!(runtime.capabilities().stable_session_catalog);
+        assert!(runtime.capabilities().existing_turn_driver);
     }
 
     #[cfg(target_os = "macos")]
@@ -772,11 +716,11 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    #[ignore = "requires an installed certified Codex or signed ChatGPT application"]
-    async fn installed_turn_runtime_skips_catalog_only_candidates() {
+    #[ignore = "requires an installed compatible Codex or signed ChatGPT application"]
+    async fn installed_turn_runtime_accepts_a_capability_compatible_candidate() {
         let runtime = discover_codex_turn_runtime(&CodexRuntimeDiscoveryConfig::default())
             .await
-            .expect("fixture-certified Codex turn runtime");
+            .expect("capability-compatible Codex turn runtime");
         assert!(runtime.capabilities().existing_turn_driver);
     }
 }

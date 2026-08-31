@@ -437,7 +437,7 @@ impl LiveNormalizer {
         let mut normalizer = Self::default();
         for turn in &thread.turns {
             for item in &turn.items {
-                if let CodexThreadItem::AgentMessage { id, text } = item {
+                if let CodexThreadItem::AgentMessage { id, text, .. } = item {
                     normalizer
                         .assistant_text
                         .insert((turn.id.clone(), id.clone()), truncate_raw_message(text));
@@ -574,7 +574,7 @@ impl LiveNormalizer {
         let item: CodexThreadItem = serde_json::from_value(item_value).map_err(|error| {
             DriverError::Protocol(format!("Codex {method} returned an invalid item: {error}"))
         })?;
-        if let CodexThreadItem::AgentMessage { id, text } = &item {
+        if let CodexThreadItem::AgentMessage { id, text, .. } = &item {
             self.assistant_text.insert(
                 (turn_id.to_string(), id.clone()),
                 truncate_raw_message(text),
@@ -592,6 +592,7 @@ impl LiveNormalizer {
         let turn = CodexTurn {
             id: turn_id.to_string(),
             items: vec![item],
+            items_view: crate::session_wire::TurnItemsView::Full,
             started_at: (method == "item/started").then_some(timestamp).flatten(),
             completed_at: (method == "item/completed").then_some(timestamp).flatten(),
         };
@@ -841,6 +842,7 @@ fn runtime_state(status: &CodexThreadStatus) -> SessionRuntimeState {
         CodexThreadStatus::Active { .. } => SessionRuntimeState::Running,
         CodexThreadStatus::Idle | CodexThreadStatus::NotLoaded => SessionRuntimeState::Idle,
         CodexThreadStatus::SystemError => SessionRuntimeState::Unavailable,
+        CodexThreadStatus::Unknown => SessionRuntimeState::Unavailable,
     }
 }
 
@@ -1140,6 +1142,7 @@ mod tests {
                 id: "provider-plan-item".to_string(),
                 text: "Implement then verify".to_string(),
             }],
+            items_view: crate::session_wire::TurnItemsView::Full,
             started_at: None,
             completed_at: Some(1),
         })
@@ -1381,7 +1384,7 @@ mod tests {
             CodexLaunchConfig {
                 executable: "/Applications/ChatGPT.app/Contents/Resources/codex".into(),
                 transport: CodexAppServerTransport::SharedLocal,
-                version_policy: CodexVersionPolicy::Certified,
+                version_policy: CodexVersionPolicy::Compatible,
                 incoming_capacity: 256,
                 ..CodexLaunchConfig::default()
             },
@@ -1476,7 +1479,7 @@ mod tests {
             CodexLaunchConfig {
                 executable: "/Applications/ChatGPT.app/Contents/Resources/codex".into(),
                 transport: CodexAppServerTransport::PrivateStdio,
-                version_policy: CodexVersionPolicy::Certified,
+                version_policy: CodexVersionPolicy::Compatible,
                 incoming_capacity: 256,
                 ..CodexLaunchConfig::default()
             }

@@ -14,8 +14,22 @@ pub(crate) struct ThreadListParams {
     pub limit: u32,
     pub sort_key: ThreadSortKey,
     pub sort_direction: SortDirection,
+    pub source_kinds: Vec<ThreadSourceKind>,
     pub archived: bool,
     pub cwd: Vec<String>,
+    /// Keep picker browsing read-only. Codex otherwise scans rollout JSONL and
+    /// may repair its state database as a side effect of `thread/list`.
+    pub use_state_db_only: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ThreadSourceKind {
+    Exec,
+    Cli,
+    #[serde(rename = "vscode")]
+    VsCode,
+    AppServer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -27,6 +41,7 @@ pub(crate) enum ThreadSortKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SortDirection {
+    Asc,
     Desc,
 }
 
@@ -34,6 +49,7 @@ pub(crate) enum SortDirection {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ThreadListResponse {
     pub data: Vec<CodexThread>,
+    #[serde(default)]
     pub next_cursor: Option<String>,
     #[serde(default, rename = "backwardsCursor")]
     pub _backwards_cursor: Option<String>,
@@ -80,6 +96,8 @@ pub(crate) enum CodexThreadStatus {
         #[serde(default, rename = "activeFlags")]
         _active_flags: Vec<String>,
     },
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -105,16 +123,50 @@ pub(crate) struct ThreadTurnsListParams {
     pub items_view: TurnItemsView,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum TurnItemsView {
+    NotLoaded,
+    Summary,
+    #[default]
     Full,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ThreadTurnsListResponse {
     pub data: Vec<CodexTurn>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+    #[serde(default, rename = "backwardsCursor")]
+    pub _backwards_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ThreadItemsListParams {
+    pub thread_id: String,
+    pub turn_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    pub limit: u32,
+    pub sort_direction: SortDirection,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ThreadItemEntry {
+    pub turn_id: String,
+    pub item: CodexThreadItem,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ThreadItemsListResponse {
+    pub data: Vec<ThreadItemEntry>,
+    #[serde(default)]
     pub next_cursor: Option<String>,
     #[serde(default, rename = "backwardsCursor")]
     pub _backwards_cursor: Option<String>,
@@ -131,6 +183,8 @@ pub(crate) struct CodexTurn {
     pub id: String,
     #[serde(default)]
     pub items: Vec<CodexThreadItem>,
+    #[serde(default)]
+    pub items_view: TurnItemsView,
     #[serde(default)]
     pub started_at: Option<i64>,
     #[serde(default)]
@@ -150,6 +204,8 @@ pub(crate) enum CodexThreadItem {
     AgentMessage {
         id: String,
         text: String,
+        #[serde(default)]
+        phase: Option<inline_agent_bridge::AgentMessagePhase>,
     },
     Plan {
         id: String,
@@ -175,6 +231,34 @@ pub(crate) enum CodexThreadItem {
 pub(crate) enum CodexUserInput {
     Text {
         text: String,
+    },
+    Image {
+        #[serde(default, rename = "url")]
+        _url: Option<serde_json::Value>,
+    },
+    LocalImage {
+        #[serde(default, rename = "path")]
+        _path: Option<serde_json::Value>,
+    },
+    Audio {
+        #[serde(default, rename = "url")]
+        _url: Option<serde_json::Value>,
+    },
+    LocalAudio {
+        #[serde(default, rename = "path")]
+        _path: Option<serde_json::Value>,
+    },
+    Skill {
+        #[serde(default, rename = "name")]
+        _name: Option<serde_json::Value>,
+        #[serde(default, rename = "path")]
+        _path: Option<serde_json::Value>,
+    },
+    Mention {
+        #[serde(default, rename = "name")]
+        _name: Option<serde_json::Value>,
+        #[serde(default, rename = "path")]
+        _path: Option<serde_json::Value>,
     },
     #[serde(other)]
     Unknown,
@@ -211,6 +295,8 @@ pub(crate) enum CodexAccount {
         #[serde(rename = "usesCodexManagedCredentials")]
         _uses_codex_managed_credentials: bool,
     },
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -256,6 +342,7 @@ pub(crate) struct ThreadLoadedListParams {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ThreadLoadedListResponse {
     pub data: Vec<String>,
+    #[serde(default)]
     pub next_cursor: Option<String>,
 }
 
@@ -271,6 +358,8 @@ pub(crate) enum ThreadUnsubscribeStatus {
     NotLoaded,
     NotSubscribed,
     Unsubscribed,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]

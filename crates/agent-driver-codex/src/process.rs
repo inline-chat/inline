@@ -12,6 +12,7 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, watch};
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tokio_tungstenite::client_async_with_config;
 use tokio_tungstenite::tungstenite::Message;
@@ -23,6 +24,7 @@ const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const SHARED_HOST_START_TIMEOUT: Duration = Duration::from_secs(15);
 const SHARED_HOST_RETRY_DELAY: Duration = Duration::from_millis(100);
+const RUNTIME_CONTRACT_TIMEOUT: Duration = Duration::from_secs(20);
 const DEFAULT_INCOMING_CAPACITY: usize = 256;
 const SOCKET_ADAPTER_BUFFER_BYTES: usize = 256 * 1024;
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
@@ -52,21 +54,21 @@ const SENSITIVE_ENVIRONMENT_NAMES: &[&str] = &[
 ];
 
 pub fn minimum_codex_version() -> Version {
-    // The oldest fixture-certified protocol retained by this bridge.
+    // The oldest app-server protocol with the stable methods required by this
+    // bridge. Newer versions are accepted after a live capability probe.
     Version::new(0, 146, 0)
 }
 
-pub fn latest_certified_codex_version() -> Version {
-    Version::parse("0.150.0-alpha.8").expect("static certified Codex version")
-}
-
-pub fn is_certified_codex_version(version: &Version) -> bool {
-    version == &minimum_codex_version() || version == &latest_certified_codex_version()
+pub fn is_compatible_codex_version(version: &Version) -> bool {
+    version >= &minimum_codex_version()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CodexVersionPolicy {
-    Certified,
+    /// Accept the minimum supported protocol and every newer Codex version.
+    /// Production callers also probe the methods and response shapes Inline
+    /// consumes before exposing the runtime.
+    Compatible,
     Exact(Version),
     Any,
 }
@@ -77,7 +79,7 @@ pub enum CodexAppServerTransport {
     #[default]
     PrivateStdio,
     /// Attach to the user's default multi-client control socket. If no host is
-    /// listening, launch one from the selected signed/certified executable and
+    /// listening, launch one from the selected signed/compatible executable and
     /// supervise it for the lifetime of this bridge connection. This transport
     /// remains catalog/connection-foundation only until the live session hub
     /// demultiplexes external traffic and reconciles ambiguous mutations; the
@@ -125,7 +127,7 @@ impl Default for CodexLaunchConfig {
         Self {
             executable: PathBuf::from("codex"),
             transport: CodexAppServerTransport::default(),
-            version_policy: CodexVersionPolicy::Certified,
+            version_policy: CodexVersionPolicy::Compatible,
             incoming_capacity: DEFAULT_INCOMING_CAPACITY,
             environment_remove: vec![
                 OsString::from("INLINE_TOKEN"),
@@ -170,6 +172,8 @@ pub enum CodexLaunchError {
     MissingPipe(&'static str),
     #[error("Codex app-server initialization failed: {0}")]
     Initialize(#[from] DriverError),
+    #[error("Codex app-server compatibility probe failed: {0}")]
+    IncompatibleProtocol(#[source] DriverError),
     #[error("Codex process host recovery failed: {0}")]
     ProcessHost(#[source] std::io::Error),
     #[error("Codex shared app-server did not become available: {0}")]
@@ -212,7 +216,10 @@ impl RedactedStderrTail {
 pub struct SpawnedCodexDriver {
     pub driver: CodexAppServerDriver<CodexDriverWriter>,
     pub version: CodexVersionProbe,
-    pub app_server_version: Version,
+    /// Advisory version parsed from initialize metadata. Future app-server
+    /// user-agent formats may omit a SemVer while still satisfying Inline's
+    /// live protocol contract.
+    pub app_server_version: Option<Version>,
     pub transport: CodexAppServerTransport,
     pub stderr_tail: RedactedStderrTail,
     pub process_status: CodexProcessStatus,
@@ -261,7 +268,9 @@ pub async fn probe_codex_version(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        // A bundled process host must handle TERM itself so it can clean its
+        // provider's separate process group before releasing the ownership lock.
+        .kill_on_drop(!cfg!(unix) || probe_host.is_none());
     apply_child_environment(&mut command, config);
     configure_process_group(&mut command);
     let mut child = command
@@ -271,6 +280,14 @@ pub async fn probe_codex_version(
             source,
         })?;
     let process_id = child.id();
+    let mut process_guard = SpawnedProcessGuard::new(
+        process_id,
+        if probe_host.is_some() {
+            libc::SIGTERM
+        } else {
+            libc::SIGKILL
+        },
+    );
     let mut stdout = child
         .stdout
         .take()
@@ -285,28 +302,45 @@ pub async fn probe_codex_version(
             executable: config.executable.clone(),
             source: std::io::Error::other("Codex version probe did not expose stderr"),
         })?;
+    let mut readers = JoinSet::new();
+    readers.spawn(async move { (true, read_probe_output(&mut stdout).await) });
+    readers.spawn(async move { (false, read_probe_output(&mut stderr).await) });
     let collected = timeout(VERSION_PROBE_TIMEOUT, async {
-        let (status, stdout, stderr) = tokio::try_join!(
-            child.wait(),
-            read_probe_output(&mut stdout),
-            read_probe_output(&mut stderr),
-        )?;
+        let status = child.wait().await?;
+        // A direct executable can be a wrapper which exits while descendants
+        // retain its pipes. Stop that process group before waiting for EOF.
+        signal_process_group(process_id, libc::SIGKILL);
+        let mut stdout = None;
+        let mut stderr = None;
+        while let Some(result) = readers.join_next().await {
+            let (is_stdout, output) = result
+                .map_err(|error| std::io::Error::other(format!("probe reader failed: {error}")))?;
+            if is_stdout {
+                stdout = Some(output?);
+            } else {
+                stderr = Some(output?);
+            }
+        }
+        let stdout = stdout.ok_or_else(|| std::io::Error::other("stdout reader disappeared"))?;
+        let stderr = stderr.ok_or_else(|| std::io::Error::other("stderr reader disappeared"))?;
         Ok::<_, std::io::Error>((status, stdout, stderr))
     })
     .await;
     let (status, stdout_bytes, stderr_bytes) = match collected {
-        Ok(result) => {
-            // `codex` can be a wrapper. Once --version has completed, remove
-            // any descendant that retained the probe's pipes instead of
-            // allowing it to escape the bridge service process.
-            signal_process_group(process_id, libc::SIGKILL);
-            result.map_err(|source| CodexLaunchError::ProbeIo {
+        Ok(Ok(result)) => {
+            process_guard.disarm();
+            result
+        }
+        Ok(Err(source)) => {
+            return Err(CodexLaunchError::ProbeIo {
                 executable: config.executable.clone(),
                 source,
-            })?
+            });
         }
         Err(_) => {
-            let _ = terminate_process(&mut child, process_id).await;
+            if terminate_process(&mut child, process_id).await.is_ok() {
+                process_guard.disarm();
+            }
             return Err(CodexLaunchError::ProbeTimeout(config.executable.clone()));
         }
     };
@@ -335,13 +369,18 @@ pub async fn probe_codex_version(
 async fn read_probe_output(
     stream: &mut (impl tokio::io::AsyncRead + Unpin),
 ) -> std::io::Result<Vec<u8>> {
-    const MAX_PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
+    const MAX_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
 
-    let mut output = Vec::new();
-    stream
-        .take(MAX_PROBE_OUTPUT_BYTES)
-        .read_to_end(&mut output)
-        .await?;
+    let mut output = Vec::with_capacity(MAX_PROBE_OUTPUT_BYTES);
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let read = stream.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        let remaining = MAX_PROBE_OUTPUT_BYTES.saturating_sub(output.len());
+        output.extend_from_slice(&buffer[..read.min(remaining)]);
+    }
     Ok(output)
 }
 
@@ -470,19 +509,28 @@ async fn spawn_shared_host(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .kill_on_drop(!cfg!(unix) || process_host.is_none());
     apply_child_environment(&mut command, config);
     configure_process_group(&mut command);
     let mut child = command.spawn().map_err(CodexLaunchError::Spawn)?;
+    let process_id = child.id();
+    let mut process_guard = SpawnedProcessGuard::new(
+        process_id,
+        if process_host.is_some() {
+            libc::SIGTERM
+        } else {
+            libc::SIGKILL
+        },
+    );
     let stderr = child
         .stderr
         .take()
         .ok_or(CodexLaunchError::MissingPipe("shared host stderr"))?;
     let stderr_tail = RedactedStderrTail::new();
     tokio::spawn(capture_stderr(stderr, stderr_tail.clone()));
-    let process_id = child.id();
     let status = CodexProcessStatus::new();
     let control = supervise_child(child, process_id, status.clone());
+    process_guard.disarm();
     Ok(SharedHostProcess {
         control,
         status,
@@ -605,6 +653,10 @@ async fn connect_shared_codex(
             return Err(error);
         }
     };
+    if let Err(error) = verify_runtime_contract(&driver, &config.version_policy).await {
+        let _ = driver.shutdown().await;
+        return Err(error);
+    }
     Ok(SpawnedCodexDriver {
         driver,
         version,
@@ -735,10 +787,19 @@ async fn spawn_codex_stdio_client(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .kill_on_drop(!cfg!(unix) || config.process_host.is_none());
     apply_child_environment(&mut command, config);
     configure_process_group(&mut command);
     let mut child = command.spawn().map_err(CodexLaunchError::Spawn)?;
+    let process_id = child.id();
+    let mut process_guard = SpawnedProcessGuard::new(
+        process_id,
+        if config.process_host.is_some() {
+            libc::SIGTERM
+        } else {
+            libc::SIGKILL
+        },
+    );
     let stdin = child
         .stdin
         .take()
@@ -751,13 +812,13 @@ async fn spawn_codex_stdio_client(
         .stderr
         .take()
         .ok_or(CodexLaunchError::MissingPipe("stderr"))?;
-    let process_id = child.id();
     let stderr_tail = RedactedStderrTail::new();
     let stderr_sink = stderr_tail.clone();
     tokio::spawn(capture_stderr(stderr, stderr_sink));
 
     let process_status = CodexProcessStatus::new();
     let control = supervise_child(child, process_id, process_status.clone());
+    process_guard.disarm();
     let hook_control = control.clone();
     let shutdown_hook = Arc::new(move || {
         let control = hook_control.clone();
@@ -788,6 +849,10 @@ async fn spawn_codex_stdio_client(
             return Err(error);
         }
     };
+    if let Err(error) = verify_runtime_contract(&driver, &config.version_policy).await {
+        let _ = driver.shutdown().await;
+        return Err(error);
+    }
     Ok(SpawnedCodexDriver {
         driver,
         version,
@@ -863,17 +928,45 @@ pub fn parse_codex_version(output: &str) -> Result<Version, CodexLaunchError> {
 fn verified_app_server_version(
     driver: &CodexAppServerDriver<CodexDriverWriter>,
     policy: &CodexVersionPolicy,
-) -> Result<Version, CodexLaunchError> {
+) -> Result<Option<Version>, CodexLaunchError> {
     let user_agent = driver.server_user_agent();
-    let version = user_agent
-        .split_whitespace()
-        .find_map(|component| {
-            let (_, raw_version) = component.split_once('/')?;
-            Version::parse(raw_version.trim_end_matches([';', ')'])).ok()
-        })
-        .ok_or_else(|| CodexLaunchError::InvalidVersionOutput(redact_stderr_line(user_agent)))?;
-    ensure_supported_version(&version, policy)?;
-    Ok(version)
+    let version = app_server_version_from_user_agent(user_agent);
+    match (policy, version.as_ref()) {
+        (CodexVersionPolicy::Exact(_), None) => Err(CodexLaunchError::InvalidVersionOutput(
+            redact_stderr_line(user_agent),
+        )),
+        (_, Some(version)) => {
+            ensure_supported_version(version, policy)?;
+            Ok(Some(version.clone()))
+        }
+        // Compatible runtimes are accepted by their live read-only contract,
+        // not by a forever-fixed initialize user-agent spelling.
+        (CodexVersionPolicy::Compatible | CodexVersionPolicy::Any, None) => Ok(None),
+    }
+}
+
+fn app_server_version_from_user_agent(user_agent: &str) -> Option<Version> {
+    user_agent.split_whitespace().find_map(|component| {
+        let (_, raw_version) = component.split_once('/')?;
+        Version::parse(raw_version.trim_end_matches([';', ')'])).ok()
+    })
+}
+
+async fn verify_runtime_contract(
+    driver: &CodexAppServerDriver<CodexDriverWriter>,
+    policy: &CodexVersionPolicy,
+) -> Result<(), CodexLaunchError> {
+    if !matches!(policy, CodexVersionPolicy::Compatible) {
+        return Ok(());
+    }
+    timeout(RUNTIME_CONTRACT_TIMEOUT, driver.verify_runtime_contract())
+        .await
+        .map_err(|_| {
+            CodexLaunchError::IncompatibleProtocol(DriverError::Unavailable(
+                "compatibility probe timed out".to_string(),
+            ))
+        })?
+        .map_err(CodexLaunchError::IncompatibleProtocol)
 }
 
 fn ensure_supported_version(
@@ -881,7 +974,7 @@ fn ensure_supported_version(
     policy: &CodexVersionPolicy,
 ) -> Result<(), CodexLaunchError> {
     let supported = match policy {
-        CodexVersionPolicy::Certified => is_certified_codex_version(found),
+        CodexVersionPolicy::Compatible => is_compatible_codex_version(found),
         CodexVersionPolicy::Exact(required) => found == required,
         CodexVersionPolicy::Any => true,
     };
@@ -889,11 +982,7 @@ fn ensure_supported_version(
         return Ok(());
     }
     let required = match policy {
-        CodexVersionPolicy::Certified => format!(
-            "one of the fixture-certified versions {} or {}",
-            minimum_codex_version(),
-            latest_certified_codex_version()
-        ),
+        CodexVersionPolicy::Compatible => format!("Codex {} or newer", minimum_codex_version()),
         CodexVersionPolicy::Exact(required) => required.to_string(),
         CodexVersionPolicy::Any => unreachable!("any Codex version is accepted"),
     };
@@ -1011,9 +1100,12 @@ async fn terminate_process(
             signal_process_group(process_id, libc::SIGKILL);
             Ok(status)
         }
-        Ok(Err(error)) => Err(DriverError::Unavailable(format!(
-            "failed to wait for Codex app-server: {error}"
-        ))),
+        Ok(Err(error)) => {
+            signal_process_group(process_id, libc::SIGKILL);
+            Err(DriverError::Unavailable(format!(
+                "failed to wait for Codex app-server: {error}"
+            )))
+        }
         Err(_) => {
             signal_process_group(process_id, libc::SIGKILL);
             child.start_kill().map_err(|error| {
@@ -1022,6 +1114,38 @@ async fn terminate_process(
             child.wait().await.map_err(|error| {
                 DriverError::Unavailable(format!("failed to reap Codex app-server: {error}"))
             })
+        }
+    }
+}
+
+/// Owns the short spawn-to-supervisor gap. Tokio's `kill_on_drop` only owns
+/// the direct child, while Codex may be launched through a wrapper with its
+/// own descendants. Once `supervise_child` owns the process this guard is
+/// disarmed and the normal graceful shutdown path becomes authoritative.
+struct SpawnedProcessGuard {
+    process_id: Option<u32>,
+    signal: i32,
+    armed: bool,
+}
+
+impl SpawnedProcessGuard {
+    fn new(process_id: Option<u32>, signal: i32) -> Self {
+        Self {
+            process_id,
+            signal,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SpawnedProcessGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            signal_process_group(self.process_id, self.signal);
         }
     }
 }
@@ -1132,26 +1256,141 @@ mod tests {
     }
 
     #[test]
-    fn accepts_only_fixture_certified_codex_versions() {
+    fn accepts_the_minimum_and_all_future_codex_versions() {
         assert!(
-            ensure_supported_version(&minimum_codex_version(), &CodexVersionPolicy::Certified)
+            ensure_supported_version(&minimum_codex_version(), &CodexVersionPolicy::Compatible)
                 .is_ok()
         );
         assert!(
             ensure_supported_version(
-                &latest_certified_codex_version(),
-                &CodexVersionPolicy::Certified,
+                &Version::parse("0.151.0-alpha.7.2").expect("future prerelease"),
+                &CodexVersionPolicy::Compatible,
             )
             .is_ok()
         );
+        assert!(
+            ensure_supported_version(&Version::new(1, 0, 0), &CodexVersionPolicy::Compatible)
+                .is_ok()
+        );
         assert!(matches!(
-            ensure_supported_version(&Version::new(0, 144, 9), &CodexVersionPolicy::Certified,),
+            ensure_supported_version(&Version::new(0, 145, 9), &CodexVersionPolicy::Compatible,),
             Err(CodexLaunchError::UnsupportedVersion { .. })
         ));
-        assert!(matches!(
-            ensure_supported_version(&Version::new(0, 149, 1), &CodexVersionPolicy::Certified,),
-            Err(CodexLaunchError::UnsupportedVersion { .. })
-        ));
+    }
+
+    #[test]
+    fn initialize_version_metadata_is_advisory_for_future_user_agent_formats() {
+        assert_eq!(
+            app_server_version_from_user_agent("codex_app_server/1.7.3 channel/stable"),
+            Some(Version::new(1, 7, 3))
+        );
+        assert_eq!(
+            app_server_version_from_user_agent("Codex App Server future-channel"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn version_probe_output_is_bounded_but_fully_drained() {
+        let (mut reader, mut writer) = tokio::io::duplex(4 * 1024);
+        let payload = vec![b'x'; 80 * 1024];
+        let writer_task = tokio::spawn(async move {
+            writer.write_all(&payload).await.expect("write noisy probe");
+            writer.shutdown().await.expect("close noisy probe");
+        });
+
+        let captured = timeout(Duration::from_secs(1), read_probe_output(&mut reader))
+            .await
+            .expect("probe output should drain")
+            .expect("read noisy probe");
+        writer_task.await.expect("writer should not block");
+        assert_eq!(captured.len(), 64 * 1024);
+        assert!(captured.iter().all(|byte| *byte == b'x'));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_a_version_probe_stops_its_process_group() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let executable = directory.path().join("blocking-codex");
+        let descendant_pid_file = directory.path().join("descendant.pid");
+        std::fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' \"$!\" > '{}'\nsleep 30\n",
+                descendant_pid_file.display()
+            ),
+        )
+        .expect("write fake Codex executable");
+        let mut permissions = std::fs::metadata(&executable)
+            .expect("fake executable metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&executable, permissions).expect("make fake Codex executable");
+
+        let config = CodexLaunchConfig {
+            executable,
+            version_policy: CodexVersionPolicy::Any,
+            ..CodexLaunchConfig::default()
+        };
+        let probe = tokio::spawn(async move { probe_codex_version(&config).await });
+        let descendant_pid = timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(contents) = std::fs::read_to_string(&descendant_pid_file)
+                    && let Ok(pid) = contents.trim().parse::<i32>()
+                    && pid > 0
+                {
+                    break pid;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        probe.abort();
+        let _ = probe.await;
+
+        // File creation precedes the shell's write. Wait for its complete PID
+        // before cancellation, and abort the probe even if startup times out.
+        let descendant_pid = descendant_pid.expect("probe descendant should start");
+        timeout(Duration::from_secs(2), async {
+            loop {
+                let result = unsafe { libc::kill(descendant_pid, 0) };
+                if result == -1
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("cancelled probe descendant should be gone");
+    }
+
+    #[tokio::test]
+    async fn compatible_policy_accepts_a_future_user_agent_after_read_only_negotiation() {
+        let config = CodexLaunchConfig {
+            executable: PathBuf::from("/bin/bash"),
+            transport: CodexAppServerTransport::PrivateStdio,
+            app_server_args_override: Some(vec![
+                OsString::from("-c"),
+                OsString::from(
+                    "IFS= read -r initialize; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"Codex App Server future-channel\"}}'; IFS= read -r initialized; IFS= read -r list; case \"$list\" in *'\"method\":\"thread/list\"'*'\"useStateDbOnly\":true'*) ;; *) exit 41 ;; esac; printf '%s\\n' '{\"id\":2,\"result\":{\"data\":[],\"nextCursor\":null}}'; IFS= read -r read; case \"$read\" in *'\"method\":\"thread/read\"'*) ;; *) exit 42 ;; esac; printf '%s\\n' '{\"id\":3,\"error\":{\"code\":-32600,\"message\":\"thread not found\"}}'; sleep 30",
+                ),
+            ]),
+            version_policy: CodexVersionPolicy::Compatible,
+            incoming_capacity: 8,
+            environment_remove: CodexLaunchConfig::default().environment_remove,
+            process_host: None,
+        };
+
+        let spawned = spawn_codex_driver(config, "0.7.6")
+            .await
+            .expect("capability-compatible future runtime");
+        assert_eq!(spawned.app_server_version, None);
+        spawned.driver.shutdown().await.expect("shutdown process");
     }
 
     #[test]
@@ -1231,10 +1470,10 @@ mod tests {
                 }
             }
         });
-        let version = latest_certified_codex_version();
+        let version = Version::parse("0.150.0-alpha.8").expect("fixture version");
         let config = CodexLaunchConfig {
             transport: CodexAppServerTransport::SharedLocal,
-            version_policy: CodexVersionPolicy::Certified,
+            version_policy: CodexVersionPolicy::Exact(version.clone()),
             ..CodexLaunchConfig::default()
         };
         let spawned = connect_shared_codex(
@@ -1251,7 +1490,7 @@ mod tests {
         .await
         .expect("shared Codex connection");
         assert_eq!(spawned.transport, CodexAppServerTransport::SharedLocal);
-        assert_eq!(spawned.app_server_version, version);
+        assert_eq!(spawned.app_server_version, Some(version));
         spawned
             .driver
             .shutdown()
@@ -1275,7 +1514,7 @@ mod tests {
                 .await
                 .expect("reject WebSocket upgrade");
         });
-        let version = latest_certified_codex_version();
+        let version = Version::parse("0.150.0-alpha.8").expect("fixture version");
         let error = connect_shared_codex(
             &CodexLaunchConfig::default(),
             &socket_path,
@@ -1549,7 +1788,7 @@ mod tests {
     #[ignore = "requires an installed Codex CLI binary"]
     async fn installed_codex_app_server_initializes_and_stops() {
         let mut config = CodexLaunchConfig {
-            transport: CodexAppServerTransport::SharedLocal,
+            transport: CodexAppServerTransport::PrivateStdio,
             ..CodexLaunchConfig::default()
         };
         if let Some(executable) = std::env::var_os("INLINE_CODEX_SMOKE_EXECUTABLE") {
@@ -1558,8 +1797,14 @@ mod tests {
         let spawned = spawn_codex_driver(config, "0.6.2")
             .await
             .expect("initialize installed Codex app-server");
-        assert!(is_certified_codex_version(&spawned.version.version));
-        assert!(is_certified_codex_version(&spawned.app_server_version));
+        assert!(is_compatible_codex_version(&spawned.version.version));
+        assert!(
+            spawned
+                .app_server_version
+                .as_ref()
+                .map(is_compatible_codex_version)
+                .unwrap_or(true)
+        );
         let catalog = spawned
             .driver
             .settings_catalog(&std::env::current_dir().expect("current directory"))

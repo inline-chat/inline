@@ -182,6 +182,7 @@ pub struct ModelListParams {
 #[serde(rename_all = "camelCase")]
 pub struct ModelListResponse {
     pub data: Vec<CodexModelOption>,
+    #[serde(default)]
     pub next_cursor: Option<String>,
 }
 
@@ -223,6 +224,7 @@ pub struct PermissionProfileListParams {
 #[serde(rename_all = "camelCase")]
 pub struct PermissionProfileListResponse {
     pub data: Vec<CodexPermissionOption>,
+    #[serde(default)]
     pub next_cursor: Option<String>,
 }
 
@@ -231,7 +233,10 @@ pub struct PermissionProfileListResponse {
 pub struct CodexPermissionOption {
     pub id: String,
     pub description: Option<String>,
-    pub allowed: bool,
+    /// Older stable app-server responses omitted this field. Treat omission as
+    /// selectable; an explicit `false` is the only safe reason to disable it.
+    #[serde(default)]
+    pub allowed: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1195,7 +1200,7 @@ mod tests {
             ),
             (
                 LATEST_VERIFIED_COMPATIBILITY_FIXTURE,
-                crate::latest_certified_codex_version(),
+                semver::Version::parse("0.150.0-alpha.8").expect("fixture version"),
             ),
         ] {
             verify_compatibility_fixture(contents, expected_version);
@@ -1210,7 +1215,7 @@ mod tests {
                 .and_then(|version| semver::Version::parse(version).ok()),
             Some(expected_version.clone())
         );
-        assert!(crate::is_certified_codex_version(&expected_version));
+        assert!(crate::is_compatible_codex_version(&expected_version));
         let schema_hashes = fixture["schemaSha256"]
             .as_object()
             .expect("schema hash manifest");

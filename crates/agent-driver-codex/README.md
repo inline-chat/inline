@@ -19,14 +19,23 @@ existing controller; unclaimed requests still belong to the ordinary private
 turn driver. Shared mutations therefore remain disabled. After detach or a
 failed resume, the connection keeps a claim-only tombstone until it closes;
 this prevents queued notifications or a late resume outcome from escaping into
-the ordinary driver before an ordered dispatcher barrier exists. Codex also
-enforces one rollout writer across app-server processes. The shared
-host can fan multiple clients for a thread it owns, but cannot take over a
-session currently held by a separate private app-server. The adapter preserves
-that rejection. The shipping beta therefore uses the ordinary private turn
-driver as an exclusive writer: selection only hydrates a bounded snapshot, the
-first Inline input tries the exact `thread/resume`, active-writer rejection
-becomes **active elsewhere** and unsubscribes only that rejected thread, and
-provider-wide-idle `/close` ends Inline's epoch so another Codex surface can resume.
+the ordinary driver before an ordered dispatcher barrier exists. Writer
+ownership is not a universal app-server guarantee: multiple shared clients can
+subscribe, and starting input during another client's turn can steer that turn.
+The beta therefore uses private stdio for sequential continuation: selection
+only hydrates a bounded snapshot, and explicit `/resume` tries the exact
+`thread/resume` and synchronizes history before prompts are accepted.
+Provider-confirmed active-writer rejection becomes **active
+elsewhere** and unsubscribes only that rejected thread. Provider-wide-idle
+`/stop` (or idle `/close`) ends Inline's epoch so another Codex surface can resume. Do not run the
+same session concurrently in another Codex client.
 The shared observer remains dark rather than polling rollout files or implying
 simultaneous multi-controller support.
+
+Compatibility uses a minimum protocol floor (0.146.0), not an exact-version
+allowlist or an upper bound. Launch probes only bounded read-only list/read
+shapes. History negotiates summary turn pages plus item pages, falls back to
+full turn pages on older implementations, and uses legacy full reads only when
+paging is unavailable. Additive fields/enums are tolerated; unknown session
+states are unavailable for adoption, and incompatible operations fail closed.
+Future breaking protocols still require adapter updates, not version pinning.
