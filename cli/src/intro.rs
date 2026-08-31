@@ -10,7 +10,7 @@ const HEADING: Style = Style::new().bold();
 const MUTED: Style = Style::new().dimmed();
 const BRAND: Style = AnsiColor::White.on_default();
 // Static Days One glyphs and per-cell silver tones keep the entry page offline.
-// Eight rows give the mark and lowercase e room for open counters and smooth corners.
+// Eight rows give the full-height mark and lowercase e room for open counters and smooth corners.
 const BRAND_TONES: [Style; 3] = [
     RgbColor(242, 244, 247).on_default(),
     RgbColor(219, 225, 232).on_default(),
@@ -19,36 +19,36 @@ const BRAND_TONES: [Style; 3] = [
 // Each tone digit corresponds to one Unicode glyph, including spaces.
 const WORDMARK: &[(&str, &str)] = &[
     (
-        "   ▄▄▄▄▄▄▄▄      ▟██▙                ███▖ ▐███",
-        "0000000000000000000000000000000000000000000000",
+        "  ▄▟████████▙▄     ▟██▙                ███▖ ▐███",
+        "000011111111000000000000000000000000000000000000",
     ),
     (
-        "▗▟██████████▙▖   ████                ███▌  ▀▀▀",
-        "0011111111110000011110000000000000000111000000",
+        "▗███▛▀▀▀▀▀▀▜███▖   ████                ███▌  ▀▀▀",
+        "011122222222110000011110000000000000000111000000",
     ),
     (
-        "▟██▘ ▄▄   ▝██▙   ████  ███▙▟█████▄   ███▌ ▐███  ▐██▙▟█████▄   ▗▄██████▙▖",
-        "111200000021110001111000000000000000011100011100000000000000000011111100",
+        "███▘ ▄▄▄    ▝███   ████  ███▙▟█████▄   ███▌ ▐███  ▐██▙▟█████▄   ▗▄██████▙▖",
+        "11120000000021100001111000000000000000011100011100000000000000000011111100",
     ),
     (
-        "██▌ ▐██    ▐██   ████  ████▀▘ ▀███▌  ███▌ ▐███  ▐███▀▘ ▀███▌ ▗███▀  ▝███▌",
-        "1110111000011100011110011111101111000111000111000111110111100001120021111",
+        "███  ███     ███   ████  ████▀▘ ▀███▌  ███▌ ▐███  ▐███▀▘ ▀███▌ ▗███▀  ▝███▌",
+        "111001110000011100011110011111101111000111000111000111110111100001120021111",
     ),
     (
-        "██▌ ▐██    ▐██   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███ ▐███▄▄▄▄▟███",
-        "1110111000011100011110011100000111000111000111000111000001110011100001111",
+        "███  ███     ███   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███ ▐███▄▄▄▄▟███",
+        "111001110000011100011110011100000111000111000111000111000001110011100001111",
     ),
     (
-        "▜██▖ ▀▀   ▗██▛   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███ ▐███▀▀▀▀▀▀▀▀",
-        "1110022000011100011110011100000111000111000111000111000001110111122222222",
+        "███▖ ▀▀▀    ▗███   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███ ▐███▀▀▀▀▀▀▀▀",
+        "111002220000011200011110011100000111000111000111000111000001110111122222222",
     ),
     (
-        "▝▜██████████▛▘   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███  ███▙▄▄▄▟██▌",
-        "2211111111112200011110011100000111000111000111000111000001110021100000111",
+        "▝███▙▄▄▄▄▄▄▟███▘   ████  ███▌    ███▌  ███▌ ▐███  ▐███    ▐███  ███▙▄▄▄▟██▌",
+        "211100000000112100011110011100000111000111000111000111000001110021100000111",
     ),
     (
-        "   ▀▀▀▀▀▀▀▀      ▜██▛  ▜██▌    ▜██▌  ███▘ ▐███  ▐██▛    ▐██▛   ▀▜██████▀",
-        "000222222220000002222002221000022210022210122200122200001222000221111112",
+        "  ▀▜████████▛▀     ▜██▛  ▜██▌    ▜██▌  ███▘ ▐███  ▐██▛    ▐██▛   ▀▜██████▀",
+        "00221111111122000002222002221000022210022210122200122200001222000221111112",
     ),
 ];
 
@@ -78,9 +78,9 @@ const GROUPS: &[(&str, &[Example])] = &[
                 description: "Connect a local agent",
             },
             Example {
-                command: "skill install",
+                command: "plugin install",
                 args: &[],
-                description: "Install the Codex skill",
+                description: "Install the skill + MCP",
             },
         ],
     ),
@@ -122,6 +122,11 @@ const GROUPS: &[(&str, &[Example])] = &[
                 args: &["zsh"],
                 description: "Generate completions",
             },
+            Example {
+                command: "skill install",
+                args: &[],
+                description: "Install the skill only",
+            },
         ],
     ),
 ];
@@ -151,8 +156,13 @@ fn render(columns: usize, color: bool) -> String {
             env!("CARGO_PKG_VERSION")
         );
         for example in GROUPS[0].1 {
-            page.push_str(&styled_tokens(&example.tokens(), color));
-            page.push('\n');
+            let tokens = example.tokens();
+            if styled_tokens(&tokens, false).width() > columns {
+                command_lines(&mut page, &tokens, columns, color);
+            } else {
+                page.push_str(&styled_tokens(&tokens, color));
+                page.push('\n');
+            }
         }
         page.push_str(&format!("\n{}\n\n", paint("inline --help", COMMAND, color)));
         return page;
@@ -404,7 +414,12 @@ mod tests {
                 "{columns}: {page}"
             );
             assert!(page.contains("inline login"));
-            assert!(page.contains("inline skill install"));
+            if columns >= "inline plugin install".len() {
+                assert!(page.contains("inline plugin install"));
+            } else {
+                assert!(page.contains("inline plugin"));
+                assert!(page.contains("install"));
+            }
             assert!(page.contains("inline --help"));
         }
     }

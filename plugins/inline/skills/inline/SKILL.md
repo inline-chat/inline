@@ -20,6 +20,7 @@ Use Inline as a thread-first work chat system. Find the exact conversation, read
    - Use `conversations.list` for a thread, chat, or recent DM.
 4. When using MCP, use `conversations.get` to verify an ambiguous or write-sensitive target.
 5. When using the CLI, read the [Inline CLI reference](references/inline-cli.md) before installing, authenticating, or operating it.
+   - When exact flags are uncertain, query `inline capabilities COMMAND... --compact`; it is offline and reflects the installed command tree.
 6. Read the smallest useful message window, then answer or act.
 
 If no usable Inline path is available, state what is missing and ask the user to connect or reauthorize MCP, or install or authenticate the CLI, as appropriate for that environment. Do not invent results or silently substitute another chat service. The unversioned `/mcp` endpoint exists only for older clients using the legacy argument contract.
@@ -56,8 +57,10 @@ Use only columns for access paths the environment actually provides. MCP entries
 | Read or summarize | `messages.list` with a bounded time window | `inline messages list --chat-id CHAT_ID --since TIME --limit 50 --json --compact` |
 | Search and inspect context | `messages.search` → `messages.context` | `inline messages search --chat-id CHAT_ID --query QUERY --json --compact`, then `inline messages get --chat-id CHAT_ID --message-id MESSAGE_ID --json --compact` |
 | Create a thread or chat | Resolve the parent and participants → `conversations.create` | Resolve IDs, then `inline chats create --title TITLE --json --compact` with the required space, visibility, and participant flags |
+| Create a reply thread | Use the CLI; MCP does not expose reply-thread creation | `inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title TITLE --json --compact` |
 | Send text or a reply | Verify target → `messages.send` | `inline messages send --chat-id CHAT_ID --text TEXT` with `--reply-to MESSAGE_ID` when needed |
 | Send files or media | Verify target → `files.upload` → `messages.send_media` | `inline messages send --chat-id CHAT_ID --attach PATH --text CAPTION` |
+| Pin or unpin a message | Use the CLI; MCP does not expose pin changes | Use `inline messages pin` or `inline messages unpin` with `--chat-id CHAT_ID --message-id MESSAGE_ID --json --compact` |
 
 ## Read results well
 

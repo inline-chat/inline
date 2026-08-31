@@ -53,10 +53,10 @@ For an agent or another non-interactive session, use the explicit two-step flow:
 
 ```bash
 inline login --email USER_EMAIL --send-code --json --compact
-inline login --email USER_EMAIL --code CODE --challenge-token TOKEN --json --compact
+inline login --email USER_EMAIL --code CODE --json --compact
 ```
 
-The first command sends the code and returns the email `challengeToken`; the second saves the bearer token without printing it. Phone login uses `--phone` in both commands and normally omits `--challenge-token`. Prefer `--code-stdin` when the code is already available through a pipe. The user must provide a code delivered outside the session; do not attempt to recover credentials from files or environment output.
+The first command sends the code and saves the V3 challenge locally; the second loads that challenge and saves the resulting credentials without printing them. Phone login uses `--phone` in both commands. V3 login does not return or accept `--challenge-token`. Prefer `--code-stdin` when the code is already available through a pipe. The user must provide a code delivered outside the session; do not attempt to recover credentials from files or environment output.
 
 If the caller already supplies an ephemeral token, use it without persisting it:
 
@@ -74,15 +74,17 @@ Use `--json --compact` for agent parsing. Start from live help instead of guessi
 inline --help
 inline messages --help
 inline messages send --help
+inline capabilities messages send --compact
 ```
 
-Core command groups are `chats`, `messages`, `users`, `spaces`, `notifications`, `bots`, `typing`, `tasks`, and `schema`. Useful read workflows include:
+`inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]` emit the live public command metadata as JSON without loading authentication, checking for updates, or connecting to Inline. Query the narrowest relevant command instead of loading the entire protobuf schema. Core command groups are `chats`, `messages`, `users`, `spaces`, `notifications`, `bots`, `typing`, `tasks`, and `schema`. Useful read workflows include:
 
 ```bash
 inline chats list --filter "launch" --json --compact
 inline messages list --chat-id CHAT_ID --limit 50 --json --compact
 inline messages search --chat-id CHAT_ID --query "launch" --json --compact
 inline messages get --chat-id CHAT_ID --message-id 91,92,100 --json --compact
+inline auth sessions --json --compact
 ```
 
 Resolve and verify the exact target before any write. Send only when the user explicitly requests it:
@@ -90,9 +92,17 @@ Resolve and verify the exact target before any write. Send only when the user ex
 ```bash
 inline messages send --chat-id CHAT_ID --text "MESSAGE"
 inline messages send --chat-id CHAT_ID --reply-to MESSAGE_ID --text "REPLY"
+inline messages pin --chat-id CHAT_ID --message-id MESSAGE_ID
+inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title "FOLLOW-UP"
+inline chats follow --chat-id REPLY_THREAD_ID
+inline notifications set-chat --chat-id CHAT_ID --mode mentions
 ```
 
 Destructive commands never prompt in JSON mode and require `--yes`. Pass it only for the exact user-approved target. After an uncertain write result, inspect the target before retrying to avoid duplicates.
+
+## Install the Codex plugin
+
+When the user asks to install the full Codex integration, use `inline plugin install`. It delegates to Codex's plugin manager with fixed arguments and installs the Inline skill plus its OAuth MCP server. The operation is idempotent; inspect it first with `inline plugin install --dry-run`. Use `inline skill install` only when the user explicitly wants the standalone skill without MCP.
 
 ## Bulk and local recipes
 

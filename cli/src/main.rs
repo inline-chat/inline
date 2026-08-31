@@ -4,6 +4,7 @@ mod auth;
 mod auth_flow;
 mod bridge;
 mod chat_output;
+mod command_schema;
 mod completion;
 mod config;
 mod dates;
@@ -22,6 +23,8 @@ mod notifications;
 mod output;
 mod owner_session;
 mod peer;
+mod plugin;
+mod session_output;
 mod skill;
 mod state;
 mod telemetry;
@@ -247,12 +250,14 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
   inline transcript -c 123 -L 500 --output ./feedback.md
   inline transcript -c 123 --download-media --output ./feedback-bundle
   inline agents setup
+  inline plugin install
   inline doctor
 
 Aliases and shortcuts:
   chat/thread/threads -> chats; message -> messages; user -> users; space -> spaces
   ls -> list; view -> get; whoami -> me; search -> messages search
   login/logout -> auth login/logout; transcript -> messages transcript
+  capabilities -> schema commands; plugins -> plugin
   Short flags: -c chat ID, -u DM user ID, -L limit, -q query, -f filter, -m text.
 
 JSON mode:
@@ -344,6 +349,14 @@ enum Command {
     Skill {
         #[command(subcommand)]
         command: SkillCommand,
+    },
+    #[command(
+        about = "Install Inline's Codex plugin (skill + OAuth MCP)",
+        visible_alias = "plugins"
+    )]
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
     },
     #[command(about = "Set up a local coding agent in Inline")]
     Setup {
@@ -442,6 +455,11 @@ One-pass review:
         #[command(subcommand)]
         command: SchemaCommand,
     },
+    #[command(about = "Print machine-readable CLI capabilities as JSON")]
+    Capabilities {
+        #[arg(value_name = "COMMAND", num_args = 0.., help = "Optional command path, for example: messages send")]
+        path: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -469,6 +487,18 @@ enum SkillCommand {
             help = "Overwrite Inline skill files that differ from this CLI's bundled version"
         )]
         force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginCommand {
+    #[command(
+        about = "Install the Inline plugin from its public Codex marketplace",
+        after_help = "The plugin bundles both the Inline skill and OAuth MCP server.\nThe operation is idempotent and safe to repeat."
+    )]
+    Install {
+        #[arg(long, help = "Print the Codex commands without changing configuration")]
+        dry_run: bool,
     },
 }
 
@@ -639,6 +669,19 @@ enum AuthCommand {
     Me,
     #[command(about = "Clear the saved token")]
     Logout,
+    #[command(about = "List account sessions and identify this CLI session")]
+    Sessions,
+    #[command(about = "Revoke an account session (asks for confirmation)")]
+    RevokeSession(AuthRevokeSessionArgs),
+}
+
+#[derive(Args)]
+struct AuthRevokeSessionArgs {
+    #[arg(long, value_name = "ID", help = "Account session id")]
+    session_id: i64,
+
+    #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+    yes: bool,
 }
 
 #[derive(Args, Clone)]
@@ -716,6 +759,14 @@ pub(crate) struct AuthLoginArgs {
 enum SchemaCommand {
     #[command(about = "Print the bundled protobuf schema (.proto sources)")]
     Proto,
+    #[command(
+        about = "Print machine-readable CLI command metadata",
+        after_help = "Examples:\n  inline schema commands\n  inline schema commands messages send\n  inline capabilities chat ls --compact"
+    )]
+    Commands {
+        #[arg(value_name = "COMMAND", num_args = 0.., help = "Optional command path")]
+        path: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -735,8 +786,15 @@ enum ChatsCommand {
     RemoveParticipant(ChatsParticipantArgs),
     #[command(about = "Create a new chat or thread")]
     Create(ChatsCreateArgs),
+    #[command(
+        about = "Create a child or reply thread",
+        visible_aliases = ["create-reply", "reply-thread", "create-subthread"]
+    )]
+    Subthread(ChatsCreateSubthreadArgs),
     #[command(about = "Create a private chat (DM)")]
     CreateDm(ChatsCreateDmArgs),
+    #[command(about = "Move a private thread between Home and a space")]
+    Move(ChatsMoveArgs),
     #[command(about = "Update chat visibility (public/private)")]
     UpdateVisibility(ChatsUpdateVisibilityArgs),
     #[command(about = "Rename a chat or thread")]
@@ -745,6 +803,16 @@ enum ChatsCommand {
     MarkUnread(ChatsMarkUnreadArgs),
     #[command(about = "Mark a chat or DM as read")]
     MarkRead(ChatsMarkReadArgs),
+    #[command(about = "Archive a chat or DM")]
+    Archive(ChatsGetArgs),
+    #[command(about = "Unarchive a chat or DM")]
+    Unarchive(ChatsGetArgs),
+    #[command(about = "Follow a reply thread")]
+    Follow(ChatsChatIdArgs),
+    #[command(about = "Stop following a reply thread")]
+    Unfollow(ChatsChatIdArgs),
+    #[command(about = "Restore the default reply-thread follow policy")]
+    FollowDefault(ChatsChatIdArgs),
     #[command(about = "Delete a chat (space thread)")]
     Delete(ChatsDeleteArgs),
 }
@@ -808,6 +876,12 @@ struct ChatsGetArgs {
 }
 
 #[derive(Args)]
+struct ChatsChatIdArgs {
+    #[arg(long, short = 'c', help = "Reply thread chat id")]
+    chat_id: i64,
+}
+
+#[derive(Args)]
 struct ChatsParticipantsArgs {
     #[arg(long, short = 'c', help = "Chat id")]
     chat_id: i64,
@@ -850,9 +924,87 @@ struct ChatsCreateArgs {
 }
 
 #[derive(Args)]
+struct ChatsCreateSubthreadArgs {
+    #[arg(long, help = "Parent chat id")]
+    parent_chat_id: i64,
+
+    #[arg(long, help = "Parent message id (creates a reply thread)")]
+    message_id: Option<i64>,
+
+    #[arg(long, help = "Optional child thread title")]
+    title: Option<String>,
+
+    #[arg(long, help = "Optional child thread description")]
+    description: Option<String>,
+
+    #[arg(long, help = "Optional emoji for the child thread")]
+    emoji: Option<String>,
+
+    #[arg(
+        long = "participant",
+        value_name = "USER_ID",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Direct participant user id (repeatable)"
+    )]
+    participants: Vec<i64>,
+}
+
+#[derive(Args)]
 struct ChatsCreateDmArgs {
     #[arg(long, help = "User id to start a DM with")]
     user_id: i64,
+}
+
+#[derive(Args)]
+struct ChatsMoveArgs {
+    #[arg(long, help = "Private thread id")]
+    chat_id: i64,
+
+    #[arg(
+        long,
+        help = "Destination space id",
+        conflicts_with = "home",
+        required_unless_present = "home"
+    )]
+    space_id: Option<i64>,
+
+    #[arg(long, help = "Move the thread to Home", conflicts_with = "space_id")]
+    home: bool,
+}
+
+impl ChatsCreateSubthreadArgs {
+    fn input(self) -> Result<proto::CreateSubthreadInput, Box<dyn std::error::Error>> {
+        let parent_chat_id = validate_positive_id_arg("--parent-chat-id", self.parent_chat_id)?;
+        let parent_message_id = validate_optional_message_id_arg("--message-id", self.message_id)?;
+        validate_positive_ids_arg("--participant", &self.participants)?;
+        Ok(proto::CreateSubthreadInput {
+            parent_chat_id,
+            parent_message_id,
+            title: trimmed_optional(self.title),
+            description: trimmed_optional(self.description),
+            emoji: trimmed_optional(self.emoji),
+            participants: self
+                .participants
+                .into_iter()
+                .map(|user_id| proto::InputChatParticipant {
+                    user_id: Some(user_id),
+                    group_id: None,
+                })
+                .collect(),
+        })
+    }
+}
+
+impl ChatsMoveArgs {
+    fn input(self) -> Result<proto::MoveThreadInput, Box<dyn std::error::Error>> {
+        let chat_id = validate_positive_id_arg("--chat-id", self.chat_id)?;
+        let space_id = validate_optional_positive_id_arg("--space-id", self.space_id)?;
+        if self.home == space_id.is_some() {
+            return Err(CliError::invalid_args("Provide --space-id or --home").into());
+        }
+        Ok(proto::MoveThreadInput { chat_id, space_id })
+    }
 }
 
 #[derive(Args)]
@@ -1092,6 +1244,10 @@ Batch behavior:
     AddReaction(MessagesReactionArgs),
     #[command(about = "Delete an emoji reaction from a message")]
     DeleteReaction(MessagesReactionArgs),
+    #[command(about = "Pin a message for everyone in the chat")]
+    Pin(MessagesPinArgs),
+    #[command(about = "Unpin a message for everyone in the chat")]
+    Unpin(MessagesPinArgs),
 }
 
 #[derive(Args)]
@@ -1290,6 +1446,33 @@ struct MessagesGetArgs {
         help = "Translate message to language code (e.g., en)"
     )]
     translate: Option<String>,
+}
+
+#[derive(Args)]
+struct MessagesPinArgs {
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
+    chat_id: Option<i64>,
+
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
+    user_id: Option<i64>,
+
+    #[arg(long, help = "Message id")]
+    message_id: i64,
+}
+
+impl MessagesPinArgs {
+    fn input(self, unpin: bool) -> Result<proto::PinMessageInput, Box<dyn std::error::Error>> {
+        Ok(proto::PinMessageInput {
+            peer_id: Some(input_peer_from_args(self.chat_id, self.user_id)?),
+            message_id: validate_message_id_arg("--message-id", self.message_id)?,
+            unpin,
+        })
+    }
 }
 
 #[derive(Args)]
@@ -1811,6 +1994,60 @@ enum NotificationsCommand {
     Get,
     #[command(about = "Update notification settings")]
     Set(NotificationsSetArgs),
+    #[command(about = "Show a chat or DM notification override")]
+    GetChat(ChatsGetArgs),
+    #[command(about = "Set or inherit a chat or DM notification override")]
+    SetChat(NotificationsSetChatArgs),
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum DialogNotificationModeArg {
+    All,
+    Mentions,
+    None,
+    Inherit,
+}
+
+impl DialogNotificationModeArg {
+    fn settings(self) -> Option<proto::DialogNotificationSettings> {
+        let mode = match self {
+            Self::All => proto::dialog_notification_settings::Mode::All,
+            Self::Mentions => proto::dialog_notification_settings::Mode::Mentions,
+            Self::None => proto::dialog_notification_settings::Mode::None,
+            Self::Inherit => return None,
+        };
+        Some(proto::DialogNotificationSettings {
+            mode: Some(mode as i32),
+        })
+    }
+}
+
+#[derive(Args)]
+struct NotificationsSetChatArgs {
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
+    chat_id: Option<i64>,
+
+    #[arg(
+        long,
+        short = 'u',
+        help = "User id (for DMs)",
+        conflicts_with = "chat_id"
+    )]
+    user_id: Option<i64>,
+
+    #[arg(long, value_enum, help = "Override: all, mentions, none, or inherit")]
+    mode: DialogNotificationModeArg,
+}
+
+impl NotificationsSetChatArgs {
+    fn input(
+        self,
+    ) -> Result<proto::UpdateDialogNotificationSettingsInput, Box<dyn std::error::Error>> {
+        Ok(proto::UpdateDialogNotificationSettingsInput {
+            peer_id: Some(input_peer_from_args(self.chat_id, self.user_id)?),
+            notification_settings: self.mode.settings(),
+        })
+    }
 }
 
 #[derive(Args)]
@@ -1991,7 +2228,56 @@ fn main() {
         return;
     }
 
+    if let Command::Schema { command } = &cli.command {
+        let result: Result<(), Box<dyn std::error::Error>> = match command {
+            SchemaCommand::Proto => {
+                let bundle = bundled_proto_sources();
+                if cli.json {
+                    output::print_json(&bundle, flags.json_format).map_err(Into::into)
+                } else {
+                    for file in bundle.files {
+                        println!("# {}", file.name);
+                        println!("{}", file.contents);
+                        println!();
+                    }
+                    Ok(())
+                }
+            }
+            SchemaCommand::Commands { path } => {
+                command_schema::print_command_schema(Cli::command(), path, flags.json_format)
+            }
+        };
+        finish_offline_command(result, flags);
+        return;
+    }
+
+    if let Command::Capabilities { path } = &cli.command {
+        let result = command_schema::print_command_schema(Cli::command(), path, flags.json_format);
+        finish_offline_command(result, flags);
+        return;
+    }
+
     run_cli(cli, flags, started_at);
+}
+
+fn finish_offline_command(
+    result: Result<(), Box<dyn std::error::Error>>,
+    flags: DetectedGlobalFlags,
+) {
+    let Err(error) = result else {
+        return;
+    };
+    if flags.json {
+        let payload = JsonErrorEnvelope {
+            error: json_cli_error_from_error(error.as_ref()),
+        };
+        if let Ok(text) = output::json_string(&payload, flags.json_format) {
+            eprintln!("{text}");
+        }
+    } else {
+        eprintln!("{}", human_cli_error_from_error(error.as_ref()));
+    }
+    std::process::exit(1);
 }
 
 #[tokio::main]
@@ -2073,6 +2359,12 @@ fn is_interactive_terminal() -> bool {
 
 async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Error>> {
     let json_format = output::resolve_json_format(cli.pretty, cli.compact);
+    if let Command::Plugin {
+        command: PluginCommand::Install { dry_run },
+    } = &cli.command
+    {
+        return plugin::install_for_codex(*dry_run, cli.json, json_format).await;
+    }
     let config = Config::load();
     if matches!(&cli.command, Command::Update { check: true }) {
         let check = update::check_update(&config).await?;
@@ -2099,6 +2391,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             | Command::Update { .. }
             | Command::Doctor
             | Command::Skill { .. }
+            | Command::Plugin { .. }
             | Command::Setup { .. }
             | Command::Agents { .. }
             | Command::Bridge { .. }
@@ -2109,13 +2402,16 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
         update::spawn_update_check(&config, &local_db, cli.json)
     };
 
-    let result = async {
+    // The command future includes every network/auth branch. Keep it off the
+    // caller's stack so unoptimized builds can connect within normal stack limits.
+    let result = Box::pin(async {
         match cli.command {
             Command::Skill { command } => match command {
                 SkillCommand::Install { force } => {
                     skill::install_for_codex(force, cli.json, json_format)?;
                 }
             },
+            Command::Plugin { .. } => unreachable!("plugin setup precedes account configuration"),
             Command::Setup { command } => {
                 match command {
                     SetupCommand::Hermes(mut args) => {
@@ -2388,6 +2684,47 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         print_auth_logout(&output);
                     }
                 }
+                AuthCommand::Sessions => {
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime.call(proto::GetSessionsInput {}).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        session_output::print_sessions(
+                            &payload.sessions,
+                            current_epoch_seconds() as i64,
+                        );
+                    }
+                }
+                AuthCommand::RevokeSession(args) => {
+                    let session_id =
+                        validate_positive_id_arg("--session-id", args.session_id)?;
+                    if cli.json && !args.yes {
+                        return Err(CliError::confirmation_required().into());
+                    }
+                    if !confirm_action(
+                        &format!("Revoke account session {session_id}?"),
+                        args.yes,
+                    )? {
+                        println!("Cancelled.");
+                        return Ok(());
+                    }
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime
+                        .call(proto::RevokeSessionInput { session_id })
+                        .await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if payload.already_revoked {
+                        println!("Session {session_id} was already revoked.");
+                    } else if payload.revoked {
+                        println!("Revoked session {session_id}.");
+                    } else {
+                        println!("Session {session_id} was not revoked.");
+                    }
+                }
             },
             Command::Update { .. } => {
                 if let Some(updated_binary) = update::run_update(&config, cli.json).await? {
@@ -2426,20 +2763,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 .await?;
             }
             Command::Completion { .. } => unreachable!("completions are handled before runtime setup"),
-            Command::Schema { command } => match command {
-                SchemaCommand::Proto => {
-                    let bundle = bundled_proto_sources();
-                    if cli.json {
-                        output::print_json(&bundle, json_format)?;
-                    } else {
-                        for file in bundle.files {
-                            println!("# {}", file.name);
-                            println!("{}", file.contents);
-                            println!();
-                        }
-                    }
-                }
-            },
+            Command::Schema { .. } | Command::Capabilities { .. } => {
+                unreachable!("schemas are handled before runtime setup")
+            }
             Command::Bots { command } => match command {
                 BotsCommand::List(args) => {
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
@@ -2728,6 +3054,23 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         println!("Created chat.");
                     }
                 }
+                ChatsCommand::Subthread(args) => {
+                    let input = args.input()?;
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if let Some(chat) = payload.chat.as_ref() {
+                        if payload.anchor_message.is_some() {
+                            println!("Created reply thread {}.", chat.id);
+                        } else {
+                            println!("Created child thread {}.", chat.id);
+                        }
+                    } else {
+                        println!("Created child thread.");
+                    }
+                }
                 ChatsCommand::CreateDm(args) => {
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
                     let mut realtime =
@@ -2755,6 +3098,23 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         } else {
                             println!("Created DM with user {}.", user_id);
                         }
+                    }
+                }
+                ChatsCommand::Move(args) => {
+                    let input = args.input()?;
+                    let destination = input
+                        .space_id
+                        .map(|space_id| format!("space {space_id}"))
+                        .unwrap_or_else(|| "Home".to_string());
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if let Some(chat) = payload.chat.as_ref() {
+                        println!("Moved thread {} to {destination}.", chat.id);
+                    } else {
+                        println!("Moved thread to {destination}.");
                     }
                 }
                 ChatsCommand::UpdateVisibility(args) => {
@@ -2867,6 +3227,61 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     } else {
                         println!("Marked {label} as read.");
                     }
+                }
+                ChatsCommand::Archive(args) => {
+                    handle_dialog_archived(
+                        args,
+                        true,
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
+                }
+                ChatsCommand::Unarchive(args) => {
+                    handle_dialog_archived(
+                        args,
+                        false,
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
+                }
+                ChatsCommand::Follow(args) => {
+                    handle_dialog_follow_mode(
+                        args,
+                        Some(proto::DialogFollowMode::Following),
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
+                }
+                ChatsCommand::Unfollow(args) => {
+                    handle_dialog_follow_mode(
+                        args,
+                        Some(proto::DialogFollowMode::Unfollowed),
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
+                }
+                ChatsCommand::FollowDefault(args) => {
+                    handle_dialog_follow_mode(
+                        args,
+                        None,
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
                 }
                 ChatsCommand::Delete(args) => {
                     let chat_id = validate_positive_id_arg("--chat-id", args.chat_id)?;
@@ -3540,6 +3955,28 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         println!("Reaction deleted (updates: {}).", payload.updates.len());
                     }
                 }
+                MessagesCommand::Pin(args) => {
+                    handle_message_pin(
+                        args,
+                        false,
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
+                }
+                MessagesCommand::Unpin(args) => {
+                    handle_message_pin(
+                        args,
+                        true,
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    )
+                    .await?;
+                }
             },
             Command::Spaces { command } => match command {
                 SpacesCommand::List => {
@@ -3695,6 +4132,48 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         );
                     }
                 }
+                NotificationsCommand::GetChat(args) => {
+                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+                    let label = peer_label_from_input(&peer);
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime
+                        .call(proto::GetChatInput {
+                            peer_id: Some(peer),
+                        })
+                        .await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let settings = payload
+                            .dialog
+                            .as_ref()
+                            .and_then(|dialog| dialog.notification_settings.as_ref());
+                        println!(
+                            "Notifications for {label}: {}.",
+                            dialog_notification_mode_label(settings)
+                        );
+                    }
+                }
+                NotificationsCommand::SetChat(args) => {
+                    let input = args.input()?;
+                    let label = input
+                        .peer_id
+                        .as_ref()
+                        .map(peer_label_from_input)
+                        .unwrap_or_else(|| "chat".to_string());
+                    let mode = dialog_notification_mode_label(
+                        input.notification_settings.as_ref(),
+                    );
+                    let mut realtime =
+                        connect_authenticated_realtime(&config, &auth_store).await?;
+                    let payload = realtime.call(input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Notifications for {label}: {mode}.");
+                    }
+                }
             },
             Command::Tasks { command } => match command {
                 TasksCommand::CreateLinear(args) => {
@@ -3768,7 +4247,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
         }
 
         Ok::<(), Box<dyn std::error::Error>>(())
-    }
+    })
     .await;
 
     // Auto-update check is informational. Only wait for it when:
@@ -4647,6 +5126,106 @@ fn peer_label_from_input(peer: &proto::InputPeer) -> String {
         Some(proto::input_peer::Type::User(user)) => format!("user {}", user.user_id),
         Some(proto::input_peer::Type::Self_(_)) => "self".to_string(),
         None => "peer".to_string(),
+    }
+}
+
+fn trimmed_optional(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let value = value.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+async fn handle_dialog_archived(
+    args: ChatsGetArgs,
+    archived: bool,
+    config: &Config,
+    auth_store: &AuthStore,
+    json: bool,
+    json_format: output::JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+    let label = peer_label_from_input(&peer);
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+    let payload = realtime
+        .call(proto::UpdateDialogArchivedInput {
+            peer_id: Some(peer),
+            archived,
+        })
+        .await?;
+    if json {
+        output::print_json(&payload, json_format)?;
+    } else if archived {
+        println!("Archived {label}.");
+    } else {
+        println!("Unarchived {label}.");
+    }
+    Ok(())
+}
+
+async fn handle_dialog_follow_mode(
+    args: ChatsChatIdArgs,
+    follow_mode: Option<proto::DialogFollowMode>,
+    config: &Config,
+    auth_store: &AuthStore,
+    json: bool,
+    json_format: output::JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let peer = input_peer_from_args(Some(args.chat_id), None)?;
+    let label = peer_label_from_input(&peer);
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+    let payload = realtime
+        .call(proto::UpdateDialogFollowModeInput {
+            peer_id: Some(peer),
+            follow_mode: follow_mode.map(|mode| mode as i32),
+        })
+        .await?;
+    if json {
+        output::print_json(&payload, json_format)?;
+    } else {
+        let action = match follow_mode {
+            Some(proto::DialogFollowMode::Following) => "Following",
+            Some(proto::DialogFollowMode::Unfollowed) => "Not following",
+            Some(proto::DialogFollowMode::Unspecified) | None => "Default follow policy for",
+        };
+        println!("{action} {label}.");
+    }
+    Ok(())
+}
+
+async fn handle_message_pin(
+    args: MessagesPinArgs,
+    unpin: bool,
+    config: &Config,
+    auth_store: &AuthStore,
+    json: bool,
+    json_format: output::JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = args.input(unpin)?;
+    let message_id = input.message_id;
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+    let payload = realtime.call(input).await?;
+    if json {
+        output::print_json(&payload, json_format)?;
+    } else if unpin {
+        println!("Unpinned message {message_id}.");
+    } else {
+        println!("Pinned message {message_id}.");
+    }
+    Ok(())
+}
+
+fn dialog_notification_mode_label(
+    settings: Option<&proto::DialogNotificationSettings>,
+) -> &'static str {
+    match settings
+        .and_then(|settings| settings.mode)
+        .and_then(|mode| proto::dialog_notification_settings::Mode::try_from(mode).ok())
+    {
+        Some(proto::dialog_notification_settings::Mode::All) => "all",
+        Some(proto::dialog_notification_settings::Mode::Mentions) => "mentions",
+        Some(proto::dialog_notification_settings::Mode::None) => "none",
+        Some(proto::dialog_notification_settings::Mode::Unspecified) | None => "inherit",
     }
 }
 
@@ -6227,6 +6806,170 @@ mod cli_parsing_tests {
                 command: SchemaCommand::Proto
             }
         ));
+    }
+
+    #[test]
+    fn parses_offline_capability_queries_and_plugin_shortcut() {
+        let cli = Cli::try_parse_from(["inline", "capabilities", "message", "send", "--compact"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Capabilities { path }
+                if path == ["message", "send"]
+        ));
+        assert!(cli.compact);
+
+        let cli =
+            Cli::try_parse_from(["inline", "schema", "commands", "chats", "subthread"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Schema {
+                command: SchemaCommand::Commands { path }
+            } if path == ["chats", "subthread"]
+        ));
+
+        let cli = Cli::try_parse_from(["inline", "plugins", "install", "--dry-run"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Plugin {
+                command: PluginCommand::Install { dry_run: true }
+            }
+        ));
+    }
+
+    #[test]
+    fn user_thread_workflows_build_existing_rpc_inputs() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "chats",
+            "reply-thread",
+            "--parent-chat-id",
+            "12",
+            "--message-id",
+            "34",
+            "--title",
+            "  Follow-up  ",
+            "--participant",
+            "56",
+        ])
+        .unwrap();
+        let Command::Chats {
+            command: ChatsCommand::Subthread(args),
+        } = cli.command
+        else {
+            panic!("expected subthread command");
+        };
+        let input = args.input().unwrap();
+        assert_eq!(input.parent_chat_id, 12);
+        assert_eq!(input.parent_message_id, Some(34));
+        assert_eq!(input.title.as_deref(), Some("Follow-up"));
+        assert_eq!(input.participants[0].user_id, Some(56));
+
+        let cli =
+            Cli::try_parse_from(["inline", "chats", "move", "--chat-id", "12", "--home"]).unwrap();
+        let Command::Chats {
+            command: ChatsCommand::Move(args),
+        } = cli.command
+        else {
+            panic!("expected move command");
+        };
+        assert_eq!(
+            args.input().unwrap(),
+            proto::MoveThreadInput {
+                chat_id: 12,
+                space_id: None,
+            }
+        );
+
+        for operation in [
+            "archive",
+            "unarchive",
+            "follow",
+            "unfollow",
+            "follow-default",
+        ] {
+            let cli = Cli::try_parse_from(["inline", "chats", operation, "-c", "12"])
+                .unwrap_or_else(|error| panic!("{operation}: {error}"));
+            assert!(matches!(cli.command, Command::Chats { .. }));
+        }
+        assert!(Cli::try_parse_from(["inline", "chats", "follow", "-u", "12"]).is_err());
+    }
+
+    #[test]
+    fn notification_pin_and_session_commands_are_agent_safe() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "notifications",
+            "set-chat",
+            "-u",
+            "42",
+            "--mode",
+            "inherit",
+        ])
+        .unwrap();
+        let Command::Notifications {
+            command: NotificationsCommand::SetChat(args),
+        } = cli.command
+        else {
+            panic!("expected per-chat notifications");
+        };
+        let input = args.input().unwrap();
+        assert!(input.notification_settings.is_none());
+        assert!(matches!(
+            input.peer_id.unwrap().r#type,
+            Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                user_id: 42
+            }))
+        ));
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "unpin",
+            "-c",
+            "12",
+            "--message-id",
+            "34",
+        ])
+        .unwrap();
+        let Command::Messages {
+            command: MessagesCommand::Unpin(args),
+        } = cli.command
+        else {
+            panic!("expected unpin command");
+        };
+        let input = args.input(true).unwrap();
+        assert_eq!(input.message_id, 34);
+        assert!(input.unpin);
+
+        assert!(matches!(
+            Cli::try_parse_from(["inline", "auth", "sessions"])
+                .unwrap()
+                .command,
+            Command::Auth {
+                command: AuthCommand::Sessions
+            }
+        ));
+        let cli = Cli::try_parse_from([
+            "inline",
+            "auth",
+            "revoke-session",
+            "--session-id",
+            "99",
+            "--yes",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Auth {
+                command: AuthCommand::RevokeSession(AuthRevokeSessionArgs {
+                    session_id: 99,
+                    yes: true,
+                })
+            }
+        ));
+        assert!(cli.json);
     }
 
     #[test]

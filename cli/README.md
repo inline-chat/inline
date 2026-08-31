@@ -194,9 +194,9 @@ Run `inline` with no arguments in a terminal for a quick introduction, useful
 commands, and links to help. The page is local and exits successfully: it does
 not read credentials, start an agent, check for updates, or connect to Inline.
 Commands and flags are highlighted, with a stacked layout in narrow terminals.
-The Inline wordmark uses a three-tone silver bevel within the letters, with no
-outer shadow. Narrow terminals fall back to text; monochrome output keeps the
-same clean letter shapes without shading.
+The Inline wordmark uses a three-tone silver bevel within the letters and a
+full-height logo mark, with no outer shadow. Narrow terminals fall back to
+text; monochrome output keeps the same clean letter shapes without shading.
 
 Use `inline --help` for the full command reference and `inline <command> --help`
 for details. Redirected no-argument calls and flags-only errors keep their
@@ -222,6 +222,27 @@ inline search -c 123 --filter documents --ids
 inline message ls -c 123 --has-media --ids
 ```
 
+Common chat state and organization operations use the same `-c`/`-u` peer
+flags and the same V2/V3 authenticated connection as reads and sends:
+
+```bash
+inline chats subthread --parent-chat-id 123 --message-id 456 --title "Follow-up"
+inline chats move --chat-id 789 --space-id 7
+inline chats archive -c 123
+inline chats follow -c 789
+inline notifications set-chat -c 123 --mode mentions
+inline messages pin -c 123 --message-id 456
+inline auth sessions
+inline auth revoke-session --session-id 42
+```
+
+`chats subthread` is also available as `create-reply`, `reply-thread`, and
+`create-subthread`. `follow-default` removes an explicit follow preference.
+Per-chat notification modes are `all`, `mentions`, `none`, and `inherit`.
+Session revocation asks for confirmation; JSON automation must pass `--yes`.
+Use `inline logout` to end the current session; `auth revoke-session` ends
+another account session.
+
 Scope filters combine with `--filter` and run before `--limit`/`--offset` in
 both human and JSON output. `--home` means chats outside spaces, including DMs
 and Home threads; use `--type thread` to exclude DMs. `--unread` includes manual
@@ -237,6 +258,24 @@ Time/media filters on message lists, and time filters on search, apply to the
 fetched page; they do not scan all history. `--ids` on message lists and search
 prints peer-local message IDs without fetching the chat catalog for names.
 It cannot be combined with `--json` or `--translate`.
+
+### Agent discovery and Codex plugin
+
+`inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]`
+emit the actual public Clap command metadata as JSON. They run before config,
+telemetry, update checks, or auth, so agents can inspect one narrow command
+without network access or stale embedded docs:
+
+```bash
+inline capabilities --compact
+inline capabilities messages send --compact
+inline schema commands chats subthread --compact
+```
+
+Install the full Codex integration with `inline plugin install`. It delegates
+to Codex's idempotent plugin manager with fixed arguments and installs the
+Inline skill plus OAuth MCP definition. `--dry-run` prints those commands
+without changing Codex. `inline skill install` remains the skill-only path.
 
 ### Shell completions
 
@@ -368,6 +407,11 @@ user-agent, OS version, and metadata header names sent to the API/realtime
 server.
 
 ## Development
+
+The workspace uses one Cargo target directory and disables incremental
+compilation to avoid large per-crate caches. Focused checks use the dev/test
+profile; release builds are not needed for local verification. Developers with
+spare disk space can opt in with `CARGO_INCREMENTAL=1`.
 
 Before committing CLI changes, run the local pre-commit check:
 

@@ -211,6 +211,9 @@ fn offline_commands_and_excluded_errors_make_no_connection() {
         (&["--help"], None),
         (&["--version"], None),
         (&["completion", "bash"], None),
+        (&["capabilities", "messages", "send", "--compact"], None),
+        (&["schema", "commands", "auth", "login", "--compact"], None),
+        (&["plugin", "install", "--dry-run", "--json"], None),
         (
             &["--json", "--compact", "definitely-not-a-command"],
             Some("invalid_args"),

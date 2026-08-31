@@ -4,7 +4,15 @@ Use Inline work chats from Codex through the hosted Inline MCP server and the bu
 
 ## Install
 
-Add Inline's public plugin marketplace:
+With the Inline CLI installed, use the idempotent shortcut:
+
+```sh
+inline plugin install
+```
+
+It invokes Codex's plugin manager and installs both this skill and the OAuth MCP definition. To inspect the exact commands without changing Codex, run `inline plugin install --dry-run`.
+
+To install directly through Codex instead, add Inline's public plugin marketplace:
 
 ```sh
 codex plugin marketplace add inline-chat/inline

@@ -118,6 +118,12 @@ Start with the [developer docs](https://inline.chat/docs), or jump directly to a
 Until Inline is available in the official Codex plugin marketplace, add the public Inline marketplace and install the plugin manually:
 
 ```sh
+inline plugin install
+```
+
+The CLI delegates to the same idempotent Codex plugin commands below and installs both the Inline skill and OAuth MCP definition. To run those commands directly:
+
+```sh
 codex plugin marketplace add inline-chat/inline
 codex plugin add inline@inline
 ```
