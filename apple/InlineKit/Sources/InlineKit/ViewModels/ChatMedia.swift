@@ -215,19 +215,18 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
           return
         }
 
-        guard !response.messages.isEmpty else {
+        if response.messages.isEmpty {
           Log.shared.debug("No more photo messages for chat media")
           hasMorePhotos = false
-          return
-        }
+        } else {
+          Log.shared.debug("Loaded \(response.messages.count) photo messages for chat \(chatId)")
+          if let lastMessageId = response.messages.last?.id {
+            nextPhotoOffsetId = lastMessageId
+          }
 
-        Log.shared.debug("Loaded \(response.messages.count) photo messages for chat \(chatId)")
-        if let lastMessageId = response.messages.last?.id {
-          nextPhotoOffsetId = lastMessageId
-        }
-
-        if response.messages.count < pageSize {
-          hasMorePhotos = false
+          if response.messages.count < pageSize {
+            hasMorePhotos = false
+          }
         }
       } catch {
         Log.shared.error("Failed to load photo messages", error: error)

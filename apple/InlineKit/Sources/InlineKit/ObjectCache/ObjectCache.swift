@@ -57,7 +57,7 @@ public class ObjectCache {
   }
 
   public func getChat(id: Int64) -> Chat? {
-    if chats[id] == nil, observingChats.contains(id) == false {
+    if observingChats.contains(id) == false {
       // fill in the cache
       observeChat(id: id)
     }
@@ -75,7 +75,7 @@ public class ObjectCache {
   }
 
   public func getSpace(id: Int64) -> Space? {
-    if spaces[id] == nil, observingSpaces.contains(id) == false {
+    if observingSpaces.contains(id) == false {
       // fill in the cache
       observeSpace(id: id)
     }

@@ -193,7 +193,9 @@ public final class SharedAudioPlayer: ObservableObject {
   }
 
   private func syncStateFromCenter() {
-    state = center.state
+    let nextState = center.state
+    guard state != nextState else { return }
+    state = nextState
   }
 
   private func observeCenter() {
@@ -202,7 +204,7 @@ public final class SharedAudioPlayer: ObservableObject {
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        state = center.state
+        syncStateFromCenter()
         observeCenter()
       }
     }
