@@ -787,6 +787,8 @@ message AgentSession {
   int64 bot_user_id = 3;
   AgentSessionProvider provider = 4;
   optional int64 status_message_id = 5;
+  // Authoritative parent for a reply-thread session. Omitted for top-level chats.
+  optional int64 parent_chat_id = 6;
 }
 
 enum ConnectAgentSessionState {

@@ -4790,12 +4790,23 @@ public nonisolated struct AgentSession: Sendable {
   /// Clears the value of `statusMessageID`. Subsequent reads from it will return its default value.
   public mutating func clearStatusMessageID() {self._statusMessageID = nil}
 
+  /// Authoritative parent for a reply-thread session. Omitted for top-level chats.
+  public var parentChatID: Int64 {
+    get {_parentChatID ?? 0}
+    set {_parentChatID = newValue}
+  }
+  /// Returns true if `parentChatID` has been explicitly set.
+  public var hasParentChatID: Bool {self._parentChatID != nil}
+  /// Clears the value of `parentChatID`. Subsequent reads from it will return its default value.
+  public mutating func clearParentChatID() {self._parentChatID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: Peer? = nil
   fileprivate var _statusMessageID: Int64? = nil
+  fileprivate var _parentChatID: Int64? = nil
 }
 
 public nonisolated struct ConnectAgentSessionInput: Sendable {
@@ -24706,7 +24717,7 @@ nonisolated extension GetSpaceResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
 nonisolated extension AgentSession: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AgentSession"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}peer_id\0\u{3}bot_user_id\0\u{1}provider\0\u{3}status_message_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}peer_id\0\u{3}bot_user_id\0\u{1}provider\0\u{3}status_message_id\0\u{3}parent_chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24719,6 +24730,7 @@ nonisolated extension AgentSession: SwiftProtobuf.Message, SwiftProtobuf._Messag
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
       case 4: try { try decoder.decodeSingularEnumField(value: &self.provider) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self._statusMessageID) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self._parentChatID) }()
       default: break
       }
     }
@@ -24744,6 +24756,9 @@ nonisolated extension AgentSession: SwiftProtobuf.Message, SwiftProtobuf._Messag
     try { if let v = self._statusMessageID {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
     } }()
+    try { if let v = self._parentChatID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 6)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -24753,6 +24768,7 @@ nonisolated extension AgentSession: SwiftProtobuf.Message, SwiftProtobuf._Messag
     if lhs.botUserID != rhs.botUserID {return false}
     if lhs.provider != rhs.provider {return false}
     if lhs._statusMessageID != rhs._statusMessageID {return false}
+    if lhs._parentChatID != rhs._parentChatID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
