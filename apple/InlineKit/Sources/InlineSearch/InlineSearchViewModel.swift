@@ -141,6 +141,7 @@ public final class InlineSearchViewModel {
   }
 
   public func loadMoreMessages() {
+    guard isSearchingLocal == false else { return }
     guard hasMoreMessages else { return }
     guard isLoadingMoreMessages == false else { return }
     guard LocalMessageSearch.isSearchable(query) else { return }
@@ -207,6 +208,8 @@ public final class InlineSearchViewModel {
   }
 
   private func dedupeGlobalUsers() {
+    // Retained chat rows belong to the previous query until local search finishes.
+    guard isSearchingLocal == false else { return }
     let localUserIds = Set(chats.compactMap { result -> Int64? in
       if case let .user(id) = result.peer {
         return id

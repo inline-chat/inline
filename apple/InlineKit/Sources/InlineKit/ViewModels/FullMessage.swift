@@ -19,7 +19,9 @@ public final class FullMessageViewModel: ObservableObject, @unchecked Sendable {
   }
 
   public func fetchMessage(_ msgId: Int64, chatId: Int64) {
-    let messageId = messageId
+    messageId = msgId
+    self.chatId = chatId
+    let messageId = msgId
     db.warnIfInMemoryDatabaseForObservation("FullMessageViewModel.fullMessage")
     cancellable =
       ValueObservation

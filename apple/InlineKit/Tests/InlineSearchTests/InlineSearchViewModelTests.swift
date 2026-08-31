@@ -1,3 +1,4 @@
+import Dispatch
 import Foundation
 import GRDB
 import Testing
@@ -68,6 +69,51 @@ struct InlineSearchViewModelTests {
 
     #expect(model.chats.map(\.peer) == [.user(id: userId)])
     #expect(model.globalUsers.map(\.id) == [42])
+  }
+
+  @Test("fast global results are deduped only against the current local query")
+  func globalUsersWaitForCurrentLocalQueryBeforeDedupe() async throws {
+    let (queue, db) = try makeInMemoryDB()
+    try await queue.write { db in
+      try seedUser(db, id: 1, firstName: "Before", lastName: nil, username: "before")
+      try seedPrivateChat(db, chatId: 5001, userId: 1)
+      try seedUser(db, id: 2, firstName: "After", lastName: nil, username: "after")
+      try seedPrivateChat(db, chatId: 5002, userId: 2)
+    }
+
+    let model = InlineSearchViewModel(
+      db: db,
+      limits: InlineSearchLimits(globalDebounceNanoseconds: 0),
+      globalClient: StaticGlobalClient(usersByQuery: [
+        "after": [
+          apiUser(id: 1, firstName: "After", username: "afterrenamed"),
+          apiUser(id: 2, firstName: "After", username: "after"),
+        ]
+      ])
+    )
+    model.search("before")
+    try await waitUntil { model.isSearching == false }
+    #expect(model.chats.map(\.peer) == [.user(id: 1)])
+
+    // Hold only the test database queue so the global response arrives first.
+    let releaseLocalRead = DispatchSemaphore(value: 0)
+    await withCheckedContinuation { (entered: CheckedContinuation<Void, Never>) in
+      queue.asyncRead { _ in
+        entered.resume()
+        _ = releaseLocalRead.wait(timeout: .now() + 5)
+      }
+    }
+    defer { releaseLocalRead.signal() }
+
+    model.search("after")
+    try await waitUntil { model.isSearchingGlobal == false }
+    #expect(model.isSearchingLocal)
+    #expect(Set(model.globalUsers.map(\.id)) == [1, 2])
+
+    releaseLocalRead.signal()
+    try await waitUntil { model.isSearchingLocal == false }
+    #expect(model.chats.map(\.peer) == [.user(id: 2)])
+    #expect(model.globalUsers.map(\.id) == [1])
   }
 
   @Test("command bar catalog matches rich chat identity and ordering without message hydration")
@@ -208,6 +254,48 @@ struct InlineSearchViewModelTests {
 
     model.loadMoreMessages()
     try await waitUntil { model.isLoadingMoreMessages == false && model.messages.count == 25 }
+    #expect(model.hasMoreMessages == false)
+  }
+
+  @Test("a new local query cannot paginate using the previous query's offset")
+  func paginationWaitsForNewLocalResults() async throws {
+    let (queue, db) = try makeInMemoryDB()
+    try await queue.write { db in
+      try seedUser(db, id: userId, firstName: "Search", lastName: "User", username: "search")
+      try seedThread(db, id: threadId, title: "Paging", spaceId: nil)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: threadId)!)
+      for messageId in 1...6 {
+        try seedMessage(
+          db,
+          chatId: threadId,
+          messageId: Int64(messageId),
+          fromUserId: userId,
+          text: messageId <= 3 ? "before query" : "after query"
+        )
+      }
+    }
+
+    let model = InlineSearchViewModel(
+      db: db,
+      scope: InlineSearchScope(includeGlobalUsers: false),
+      limits: InlineSearchLimits(messageBatchSize: 2),
+      globalClient: StaticGlobalClient()
+    )
+    model.search("before")
+    try await waitUntil { model.isSearchingLocal == false }
+    #expect(model.messages.map(\.messageId) == [3, 2])
+    #expect(model.hasMoreMessages)
+
+    model.search("after")
+    model.loadMoreMessages()
+    #expect(model.isSearchingLocal)
+    #expect(model.isLoadingMoreMessages == false)
+    try await waitUntil { model.isSearchingLocal == false }
+    #expect(model.messages.map(\.messageId) == [6, 5])
+
+    model.loadMoreMessages()
+    try await waitUntil { model.isLoadingMoreMessages == false }
+    #expect(model.messages.map(\.messageId) == [6, 5, 4])
     #expect(model.hasMoreMessages == false)
   }
 

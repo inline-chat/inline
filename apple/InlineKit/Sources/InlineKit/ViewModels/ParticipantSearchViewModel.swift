@@ -10,6 +10,8 @@ public final class ParticipantSearchViewModel: ObservableObject {
 
   private let log = Log.scoped("ParticipantSearch")
   private var db: AppDatabase
+  private(set) var searchTask: Task<Void, Never>?
+  private var searchToken = UUID()
   var spaceId: Int64?
 
   public init(db: AppDatabase, spaceId: Int64?) {
@@ -17,17 +19,26 @@ public final class ParticipantSearchViewModel: ObservableObject {
     self.spaceId = spaceId
   }
 
+  deinit {
+    searchTask?.cancel()
+  }
+
   public func search(query: String) {
+    searchTask?.cancel()
+    searchTask = nil
+    searchToken = UUID()
+    let token = searchToken
     log.debug("Searching for query: \(query)")
     guard !query.isEmpty else {
       results = []
       return
     }
 
-    Task {
+    searchTask = Task { [weak self, db, spaceId] in
+      guard !Task.isCancelled else { return }
       do {
         if let spaceId {
-          log.debug("Using spaceId: \(spaceId)")
+          self?.log.debug("Using spaceId: \(spaceId)")
           let spaceMembers = try await db.reader.read { db in
             try Member.filter(Column("spaceId") == spaceId)
               .including(
@@ -42,16 +53,19 @@ public final class ParticipantSearchViewModel: ObservableObject {
               .fetchAll(db)
           }
 
-          log.debug("Fetched \(spaceMembers.count) space members")
-          results = spaceMembers.sorted(by: {
+          guard !Task.isCancelled, let self, self.searchToken == token else { return }
+          self.log.debug("Fetched \(spaceMembers.count) space members")
+          self.results = spaceMembers.sorted(by: {
             $0.user.displayName < $1.user.displayName
           })
         } else {
-          results = []
+          guard !Task.isCancelled, let self, self.searchToken == token else { return }
+          self.results = []
         }
       } catch {
+        guard !Task.isCancelled, let self, self.searchToken == token else { return }
         Log.shared.error("Failed to search space members: \(error)")
-        results = []
+        self.results = []
       }
     }
   }
