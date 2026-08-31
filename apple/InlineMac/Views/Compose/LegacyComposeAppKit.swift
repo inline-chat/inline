@@ -1027,12 +1027,8 @@ class LegacyComposeAppKit: NSView {
     autocompleteMenu?.update(
       items: items,
       selectedIndex: selectedIndex,
-      match: match,
-      availableWidth: autocompleteMenuWidth()
+      match: match
     )
-    if let autocompleteMenu {
-      updateAutocompleteMenuPosition(menu: autocompleteMenu)
-    }
     autocompleteMenu?.show()
 
     autocompleteKeyMonitorEscUnsubscribe?()
@@ -1043,19 +1039,6 @@ class LegacyComposeAppKit: NSView {
         self?.hideAutocomplete(suppressCurrentMatch: true)
       }
     )
-  }
-
-  private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu) {
-    layoutSubtreeIfNeeded()
-    if let width = autocompleteMenuWidth() {
-      menu.setAvailableWidth(width)
-    }
-  }
-
-  private func autocompleteMenuWidth() -> CGFloat? {
-    layoutSubtreeIfNeeded()
-    let width = bounds.width
-    return width > 1 ? width : nil
   }
 
   private func showMentionCompletion(for query: String) {

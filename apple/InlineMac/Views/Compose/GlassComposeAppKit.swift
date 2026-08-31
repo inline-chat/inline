@@ -732,9 +732,6 @@ class GlassComposeAppKit: NSView {
     if mentionCompletionMenu?.isVisible == true {
       updateMentionMenuPosition()
     }
-    if let autocompleteMenu, autocompleteMenu.isVisible {
-      updateAutocompleteMenuPosition(menu: autocompleteMenu)
-    }
   }
 
   private func hydrateInitialDraftIfNeeded() {
@@ -1543,12 +1540,8 @@ class GlassComposeAppKit: NSView {
     autocompleteMenu?.update(
       items: items,
       selectedIndex: selectedIndex,
-      match: match,
-      availableWidth: autocompleteMenuWidth()
+      match: match
     )
-    if let autocompleteMenu {
-      updateAutocompleteMenuPosition(menu: autocompleteMenu)
-    }
     autocompleteMenu?.show()
 
     autocompleteKeyMonitorEscUnsubscribe?()
@@ -1559,19 +1552,6 @@ class GlassComposeAppKit: NSView {
         self?.hideAutocomplete(suppressCurrentMatch: true)
       }
     )
-  }
-
-  private func updateAutocompleteMenuPosition(menu: ComposeAutocompleteMenu) {
-    layoutSubtreeIfNeeded()
-    if let width = autocompleteMenuWidth() {
-      menu.setAvailableWidth(width)
-    }
-  }
-
-  private func autocompleteMenuWidth() -> CGFloat? {
-    layoutSubtreeIfNeeded()
-    let width = (glassComposePillView ?? self).bounds.width
-    return width > 1 ? width : nil
   }
 
   private func showMentionCompletion(for query: String) {

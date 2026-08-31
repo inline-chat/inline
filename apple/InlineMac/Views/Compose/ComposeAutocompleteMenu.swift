@@ -19,12 +19,10 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
 
   private var items: [ComposeAutocompleteItem] = []
   private var selectedIndex = 0
-  private var availableWidth: CGFloat?
   private var style: Style = .list
   private(set) var canSelectItems = true
   private(set) var presentationSession: ComposeAutocompletePresentationSession?
   private var heightConstraint: NSLayoutConstraint!
-  private var widthConstraint: NSLayoutConstraint!
 
   var isShowingEmojiPalette: Bool {
     style == .emojiPalette
@@ -45,8 +43,6 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
     static let paletteSpacing: CGFloat = 0
     static let paletteHorizontalInset: CGFloat = 6
     static let paletteVerticalInset: CGFloat = 4
-    static let paletteMinVisibleItems = 4
-    static let paletteMaxVisibleItems = 7
   }
 
   init(surfaceStyle: ComposeCompletionSurfaceStyle) {
@@ -81,26 +77,20 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
   func update(
     items: [ComposeAutocompleteItem],
     selectedIndex: Int,
-    match: ComposeAutocompleteMatch,
-    availableWidth: CGFloat? = nil
+    match: ComposeAutocompleteMatch
   ) {
     let nextStyle: Style = items.allSatisfy { $0.kind == .emoji } ? .emojiPalette : .list
     let needsReload = self.items != items || style != nextStyle
-    let needsResize = self.availableWidth != availableWidth
 
     presentationSession = ComposeAutocompletePresentationSession(match: match)
     setContentInteractionEnabled(true)
     self.items = items
     self.selectedIndex = items.indices.contains(selectedIndex) ? selectedIndex : 0
-    self.availableWidth = availableWidth
     style = nextStyle
 
     if needsReload {
       updateContent()
     } else {
-      if needsResize {
-        updateSize()
-      }
       updateSelection()
     }
   }
@@ -109,12 +99,6 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
     guard canSelectItems, items.indices.contains(selectedIndex) else { return }
     self.selectedIndex = selectedIndex
     updateSelection()
-  }
-
-  func setAvailableWidth(_ availableWidth: CGFloat) {
-    guard availableWidth > 1, self.availableWidth != availableWidth else { return }
-    self.availableWidth = availableWidth
-    updateSize()
   }
 
   @discardableResult
@@ -231,12 +215,11 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
     paletteScrollView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(paletteScrollView)
 
+    // The host's horizontal anchors own width. A preferred menu width feeds
+    // back into the chat's SwiftUI/AppKit fitting size, even while hidden.
     heightConstraint = heightAnchor.constraint(equalToConstant: 0)
-    widthConstraint = widthAnchor.constraint(equalToConstant: Layout.listWidth)
-    widthConstraint.priority = .defaultHigh
     let constraints: [NSLayoutConstraint] = [
       heightConstraint,
-      widthConstraint,
       surfaceView.leadingAnchor.constraint(equalTo: leadingAnchor),
       surfaceView.trailingAnchor.constraint(equalTo: trailingAnchor),
       surfaceView.topAnchor.constraint(equalTo: topAnchor),
@@ -286,30 +269,15 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
 
   private func updateSize() {
     let newHeight: CGFloat
-    let newWidth: CGFloat
 
     switch style {
     case .list:
       newHeight = min(CGFloat(items.count) * Layout.rowHeight, Layout.maxHeight)
-      newWidth = availableWidth.flatMap { $0 > 0 ? $0 : nil } ?? Layout.listWidth
-      tableView.tableColumns.first?.width = newWidth
     case .emojiPalette:
       newHeight = Layout.paletteHeight
-      newWidth = availableWidth.flatMap { $0 > 0 ? $0 : nil } ?? naturalPaletteWidth()
     }
 
     setHeight(newHeight, constraint: heightConstraint)
-    widthConstraint.constant = newWidth
-  }
-
-  private func naturalPaletteWidth() -> CGFloat {
-    let visibleItems = min(
-      max(items.count, Layout.paletteMinVisibleItems),
-      Layout.paletteMaxVisibleItems
-    )
-    let itemWidth = CGFloat(visibleItems) * Layout.paletteItemSize
-    let spacingWidth = CGFloat(max(visibleItems - 1, 0)) * Layout.paletteSpacing
-    return itemWidth + spacingWidth + Layout.paletteHorizontalInset * 2
   }
 
   private func updateSelection() {
