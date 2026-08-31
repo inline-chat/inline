@@ -74,6 +74,7 @@ struct InviteCode: View {
       .monospaced()
       .multilineTextAlignment(.center)
       .onboardingFormField()
+      .disabled(isChecking)
       .onSubmit {
         submit()
       }
@@ -84,7 +85,8 @@ struct InviteCode: View {
   }
 
   func submit() {
-    guard isInputValid, !isChecking else {
+    guard !isChecking else { return }
+    guard isInputValid else {
       errorMsg = String(
         localized: "Enter the 8-character access invite code.",
         comment: "Access invite code validation error"
@@ -92,13 +94,14 @@ struct InviteCode: View {
       return
     }
 
+    let inviteCode = normalizedCode
     #if IOS_ONBOARDING_GALLERY_APP
     errorMsg = ""
     switch destination {
       case let .email(email, challengeToken):
-        nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: normalizedCode))
+        nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: inviteCode))
       case let .phone(phoneNumber):
-        nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: normalizedCode))
+        nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode))
       case .nativeApple:
         nav.push(.profile(userId: OnboardingGallerySession.userID))
     }
@@ -109,18 +112,18 @@ struct InviteCode: View {
     Task {
       do {
         if case .nativeApple = destination {
-          await providerSignIn.continueNativeAppleAuthorization(inviteCode: normalizedCode)
+          await providerSignIn.continueNativeAppleAuthorization(inviteCode: inviteCode)
           isChecking = false
           if let error = providerSignIn.errorMessage { errorMsg = error }
           return
         }
-        _ = try await api.checkInviteCode(normalizedCode)
+        _ = try await api.checkInviteCode(inviteCode)
         isChecking = false
         switch destination {
         case let .email(email, challengeToken):
-          nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: normalizedCode))
+          nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: inviteCode))
         case let .phone(phoneNumber):
-          nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: normalizedCode))
+          nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode))
         case .nativeApple:
           break
         }
