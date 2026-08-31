@@ -39,7 +39,7 @@ describe("toRealtimeRpcError", () => {
 
       expect(result.code).toBe(RealtimeRpcError.Code.BAD_REQUEST)
       expect(result.codeNumber).toBe(400)
-      expect(result.message).toBe(error.description)
+      expect(result.message).toBe(InlineError.ApiError[type][2])
       expect(result.message).not.toContain("private auth failure")
     }
   })
