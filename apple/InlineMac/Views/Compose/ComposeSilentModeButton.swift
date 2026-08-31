@@ -93,7 +93,8 @@ final class ComposeSilentModeButton: NSView {
     button.state = enabled ? .on : .off
     button.image = NSImage(systemSymbolName: enabled ? "bell.slash" : "bell", accessibilityDescription: nil)?
       .withSymbolConfiguration(.init(pointSize: mode.silentIconPointSize, weight: .medium))
-    button.contentTintColor = .labelColor
+    // labelColor is translucent; match the microphone's opaque foreground.
+    button.contentTintColor = .textColor
     button.setAccessibilityRole(.checkBox)
     button.setAccessibilityLabel("Silent mode")
     button.setAccessibilityValue(enabled ? 1 : 0)

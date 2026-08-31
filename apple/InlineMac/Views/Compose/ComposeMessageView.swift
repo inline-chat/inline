@@ -38,14 +38,8 @@ class ComposeMessageView: NSView {
     return view
   }()
 
-  private lazy var closeButton: NSButton = {
-    let button = NSButton(frame: .zero)
-    button.bezelStyle = .circular
-    button.isBordered = false
-    button.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
-    button.imagePosition = .imageOnly
-    button.target = self
-    button.action = #selector(handleClose)
+  private lazy var closeButton: ComposeCloseButton = {
+    let button = ComposeCloseButton(target: self, action: #selector(handleClose))
     button.translatesAutoresizingMaskIntoConstraints = false
     return button
   }()
@@ -179,5 +173,96 @@ class ComposeMessageView: NSView {
 
   var isOpen: Bool {
     alphaValue == visibleAlpha
+  }
+}
+
+private final class ComposeCloseButton: NSView {
+  private let button = NSButton(frame: .zero)
+  private var hoverTrackingArea: NSTrackingArea?
+  private var isHovering = false
+
+  init(target: AnyObject, action: Selector) {
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+
+    button.bezelStyle = .circular
+    button.isBordered = false
+    button.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
+    button.imagePosition = .imageOnly
+    button.target = target
+    button.action = action
+    button.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(button)
+
+    NSLayoutConstraint.activate([
+      button.leadingAnchor.constraint(equalTo: leadingAnchor),
+      button.trailingAnchor.constraint(equalTo: trailingAnchor),
+      button.topAnchor.constraint(equalTo: topAnchor),
+      button.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layout() {
+    super.layout()
+    layer?.cornerRadius = min(bounds.width, bounds.height) / 2
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+
+    if let hoverTrackingArea {
+      removeTrackingArea(hoverTrackingArea)
+    }
+
+    let area = NSTrackingArea(
+      rect: .zero,
+      options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    )
+    addTrackingArea(area)
+    hoverTrackingArea = area
+    refreshHoverState()
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    refreshHoverState()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    setHovering(button.isEnabled)
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    setHovering(false)
+  }
+
+  private func refreshHoverState() {
+    guard button.isEnabled, !isHiddenOrHasHiddenAncestor, let window else {
+      setHovering(false)
+      return
+    }
+
+    let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    setHovering(visibleRect.contains(point))
+  }
+
+  private func setHovering(_ hovering: Bool) {
+    guard isHovering != hovering else { return }
+    isHovering = hovering
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer?.backgroundColor = hovering ? NSColor.gray.withAlphaComponent(0.1).cgColor : NSColor.clear.cgColor
+    CATransaction.commit()
   }
 }
