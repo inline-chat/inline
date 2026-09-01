@@ -69,6 +69,7 @@ export const MessageModel = {
   deleteMessages: deleteMessages,
   insertMessage: insertMessage,
   getMessages: getMessages,
+  getLatestMessagesForChat: getLatestMessagesForChat,
   getMessagesWithMediaFilter: getMessagesWithMediaFilter,
   getMessage: getMessage, // 1 msg
   getMessageByRandomId: getMessageByRandomId,
@@ -516,6 +517,22 @@ async function getMessages(
   combinedAround.sort((a, b) => b.messageId - a.messageId)
 
   return processMessages(combinedAround)
+}
+
+/** Reads the newest message identities and core rows from an existing snapshot. */
+async function getLatestMessagesForChat(
+  chatId: number,
+  limit: number,
+  tx: Transaction,
+): Promise<DbFullMessage[]> {
+  const latestMessages = await tx._query.messages.findMany({
+    where: eq(messages.chatId, chatId),
+    orderBy: desc(messages.messageId),
+    limit,
+    with: fullMessageRelations,
+  })
+
+  return processMessages(latestMessages)
 }
 
 async function getMessagesWithMediaFilter(input: {
@@ -1372,12 +1389,17 @@ async function getSenderIdForMessage({
   return message?.fromId ?? undefined
 }
 
-async function getMessagesByIds(chatId: number, messageIds: bigint[]): Promise<DbFullMessage[]> {
+async function getMessagesByIds(
+  chatId: number,
+  messageIds: bigint[],
+  options?: { tx?: Transaction },
+): Promise<DbFullMessage[]> {
   if (messageIds.length === 0) {
     return []
   }
 
-  let result = await db._query.messages.findMany({
+  const query = options?.tx?._query ?? db._query
+  const result = await query.messages.findMany({
     where: and(
       eq(messages.chatId, chatId),
       inArray(

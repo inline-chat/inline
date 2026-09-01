@@ -851,6 +851,7 @@ final class SyncTests {
 
     let methods = await client.getCalledMethods()
     #expect(methods == [.getUpdates, .getChat])
+    #expect(await client.getChatRecentMessageRequests() == [true])
 
     let applied = await apply.appliedUpdates
     #expect(applied.isEmpty)
@@ -966,6 +967,41 @@ final class SyncTests {
 
     let callCount = await client.getCallCount()
     #expect(callCount == 2)
+  }
+
+  @Test("chat TOO_LONG rejects a metadata-only response that omits the current tail")
+  func testChatTooLongRejectsMissingRecentWindow() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 10,
+          date: 200,
+          updates: [],
+          final: false,
+          resultType: .tooLong
+        )],
+        .getChat: [makeGetChatResult(chatId: 1, seq: 10, lastMessageId: 99)],
+      ]
+    )
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: Auth.mocked(authenticated: true).handle
+    )
+    await sync.activateGeneration()
+
+    let peer = makeChatPeer(chatId: 1)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 10)])
+    #expect(await waitForCondition { await client.getCallCount() == 2 })
+    #expect(await apply.repairedChats.isEmpty)
+    #expect(await storage.getBucketState(for: .chat(peer: peer)).seq == 0)
+    #expect(await client.getChatRecentMessageRequests() == [true])
   }
 
   @Test("space TOO_LONG repairs its authoritative snapshot and advances")
@@ -4076,6 +4112,7 @@ final actor FakeProtocolClient: ProtocolClientType {
   private var updatesStateDates: [Int64?] = []
   private var updatesStartSequences: [Int64] = []
   private var updatesEndSequences: [Int64?] = []
+  private var getChatRecentMessageFlags: [Bool] = []
   private var deferredGetUpdatesError: (afterCalls: Int, error: ProtocolSessionError)?
 
   func setError(afterGetUpdatesCalls count: Int, error: ProtocolSessionError) {
@@ -4133,6 +4170,8 @@ final actor FakeProtocolClient: ProtocolClientType {
     } else if case let .getUpdates(payload)? = input {
       updatesStartSequences.append(payload.startSeq)
       updatesEndSequences.append(payload.seqEnd > 0 ? payload.seqEnd : nil)
+    } else if case let .getChat(payload)? = input {
+      getChatRecentMessageFlags.append(payload.includeRecentMessages)
     }
     signalCallStarted(callNumber)
     if gatedCalls.contains(callNumber) {
@@ -4216,6 +4255,10 @@ final actor FakeProtocolClient: ProtocolClientType {
 
   func getUpdatesEndSequences() -> [Int64?] {
     updatesEndSequences
+  }
+
+  func getChatRecentMessageRequests() -> [Bool] {
+    getChatRecentMessageFlags
   }
 
   private func signalCallStarted(_ callNumber: Int) {
@@ -4655,6 +4698,7 @@ private func makeSpaceHasNewUpdatesSignal(spaceId: Int64, updateSeq: Int32) -> I
 private func makeGetChatResult(
   chatId: Int64 = 1,
   seq: Int32,
+  lastMessageId: Int64? = nil,
   pinnedMessageIds: [Int64] = []
 ) -> InlineProtocol.RpcResult.OneOf_Result {
   let peer = makeChatPeer(chatId: chatId)
@@ -4664,10 +4708,14 @@ private func makeGetChatResult(
   chat.title = "Chat \(chatId)"
   chat.peerID = peer
   chat.seq = seq
+  if let lastMessageId {
+    chat.lastMsgID = lastMessageId
+  }
 
   var dialog = InlineProtocol.Dialog()
   dialog.peer = peer
   dialog.chatID = chatId
+  dialog.unreadCount = 0
 
   var result = InlineProtocol.GetChatResult()
   result.chat = chat

@@ -10474,6 +10474,10 @@ public nonisolated struct GetChatInput: Sendable {
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
+  /// Include the newest bounded message window. Used by typed chat repair;
+  /// ordinary metadata reads keep the lightweight default.
+  public var includeRecentMessages: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -10523,6 +10527,9 @@ public nonisolated struct GetChatResult: Sendable {
   public var hasUser: Bool {self._user != nil}
   /// Clears the value of `user`. Subsequent reads from it will return its default value.
   public mutating func clearUser() {self._user = nil}
+
+  /// Newest-first ordinary messages, capped by the server at 100.
+  public var messages: [Message] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -34380,7 +34387,7 @@ nonisolated extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}include_recent_messages\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -34389,6 +34396,7 @@ nonisolated extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.includeRecentMessages) }()
       default: break
       }
     }
@@ -34402,11 +34410,15 @@ nonisolated extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    if self.includeRecentMessages != false {
+      try visitor.visitSingularBoolField(value: self.includeRecentMessages, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetChatInput, rhs: GetChatInput) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
+    if lhs.includeRecentMessages != rhs.includeRecentMessages {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -34414,7 +34426,7 @@ nonisolated extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 nonisolated extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0\u{3}pinned_message_ids\0\u{3}anchor_message\0\u{1}user\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}chat\0\u{1}dialog\0\u{3}pinned_message_ids\0\u{3}anchor_message\0\u{1}user\0\u{1}messages\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -34427,6 +34439,7 @@ nonisolated extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
       case 3: try { try decoder.decodeRepeatedInt64Field(value: &self.pinnedMessageIds) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._anchorMessage) }()
       case 5: try { try decoder.decodeSingularMessageField(value: &self._user) }()
+      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
       default: break
       }
     }
@@ -34452,6 +34465,9 @@ nonisolated extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
     try { if let v = self._user {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
     } }()
+    if !self.messages.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -34461,6 +34477,7 @@ nonisolated extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if lhs.pinnedMessageIds != rhs.pinnedMessageIds {return false}
     if lhs._anchorMessage != rhs._anchorMessage {return false}
     if lhs._user != rhs._user {return false}
+    if lhs.messages != rhs.messages {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

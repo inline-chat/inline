@@ -14,6 +14,9 @@ import {
 } from "@in/server/db/schema"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { and, eq, isNull } from "drizzle-orm"
+import type { Transaction } from "@in/server/db/types"
+
+type ThreadAccessQuery = Pick<typeof db, "select"> | Pick<Transaction, "select">
 
 export async function getDirectParticipantUserIds(chatId: number): Promise<number[]> {
   const participants = await db
@@ -99,28 +102,38 @@ export async function getEffectiveAccessUserIds(chat: DbChat): Promise<number[]>
   return uniqueIds([...grantedUserIds, ...inheritedUserIds])
 }
 
-export async function hasDirectParticipantGrant(chatId: number, userId: number): Promise<boolean> {
-  const cachedParticipant = AccessGuardsCache.getChatParticipant(chatId, userId)
-  if (cachedParticipant !== undefined) {
-    return cachedParticipant
+export async function hasDirectParticipantGrant(
+  chatId: number,
+  userId: number,
+  query: ThreadAccessQuery = db,
+): Promise<boolean> {
+  if (query === db) {
+    const cachedParticipant = AccessGuardsCache.getChatParticipant(chatId, userId)
+    if (cachedParticipant !== undefined) {
+      return cachedParticipant
+    }
   }
 
-  const participant = await db
+  const participant = await query
     .select({ id: chatParticipants.id })
     .from(chatParticipants)
     .where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, userId)))
     .limit(1)
 
   const exists = participant.length > 0
-  if (exists) {
+  if (exists && query === db) {
     AccessGuardsCache.setChatParticipant(chatId, userId)
   }
 
   return exists
 }
 
-export async function hasGroupParticipantGrant(chatId: number, userId: number): Promise<boolean> {
-  const rows = await db
+export async function hasGroupParticipantGrant(
+  chatId: number,
+  userId: number,
+  query: ThreadAccessQuery = db,
+): Promise<boolean> {
+  const rows = await query
     .select({ id: chatParticipantGroups.id })
     .from(chatParticipantGroups)
     .innerJoin(chats, eq(chatParticipantGroups.chatId, chats.id))
@@ -145,12 +158,16 @@ export async function hasGroupParticipantGrant(chatId: number, userId: number): 
   return rows.length > 0
 }
 
-export async function hasThreadAccessGrant(chatId: number, userId: number): Promise<boolean> {
-  if (await hasDirectParticipantGrant(chatId, userId)) {
+export async function hasThreadAccessGrant(
+  chatId: number,
+  userId: number,
+  query: ThreadAccessQuery = db,
+): Promise<boolean> {
+  if (await hasDirectParticipantGrant(chatId, userId, query)) {
     return true
   }
 
-  return hasGroupParticipantGrant(chatId, userId)
+  return hasGroupParticipantGrant(chatId, userId, query)
 }
 
 async function getGrantedUserIds(chatId: number): Promise<number[]> {

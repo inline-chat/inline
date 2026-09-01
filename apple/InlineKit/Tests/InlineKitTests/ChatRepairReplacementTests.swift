@@ -128,6 +128,104 @@ struct ChatRepairReplacementTests {
     }
   }
 
+  @Test("installs the newest ordinary-message window and matching read projection")
+  func installsRecentWindowAndReadProjection() async throws {
+    let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
+    let expectedUserState = BucketState(date: 50, seq: 7)
+    try await queue.write { (db: Database) throws in
+      try User(id: 1, email: "sender@example.com", firstName: "Sender").insert(db)
+      try User(id: 42, email: "viewer@example.com", firstName: "Viewer").insert(db)
+      var dialog = Dialog(from: .with {
+        $0.peer = chatPeer(7)
+        $0.chatID = 7
+        $0.unreadCount = 9
+        $0.readMaxID = 3
+      })
+      dialog.open = true
+      try dialog.insert(db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .user, state: expectedUserState, in: db)
+    }
+
+    var repair = repairedChatResult()
+    repair.chat.lastMsgID = 12
+    repair.dialog.readMaxID = 10
+    repair.dialog.unreadCount = 2
+    repair.messages = [
+      protocolMessage(id: 12, chatID: 7, fromID: 1),
+      protocolMessage(id: 11, chatID: 7, fromID: 1),
+    ]
+
+    let committed = await engine.applyChatRepair(ChatRepairSnapshot(
+      peer: chatPeer(7),
+      chat: repair,
+      pinnedMessages: [],
+      targetState: BucketState(date: 20, seq: 5),
+      mutationToken: accountToken(),
+      reason: "recent-window",
+      expectedUserStateForMissingChild: expectedUserState
+    ))
+
+    #expect(committed?.seq == 5)
+    try await queue.read { (db: Database) throws in
+      #expect(try Message
+        .filter(Message.Columns.chatId == 7)
+        .order(Message.Columns.messageId.desc)
+        .fetchAll(db)
+        .map(\.messageId) == [12, 11])
+      #expect(try Chat.fetchOne(db, id: 7)?.lastMsgId == 12)
+      let dialog = try #require(try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: .thread(id: 7))))
+      #expect(dialog.readInboxMaxId == 10)
+      #expect(dialog.unreadCount == 2)
+      #expect(dialog.open)
+      #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7) == [
+        MessageHistoryHole(chatId: 7, lowerId: 1, upperId: 10),
+      ])
+    }
+  }
+
+  @Test("does not let a chat repair overwrite a newer user-bucket read projection")
+  func newerUserCursorPreservesReadProjection() async throws {
+    let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
+    let requestedUserState = BucketState(date: 50, seq: 7)
+    try await queue.write { (db: Database) throws in
+      try User(id: 42, email: "viewer-newer@example.com", firstName: "Viewer").insert(db)
+      var dialog = Dialog(from: .with {
+        $0.peer = chatPeer(7)
+        $0.chatID = 7
+        $0.unreadCount = 1
+        $0.readMaxID = 20
+      })
+      dialog.open = true
+      try dialog.insert(db)
+      _ = try GRDBSyncStorage.advanceBucketState(
+        for: .user,
+        state: BucketState(date: 60, seq: 8),
+        in: db
+      )
+    }
+
+    var repair = repairedChatResult()
+    repair.dialog.readMaxID = 10
+    repair.dialog.unreadCount = 2
+    let committed = await engine.applyChatRepair(ChatRepairSnapshot(
+      peer: chatPeer(7),
+      chat: repair,
+      pinnedMessages: [],
+      targetState: BucketState(date: 20, seq: 5),
+      mutationToken: accountToken(),
+      reason: "stale-user-projection",
+      expectedUserStateForMissingChild: requestedUserState
+    ))
+
+    #expect(committed?.seq == 5)
+    try await queue.read { (db: Database) throws in
+      let dialog = try #require(try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: .thread(id: 7))))
+      #expect(dialog.readInboxMaxId == 20)
+      #expect(dialog.unreadCount == 1)
+      #expect(dialog.open)
+    }
+  }
+
   @Test("authoritative chat sequence wins admission even after the requested target was reached")
   func admitsSnapshotSequenceAboveDurableCursor() async throws {
     let (queue, engine) = try makeRepairDatabase(cursor: 11, title: "Live 11")
@@ -438,6 +536,7 @@ struct ChatRepairReplacementTests {
     var dialog = InlineProtocol.Dialog()
     dialog.chatID = 7
     dialog.peer = peer
+    dialog.unreadCount = 0
 
     var result = InlineProtocol.GetChatResult()
     result.chat = chat

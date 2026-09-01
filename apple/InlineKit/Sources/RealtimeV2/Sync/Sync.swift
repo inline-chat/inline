@@ -621,6 +621,7 @@ actor Sync {
         method: .getChat,
         input: .getChat(.with {
           $0.peerID = peer.toInputPeer()
+          $0.includeRecentMessages = true
         }),
         timeout: Self.chatRepairTimeout
       ) else {
@@ -634,7 +635,10 @@ actor Sync {
             chat.hasDialog,
             chat.chat.id > 0,
             chat.dialog.chatID == chat.chat.id,
-            chat.chat.peerID == peer
+            chat.chat.peerID == peer,
+            chat.dialog.hasUnreadCount,
+            chat.dialog.unreadCount >= 0,
+            !chat.dialog.hasReadMaxID || chat.dialog.readMaxID >= 0
       else {
         log.error("getChat result did not match the requested chat during chat repair")
         return nil
@@ -643,9 +647,10 @@ actor Sync {
       let pinnedIDs = chat.pinnedMessageIds
       guard pinnedIDs.count <= Int(Self.chatRepairHistoryLimit),
             pinnedIDs.allSatisfy({ $0 > 0 }),
-            Set(pinnedIDs).count == pinnedIDs.count
+            Set(pinnedIDs).count == pinnedIDs.count,
+            validateChatRepairMessages(chat)
       else {
-        log.error("getChat returned an invalid pinned-message set during chat repair")
+        log.error("getChat returned an invalid chat repair window")
         return nil
       }
 
@@ -666,6 +671,25 @@ actor Sync {
       log.error("failed to repair chat bucket", error: error)
       return nil
     }
+  }
+
+  private func validateChatRepairMessages(_ snapshot: InlineProtocol.GetChatResult) -> Bool {
+    let messages = snapshot.messages
+    guard messages.count <= Int(Self.chatRepairHistoryLimit),
+          Set(messages.map(\.id)).count == messages.count,
+          messages.allSatisfy({
+            $0.id > 0 &&
+              $0.chatID == snapshot.chat.id &&
+              $0.peerID == snapshot.chat.peerID
+          }),
+          zip(messages, messages.dropFirst()).allSatisfy({ $0.0.id > $0.1.id })
+    else { return false }
+
+    let lastMessageID = snapshot.chat.hasLastMsgID ? snapshot.chat.lastMsgID : 0
+    if lastMessageID > 0 {
+      return messages.first?.id == lastMessageID
+    }
+    return messages.isEmpty
   }
 
   func repairSpaceBucket(

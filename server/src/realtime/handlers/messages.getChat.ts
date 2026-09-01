@@ -11,6 +11,7 @@ export const getChat = async (input: GetChatInput, handlerContext: HandlerContex
   const result = await Functions.messages.getChat(
     {
       peerId: input.peerId,
+      includeRecentMessages: input.includeRecentMessages,
     },
     {
       currentSessionId: handlerContext.sessionId,
@@ -24,5 +25,6 @@ export const getChat = async (input: GetChatInput, handlerContext: HandlerContex
     pinnedMessageIds: result.pinnedMessageIds,
     anchorMessage: result.anchorMessage,
     user: result.user,
+    messages: result.messages,
   }
 }

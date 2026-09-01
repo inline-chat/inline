@@ -670,6 +670,7 @@ public actor UpdatesEngine: Sendable {
     }
     let pinnedIDs = snapshot.chat.pinnedMessageIds
     let hydratedPinnedIDs = snapshot.pinnedMessages.map(\.id)
+    let recentMessages = snapshot.chat.messages
     guard pinnedIDs.count <= 100,
           pinnedIDs.allSatisfy({ $0 > 0 }),
           Set(pinnedIDs).count == pinnedIDs.count,
@@ -679,9 +680,23 @@ public actor UpdatesEngine: Sendable {
             $0.id > 0 &&
               $0.chatID == snapshot.chat.chat.id &&
               validatedPeer($0.peerID) == peer
-          })
+          }),
+          snapshot.chat.dialog.hasUnreadCount,
+          snapshot.chat.dialog.unreadCount >= 0,
+          !snapshot.chat.dialog.hasReadMaxID || snapshot.chat.dialog.readMaxID >= 0,
+          recentMessages.count <= 100,
+          Set(recentMessages.map(\.id)).count == recentMessages.count,
+          recentMessages.allSatisfy({
+            $0.id > 0 &&
+              $0.chatID == snapshot.chat.chat.id &&
+              validatedPeer($0.peerID) == peer
+          }),
+          zip(recentMessages, recentMessages.dropFirst()).allSatisfy({ $0.0.id > $0.1.id }),
+          snapshot.chat.chat.hasLastMsgID
+            ? recentMessages.first?.id == snapshot.chat.chat.lastMsgID
+            : recentMessages.isEmpty
     else {
-      log.error("Chat repair snapshot contains invalid pinned-message hydration")
+      log.error("Chat repair snapshot is invalid")
       return nil
     }
 
@@ -690,7 +705,7 @@ public actor UpdatesEngine: Sendable {
     let span = PerformanceTrace.begin(
       "UpdateApplyChatRepair",
       category: .updates,
-      "reason=\(snapshot.reason) pins=\(snapshot.pinnedMessages.count)"
+      "reason=\(snapshot.reason) messages=\(recentMessages.count) pins=\(snapshot.pinnedMessages.count)"
     )
 
     do {
@@ -725,6 +740,7 @@ public actor UpdatesEngine: Sendable {
           _ = try User.save(db, user: snapshot.chat.user)
         }
         var chat = Chat(from: snapshot.chat.chat)
+        let authoritativeLastMessageID = chat.lastMsgId
         chat.participantRosterComplete = false
         if snapshot.chat.hasAnchorMessage {
           let anchor = snapshot.chat.anchorMessage
@@ -748,8 +764,38 @@ public actor UpdatesEngine: Sendable {
         try Acknowledgement.save(db, cursors: snapshot.chat.chat.acknowledgements.cursors, chatId: chat.id)
 
         let dialogID = Dialog.getDialogId(peerId: peer)
-        if try Dialog.fetchOne(db, id: dialogID) == nil {
+        if var existingDialog = try Dialog.fetchOne(db, id: dialogID) {
+          if let expectedUserState = snapshot.expectedUserStateForMissingChild {
+            let currentUserRecord = try DbBucketState
+              .filter(
+                DbBucketState.Columns.bucketType == BucketKey.user.getBucket()
+                  && DbBucketState.Columns.entityId == BucketKey.user.getEntityId()
+              )
+              .fetchOne(db)
+            let currentUserState = BucketState(
+              date: currentUserRecord?.date ?? 0,
+              seq: currentUserRecord?.seq ?? 0
+            )
+            if currentUserState.date == expectedUserState.date,
+               currentUserState.seq == expectedUserState.seq {
+              existingDialog.readInboxMaxId = snapshot.chat.dialog.hasReadMaxID
+                ? snapshot.chat.dialog.readMaxID
+                : nil
+              existingDialog.unreadCount = Int(snapshot.chat.dialog.unreadCount)
+              try existingDialog.update(db)
+            }
+          }
+        } else {
           _ = try snapshot.chat.dialog.saveFull(db)
+        }
+
+        for message in recentMessages {
+          _ = try Message.save(
+            db,
+            protocolMessage: message,
+            publishChanges: false,
+            materializeMissingReferences: true
+          )
         }
 
         for pinnedMessage in snapshot.pinnedMessages {
@@ -762,9 +808,22 @@ public actor UpdatesEngine: Sendable {
         }
 
         // Repair proves current chat metadata and the exact pin rows, not any
-        // contiguous history interval. Preserve cached messages while marking
-        // the full numeric history range uncertain for a later bounded refill.
+        // older history interval. Preserve cached messages, certify the newest
+        // ordinary-message window, and leave only the older range demand-driven.
         try MessageHistoryCoverageStore.invalidate(db, chatId: chatID)
+        if let oldestRecentID = recentMessages.last?.id {
+          try MessageHistoryCoverageStore.subtract(
+            db,
+            chatId: chatID,
+            lowerId: oldestRecentID,
+            upperId: MessageHistoryHole.positiveMessageIDMax
+          )
+        }
+
+        // The first save may have withheld lastMsgId until its message row was
+        // materialized. Re-apply the same authoritative Chat after the window.
+        chat.lastMsgId = authoritativeLastMessageID
+        try chat.saveWithValidLastMsg(db)
 
         try PinnedMessage.replaceAll(
           db,

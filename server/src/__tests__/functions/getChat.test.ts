@@ -99,4 +99,46 @@ describe("getChat", () => {
       )
     expect(storedDialogs).toHaveLength(1)
   })
+
+  test("returns the optional newest repair window with the existing unread semantics", async () => {
+    const viewer = await testUtils.createUser("repair-window-viewer@example.com")
+    const sender = await testUtils.createUser("repair-window-sender@example.com")
+    const chat = await testUtils.createChat(null, "Repair Window", "thread", false, viewer.id)
+    if (!viewer || !sender || !chat) throw new Error("Repair fixture not created")
+
+    await testUtils.addParticipant(chat.id, viewer.id)
+    await db.insert(schema.dialogs).values({
+      chatId: chat.id,
+      userId: viewer.id,
+      readInboxMaxId: 97,
+    })
+    await db.insert(schema.messages).values(
+      Array.from({ length: 101 }, (_, index) => ({
+        chatId: chat.id,
+        messageId: index + 1,
+        fromId: index === 100 ? viewer.id : sender.id,
+        countsAsUnread: index !== 99,
+        text: `message ${index + 1}`,
+      })),
+    )
+    await db.update(schema.chats).set({ lastMsgId: 101, updateSeq: 7 }).where(eq(schema.chats.id, chat.id))
+
+    const metadataOnly = await getChat(
+      { peerId: makeInputPeerChat(chat.id) },
+      makeHandlerContext(viewer.id),
+    )
+    expect(metadataOnly.messages).toEqual([])
+
+    const repair = await getChat(
+      { peerId: makeInputPeerChat(chat.id), includeRecentMessages: true },
+      makeHandlerContext(viewer.id),
+    )
+    expect(repair.chat.seq).toBe(7)
+    expect(repair.chat.lastMsgId).toBe(101n)
+    expect(repair.dialog?.readMaxId).toBe(97n)
+    expect(repair.dialog?.unreadCount).toBe(2)
+    expect(repair.messages).toHaveLength(100)
+    expect(repair.messages[0]?.id).toBe(101n)
+    expect(repair.messages.at(-1)?.id).toBe(2n)
+  })
 })

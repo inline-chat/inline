@@ -8,6 +8,7 @@ import {
   resolveChatPermissionsBatch,
   resolveChatPermissionsForUsers,
 } from "@in/server/modules/authorization/chatPermissions"
+import type { Transaction } from "@in/server/db/types"
 
 type EncodeChatOptions = {
   encodingForUserId: number
@@ -61,10 +62,16 @@ export function encodeChat(chat: DbChat, { encodingForUserId, permissions }: Enc
   }
 }
 
-export async function encodeChatForUser(chat: DbChat, options: { encodingForUserId: number }): Promise<Chat> {
-  const permissions = await resolveChatPermissions(chat, options.encodingForUserId)
-  const acknowledgements = await getChatAcknowledgements([chat.id])
-  return { ...encodeChat(chat, { ...options, permissions }), acknowledgements: { cursors: acknowledgements.get(chat.id) ?? [] } }
+export async function encodeChatForUser(
+  chat: DbChat,
+  options: { encodingForUserId: number; tx?: Transaction },
+): Promise<Chat> {
+  const permissions = await resolveChatPermissions(chat, options.encodingForUserId, options.tx)
+  const acknowledgements = await getChatAcknowledgements([chat.id], { tx: options.tx })
+  return {
+    ...encodeChat(chat, { encodingForUserId: options.encodingForUserId, permissions }),
+    acknowledgements: { cursors: acknowledgements.get(chat.id) ?? [] },
+  }
 }
 
 export async function encodeChatsForUser(

@@ -1,5 +1,6 @@
 import type { Chat, Dialog, InputPeer, Message, User } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
+import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -8,13 +9,14 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { db } from "@in/server/db"
 import { and, desc, eq, isNull, not } from "drizzle-orm"
-import { dialogs, messages, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
+import { chats, dialogs, messages, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { ensureLinkedSubthreadDialogs, getAnchorMessageForChat, isLinkedSubthread } from "@in/server/modules/subthreads"
+import { ensureLinkedSubthreadDialogs, isLinkedSubthread } from "@in/server/modules/subthreads"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 type Input = {
   peerId: InputPeer
+  includeRecentMessages?: boolean
 }
 
 type Output = {
@@ -23,9 +25,11 @@ type Output = {
   pinnedMessageIds: bigint[]
   anchorMessage?: Message
   user?: User
+  messages: Message[]
 }
 
 const log = new Log("functions.getChat")
+const CHAT_REPAIR_MESSAGE_LIMIT = 100
 
 const createDialogOrLoadConcurrentWinner = async (
   values: DbNewDialog,
@@ -208,7 +212,6 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
   const currentUserId = context.currentUserId
 
   let chat: DbChat
-  let dialog: DbDialog | undefined
   let peerUserId: number | undefined
 
   if (inputPeer.type.oneofKind === "user") {
@@ -220,7 +223,6 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
 
     const result = await getChatAndDialogForDM(peerUserId, currentUserId)
     chat = result.chat
-    dialog = result.dialog
   } else if (inputPeer.type.oneofKind === "chat") {
     const chatId = Number(inputPeer.type.chat.chatId)
 
@@ -230,53 +232,86 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
 
     const result = await getChatAndDialogForThread(chatId, currentUserId)
     chat = result.chat
-    dialog = result.dialog
   } else if (inputPeer.type.oneofKind === "self") {
     peerUserId = currentUserId
     const result = await getChatAndDialogForDM(currentUserId, currentUserId)
     chat = result.chat
-    dialog = result.dialog
   } else {
     throw RealtimeRpcError.PeerIdInvalid()
   }
 
-  const [unreadData] = await DialogsModel.getBatchUnreadCounts({
-    userId: currentUserId,
-    chatIds: dialog ? [chat.id] : [],
-  })
+  return db.transaction(
+    async (tx): Promise<Output> => {
+      const [snapshotChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
+      if (!snapshotChat) throw RealtimeRpcError.ChatIdInvalid()
+      await AccessGuards.ensureChatAccess(snapshotChat, currentUserId, tx)
 
-  const encodedChat = await Encoders.chatForUser(chat, { encodingForUserId: currentUserId })
-  const encodedDialog = dialog ? Encoders.dialog(dialog, { unreadCount: unreadData?.unreadCount ?? 0 }) : undefined
-  const anchorMessage = await getAnchorMessageForChat(chat)
-  const encodedAnchorMessage = anchorMessage
-    ? Encoders.fullMessage({
-        message: anchorMessage,
+      const [snapshotDialog] = await tx
+        .select()
+        .from(dialogs)
+        .where(and(eq(dialogs.chatId, snapshotChat.id), eq(dialogs.userId, currentUserId)))
+        .limit(1)
+      const unreadCount = snapshotDialog
+        ? await DialogsModel.getUnreadCount(snapshotChat.id, currentUserId, tx)
+        : 0
+      const encodedChat = await Encoders.chatForUser(snapshotChat, {
         encodingForUserId: currentUserId,
-        encodingForPeer: {
-          peer: {
-            type: {
-              oneofKind: "chat",
-              chat: { chatId: BigInt(chat.parentChatId ?? chat.id) },
-            },
-          },
-        },
+        tx,
       })
-    : undefined
 
-  const pinnedRows = await db
-    .select({ messageId: messages.messageId })
-    .from(messages)
-    .where(and(eq(messages.chatId, chat.id), not(isNull(messages.pinnedAt))))
-    .orderBy(desc(messages.pinnedAt), desc(messages.messageId))
+      const anchorRows = snapshotChat.parentChatId != null && snapshotChat.parentMessageId != null
+        ? await MessageModel.getMessagesByIds(
+            snapshotChat.parentChatId,
+            [BigInt(snapshotChat.parentMessageId)],
+            { tx },
+          )
+        : []
+      const anchorMessage = anchorRows[0]
+      const encodedAnchorMessage = anchorMessage
+        ? Encoders.fullMessage({
+            message: anchorMessage,
+            encodingForUserId: currentUserId,
+            encodingForPeer: {
+              peer: {
+                type: {
+                  oneofKind: "chat",
+                  chat: { chatId: BigInt(snapshotChat.parentChatId ?? snapshotChat.id) },
+                },
+              },
+            },
+          })
+        : undefined
 
-  const pinnedMessageIds = pinnedRows.map((row) => BigInt(row.messageId))
-  const peerUser = peerUserId ? await UsersModel.getUserById(peerUserId) : undefined
+      const pinnedRows = await tx
+        .select({ messageId: messages.messageId })
+        .from(messages)
+        .where(and(eq(messages.chatId, snapshotChat.id), not(isNull(messages.pinnedAt))))
+        .orderBy(desc(messages.pinnedAt), desc(messages.messageId))
 
-  return {
-    chat: encodedChat,
-    dialog: encodedDialog,
-    pinnedMessageIds,
-    anchorMessage: encodedAnchorMessage,
-    user: peerUser ? Encoders.user({ user: peerUser, viewerUserId: currentUserId }) : undefined,
-  }
+      const recentMessages = input.includeRecentMessages
+        ? await MessageModel.getLatestMessagesForChat(snapshotChat.id, CHAT_REPAIR_MESSAGE_LIMIT, tx)
+        : []
+      const encodedMessages = recentMessages.map((message) =>
+        Encoders.fullMessage({
+          message,
+          encodingForUserId: currentUserId,
+          encodingForPeer: { inputPeer },
+        }),
+      )
+
+      const [peerUser] = peerUserId
+        ? await tx.select().from(users).where(eq(users.id, peerUserId)).limit(1)
+        : []
+
+      return {
+        chat: encodedChat,
+        dialog: snapshotDialog ? Encoders.dialog(snapshotDialog, { unreadCount }) : undefined,
+        pinnedMessageIds: pinnedRows.map((row) => BigInt(row.messageId)),
+        anchorMessage: encodedAnchorMessage,
+        user: peerUser ? Encoders.user({ user: peerUser, viewerUserId: currentUserId }) : undefined,
+        messages: encodedMessages,
+      }
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  )
 }
