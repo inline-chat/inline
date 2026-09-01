@@ -25,10 +25,6 @@ struct OnboardingAppearance: View {
       .id(selectedStyle)
       .transition(.opacity)
       .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-          .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
-      }
       .accessibilityHidden(true)
       .padding(.top, 20)
 
@@ -78,6 +74,9 @@ private struct OnboardingAppearanceHeader: View {
 }
 
 private struct OnboardingAppearanceStyleChoice: View {
+  private static let controlSize = CGSize(width: 92, height: 34)
+  private static let controlCornerRadius: CGFloat = 10
+
   @State private var isHovered = false
 
   let style: MessageRenderStyle
@@ -96,6 +95,11 @@ private struct OnboardingAppearanceStyleChoice: View {
   }
 
   var body: some View {
+    let controlShape = RoundedRectangle(
+      cornerRadius: Self.controlCornerRadius,
+      style: .continuous
+    )
+
     Button(action: action) {
       HStack(spacing: 7) {
         ZStack {
@@ -122,12 +126,9 @@ private struct OnboardingAppearanceStyleChoice: View {
           .font(.body)
           .foregroundStyle(.primary)
       }
-      .frame(width: 92, height: 34)
-      .background(
-        Color.gray.opacity(isHovered ? 0.14 : 0),
-        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-      )
-      .contentShape(Rectangle())
+      .frame(width: Self.controlSize.width, height: Self.controlSize.height)
+      .background(Color.gray.opacity(isHovered ? 0.14 : 0), in: controlShape)
+      .contentShape(controlShape)
       .animation(.easeOut(duration: 0.14), value: isHovered)
     }
     .buttonStyle(OnboardingAppearanceButtonStyle())

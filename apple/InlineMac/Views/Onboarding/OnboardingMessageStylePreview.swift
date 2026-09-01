@@ -14,7 +14,7 @@ struct OnboardingPreviewIdentity {
 }
 
 struct OnboardingMessageStylePreview: View {
-  static let size = CGSize(width: 500, height: 230)
+  static let size = CGSize(width: 460, height: 200)
 
   @Environment(\.colorScheme) private var colorScheme
 
@@ -98,7 +98,6 @@ private struct PreviewReplyContent {
 // Frozen snapshot of the macOS message presentation metrics used by onboarding.
 // Keep these values local so the preview cannot depend on renderer internals.
 private enum PreviewMessageMetrics {
-  static let bubbleAvatarSize: CGFloat = 28
   static let minimalAvatarSize: CGFloat = 30
   static let avatarContentSpacing: CGFloat = 8
   static let bubbleSideInset: CGFloat = 16
@@ -107,7 +106,6 @@ private enum PreviewMessageMetrics {
 
   static let bubbleCornerRadius: CGFloat = 14
   static let bubbleContentInset: CGFloat = 11
-  static let bubbleNameLeadingInset: CGFloat = 5
   static let messageTextVerticalInset: CGFloat = 6
 
   static let minimalNameHeight: CGFloat = 14
@@ -162,7 +160,7 @@ private struct PreviewMinimalMessageRow: View {
         .padding(.top, 2)
 
       VStack(alignment: .leading, spacing: 0) {
-        PreviewSenderName(identity: message.identity, style: .minimal, palette: palette)
+        PreviewSenderName(identity: message.identity, palette: palette)
           .frame(height: PreviewMessageMetrics.minimalNameHeight, alignment: .topLeading)
           .padding(.bottom, PreviewMessageMetrics.minimalNameBottomSpacing)
 
@@ -210,17 +208,11 @@ private struct PreviewBubbleMessageRow: View {
   let palette: PreviewMessagePalette
 
   var body: some View {
-    HStack(alignment: .bottom, spacing: PreviewMessageMetrics.avatarContentSpacing) {
-      if !message.isOutgoing {
-        PreviewAvatar(identity: message.identity, size: PreviewMessageMetrics.bubbleAvatarSize)
-      }
-
-      PreviewBubble(
-        message: message,
-        viewportFraction: viewportFraction,
-        palette: palette
-      )
-    }
+    PreviewBubble(
+      message: message,
+      viewportFraction: viewportFraction,
+      palette: palette
+    )
     .frame(maxWidth: .infinity, alignment: message.isOutgoing ? .trailing : .leading)
     .padding(.leading, PreviewMessageMetrics.bubbleSideInset)
     .padding(.trailing, PreviewMessageMetrics.bubbleSideInset)
@@ -237,42 +229,35 @@ private struct PreviewBubble: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      PreviewSenderName(identity: message.identity, style: .bubble, palette: palette)
-        .frame(height: 16, alignment: .topLeading)
-        .padding(.leading, PreviewMessageMetrics.bubbleNameLeadingInset)
-
-      bubbleContent
-        .fixedSize(horizontal: true, vertical: true)
-        .background {
-          PreviewBubbleBackground(
+    bubbleContent
+      .fixedSize(horizontal: true, vertical: true)
+      .background {
+        PreviewBubbleBackground(
+          isOutgoing: message.isOutgoing,
+          viewportFraction: viewportFraction,
+          palette: palette
+        )
+      }
+      .overlay(alignment: message.isOutgoing ? .bottomTrailing : .bottomLeading) {
+        PreviewBubbleTail(
+          side: message.isOutgoing ? .trailing : .leading,
+          color: palette.bubbleColor(isOutgoing: message.isOutgoing),
+          lightingAlpha: palette.bubbleLightingAlpha(
             isOutgoing: message.isOutgoing,
-            viewportFraction: viewportFraction,
-            palette: palette
+            viewportFraction: viewportFraction
           )
-        }
-        .overlay(alignment: message.isOutgoing ? .bottomTrailing : .bottomLeading) {
-          PreviewBubbleTail(
-            side: message.isOutgoing ? .trailing : .leading,
-            color: palette.bubbleColor(isOutgoing: message.isOutgoing),
-            lightingAlpha: palette.bubbleLightingAlpha(
-              isOutgoing: message.isOutgoing,
-              viewportFraction: viewportFraction
-            )
-          )
-          .frame(
-            width: PreviewMessageMetrics.tailSize.width,
-            height: PreviewMessageMetrics.tailSize.height
-          )
-          .offset(
-            x: message.isOutgoing
-              ? PreviewMessageMetrics.tailExposedWidth
-              : -PreviewMessageMetrics.tailExposedWidth,
-            y: PreviewMessageMetrics.tailBottomOffset
-          )
-        }
-    }
-    .fixedSize(horizontal: true, vertical: true)
+        )
+        .frame(
+          width: PreviewMessageMetrics.tailSize.width,
+          height: PreviewMessageMetrics.tailSize.height
+        )
+        .offset(
+          x: message.isOutgoing
+            ? PreviewMessageMetrics.tailExposedWidth
+            : -PreviewMessageMetrics.tailExposedWidth,
+          y: PreviewMessageMetrics.tailBottomOffset
+        )
+      }
   }
 
   private var bubbleContent: some View {
@@ -402,27 +387,12 @@ private struct PreviewBubbleTailShape: Shape {
 }
 
 private struct PreviewSenderName: View {
-  enum Style {
-    case bubble
-    case minimal
-  }
-
   let identity: OnboardingPreviewIdentity
-  let style: Style
   let palette: PreviewMessagePalette
-
-  private var font: Font {
-    switch style {
-    case .bubble:
-      .system(size: 12, weight: .semibold)
-    case .minimal:
-      .system(size: 13, weight: .medium)
-    }
-  }
 
   var body: some View {
     Text(identity.displayName)
-      .font(font)
+      .font(.system(size: 13, weight: .medium))
       .foregroundStyle(palette.senderColor(for: identity))
       .lineLimit(1)
       .fixedSize(horizontal: true, vertical: false)
