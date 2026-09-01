@@ -274,12 +274,8 @@ struct SidebarNativeRowConfiguration {
   }
 }
 
-/// The close control deliberately separates input and visual geometry. Its
-/// AppKit hit target can stay generous without consuming more title/preview
-/// width than the 16-point SwiftUI reference button.
 private enum SidebarNativeChatRowMetrics {
-  static let closeVisualSize: CGFloat = 16
-  static let closeHitSize: CGFloat = 28
+  static let closeButtonSize: CGFloat = 16
   static let closeTextSpacing: CGFloat = 8
 }
 
@@ -570,7 +566,6 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
   private var mouseDownPoint: NSPoint?
   private var capturedInteractionTarget: InteractionTarget?
   private(set) var isHovered = false
-  private(set) var hoveredInteractionTarget: InteractionTarget?
   private(set) var pressedInteractionTarget: InteractionTarget?
 
   var isPrimaryPressed: Bool {
@@ -628,13 +623,11 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
 
   override func mouseExited(with _: NSEvent) {
     setHovered(false)
-    setHoveredInteractionTarget(nil)
   }
 
   override func mouseMoved(with event: NSEvent) {
     let point = convert(event.locationInWindow, from: nil)
     setHovered(bounds.contains(point))
-    setHoveredInteractionTarget(bounds.contains(point) ? interactionTarget(at: point) : nil)
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -644,14 +637,8 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
     }
     window?.makeFirstResponder(self)
     let point = convert(event.locationInWindow, from: nil)
-    let target = interactionTarget(at: point)
-    // A click can be the first pointer event delivered after a row moves under
-    // a stationary cursor. Resolve and present the semantic target directly
-    // from that event instead of waiting for a preceding mouseMoved callback.
-    setHovered(bounds.contains(point))
-    setHoveredInteractionTarget(bounds.contains(point) ? target : nil)
     mouseDownPoint = point
-    capturedInteractionTarget = target
+    capturedInteractionTarget = interactionTarget(at: point)
     setPressedInteractionTarget(capturedInteractionTarget)
   }
 
@@ -726,13 +713,11 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
           window.isKeyWindow
     else {
       setHovered(false)
-      setHoveredInteractionTarget(nil)
       return
     }
     let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
     let containsPointer = bounds.contains(point)
     setHovered(containsPointer)
-    setHoveredInteractionTarget(containsPointer ? interactionTarget(at: point) : nil)
   }
 
   func interactionTarget(at _: NSPoint) -> InteractionTarget {
@@ -745,17 +730,15 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
   func interactionPresentationDidChange() {}
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    guard isLayoutVisible, super.hitTest(point) != nil else { return nil }
-    // The row owns one deterministic pointer state machine. Visual hosting
-    // leaves and accessory symbols never become competing event owners.
-    return self
+    guard isLayoutVisible, let hitView = super.hitTest(point) else { return nil }
+    // Native controls own their clicks; visual leaves belong to the row.
+    return hitView is NSControl ? hitView : self
   }
 
   private func cancelPointerInteraction() {
     mouseDownPoint = nil
     capturedInteractionTarget = nil
     setPressedInteractionTarget(nil)
-    setHoveredInteractionTarget(nil)
     setHovered(false)
   }
 
@@ -763,12 +746,6 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
     guard isHovered != hovered else { return }
     isHovered = hovered
     hoverDidChange()
-  }
-
-  private func setHoveredInteractionTarget(_ target: InteractionTarget?) {
-    guard hoveredInteractionTarget != target else { return }
-    hoveredInteractionTarget = target
-    interactionPresentationDidChange()
   }
 
   private func setPressedInteractionTarget(_ target: InteractionTarget?) {
@@ -2001,7 +1978,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   private let previewView = SidebarNativeComposeActivityView()
   private let titleActivityView = SidebarNativeComposeActivityView()
   private let trailingUnreadBadge = SidebarNativeUnreadBadgeView()
-  private let closeView = SidebarNativeCloseAccessoryView()
+  private let closeButton = SidebarNativeCloseButton()
   private let disclosureView = SidebarNativeHostedVisualView()
   private var configuration: SidebarNativeRowConfiguration.Chat?
   private var displayedDisclosureExpanded: Bool?
@@ -2020,11 +1997,22 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     addSubview(previewView)
     addSubview(titleActivityView)
     addSubview(trailingUnreadBadge)
-    addSubview(closeView)
+    addSubview(closeButton)
     addSubview(disclosureView)
 
     titleField.font = .systemFont(ofSize: 13)
-    closeView.configureIcon()
+    closeButton.title = ""
+    closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
+    closeButton.symbolConfiguration = .init(pointSize: 9, weight: .semibold)
+    closeButton.imagePosition = .imageOnly
+    closeButton.controlSize = .small
+    closeButton.isBordered = false
+    closeButton.contentTintColor = .secondaryLabelColor
+    closeButton.target = self
+    closeButton.action = #selector(closeButtonPressed)
+    closeButton.toolTip = "Close"
+    closeButton.setAccessibilityLabel("Close")
+    closeButton.isHidden = true
     titleActivityView.visibilityChanged = { [weak self] in
       self?.needsLayout = true
     }
@@ -2079,7 +2067,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     }
 
     let presentation = configuration.presentation
-    closeView.configure(action: configuration.actions.close)
     titleField.stringValue = presentation.title
     let titleFont = NSFont.systemFont(ofSize: 13)
     titleField.font = configuration.isTemporary
@@ -2146,7 +2133,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       animated: allowsAnimations
     )
 
-    closeView.toolTip = "Close"
     configureDisclosureVisual()
     updateControlPresentation(animated: false)
     updateBackground()
@@ -2204,9 +2190,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     disclosureView.frame = disclosureHitRect(in: painted)
 
     var availableTrailing = painted.maxX - Theme.sidebarItemOuterSpacing
-    closeView.frame = closeHitRect(in: painted)
-    if configuration.showsCloseButton, closeView.alphaValue > 0.01 {
-      availableTrailing = closeVisualLeading(in: painted)
+    closeButton.frame = closeButtonRect(in: painted)
+    if showsCloseControl {
+      availableTrailing = closeButton.frame.minX
         - SidebarNativeChatRowMetrics.closeTextSpacing
     }
     let showsPreview = configuration.size != .compact
@@ -2575,7 +2561,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     titleActivityView.prepareForReuse()
     leadingUnreadBadge.prepareForReuse()
     trailingUnreadBadge.prepareForReuse()
-    closeView.prepareForReuse()
+    closeButton.isHidden = true
     disclosureView.prepareForReuse()
     setAccessibilityCustomActions([])
   }
@@ -2592,9 +2578,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   override func interactionTarget(at point: NSPoint) -> InteractionTarget {
     guard let configuration else { return .primary }
     let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
-    if configuration.showsCloseButton, closeHitRect(in: painted).contains(point) {
-      return .accessory(0)
-    }
     if configuration.disclosureExpanded != nil,
        disclosureHitRect(in: painted).contains(point) {
       return .accessory(1)
@@ -2602,26 +2585,10 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     return .primary
   }
 
-  override func hitTest(_ point: NSPoint) -> NSView? {
-    guard isLayoutVisible, super.hitTest(point) != nil else { return nil }
-    guard let configuration else { return self }
-    let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
-    if configuration.showsCloseButton, closeHitRect(in: painted).contains(point) {
-      // AppKit may deliver this mouse-down without a preceding mouseMoved when
-      // the prior row disappeared under a stationary pointer. Route directly
-      // to the real control and reveal its non-animated hover presentation.
-      closeView.alphaValue = 1
-      closeView.setAccessibilityHidden(false)
-      closeView.configureInteraction(hovered: true, pressed: false)
-      return closeView
-    }
-    return self
-  }
-
   override func blocksReorder(at point: NSPoint) -> Bool {
     guard let configuration else { return false }
     let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
-    if configuration.showsCloseButton, closeHitRect(in: painted).contains(point) {
+    if showsCloseControl, closeButton.frame.contains(point) {
       return true
     }
     return configuration.disclosureExpanded != nil
@@ -2629,23 +2596,20 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   }
 
   override func performAccessoryAction(_ target: InteractionTarget) {
-    guard let configuration else { return }
-    switch target {
-    case .accessory(0):
-      configuration.actions.close()
-    case .accessory(1):
-      performDisclosureToggle()
-    default:
-      break
-    }
+    guard target == .accessory(1) else { return }
+    performDisclosureToggle()
   }
 
   override func interactionPresentationDidChange() {
-    closeView.configureInteraction(
-      hovered: hoveredInteractionTarget == .accessory(0),
-      pressed: pressedInteractionTarget == .accessory(0)
-    )
     updateAccessibility()
+  }
+
+  @objc private func closeButtonPressed() {
+    configuration?.actions.close()
+  }
+
+  private var showsCloseControl: Bool {
+    configuration?.showsCloseButton == true && hasHoverPresentation
   }
 
   private func updateControlPresentation(animated: Bool) {
@@ -2655,14 +2619,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       !$0 || hasHoverAppearance
     } ?? false
     disclosureView.isHidden = displayedDisclosureExpanded == nil
-    let closeVisible = configuration.showsCloseButton && hasHoverAppearance
-    closeView.isHidden = false
-    closeView.isEnabled = configuration.showsCloseButton
-    closeView.alphaValue = closeVisible ? 1 : 0
-    // Hover controls only the visual treatment. Keep the semantic AppKit
-    // button available to assistive technologies whenever this mode supports
-    // closing, just like the row's keyboard Delete action.
-    closeView.setAccessibilityHidden(!configuration.showsCloseButton)
+    closeButton.isHidden = !showsCloseControl
+    // The row's Close accessibility action remains available without hover.
+    closeButton.isEnabled = configuration.showsCloseButton
     leadingUnreadBadge.setObscured(
       disclosureVisible,
       animated: animated && allowsAnimations
@@ -2683,21 +2642,14 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     recomputePointerLocation()
   }
 
-  private func closeHitRect(in painted: CGRect) -> CGRect {
-    let hitSize = SidebarNativeChatRowMetrics.closeHitSize
-    let visualPadding = (hitSize - SidebarNativeChatRowMetrics.closeVisualSize) / 2
+  private func closeButtonRect(in painted: CGRect) -> CGRect {
+    let size = SidebarNativeChatRowMetrics.closeButtonSize
     return CGRect(
-      x: closeVisualLeading(in: painted) - visualPadding,
-      y: painted.midY - hitSize / 2,
-      width: hitSize,
-      height: hitSize
+      x: painted.maxX - Theme.sidebarItemOuterSpacing - size,
+      y: painted.midY - size / 2,
+      width: size,
+      height: size
     )
-  }
-
-  private func closeVisualLeading(in painted: CGRect) -> CGFloat {
-    painted.maxX
-      - Theme.sidebarItemOuterSpacing
-      - SidebarNativeChatRowMetrics.closeVisualSize
   }
 
   private func disclosureHitRect(in painted: CGRect) -> CGRect {
@@ -2995,35 +2947,16 @@ private final class SidebarNativeUnreadBadgeView: NSView {
 
 }
 
+/// Appearance only; NSButton owns hit testing, highlighting, and activation.
 @MainActor
-private final class SidebarNativeCloseAccessoryView: NSButton {
-  private let visualBackgroundLayer = CALayer()
-  private let iconView = SidebarNativeHostedVisualView()
-  private var actionHandler: (() -> Void)?
-  private var isHovering = false
-  private var isPressing = false
+private final class SidebarNativeCloseButton: NSButton {
+  private var hoverTrackingArea: NSTrackingArea?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    visualBackgroundLayer.cornerRadius = 5
-    visualBackgroundLayer.cornerCurve = .continuous
-    SidebarNativeLayerUpdates.disableImplicitAnimations(on: visualBackgroundLayer)
-    layer?.addSublayer(visualBackgroundLayer)
-    isBordered = false
-    title = ""
-    imagePosition = .noImage
-    focusRingType = .none
-    target = self
-    action = #selector(performClose)
-    // Keep AppKit's standard cancellable mouse-up activation. The collection
-    // owner projects a successful click optimistically after the action fires;
-    // removing a row on mouse-down makes drag-away cancellation impossible.
-    addSubview(iconView)
-    setAccessibilityElement(true)
-    setAccessibilityRole(.button)
-    setAccessibilityLabel("Close")
-    setAccessibilityHidden(true)
+    layer?.cornerRadius = 5
+    layer?.cornerCurve = .continuous
   }
 
   @available(*, unavailable)
@@ -3031,79 +2964,45 @@ private final class SidebarNativeCloseAccessoryView: NSButton {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func configureIcon() {
-    iconView.configure { SidebarChatCloseIcon() }
-  }
-
-  func configure(action: @escaping () -> Void) {
-    actionHandler = action
-    isEnabled = true
-  }
-
-  func configureInteraction(hovered: Bool, pressed: Bool) {
-    isHovering = hovered
-    isPressing = pressed
-    updateBackground()
-  }
-
-  override func prepareForReuse() {
-    super.prepareForReuse()
-    actionHandler = nil
-    isEnabled = false
-    isHovering = false
-    isPressing = false
-    updateBackground()
-  }
-
-  override func mouseDown(with event: NSEvent) {
-    isPressing = true
-    updateBackground()
-    defer {
-      isPressing = false
-      updateBackground()
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let hoverTrackingArea {
+      removeTrackingArea(hoverTrackingArea)
     }
-    super.mouseDown(with: event)
-  }
-
-  override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
-    true
-  }
-
-  override func layout() {
-    super.layout()
-    let visualSize = CGSize(
-      width: SidebarNativeChatRowMetrics.closeVisualSize,
-      height: SidebarNativeChatRowMetrics.closeVisualSize
+    let area = NSTrackingArea(
+      rect: .zero,
+      options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
+      owner: self
     )
-    let visualFrame = CGRect(
-      x: bounds.midX - visualSize.width / 2,
-      y: bounds.midY - visualSize.height / 2,
-      width: visualSize.width,
-      height: visualSize.height
-    )
-    visualBackgroundLayer.frame = visualFrame
-    iconView.frame = visualFrame
+    addTrackingArea(area)
+    hoverTrackingArea = area
+    needsDisplay = true
   }
 
-  override func viewDidChangeEffectiveAppearance() {
-    super.viewDidChangeEffectiveAppearance()
-    updateBackground()
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    needsDisplay = true
   }
 
-  private func updateBackground() {
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    needsDisplay = true
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
     let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let alpha: CGFloat = isPressing ? (isDark ? 0.16 : 0.13) : (isHovering
-      ? (isDark ? 0.10 : 0.08)
-      : 0)
-    SidebarNativeLayerUpdates.setBackgroundColor(
-      (isDark ? NSColor.white : NSColor.black).withAlphaComponent(alpha).cgColor,
-      on: visualBackgroundLayer
-    )
-  }
-
-  @objc private func performClose() {
-    let handler = actionHandler
-    handler?()
+    let isHovered = window.map {
+      $0.isKeyWindow && bounds.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil))
+    } ?? false
+    let opacity: CGFloat = isHighlighted ? (isDark ? 0.16 : 0.13)
+      : (isHovered ? (isDark ? 0.10 : 0.08) : 0)
+    if let layer {
+      SidebarNativeLayerUpdates.setBackgroundColor(
+        (isDark ? NSColor.white : NSColor.black).withAlphaComponent(opacity).cgColor,
+        on: layer
+      )
+    }
+    super.draw(dirtyRect)
   }
 }
 

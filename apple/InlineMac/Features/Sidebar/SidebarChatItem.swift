@@ -710,8 +710,7 @@ private enum SidebarChatItemAccessory {
   case unread
 }
 
-/// Shared by the SwiftUI and experimental AppKit row renderers so symbol
-/// metrics cannot drift between them.
+/// Close symbol for the SwiftUI sidebar row.
 struct SidebarChatCloseIcon: View {
   var body: some View {
     Image(systemName: "xmark")
