@@ -5,6 +5,13 @@ struct DeveloperPlaygroundsView: View {
   var body: some View {
     List {
       NavigationLink {
+        MessageListV2LabView()
+          .navigationTitle("Message List 2 Lab")
+          .navigationBarTitleDisplayMode(.inline)
+      } label: {
+        SettingsItem(icon: "list.bullet.rectangle", iconColor: .purple, title: "Message List 2 Lab")
+      }
+      NavigationLink {
         MessageView2PlaygroundView()
       } label: {
         SettingsItem(

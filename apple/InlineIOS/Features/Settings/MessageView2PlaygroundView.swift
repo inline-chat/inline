@@ -140,6 +140,14 @@ private final class MessageView2PlaygroundHostView: UIView {
       maximumBubbleContentWidth: width * MessageBubbleWidthPolicy.maximumWidthFraction,
       theme: ThemeManager.shared.snapshot(variant: variant)
     )
+    nextView.onGeometryChange = { [weak self, weak nextView] _, layout in
+      guard let self, let nextView else { return }
+      let generation = nextView.geometryTransitionGeneration
+      nextView.applyGeometryTransition(to: layout, generation: generation)
+      nextView.finishGeometryTransition(generation: generation)
+      self.invalidateIntrinsicContentSize()
+      self.setNeedsLayout()
+    }
     nextView.isUserInteractionEnabled = scenario.allowsInteraction
     addSubview(nextView)
     messageView = nextView
@@ -148,7 +156,7 @@ private final class MessageView2PlaygroundHostView: UIView {
   }
 }
 
-private struct MessageView2PlaygroundScenario: Identifiable {
+struct MessageView2PlaygroundScenario: Identifiable {
   let id: Int64
   let title: LocalizedStringResource
   let detail: LocalizedStringResource
@@ -157,7 +165,7 @@ private struct MessageView2PlaygroundScenario: Identifiable {
   let allowsInteraction: Bool
 }
 
-private enum MessageView2PlaygroundFixtures {
+enum MessageView2PlaygroundFixtures {
   private static let date = Date(timeIntervalSince1970: 1_787_816_400)
   private static let chatID: Int64 = 9_001
   private static let incomingUser = User(

@@ -13,6 +13,14 @@ import UIKit
 /// its internal hierarchy and update behavior without making those callers route through an
 /// untyped wrapper or a hidden legacy child.
 final class UIMessageView2: UIMessageView {
+  /// Only the synthetic list lab opts out of the existing renderer-owned sizing path.
+  enum RenderingMode {
+    case automatic
+    case fixtureMeasurement
+    case fixtureDisplay
+  }
+
+  private let renderingMode: RenderingMode
   private enum NodeID {
     static let serviceContainer = MessageLayoutNodeIDV2("service-container")
     static let forwardHeader = MessageLayoutNodeIDV2("forward-header")
@@ -114,8 +122,10 @@ final class UIMessageView2: UIMessageView {
     maximumBubbleContentWidth: CGFloat,
     theme: IOSThemeSnapshot,
     animatedReactionEmoji: String? = nil,
-    initialMetadataStatus: MessageSendingStatus? = nil
+    initialMetadataStatus: MessageSendingStatus? = nil,
+    renderingMode: RenderingMode = .automatic
   ) {
+    self.renderingMode = renderingMode
     maximumBubbleWidth = maximumBubbleContentWidth
     super.init(
       fullMessage: fullMessage,
@@ -146,6 +156,9 @@ final class UIMessageView2: UIMessageView {
   }
 
   override var intrinsicContentSize: CGSize {
+    if renderingMode == .fixtureDisplay {
+      return CGSize(width: UIView.noIntrinsicMetric, height: currentLayout?.size.height ?? 0)
+    }
     let width = bounds.width > 0 ? bounds.width : maximumBubbleWidth
     return CGSize(
       width: UIView.noIntrinsicMetric,
@@ -154,6 +167,7 @@ final class UIMessageView2: UIMessageView {
   }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {
+    if renderingMode == .fixtureDisplay { return currentLayout?.size ?? .zero }
     let width = size.width.isFinite && size.width > 0 ? size.width : maximumBubbleWidth
     return measuredLayout(containerWidth: width)?.size ?? CGSize(width: width, height: 0)
   }
@@ -168,6 +182,7 @@ final class UIMessageView2: UIMessageView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    guard renderingMode == .automatic else { return }
     // The collection owns the single geometry transaction. Re-applying the measured final plan
     // from an incidental Auto Layout pass would otherwise jump the bubble and its children to the
     // destination before that transaction can interpolate them.
@@ -178,6 +193,8 @@ final class UIMessageView2: UIMessageView {
   }
 
   private func refreshLayoutTraits() {
+    // The lab controller replaces plans and views together when its environment changes.
+    guard renderingMode == .automatic else { return }
     if message.isServiceMessage {
       serviceLabel.attributedText = serviceAttributedText()
     } else {
@@ -564,9 +581,11 @@ final class UIMessageView2: UIMessageView {
 
   func applySnapshot(_ updatedMessage: FullMessage, animatedReactionEmoji: String? = nil) {
     guard canApplySnapshot(updatedMessage) else { return }
-    finishGeometryTransition(generation: geometryTransitionGeneration)
+    if renderingMode != .fixtureDisplay {
+      finishGeometryTransition(generation: geometryTransitionGeneration)
+    }
     let width = bounds.width > 0 ? bounds.width : maximumBubbleWidth
-    let oldLayout = measuredLayout(containerWidth: width)
+    let oldLayout = renderingMode == .fixtureDisplay ? currentLayout : measuredLayout(containerWidth: width)
     transitionOldRichPlan = currentRichPlan
     geometryTransitionGeneration &+= 1
     Self.animationEvent(
@@ -634,6 +653,8 @@ final class UIMessageView2: UIMessageView {
     currentRichPlan = nil
     invalidateIntrinsicContentSize()
     setNeedsLayout()
+    // Content binding above is shared. The lab supplies geometry prepared on a separate renderer.
+    if renderingMode == .fixtureDisplay { return }
     guard let newLayout = measuredLayout(containerWidth: width) else {
       cancelPendingGeometryTransitions()
       return
@@ -700,7 +721,7 @@ final class UIMessageView2: UIMessageView {
     }
 
     if shouldRenderRichContentV2 {
-      installRichInteractionsIfNeeded()
+      if renderingMode == .automatic { installRichInteractionsIfNeeded() }
       registerBubbleNode(richContentView, id: NodeID.text)
       messageLabel.translatesAutoresizingMaskIntoConstraints = true
       messageLabel.alpha = 0
@@ -763,9 +784,11 @@ final class UIMessageView2: UIMessageView {
     }
 
     setupAppearance()
-    addGestureRecognizer()
-    setupDoubleTapGestureRecognizer()
-    setupTranslationObserver()
+    if renderingMode == .automatic {
+      addGestureRecognizer()
+      setupDoubleTapGestureRecognizer()
+      setupTranslationObserver()
+    }
   }
 
   private func buildServiceHierarchy() {
@@ -820,6 +843,74 @@ final class UIMessageView2: UIMessageView {
     )
     return plan
   }
+
+  #if DEBUG || DEBUG_BUILD
+  /// A main-actor preparation result, including the rich plan. Never carries sizing views into cells.
+  struct PreparedListLayout {
+    let bubble: MessageBubbleLayoutV2
+    fileprivate let rich: RichBlockLayoutPlanV2?
+    fileprivate let key: NSString
+    fileprivate let message: FullMessage
+  }
+
+  func prepareListLayout(width: CGFloat) -> PreparedListLayout? {
+    precondition(renderingMode == .fixtureMeasurement)
+    guard let bubble = measuredLayout(containerWidth: width) else { return nil }
+    return PreparedListLayout(
+      bubble: bubble, rich: currentRichPlan,
+      key: layoutCacheKey(containerWidth: width), message: fullMessage
+    )
+  }
+
+  /// Binds content without measuring or applying final frames. The caller captures presentation
+  /// first, installs the collection geometry, then calls applyGeometryTransition in its animator.
+  @discardableResult
+  func installListLayout(_ prepared: PreparedListLayout, message updated: FullMessage, animated: Bool) -> Bool {
+    precondition(renderingMode == .fixtureDisplay)
+    guard prepared.message == updated, canApplySnapshot(updated),
+          prepared.bubble.size.width == bounds.width
+    else { return false }
+    let oldLayout = currentLayout
+    let oldRichPlan = currentRichPlan
+    let shouldAnimate = animated && !UIAccessibility.isReduceMotionEnabled
+    if fullMessage != updated {
+      applySnapshot(updated)
+    } else {
+      geometryTransitionGeneration &+= 1
+    }
+    guard prepared.key == layoutCacheKey(containerWidth: bounds.width) else {
+      cancelPendingGeometryTransitions()
+      return false
+    }
+    // A newly attached fixture inherits traits after initialization, before its first display.
+    messageLabel.attributedText = attributedMessageText()
+    transitionOldRichPlan = oldRichPlan
+    activeGeometryTransitionGeneration = geometryTransitionGeneration
+    if let rich = prepared.rich, let payload = message.blockContentPayload {
+      richContentView.update(
+        plan: rich,
+        content: payload.content,
+        attributedText: attributedMessageText() ?? NSAttributedString(string: message.text ?? ""),
+        baseFontSize: richBaseFontSize,
+        palette: richPalette,
+        message: message,
+        deferLayout: shouldAnimate,
+        transitionGeneration: geometryTransitionGeneration
+      )
+    }
+    if shouldAnimate, let oldLayout {
+      prepareGeometryTransition(from: oldLayout, generation: geometryTransitionGeneration)
+    }
+    currentLayout = prepared.bubble
+    currentLayoutKey = prepared.key
+    currentRichPlan = prepared.rich
+    if !shouldAnimate {
+      applyGeometryTransition(to: prepared.bubble, generation: geometryTransitionGeneration)
+      finishGeometryTransition(generation: geometryTransitionGeneration)
+    }
+    return true
+  }
+  #endif
 
   private func makeMeasuredLayout(containerWidth: CGFloat) -> MessageBubbleLayoutV2? {
     if message.isServiceMessage {
@@ -1204,7 +1295,7 @@ final class UIMessageView2: UIMessageView {
       return true
     }
 
-    if currentRichPlan != plan
+    if renderingMode != .fixtureMeasurement, currentRichPlan != plan
       || renderedRichContentSignature != payload.cacheSignature
       || renderedRichContentByteCount != payload.byteCount
       || renderedRichTextHash != attributedText.hash
