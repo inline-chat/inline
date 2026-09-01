@@ -75,7 +75,7 @@ struct ThemeTests {
             variant: variant,
             userDefaults: defaults
           )
-          let amount: CGFloat = variant == .dark ? 0.105 : 0.07
+          let amount: CGFloat = variant == .dark ? 0.084 : 0.056
           let expectedColor = native.nsColor.blended(
             withFraction: amount,
             of: canvas.nsColor
