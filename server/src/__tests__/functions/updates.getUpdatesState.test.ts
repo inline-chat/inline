@@ -2,7 +2,18 @@ import { describe, test, expect, spyOn } from "bun:test"
 import { getUpdatesState } from "@in/server/functions/updates.getUpdatesState"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { db } from "@in/server/db"
-import { chatParticipants, chats, dialogs, members, messages, spaces, users as usersTable } from "@in/server/db/schema"
+import {
+  chatParticipantGroups,
+  chatParticipants,
+  chats,
+  dialogs,
+  members,
+  messages,
+  spaces,
+  userGroupMembers,
+  userGroups,
+  users as usersTable,
+} from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
@@ -81,6 +92,105 @@ describe("getUpdatesState", () => {
       }
     })
   }
+
+  test("retained root participant does not authorize a hint after membership changes post-catalog", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Root hint authority", [
+      "root-hint-authority@example.com",
+    ])
+    const user = users[0]
+    const chat = await testUtils.createChat(space.id, "Private Root", "thread", false)
+    if (!user || !chat) throw new Error("Fixture creation failed")
+    await db.insert(chatParticipants).values({ chatId: chat.id, userId: user.id })
+    await db.update(chats).set({ lastUpdateDate: new Date(), updateSeq: 1 }).where(eq(chats.id, chat.id))
+
+    const originalGetChats = ChatModel.getUserChats.bind(ChatModel)
+    const getChats = spyOn(ChatModel, "getUserChats").mockImplementationOnce(async (query) => {
+      const result = await originalGetChats(query)
+      await db.delete(members).where(and(eq(members.spaceId, space.id), eq(members.userId, user.id)))
+      return result
+    })
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {})
+    try {
+      await getUpdatesState(
+        { date: floorWireDate(new Date(Date.now() - 60_000)) },
+        testUtils.functionContext({ userId: user.id }),
+      )
+      const hints = push.mock.calls.flatMap(([, updates]) => updates)
+      expect(hints.some((hint) => hint.update.oneofKind === "chatHasNewUpdates" &&
+        hint.update.chatHasNewUpdates.chatId === BigInt(chat.id))).toBe(false)
+      expect(await db.select().from(chatParticipants).where(eq(chatParticipants.chatId, chat.id))).toHaveLength(1)
+    } finally {
+      getChats.mockRestore()
+      push.mockRestore()
+    }
+  })
+
+  test("retained root group does not authorize a hint after Space deletion post-catalog", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Root group authority", [
+      "root-group-authority@example.com",
+    ])
+    const user = users[0]
+    const chat = await testUtils.createChat(space.id, "Group Root", "thread", false)
+    if (!user || !chat) throw new Error("Fixture creation failed")
+    const [group] = await db.insert(userGroups)
+      .values({ spaceId: space.id, name: "Root Readers", createdBy: user.id }).returning()
+    if (!group) throw new Error("Group creation failed")
+    await db.insert(userGroupMembers).values({ groupId: group.id, userId: user.id })
+    await db.insert(chatParticipantGroups).values({ chatId: chat.id, groupId: group.id })
+    await db.update(chats).set({ lastUpdateDate: new Date(), updateSeq: 1 }).where(eq(chats.id, chat.id))
+
+    const originalGetChats = ChatModel.getUserChats.bind(ChatModel)
+    const getChats = spyOn(ChatModel, "getUserChats").mockImplementationOnce(async (query) => {
+      const result = await originalGetChats(query)
+      await db.update(spaces).set({ deleted: new Date() }).where(eq(spaces.id, space.id))
+      return result
+    })
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {})
+    try {
+      await getUpdatesState(
+        { date: floorWireDate(new Date(Date.now() - 60_000)) },
+        testUtils.functionContext({ userId: user.id }),
+      )
+      const hints = push.mock.calls.flatMap(([, updates]) => updates)
+      expect(hints.some((hint) => hint.update.oneofKind === "chatHasNewUpdates" &&
+        hint.update.chatHasNewUpdates.chatId === BigInt(chat.id))).toBe(false)
+      expect(await db.select().from(chatParticipantGroups)
+        .where(eq(chatParticipantGroups.chatId, chat.id))).toHaveLength(1)
+    } finally {
+      getChats.mockRestore()
+      push.mockRestore()
+    }
+  })
+
+  test("retained public root does not authorize a hint after Space deletion post-catalog", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Public root authority", [
+      "public-root-authority@example.com",
+    ])
+    const user = users[0]
+    const chat = await testUtils.createChat(space.id, "Public Root", "thread", true)
+    if (!user || !chat) throw new Error("Fixture creation failed")
+    await db.update(chats).set({ lastUpdateDate: new Date(), updateSeq: 1 }).where(eq(chats.id, chat.id))
+
+    const originalGetChats = ChatModel.getUserChats.bind(ChatModel)
+    const getChats = spyOn(ChatModel, "getUserChats").mockImplementationOnce(async (query) => {
+      const result = await originalGetChats(query)
+      await db.update(spaces).set({ deleted: new Date() }).where(eq(spaces.id, space.id))
+      return result
+    })
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {})
+    try {
+      await getUpdatesState(
+        { date: floorWireDate(new Date(Date.now() - 60_000)) },
+        testUtils.functionContext({ userId: user.id }),
+      )
+      const hints = push.mock.calls.flatMap(([, updates]) => updates)
+      expect(hints.some((hint) => hint.update.oneofKind === "chatHasNewUpdates" &&
+        hint.update.chatHasNewUpdates.chatId === BigInt(chat.id))).toBe(false)
+    } finally {
+      getChats.mockRestore()
+      push.mockRestore()
+    }
+  })
 
   test("returns a fresh current checkpoint without discovering old bucket work", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Updates State Zero", [

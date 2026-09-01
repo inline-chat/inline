@@ -19,14 +19,16 @@ import {
   UpdateBucket,
   chatParticipantGroups,
   chatParticipants,
+  chats as chatsTable,
   members,
+  spaces as spacesTable,
   updates as updatesTable,
   userGroupMembers,
   userGroups,
   userNotDeleted,
   users as usersTable,
 } from "@in/server/db/schema"
-import { and, eq, inArray, or, sql } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { captureUpdateDiscoveryWatermark } from "@in/server/modules/updates/updateDiscoveryBarrier"
 
 const log = new Log("updates.getUpdatesState")
@@ -387,20 +389,39 @@ const findKnownAccessibleChatIds = async (chats: DbChat[], userId: number): Prom
     const batchChatIds = grantChatIds.slice(offset, offset + MAX_CHAT_ACCESS_QUERY_BATCH)
     const [directRows, groupRows] = await Promise.all([
       db
-        .select({ chatId: chatParticipants.chatId })
+        .selectDistinct({ chatId: chatParticipants.chatId })
         .from(chatParticipants)
-        .where(and(inArray(chatParticipants.chatId, batchChatIds), eq(chatParticipants.userId, userId))),
+        .innerJoin(chatsTable, eq(chatParticipants.chatId, chatsTable.id))
+        .leftJoin(spacesTable, eq(chatsTable.spaceId, spacesTable.id))
+        .leftJoin(
+          members,
+          and(eq(members.spaceId, chatsTable.spaceId), eq(members.userId, userId)),
+        )
+        .where(
+          and(
+            inArray(chatParticipants.chatId, batchChatIds),
+            eq(chatParticipants.userId, userId),
+            or(
+              isNull(chatsTable.spaceId),
+              and(isNull(spacesTable.deleted), isNotNull(members.userId)),
+            ),
+          ),
+        ),
       db
-        .select({ chatId: chatParticipantGroups.chatId })
+        .selectDistinct({ chatId: chatParticipantGroups.chatId })
         .from(chatParticipantGroups)
+        .innerJoin(chatsTable, eq(chatParticipantGroups.chatId, chatsTable.id))
         .innerJoin(userGroups, eq(chatParticipantGroups.groupId, userGroups.id))
         .innerJoin(userGroupMembers, eq(chatParticipantGroups.groupId, userGroupMembers.groupId))
         .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
         .innerJoin(usersTable, eq(usersTable.id, userGroupMembers.userId))
+        .innerJoin(spacesTable, eq(spacesTable.id, userGroups.spaceId))
         .where(
           and(
             inArray(chatParticipantGroups.chatId, batchChatIds),
             eq(userGroupMembers.userId, userId),
+            eq(chatsTable.spaceId, userGroups.spaceId),
+            isNull(spacesTable.deleted),
             userNotDeleted(),
           ),
         ),
@@ -415,11 +436,13 @@ const findKnownAccessibleChatIds = async (chats: DbChat[], userId: number): Prom
     const memberRows = await db
       .select({ spaceId: members.spaceId })
       .from(members)
+      .innerJoin(spacesTable, eq(members.spaceId, spacesTable.id))
       .where(
         and(
           inArray(members.spaceId, batchSpaceIds),
           eq(members.userId, userId),
           eq(members.canAccessPublicChats, true),
+          isNull(spacesTable.deleted),
         ),
       )
     const accessibleSpaceIds = new Set(memberRows.map((row) => row.spaceId))
