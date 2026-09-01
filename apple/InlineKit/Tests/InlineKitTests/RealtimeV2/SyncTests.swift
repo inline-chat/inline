@@ -1669,16 +1669,23 @@ final class SyncTests {
     #expect(bucketState.date == 120)
   }
 
-  @Test("fresh connection installs the current checkpoint then probes user history once")
+  @Test("fresh connection captures a later bound and replays B plus one")
   func testFreshConnectionInstallsCurrentCheckpoint() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     let checkpoint = makeGetUpdatesStateResult(date: 100, seq: 42)
+    let update43 = makeDurableUpdate(seq: 43, date: 110, payload: .updateUserSettings(.init()))
     let client = FakeProtocolClient(
       responses: [],
       methodResponses: [
-        .getUpdatesState: [checkpoint],
-        .getUpdates: [makeGetUpdatesResult(seq: 42, date: 0, updates: [], final: true, resultType: .empty)],
+        .getUpdatesState: [checkpoint, makeGetUpdatesStateResult(date: 110, seq: 43)],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 43,
+          date: 110,
+          updates: [update43],
+          final: true,
+          resultType: .slice
+        )],
       ]
     )
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
@@ -1700,18 +1707,19 @@ final class SyncTests {
     let methods = await client.getCalledMethods()
     #expect(methods.contains(.getUpdatesState))
     #expect(methods.contains(.getUpdates))
-    #expect(await client.getUpdatesStateDates() == [nil])
+    #expect(await client.getUpdatesStateDates() == [nil, nil])
     #expect(await client.getUpdatesStartSequences() == [42])
-    #expect(await client.getUpdatesEndSequences() == [42])
+    #expect(await client.getUpdatesEndSequences() == [43])
     #expect(await storage.getState().lastSyncDate == 100)
-    #expect(await storage.getBucketState(for: .user).seq == 42)
+    #expect(await storage.getBucketState(for: .user).seq == 43)
     #expect(await waitForCondition {
       let sequence = await activity.sequence
       return sequence.contains(true) && sequence.last == false
     })
-    #expect(await storage.getBucketState(for: .user).date == 100)
-    #expect(await apply.bucketCommits.count == 2) // checkpoint seed, then no-op completion
-    #expect(await client.getCalledMethods() == [.getUpdatesState, .getUpdates])
+    #expect(await storage.getBucketState(for: .user).date == 110)
+    #expect(await apply.appliedUpdates == [update43])
+    #expect(await apply.bucketCommits.count == 2) // checkpoint B, then bounded (B,C] replay
+    #expect(await client.getCalledMethods() == [.getUpdatesState, .getUpdatesState, .getUpdates])
     await sync.prepareForTermination()
   }
 
@@ -1820,8 +1828,10 @@ final class SyncTests {
     let client = FakeProtocolClient(
       responses: [],
       methodResponses: [
-        .getUpdatesState: [makeGetUpdatesStateResult(date: 100, seq: 42)],
-        .getUpdates: [makeGetUpdatesResult(seq: 50, date: 110, updates: [], final: true, resultType: .empty)],
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 100, seq: 42),
+          makeGetUpdatesStateResult(date: 110, seq: 50),
+        ],
       ]
     )
     let sync = Sync(
@@ -1837,15 +1847,15 @@ final class SyncTests {
     }
 
     #expect(didInstallCheckpoint)
-    let didProbeUser = await waitForCondition(timeout: .seconds(1)) {
-      await client.getCalledMethods().contains(.getUpdates)
+    let didCaptureCurrentUser = await waitForCondition(timeout: .seconds(1)) {
+      await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2
     }
-    #expect(didProbeUser)
+    #expect(didCaptureCurrentUser)
     let userState = await storage.getBucketState(for: .user)
     #expect(userState.seq == 50)
     #expect(userState.date == 110)
-    #expect(await client.getUpdatesStartSequences() == [50])
-    #expect(await client.getUpdatesEndSequences() == [50])
+    #expect(await client.getUpdatesStartSequences().isEmpty)
+    #expect(await client.getUpdatesEndSequences().isEmpty)
   }
 
   @Test("connected event during checkpoint discovery schedules one follow-up")
@@ -1859,14 +1869,8 @@ final class SyncTests {
         .getUpdatesState: [
           makeGetUpdatesStateResult(date: 100, seq: 42),
           makeGetUpdatesStateResult(date: 101, seq: 42),
+          makeGetUpdatesStateResult(date: 101, seq: 42),
         ],
-        .getUpdates: [makeGetUpdatesResult(
-          seq: 42,
-          date: 100,
-          updates: [],
-          final: true,
-          resultType: .empty
-        )],
       ]
     )
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
@@ -1881,10 +1885,10 @@ final class SyncTests {
 
     await client.releaseCall(1)
     let didRunFollowUp = await waitForCondition(timeout: .seconds(3)) {
-      await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2
+      await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 3
     }
     #expect(didRunFollowUp)
-    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2)
+    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 3)
   }
 
   @Test("overlapping discovery rounds cannot borrow an earlier round target")
@@ -1954,6 +1958,7 @@ final class SyncTests {
         .getUpdatesState: [
           .getUpdatesState(missingSequence),
           makeGetUpdatesStateResult(date: 101, seq: 55),
+          makeGetUpdatesStateResult(date: 101, seq: 55),
         ],
       ]
     )
@@ -1970,7 +1975,7 @@ final class SyncTests {
     }
 
     #expect(recovered)
-    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2)
+    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 3)
     #expect(await storage.getBucketState(for: .user).seq == 55)
   }
 
@@ -1983,6 +1988,7 @@ final class SyncTests {
       methodResponses: [
         .getUpdatesState: [
           nil,
+          makeGetUpdatesStateResult(date: 102, seq: 56),
           makeGetUpdatesStateResult(date: 102, seq: 56),
         ],
       ]
@@ -2000,7 +2006,7 @@ final class SyncTests {
     }
 
     #expect(recovered)
-    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2)
+    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 3)
     #expect(await storage.getBucketState(for: .user).seq == 56)
   }
 
@@ -2014,6 +2020,7 @@ final class SyncTests {
       methodResponses: [
         .getUpdatesState: [
           makeGetUpdatesStateResult(date: 100, seq: 21),
+          makeGetUpdatesStateResult(date: 101, seq: 22),
           makeGetUpdatesStateResult(date: 101, seq: 22),
         ],
       ]
@@ -2031,7 +2038,7 @@ final class SyncTests {
     }
 
     #expect(recovered)
-    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2)
+    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 3)
     #expect(await storage.getBucketState(for: .user).seq == 22)
   }
 
@@ -2045,6 +2052,7 @@ final class SyncTests {
       methodResponses: [
         .getUpdatesState: [
           makeGetUpdatesStateResult(date: 100, seq: 31),
+          makeGetUpdatesStateResult(date: 101, seq: 32),
           makeGetUpdatesStateResult(date: 101, seq: 32),
         ],
         .getUpdates: [makeGetUpdatesResult(
@@ -2066,7 +2074,7 @@ final class SyncTests {
     }
 
     #expect(recovered)
-    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 2)
+    #expect(await client.getCalledMethods().filter { $0 == .getUpdatesState }.count == 3)
     #expect(await storage.getBucketState(for: .user).seq == 32)
     #expect(await client.getUpdatesStartSequences() == [31])
   }
@@ -2076,7 +2084,10 @@ final class SyncTests {
     let storage = InMemorySyncStorage()
     await storage.setBucketState(for: .user, state: BucketState(date: 100, seq: 10))
     let client = FakeProtocolClient(responses: [], methodResponses: [
-      .getUpdatesState: [makeGetUpdatesStateResult(date: 200, seq: 20)],
+      .getUpdatesState: [
+        makeGetUpdatesStateResult(date: 200, seq: 20),
+        makeGetUpdatesStateResult(date: 200, seq: 20),
+      ],
       .getUpdates: [makeGetUpdatesResult(
         seq: 20, date: 200, updates: [], final: true, resultType: .slice,
         skippedSequences: makeIrrelevantSkippedSequences(after: 10, through: 20)
@@ -2419,14 +2430,10 @@ final class SyncTests {
     let client = FakeProtocolClient(
       responses: [],
       methodResponses: [
-        .getUpdatesState: [makeGetUpdatesStateResult(date: 777, seq: 12)],
-        .getUpdates: [makeGetUpdatesResult(
-          seq: 12,
-          date: 777,
-          updates: [],
-          final: true,
-          resultType: .empty
-        )],
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 777, seq: 12),
+          makeGetUpdatesStateResult(date: 777, seq: 12),
+        ],
       ]
     )
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
@@ -2441,7 +2448,7 @@ final class SyncTests {
     }
     #expect(didCallState)
 
-    #expect(await client.getUpdatesStateDates() == [nil])
+    #expect(await client.getUpdatesStateDates() == [nil, nil])
     #expect(await storage.getState().lastSyncDate == 777)
     #expect(await storage.getBucketState(for: .user).seq == 12)
   }

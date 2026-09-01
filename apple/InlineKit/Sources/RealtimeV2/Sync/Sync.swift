@@ -1221,6 +1221,24 @@ actor Sync {
     }
   }
 
+  /// Closes fresh bootstrap at a finite server coordinate. The first state
+  /// response seeds B; the actor captures current C through the ordinary state
+  /// RPC, then replays only (B,C]. Concurrent catalog snapshots are guarded by
+  /// their expected user cursor, so they either land before this replay or retry.
+  private func probeFreshUserBucket(afterCheckpointSeq checkpointSeq: Int64) {
+    guard checkpointSeq > 0 else {
+      log.warning("refusing a fresh user probe without a checkpoint sequence")
+      return
+    }
+    registerDiscoveryTarget(key: .user, seq: 0)
+    launchRootTask { sync, generation in
+      guard let bucketActor = await sync.getBucketActor(key: .user, generation: generation) else { return }
+      await bucketActor.setFetchTarget(upToSeq: checkpointSeq)
+      _ = await bucketActor.noteHasNewUpdates(upToSeq: 0)
+      await bucketActor.fetchNewUpdates()
+    }
+  }
+
   private func wakeBucketRetries(generation expectedGeneration: UInt64) async {
     guard isCurrent(expectedGeneration) else { return }
     // Only runtime work owners participate; dormant persisted buckets are not
@@ -1480,7 +1498,7 @@ actor Sync {
             try await stageDiscoveryCheckpoint(
               payload.date, updatesFound: false, round: round, generation: expectedGeneration
             )
-            if payload.seq > 0 { fetchUserBucket(upToSeq: Int64(payload.seq)) }
+            if payload.seq > 0 { probeFreshUserBucket(afterCheckpointSeq: Int64(payload.seq)) }
           } else {
             let seed = BucketState(date: payload.date, seq: Int64(payload.seq))
             let appliedSeed = await applyUpdates.apply(
@@ -1510,7 +1528,7 @@ actor Sync {
             }
             stats.lastSyncDate = payload.date
             if payload.seq > 0 {
-              fetchUserBucket(upToSeq: Int64(payload.seq))
+              probeFreshUserBucket(afterCheckpointSeq: Int64(payload.seq))
             }
           }
           // A fresh bootstrap captures the account cursor first, then performs
