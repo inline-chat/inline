@@ -213,6 +213,39 @@ struct MacNotificationsTests {
     #expect(MacNotifications.notificationThreadIdentifier(chatID: 12) == "chat_12")
   }
 
+#if DEBUG || DEBUG_BUILD
+  @Test("playground scenarios project supported notification content")
+  func playgroundScenariosProjectSupportedContent() {
+    let expectedBodies: [MacNotificationPlaygroundScenario: String] = [
+      .customText: "Custom\nbody",
+      .multilineText: "First line\nSecond line\n\nA new paragraph",
+      .photo: "🖼️ Photo",
+      .photoWithCaption: "🖼️ Sprint whiteboard\nFinal layout",
+      .video: "🎥 Video",
+      .gif: "🎞️ GIF",
+      .document: "📄 Quarterly Report.pdf",
+      .voice: "🎤 Voice message (1:05)",
+      .sticker: "🖼️ Sticker",
+      .nudge: "👋 Nudge",
+      .urgentNudge: "🚨 Urgent nudge",
+      .messageFailed: "A message could not be sent in Design Review.",
+    ]
+
+    #expect(expectedBodies.count == MacNotificationPlaygroundScenario.allCases.count)
+    for scenario in MacNotificationPlaygroundScenario.allCases {
+      let presentation = MacNotifications.playgroundPresentation(
+        scenario: scenario,
+        customBody: " Custom \n body ",
+        chatName: " Design\nReview "
+      )
+      #expect(presentation.body == expectedBodies[scenario])
+      #expect(presentation.forceSound == (scenario == .urgentNudge))
+      #expect(presentation.titleOverride == (scenario == .messageFailed ? "Message failed to send" : nil))
+      #expect(presentation.includesSenderArtwork == (scenario != .messageFailed))
+    }
+  }
+#endif
+
   @Test("Grid screen-share notification identifier replaces stale start state")
   func gridScreenShareNotificationIdentifier() {
     #expect(

@@ -17,6 +17,28 @@ public enum MacNotificationPlaygroundAvatarMode: String, CaseIterable, Sendable,
   case initials
   case none
 }
+
+public enum MacNotificationPlaygroundScenario: String, CaseIterable, Sendable, Hashable {
+  case customText
+  case multilineText
+  case photo
+  case photoWithCaption
+  case video
+  case gif
+  case document
+  case voice
+  case sticker
+  case nudge
+  case urgentNudge
+  case messageFailed
+}
+
+struct MacNotificationPlaygroundPresentation: Equatable, Sendable {
+  let titleOverride: String?
+  let body: String
+  let forceSound: Bool
+  let includesSenderArtwork: Bool
+}
 #endif
 
 struct MacIncomingNotificationContext: Sendable {
@@ -236,28 +258,99 @@ public actor MacNotifications {
 extension MacNotifications {
   @discardableResult
   public func showPlaygroundNotification(
+    scenario: MacNotificationPlaygroundScenario,
     avatarMode: MacNotificationPlaygroundAvatarMode,
     senderName: String,
-    body: String,
+    customBody: String,
     isThread: Bool,
     soundEnabled: Bool
   ) async -> Bool {
-    let imageURL = await avatarBuilder.playgroundAttachmentURL(
-      mode: avatarMode,
-      senderName: senderName
+    let presentation = Self.playgroundPresentation(
+      scenario: scenario,
+      customBody: customBody,
+      chatName: "Design"
     )
+    let projectedSenderName = MessageNotificationPreview.singleLine(senderName)
+    let displaySenderName = projectedSenderName.isEmpty ? "Ava Lin" : projectedSenderName
+    let imageURL: URL? = if presentation.includesSenderArtwork {
+      await avatarBuilder.playgroundAttachmentURL(
+        mode: avatarMode,
+        senderName: displaySenderName
+      )
+    } else {
+      nil
+    }
+    let playsSound = soundEnabled || presentation.forceSound
     return await showMessageNotification(
-      title: isThread ? "Design" : senderName,
-      subtitle: isThread ? senderName : nil,
-      body: body,
+      title: presentation.titleOverride ?? (isThread ? "Design" : displaySenderName),
+      subtitle: presentation.titleOverride == nil && isThread ? displaySenderName : nil,
+      body: presentation.body,
       userInfo: [
         "playgroundNotification": true,
         "playgroundAvatarMode": avatarMode.rawValue,
-        "playgroundSoundEnabled": soundEnabled,
+        "playgroundScenario": scenario.rawValue,
+        "playgroundSoundEnabled": playsSound,
+        "playgroundIncludesSenderArtwork": presentation.includesSenderArtwork,
         "isThread": isThread,
       ],
       imageURL: imageURL,
-      soundOverride: soundEnabled
+      forceSound: presentation.forceSound,
+      soundOverride: playsSound
+    )
+  }
+
+  nonisolated static func playgroundPresentation(
+    scenario: MacNotificationPlaygroundScenario,
+    customBody: String,
+    chatName: String
+  ) -> MacNotificationPlaygroundPresentation {
+    if scenario == .messageFailed {
+      let projectedChatName = MessageNotificationPreview.singleLine(chatName)
+      return .init(
+        titleOverride: "Message failed to send",
+        body: "A message could not be sent in \(projectedChatName.isEmpty ? "Chat" : projectedChatName).",
+        forceSound: false,
+        includesSenderArtwork: false
+      )
+    }
+
+    var message = InlineProtocol.Message()
+    switch scenario {
+    case .customText:
+      message.message = customBody
+    case .multilineText:
+      message.message = "First line\nSecond line\n\nA new paragraph"
+    case .photo:
+      message.media.photo.photo.id = 1
+    case .photoWithCaption:
+      message.media.photo.photo.id = 1
+      message.message = "Sprint whiteboard\nFinal layout"
+    case .video:
+      message.media.video.video.id = 1
+    case .gif:
+      message.media.video.video.id = 1
+      message.media.video.video.isAnimated = true
+    case .document:
+      message.media.document.document.fileName = "Quarterly Report.pdf"
+    case .voice:
+      message.media.voice.voice.duration = 65
+    case .sticker:
+      message.media.photo.photo.id = 1
+      message.isSticker = true
+    case .nudge:
+      message.media.nudge = .init()
+    case .urgentNudge:
+      message.media.nudge = .init()
+      message.message = urgentNudgeText
+    case .messageFailed:
+      break
+    }
+
+    return .init(
+      titleOverride: nil,
+      body: MessageNotificationPreview.body(for: message),
+      forceSound: scenario == .urgentNudge,
+      includesSenderArtwork: true
     )
   }
 }

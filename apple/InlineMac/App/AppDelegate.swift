@@ -947,6 +947,14 @@ extension AppDelegate {
 
   @MainActor func handleNotification(_ response: UNNotificationResponse) {
     guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+#if DEBUG || DEBUG_BUILD
+    // Playground notifications exercise system rendering without fixture navigation.
+    if let userInfo = response.notification.request.content.userInfo as? [String: Any],
+       userInfo["playgroundNotification"] as? Bool == true
+    {
+      return
+    }
+#endif
     // Reserve tap order before any chat lookup, including encrypted fallbacks.
     notificationNavigationTask?.cancel()
     notificationNavigationTask = nil
