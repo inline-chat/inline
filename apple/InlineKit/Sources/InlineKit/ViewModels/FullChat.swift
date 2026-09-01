@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import Foundation
 import GRDB
@@ -76,6 +77,8 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var message: Message
   public var replyThread: Chat?
   public var reactions: [FullReaction]
+  public var acknowledgements: [FullAcknowledgement]? = nil
+  public var currentUserAcknowledgement: Acknowledgement? = nil
   public var repliedToMessage: EmbeddedMessage?
   public var attachments: [FullAttachment]
   public var photoInfo: PhotoInfo?
@@ -230,7 +233,7 @@ public extension FullMessage {
 }
 
 public extension FullMessage {
-  static func queryRequest() -> QueryInterfaceRequest<FullMessage> {
+  static func queryRequest(currentUserId: Int64? = Auth.shared.getCurrentUserId()) -> QueryInterfaceRequest<FullMessage> {
     Message
       // user info
       .including(
@@ -256,6 +259,15 @@ public extension FullMessage {
         Message.forwardFromPeerThread
           .forKey(CodingKeys.forwardFromChatInfo)
       )
+      .including(
+        all: Message.acknowledgements.forKey("acknowledgements")
+          .order(Column("userId"))
+          .including(optional: Acknowledgement.user.forKey("userInfo")
+            .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto)))
+      )
+      .including(optional: Message.currentUserAcknowledgement
+        .filter(Acknowledgement.Columns.userId == (currentUserId ?? 0))
+        .forKey("currentUserAcknowledgement"))
       .including(optional: Message.replyThread.forKey(CodingKeys.replyThread))
       .including(optional: Message.file)
       .including(

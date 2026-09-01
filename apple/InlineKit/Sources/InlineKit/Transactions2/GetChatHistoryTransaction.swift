@@ -171,6 +171,9 @@ public struct GetChatHistoryTransaction: Transaction2 {
         materializeMissingReferences: true
       ))
     }
+    // Message persistence materializes a missing Chat for a cold thread. Cursor
+    // foreign keys must exist before the first row projection is constructed.
+    try Acknowledgement.save(db, cursors: response.acknowledgements.cursors, chatId: chatID)
     try Chat.updateLastMsgIds(db, messages: savedMessages)
 
     if let range = provenCoverage(context: context, messageIDs: response.messages.map(\.id)) {

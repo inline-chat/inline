@@ -121,7 +121,11 @@ public struct GetChatsTransaction: Transaction2 {
       || (userCursor?.seq ?? 0) == 0
 
     let spaces = deduplicatedSpaces(result.spaces, failures: &failures)
-    let chats = deduplicatedChats(result.chats, failures: &failures)
+    var chats = deduplicatedChats(result.chats, failures: &failures)
+    let chatDependencyUsers = acknowledgementUsers(in: chats)
+    if !allowsUserProjectionReplacements {
+      chats = chats.map(chatWithoutAcknowledgementUserReplacements)
+    }
 
     // Decide admission from one consistent database view before any
     // child-owned snapshot model is written. A partially populated resource is
@@ -182,7 +186,7 @@ public struct GetChatsTransaction: Transaction2 {
     }
 
     try importUsers(
-      result.users,
+      result.users + chatDependencyUsers,
       allowsReplacements: allowsUserProjectionReplacements,
       in: db,
       failures: &failures
@@ -209,6 +213,17 @@ public struct GetChatsTransaction: Transaction2 {
         if !admission.modelExists {
           failures.record(.chats)
           continue
+        }
+        // Acknowledgements have their own revision/max monotonicity and remain
+        // safe to hydrate without replacing the child-owned Chat model.
+        _ = try attempt(.chats, in: db, failures: &failures) {
+          try Acknowledgement.save(
+            db,
+            cursors: protocolChat.acknowledgements.cursors,
+            chatId: protocolChat.id,
+            publishChanges: true
+          )
+          return true
         }
         if let sequence {
           recordCatchUpTarget(sequence, for: admission, in: &catchUpTargets)
@@ -345,6 +360,7 @@ public struct GetChatsTransaction: Transaction2 {
       let savedChat: Chat
       do {
         let saved = try pending.chat.saveFull(db)
+        try Acknowledgement.save(db, cursors: pending.protocolChat.acknowledgements.cursors, chatId: saved.id, publishChanges: true)
         savedChat = saved
       } catch {
         guard isRecoverableRecordError(error) else { throw error }
@@ -674,6 +690,34 @@ public struct GetChatsTransaction: Transaction2 {
         return true
       }
     }
+  }
+
+  private static func acknowledgementUsers(
+    in chats: [InlineProtocol.Chat]
+  ) -> [InlineProtocol.User] {
+    chats.flatMap { chat in
+      chat.acknowledgements.cursors.compactMap { cursor in
+        guard cursor.hasUser,
+              cursor.user.id > 0,
+              cursor.user.id == cursor.userID
+        else { return nil }
+        return cursor.user
+      }
+    }
+  }
+
+  private static func chatWithoutAcknowledgementUserReplacements(
+    _ source: InlineProtocol.Chat
+  ) -> InlineProtocol.Chat {
+    var chat = source
+    var acknowledgements = chat.acknowledgements
+    acknowledgements.cursors = acknowledgements.cursors.map { sourceCursor in
+      var cursor = sourceCursor
+      cursor.clearUser()
+      return cursor
+    }
+    chat.acknowledgements = acknowledgements
+    return chat
   }
 
   private static func attempt<T>(

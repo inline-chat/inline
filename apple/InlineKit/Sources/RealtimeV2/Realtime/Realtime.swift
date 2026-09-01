@@ -1306,6 +1306,13 @@ public actor RealtimeV2 {
       // remote execution can never overtake the local projection.
       await transaction.optimistic()
 
+      guard await transaction.validateOptimisticState() else {
+        cancellationState.finish()
+        await transaction.cancelled()
+        await endTransactionOperation()
+        throw TransactionError.rejectedBeforeExecution
+      }
+
       return try await withCheckedThrowingContinuation { continuation in
         Task {
           await registerAndEnqueue(

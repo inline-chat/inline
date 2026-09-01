@@ -111,6 +111,16 @@ public actor UpdatesEngine: Sendable {
             reloadPeers.insert(peer)
           }
 
+        case let .acknowledgement(cursor):
+          let affected = try Acknowledgement.save(
+            db, cursors: [cursor], chatId: cursor.chatID,
+            publishChanges: source != .syncCatchup, animated: true
+          )
+          if source == .syncCatchup, !affected.isEmpty,
+             let chat = try Chat.fetchOne(db, id: cursor.chatID) {
+            reloadPeers.insert(chat.peerId.toPeer())
+          }
+
         case let .updateReaction(updateReaction):
           try updateReaction.apply(db)
 
@@ -425,7 +435,7 @@ public actor UpdatesEngine: Sendable {
                 "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count) user_groups=\(sidecars.userGroups.count)"
               )
             }
-            try self.apply(sidecars: sidecars, db: db)
+            try self.apply(sidecars: sidecars, db: db, source: source, reloadPeers: &chunkReloadPeers)
           }
 
           var writeApplied = 0
@@ -531,7 +541,7 @@ public actor UpdatesEngine: Sendable {
 
     if updates.isEmpty, let bucketCommit {
       do {
-        let state = try await database.dbWriter.write { db in
+        let result = try await database.dbWriter.write { db in
           if let mutationToken {
             try validateAccountMutation(mutationToken)
           }
@@ -549,17 +559,24 @@ public actor UpdatesEngine: Sendable {
           try requireUserAdmissionForMissingChild(
             bucketCommit.key, expectedUserState: bucketCommit.expectedUserStateForMissingChild, in: db
           )
+          var emptyReloadPeers = Set<Peer>()
           if let sidecars, hasSidecars(sidecars) {
-            try self.apply(sidecars: sidecars, db: db)
+            try self.apply(
+              sidecars: sidecars,
+              db: db,
+              source: source,
+              reloadPeers: &emptyReloadPeers
+            )
           }
           let state = try GRDBSyncStorage.advanceBucketState(
             for: bucketCommit.key,
             state: bucketCommit.state,
             in: db
           )
-          return state
+          return (emptyReloadPeers, state)
         }
-        committedBucketState = state
+        reloadPeers.formUnion(result.0)
+        committedBucketState = result.1
       } catch {
         log.error("Failed to atomically apply empty update batch sidecars and cursor", error: error)
         failedCount += 1
@@ -727,6 +744,7 @@ public actor UpdatesEngine: Sendable {
         }
         try self.requireStructuralReferences(for: chat, db: db)
         try chat.saveWithValidLastMsg(db)
+        try Acknowledgement.save(db, cursors: snapshot.chat.chat.acknowledgements.cursors, chatId: chat.id)
 
         let dialogID = Dialog.getDialogId(peerId: peer)
         if try Dialog.fetchOne(db, id: dialogID) == nil {
@@ -1096,7 +1114,9 @@ public actor UpdatesEngine: Sendable {
 
   private nonisolated func apply(
     sidecars: InlineProtocol.UpdateSidecars,
-    db: Database
+    db: Database,
+    source: UpdateApplySource,
+    reloadPeers: inout Set<Peer>
   ) throws {
     for user in sidecars.users {
       _ = try User.save(db, user: user)
@@ -1114,6 +1134,16 @@ public actor UpdatesEngine: Sendable {
     for chat in try preparedSidecarChats(sidecars.chats, db: db) {
       guard let snapshot = chatSnapshots[chat.id] else { continue }
       try saveMissingSidecarChat(snapshot, preparedChat: chat, db: db)
+    }
+
+    for chat in sidecars.chats {
+      let affected = try Acknowledgement.save(
+        db, cursors: chat.acknowledgements.cursors, chatId: chat.id,
+        publishChanges: source != .syncCatchup
+      )
+      if source == .syncCatchup, !affected.isEmpty {
+        reloadPeers.insert(chat.peerID.toPeer())
+      }
     }
 
     for dialog in sidecars.dialogs {
@@ -1225,6 +1255,7 @@ enum RealtimeUpdateDiagnostics {
     guard let update else { return "missing" }
     switch update {
     case .newMessage: return "newMessage"
+    case .acknowledgement: return "acknowledgement"
     case .editMessage: return "editMessage"
     case .updateMessageID: return "updateMessageID"
     case .deleteMessages: return "deleteMessages"
@@ -2041,6 +2072,7 @@ extension InlineProtocol.UpdateNewChat {
 
     Log.shared.debug("saving chat \(chat)")
     try chat.saveWithValidLastMsg(db)
+    try Acknowledgement.save(db, cursors: self.chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
 
     var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: chat.peerId.toPeer()))
       ?? Dialog(optimisticForChat: chat)
@@ -2284,6 +2316,7 @@ extension InlineProtocol.UpdateChatMoved {
   func apply(_ db: Database) throws {
     var updatedChat = Chat(from: chat)
     try updatedChat.saveWithValidLastMsg(db)
+    try Acknowledgement.save(db, cursors: chat.acknowledgements.cursors, chatId: updatedChat.id, publishChanges: true)
 
     let peer: Peer = .thread(id: updatedChat.id)
     if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer)) {
@@ -2421,6 +2454,7 @@ extension InlineProtocol.UpdateChatOpen {
     for preparedChat in try preparedSidecarChats([chat], db: db) {
       try saveMissingSidecarChat(chat, preparedChat: preparedChat, db: db)
     }
+    try Acknowledgement.save(db, cursors: chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
     _ = try dialog.saveFull(db)
   }
 }

@@ -123,6 +123,7 @@ public class DataManager: ObservableObject {
 
         var chat = Chat(from: result.chat)
         try chat.saveWithValidLastMsg(db)
+        try Acknowledgement.save(db, cursors: chatState.chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
 
         try Dialog(from: result.dialog).save(db, onConflict: .replace)
       }
@@ -157,6 +158,7 @@ public class DataManager: ObservableObject {
       try await writeAccountProjection(token: mutationToken) { db in
         var chat = Chat(from: result.chat)
         try chat.saveWithValidLastMsg(db)
+        try Acknowledgement.save(db, cursors: result.chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
 
         let dialog = Dialog(from: result.dialog)
         try dialog.save(db, onConflict: .replace)
@@ -324,10 +326,7 @@ public class DataManager: ObservableObject {
       "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
     )
 
-    let messages = try await InlineRPCClient.shared.getChatHistory(peerID: peerId_)
-    var result = InlineProtocol.GetChatHistoryResult()
-    result.messages = messages
-    let historyResult = result
+    let historyResult = try await InlineRPCClient.shared.getChatHistory(peerID: peerId_)
     let transaction = GetChatHistoryTransaction(
       peer: peerId_,
       mode: .historyModeLatest,

@@ -1081,6 +1081,23 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("explicit acknowledgement cursors") { db in
+      try db.create(table: "acknowledgement") { table in
+        table.column("chatId", .integer).notNull().references("chat", onDelete: .cascade)
+        table.column("userId", .integer).notNull()
+        table.column("maxId", .integer).notNull()
+        table.primaryKey(["chatId", "userId"])
+      }
+      try db.create(index: "acknowledgement_message", on: "acknowledgement", columns: ["chatId", "maxId"])
+    }
+
+    migrator.registerMigration("revisioned acknowledgement clear") { db in
+      try db.alter(table: "acknowledgement") { table in
+        table.add(column: "revision", .integer).notNull().defaults(to: 0)
+        table.add(column: "cleared", .boolean).notNull().defaults(to: false)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

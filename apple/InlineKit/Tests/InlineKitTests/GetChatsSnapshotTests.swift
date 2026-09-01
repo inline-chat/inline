@@ -658,7 +658,7 @@ struct GetChatsSnapshotTests {
     }
   }
 
-  @Test("cursor failure rolls back a fresh chat model and messages")
+  @Test("cursor failure rolls back a fresh chat model acknowledgements and messages")
   func cursorFailureRollsBackWholeFreshChat() throws {
     let queue = try makeInMemoryDB()
     let failedKey = BucketKey.chat(peer: makeChatPeer(id: 20))
@@ -669,6 +669,12 @@ struct GetChatsSnapshotTests {
 
     var failedChat = makeChat(id: 20, seq: 20)
     failedChat.lastMsgID = 1
+    failedChat.acknowledgements.cursors = [InlineProtocol.ChatAcknowledgement.with {
+      $0.chatID = 20
+      $0.userID = 1
+      $0.maxID = 1
+      $0.revision = 1
+    }]
     var result = InlineProtocol.GetChatsResult()
     result.users = [makeUser(id: 1)]
     result.chats = [failedChat, makeChat(id: 10, seq: 10)]
@@ -680,6 +686,7 @@ struct GetChatsSnapshotTests {
       #expect(failureCount(in: imported, phase: .chatCursors) == 1)
       #expect(try Chat.fetchOne(db, key: 20) == nil)
       #expect(try Message.fetchOne(db, key: ["chatId": 20, "messageId": 1]) == nil)
+      #expect(try Acknowledgement.fetchCount(db) == 0)
       #expect(try bucketState(for: failedKey, in: db) == nil)
       #expect(imported.seededStates[failedKey] == nil)
 
@@ -701,7 +708,14 @@ struct GetChatsSnapshotTests {
       try makeFolder(id: 7, title: "Live Folder").saveFull(db)
       try makeDialog(chatID: 10, folderID: 7, pinned: true).saveFull(db)
 
-      let child = makeChat(id: 20, seq: 20)
+      var child = makeChat(id: 20, seq: 20)
+      child.acknowledgements.cursors = [.with {
+        $0.chatID = 20
+        $0.userID = 1
+        $0.maxID = 1
+        $0.revision = 1
+        $0.user = makeUser(id: 1, name: "Stale ACK User")
+      }]
       var result = InlineProtocol.GetChatsResult()
       result.users = [
         makeUser(id: 1, name: "Stale User"),
@@ -726,6 +740,7 @@ struct GetChatsSnapshotTests {
       #expect(try DialogFolder.fetchOne(db, key: 8) == nil)
       #expect(try Dialog.fetchOne(db, key: 10)?.pinned == true)
       #expect(try Dialog.fetchOne(db, key: 20) == nil)
+      #expect(try Acknowledgement.fetchCount(db) == 0)
       #expect(try bucketState(for: childKey, in: db) == nil)
       #expect(imported.seededStates.isEmpty)
     }

@@ -8,6 +8,7 @@ public enum TransactionTypeRegistry {
   public static func typeString(for transaction: any Transaction2) -> String {
     switch transaction {
       case is SendMessageTransaction: "send_message"
+      case is AcknowledgeMessagesTransaction: "acknowledge_messages"
       case is AddReactionTransaction: "add_reaction"
       case is DeleteReactionTransaction: "delete_reaction"
       case is EditMessageTransaction: "edit_message"
@@ -80,6 +81,7 @@ public enum TransactionTypeRegistry {
     let decoder = JSONDecoder()
     switch type {
       case "send_message": return try decoder.decode(SendMessageTransaction.self, from: data)
+      case "acknowledge_messages": return try decoder.decode(AcknowledgeMessagesTransaction.self, from: data)
       case "add_reaction": return try decoder.decode(AddReactionTransaction.self, from: data)
       case "delete_reaction": return try decoder.decode(DeleteReactionTransaction.self, from: data)
       case "edit_message": return try decoder.decode(EditMessageTransaction.self, from: data)

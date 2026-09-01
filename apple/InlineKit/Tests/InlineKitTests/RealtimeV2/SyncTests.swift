@@ -2716,6 +2716,38 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
+  @Test("ACK catch-up and live delivery advance the correct DM or group bucket", arguments: [false, true])
+  func testAcknowledgementSyncRouting(directMessage: Bool) async throws {
+    let peer: InlineProtocol.Peer = directMessage
+      ? .with { $0.user = .with { $0.userID = 7 } }
+      : makeChatPeer(chatId: 42)
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let cursor = InlineProtocol.ChatAcknowledgement.with {
+      $0.chatID = 42; $0.userID = 9; $0.maxID = 10; $0.peerID = peer
+    }
+    let first = makeDurableUpdate(seq: 1, date: 100, payload: .acknowledgement(cursor))
+    let client = FakeProtocolClient(responses: [makeGetUpdatesResult(
+      seq: 1, date: 100, updates: [first], final: true, resultType: .slice
+    )])
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    let signal = InlineProtocol.Update.with {
+      $0.chatHasNewUpdates = .with { $0.peerID = peer; $0.updateSeq = 1 }
+    }
+    await sync.process(updates: [signal])
+    let caughtUp = await waitForCondition { await storage.getBucketState(for: .chat(peer: peer)).seq == 1 }
+    #expect(caughtUp)
+    #expect(await apply.appliedUpdates.count == 1)
+    var secondCursor = cursor
+    secondCursor.maxID = 12
+    await sync.process(updates: [makeDurableUpdate(seq: 2, date: 101, payload: .acknowledgement(secondCursor))])
+    #expect(await storage.getBucketState(for: .chat(peer: peer)).seq == 2)
+    #expect(await apply.appliedUpdates.count == 2)
+    if directMessage {
+      #expect(await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 42))).seq == 0)
+    }
+  }
+
   @Test("legacy sequenced reaction records remain replayable without making reactions durable")
   func testChatCatchUpAppliesDurableReactionUpdates() async throws {
     let storage = InMemorySyncStorage()

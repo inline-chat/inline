@@ -2237,6 +2237,8 @@ actor Sync {
         }
       case let .messageAttachment(payload):
         .chat(peer: payload.peerID)
+      case let .acknowledgement(payload):
+        payload.hasPeerID ? .chat(peer: payload.peerID) : nil
       case let .updateReaction(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.reaction.chatID } })
       case let .deleteReaction(payload):
@@ -2483,6 +2485,8 @@ actor BucketActor {
   /// (membership, chat metadata, and other non-history state).
   private func shouldProcessUpdate(_ update: InlineProtocol.Update) -> Bool {
     switch update.update {
+      case .acknowledgement:
+        true
       case .participantAdd:
         true
       case .spaceMemberDelete:

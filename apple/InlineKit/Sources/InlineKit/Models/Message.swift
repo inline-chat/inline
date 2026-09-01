@@ -198,6 +198,17 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let entities = Column(CodingKeys.entities)
   }
 
+  public static let acknowledgements = hasMany(
+    Acknowledgement.self,
+    using: ForeignKey(["chatId", "maxId"], to: ["chatId", "messageId"])
+  )
+
+  /// Filtered to the authenticated actor by FullMessage.queryRequest.
+  public static let currentUserAcknowledgement = hasOne(
+    Acknowledgement.self,
+    using: ForeignKey(["chatId"], to: ["chatId"])
+  )
+
   public static let chat = belongsTo(Chat.self)
   public var chat: QueryInterfaceRequest<Chat> {
     request(for: Message.chat)

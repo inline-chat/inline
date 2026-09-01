@@ -121,7 +121,7 @@ public actor InlineRPCClient {
     await Api.realtime.applyUpdatesAndWait(result.updates)
   }
 
-  public func getChatHistory(peerID: Peer, limit: Int32 = 100) async throws -> [InlineProtocol.Message] {
+  public func getChatHistory(peerID: Peer, limit: Int32 = 100) async throws -> InlineProtocol.GetChatHistoryResult {
     let response = try await Api.realtime.callRpcDirect(
       method: .getChatHistory,
       input: .getChatHistory(.with {
@@ -133,7 +133,7 @@ public actor InlineRPCClient {
     guard case let .getChatHistory(result)? = response else {
       throw InlineRPCClientError.unexpectedResponse
     }
-    return result.messages
+    return result
   }
 
   public func inviteToSpace(spaceID: Int64, userID: Int64) async throws -> InlineProtocol.InviteToSpaceResult {

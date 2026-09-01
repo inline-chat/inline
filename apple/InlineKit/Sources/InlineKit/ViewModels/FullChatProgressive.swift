@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import Foundation
 import GRDB
@@ -231,14 +232,26 @@ public class MessagesProgressiveViewModel {
   private lazy var initialLimit: Int = Self.defaultInitialLimit()
 
   private let log = Log.scoped("MessagesViewModel", level: .info)
-  private let db = AppDatabase.shared
+  private let db: AppDatabase
+  private let publisher: MessagesPublisher
+  private let currentUserId: Int64?
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
   private var loadedWindowMetadataGeneration: UInt64 = 0
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
-  public init(peer: Peer, reversed: Bool = false, initialState: InitialState? = nil) {
+  public init(
+    peer: Peer,
+    reversed: Bool = false,
+    initialState: InitialState? = nil,
+    database: AppDatabase = .shared,
+    publisher: MessagesPublisher = .shared,
+    currentUserId: Int64? = Auth.shared.getCurrentUserId()
+  ) {
+    db = database
+    self.publisher = publisher
+    self.currentUserId = currentUserId
     self.peer = peer
     self.reversed = reversed
     if let initialState {
@@ -253,7 +266,7 @@ public class MessagesProgressiveViewModel {
     }
 
     // subscribe to changes
-    MessagesPublisher.shared.publisher
+    publisher.publisher
       .sink { [weak self] update in
         guard let self else { return }
         Log.shared.trace("Received update \(update)")
@@ -265,8 +278,8 @@ public class MessagesProgressiveViewModel {
   }
 
   private func applyInitialState(_ state: InitialState) {
-    messages = state.messages
-    threadAnchor = state.threadAnchor
+    messages = reapplyingPendingAcknowledgements(to: state.messages)
+    threadAnchor = state.threadAnchor?.withoutAcknowledgements
     if messages.isEmpty {
       minDate = .init()
       maxDate = .init()
@@ -301,7 +314,7 @@ public class MessagesProgressiveViewModel {
           .filter(Column("messageId") == parentMessageId)
           .fetchOne(db)
       }
-      threadAnchor = anchor
+      threadAnchor = anchor?.withoutAcknowledgements
     } catch {
       log.error("Failed to load thread anchor message", error: error)
       threadAnchor = nil
@@ -409,7 +422,9 @@ public class MessagesProgressiveViewModel {
         if messageAdd.peer == peer {
           // Check if we have it to not add it again
           let existingIds = Set(messages.map(\.id))
-          let newMessages = messageAdd.messages.filter { !existingIds.contains($0.id) }
+          let newMessages = reapplyingPendingAcknowledgements(
+            to: messageAdd.messages.filter { !existingIds.contains($0.id) }
+          )
           guard !newMessages.isEmpty else { return nil }
 
           // TODO: detect if we should add to the bottom or top
@@ -466,8 +481,8 @@ public class MessagesProgressiveViewModel {
 
       case let .update(messageUpdate):
         if let threadAnchor, messageUpdate.message.id == threadAnchor.id {
-          self.threadAnchor = messageUpdate.message
-          return MessagesChangeSet.updated([messageUpdate.message], indexSet: [], animated: messageUpdate.animated ?? true)
+          self.threadAnchor = messageUpdate.message.withoutAcknowledgements
+          return MessagesChangeSet.updated([messageUpdate.message.withoutAcknowledgements], indexSet: [], animated: messageUpdate.animated ?? true)
         }
 
         if messageUpdate.peer == peer {
@@ -476,11 +491,33 @@ public class MessagesProgressiveViewModel {
             return nil
           }
 
-          messages[index] = messageUpdate.message
+          messages[index] = reapplyingPendingAcknowledgements(to: messageUpdate.message)
           updateRange() // ??
           updateLoadedWindowMetadata()
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
+
+      case let .acknowledgements(change):
+        guard change.peer == peer else { return nil }
+        var nextMessages = messages
+        var updated: [FullMessage] = []
+        var indices: [Int] = []
+        for index in nextMessages.indices {
+          let previous = nextMessages[index]
+          for projection in change.projections {
+            nextMessages[index].applyAcknowledgement(projection, currentUserId: currentUserId)
+          }
+          let next = nextMessages[index]
+          if previous.acknowledgements != next.acknowledgements
+            || previous.acknowledgementAction(currentUserId: currentUserId)
+              != next.acknowledgementAction(currentUserId: currentUserId) {
+            updated.append(next)
+            indices.append(index)
+          }
+        }
+        messages = nextMessages
+        guard !updated.isEmpty else { return nil }
+        return .updated(updated, indexSet: indices, animated: change.animated)
 
       case let .reload(reloadPeer, animated):
         if let threadAnchor, reloadPeer == threadAnchor.peerId {
@@ -517,8 +554,23 @@ public class MessagesProgressiveViewModel {
     return nil
   }
 
+  private func reapplyingPendingAcknowledgements(to message: FullMessage) -> FullMessage {
+    var message = message
+    for projection in publisher.pendingAcknowledgementProjections(
+      chatId: message.chatId,
+      canonicalCurrent: message.currentUserAcknowledgement
+    ) {
+      message.applyAcknowledgement(projection, currentUserId: currentUserId)
+    }
+    return message
+  }
+
+  private func reapplyingPendingAcknowledgements(to messages: [FullMessage]) -> [FullMessage] {
+    messages.map(reapplyingPendingAcknowledgements(to:))
+  }
+
   private func sort() {
-    messages = stableSorted(messages)
+    messages = reapplyingPendingAcknowledgements(to: stableSorted(messages))
   }
 
   private func sort(batch: [FullMessage]) -> [FullMessage] {
@@ -919,7 +971,7 @@ public class MessagesProgressiveViewModel {
       // A deferred history reload must preserve this window until scrolling
       // establishes that the user has returned to the live end of the chat.
       atBottom = false
-      messages = aroundBatch
+      messages = reapplyingPendingAcknowledgements(to: aroundBatch)
       updateRange()
       updateLoadedWindowMetadata()
 
@@ -937,7 +989,9 @@ public class MessagesProgressiveViewModel {
   private func mergeLatestWindowFromLocal() {
     do {
       let latest = try fetchMessages(loadMode: .limit(initialLimit), previousCount: messages.count)
-      messages = Self.mergingLatestMessages(existing: messages, latest: latest, reversed: reversed)
+      messages = reapplyingPendingAcknowledgements(
+        to: Self.mergingLatestMessages(existing: messages, latest: latest, reversed: reversed)
+      )
       updateRange()
       updateLoadedWindowMetadata()
     } catch {
@@ -1063,7 +1117,7 @@ public class MessagesProgressiveViewModel {
     }
 
     let result = try db.reader.read { db in
-      try Self.buildAdditionalMessagesQuery(peer: peer, request: request).fetchAll(db)
+      try Self.buildAdditionalMessagesQuery(peer: peer, request: request, currentUserId: currentUserId).fetchAll(db)
     }
     fetchedCount = result.count
     return result
@@ -1072,7 +1126,8 @@ public class MessagesProgressiveViewModel {
   private nonisolated static func fetchAdditionalMessages(
     db appDatabase: AppDatabase,
     peer: Peer,
-    request: AdditionalLoadRequest
+    request: AdditionalLoadRequest,
+    currentUserId: Int64?
   ) async throws -> [FullMessage] {
     let startedAt = Date()
     let span = PerformanceTrace.begin(
@@ -1088,7 +1143,7 @@ public class MessagesProgressiveViewModel {
     }
 
     let result = try await appDatabase.reader.read { db in
-      try buildAdditionalMessagesQuery(peer: peer, request: request).fetchAll(db)
+      try buildAdditionalMessagesQuery(peer: peer, request: request, currentUserId: currentUserId).fetchAll(db)
     }
     fetchedCount = result.count
     return result
@@ -1096,9 +1151,10 @@ public class MessagesProgressiveViewModel {
 
   private nonisolated static func buildAdditionalMessagesQuery(
     peer: Peer,
-    request: AdditionalLoadRequest
+    request: AdditionalLoadRequest,
+    currentUserId: Int64?
   ) -> QueryInterfaceRequest<FullMessage> {
-    let query = baseQuery(for: peer)
+    let query = baseQuery(for: peer, currentUserId: currentUserId)
 
     switch request.direction {
       case .older:
@@ -1238,7 +1294,9 @@ public class MessagesProgressiveViewModel {
       let messagesBatch = try fetchMessages(loadMode: loadMode, previousCount: prevCount)
 
       //      log.trace("loaded messages: \(messagesBatch.count)")
-      messages = normalizedMessagesForDisplay(messagesBatch)
+      messages = reapplyingPendingAcknowledgements(
+        to: normalizedMessagesForDisplay(messagesBatch)
+      )
 
       // Uncomment if we want to sort in SQL based on anything other than date
       // sort()
@@ -1273,7 +1331,9 @@ public class MessagesProgressiveViewModel {
 
       // Only proceed if we have new messages to add
       if !messagesBatch.isEmpty {
-        messages = Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
+        messages = reapplyingPendingAcknowledgements(
+          to: Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
+        )
 
         updateRange()
       }
@@ -1292,7 +1352,9 @@ public class MessagesProgressiveViewModel {
       )
 
     do {
-      var messagesBatch = try await Self.fetchAdditionalMessages(db: db, peer: peer, request: request)
+      var messagesBatch = try await Self.fetchAdditionalMessages(
+        db: db, peer: peer, request: request, currentUserId: currentUserId
+      )
       let rawCount = messagesBatch.count
       guard !Task.isCancelled else { return false }
 
@@ -1309,7 +1371,9 @@ public class MessagesProgressiveViewModel {
         return false
       }
 
-      messages = Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
+      messages = reapplyingPendingAcknowledgements(
+        to: Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
+      )
 
       updateRange()
       await updateLoadedWindowMetadataAsync()
@@ -1322,11 +1386,14 @@ public class MessagesProgressiveViewModel {
   }
 
   private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
-    Self.baseQuery(for: peer)
+    Self.baseQuery(for: peer, currentUserId: currentUserId)
   }
 
-  private nonisolated static func baseQuery(for peer: Peer) -> QueryInterfaceRequest<FullMessage> {
-    var query = FullMessage.queryRequest()
+  private nonisolated static func baseQuery(
+    for peer: Peer,
+    currentUserId: Int64? = Auth.shared.getCurrentUserId()
+  ) -> QueryInterfaceRequest<FullMessage> {
+    var query = FullMessage.queryRequest(currentUserId: currentUserId)
 
     switch peer {
       case let .thread(id):
@@ -1355,7 +1422,17 @@ private extension MessagesProgressiveViewModel.MessagesLoadDirection {
 
 @MainActor
 public final class MessagesPublisher {
-  public static let shared = MessagesPublisher()
+  public static let shared = MessagesPublisher(database: .shared)
+
+  private struct OptimisticAcknowledgementKey: Hashable {
+    let chatId: Int64
+    let userId: Int64
+  }
+
+  private struct PendingAcknowledgement {
+    let requestId: UUID
+    var projection: FullAcknowledgement
+  }
 
 #if os(iOS)
   public struct ActiveChatToken: Sendable {
@@ -1366,6 +1443,12 @@ public final class MessagesPublisher {
 
   public struct MessageUpdate {
     public let message: FullMessage
+    public let animated: Bool?
+    let peer: Peer
+  }
+
+  public struct AcknowledgementChange {
+    public let projections: [AcknowledgementProjection]
     public let animated: Bool?
     let peer: Peer
   }
@@ -1384,14 +1467,19 @@ public final class MessagesPublisher {
   public enum UpdateType {
     case add(MessageAdd)
     case update(MessageUpdate)
+    case acknowledgements(AcknowledgementChange)
     case delete(MessageDelete)
     case reload(peer: Peer, animated: Bool?)
   }
 
-  private init() {}
-
-  private let db = AppDatabase.shared
+  private let db: AppDatabase
   let publisher = PassthroughSubject<UpdateType, Never>()
+  private var nextAcknowledgementProjectionToken: Int64 = 1
+  private var pendingAcknowledgements: [OptimisticAcknowledgementKey: PendingAcknowledgement] = [:]
+
+  init(database: AppDatabase) {
+    db = database
+  }
 
 #if os(iOS)
   private var activeChatTokens: [UUID: Peer] = [:]
@@ -1539,6 +1627,137 @@ public final class MessagesPublisher {
     publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 
+  /// Cursor publication only updates already-loaded rows. No message query or anchor routing.
+  public func acknowledgementsChanged(_ cursors: [FullAcknowledgement], peer: Peer, animated: Bool?) {
+    guard !cursors.isEmpty else { return }
+    for cursor in cursors where !cursor.acknowledgement.isOptimisticProjection {
+      pendingAcknowledgements.removeValue(forKey: OptimisticAcknowledgementKey(
+        chatId: cursor.acknowledgement.chatId,
+        userId: cursor.acknowledgement.userId
+      ))
+    }
+    guard shouldPublish(peer: peer) else { return }
+    publisher.send(.acknowledgements(AcknowledgementChange(
+      projections: cursors.map(AcknowledgementProjection.replace),
+      animated: animated,
+      peer: peer
+    )))
+  }
+
+  /// Atomically admits one local ACK intent per actor/chat and assigns its
+  /// monotonic, process-local row token before any asynchronous work begins.
+  @discardableResult
+  func beginOptimisticAcknowledgement(
+    requestId: UUID,
+    chatId: Int64,
+    userId: Int64,
+    maxId: Int64,
+    cleared: Bool,
+    peer: Peer,
+    animated: Bool?
+  ) -> Bool {
+    guard chatId > 0, userId > 0, maxId > 0 else { return false }
+    let key = OptimisticAcknowledgementKey(chatId: chatId, userId: userId)
+    guard pendingAcknowledgements[key] == nil else { return false }
+
+    let token = nextAcknowledgementProjectionToken
+    nextAcknowledgementProjectionToken = token == Int64.max ? 1 : token + 1
+    let projection = FullAcknowledgement(acknowledgement: Acknowledgement(
+      chatId: chatId,
+      userId: userId,
+      maxId: maxId,
+      revision: -token,
+      cleared: cleared
+    ))
+    pendingAcknowledgements[key] = PendingAcknowledgement(
+      requestId: requestId,
+      projection: projection
+    )
+
+    if shouldPublish(peer: peer) {
+      publisher.send(.acknowledgements(AcknowledgementChange(
+        projections: [.replace(projection)],
+        animated: animated,
+        peer: peer
+      )))
+    }
+    return true
+  }
+
+  func enrichOptimisticAcknowledgement(
+    requestId: UUID,
+    chatId: Int64,
+    userId: Int64,
+    userInfo: UserInfo?,
+    peer: Peer,
+    animated: Bool?
+  ) {
+    guard let userInfo else { return }
+    let key = OptimisticAcknowledgementKey(chatId: chatId, userId: userId)
+    guard var pending = pendingAcknowledgements[key], pending.requestId == requestId else { return }
+    pending.projection.userInfo = userInfo
+    pendingAcknowledgements[key] = pending
+    guard shouldPublish(peer: peer) else { return }
+    publisher.send(.acknowledgements(AcknowledgementChange(
+      projections: [.replace(pending.projection)],
+      animated: animated,
+      peer: peer
+    )))
+  }
+
+  func hasOptimisticAcknowledgement(requestId: UUID, chatId: Int64, userId: Int64) -> Bool {
+    pendingAcknowledgements[OptimisticAcknowledgementKey(chatId: chatId, userId: userId)]?.requestId
+      == requestId
+  }
+
+  func pendingAcknowledgementProjections(
+    chatId: Int64,
+    canonicalCurrent: Acknowledgement?
+  ) -> [AcknowledgementProjection] {
+    var resolvedKeys: [OptimisticAcknowledgementKey] = []
+    var projections: [AcknowledgementProjection] = []
+    for (key, pending) in pendingAcknowledgements where key.chatId == chatId {
+      let desired = pending.projection.acknowledgement
+      if let canonicalCurrent,
+         !canonicalCurrent.isOptimisticProjection,
+         canonicalCurrent.userId == key.userId,
+         canonicalCurrent.maxId == desired.maxId,
+         canonicalCurrent.cleared == desired.cleared {
+        resolvedKeys.append(key)
+      } else {
+        projections.append(.replace(pending.projection))
+      }
+    }
+    for key in resolvedKeys { pendingAcknowledgements.removeValue(forKey: key) }
+    return projections
+  }
+
+  /// Reverts one still-current optimistic projection without touching a newer
+  /// authoritative cursor or querying message rows.
+  func restoreOptimisticAcknowledgement(
+    requestId: UUID,
+    chatId: Int64,
+    userId: Int64,
+    previous: FullAcknowledgement?,
+    peer: Peer,
+    animated: Bool?
+  ) {
+    let key = OptimisticAcknowledgementKey(chatId: chatId, userId: userId)
+    guard let pending = pendingAcknowledgements[key], pending.requestId == requestId else { return }
+    pendingAcknowledgements.removeValue(forKey: key)
+    guard shouldPublish(peer: peer) else { return }
+    publisher.send(.acknowledgements(AcknowledgementChange(
+      projections: [.restore(
+        chatId: chatId,
+        userId: userId,
+        replacingRevision: pending.projection.acknowledgement.revision,
+        previous: previous
+      )],
+      animated: animated,
+      peer: peer
+    )))
+  }
+
   public func messageUpdatedSync(message: Message, peer: Peer, animated: Bool?) {
     guard shouldPublish(peer: peer) else { return }
 
@@ -1649,7 +1868,7 @@ private extension MessagesPublisher.UpdateType {
     switch self {
       case .add:
         "add"
-      case .update:
+      case .update, .acknowledgements:
         "update"
       case .delete:
         "delete"

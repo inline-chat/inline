@@ -51,6 +51,7 @@ public struct GetChatTransaction: Transaction2 {
           var chat = Chat(from: response.chat)
           try clearMissingOptionalReferences(in: &chat, db: db)
           try chat.saveWithValidLastMsg(db)
+          try Acknowledgement.save(db, cursors: response.chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
         } catch {
           log.error("Failed to save chat", error: error)
           throw error
