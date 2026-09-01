@@ -182,11 +182,15 @@ export function getPreviewUrlFromMessage(text: string, entities?: MessageEntitie
 }
 
 export function getPreviewUrlsFromMessage(text: string, entities?: MessageEntities | null): string[] {
-  return extractPreviewUrls(text, collectEntityUrls(text, entities), { limit: urlPreviewCandidatePolicy.maxUrls })
+  return extractPreviewUrls(previewCandidateText(text, entities), collectEntityUrls(text, entities), {
+    limit: urlPreviewCandidatePolicy.maxUrls,
+  })
 }
 
 export function getPreviewRoutesFromMessage(text: string, entities?: MessageEntities | null): PreviewRoute[] {
-  return extractPreviewRoutes(text, collectEntityUrls(text, entities), { limit: urlPreviewCandidatePolicy.maxUrls })
+  return extractPreviewRoutes(previewCandidateText(text, entities), collectEntityUrls(text, entities), {
+    limit: urlPreviewCandidatePolicy.maxUrls,
+  })
 }
 
 /**
@@ -720,6 +724,32 @@ function collectEntityUrls(text: string, entities?: MessageEntities | null): str
   }
 
   return urls
+}
+
+function previewCandidateText(text: string, entities?: MessageEntities | null): string {
+  const ranges = (entities?.entities ?? [])
+    .filter((entity) => entity.type === MessageEntity_Type.CODE || entity.type === MessageEntity_Type.PRE)
+    .flatMap((entity) => {
+      const start = Number(entity.offset)
+      const end = start + Number(entity.length)
+      return Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end > start && start < text.length
+        ? [{ start, end: Math.min(end, text.length) }]
+        : []
+    })
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+
+  if (ranges.length === 0) return text
+
+  let result = ""
+  let cursor = 0
+  for (const range of ranges) {
+    if (range.end <= cursor) continue
+    const start = Math.max(range.start, cursor)
+    result += text.slice(cursor, start)
+    result += " ".repeat(range.end - start)
+    cursor = range.end
+  }
+  return result + text.slice(cursor)
 }
 
 async function maybeScheduleTitleGenerationAfterPreviews(

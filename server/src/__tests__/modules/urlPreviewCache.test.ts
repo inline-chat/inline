@@ -6,6 +6,7 @@ import { db, schema } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
 import { addSpaceUrlPreviewExclusion } from "@in/server/functions/space.urlPreviewExclusions"
 import { encrypt } from "@in/server/modules/encryption/encryption"
+import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { isSpaceUrlPreviewExcluded } from "@in/server/modules/urlPreview/exclusions"
 import {
   getPreviewRoutesFromMessage,
@@ -60,6 +61,43 @@ describe("URL preview candidates", () => {
       { kind: "general", url: "https://three.example/" },
       { kind: "general", url: "https://four.example/" },
       { kind: "general", url: "https://five.example/" },
+    ])
+  })
+
+  it("does not preview literal URLs inside inline or fenced code", async () => {
+    const inlineUrl = "https://inline-code.example/private"
+    const fencedUrl = "https://fenced-code.example/private"
+    const outsideUrl = "https://outside.example/docs"
+    const text = `😀 code ${inlineUrl}\noutput ${fencedUrl}\nreference ${outsideUrl}`
+    const entities: MessageEntities = {
+      entities: [
+        {
+          type: MessageEntity_Type.CODE,
+          offset: BigInt(text.indexOf(inlineUrl)),
+          length: BigInt(inlineUrl.length),
+          entity: { oneofKind: undefined },
+        },
+        {
+          type: MessageEntity_Type.PRE,
+          offset: BigInt(text.indexOf(fencedUrl)),
+          length: BigInt(fencedUrl.length),
+          entity: { oneofKind: "pre", pre: { language: "json" } },
+        },
+      ],
+    }
+
+    expect(getPreviewRoutesFromMessage(text, entities)).toEqual([
+      { kind: "general", url: "https://outside.example/docs" },
+    ])
+
+    const parsed = await processOutgoingText({
+      text: `~~~json\n{"url":"${fencedUrl}"}\n~~~\nreference ${outsideUrl}`,
+      entities: undefined,
+      parseMarkdown: true,
+    })
+    expect(parsed.entities?.entities.some((entity) => entity.type === MessageEntity_Type.PRE)).toBe(true)
+    expect(getPreviewRoutesFromMessage(parsed.text, parsed.entities)).toEqual([
+      { kind: "general", url: "https://outside.example/docs" },
     ])
   })
 })
