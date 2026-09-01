@@ -643,40 +643,10 @@ actor Sync {
         return nil
       }
 
-      var exactMessages: [InlineProtocol.Message] = []
-      if !pinnedIDs.isEmpty {
-        guard let rawMessages = try await callRepairRpc(
-          client: client,
-          method: .getMessages,
-          input: .getMessages(.with {
-            $0.peerID = peer.toInputPeer()
-            $0.messageIds = pinnedIDs
-          }),
-          timeout: Self.chatRepairTimeout
-        ) else {
-          return nil
-        }
-        guard case let .getMessages(messages) = rawMessages else {
-          log.error("failed to parse getMessages result during chat repair")
-          return nil
-        }
-        let returnedIDs = messages.messages.map(\.id)
-        guard returnedIDs.count == pinnedIDs.count,
-              Set(returnedIDs) == Set(pinnedIDs),
-              messages.messages.allSatisfy({
-                $0.id > 0 && $0.chatID == chat.chat.id && $0.peerID == peer
-              })
-        else {
-          log.error("getMessages did not return the exact pinned messages for chat \(chat.chat.id)")
-          return nil
-        }
-        exactMessages = messages.messages
-      }
-
       let repaired = await applyUpdates.repairChat(ChatRepairSnapshot(
         peer: peer,
         chat: chat,
-        pinnedMessages: exactMessages,
+        pinnedMessages: [],
         targetState: targetState,
         mutationToken: accountMutationToken,
         reason: reason,
@@ -3198,7 +3168,8 @@ actor BucketActor {
 
         guard let requiresSnapshotRepair = validatePageEnvelope(
           payload,
-          startSeq: currentSeq
+          startSeq: currentSeq,
+          targetSeq: hardEndSeq
         ) else {
           let fingerprint = invalidEnvelopeFingerprint(
             payload,
@@ -3781,7 +3752,8 @@ actor BucketActor {
 
   private func validatePageEnvelope(
     _ payload: InlineProtocol.GetUpdatesResult,
-    startSeq: Int64
+    startSeq: Int64,
+    targetSeq: Int64
   ) -> Bool? {
     guard payload.resultType == .slice || payload.resultType == .empty else {
       log.error("invalid getUpdates result type \(payload.resultType) for bucket \(key)")
@@ -3791,7 +3763,13 @@ actor BucketActor {
       log.error("getUpdates page moved backwards for bucket \(key): start=\(startSeq), end=\(payload.seq)")
       return nil
     }
-    guard payload.date > 0 else {
+    // An equal-bound request has no journal row from which the server can
+    // supply a date. Admit only this exact no-op; the normal page commit keeps
+    // the stored date and completes checkpoint, buffer and activity ownership.
+    let isEmptyCompletion = payload.resultType == .empty && payload.final &&
+      payload.seq == startSeq && startSeq == targetSeq && payload.date == 0 &&
+      payload.updates.isEmpty && payload.skippedSequences.isEmpty && !payload.hasSidecars
+    guard payload.date > 0 || isEmptyCompletion else {
       log.error("getUpdates page omitted a valid date for bucket \(key)")
       return nil
     }

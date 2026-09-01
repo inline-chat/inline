@@ -669,18 +669,19 @@ public actor UpdatesEngine: Sendable {
       return nil
     }
     let pinnedIDs = snapshot.chat.pinnedMessageIds
+    let hydratedPinnedIDs = snapshot.pinnedMessages.map(\.id)
     guard pinnedIDs.count <= 100,
           pinnedIDs.allSatisfy({ $0 > 0 }),
           Set(pinnedIDs).count == pinnedIDs.count,
-          snapshot.pinnedMessages.count == pinnedIDs.count,
-          Set(snapshot.pinnedMessages.map(\.id)) == Set(pinnedIDs),
+          Set(hydratedPinnedIDs).count == hydratedPinnedIDs.count,
+          Set(hydratedPinnedIDs).isSubset(of: Set(pinnedIDs)),
           snapshot.pinnedMessages.allSatisfy({
             $0.id > 0 &&
               $0.chatID == snapshot.chat.chat.id &&
               validatedPeer($0.peerID) == peer
           })
     else {
-      log.error("Chat repair snapshot does not contain the exact pinned-message payload")
+      log.error("Chat repair snapshot contains invalid pinned-message hydration")
       return nil
     }
 
@@ -765,11 +766,6 @@ public actor UpdatesEngine: Sendable {
         // the full numeric history range uncertain for a later bounded refill.
         try MessageHistoryCoverageStore.invalidate(db, chatId: chatID)
 
-        try self.requirePinnedMessages(
-          db,
-          chatId: chatID,
-          messageIds: snapshot.chat.pinnedMessageIds
-        )
         try PinnedMessage.replaceAll(
           db,
           chatId: chatID,
@@ -819,7 +815,8 @@ public actor UpdatesEngine: Sendable {
         thresholdMs: 400,
         data: [
           "reason": snapshot.reason,
-          "pins": snapshot.pinnedMessages.count,
+          "pins": pinnedIDs.count,
+          "hydrated_pins": snapshot.pinnedMessages.count,
         ]
       )
       return committedState
@@ -1226,26 +1223,6 @@ public actor UpdatesEngine: Sendable {
     }
   }
 
-  private nonisolated func requirePinnedMessages(
-    _ db: Database,
-    chatId: Int64,
-    messageIds: [Int64]
-  ) throws {
-    guard !messageIds.isEmpty else { return }
-
-    let known = try Message
-      .filter(Message.Columns.chatId == chatId)
-      .filter(messageIds.contains(Message.Columns.messageId))
-      .fetchAll(db)
-    let knownIds = Set(known.map(\.messageId))
-    let missingIds = Set(messageIds).subtracting(knownIds).sorted()
-    if !missingIds.isEmpty {
-      throw DurableUpdateApplyError.missingPinnedMessages(
-        chatID: chatId,
-        messageIDs: missingIds
-      )
-    }
-  }
 }
 
 // MARK: Extensions
@@ -1322,7 +1299,6 @@ private enum DurableUpdateApplyError: Error {
   case unresolvedParentChat(chatID: Int64, parentChatID: Int64)
   case unresolvedParentMessage(chatID: Int64, parentChatID: Int64, parentMessageID: Int64)
   case invalidParentReference(chatID: Int64)
-  case missingPinnedMessages(chatID: Int64, messageIDs: [Int64])
   case unresolvedUserRepairAccount(Int64)
   case unresolvedUserRepairTarget(BucketKey)
 }

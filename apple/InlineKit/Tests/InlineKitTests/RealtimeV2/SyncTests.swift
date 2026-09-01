@@ -870,13 +870,11 @@ final class SyncTests {
       resultType: .tooLong
     )
 
-    let pinnedMessage = makeProtocolMessage(id: 10, chatId: 1)
     let client = FakeProtocolClient(
       responses: [],
       methodResponses: [
         .getUpdates: [tooLong],
         .getChat: [makeGetChatResult(chatId: 1, seq: 10, pinnedMessageIds: [10])],
-        .getMessages: [makeGetMessagesResult(messages: [pinnedMessage])],
       ]
     )
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
@@ -901,7 +899,7 @@ final class SyncTests {
     #expect(repaired.count == 1)
     let snapshot = try #require(repaired.first)
     #expect(snapshot.reason == "too_long")
-    #expect(snapshot.pinnedMessages.map(\.id) == [10])
+    #expect(snapshot.pinnedMessages.isEmpty)
 
     let applied = await apply.appliedUpdates
     #expect(applied.isEmpty)
@@ -914,10 +912,10 @@ final class SyncTests {
     #expect(stats.bucketFetchTooLong == 1)
 
     let callCount = await client.getCallCount()
-    #expect(callCount == 3)
+    #expect(callCount == 2)
 
     let methods = await client.getCalledMethods()
-    #expect(methods == [.getUpdates, .getChat, .getMessages])
+    #expect(methods == [.getUpdates, .getChat])
   }
 
   @Test("chat TOO_LONG retains its cursor when authoritative repair fails")
@@ -1680,12 +1678,14 @@ final class SyncTests {
       responses: [],
       methodResponses: [
         .getUpdatesState: [checkpoint],
-        .getUpdates: [makeGetUpdatesResult(seq: 42, date: 100, updates: [], final: true, resultType: .empty)],
+        .getUpdates: [makeGetUpdatesResult(seq: 42, date: 0, updates: [], final: true, resultType: .empty)],
       ]
     )
     let config = SyncConfig(lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
+    let activity = SyncActivityRecorder()
+    await sync.setSyncActivityListener { await activity.record($0) }
     await sync.acceptedSessionOpened(sessionID: 1)
     await Task.yield()
     let didInstallCheckpoint = await waitForCondition(timeout: .seconds(3)) {
@@ -1705,6 +1705,57 @@ final class SyncTests {
     #expect(await client.getUpdatesEndSequences() == [42])
     #expect(await storage.getState().lastSyncDate == 100)
     #expect(await storage.getBucketState(for: .user).seq == 42)
+    #expect(await waitForCondition {
+      let sequence = await activity.sequence
+      return sequence.contains(true) && sequence.last == false
+    })
+    #expect(await storage.getBucketState(for: .user).date == 100)
+    #expect(await apply.bucketCommits.count == 2) // checkpoint seed, then no-op completion
+    #expect(await client.getCalledMethods() == [.getUpdatesState, .getUpdates])
+    await sync.prepareForTermination()
+  }
+
+  enum InvalidEmptyCompletion: CaseIterable, Sendable {
+    case nonfinal, belowTarget, advancing, negativeDate, slice, sidecars, updates, skips
+  }
+
+  @Test("date-less completion never admits mutations or unresolved targets", arguments: InvalidEmptyCompletion.allCases)
+  func testInvalidEmptyCompletionIsRejected(_ invalid: InvalidEmptyCompletion) async throws {
+    let storage = InMemorySyncStorage()
+    await storage.setBucketState(for: .user, state: BucketState(date: 100, seq: 42))
+    let apply = RecordingApplyUpdates()
+    var page = InlineProtocol.GetUpdatesResult.with {
+      $0.seq = 42; $0.date = 0; $0.final = true; $0.resultType = .empty
+    }
+    var target: Int64 = 42
+    switch invalid {
+    case .nonfinal: page.final = false
+    case .belowTarget: target = 43
+    case .advancing:
+      target = 43
+      page.seq = 43
+      page.skippedSequences = makeIrrelevantSkippedSequences(after: 42, through: 43)
+    case .negativeDate: page.date = -1
+    case .slice: page.resultType = .slice
+    case .sidecars: page.sidecars = .init()
+    case .updates: page.updates = [makeChatInfoUpdate(seq: 43, date: 110)]
+    case .skips: page.skippedSequences = makeIrrelevantSkippedSequences(after: 42, through: 43)
+    }
+    let client = FakeProtocolClient(responses: [.getUpdates(page)])
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    let actor = BucketActor(
+      key: .user, seq: 42, date: 100, client: client, sync: sync,
+      fetchLimiter: FetchLimiter(limit: 1), accountMutationToken: nil
+    )
+    await actor.setFetchTarget(upToSeq: target)
+    await actor.fetchNewUpdates()
+    #expect(await apply.bucketCommits.isEmpty)
+    #expect(await apply.appliedUpdates.isEmpty)
+    #expect(await apply.appliedSidecars.isEmpty)
+    #expect(await storage.getBucketState(for: .user).seq == 42)
+    #expect(await storage.getBucketState(for: .user).date == 100)
+    await actor.invalidate()
+    await actor.waitUntilIdle()
     await sync.prepareForTermination()
   }
 
@@ -4563,14 +4614,6 @@ private func makeGetChatResult(
   result.dialog = dialog
   result.pinnedMessageIds = pinnedMessageIds
   return .getChat(result)
-}
-
-private func makeGetMessagesResult(
-  messages: [InlineProtocol.Message]
-) -> InlineProtocol.RpcResult.OneOf_Result {
-  var result = InlineProtocol.GetMessagesResult()
-  result.messages = messages
-  return .getMessages(result)
 }
 
 private func makeGetSpaceResult(

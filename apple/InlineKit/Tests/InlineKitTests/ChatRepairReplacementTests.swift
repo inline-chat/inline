@@ -351,8 +351,8 @@ struct ChatRepairReplacementTests {
     }
   }
 
-  @Test("an uncached authoritative pin retains the previous chat and cursor")
-  func missingPinnedMessageDoesNotAdvance() async throws {
+  @Test("an uncached authoritative pin advances metadata and retains unavailable body state")
+  func missingPinnedMessageDoesNotBlockRepair() async throws {
     let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
     try await queue.write { (db: Database) throws in
       // Chat insertion already seeds unknown history across the full ID range.
@@ -375,22 +375,27 @@ struct ChatRepairReplacementTests {
       reason: "missing-pin"
     ))
 
-    #expect(committed == nil)
+    #expect(committed?.seq == 5)
     try await queue.read { (db: Database) throws in
-      #expect(try Chat.fetchOne(db, id: 7)?.title == "Stale")
-      #expect(try PinnedMessage.fetchCount(db) == 0)
-      #expect(try DbBucketState.fetchOne(db)?.seq == 1)
+      #expect(try Chat.fetchOne(db, id: 7)?.title == "Repaired")
+      #expect(try PinnedMessage.fetchAll(db).map(\.messageId) == [999])
+      #expect(try Message.filter(Message.Columns.messageId == 999).fetchCount(db) == 0)
+      #expect(try DbBucketState.fetchOne(db)?.seq == 5)
       #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7) == [
-        MessageHistoryHole(chatId: 7, lowerId: 1, upperId: 100),
+        MessageHistoryHole(
+          chatId: 7,
+          lowerId: 1,
+          upperId: MessageHistoryHole.positiveMessageIDMax
+        ),
       ])
     }
   }
 
-  @Test("exact pin hydration saves the pin without claiming contiguous history")
-  func exactPinnedMessageDoesNotCloseCoverage() async throws {
+  @Test("partial pin hydration saves available bodies without claiming contiguous history")
+  func partialPinnedMessageDoesNotCloseCoverage() async throws {
     let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
     var snapshot = repairedChatResult()
-    snapshot.pinnedMessageIds = [20]
+    snapshot.pinnedMessageIds = [20, 21]
     let pinned = protocolMessage(id: 20, chatID: 7, fromID: 2)
 
     let committed = await engine.applyChatRepair(ChatRepairSnapshot(
@@ -407,7 +412,7 @@ struct ChatRepairReplacementTests {
       #expect(try Message
         .filter(Message.Columns.chatId == 7 && Message.Columns.messageId == 20)
         .fetchCount(db) == 1)
-      #expect(try PinnedMessage.fetchAll(db).map(\.messageId) == [20])
+      #expect(try PinnedMessage.fetchAll(db).map(\.messageId) == [20, 21])
       #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7) == [
         MessageHistoryHole(
           chatId: 7,
