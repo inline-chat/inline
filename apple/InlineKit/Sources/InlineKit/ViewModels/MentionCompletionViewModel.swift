@@ -12,11 +12,38 @@ public struct MentionCompletionUser: Hashable, Sendable {
   public var userInfo: UserInfo
   public var source: MentionCompletionSource
   public var lastMsgId: Int64?
+  public var isPinned: Bool
 
-  public init(userInfo: UserInfo, source: MentionCompletionSource, lastMsgId: Int64? = nil) {
+  public init(
+    userInfo: UserInfo,
+    source: MentionCompletionSource,
+    lastMsgId: Int64? = nil,
+    isPinned: Bool = false
+  ) {
     self.userInfo = userInfo
     self.source = source
     self.lastMsgId = lastMsgId
+    self.isPinned = isPinned
+  }
+
+  /// Keep the strongest source without losing the same person's direct-chat signals.
+  static func mergingDuplicates(_ users: [Self]) -> [Self] {
+    var indicesById: [Int64: Int] = [:]
+    var merged: [Self] = []
+    for user in users {
+      guard let index = indicesById[user.userInfo.id] else {
+        indicesById[user.userInfo.id] = merged.count
+        merged.append(user)
+        continue
+      }
+
+      let existing = merged[index]
+      var preferred = existing.source.rawValue <= user.source.rawValue ? existing : user
+      preferred.isPinned = existing.isPinned || user.isPinned
+      preferred.lastMsgId = max(existing.lastMsgId ?? 0, user.lastMsgId ?? 0)
+      merged[index] = preferred
+    }
+    return merged
   }
 }
 
@@ -161,40 +188,42 @@ public final class MentionCompletionViewModel {
 
   public func updateCandidates(_ input: MentionCompletionCandidates) {
     let currentUserId = currentUserId()
-    var candidatesByUserId: [Int64: MentionCompletionCandidate] = [:]
+    let users = MentionCompletionUser.mergingDuplicates(input.users.filter { user in
+      user.userInfo.user.pendingSetup != true &&
+        (user.source != .directChat || (user.lastMsgId ?? 0) > 0) &&
+        user.userInfo.user.id != currentUserId
+    })
+    let usersById = Dictionary(uniqueKeysWithValues: users.map { ($0.userInfo.id, $0) })
     var groupCandidatesById: [Int64: MentionCompletionCandidate] = [:]
     var agentCandidatesById: [Int64: MentionCompletionCandidate] = [:]
-
-    for user in input.users {
-      guard user.userInfo.user.pendingSetup != true else { continue }
-      guard user.source != .directChat || (user.lastMsgId ?? 0) > 0 else { continue }
-      if let currentUserId, user.userInfo.user.id == currentUserId {
-        continue
-      }
-
-      let candidate = MentionCompletionCandidate(user: user, locale: locale)
-      if let existing = candidatesByUserId[user.userInfo.id],
-         existing.source.rawValue <= candidate.source.rawValue
-      {
-        continue
-      }
-
-      candidatesByUserId[user.userInfo.id] = candidate
-    }
 
     for group in input.groups where group.id > 0 {
       groupCandidatesById[group.id] = MentionCompletionCandidate(group: group, locale: locale)
     }
 
     for agent in input.agents where agent.id > 0 && agent.botUserId > 0 {
-      agentCandidatesById[agent.id] = MentionCompletionCandidate(agent: agent, locale: locale)
+      agentCandidatesById[agent.id] = MentionCompletionCandidate(
+        agent: agent,
+        relationship: usersById[agent.botUserId],
+        locale: locale
+      )
     }
 
+    // Query-independent order is computed only when the observed candidates change.
+    // Filtering keeps this order inside each relevance tier, without sorting per keystroke.
     candidates = (
       Array(groupCandidatesById.values) +
         Array(agentCandidatesById.values) +
-        Array(candidatesByUserId.values)
+        users.map { MentionCompletionCandidate(user: $0, locale: locale) }
     ).sorted {
+      if $0.isPinned != $1.isPinned {
+        return $0.isPinned
+      }
+
+      if $0.lastMsgId != $1.lastMsgId {
+        return $0.lastMsgId > $1.lastMsgId
+      }
+
       if $0.sortRank != $1.sortRank {
         return $0.sortRank < $1.sortRank
       }
@@ -310,10 +339,12 @@ public final class MentionCompletionViewModel {
         candidate.isDirectChat ? nil : candidate.item
       }
     } else {
-      nextItems = candidates.compactMap { candidate in
-        guard candidate.matches(normalizedQuery, compactQuery: compactQuery) else { return nil }
-        return candidate.item
+      var tiers = Array(repeating: [MentionCompletionItem](), count: MentionMatchRank.allCases.count)
+      for candidate in candidates {
+        guard let rank = candidate.matchRank(normalizedQuery, compactQuery: compactQuery) else { continue }
+        tiers[rank.rawValue].append(candidate.item)
       }
+      nextItems = tiers.flatMap(\.self)
     }
 
     items = nextItems
@@ -343,26 +374,24 @@ public final class MentionCompletionViewModel {
   }
 }
 
-private struct MentionCompletionCandidate: Equatable {
+private enum MentionMatchRank: Int, CaseIterable {
+  case exactUsername
+  case exactName
+  case prefix
+  case substring
+  case detail
+}
+
+private struct MentionCompletionCandidate {
   let item: MentionCompletionItem
   let sortRank: Int
-  let matchText: String
-  let compactMatchText: String
   let sortText: String
+  let isPinned: Bool
+  let lastMsgId: Int64
+  private let fields: [MatchField]
 
   var id: String {
     item.id
-  }
-
-  var source: MentionCompletionSource {
-    switch item {
-      case let .user(user):
-        user.source
-      case .group:
-        .participant
-      case .agent:
-        .participant
-    }
   }
 
   var isDirectChat: Bool {
@@ -375,56 +404,86 @@ private struct MentionCompletionCandidate: Equatable {
   init(user: MentionCompletionUser, locale: Locale) {
     item = .user(user)
     sortRank = user.source.rawValue + 1
-
-    let values = Self.matchValues(for: user.userInfo)
-      .map { MentionCompletionViewModel.normalized($0, locale: locale) }
-      .filter { !$0.isEmpty }
-
-    matchText = values.joined(separator: "\n")
-    compactMatchText = MentionCompletionViewModel.compact(matchText)
+    isPinned = user.isPinned
+    lastMsgId = user.lastMsgId ?? 0
+    fields = Self.fields([user.userInfo.user.username], exactRank: .exactUsername, locale: locale) +
+      Self.fields(
+        [user.userInfo.user.displayName, user.userInfo.user.fullName],
+        exactRank: .exactName,
+        locale: locale
+      )
     sortText = MentionCompletionViewModel.normalized(user.userInfo.user.displayName, locale: locale)
   }
 
   init(group: UserGroup, locale: Locale) {
     item = .group(group)
     sortRank = 0
-
-    var values = [group.name]
-    if let description = group.description {
-      values.append(description)
-    }
-
-    let normalizedValues = values
-      .map { MentionCompletionViewModel.normalized($0, locale: locale) }
-      .filter { !$0.isEmpty }
-
-    matchText = normalizedValues.joined(separator: "\n")
-    compactMatchText = MentionCompletionViewModel.compact(matchText)
+    isPinned = false
+    lastMsgId = 0
+    fields = Self.fields([group.name], exactRank: .exactName, locale: locale) +
+      Self.fields([group.description], exactRank: .detail, locale: locale)
     sortText = MentionCompletionViewModel.normalized(group.name, locale: locale)
   }
 
-  init(agent: MentionableBotAgent, locale: Locale) {
+  init(agent: MentionableBotAgent, relationship: MentionCompletionUser?, locale: Locale) {
     item = .agent(agent)
     sortRank = 1
-
-    let values = [
-      agent.name,
-      agent.handle,
-      agent.description,
-      agent.botDisplayName,
-      agent.botUserInfo.user.username,
-    ].compactMap { $0 }
-    let normalizedValues = values
-      .map { MentionCompletionViewModel.normalized($0, locale: locale) }
-      .filter { !$0.isEmpty }
-
-    matchText = normalizedValues.joined(separator: "\n")
-    compactMatchText = MentionCompletionViewModel.compact(matchText)
+    isPinned = relationship?.isPinned ?? false
+    lastMsgId = relationship?.lastMsgId ?? 0
+    fields = Self.fields([agent.handle], exactRank: .exactUsername, locale: locale) +
+      Self.fields([agent.name], exactRank: .exactName, locale: locale) +
+      Self.fields(
+        [agent.description, agent.botDisplayName, agent.botUserInfo.user.username],
+        exactRank: .detail,
+        locale: locale
+      )
     sortText = MentionCompletionViewModel.normalized(agent.name, locale: locale)
   }
 
-  func matches(_ query: String, compactQuery: String) -> Bool {
-    matchText.contains(query) || (!compactQuery.isEmpty && compactMatchText.contains(compactQuery))
+  func matchRank(_ query: String, compactQuery: String) -> MentionMatchRank? {
+    var best: MentionMatchRank?
+    for field in fields {
+      guard let rank = field.matchRank(query, compactQuery: compactQuery) else { continue }
+      if rank.rawValue < (best?.rawValue ?? Int.max) {
+        best = rank
+      }
+      if best == .exactUsername { break }
+    }
+    return best
+  }
+
+  private static func fields(_ values: [String?], exactRank: MentionMatchRank, locale: Locale) -> [MatchField] {
+    var seen = Set<String>()
+    return values.compactMap { value in
+      guard let value else { return nil }
+      let text = MentionCompletionViewModel.normalized(value, locale: locale)
+      guard !text.isEmpty, seen.insert(text).inserted else { return nil }
+      return MatchField(text: text, exactRank: exactRank)
+    }
+  }
+
+  private struct MatchField {
+    let text: String
+    let compactText: String
+    let words: [Substring]
+    let exactRank: MentionMatchRank
+
+    init(text: String, exactRank: MentionMatchRank) {
+      self.text = text
+      compactText = MentionCompletionViewModel.compact(text)
+      words = text.split(whereSeparator: \.isWhitespace)
+      self.exactRank = exactRank
+    }
+
+    func matchRank(_ query: String, compactQuery: String) -> MentionMatchRank? {
+      // Compact each field independently: "aden" + "aden" must never match "dena".
+      guard text.contains(query) || (!compactQuery.isEmpty && compactText.contains(compactQuery)) else { return nil }
+      guard exactRank != .detail else { return .detail }
+      if text == query { return exactRank }
+      let isPrefix = text.hasPrefix(query) || words.contains(where: { $0.hasPrefix(query) }) ||
+        (!compactQuery.isEmpty && compactText.hasPrefix(compactQuery))
+      return isPrefix ? .prefix : .substring
+    }
   }
 
   static func exactMatchValues(for userInfo: UserInfo, locale: Locale) -> Set<String> {

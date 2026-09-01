@@ -161,7 +161,21 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     let userId: Int64
   }
 
-  private static func fetchDirectChatCandidates(_ db: Database) throws -> [MentionCompletionUser] {
+  private static func fetchPinnedMentionUserIds(_ db: Database) throws -> Set<Int64> {
+    // One scalar batch read in the existing observation, never a lookup while typing.
+    // A DM dialog can be optimistic (chatId is nil), so use its stable peer identity.
+    try Set(Dialog
+      .select(Dialog.Columns.peerUserId)
+      .filter(Dialog.Columns.peerUserId != nil)
+      .filter(Dialog.Columns.pinned == true)
+      .asRequest(of: Int64.self)
+      .fetchAll(db))
+  }
+
+  private static func fetchDirectChatCandidates(
+    _ db: Database,
+    pinnedUserIds: Set<Int64>
+  ) throws -> [MentionCompletionUser] {
     let chats = try Chat
       .filter(Chat.Columns.type == ChatType.privateChat.rawValue)
       .filter(Chat.Columns.peerUserId != nil)
@@ -179,32 +193,34 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         return nil
       }
 
-      return MentionCompletionUser(userInfo: userInfo, source: .directChat, lastMsgId: chat.lastMsgId)
+      return MentionCompletionUser(
+        userInfo: userInfo,
+        source: .directChat,
+        lastMsgId: chat.lastMsgId,
+        isPinned: pinnedUserIds.contains(peerUserId)
+      )
     }
   }
 
-  fileprivate static func newThreadMentionCandidates(
+  static func newThreadMentionCandidates(
     _ db: Database,
     spaceID: Int64?
   ) throws -> MentionCompletionCandidates {
-    let directChats = try fetchDirectChatCandidates(db).filter {
+    let pinnedUserIds = try fetchPinnedMentionUserIds(db)
+    let directChats = try fetchDirectChatCandidates(db, pinnedUserIds: pinnedUserIds).filter {
       !filterMentionCandidates([$0.userInfo]).isEmpty
     }
     guard let spaceID else {
       return MentionCompletionCandidates(users: directChats, groups: [])
     }
 
-    let members = filterMentionCandidates(try fetchSpaceMembers(db, spaceId: spaceID))
+    let members = try filterMentionCandidates(fetchSpaceMembers(db, spaceId: spaceID))
     let memberCandidates = members.map {
-      MentionCompletionUser(userInfo: $0, source: .spaceMember)
+      MentionCompletionUser(userInfo: $0, source: .spaceMember, isPinned: pinnedUserIds.contains($0.id))
     }
-    var seenUserIDs = Set<Int64>()
-    let users = (memberCandidates + directChats).filter {
-      seenUserIDs.insert($0.userInfo.id).inserted
-    }
-    return MentionCompletionCandidates(
-      users: users,
-      groups: try fetchUserGroups(db, spaceId: spaceID)
+    return try MentionCompletionCandidates(
+      users: MentionCompletionUser.mergingDuplicates(memberCandidates + directChats),
+      groups: fetchUserGroups(db, spaceId: spaceID)
     )
   }
 
@@ -305,7 +321,9 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         let requestedChat = try Chat.fetchOne(db, id: chatId)
         let chat = try requestedChat.flatMap { try Self.participantsSourceChat(db, for: $0, purpose: purpose) }
         let sourceChatId = chat?.id ?? chatId
-        let directChats = purpose == .mentionCandidates ? try Self.fetchDirectChatCandidates(db) : []
+        let pinnedUserIds = purpose == .mentionCandidates ? try Self.fetchPinnedMentionUserIds(db) : []
+        let directChats = purpose == .mentionCandidates ?
+          try Self.fetchDirectChatCandidates(db, pinnedUserIds: pinnedUserIds) : []
 
         func snapshot(
           participants: [UserInfo],
@@ -318,10 +336,10 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
           let mentionSpaceMembers = Self.filterMentionCandidates(spaceMembers)
 
           var mentionUsers = mentionParticipants.map {
-            MentionCompletionUser(userInfo: $0, source: .participant)
+            MentionCompletionUser(userInfo: $0, source: .participant, isPinned: pinnedUserIds.contains($0.id))
           }
           mentionUsers.append(contentsOf: mentionSpaceMembers.map {
-            MentionCompletionUser(userInfo: $0, source: .spaceMember)
+            MentionCompletionUser(userInfo: $0, source: .spaceMember, isPinned: pinnedUserIds.contains($0.id))
           })
           mentionUsers.append(contentsOf: directChats)
 
