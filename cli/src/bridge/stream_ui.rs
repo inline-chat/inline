@@ -922,11 +922,11 @@ const MAX_TRACKED_ACTIVITIES: usize = 64;
 #[cfg(test)]
 const MAX_TRACKED_MESSAGES: usize = 32;
 
-// The server validates both boundaries before parsing Markdown. Fill that
-// existing envelope before creating a continuation message; keep individual
-// disclosures small enough to leave room for the outer Working wrapper/footer.
-const MAX_PROGRESS_CHUNK_BYTES: usize = 20_000;
-const MAX_PROGRESS_CHUNK_UTF16: usize = 20_000;
+// The server validates both boundaries before parsing Markdown. Fill the full
+// 100k message envelope before creating a continuation; keep individual
+// disclosures small enough to avoid one enormous nested row.
+const MAX_PROGRESS_CHUNK_BYTES: usize = 400_000;
+const MAX_PROGRESS_CHUNK_UTF16: usize = 100_000;
 const MAX_PROGRESS_BLOCK_BYTES: usize = 18_000;
 const PROGRESS_OMITTED_MARKER: &str = "- [additional activity omitted]";
 
@@ -2701,7 +2701,7 @@ mod disclosure_tests {
         }
 
         let verbose = restored.render_chunks(VisibilityMode::Verbose, WORKING_STATUS, None);
-        assert!(verbose.len() > 1);
+        assert_eq!(verbose.len(), 1);
         assert!(verbose.iter().all(|chunk| progress_chunk_fits(chunk)));
         assert!(
             verbose
@@ -2778,7 +2778,7 @@ mod disclosure_tests {
             tracker.apply_message(
                 &format!("comment-{index}"),
                 Some(AgentMessagePhase::Commentary),
-                AgentMessageUpdate::Completed("x".repeat(1_000)),
+                AgentMessageUpdate::Completed("x".repeat(4_000)),
             );
         }
 
@@ -2788,9 +2788,26 @@ mod disclosure_tests {
         assert!(
             chunks[..chunks.len() - 1]
                 .iter()
-                .all(|chunk| chunk.len() >= 18_000),
+                .all(|chunk| chunk.len() >= 90_000),
             "every nonterminal continuation must fill the available message envelope"
         );
+    }
+
+    #[test]
+    fn five_legacy_message_envelopes_stay_in_one_progress_message() {
+        let mut tracker = ActivityTracker::default();
+        for index in 0..18 {
+            tracker.apply_message(
+                &format!("comment-{index}"),
+                Some(AgentMessagePhase::Commentary),
+                AgentMessageUpdate::Completed("x".repeat(5_000)),
+            );
+        }
+
+        let chunks = tracker.render_chunks(VisibilityMode::Verbose, WORKING_STATUS, None);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].len() >= 90_000);
+        assert!(progress_chunk_fits(&chunks[0]));
     }
 
     #[test]

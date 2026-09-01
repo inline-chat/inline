@@ -1432,15 +1432,22 @@ fn verbose_progress_overflow_is_bounded_and_terminal_headers_do_not_repeat_worki
                 &format!("activity-{index}"),
                 ActivitySemanticKind::Execute,
                 ActivityStatus::Completed,
-                &format!("Run command {index} {}", "x".repeat(180)),
+                &format!("Run command {index} {}", "x".repeat(480)),
             )
             .with_detail(format!(
                 "cargo test --package package-{index} {}",
-                "y".repeat(420)
+                "y".repeat(1_200)
             ))
             .with_paths(paths),
             VisibilityMode::Verbose,
             workspace,
+        );
+    }
+    for index in 0..12 {
+        tracker.apply_message(
+            &format!("comment-{index}"),
+            Some(AgentMessagePhase::Commentary),
+            AgentMessageUpdate::Completed("z".repeat(5_000)),
         );
     }
 

@@ -23,8 +23,8 @@ const HELPER_TIMEOUT: Duration = Duration::from_secs(20);
 const PICKER_TTL_SECONDS: i64 = 10 * 60;
 const MAX_PICKERS: usize = 32;
 const MAX_CONCURRENT_IMPORTS: usize = 1;
-const MAX_INLINE_TEXT_UTF16: usize = 12_000;
-const MAX_INLINE_TEXT_BYTES: usize = 20_000;
+const MAX_INLINE_TEXT_UTF16: usize = 100_000;
+const MAX_INLINE_TEXT_BYTES: usize = 400_000;
 const MAX_IMPORT_PREFIX_LENGTH: usize = "Claude (continued)\n\n".len();
 const MAX_BUTTON_TEXT_UTF16: usize = 64;
 const MAX_IMPORTED_MESSAGES: usize = 500;
@@ -2713,7 +2713,7 @@ export async function getSessionMessages(_sessionId, options) {
 
     #[test]
     fn text_chunks_bound_utf16_and_utf8_without_splitting_astral_scalars() {
-        let input = "😀".repeat(7_000);
+        let input = "😀".repeat(70_000);
         let prefix = "Claude (continued)\n\n";
         let chunks = text_chunks(
             &input,

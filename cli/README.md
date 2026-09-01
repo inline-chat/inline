@@ -193,9 +193,9 @@ commentary and tools stay in order, with the working directory in its footer;
 normal mode includes reasoning summaries and exact structured action details.
 Verbose mode adds the complete retained textual provider record: reasoning
 content, output, progress, commands, paths, arguments, results, and raw item
-payloads. The bridge fills the existing Working message to Inline's actual text
-limit before adding a densely packed silent continuation; it never starts a new
-message merely because a command or provider item began. Normal mode remains one
+payloads. The bridge fills the existing Working message to Inline's text limit
+of 100,000 UTF-16 units before adding a densely packed silent continuation; it
+never starts a new message merely because a command or provider item began. Normal mode remains one
 bounded progress message with an explicit overflow notice. Completion collapses
 progress and sends the final answer
 separately with normal notifications. Approvals, questions, and attachments keep

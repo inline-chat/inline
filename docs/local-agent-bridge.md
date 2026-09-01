@@ -242,8 +242,8 @@ marks the unusual turn that does not fit.
 `/verbose` exposes the complete textual provider record retained by the bridge,
 including reasoning content, command output, tool progress, exact commands and
 paths, arguments, results, and raw Codex item payloads. It fills the existing
-Working message to Inline's actual text limit before adding a densely packed
-silent continuation, so a command or provider item never creates a new message
+Working message to Inline's text limit of 100,000 UTF-16 units before adding a
+densely packed silent continuation, so a command or provider item never creates a new message
 by itself and no textual field is omitted. Binary generated
 images remain lossless attachments instead of being duplicated as base64 text.
 Formatting applies only structural Markdown/HTML escaping needed to keep the
