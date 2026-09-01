@@ -4,6 +4,7 @@ import Foundation
 public enum AudioPlaybackError: LocalizedError, Sendable {
   case missingVoice
   case missingLocalFile
+  case unsupportedAudioFile
   case playbackUnavailable
 
   public var errorDescription: String? {
@@ -12,6 +13,8 @@ public enum AudioPlaybackError: LocalizedError, Sendable {
       "The selected message doesn't contain a playable voice payload."
     case .missingLocalFile:
       "The selected audio file isn't downloaded yet."
+    case .unsupportedAudioFile:
+      "The selected file isn't a supported audio format."
     case .playbackUnavailable:
       "There isn't an audio item ready to resume."
     }

@@ -131,11 +131,9 @@ public extension AppDatabase {
 private extension EmbeddedMessage {
   var documentPreviewText: String? {
     guard message.documentId != nil else { return nil }
-    guard let fileName = document?.fileName?.trimmingCharacters(in: .whitespacesAndNewlines),
-          fileName.isEmpty == false
-    else {
-      return nil
-    }
-    return MessagePreviewText.document(fileName: fileName)
+    return MessagePreviewText.document(
+      fileName: document?.fileName,
+      mimeType: document?.mimeType
+    )
   }
 }

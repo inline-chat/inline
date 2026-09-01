@@ -751,6 +751,7 @@ struct HomeChatListPresentationTests {
     #expect(preview(photoID: 1) == "Photo")
     #expect(preview(videoID: 1) == "Video")
     #expect(preview(documentID: 1, documentFileName: "Report.pdf") == "📄 Report.pdf")
+    #expect(preview(documentID: 1, documentFileName: "Artist - Song.mp3") == "🎵 Artist - Song.mp3")
     #expect(preview(documentID: 1) == "📄 Document")
     #expect(preview(contentPayload: try voicePayload.serializedData()) == "Voice message")
     #expect(preview(contentPayload: try servicePayload.serializedData()) == "Pinned a message")

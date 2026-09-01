@@ -49,7 +49,10 @@ public extension FullMessage {
       }
     }
     guard message.documentId != nil else { return nil }
-    return MessagePreviewText.document(fileName: documentInfo?.document.fileName)
+    return MessagePreviewText.document(
+      fileName: documentInfo?.document.fileName,
+      mimeType: documentInfo?.document.mimeType
+    )
   }
 }
 
@@ -96,6 +99,9 @@ public extension EmbeddedMessage {
       }
     }
     guard message.documentId != nil else { return nil }
-    return MessagePreviewText.document(fileName: document?.fileName)
+    return MessagePreviewText.document(
+      fileName: document?.fileName,
+      mimeType: document?.mimeType
+    )
   }
 }

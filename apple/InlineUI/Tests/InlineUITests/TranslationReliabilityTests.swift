@@ -96,6 +96,30 @@ struct TranslationReliabilityTests {
     #expect(message.displayText == "plain translated")
   }
 
+  @Test("audio document replies use an audio filename preview")
+  func audioDocumentReplyPreview() {
+    let message = Message(
+      messageId: 93,
+      fromId: 1,
+      date: Date(timeIntervalSince1970: 0),
+      text: nil,
+      peerUserId: 2,
+      peerThreadId: nil,
+      chatId: 10,
+      documentId: 77
+    )
+    let document = Document.from(proto: .with {
+      $0.id = 77
+      $0.date = 0
+      $0.fileName = "Artist - Song.mp3"
+      $0.mimeType = "audio/mpeg"
+      $0.size = 9_000_000
+    })
+    let embedded = EmbeddedMessage(message: message, document: document)
+
+    #expect(embedded.displayTextForLastMessage == "🎵 Artist - Song.mp3")
+  }
+
   @MainActor
   @Test("translation state subscriptions only fire for the subscribed peer")
   func translationStateSubscriptionsArePeerScoped() {

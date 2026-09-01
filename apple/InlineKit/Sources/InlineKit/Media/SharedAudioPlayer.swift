@@ -120,6 +120,26 @@ public final class SharedAudioPlayer: ObservableObject {
     syncStateFromCenter()
   }
 
+  public func toggleAudioDocumentPlayback(
+    for message: Message,
+    document: DocumentInfo,
+    fileURLOverride: URL? = nil,
+    presentation: SharedAudioPlayerPresentation? = nil
+  ) throws {
+    let item = try audioDocumentItem(for: message, document: document)
+    let hasDifferentSourceOverride = fileURLOverride.map { state.sourceURL != $0 } ?? false
+
+    if state.item == item, !hasDifferentSourceOverride {
+      try toggleCurrentPlaybackThrowing()
+      return
+    }
+
+    let fileURL = try resolvedAudioDocumentURL(document, fileURLOverride: fileURLOverride)
+    let presentation = presentation ?? audioDocumentPresentation(for: message, document: document)
+    try center.toggleOrPlay(fileURL: fileURL, item: item, presentation: presentation)
+    syncStateFromCenter()
+  }
+
   public func pause() {
     center.pause()
     syncStateFromCenter()
@@ -230,6 +250,26 @@ public final class SharedAudioPlayer: ObservableObject {
     )
   }
 
+  private func audioDocumentPresentation(
+    for message: Message,
+    document: DocumentInfo
+  ) -> SharedAudioPlayerPresentation {
+    let title = MessagePreviewText.document(
+      fileName: document.document.fileName,
+      mimeType: document.document.mimeType,
+      includesEmoji: false
+    )
+
+    return SharedAudioPlayerPresentation(
+      display: SharedAudioPlayerDisplay(title: title),
+      openTarget: SharedAudioPlayerOpenTarget(
+        peer: AudioPlaybackPeer(message.peerId),
+        chatId: message.chatId,
+        messageId: message.messageId
+      )
+    )
+  }
+
   private func fetchPeerDisplayTitle(_ peer: Peer) -> String? {
     switch peer {
     case let .user(id):
@@ -287,12 +327,37 @@ public final class SharedAudioPlayer: ObservableObject {
     )
   }
 
+  private func audioDocumentItem(
+    for message: Message,
+    document: DocumentInfo
+  ) throws -> SharedAudioPlayerItem {
+    guard let item = AudioDocumentSupport.playbackItem(for: message, document: document) else {
+      throw SharedAudioPlayerError.unsupportedAudioFile
+    }
+    return item
+  }
+
   private func resolvedVoiceURL(for message: Message, fileURLOverride: URL?) throws -> URL {
     if let fileURLOverride {
       return fileURLOverride
     }
 
     guard let localURL = message.voiceLocalURL else {
+      throw SharedAudioPlayerError.missingLocalFile
+    }
+
+    return localURL
+  }
+
+  private func resolvedAudioDocumentURL(
+    _ document: DocumentInfo,
+    fileURLOverride: URL?
+  ) throws -> URL {
+    if let fileURLOverride {
+      return fileURLOverride
+    }
+
+    guard let localURL = AudioDocumentSupport.localURL(for: document) else {
       throw SharedAudioPlayerError.missingLocalFile
     }
 

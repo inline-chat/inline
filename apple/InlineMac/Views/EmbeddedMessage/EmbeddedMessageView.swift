@@ -350,7 +350,11 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     let messageContent: String = if let displayText = embeddedMessage.displayTextForLastMessage, !displayText.isEmpty {
       displayText
     } else {
-      getMessageContentText(from: embeddedMessage.message, documentFileName: embeddedMessage.document?.fileName)
+      getMessageContentText(
+        from: embeddedMessage.message,
+        documentFileName: embeddedMessage.document?.fileName,
+        documentMimeType: embeddedMessage.document?.mimeType
+      )
     }
 
     updateView(
@@ -376,7 +380,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     } else {
       getMessageContentText(
         from: fullMessage.message,
-        documentFileName: fullMessage.documentInfo?.document.fileName
+        documentFileName: fullMessage.documentInfo?.document.fileName,
+        documentMimeType: fullMessage.documentInfo?.document.mimeType
       )
     }
 
@@ -569,7 +574,11 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     "\(senderName): \(messageText)"
   }
 
-  private func getMessageContentText(from message: Message, documentFileName: String?) -> String {
+  private func getMessageContentText(
+    from message: Message,
+    documentFileName: String?,
+    documentMimeType: String?
+  ) -> String {
     if message.isSticker == true {
       "Sticker"
     } else if let _ = message.photoId {
@@ -577,7 +586,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     } else if let _ = message.videoId {
       "🎥 Video"
     } else if let _ = message.documentId {
-      MessagePreviewText.document(fileName: documentFileName)
+      MessagePreviewText.document(fileName: documentFileName, mimeType: documentMimeType)
     } else {
       "Message"
     }

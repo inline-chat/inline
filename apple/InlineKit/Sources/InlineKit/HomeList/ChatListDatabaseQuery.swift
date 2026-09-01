@@ -409,7 +409,10 @@ public enum ChatListDatabaseQuery {
     if input.photoID != nil { return "Photo" }
     if input.videoID != nil { return "Video" }
     if input.documentID != nil {
-      return MessagePreviewText.document(fileName: input.documentFileName)
+      return MessagePreviewText.document(
+        fileName: input.documentFileName,
+        mimeType: nil
+      )
     }
     if payload?.hasVoice == true { return "Voice message" }
     return input.messageID == nil ? nil : "Message"

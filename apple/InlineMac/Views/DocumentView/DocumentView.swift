@@ -7,6 +7,7 @@ import InlineKit
 import InlineMacUI
 import InlineUI
 import Logger
+import Observation
 import QuickLookUI
 
 typealias DocumentPresentationPlan = DocumentFileLayoutPlan
@@ -104,6 +105,7 @@ class DocumentView: NSView {
   private var uploadProgressBindingTask: Task<Void, Never>?
   private var uploadProgressLocalId: Int64?
   private var uploadProgressSnapshot: UploadProgressSnapshot?
+  private var audioPlaybackObservationGeneration = 0
   private var white = false
   private var locallyAvailableFileURL: URL?
   private var actionColor: NSColor {
@@ -125,6 +127,23 @@ class DocumentView: NSView {
   private var isLocallyAvailable: Bool {
     if case .locallyAvailable = documentState { return true }
     return false
+  }
+
+  private var isPlayableAudioMessage: Bool {
+    fullMessage != nil && AudioDocumentSupport.isPlayableAudio(document: documentInfo)
+  }
+
+  private var isCurrentAudioDocument: Bool {
+    guard let message = fullMessage?.message,
+          let item = AudioDocumentSupport.playbackItem(for: message, document: documentInfo)
+    else {
+      return false
+    }
+    return AudioPlaybackCenter.shared.item == item
+  }
+
+  private var isAudioPlaying: Bool {
+    isCurrentAudioDocument && AudioPlaybackCenter.shared.isPlaying
   }
 
   override func viewDidChangeEffectiveAppearance() {
@@ -310,6 +329,7 @@ class DocumentView: NSView {
     setupView()
     syncUploadProgressBinding()
     updateUI()
+    restartAudioPlaybackObservation()
 
     // Start monitoring progress if download is active
     if case .downloading = documentState {
@@ -436,7 +456,16 @@ class DocumentView: NSView {
       case .needsDownload:
         iconView.image = NSImage(systemSymbolName: Symbol.download, accessibilityDescription: "Download")
       case .locallyAvailable:
-        iconView.image = NSImage(systemSymbolName: fileTypeSymbolName(), accessibilityDescription: nil)
+        let symbolName = isPlayableAudioMessage
+          ? (isAudioPlaying ? "pause.fill" : "play.fill")
+          : fileTypeSymbolName()
+        let accessibilityDescription = isPlayableAudioMessage
+          ? (isAudioPlaying ? "Pause audio" : "Play audio")
+          : nil
+        iconView.image = NSImage(
+          systemSymbolName: symbolName,
+          accessibilityDescription: accessibilityDescription
+        )
       case .downloading:
         iconView.image = NSImage(systemSymbolName: fileTypeSymbolName(), accessibilityDescription: nil)
       case .uploadProcessing, .uploading:
@@ -517,7 +546,7 @@ class DocumentView: NSView {
   }
 
   private func updateMediaOverlayAppearance() {
-    iconContainer.isHidden = hasDocumentThumbnail && isLocallyAvailable
+    iconContainer.isHidden = hasDocumentThumbnail && isLocallyAvailable && !isPlayableAudioMessage
     iconContainer.layer?.backgroundColor = if hasDocumentThumbnail {
       NSColor.black.withAlphaComponent(0.38).cgColor
     } else if white {
@@ -699,9 +728,11 @@ class DocumentView: NSView {
     super.viewDidMoveToSuperview()
 
     if superview == nil {
+      audioPlaybackObservationGeneration &+= 1
       stopMonitoringProgress()
       clearUploadProgressBinding(resetState: false)
     } else {
+      restartAudioPlaybackObservation()
       syncUploadProgressBinding()
       documentState = determineDocumentState(documentInfo)
       if case .downloading = documentState {
@@ -730,7 +761,11 @@ class DocumentView: NSView {
   @objc private func handleIconOrNameClick() {
     switch documentState {
     case .locallyAvailable:
-      openQuickLook()
+      if isPlayableAudioMessage {
+        toggleAudioPlayback()
+      } else {
+        openQuickLook()
+      }
     case .needsDownload:
       downloadAction(saveToDownloadsWhenFinished: false)
     case .downloading, .uploadProcessing, .uploading:
@@ -752,6 +787,7 @@ class DocumentView: NSView {
       locallyAvailableFileURL = nil
     }
     syncUploadProgressBinding()
+    restartAudioPlaybackObservation()
 
     // Set initial state
     documentState = determineDocumentState(documentInfo)
@@ -833,6 +869,44 @@ class DocumentView: NSView {
 
   private func isDocumentAvailableLocally(_ documentInfo: DocumentInfo) -> Bool {
     Self.localDocumentURL(for: documentInfo) != nil || Self.fileExists(at: locallyAvailableFileURL)
+  }
+
+  private func restartAudioPlaybackObservation() {
+    audioPlaybackObservationGeneration &+= 1
+    guard isPlayableAudioMessage, superview != nil else { return }
+    observeAudioPlaybackState(generation: audioPlaybackObservationGeneration)
+  }
+
+  private func observeAudioPlaybackState(generation: Int) {
+    withObservationTracking {
+      _ = AudioPlaybackCenter.shared.item
+      _ = AudioPlaybackCenter.shared.isPlaying
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        guard let self, generation == self.audioPlaybackObservationGeneration else { return }
+        self.updateIconForCurrentState()
+        self.observeAudioPlaybackState(generation: generation)
+      }
+    }
+  }
+
+  private func toggleAudioPlayback() {
+    guard let message = fullMessage?.message,
+          let fileURL = currentLocalDocumentURL()
+    else {
+      return
+    }
+
+    do {
+      try SharedAudioPlayer.shared.toggleAudioDocumentPlayback(
+        for: message,
+        document: documentInfo,
+        fileURLOverride: fileURL
+      )
+    } catch {
+      Log.shared.error("Failed to toggle document audio playback", error: error)
+      ToastCenter.shared.showError("Failed to play audio")
+    }
   }
 
   // MARK: - Progress Monitoring

@@ -285,6 +285,9 @@ public extension FullMessage {
                   .forKey(VideoInfo.CodingKeys.thumbnail)
               )
           )
+          .including(
+            optional: Message.document.forKey(EmbeddedMessage.CodingKeys.document)
+          )
       )
       .including(
         all: Message.attachments

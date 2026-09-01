@@ -106,7 +106,10 @@ public enum ReplyThreadTitleFallback {
       let document = try Document
         .filter(Document.Columns.documentId == documentID)
         .fetchOne(db)
-      return MessagePreviewText.document(fileName: document?.fileName)
+      return MessagePreviewText.document(
+        fileName: document?.fileName,
+        mimeType: document?.mimeType
+      )
     }
 
     return message.stringRepresentationPlain

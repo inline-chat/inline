@@ -191,7 +191,11 @@ struct ChatItemView: View {
         Text(
           (message?.message.hasText == true
             ? message?.displayText ?? ""
-            : MessagePreviewText.document(fileName: message?.document?.fileName, includesEmoji: false))
+            : MessagePreviewText.document(
+              fileName: message?.document?.fileName,
+              mimeType: message?.document?.mimeType,
+              includesEmoji: false
+            ))
             .replacingOccurrences(of: "\n", with: " ")
         )
         .font(.callout)
