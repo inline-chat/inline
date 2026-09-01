@@ -390,7 +390,7 @@ struct AcknowledgementTests {
     ))
 
     // A DB-backed row replacement cannot erase the one pending projection.
-    publisher.messageUpdatedSync(fullMessage: rows[1], peer: peer, animated: false)
+    publisher.messageUpdatedSync(message: rows[1].message, peer: peer, animated: false)
     #expect(try row(12).acknowledgementActors.map(\.acknowledgement.revision) == [-1])
 
     publisher.restoreOptimisticAcknowledgement(
