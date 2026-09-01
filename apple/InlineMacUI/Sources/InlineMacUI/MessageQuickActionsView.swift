@@ -174,8 +174,10 @@ public final class MessageQuickActionsView: NSView {
       case .replyInThread: "arrow.turn.down.right"
     }
     let configuration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-    return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)!
-      .withSymbolConfiguration(configuration)!
+    guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: action.title) else {
+      return NSImage()
+    }
+    return image.withSymbolConfiguration(configuration) ?? image
   }
 }
 

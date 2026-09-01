@@ -243,18 +243,6 @@ class MessageListAppKit: NSViewController {
         self?.scheduleToolbarBackgroundUpdate()
       }
       .store(in: &cancellables)
-
-    if messageRenderStyle == .minimal {
-      AppSettings.shared.$minimalMessageQuickActionsEnabled
-        .removeDuplicates()
-        .receive(on: DispatchQueue.main)
-        .sink { [weak self] _ in
-          guard let self, isViewLoaded, !isDisposed else { return }
-          hideMessageQuickActions()
-          scheduleMessageHoverRefresh()
-        }
-        .store(in: &cancellables)
-    }
   }
 
   @available(*, unavailable)
@@ -1370,10 +1358,10 @@ class MessageListAppKit: NSViewController {
     log.trace("Scrolling to bottom animated=\(animated)")
     #endif
 
-    isProgrammaticScroll = true
+    beginProgrammaticScroll()
 
     defer {
-      isProgrammaticScroll = false
+      endProgrammaticScroll()
     }
 
     if animated {
@@ -1525,7 +1513,7 @@ class MessageListAppKit: NSViewController {
   private func refreshMessageHoverAfterGeometryChange() {
     guard messageRenderStyle == .minimal else { return }
 
-    guard scrollState == .idle, !isUserScrolling else {
+    guard scrollState == .idle, !isUserScrolling, !isProgrammaticScroll else {
       clearHoveredMessage()
       return
     }
@@ -1547,7 +1535,7 @@ class MessageListAppKit: NSViewController {
 
   private func updateHoveredMessage(from event: NSEvent) {
     guard messageRenderStyle == .minimal else { return }
-    guard scrollState == .idle, !isUserScrolling else {
+    guard scrollState == .idle, !isUserScrolling, !isProgrammaticScroll else {
       clearHoveredMessage()
       return
     }
@@ -1558,7 +1546,7 @@ class MessageListAppKit: NSViewController {
 
   private func updateHoveredMessageFromCurrentMouseLocation(force: Bool = false) {
     guard messageRenderStyle == .minimal else { return }
-    guard scrollState == .idle, !isUserScrolling else {
+    guard scrollState == .idle, !isUserScrolling, !isProgrammaticScroll else {
       clearHoveredMessage()
       return
     }
@@ -1637,8 +1625,7 @@ class MessageListAppKit: NSViewController {
 
   private func updateMessageQuickActions() {
     guard messageRenderStyle == .minimal,
-          AppSettings.shared.minimalMessageQuickActionsEnabled,
-          !isDisposed, !messageSelection.isActive, scrollState == .idle, !isUserScrolling,
+          !isDisposed, !messageSelection.isActive, scrollState == .idle, !isUserScrolling, !isProgrammaticScroll,
           let cell = hoveredMessageCell, let stableId = hoveredMessageStableId,
           let renderer = cell.quickActionsMessageView,
           renderer.fullMessage.message.stableId == stableId,
@@ -1677,8 +1664,7 @@ class MessageListAppKit: NSViewController {
     capsule.isHidden = false
     capsule.refreshHoverState()
     capsule.onAction = { [weak self, weak cell, weak capsule] action, button in
-      guard let self, let cell, let capsule, !isDisposed,
-            AppSettings.shared.minimalMessageQuickActionsEnabled,
+      guard let self, let cell, let capsule, !isDisposed, !isProgrammaticScroll,
             !messageSelection.isActive, hoveredMessageCell === cell,
             let renderer = cell.quickActionsMessageView,
             renderer.fullMessage.message.stableId == stableId,
@@ -1771,6 +1757,16 @@ class MessageListAppKit: NSViewController {
 
   // True while we're changing scroll position programmatically
   private var isProgrammaticScroll = false
+
+  private func beginProgrammaticScroll() {
+    isProgrammaticScroll = true
+    clearHoveredMessage()
+  }
+
+  private func endProgrammaticScroll() {
+    isProgrammaticScroll = false
+    scheduleMessageHoverRefresh()
+  }
 
   // True when user is scrolling via trackpad or mouse wheel
   private var isUserScrolling = false
@@ -3852,7 +3848,7 @@ extension MessageListAppKit {
     let distance = abs(targetY - currentY)
 
     // Prepare for animation
-    isProgrammaticScroll = true
+    beginProgrammaticScroll()
 
     // For long distances, use a two-phase animation
     if distance > viewportHeight * 2 {
@@ -3876,7 +3872,7 @@ extension MessageListAppKit {
           self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
         } completionHandler: { [weak self] in
           // Clean up
-          self?.isProgrammaticScroll = false
+          self?.endProgrammaticScroll()
 
           self?.highlightMessage(at: row)
         }
@@ -3889,7 +3885,7 @@ extension MessageListAppKit {
         self?.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
       } completionHandler: { [weak self] in
         // Clean up
-        self?.isProgrammaticScroll = false
+        self?.endProgrammaticScroll()
 
         self?.highlightMessage(at: row)
       }
@@ -3945,6 +3941,8 @@ extension MessageListAppKit {
 
     // If not animated, just jump to position
     if !animated {
+      beginProgrammaticScroll()
+      defer { endProgrammaticScroll() }
       scrollView.withoutScrollerFlash { [weak self] in
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -3958,7 +3956,7 @@ extension MessageListAppKit {
     let distance = abs(targetY - currentY)
 
     // Prepare for animation
-    isProgrammaticScroll = true
+    beginProgrammaticScroll()
 
     // For long distances, use a two-phase animation
     if distance > viewportHeight * 2 {
@@ -3983,7 +3981,7 @@ extension MessageListAppKit {
           self.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
         } completionHandler: { [weak self] in
           // Clean up
-          self?.isProgrammaticScroll = false
+          self?.endProgrammaticScroll()
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.enableScrollbars()
@@ -3999,7 +3997,7 @@ extension MessageListAppKit {
         scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
       } completionHandler: { [weak self] in
         // Clean up
-        self?.isProgrammaticScroll = false
+        self?.endProgrammaticScroll()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
           self?.enableScrollbars()

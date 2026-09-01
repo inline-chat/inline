@@ -173,7 +173,6 @@ final class AppSettings: ObservableObject {
   static let sidebarModeKey = "sidebarMode"
   static let showGridInSidebarKey = "showGridInSidebar"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
-  static let minimalMessageQuickActionsEnabledKey = "experimental.minimalMessageQuickActionsEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -438,15 +437,6 @@ final class AppSettings: ObservableObject {
 
   // MARK: - Experimental Settings
 
-  @Published var minimalMessageQuickActionsEnabled: Bool {
-    didSet {
-      UserDefaults.standard.set(
-        minimalMessageQuickActionsEnabled,
-        forKey: Self.minimalMessageQuickActionsEnabledKey
-      )
-    }
-  }
-
   @Published var richContentRendererEnabled: Bool {
     didSet {
       UserDefaults.standard.set(
@@ -555,9 +545,6 @@ final class AppSettings: ObservableObject {
     richContentRendererEnabled = UserDefaults.standard.object(
       forKey: Self.richContentRendererEnabledKey
     ) as? Bool ?? true
-    minimalMessageQuickActionsEnabled = UserDefaults.standard.object(
-      forKey: Self.minimalMessageQuickActionsEnabledKey
-    ) as? Bool ?? false
     let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
       .flatMap(SidebarMode.init(rawValue:))
     let legacyInbox = persistentDefaults?[ExperimentalFeatureFlags.sidebarAsInboxKey] as? Bool

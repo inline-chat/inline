@@ -3090,7 +3090,9 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   func quickActionsAnchorRect(in coordinateView: NSView) -> NSRect {
-    convert(hoverBackgroundView.frame, to: coordinateView)
+    let anchor = convert(hoverBackgroundView.frame, to: coordinateView)
+    let offset: CGFloat = props.layout.hasAvatar && props.layout.hasName ? 4 : 10
+    return anchor.offsetBy(dx: 0, dy: coordinateView.isFlipped ? -offset : offset)
   }
 
   func performQuickAction(

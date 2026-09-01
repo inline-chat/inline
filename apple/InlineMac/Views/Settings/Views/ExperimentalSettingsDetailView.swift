@@ -15,12 +15,6 @@ struct ExperimentalSettingsDetailView: View {
             description: "Render supported agent Markdown as native rich-content blocks in messages."
           )
         }
-        Toggle(isOn: $settings.minimalMessageQuickActionsEnabled) {
-          SettingsRowLabel(
-            "Message Hover Menu",
-            description: "Show thread reply, reactions, and more actions when hovering over messages in Minimal mode."
-          )
-        }
       } header: {
         SettingsSectionHeader("Messages")
       }
