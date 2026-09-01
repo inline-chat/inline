@@ -329,6 +329,21 @@ pub(super) fn actionable_event_chat_id(event: &ClientEvent) -> Option<i64> {
     }
 }
 
+/// Bot-authored sends and edits are observable on the same lossless stream as
+/// user input. Never feed those progress projections back into the active-turn
+/// control queue: a verbose burst can otherwise fill that queue while the turn
+/// is publishing progress and falsely restart a healthy provider epoch.
+pub(super) fn active_turn_event_chat_id(event: &ClientEvent, bot_user_id: i64) -> Option<i64> {
+    if matches!(
+        event,
+        ClientEvent::MessageStored { message }
+            if message.is_outgoing || message.sender_id.get() == bot_user_id
+    ) {
+        return None;
+    }
+    actionable_event_chat_id(event)
+}
+
 pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource + 'static>(
     bot: &InlineClient,
     delivery: LosslessEventDelivery,

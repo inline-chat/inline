@@ -1704,7 +1704,8 @@ async fn run_provider_installation(
                     let dispatch_chat_id = approval_dispatch_chat_id(
                         delivery.event(),
                         &bridge_store,
-                    )?.or(chat_id);
+                    )?
+                    .or_else(|| active_turn_event_chat_id(delivery.event(), inbound_route.bot_user_id));
                     if let Some(dispatch_chat_id) = dispatch_chat_id
                         && let Some(sender) = active_turns.get(&dispatch_chat_id).cloned()
                     {

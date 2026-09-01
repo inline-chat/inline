@@ -922,9 +922,13 @@ const MAX_TRACKED_ACTIVITIES: usize = 64;
 #[cfg(test)]
 const MAX_TRACKED_MESSAGES: usize = 32;
 
-const MAX_PROGRESS_CHUNK_BYTES: usize = 12 * 1024;
+// The server validates both boundaries before parsing Markdown. Fill that
+// existing envelope before creating a continuation message; keep individual
+// disclosures small enough to leave room for the outer Working wrapper/footer.
+const MAX_PROGRESS_CHUNK_BYTES: usize = 20_000;
+const MAX_PROGRESS_CHUNK_UTF16: usize = 20_000;
+const MAX_PROGRESS_BLOCK_BYTES: usize = 18_000;
 const PROGRESS_OMITTED_MARKER: &str = "- [additional activity omitted]";
-const VERBOSE_SEGMENT_BYTES: usize = 6 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -1398,8 +1402,7 @@ impl ActivityTracker {
             for block in blocks {
                 let mut candidate = included.clone();
                 candidate.push(block.clone());
-                if render_progress_chunk(header, &candidate, terminal, footer).len()
-                    <= MAX_PROGRESS_CHUNK_BYTES
+                if progress_chunk_fits(&render_progress_chunk(header, &candidate, terminal, footer))
                 {
                     included.push(block);
                 } else {
@@ -1410,9 +1413,9 @@ impl ActivityTracker {
                 while !included.is_empty() {
                     let mut candidate = included.clone();
                     candidate.push(PROGRESS_OMITTED_MARKER.to_string());
-                    if render_progress_chunk(header, &candidate, terminal, footer).len()
-                        <= MAX_PROGRESS_CHUNK_BYTES
-                    {
+                    if progress_chunk_fits(&render_progress_chunk(
+                        header, &candidate, terminal, footer,
+                    )) {
                         break;
                     }
                     included.pop();
@@ -1431,8 +1434,12 @@ impl ActivityTracker {
             let mut candidate = current.clone();
             candidate.push(block.clone());
             if !current.is_empty()
-                && render_progress_chunk(chunk_header, &candidate, terminal, chunk_footer).len()
-                    > MAX_PROGRESS_CHUNK_BYTES
+                && !progress_chunk_fits(&render_progress_chunk(
+                    chunk_header,
+                    &candidate,
+                    terminal,
+                    chunk_footer,
+                ))
             {
                 chunks.push(render_progress_chunk(
                     chunk_header,
@@ -1454,6 +1461,11 @@ impl ActivityTracker {
         ));
         chunks
     }
+}
+
+fn progress_chunk_fits(text: &str) -> bool {
+    text.len() <= MAX_PROGRESS_CHUNK_BYTES
+        && text.encode_utf16().count() <= MAX_PROGRESS_CHUNK_UTF16
 }
 
 fn normalized_progress_path(path: &Path, workspace: &Path) -> Option<String> {
@@ -1557,7 +1569,11 @@ fn render_activity_group(
                 } if matches!(activity.status, ActivityStatus::Pending | ActivityStatus::InProgress)
             )
         });
-    pack_activity_body(&progress_literal(&title), &children, open)
+    pack_activity_body(
+        &progress_literal(disclosure_summary_text(&title)),
+        &children,
+        open,
+    )
 }
 
 fn render_normal_activity_rows(entry: &ProgressEntry, terminal: bool) -> Vec<String> {
@@ -1671,7 +1687,7 @@ fn render_progress_entry(
     terminal: bool,
 ) -> Vec<String> {
     match entry {
-        ProgressEntry::Message { text, .. } => split_segments(text, VERBOSE_SEGMENT_BYTES)
+        ProgressEntry::Message { text, .. } => split_segments(text, MAX_PROGRESS_BLOCK_BYTES)
             .into_iter()
             .map(|segment| progress_commentary(&segment))
             .collect(),
@@ -1763,7 +1779,7 @@ fn render_activity_blocks(input: ActivityRenderInput<'_>) -> Vec<String> {
         .trim_end_matches('…');
     let summary = format!(
         "{}{}",
-        progress_literal(effective_title),
+        progress_literal(disclosure_summary_text(effective_title)),
         if state == " · running" { "" } else { &state }
     );
     let disclosure_open =
@@ -1845,14 +1861,14 @@ fn render_activity_detail(detail: &ActivityDetail) -> Vec<String> {
 }
 
 fn render_labeled_text(label: &str, value: &str) -> Vec<String> {
-    split_segments(value, VERBOSE_SEGMENT_BYTES)
+    split_segments(value, MAX_PROGRESS_BLOCK_BYTES)
         .into_iter()
         .map(|segment| format!("{} {}", progress_literal(label), progress_literal(&segment)))
         .collect()
 }
 
 fn render_labeled_code(label: &str, value: &str) -> Vec<String> {
-    split_segments(value, VERBOSE_SEGMENT_BYTES)
+    split_segments(value, MAX_PROGRESS_BLOCK_BYTES)
         .into_iter()
         .map(|segment| {
             if segment.contains('\n') || segment.contains('\r') {
@@ -1878,7 +1894,7 @@ fn pack_activity_body(summary: &str, parts: &[String], open: bool) -> Vec<String
     for part in parts {
         let mut candidate = current.clone();
         candidate.push(part.clone());
-        if !current.is_empty() && candidate.join("\n\n").len() > VERBOSE_SEGMENT_BYTES {
+        if !current.is_empty() && candidate.join("\n\n").len() > MAX_PROGRESS_BLOCK_BYTES {
             blocks.push(activity_disclosure(summary, &current.join("\n\n"), open));
             current.clear();
         }
@@ -1890,6 +1906,34 @@ fn pack_activity_body(summary: &str, parts: &[String], open: bool) -> Vec<String
     blocks
 }
 
+// Disclosure summaries are rendered as plain text by Inline. Codex may decorate
+// a summary with Markdown emphasis or a code span, which would otherwise expose
+// the source markers literally in the header. The complete original summary is
+// still retained and emitted in verbose detail rows.
+fn disclosure_summary_text(mut value: &str) -> &str {
+    value = value.trim();
+    loop {
+        let mut stripped = false;
+        for marker in ["***", "___", "**", "__", "*", "_", "`"] {
+            if value.len() <= marker.len() * 2
+                || !value.starts_with(marker)
+                || !value.ends_with(marker)
+            {
+                continue;
+            }
+            let inner = value[marker.len()..value.len() - marker.len()].trim();
+            if !inner.is_empty() {
+                value = inner;
+                stripped = true;
+                break;
+            }
+        }
+        if !stripped {
+            return value;
+        }
+    }
+}
+
 fn activity_disclosure(summary: &str, body: &str, open: bool) -> String {
     format!(
         "<details{}>\n<summary>{summary}</summary>\n\n{body}\n</details>",
@@ -1898,7 +1942,7 @@ fn activity_disclosure(summary: &str, body: &str, open: bool) -> String {
 }
 
 fn render_verbose_section(summary: &str, label: &str, language: &str, value: &str) -> Vec<String> {
-    let segments = split_segments(value, VERBOSE_SEGMENT_BYTES);
+    let segments = split_segments(value, MAX_PROGRESS_BLOCK_BYTES);
     let count = segments.len();
     segments
         .into_iter()
@@ -2410,6 +2454,34 @@ mod disclosure_tests {
     }
 
     #[test]
+    fn disclosure_headers_drop_outer_markdown_decoration() {
+        assert_eq!(
+            disclosure_summary_text(" **Planning systematic repository inspection** "),
+            "Planning systematic repository inspection"
+        );
+        assert_eq!(
+            disclosure_summary_text("***Nested emphasis***"),
+            "Nested emphasis"
+        );
+        assert_eq!(
+            disclosure_summary_text("`Read README.md`"),
+            "Read README.md"
+        );
+        assert_eq!(
+            disclosure_summary_text("src/**/README.md"),
+            "src/**/README.md"
+        );
+
+        let rendered = activity_disclosure(
+            &progress_literal(disclosure_summary_text("**Planning inspection**")),
+            "Thinking",
+            true,
+        );
+        assert!(rendered.contains("<summary>Planning inspection</summary>"));
+        assert!(!rendered.contains("\\*\\*Planning"));
+    }
+
+    #[test]
     fn commentary_preserves_provider_text_without_flattening_markdown() {
         let prose = "## Checking\n\n- Read source  \n  - Keep nested indentation\n\nAuthorization: Bearer bearer-value-123\nTOKEN=assigned-value-123\ncurl --api-key flag-value-123 https://example.com/file?signature=signed-value-123\nRead </Users/alice/private>\n\n```rust\n    let x = 1;  \n    TOKEN=code-value-123\n</details>\n```";
         let mut tracker = ActivityTracker::default();
@@ -2630,11 +2702,7 @@ mod disclosure_tests {
 
         let verbose = restored.render_chunks(VisibilityMode::Verbose, WORKING_STATUS, None);
         assert!(verbose.len() > 1);
-        assert!(
-            verbose
-                .iter()
-                .all(|chunk| chunk.len() <= MAX_PROGRESS_CHUNK_BYTES)
-        );
+        assert!(verbose.iter().all(|chunk| progress_chunk_fits(chunk)));
         assert!(
             verbose
                 .iter()
@@ -2704,6 +2772,28 @@ mod disclosure_tests {
     }
 
     #[test]
+    fn verbose_continuations_are_dense_before_starting_another_message() {
+        let mut tracker = ActivityTracker::default();
+        for index in 0..30 {
+            tracker.apply_message(
+                &format!("comment-{index}"),
+                Some(AgentMessagePhase::Commentary),
+                AgentMessageUpdate::Completed("x".repeat(1_000)),
+            );
+        }
+
+        let chunks = tracker.render_chunks(VisibilityMode::Verbose, WORKING_STATUS, None);
+        assert!(chunks.len() > 1);
+        assert!(chunks.iter().all(|chunk| progress_chunk_fits(chunk)));
+        assert!(
+            chunks[..chunks.len() - 1]
+                .iter()
+                .all(|chunk| chunk.len() >= 18_000),
+            "every nonterminal continuation must fill the available message envelope"
+        );
+    }
+
+    #[test]
     fn message_overflow_keeps_final_answer_and_one_complete_progress_message() {
         let mut tracker = ActivityTracker::default();
         for i in 0..MAX_TRACKED_MESSAGES + 8 {
@@ -2730,11 +2820,7 @@ mod disclosure_tests {
         assert!(tracker.durable_json().unwrap().len() > 600_000);
         let verbose = tracker.render_chunks(VisibilityMode::Verbose, WORKING_STATUS, None);
         assert!(verbose.len() > 1);
-        assert!(
-            verbose
-                .iter()
-                .all(|chunk| chunk.len() <= MAX_PROGRESS_CHUNK_BYTES)
-        );
+        assert!(verbose.iter().all(|chunk| progress_chunk_fits(chunk)));
         assert!(
             verbose
                 .iter()

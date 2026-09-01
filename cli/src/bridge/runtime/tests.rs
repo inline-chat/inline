@@ -108,6 +108,29 @@ fn projected_agent_session_history_is_rejected_before_idle_or_active_handling() 
 }
 
 #[test]
+fn bot_progress_updates_do_not_feed_the_active_turn_control_queue() {
+    let mut own = voice_message(Some("Working"), None);
+    own.sender_id = InlineId::new(17);
+    assert_eq!(
+        active_turn_event_chat_id(&ClientEvent::MessageStored { message: own }, 17),
+        None
+    );
+
+    let mut outgoing = voice_message(Some("Working"), None);
+    outgoing.is_outgoing = true;
+    assert_eq!(
+        active_turn_event_chat_id(&ClientEvent::MessageStored { message: outgoing }, 17),
+        None
+    );
+
+    let user = voice_message(Some("continue"), None);
+    assert_eq!(
+        active_turn_event_chat_id(&ClientEvent::MessageStored { message: user }, 17),
+        Some(42)
+    );
+}
+
+#[test]
 fn pending_voice_registry_deduplicates_replacements_and_cancels_per_chat() {
     let route = InboundRoute {
         store: Arc::new(BridgeStore::open_in_memory().expect("bridge store")),
@@ -1441,10 +1464,7 @@ fn verbose_progress_overflow_is_bounded_and_terminal_headers_do_not_repeat_worki
     let joined = live.join("\n");
     assert!(joined.contains("Run command 0"));
     assert!(joined.contains(&format!("Run command {}", MAX_TRACKED_ACTIVITIES - 1)));
-    assert!(
-        live.iter()
-            .all(|chunk| chunk.len() <= MAX_PROGRESS_CHUNK_BYTES)
-    );
+    assert!(live.iter().all(|chunk| progress_chunk_fits(chunk)));
 
     tracker.set_terminal_header("Worked for 2m 05s");
     let terminal = tracker.render_chunks(VisibilityMode::Verbose, "Worked for 2m 05s", None);
@@ -1454,11 +1474,7 @@ fn verbose_progress_overflow_is_bounded_and_terminal_headers_do_not_repeat_worki
             .iter()
             .all(|chunk| !chunk.contains(WORKING_CONTINUED_STATUS))
     );
-    assert!(
-        terminal
-            .iter()
-            .all(|chunk| chunk.len() <= MAX_PROGRESS_CHUNK_BYTES)
-    );
+    assert!(terminal.iter().all(|chunk| progress_chunk_fits(chunk)));
 }
 
 #[test]
