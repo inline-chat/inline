@@ -35,8 +35,7 @@ import {
 } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { encryptBinary } from "@in/server/modules/encryption/encryption"
-import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import {
   deleteUnreferencedBlockContents,
@@ -46,6 +45,7 @@ import {
   type PreparedBlockContent,
 } from "@in/server/modules/message/blockContentStorage"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { validateOutgoingMessageText } from "@in/server/modules/message/messageTextLimits"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { sendProjectedMessageNotification } from "@in/server/functions/messages.sendMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -68,7 +68,6 @@ import {
 
 const log = new Log("AgentSessions")
 const MAX_BATCH_SIZE = 100
-const MAX_MESSAGE_BYTES = 20_000
 const MAX_PROJECT_REF_BYTES = 512
 
 type AgentSessionContext = {
@@ -86,7 +85,7 @@ type PreparedSync = {
   revisionRef?: string
   baseRevisionRef?: string
   encryptedText?: ReturnType<typeof encryptMessage>
-  encryptedEntities?: ReturnType<typeof encryptBinary>
+  encryptedEntities?: ReturnType<typeof encryptMessageEntities>
   preparedBlockContent?: PreparedBlockContent
   hasLink: boolean
   sourceDate?: Date
@@ -384,9 +383,9 @@ async function prepareSync(input: AgentSessionMessageSync): Promise<PreparedSync
     if (input.role !== AgentSessionMessageRole.ASSISTANT) throw RealtimeRpcError.BadRequest()
     if (assistantRandomId <= 0n) throw RealtimeRpcError.BadRequest()
   }
+  validateOutgoingMessageText(text)
   if (
-    Buffer.byteLength(text, "utf8") > MAX_MESSAGE_BYTES ||
-    (input.sourceDate === undefined && assistantRandomId === undefined)
+    input.sourceDate === undefined && assistantRandomId === undefined
   ) {
     throw RealtimeRpcError.BadRequest()
   }
@@ -439,7 +438,9 @@ async function prepareSync(input: AgentSessionMessageSync): Promise<PreparedSync
     revisionRef,
     baseRevisionRef,
     encryptedText: text.length > 0 ? encryptMessage(text) : undefined,
-    encryptedEntities: entityBytes && entityBytes.length > 0 ? encryptBinary(entityBytes) : undefined,
+    encryptedEntities: entityBytes && entityBytes.length > 0
+      ? encryptMessageEntities(entityBytes)
+      : undefined,
     preparedBlockContent,
     hasLink: detectHasLink({ entities }),
     sourceDate,

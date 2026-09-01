@@ -162,6 +162,27 @@ describe("agent session continuity", () => {
     expect(plain.blockContent?.blocks[0]?.kind.oneofKind).toBe("paragraph")
   })
 
+  test("stores one 90k assistant progress projection", async () => {
+    const connected = await connect()
+    const text = "x".repeat(90_000)
+    const synced = await syncAgentSessionMessages({
+      agentSessionId: connected.agentSession!.id,
+      mode: AgentSessionSyncMode.LIVE,
+      messages: [{
+        role: AgentSessionMessageRole.ASSISTANT,
+        itemRef: "assistant-large-progress",
+        sourceDate: 1_700_000_001n,
+        revisionRef: "assistant-large-r1",
+        complete: false,
+        operation: { oneofKind: "upsert", upsert: { text } },
+      }],
+    }, botId)
+
+    expect(synced.messages[0]?.state).toBe(AgentSessionMessageSyncState.CREATED)
+    const message = await MessageModel.getMessage(Number(synced.messages[0]!.messageId), chatId)
+    expect(message.text).toBe(text)
+  })
+
   test("deduplicates retries and compare-and-swap edits the same assistant row", async () => {
     const connected = await connect()
     const first = {

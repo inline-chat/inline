@@ -16,7 +16,7 @@ import { db } from "@in/server/db"
 import { dialogs, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
-import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -264,7 +264,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // encrypt entities
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
-  const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const encryptedEntities = binaryEntities && binaryEntities.length > 0
+    ? encryptMessageEntities(binaryEntities)
+    : undefined
   const binaryActions = normalizedActions ? MessageActions.toBinary(normalizedActions) : undefined
   const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
 

@@ -19,8 +19,7 @@ import type { HandlerContext } from "../controllers/helpers"
 import { getApnProvider } from "../libs/apn"
 import { summarizeApnFailure } from "../libs/apnFailures"
 import { SessionsModel } from "@in/server/db/models/sessions"
-import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
-import { encryptBinary } from "@in/server/modules/encryption/encryption"
+import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { TInputId } from "@in/server/types/methods"
 import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
@@ -140,7 +139,9 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   // Encrypt
   const encryptedText = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
-  const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const encryptedEntities = binaryEntities && binaryEntities.length > 0
+    ? encryptMessageEntities(binaryEntities)
+    : undefined
   const hasLink = detectHasLink({ entities }) ? true : undefined
 
   // File

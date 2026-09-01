@@ -35,7 +35,11 @@ import {
 } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { messageAttachments, type DbMessageAttachment } from "@in/server/db/schema/attachments"
-import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import {
+  decryptMessage,
+  encryptMessage,
+  encryptMessageEntities,
+} from "@in/server/modules/encryption/encryptMessage"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, not, or, sql } from "drizzle-orm"
 import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
@@ -889,7 +893,9 @@ async function editMessage(input: EditMessageInput): Promise<{
 
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
-  const encryptedEntities = binaryEntities && binaryEntities?.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const encryptedEntities = binaryEntities && binaryEntities?.length > 0
+    ? encryptMessageEntities(binaryEntities)
+    : undefined
   const binaryActions = actions ? MessageActions.toBinary(actions) : undefined
   const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
   const hasLink = detectHasLink({ entities })

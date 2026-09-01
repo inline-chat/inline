@@ -102,6 +102,29 @@ describe("sendMessage", () => {
     expect(message?.entities).toBeUndefined()
   })
 
+  test("sends one 90k rich progress message through the realtime function", async () => {
+    const source = [
+      "<details open>",
+      "<summary kind=\"progress\">Working</summary>",
+      "",
+      "<details>",
+      "<summary>Ran commands</summary>",
+      "",
+      "x".repeat(90_000),
+      "</details>",
+      "</details>",
+    ].join("\n")
+
+    const result = await sendMessage({
+      peerId: privateChatPeerId,
+      message: source,
+      parseMarkdown: true,
+    }, context)
+    const message = extractMessage(result)
+    expect(message?.message?.length).toBeGreaterThan(90_000)
+    expect(message?.blockContent?.blocks).toHaveLength(1)
+  })
+
   test("records desktop chat activity from successful sends", async () => {
     const mockRecordChatActivity = mock().mockResolvedValue(undefined)
     const originalRecordChatActivity = desktopPushSuppressionTracker.recordChatActivity

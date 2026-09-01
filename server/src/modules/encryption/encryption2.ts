@@ -1,5 +1,6 @@
 import { Log } from "@in/server/utils/log"
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto"
+import { MAX_ENCRYPTED_DATA_LENGTH } from "./limits"
 
 // -----------------------------------------------------------------------------
 // Encryption-2: single-column binary encryption utilities
@@ -18,8 +19,6 @@ const log = new Log("encryption2")
 const ALGORITHM = "aes-256-gcm"
 const IV_LENGTH = 12 // 96-bit IV for GCM (recommended length)
 const AUTH_TAG_LENGTH = 16 // 128-bit authentication tag
-const MAX_ENCRYPTED_DATA_LENGTH = 20_000 // Keep parity with v1 implementation
-
 // -----------------------------------------------------------------------------
 // Utilities
 // -----------------------------------------------------------------------------

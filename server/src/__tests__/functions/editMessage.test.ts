@@ -96,6 +96,36 @@ describe("editMessage function", () => {
   })
   afterAll(teardownTestDatabase)
 
+  test("edits one message to a 90k rich progress payload", async () => {
+    const sent = await sendMessage({
+      peerId: privateChatPeerId,
+      message: "Working",
+    }, context)
+    const messageId = extractSentMessageId(sent)
+    if (!messageId) throw new Error("message was not created")
+    const source = [
+      "<details open>",
+      "<summary kind=\"progress\">Working</summary>",
+      "",
+      "<details>",
+      "<summary>Ran commands</summary>",
+      "",
+      "x".repeat(90_000),
+      "</details>",
+      "</details>",
+    ].join("\n")
+
+    const result = await editMessage({
+      messageId,
+      peer: privateChatPeerId,
+      text: source,
+      parseMarkdown: true,
+    }, context)
+    const message = extractEditedMessage(result)
+    expect(message?.message?.length).toBeGreaterThan(90_000)
+    expect(message?.blockContent?.blocks).toHaveLength(1)
+  })
+
   test("parses markdown when parseMarkdown is enabled", async () => {
     const sent = await sendMessage(
       {

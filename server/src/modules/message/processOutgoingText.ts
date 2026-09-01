@@ -8,6 +8,7 @@ import {
   normalizeMarkdownInput,
   parseMarkdownWithSourceMap,
 } from "@in/server/modules/message/parseMarkdown"
+import { validateOutgoingMessageText } from "@in/server/modules/message/messageTextLimits"
 
 type ProcessOutgoingTextInput = {
   text: string
@@ -728,6 +729,7 @@ const parseMissingMentionEntitiesByUsername = async ({
 export const processOutgoingText = async (
   input: ProcessOutgoingTextInput,
 ): Promise<ProcessOutgoingTextOutput> => {
+  validateOutgoingMessageText(input.text)
   let text = input.text
   let entities = input.entities
   const markdown = input.parseMarkdown ? normalizeMarkdownInput(input.text) : input.text

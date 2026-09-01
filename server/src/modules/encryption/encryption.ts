@@ -1,5 +1,6 @@
 import { Log } from "@in/server/utils/log"
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto"
+import { MAX_ENCRYPTED_DATA_LENGTH } from "./limits"
 
 const ALGORITHM = "aes-256-gcm"
 const IV_LENGTH = 12
@@ -170,8 +171,6 @@ const validateKey = (key: Uint8Array): void => {
     throw new EncryptionConfigurationError("Invalid key length. Expected 32 bytes")
   }
 }
-
-const MAX_ENCRYPTED_DATA_LENGTH = 20_000
 
 const validateText = (text: string): void => {
   if (!text) {
