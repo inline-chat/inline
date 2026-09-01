@@ -31,7 +31,7 @@ struct Welcome: View {
             .offset(y: isVisible ? 0 : 20)
             .animation(animation.delay(0.2), value: isVisible)
 
-          Text("A fast, tranquil, AI native work chat app")
+          Text("The interface for multiplayer work")
             .font(.onboardingIOSTitle2)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
