@@ -231,17 +231,25 @@ after a retry or restart; the retained status plus final answer are an intention
 two-message beta design. A failed progress edit never creates another progress
 message or prevents the final answer; after a crash the bridge resolves the
 original progress send by its stable local transaction identity before recovery.
-Normal mode shows safe commentary, tool summaries, and provider plan steps
-inside that disclosure. Codex preserves assistant item identity and phase:
-commentary and nested tools stay in first-seen order; the final answer is kept
-out of progress. `/verbose` adds sanitized details and validated relative file
-paths. Updates replace the existing item without clearing earlier work.
-One bounded progress message explicitly marks omitted overflow; new turns do
-not create continuation messages. Recovery restores the same durable ledger.
-Raw reasoning, terminal output, and tool payloads are excluded. Commentary uses
-the same credential, signed-URL, and absolute-path redaction as tool details,
-while preserving Markdown whitespace. Missing tool completion remains
-unconfirmed, even when the turn succeeds. The explicit `/verbose on` and
+Normal mode keeps the Codex presentation hierarchy and usually exposes 90–95%
+of a turn: exact commentary, reasoning summaries, action rows, searches, file
+reads, commands, tool metadata, provider plan steps, compaction notices, and
+other structured activity inside that disclosure. Assistant item identity and
+phase preserve first-seen ordering, while the final answer remains outside
+progress. Normal mode stays within one bounded progress message and explicitly
+marks the unusual turn that does not fit.
+
+`/verbose` exposes the complete textual provider record retained by the bridge,
+including reasoning content, command output, tool progress, exact commands and
+paths, arguments, results, and raw Codex item payloads. It creates as many silent
+continuation disclosures as the turn needs so no textual field is omitted, with
+each message kept below Inline's message-size safety limit. Binary generated
+images remain lossless attachments instead of being duplicated as base64 text.
+Formatting applies only structural Markdown/HTML escaping needed to keep the
+disclosures valid; this output is not a credential-redaction boundary. Recovery
+restores the same durable ledger, and switching from normal to verbose during a
+turn reveals the verbose data already retained. Missing tool completion remains
+unconfirmed even when the turn succeeds. The explicit `/verbose on` and
 `/verbose off` forms remain available for automation.
 
 The progress disclosure includes a footer such as

@@ -1011,7 +1011,9 @@ fn structured_activity_upserts_replace_by_id_and_count_concurrency() {
     )
     .with_detail("cargo test -p inline-agent-bridge");
     let update = tracker.apply(first, VisibilityMode::Normal, workspace);
-    assert!(update.status.as_deref().is_some_and(|text| text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")));
+    assert!(update.status.as_deref().is_some_and(|text| {
+        text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")
+    }));
     assert!(update.validation.is_none());
 
     let second = activity_snapshot(
@@ -1021,7 +1023,9 @@ fn structured_activity_upserts_replace_by_id_and_count_concurrency() {
         "Reading driver.rs",
     );
     let update = tracker.apply(second, VisibilityMode::Normal, workspace);
-    assert!(update.status.as_deref().is_some_and(|text| text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")));
+    assert!(update.status.as_deref().is_some_and(|text| {
+        text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")
+    }));
 
     let second = activity_snapshot(
         "read-1",
@@ -1030,7 +1034,9 @@ fn structured_activity_upserts_replace_by_id_and_count_concurrency() {
         "Reading driver.rs",
     );
     let update = tracker.apply(second, VisibilityMode::Normal, workspace);
-    assert!(update.status.as_deref().is_some_and(|text| text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")));
+    assert!(update.status.as_deref().is_some_and(|text| {
+        text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")
+    }));
 
     let first = activity_snapshot(
         "command-1",
@@ -1040,7 +1046,9 @@ fn structured_activity_upserts_replace_by_id_and_count_concurrency() {
     )
     .with_exit_code(Some(0));
     let update = tracker.apply(first, VisibilityMode::Normal, workspace);
-    assert!(update.status.as_deref().is_some_and(|text| text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")));
+    assert!(update.status.as_deref().is_some_and(|text| {
+        text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")
+    }));
     assert_eq!(
         update.validation,
         Some(ValidationSummary::Passed("cargo test".to_string()))
@@ -1059,7 +1067,9 @@ fn structured_activity_failure_and_decline_have_truthful_semantics() {
     );
     let update = tracker.apply(failed, VisibilityMode::Normal, workspace);
     assert_eq!(update.priority, UpdatePriority::Attention);
-    assert!(update.status.as_deref().is_some_and(|text| text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")));
+    assert!(update.status.as_deref().is_some_and(|text| {
+        text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")
+    }));
 
     let declined = activity_snapshot(
         "command-2",
@@ -1068,7 +1078,9 @@ fn structured_activity_failure_and_decline_have_truthful_semantics() {
         "cargo check",
     );
     let update = tracker.apply(declined, VisibilityMode::Normal, workspace);
-    assert!(update.status.as_deref().is_some_and(|text| text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")));
+    assert!(update.status.as_deref().is_some_and(|text| {
+        text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")
+    }));
     assert!(matches!(
         update.validation,
         Some(ValidationSummary::NotRun(_))
@@ -1101,7 +1113,9 @@ fn structured_activity_failure_preempts_concurrent_work() {
     .with_exit_code(Some(1));
     let update = tracker.apply(failed, VisibilityMode::Normal, workspace);
     assert_eq!(update.priority, UpdatePriority::Attention);
-    assert!(update.status.as_deref().is_some_and(|text| text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")));
+    assert!(update.status.as_deref().is_some_and(|text| {
+        text.starts_with("<details open>\n<summary kind=\"progress\">Working</summary>")
+    }));
 }
 
 #[test]
@@ -1180,7 +1194,7 @@ fn verbose_activity_ledger_adds_command_detail_from_a_later_provider_update() {
 }
 
 #[test]
-fn verbose_activity_renderer_redacts_command_details_again() {
+fn verbose_activity_renderer_preserves_command_details_exactly() {
     let mut tracker = ActivityTracker::default();
     let rendered = tracker
         .apply(
@@ -1196,10 +1210,8 @@ fn verbose_activity_renderer_redacts_command_details_again() {
         )
         .status
         .expect("verbose ledger");
-    assert!(rendered.contains("deploy --api-key [redacted]"));
-    assert!(rendered.contains("https://example.com/file?[redacted]"));
-    assert!(!rendered.contains("must-not-appear"));
-    assert!(!rendered.contains("token=private"));
+    assert!(rendered.contains("deploy --api-key must-not-appear"));
+    assert!(rendered.contains("https://example.com/file?token=private"));
 }
 
 #[test]
@@ -1366,6 +1378,8 @@ fn progress_ledger_round_trips_only_normalized_relative_paths() {
 
     let json = tracker.durable_json().expect("serialize");
     assert!(!json.contains("/workspace/"));
+    assert!(json.contains(r#"{"kind":"activity","key":"read-1""#));
+    assert!(!json.contains(r#""activity":{"key""#));
     let restored = ActivityTracker::from_durable_json(&json).expect("restore");
     assert_eq!(restored.visibility_mode(), VisibilityMode::Verbose);
     assert_eq!(restored.terminal_header(), Some("Worked for 2m 05s"));
@@ -1412,18 +1426,21 @@ fn verbose_progress_overflow_is_bounded_and_terminal_headers_do_not_repeat_worki
         WORKING_STATUS,
         Some(WORKING_CONTINUED_STATUS),
     );
-    assert_eq!(live.len(), 1);
+    assert!(live.len() > 1);
     assert!(live[0].starts_with("<details open>\n<summary kind=\"progress\">Working</summary>"));
     assert!(
         live[1..]
             .iter()
-            .all(|chunk| chunk.starts_with("Working... · continued\n\n"))
+            .all(|chunk| chunk.starts_with("<details open>\n<summary kind=\"progress\">"))
     );
+    assert!(live[1..].iter().all(|chunk| chunk.contains("continued")));
     assert!(
-        live.last()
-            .expect("last")
-            .contains("[additional activity omitted]")
+        live.iter()
+            .all(|chunk| !chunk.contains(PROGRESS_OMITTED_MARKER))
     );
+    let joined = live.join("\n");
+    assert!(joined.contains("Run command 0"));
+    assert!(joined.contains(&format!("Run command {}", MAX_TRACKED_ACTIVITIES - 1)));
     assert!(
         live.iter()
             .all(|chunk| chunk.len() <= MAX_PROGRESS_CHUNK_BYTES)

@@ -190,12 +190,17 @@ folder switching, lifecycle, and security details.
 
 During a turn the bot silently edits one open **Working** disclosure. Codex
 commentary and tools stay in order, with the working directory in its footer;
-verbose mode adds sanitized tool details. Completion collapses that message and
-sends the final answer separately with normal notifications. Progress is bounded
-to one message, with an explicit omission notice for long turns. It remains
-ordinary chat history; approvals, questions, and attachments keep their existing
-delivery paths. The persisted final-send identity is reused across retries and
-service restarts so an ambiguous response does not create another final answer.
+normal mode includes reasoning summaries and exact structured action details.
+Verbose mode adds the complete retained textual provider record: reasoning
+content, output, progress, commands, paths, arguments, results, and raw item
+payloads. Long verbose turns use silent continuation disclosures so textual data
+is not omitted; normal mode remains one bounded progress message with an explicit
+overflow notice. Completion collapses progress and sends the final answer
+separately with normal notifications. Approvals, questions, and attachments keep
+their existing delivery paths; generated-image bytes stay in the attachment
+instead of being repeated as base64 text. The persisted final-send identity is
+reused across retries and service restarts so an ambiguous response does not
+create another final answer.
 
 ## Output
 

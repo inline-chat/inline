@@ -82,6 +82,7 @@ fn runtime_agent_event_kind(event: &AgentEvent) -> &'static str {
         AgentEvent::AgentTextCompleted { .. } => "agent_text_completed",
         AgentEvent::Activity { .. } => "activity",
         AgentEvent::ActivityUpsert { .. } => "activity_upsert",
+        AgentEvent::ActivityTextDelta { .. } => "activity_text_delta",
         AgentEvent::PlanUpdated { .. } => "plan_updated",
         AgentEvent::ApprovalRequested(_) => "approval_requested",
         AgentEvent::ApprovalClosed { .. } => "approval_closed",
@@ -1651,6 +1652,43 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                             ).await?;
                         }
                     }
+                    Some(Ok(AgentEvent::ActivityTextDelta {
+                        activity_id,
+                        stream,
+                        index,
+                        delta,
+                        ..
+                    })) => {
+                        activities.apply_activity_text_delta(&activity_id, stream, index, &delta);
+                        let now = now_millis();
+                        if presenter.ordinary_update_ready(now) {
+                            persist_progress_ledger(store, &record.event_id, &activities)?;
+                            let status = activities
+                                .render(visibility_mode, WORKING_STATUS, workspace)
+                                .unwrap_or_default();
+                            if presenter
+                                .show_transient(now, status, UpdatePriority::Ordinary)
+                                .is_none()
+                            {
+                                continue;
+                            }
+                            let chunks = activities.render_chunks(
+                                visibility_mode,
+                                WORKING_STATUS,
+                                Some(WORKING_CONTINUED_STATUS),
+                            );
+                            sync_turn_progress(
+                                bot,
+                                store,
+                                &record.event_id,
+                                binding.chat_id,
+                                stream_message_id,
+                                &mut progress_message_ids,
+                                &chunks,
+                                WORKING_CONTINUED_STATUS,
+                            ).await?;
+                        }
+                    }
                     Some(Ok(AgentEvent::Activity { summary, .. })) => {
                         if let Some(update) = validation_summary_from_provider(&summary) {
                             validation = Some(update);
@@ -1995,9 +2033,8 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         }
     }
     if let Some(text) = activities.final_message_text() {
-        let _ = presenter.replace_snapshot_with_priority(
-            now_millis(), text, UpdatePriority::Terminal,
-        );
+        let _ =
+            presenter.replace_snapshot_with_priority(now_millis(), text, UpdatePriority::Terminal);
     }
     let final_text = final_turn_text(
         presenter.content(),

@@ -556,11 +556,7 @@ fn close_peer(
 fn notification_is_drop_safe(method: &str) -> bool {
     matches!(
         method,
-        "account/rateLimits/updated"
-            | "thread/tokenUsage/updated"
-            | "item/reasoning/summaryTextDelta"
-            | "item/reasoning/summaryPartAdded"
-            | "item/reasoning/textDelta"
+        "account/rateLimits/updated" | "thread/tokenUsage/updated"
     )
 }
 

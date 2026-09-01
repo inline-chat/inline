@@ -9,8 +9,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::StreamExt;
 use inline_agent_bridge::{
-    Acknowledgement, ActivitySemanticKind, ActivityStatus, ActivityUpsert, AddressSignals,
-    Addressing, AgentDriver, AgentEvent, AgentMessagePhase, AgentMessageUpdate, ApprovalClaimContext, ApprovalClaimOutcome,
+    Acknowledgement, ActivityDetail, ActivityDetailStyle, ActivitySemanticKind, ActivityStatus,
+    ActivityTextStream, ActivityUpsert, AddressSignals, Addressing, AgentDriver, AgentEvent,
+    AgentMessagePhase, AgentMessageUpdate, ApprovalClaimContext, ApprovalClaimOutcome,
     ApprovalDecision, ApprovalOption, ApprovalRecord, BindingKey, BridgeStore, ChatSettingsRecord,
     CommandChoiceAction, CommandChoiceClaimContext, CommandChoiceClaimOutcome,
     CommandChoiceRequest, CommandInvocation, CoordinatorEffect, Direction, DirectionDisposition,

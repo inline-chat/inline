@@ -551,6 +551,23 @@ async fn real_codex_default_chat_projects_open_link_and_resume_deliver_final_ans
         let default_session = route.store.get_binding(&binding)?.expect("default session").1;
         let history = bot.history(HistoryRequest { chat_id: InlineId::new(706), limit: Some(50), before_message_id: None, after_message_id: None }).await?;
         assert!(history.messages.iter().any(|message| matches!(&message.content, MessageContent::Text { text } if text.trim() == marker)), "default handler must deliver final to Inline");
+        run_message(&bot, &route, &manager, &identity, 706, 130, "/verbose on").await?;
+        let output_marker = format!("inline-command-output-{}", now_millis());
+        let answer_marker = format!("inline-tool-answer-{}", now_millis());
+        run_message(&bot, &route, &manager, &identity, 706, 131,
+            &format!("Use the terminal tool exactly once to run `printf {output_marker}` without reading or changing files. Then reply with only `{answer_marker}`.")).await?;
+        let history = bot.history(HistoryRequest { chat_id: InlineId::new(706), limit: Some(50), before_message_id: None, after_message_id: None }).await?;
+        let history_text = history.messages.iter().filter_map(|message| match &message.content {
+            MessageContent::Text { text } => Some(text.as_str()),
+            _ => None,
+        }).collect::<Vec<_>>().join("\n");
+        for expected in ["<summary>Worked", "Command output", "Provider payload", output_marker.as_str()] {
+            assert!(history_text.contains(expected),
+                "verbose progress set must retain real Codex field: {expected}");
+        }
+        assert!(history.messages.iter().any(|message| matches!(&message.content, MessageContent::Text { text } if text.trim() == answer_marker)),
+            "tool turn must still deliver its separate final answer");
+        run_message(&bot, &route, &manager, &identity, 706, 132, "/verbose off").await?;
         // Model an existing session created in Codex, separate from the session
         // already attached to the ordinary Inline DM. Opening must never steal
         // that DM binding or fork its context.

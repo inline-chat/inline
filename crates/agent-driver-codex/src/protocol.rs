@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use inline_agent_bridge::{
-    ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent, AgentMessagePhase,
-    AgentMessageUpdate, ApprovalOption, ApprovalRequest, FileChange, OutputAttachment,
-    OutputAttachmentKind, PlanStep, PlanStepStatus, Question, QuestionAnswer, QuestionOption,
-    QuestionRequest, TurnId, TurnOutcome, TurnTiming, native_tool_activity,
+    ActivityDetail, ActivitySemanticKind, ActivityStatus, ActivityTextStream, ActivityUpsert,
+    AgentEvent, AgentMessagePhase, AgentMessageUpdate, ApprovalOption, ApprovalRequest, FileChange,
+    OutputAttachment, OutputAttachmentKind, PlanStep, PlanStepStatus, Question, QuestionAnswer,
+    QuestionOption, QuestionRequest, TurnId, TurnOutcome, TurnTiming, native_tool_activity,
     sanitize_visible_command,
 };
 use serde::{Deserialize, Serialize};
@@ -16,21 +16,17 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-const MAX_PLAN_STEPS: usize = 32;
-const MAX_PLAN_TEXT_CHARS: usize = 512;
 const MAX_PROVIDER_ID_BYTES: usize = 256;
 const MAX_QUESTION_ID_BYTES: usize = 128;
 const MAX_QUESTION_HEADER_CHARS: usize = 80;
 const MAX_QUESTION_PROMPT_CHARS: usize = 2_000;
 const MAX_QUESTION_OPTION_LABEL_CHARS: usize = 160;
 const MAX_QUESTION_OPTION_DESCRIPTION_CHARS: usize = 400;
-const MAX_AGENT_TEXT_BYTES: usize = 64 * 1024;
 const MAX_FILE_CHANGES: usize = 64;
 const MAX_FILE_CHANGE_PATH_BYTES: usize = 1024;
 const MAX_TURN_ERROR_CHARS: usize = 1_024;
 const MAX_OUTPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_OUTPUT_PATH_BYTES: usize = 4 * 1024;
-const TRUNCATED_AGENT_TEXT_MARKER: &str = "\n[additional agent output omitted]";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -299,7 +295,7 @@ pub fn normalize_notification(
         }
         "item/agentMessage/delta" => {
             let turn_id = turn_id_at(&method, &params, &["turnId"])?;
-            let text = bounded_agent_text(&string_at(&method, &params, &["delta"])?);
+            let text = string_at(&method, &params, &["delta"])?;
             if let Some(item_id) = params
                 .get("itemId")
                 .and_then(Value::as_str)
@@ -314,9 +310,39 @@ pub fn normalize_notification(
             }
             Ok(vec![AgentEvent::AgentTextDelta { turn_id, text }])
         }
+        "item/plan/delta" => normalize_plan_delta(&method, &params),
         "turn/plan/updated" => normalize_plan_update(&method, &params),
         "item/started" => normalize_started_item(&method, &params),
+        "item/autoApprovalReview/started" => {
+            normalize_auto_approval_review(&method, &params, false)
+        }
+        "item/autoApprovalReview/completed" => {
+            normalize_auto_approval_review(&method, &params, true)
+        }
+        "autoApprovalReview/strictReviewRequired" => {
+            normalize_strict_review_required(&method, &params)
+        }
         "item/commandExecution/outputDelta" => normalize_command_output_progress(&method, &params),
+        "item/commandExecution/terminalInteraction" => {
+            normalize_terminal_interaction(&method, &params)
+        }
+        "item/fileChange/outputDelta" => {
+            normalize_activity_text_progress(&method, &params, ActivityTextStream::Output, "")
+        }
+        "item/reasoning/summaryTextDelta" => normalize_activity_text_progress(
+            &method,
+            &params,
+            ActivityTextStream::Summary,
+            "summaryIndex",
+        ),
+        "item/reasoning/summaryPartAdded" => Ok(Vec::new()),
+        "item/reasoning/textDelta" => normalize_activity_text_progress(
+            &method,
+            &params,
+            ActivityTextStream::Content,
+            "contentIndex",
+        ),
+        "item/mcpToolCall/progress" => normalize_mcp_progress(&method, &params),
         "item/fileChange/patchUpdated" => normalize_file_change_progress(&method, &params),
         "item/completed" => normalize_completed_item(&method, &params),
         "turn/completed" => normalize_completed_turn(&method, &params),
@@ -331,8 +357,18 @@ pub fn unsupported_notification_diagnostic(method: &str, params: &Value) -> Opti
         "turn/started"
         | "turn/plan/updated"
         | "item/agentMessage/delta"
+        | "item/plan/delta"
         | "item/started"
+        | "item/autoApprovalReview/started"
+        | "item/autoApprovalReview/completed"
+        | "autoApprovalReview/strictReviewRequired"
         | "item/commandExecution/outputDelta"
+        | "item/commandExecution/terminalInteraction"
+        | "item/fileChange/outputDelta"
+        | "item/reasoning/summaryTextDelta"
+        | "item/reasoning/summaryPartAdded"
+        | "item/reasoning/textDelta"
+        | "item/mcpToolCall/progress"
         | "item/fileChange/patchUpdated"
         | "turn/completed" => None,
         "item/completed" => {
@@ -351,6 +387,10 @@ pub fn unsupported_notification_diagnostic(method: &str, params: &Value) -> Opti
                     | "webSearch"
                     | "reasoning"
                     | "collabAgentToolCall"
+                    | "subAgentActivity"
+                    | "hookPrompt"
+                    | "imageView"
+                    | "sleep"
                     | "enteredReviewMode"
                     | "exitedReviewMode"
                     | "contextCompaction"
@@ -378,9 +418,9 @@ fn normalize_plan_update(method: &str, params: &Value) -> Result<Vec<AgentEvent>
             method: method.to_string(),
             field: "plan",
         })?;
-    let mut steps = Vec::with_capacity(plan.len().min(MAX_PLAN_STEPS));
-    for item in plan.iter().take(MAX_PLAN_STEPS) {
-        let text = bounded_visible_text(&string_at(method, item, &["step"])?);
+    let mut steps = Vec::with_capacity(plan.len());
+    for item in plan {
+        let text = string_at(method, item, &["step"])?;
         if text.is_empty() {
             continue;
         }
@@ -400,7 +440,7 @@ fn normalize_plan_update(method: &str, params: &Value) -> Result<Vec<AgentEvent>
     let explanation = params
         .get("explanation")
         .and_then(Value::as_str)
-        .map(bounded_visible_text)
+        .map(str::to_string)
         .filter(|value| !value.is_empty());
     Ok(vec![AgentEvent::PlanUpdated {
         turn_id,
@@ -409,27 +449,21 @@ fn normalize_plan_update(method: &str, params: &Value) -> Result<Vec<AgentEvent>
     }])
 }
 
-fn bounded_visible_text(value: &str) -> String {
-    value
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(MAX_PLAN_TEXT_CHARS)
-        .collect()
-}
-
-fn bounded_agent_text(value: &str) -> String {
-    if value.len() <= MAX_AGENT_TEXT_BYTES {
-        return value.to_string();
+fn normalize_plan_delta(method: &str, params: &Value) -> Result<Vec<AgentEvent>, ProtocolError> {
+    let turn_id = turn_id_at(method, params, &["turnId"])?;
+    let item_id = string_at(method, params, &["itemId"])?;
+    if !safe_provider_id(&item_id) {
+        return Err(ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "itemId",
+        });
     }
-    let mut boundary = MAX_AGENT_TEXT_BYTES.min(value.len());
-    while boundary > 0 && !value.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    let mut bounded = value[..boundary].to_string();
-    bounded.push_str(TRUNCATED_AGENT_TEXT_MARKER);
-    bounded
+    Ok(vec![AgentEvent::AgentMessage {
+        turn_id,
+        item_id,
+        phase: Some(AgentMessagePhase::Commentary),
+        update: AgentMessageUpdate::Delta(string_at(method, params, &["delta"])?),
+    }])
 }
 
 fn safe_file_change_path(value: &str) -> bool {
@@ -644,21 +678,47 @@ fn normalize_completed_item(
     let item_type = string_at(method, item, &["type"])?;
     match item_type.as_str() {
         "agentMessage" => {
-            let text = bounded_agent_text(&string_at(method, item, &["text"]).unwrap_or_default());
-            Ok(vec![if let Some(item_id) = item
+            let text = string_at(method, item, &["text"]).unwrap_or_default();
+            let metadata_turn_id = turn_id.clone();
+            let item_id = item
                 .get("id")
                 .and_then(Value::as_str)
                 .filter(|id| safe_provider_id(id))
-            {
+                .map(str::to_string);
+            let mut events = vec![if let Some(item_id) = &item_id {
                 AgentEvent::AgentMessage {
                     turn_id,
-                    item_id: item_id.to_string(),
+                    item_id: item_id.clone(),
                     phase: message_phase(item),
                     update: AgentMessageUpdate::Completed(text),
                 }
             } else {
                 AgentEvent::AgentTextCompleted { turn_id, text }
-            }])
+            }];
+            if let Some(item_id) = item_id {
+                let mut details = Vec::new();
+                push_json_detail(&mut details, "Delivery", item.get("delivery"));
+                push_json_detail(&mut details, "Memory citation", item.get("memoryCitation"));
+                if !details.is_empty()
+                    && let Some(activity) = ActivityUpsert::new(
+                        item_id,
+                        ActivitySemanticKind::Other,
+                        ActivityStatus::Completed,
+                        "Agent message metadata",
+                    )
+                {
+                    let activity = verbose_item_payload(item)
+                        .map_or(activity.clone(), |payload| {
+                            activity.with_verbose_payload(payload)
+                        })
+                        .with_details(details);
+                    events.push(AgentEvent::ActivityUpsert {
+                        turn_id: metadata_turn_id,
+                        activity,
+                    });
+                }
+            }
+            Ok(events)
         }
         "fileChange" => {
             let files = item
@@ -682,7 +742,15 @@ fn normalize_completed_item(
                 })
                 .take(MAX_FILE_CHANGES)
                 .collect();
-            let activity = codex_file_change_activity(item, ActivityStatus::Completed);
+            let activity = if item
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(safe_provider_id)
+            {
+                codex_item_activity(method, &turn_id, item, ActivityStatus::Completed)?
+            } else {
+                None
+            };
             let mut events = vec![AgentEvent::FilesChanged {
                 turn_id: turn_id.clone(),
                 files,
@@ -693,22 +761,30 @@ fn normalize_completed_item(
             Ok(events)
         }
         "imageGeneration" => normalize_image_generation(method, item, turn_id),
-        "commandExecution"
-        | "mcpToolCall"
-        | "dynamicToolCall"
-        | "webSearch"
-        | "collabAgentToolCall"
-        | "enteredReviewMode"
-        | "exitedReviewMode"
-        | "contextCompaction" => {
-            Ok(
-                codex_item_activity(method, &turn_id, item, ActivityStatus::Completed)?
-                    .map(|activity| AgentEvent::ActivityUpsert { turn_id, activity })
-                    .into_iter()
-                    .collect(),
-            )
+        "plan" => {
+            let item_id = string_at(method, item, &["id"])?;
+            if !safe_provider_id(&item_id) {
+                return Err(ProtocolError::InvalidField {
+                    method: method.to_string(),
+                    field: "item.id",
+                });
+            }
+            Ok(vec![AgentEvent::AgentMessage {
+                turn_id,
+                item_id,
+                phase: Some(AgentMessagePhase::Commentary),
+                update: AgentMessageUpdate::Completed(
+                    string_at(method, item, &["text"]).unwrap_or_default(),
+                ),
+            }])
         }
-        _ => Ok(Vec::new()),
+        "userMessage" => Ok(Vec::new()),
+        _ => Ok(
+            codex_item_activity(method, &turn_id, item, ActivityStatus::Completed)?
+                .map(|activity| AgentEvent::ActivityUpsert { turn_id, activity })
+                .into_iter()
+                .collect(),
+        ),
     }
 }
 
@@ -769,7 +845,7 @@ fn normalize_image_generation(
         });
     }
     let attachment = OutputAttachment {
-        id,
+        id: id.clone(),
         kind: OutputAttachmentKind::Image,
         path,
         mime_type: "image/png".to_string(),
@@ -777,10 +853,18 @@ fn normalize_image_generation(
         size_bytes: u64::try_from(saved.len()).unwrap_or(u64::MAX),
         sha256: format!("{:x}", Sha256::digest(&saved)),
     };
-    Ok(vec![AgentEvent::OutputAttachment {
+    let mut events = codex_item_activity(method, &turn_id, item, ActivityStatus::Completed)?
+        .map(|activity| AgentEvent::ActivityUpsert {
+            turn_id: turn_id.clone(),
+            activity,
+        })
+        .into_iter()
+        .collect::<Vec<_>>();
+    events.push(AgentEvent::OutputAttachment {
         turn_id,
         attachment,
-    }])
+    });
+    Ok(events)
 }
 
 fn is_png(bytes: &[u8]) -> bool {
@@ -812,10 +896,174 @@ fn normalize_started_item(method: &str, params: &Value) -> Result<Vec<AgentEvent
 }
 
 fn normalize_command_output_progress(
-    _method: &str,
-    _params: &Value,
+    method: &str,
+    params: &Value,
 ) -> Result<Vec<AgentEvent>, ProtocolError> {
-    Ok(Vec::new())
+    normalize_activity_text_progress(method, params, ActivityTextStream::Output, "")
+}
+
+fn normalize_mcp_progress(method: &str, params: &Value) -> Result<Vec<AgentEvent>, ProtocolError> {
+    let turn_id = turn_id_at(method, params, &["turnId"])?;
+    let activity_id = string_at(method, params, &["itemId"])?;
+    if !safe_provider_id(&activity_id) {
+        return Err(ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "itemId",
+        });
+    }
+    Ok(vec![AgentEvent::ActivityTextDelta {
+        turn_id,
+        activity_id,
+        stream: ActivityTextStream::Progress,
+        index: None,
+        delta: string_at(method, params, &["message"])?,
+    }])
+}
+
+fn normalize_terminal_interaction(
+    method: &str,
+    params: &Value,
+) -> Result<Vec<AgentEvent>, ProtocolError> {
+    let turn_id = turn_id_at(method, params, &["turnId"])?;
+    let activity_id = string_at(method, params, &["itemId"])?;
+    if !safe_provider_id(&activity_id) {
+        return Err(ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "itemId",
+        });
+    }
+    Ok(vec![AgentEvent::ActivityTextDelta {
+        turn_id,
+        activity_id,
+        stream: ActivityTextStream::Input,
+        index: None,
+        delta: string_at(method, params, &["stdin"])?,
+    }])
+}
+
+fn normalize_auto_approval_review(
+    method: &str,
+    params: &Value,
+    completed: bool,
+) -> Result<Vec<AgentEvent>, ProtocolError> {
+    let turn_id = turn_id_at(method, params, &["turnId"])?;
+    let review_id = string_at(method, params, &["reviewId"])?;
+    if !safe_provider_id(&review_id) {
+        return Err(ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "reviewId",
+        });
+    }
+    let mut details = Vec::new();
+    push_json_detail(&mut details, "Action", params.get("action"));
+    push_json_detail(&mut details, "Review", params.get("review"));
+    push_json_detail(
+        &mut details,
+        "Decision source",
+        params.get("decisionSource"),
+    );
+    push_text_detail(&mut details, "Target item", params.get("targetItemId"));
+    push_json_detail(&mut details, "Started at (ms)", params.get("startedAtMs"));
+    push_json_detail(
+        &mut details,
+        "Completed at (ms)",
+        params.get("completedAtMs"),
+    );
+    let activity = ActivityUpsert::new(
+        review_id,
+        ActivitySemanticKind::Other,
+        if completed {
+            ActivityStatus::Completed
+        } else {
+            ActivityStatus::InProgress
+        },
+        if completed {
+            "Reviewed approval"
+        } else {
+            "Reviewing approval"
+        },
+    )
+    .ok_or_else(|| ProtocolError::InvalidField {
+        method: method.to_string(),
+        field: "reviewId",
+    })?
+    .with_details(details)
+    .with_verbose_payload(serde_json::to_string_pretty(params).map_err(|_| {
+        ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "params",
+        }
+    })?);
+    Ok(vec![AgentEvent::ActivityUpsert { turn_id, activity }])
+}
+
+fn normalize_strict_review_required(
+    method: &str,
+    params: &Value,
+) -> Result<Vec<AgentEvent>, ProtocolError> {
+    let turn_id = turn_id_at(method, params, &["turnId"])?;
+    let started_at = params
+        .get("startedAtMs")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "startedAtMs",
+        })?;
+    let activity = ActivityUpsert::new(
+        format!("strict-review-{started_at}"),
+        ActivitySemanticKind::Other,
+        ActivityStatus::Completed,
+        "Strict approval review required",
+    )
+    .expect("bounded timestamp activity id")
+    .with_details([ActivityDetail::text(
+        "Started at (ms)",
+        started_at.to_string(),
+    )])
+    .with_verbose_payload(serde_json::to_string_pretty(params).map_err(|_| {
+        ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "params",
+        }
+    })?);
+    Ok(vec![AgentEvent::ActivityUpsert { turn_id, activity }])
+}
+
+fn normalize_activity_text_progress(
+    method: &str,
+    params: &Value,
+    stream: ActivityTextStream,
+    index_field: &'static str,
+) -> Result<Vec<AgentEvent>, ProtocolError> {
+    let turn_id = turn_id_at(method, params, &["turnId"])?;
+    let activity_id = string_at(method, params, &["itemId"])?;
+    if !safe_provider_id(&activity_id) {
+        return Err(ProtocolError::InvalidField {
+            method: method.to_string(),
+            field: "itemId",
+        });
+    }
+    let index = if index_field.is_empty() {
+        None
+    } else {
+        Some(
+            params
+                .get(index_field)
+                .and_then(Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .ok_or_else(|| ProtocolError::InvalidField {
+                    method: method.to_string(),
+                    field: index_field,
+                })?,
+        )
+    };
+    Ok(vec![AgentEvent::ActivityTextDelta {
+        turn_id,
+        activity_id,
+        stream,
+        index,
+        delta: string_at(method, params, &["delta"])?,
+    }])
 }
 
 fn normalize_file_change_progress(
@@ -824,20 +1072,42 @@ fn normalize_file_change_progress(
 ) -> Result<Vec<AgentEvent>, ProtocolError> {
     let turn_id = turn_id_at(method, params, &["turnId"])?;
     let activity_id = string_at(method, params, &["itemId"])?;
-    let paths = params
+    let changes = params
         .get("changes")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .collect::<Vec<_>>();
+    let paths = changes
+        .iter()
         .filter_map(|change| change.get("path").and_then(Value::as_str))
         .map(PathBuf::from);
+    let details = changes.iter().filter_map(|change| {
+        let path = change.get("path")?.as_str()?;
+        Some(ActivityDetail::code(
+            change
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("Updated"),
+            path,
+        ))
+    });
     Ok(ActivityUpsert::new(
         activity_id,
         ActivitySemanticKind::Edit,
         ActivityStatus::InProgress,
         "Updating files",
     )
-    .map(|activity| activity.with_detail("Patch updated.").with_paths(paths))
+    .map(|activity| {
+        activity
+            .with_detail("Patch updated.")
+            .with_details(details)
+            .with_verbose_payload(
+                serde_json::to_string_pretty(params)
+                    .expect("serializing a JSON Value is infallible"),
+            )
+            .with_paths(paths)
+    })
     .map(|activity| AgentEvent::ActivityUpsert { turn_id, activity })
     .into_iter()
     .collect())
@@ -857,36 +1127,39 @@ fn codex_item_activity(
         .map(codex_item_status)
         .unwrap_or(fallback_status);
     let activity = match item_type.as_str() {
-        "commandExecution" => ActivityUpsert::new(
-            id,
-            command_semantics(item).0,
-            item.get("status")
-                .and_then(Value::as_str)
-                .map(codex_command_status)
-                .unwrap_or(fallback_status),
-            command_semantics(item).1,
-        )
-        .map(|activity| {
-            // Explicit per-chat verbose mode remains secret-safe. Command output
-            // bytes stay omitted and the visible command is scrubbed before it
-            // enters the provider-neutral activity contract.
-            let activity = if let Some(command) = item
-                .get("command")
-                .and_then(Value::as_str)
-                .and_then(sanitize_visible_command)
-            {
-                activity.with_detail(command)
-            } else {
+        "commandExecution" => {
+            let (kind, title) = command_semantics(item);
+            ActivityUpsert::new(
+                id,
+                kind,
+                item.get("status")
+                    .and_then(Value::as_str)
+                    .map(codex_command_status)
+                    .unwrap_or(fallback_status),
+                title,
+            )
+            .map(|activity| {
+                let activity = item
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .map_or(activity.clone(), |command| activity.with_detail(command));
+                let activity = item
+                    .get("aggregatedOutput")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map_or(activity.clone(), |output| {
+                        activity.with_output_snapshot(output)
+                    });
                 activity
-            };
-            activity
-                .with_paths(item.get("cwd").and_then(Value::as_str).map(PathBuf::from))
-                .with_exit_code(
-                    item.get("exitCode")
-                        .and_then(Value::as_i64)
-                        .and_then(|code| i32::try_from(code).ok()),
-                )
-        }),
+                    .with_details(command_action_details(item))
+                    .with_paths(item.get("cwd").and_then(Value::as_str).map(PathBuf::from))
+                    .with_exit_code(
+                        item.get("exitCode")
+                            .and_then(Value::as_i64)
+                            .and_then(|code| i32::try_from(code).ok()),
+                    )
+            })
+        }
         "fileChange" => codex_file_change_activity_from_id(&id, item, fallback_status),
         "mcpToolCall" | "dynamicToolCall" => {
             let name = item
@@ -895,6 +1168,19 @@ fn codex_item_activity(
                 .or_else(|| item.get("server").and_then(Value::as_str))
                 .unwrap_or_default();
             let presentation = native_tool_activity(name, ActivitySemanticKind::Other);
+            let title = item
+                .pointer("/appContext/actionName")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(presentation.title);
+            let mut details = Vec::new();
+            push_text_detail(&mut details, "App", item.pointer("/appContext/appName"));
+            push_text_detail(&mut details, "Server", item.get("server"));
+            push_text_detail(&mut details, "Tool", item.get("tool"));
+            push_text_detail(&mut details, "Namespace", item.get("namespace"));
+            push_text_detail(&mut details, "Plugin", item.get("pluginId"));
+            push_json_detail(&mut details, "Read only", item.get("readOnlyHint"));
+            push_json_detail(&mut details, "Duration (ms)", item.get("durationMs"));
             ActivityUpsert::new(
                 id,
                 presentation.kind,
@@ -905,53 +1191,276 @@ fn codex_item_activity(
                 } else {
                     status
                 },
-                presentation.title,
+                title,
             )
+            .map(|activity| activity.with_details(details))
         }
         "webSearch" => {
-            ActivityUpsert::new(id, ActivitySemanticKind::Search, status, "Search the web")
+            let mut details = Vec::new();
+            push_code_detail(&mut details, "Searched for", item.get("query"));
+            push_json_detail(&mut details, "Action", item.get("action"));
+            ActivityUpsert::new(id, ActivitySemanticKind::Search, status, "Searched the web")
+                .map(|activity| activity.with_details(details))
         }
         "collabAgentToolCall" => {
-            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Delegate to agent")
+            let tool = item
+                .get("tool")
+                .and_then(Value::as_str)
+                .unwrap_or("agent tool");
+            let mut details = Vec::new();
+            push_text_detail(&mut details, "Agent action", item.get("tool"));
+            push_text_detail(&mut details, "Agent path", item.get("agentPath"));
+            push_text_detail(&mut details, "Model", item.get("model"));
+            push_json_detail(
+                &mut details,
+                "Reasoning effort",
+                item.get("reasoningEffort"),
+            );
+            push_text_detail(&mut details, "Prompt", item.get("prompt"));
+            push_json_detail(
+                &mut details,
+                "Receiving agents",
+                item.get("receiverThreadIds"),
+            );
+            push_json_detail(&mut details, "Agent states", item.get("agentsStates"));
+            ActivityUpsert::new(
+                id,
+                ActivitySemanticKind::Other,
+                status,
+                format!("Agent: {tool}"),
+            )
+            .map(|activity| activity.with_details(details))
         }
-        "enteredReviewMode" | "exitedReviewMode" => {
-            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Review changes")
+        "subAgentActivity" => {
+            let mut details = Vec::new();
+            push_text_detail(&mut details, "Agent", item.get("agentPath"));
+            push_text_detail(&mut details, "Thread", item.get("agentThreadId"));
+            push_json_detail(&mut details, "Activity", item.get("kind"));
+            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Subagent activity")
+                .map(|activity| activity.with_details(details))
         }
-        "contextCompaction" => {
-            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Compact context")
+        "enteredReviewMode" => {
+            let mut details = Vec::new();
+            push_text_detail(&mut details, "Review", item.get("review"));
+            ActivityUpsert::new(
+                id,
+                ActivitySemanticKind::Other,
+                status,
+                "Entered review mode",
+            )
+            .map(|activity| activity.with_details(details))
         }
-        "reasoning" => None,
-        _ => None,
+        "exitedReviewMode" => {
+            let mut details = Vec::new();
+            push_text_detail(&mut details, "Review", item.get("review"));
+            ActivityUpsert::new(
+                id,
+                ActivitySemanticKind::Other,
+                status,
+                "Exited review mode",
+            )
+            .map(|activity| activity.with_details(details))
+        }
+        "contextCompaction" => ActivityUpsert::new(
+            id,
+            ActivitySemanticKind::Other,
+            status,
+            "Context automatically compacted",
+        ),
+        "reasoning" => {
+            let summaries = string_array(item.get("summary"));
+            let title = summaries
+                .first()
+                .map(String::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("Thinking")
+                .to_string();
+            let details = summaries
+                .into_iter()
+                .skip(1)
+                .map(|value| ActivityDetail::text("Summary", value))
+                .collect::<Vec<_>>();
+            ActivityUpsert::new(id, ActivitySemanticKind::Think, status, title)
+                .map(|activity| activity.with_details(details))
+        }
+        "hookPrompt" => {
+            let mut details = Vec::new();
+            push_json_detail(&mut details, "Prompt", item.get("fragments"));
+            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Hook prompt")
+                .map(|activity| activity.with_details(details))
+        }
+        "imageView" => {
+            let mut details = Vec::new();
+            push_code_detail(&mut details, "Viewed", item.get("path"));
+            ActivityUpsert::new(id, ActivitySemanticKind::Read, status, "Viewed image")
+                .map(|activity| activity.with_details(details))
+        }
+        "sleep" => {
+            let mut details = Vec::new();
+            push_json_detail(&mut details, "Duration (ms)", item.get("durationMs"));
+            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Waited")
+                .map(|activity| activity.with_details(details))
+        }
+        "imageGeneration" => {
+            let mut details = Vec::new();
+            push_text_detail(&mut details, "Prompt", item.get("revisedPrompt"));
+            push_code_detail(&mut details, "Saved", item.get("savedPath"));
+            push_json_detail(
+                &mut details,
+                "Transparent background",
+                item.get("transparentBackground"),
+            );
+            push_json_detail(&mut details, "Failure", item.get("failure"));
+            ActivityUpsert::new(id, ActivitySemanticKind::Other, status, "Generated image")
+                .map(|activity| activity.with_details(details))
+        }
+        "userMessage" | "agentMessage" | "plan" => None,
+        _ => ActivityUpsert::new(
+            id,
+            ActivitySemanticKind::Other,
+            status,
+            format!("Codex item: {item_type}"),
+        ),
     };
-    Ok(activity)
+    Ok(activity.map(|activity| {
+        verbose_item_payload(item).map_or(activity.clone(), |payload| {
+            activity.with_verbose_payload(payload)
+        })
+    }))
 }
 
-fn command_semantics(item: &Value) -> (ActivitySemanticKind, &'static str) {
+fn command_semantics(item: &Value) -> (ActivitySemanticKind, String) {
     let actions = item.get("commandActions").and_then(Value::as_array);
-    let Some(actions) = actions.filter(|actions| !actions.is_empty() && actions.len() <= 32) else {
-        return (ActivitySemanticKind::Execute, "Run command");
+    let Some(actions) = actions.filter(|actions| !actions.is_empty()) else {
+        return (ActivitySemanticKind::Execute, "Ran command".to_string());
     };
-    let first = actions[0].get("type").and_then(Value::as_str);
-    if !actions
+    let kinds = actions
         .iter()
-        .all(|action| action.get("type").and_then(Value::as_str) == first)
+        .filter_map(|action| action.get("type").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    let kind = if kinds
+        .iter()
+        .all(|kind| *kind == "read" || *kind == "listFiles")
     {
-        return (ActivitySemanticKind::Execute, "Run command");
+        ActivitySemanticKind::Read
+    } else if kinds.iter().all(|kind| *kind == "search") {
+        ActivitySemanticKind::Search
+    } else {
+        ActivitySemanticKind::Execute
+    };
+    let mut phrases = Vec::new();
+    for (action_type, phrase) in [
+        ("read", "Read files"),
+        ("listFiles", "Listed files"),
+        ("search", "Searched files"),
+        ("unknown", "Ran commands"),
+    ] {
+        if kinds.contains(&action_type) {
+            phrases.push(phrase);
+        }
     }
-    match first {
-        Some("read") => (ActivitySemanticKind::Read, "Read files"),
-        Some("search") => (ActivitySemanticKind::Search, "Search files"),
-        Some("listFiles") => (ActivitySemanticKind::Read, "List files"),
-        _ => (ActivitySemanticKind::Execute, "Run command"),
+    if phrases.is_empty() {
+        phrases.push("Ran command");
+    }
+    (kind, phrases.join(", "))
+}
+
+fn command_action_details(item: &Value) -> Vec<ActivityDetail> {
+    let mut details = Vec::new();
+    for action in item
+        .get("commandActions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let command = action
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match action.get("type").and_then(Value::as_str) {
+            Some("read") => {
+                let value = action
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .or_else(|| action.get("path").and_then(Value::as_str))
+                    .unwrap_or(command);
+                details.push(ActivityDetail::code("Read", value));
+            }
+            Some("search") => {
+                let value = action
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(command);
+                details.push(ActivityDetail::code("Searched for", value));
+                push_code_detail(&mut details, "In", action.get("path"));
+            }
+            Some("listFiles") => {
+                let value = action
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(command);
+                details.push(ActivityDetail::code("Listed files in", value));
+            }
+            _ => details.push(ActivityDetail::code("Ran", command)),
+        }
+    }
+    if details.is_empty() {
+        push_code_detail(&mut details, "Ran", item.get("command"));
+    }
+    details
+}
+
+fn push_text_detail(details: &mut Vec<ActivityDetail>, label: &str, value: Option<&Value>) {
+    if let Some(value) = value
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        details.push(ActivityDetail::text(label, value));
     }
 }
 
-fn codex_file_change_activity(
-    item: &Value,
-    fallback_status: ActivityStatus,
-) -> Option<ActivityUpsert> {
-    let id = item.get("id").and_then(Value::as_str)?;
-    codex_file_change_activity_from_id(id, item, fallback_status)
+fn push_code_detail(details: &mut Vec<ActivityDetail>, label: &str, value: Option<&Value>) {
+    if let Some(value) = value
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        details.push(ActivityDetail::code(label, value));
+    }
+}
+
+fn push_json_detail(details: &mut Vec<ActivityDetail>, label: &str, value: Option<&Value>) {
+    if let Some(value) = value.filter(|value| !value.is_null())
+        && let Ok(value) = serde_json::to_string(value)
+    {
+        details.push(ActivityDetail::text(label, value));
+    }
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn verbose_item_payload(item: &Value) -> Option<String> {
+    let mut payload = item.clone();
+    if payload.get("type").and_then(Value::as_str) == Some("imageGeneration")
+        && let Some(result) = payload.get_mut("result")
+        && let Some(encoded) = result.as_str()
+    {
+        *result = Value::String(format!(
+            "[{} base64 characters rendered as the generated image attachment]",
+            encoded.len()
+        ));
+    }
+    serde_json::to_string_pretty(&payload).ok()
 }
 
 fn codex_file_change_activity_from_id(
@@ -959,20 +1468,34 @@ fn codex_file_change_activity_from_id(
     item: &Value,
     fallback_status: ActivityStatus,
 ) -> Option<ActivityUpsert> {
-    let paths = item
+    let changes = item
         .get("changes")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .collect::<Vec<_>>();
+    let paths = changes
+        .iter()
         .filter_map(|change| change.get("path").and_then(Value::as_str))
         .map(PathBuf::from);
+    let details = changes
+        .iter()
+        .filter_map(|change| {
+            let path = change.get("path")?.as_str()?;
+            let kind = change
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("Updated");
+            Some(ActivityDetail::code(kind, path))
+        })
+        .collect::<Vec<_>>();
     let status = item
         .get("status")
         .and_then(Value::as_str)
         .map(codex_item_status)
         .unwrap_or(fallback_status);
     ActivityUpsert::new(id, ActivitySemanticKind::Edit, status, "Updating files")
-        .map(|activity| activity.with_paths(paths))
+        .map(|activity| activity.with_details(details).with_paths(paths))
 }
 
 fn codex_item_status(status: &str) -> ActivityStatus {
@@ -1329,8 +1852,16 @@ mod tests {
 
         assert!(matches!(
             events.as_slice(),
-            [AgentEvent::OutputAttachment { attachment, .. }]
-                if attachment.id == "image-1"
+            [
+                AgentEvent::ActivityUpsert { activity, .. },
+                AgentEvent::OutputAttachment { attachment, .. }
+            ]
+                if activity.title == "Generated image"
+                    && activity.verbose_payload.as_deref().is_some_and(|payload| {
+                        payload.contains("rendered as the generated image attachment")
+                            && !payload.contains(&BASE64_STANDARD.encode(png))
+                    })
+                    && attachment.id == "image-1"
                     && attachment.kind == OutputAttachmentKind::Image
                     && attachment.size_bytes == png.len() as u64
                     && attachment.sha256.len() == 64
@@ -1429,13 +1960,21 @@ mod tests {
     }
 
     #[test]
-    fn command_actions_and_tool_completions_use_safe_semantics() {
+    fn command_actions_and_tool_completions_preserve_normal_details_and_verbose_payloads() {
         let events = normalize_notification(CodexNotification {
             method: "item/started".into(), params: json!({"turnId":"turn-1", "item": {"id":"cmd", "type":"commandExecution", "command":"cat src/lib.rs", "commandActions":[{"type":"read","name":"lib.rs","path":"/private/project/src/lib.rs"}]}}),
         }).unwrap();
-        assert!(
-            matches!(&events[0], AgentEvent::ActivityUpsert { activity, .. } if activity.kind == ActivitySemanticKind::Read && activity.title == "Read files")
-        );
+        assert!(matches!(
+            &events[0],
+            AgentEvent::ActivityUpsert { activity, .. }
+                if activity.kind == ActivitySemanticKind::Read
+                    && activity.title == "Read files"
+                    && activity.details == [ActivityDetail::code("Read", "lib.rs")]
+                    && activity.verbose_payload.as_deref().is_some_and(|payload| {
+                        payload.contains("/private/project/src/lib.rs")
+                            && payload.contains("cat src/lib.rs")
+                    })
+        ));
         for kind in [
             "mcpToolCall",
             "dynamicToolCall",
@@ -1449,11 +1988,17 @@ mod tests {
             assert!(
                 matches!(&events[0], AgentEvent::ActivityUpsert { activity, .. } if activity.status == ActivityStatus::Completed)
             );
-            assert!(!format!("{events:?}").contains("secret-should-not-appear"));
-            assert!(!format!("{events:?}").contains("private output"));
+            assert!(format!("{events:?}").contains("secret-should-not-appear"));
+            assert!(format!("{events:?}").contains("private output"));
         }
-        let events = normalize_notification(CodexNotification { method: "item/started".into(), params: json!({"turnId":"turn-1", "item":{"id":"think", "type":"reasoning", "text":"private reasoning"}}) }).unwrap();
-        assert!(events.is_empty());
+        let events = normalize_notification(CodexNotification { method: "item/completed".into(), params: json!({"turnId":"turn-1", "item":{"id":"think", "type":"reasoning", "summary":["Mapping source references"], "content":["private reasoning"]}}) }).unwrap();
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::ActivityUpsert { activity, .. }]
+                if activity.kind == ActivitySemanticKind::Think
+                    && activity.title == "Mapping source references"
+                    && activity.verbose_payload.as_deref().is_some_and(|payload| payload.contains("private reasoning"))
+        ));
     }
 
     #[test]
@@ -1475,7 +2020,7 @@ mod tests {
             events,
             vec![AgentEvent::PlanUpdated {
                 turn_id: TurnId::new("turn-1").expect("turn id"),
-                explanation: Some("Revised after inspection.".to_string()),
+                explanation: Some("  Revised   after inspection. ".to_string()),
                 steps: vec![
                     PlanStep {
                         text: "Inspect".to_string(),
@@ -1547,7 +2092,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_codex_item_lifecycle_without_raw_reasoning_or_output() {
+    fn normalizes_codex_item_lifecycle_with_lossless_verbose_payload_and_output() {
         let started = normalize_notification(CodexNotification {
             method: "item/started".to_string(),
             params: json!({
@@ -1570,8 +2115,14 @@ mod tests {
                     && activity.kind == ActivitySemanticKind::Execute
                     && activity.status == ActivityStatus::InProgress
                     && activity.detail.as_deref()
-                        == Some("cargo test -p inline-agent-bridge --token [redacted]")
+                        == Some("cargo test -p inline-agent-bridge --token must-not-appear")
+                    && activity.output_snapshot.as_deref()
+                        == Some("private output must not appear")
                     && activity.paths == [PathBuf::from("/workspace")]
+                    && activity.verbose_payload.as_deref().is_some_and(|payload| {
+                        payload.contains("private output must not appear")
+                            && payload.contains("must-not-appear")
+                    })
         ));
 
         let progress = normalize_notification(CodexNotification {
@@ -1583,9 +2134,15 @@ mod tests {
             }),
         })
         .expect("progress");
-        assert!(
-            progress.is_empty(),
-            "raw output does not replace semantic activity metadata"
+        assert_eq!(
+            progress,
+            vec![AgentEvent::ActivityTextDelta {
+                turn_id: TurnId::new("turn-1").expect("turn id"),
+                activity_id: "command-1".to_string(),
+                stream: ActivityTextStream::Output,
+                index: None,
+                delta: "secret output must not appear".to_string(),
+            }]
         );
 
         let completed = normalize_notification(CodexNotification {
@@ -1610,8 +2167,262 @@ mod tests {
                 if activity.status == ActivityStatus::Declined
                     && activity.exit_code == Some(126)
                     && activity.detail.as_deref() == Some("cargo test -p inline-agent-bridge")
-                    && !format!("{activity:?}").contains("secret output")
+                    && activity.output_snapshot.as_deref()
+                        == Some("secret output must not appear")
+                    && activity.verbose_payload.as_deref().is_some_and(|payload| payload.contains("secret output must not appear"))
         ));
+    }
+
+    #[test]
+    fn preserves_reasoning_and_tool_progress_streams_without_rewriting() {
+        for (method, params, expected_stream, expected_index, expected_delta) in [
+            (
+                "item/reasoning/summaryTextDelta",
+                json!({
+                    "turnId": "turn-1",
+                    "itemId": "reasoning-1",
+                    "summaryIndex": 2,
+                    "delta": "Mapping exact provider fields"
+                }),
+                ActivityTextStream::Summary,
+                Some(2),
+                "Mapping exact provider fields",
+            ),
+            (
+                "item/reasoning/textDelta",
+                json!({
+                    "turnId": "turn-1",
+                    "itemId": "reasoning-1",
+                    "contentIndex": 1,
+                    "delta": "unredacted reasoning content"
+                }),
+                ActivityTextStream::Content,
+                Some(1),
+                "unredacted reasoning content",
+            ),
+        ] {
+            let events = normalize_notification(CodexNotification {
+                method: method.to_string(),
+                params,
+            })
+            .expect("normalize reasoning progress");
+            assert!(matches!(
+                events.as_slice(),
+                [AgentEvent::ActivityTextDelta {
+                    activity_id,
+                    stream,
+                    index,
+                    delta,
+                    ..
+                }] if activity_id == "reasoning-1"
+                    && *stream == expected_stream
+                    && *index == expected_index
+                    && delta == expected_delta
+            ));
+        }
+
+        let events = normalize_notification(CodexNotification {
+            method: "item/mcpToolCall/progress".to_string(),
+            params: json!({
+                "turnId": "turn-1",
+                "itemId": "tool-1",
+                "message": "downloaded 3/7 records"
+            }),
+        })
+        .expect("normalize tool progress");
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::ActivityTextDelta {
+                activity_id,
+                stream: ActivityTextStream::Progress,
+                index: None,
+                delta,
+                ..
+            }] if activity_id == "tool-1" && delta == "downloaded 3/7 records"
+        ));
+    }
+
+    #[test]
+    fn preserves_terminal_file_plan_review_and_message_metadata_output() {
+        for (method, params, expected_stream, expected_delta) in [
+            (
+                "item/commandExecution/terminalInteraction",
+                json!({
+                    "turnId": "turn-1",
+                    "itemId": "command-1",
+                    "processId": "42",
+                    "stdin": "terminal input exact"
+                }),
+                ActivityTextStream::Input,
+                "terminal input exact",
+            ),
+            (
+                "item/fileChange/outputDelta",
+                json!({
+                    "turnId": "turn-1",
+                    "itemId": "patch-1",
+                    "delta": "legacy patch output exact"
+                }),
+                ActivityTextStream::Output,
+                "legacy patch output exact",
+            ),
+        ] {
+            let events = normalize_notification(CodexNotification {
+                method: method.to_string(),
+                params,
+            })
+            .expect("normalize auxiliary text stream");
+            assert!(matches!(
+                events.as_slice(),
+                [AgentEvent::ActivityTextDelta { stream, delta, .. }]
+                    if *stream == expected_stream && delta == expected_delta
+            ));
+        }
+
+        let plan = normalize_notification(CodexNotification {
+            method: "item/plan/delta".to_string(),
+            params: json!({
+                "turnId": "turn-1",
+                "itemId": "plan-1",
+                "delta": "streamed plan exact"
+            }),
+        })
+        .expect("plan delta");
+        assert!(matches!(
+            plan.as_slice(),
+            [AgentEvent::AgentMessage {
+                phase: Some(AgentMessagePhase::Commentary),
+                update: AgentMessageUpdate::Delta(text),
+                ..
+            }] if text == "streamed plan exact"
+        ));
+
+        for (method, expected_status, expected_title) in [
+            (
+                "item/autoApprovalReview/started",
+                ActivityStatus::InProgress,
+                "Reviewing approval",
+            ),
+            (
+                "item/autoApprovalReview/completed",
+                ActivityStatus::Completed,
+                "Reviewed approval",
+            ),
+        ] {
+            let review = normalize_notification(CodexNotification {
+                method: method.to_string(),
+                params: json!({
+                    "turnId": "turn-1",
+                    "reviewId": "review-1",
+                    "action": {"command": "printf review-secret"},
+                    "review": {"risk": "low"},
+                    "decisionSource": "policy",
+                    "targetItemId": "command-1",
+                    "startedAtMs": 10,
+                    "completedAtMs": 20
+                }),
+            })
+            .expect("review notification");
+            assert!(matches!(
+                review.as_slice(),
+                [AgentEvent::ActivityUpsert { activity, .. }]
+                    if activity.status == expected_status
+                        && activity.title == expected_title
+                        && activity.verbose_payload.as_deref().is_some_and(|payload| {
+                            payload.contains("review-secret") && payload.contains("decisionSource")
+                        })
+            ));
+        }
+
+        let strict = normalize_notification(CodexNotification {
+            method: "autoApprovalReview/strictReviewRequired".to_string(),
+            params: json!({"turnId": "turn-1", "startedAtMs": 123}),
+        })
+        .expect("strict review");
+        assert!(matches!(
+            strict.as_slice(),
+            [AgentEvent::ActivityUpsert { activity, .. }]
+                if activity.title == "Strict approval review required"
+                    && activity.verbose_payload.as_deref().is_some_and(|payload| payload.contains("123"))
+        ));
+
+        let message = normalize_notification(CodexNotification {
+            method: "item/completed".to_string(),
+            params: json!({
+                "turnId": "turn-1",
+                "item": {
+                    "id": "message-1",
+                    "type": "agentMessage",
+                    "phase": "commentary",
+                    "text": "provider prose",
+                    "delivery": "async",
+                    "memoryCitation": {
+                        "entries": [{"path": "MEMORY.md", "lineStart": 1, "lineEnd": 2, "note": "exact note"}],
+                        "threadIds": ["thread-secret"]
+                    }
+                }
+            }),
+        })
+        .expect("message metadata");
+        assert!(matches!(
+            message.as_slice(),
+            [
+                AgentEvent::AgentMessage {
+                    update: AgentMessageUpdate::Completed(text),
+                    ..
+                },
+                AgentEvent::ActivityUpsert { activity, .. }
+            ] if text == "provider prose"
+                && activity.title == "Agent message metadata"
+                && activity.verbose_payload.as_deref().is_some_and(|payload| {
+                    payload.contains("exact note") && payload.contains("thread-secret")
+                })
+        ));
+
+        let completed_plan = normalize_notification(CodexNotification {
+            method: "item/completed".to_string(),
+            params: json!({
+                "turnId": "turn-1",
+                "item": {"id": "plan-1", "type": "plan", "text": "authoritative plan exact"}
+            }),
+        })
+        .expect("completed plan");
+        assert!(matches!(
+            completed_plan.as_slice(),
+            [AgentEvent::AgentMessage {
+                phase: Some(AgentMessagePhase::Commentary),
+                update: AgentMessageUpdate::Completed(text),
+                ..
+            }] if text == "authoritative plan exact"
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_or_invalid_reasoning_part_indexes() {
+        for params in [
+            json!({
+                "turnId": "turn-1",
+                "itemId": "reasoning-1",
+                "delta": "missing index"
+            }),
+            json!({
+                "turnId": "turn-1",
+                "itemId": "reasoning-1",
+                "summaryIndex": -1,
+                "delta": "negative index"
+            }),
+        ] {
+            assert!(matches!(
+                normalize_notification(CodexNotification {
+                    method: "item/reasoning/summaryTextDelta".to_string(),
+                    params,
+                }),
+                Err(ProtocolError::InvalidField {
+                    field: "summaryIndex",
+                    ..
+                })
+            ));
+        }
     }
 
     #[test]
@@ -1633,17 +2444,15 @@ mod tests {
     }
 
     #[test]
-    fn command_activity_preserves_only_secret_safe_bounded_details() {
-        for (id, command, expected) in [
+    fn command_activity_preserves_exact_command_for_normal_and_verbose_output() {
+        for (id, command) in [
             (
                 "safe-check",
                 "cargo test -p inline-agent-bridge --token must-not-appear",
-                "cargo test -p inline-agent-bridge --token [redacted]",
             ),
             (
                 "unknown-command",
                 "deploy --api-key=must-not-appear https://signed.example/file?token=private",
-                "deploy --api-key=[redacted] https://signed.example/file?[redacted]",
             ),
         ] {
             let events = normalize_notification(CodexNotification {
@@ -1662,7 +2471,9 @@ mod tests {
             assert!(matches!(
                 events.as_slice(),
                 [AgentEvent::ActivityUpsert { activity, .. }]
-                    if activity.detail.as_deref() == Some(expected)
+                    if activity.detail.as_deref() == Some(command)
+                        && activity.details == [ActivityDetail::code("Ran", command)]
+                        && activity.verbose_payload.as_deref().is_some_and(|payload| payload.contains(command))
             ));
         }
     }
@@ -1732,6 +2543,9 @@ mod tests {
             events.as_slice(),
             [AgentEvent::FilesChanged { .. }, AgentEvent::ActivityUpsert { activity, .. }]
                 if activity.status == ActivityStatus::Declined
+                    && activity.verbose_payload.as_deref().is_some_and(|payload| {
+                        payload.contains("/workspace/src/lib.rs") && payload.contains("declined")
+                    })
         ));
     }
 

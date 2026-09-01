@@ -1551,17 +1551,14 @@ fn route_event(
             let backlog = routing.backlog.entry(turn_id.clone()).or_default();
             if let Some(position) = backlog_activity_upsert_position(&backlog.events, &event) {
                 backlog.events[position] = event.clone();
-            } else if backlog.events.len() == MAX_UNCLAIMED_EVENTS_PER_TURN {
-                if let Some(position) = backlog.events.iter().position(is_coalescible_event) {
-                    backlog.events.remove(position);
-                    backlog.events.push(event.clone());
-                } else {
+            } else if !append_to_backlog_delta(&mut backlog.events, &event) {
+                if backlog.events.len() == MAX_UNCLAIMED_EVENTS_PER_TURN {
                     backlog.events.clear();
                     backlog.overflowed = true;
                     backlog.terminal = true;
+                } else if !backlog.overflowed {
+                    backlog.events.push(event.clone());
                 }
-            } else if !backlog.overflowed {
-                backlog.events.push(event.clone());
             }
             if !backlog.overflowed {
                 backlog.terminal |= terminal;
@@ -1596,6 +1593,7 @@ fn agent_event_kind(event: &AgentEvent) -> &'static str {
         AgentEvent::AgentTextCompleted { .. } => "agent_text_completed",
         AgentEvent::Activity { .. } => "activity",
         AgentEvent::ActivityUpsert { .. } => "activity_upsert",
+        AgentEvent::ActivityTextDelta { .. } => "activity_text_delta",
         AgentEvent::PlanUpdated { .. } => "plan_updated",
         AgentEvent::ApprovalRequested(_) => "approval_requested",
         AgentEvent::ApprovalClosed { .. } => "approval_closed",
@@ -1621,25 +1619,74 @@ fn backlog_activity_upsert_position(events: &[AgentEvent], event: &AgentEvent) -
     })
 }
 
-fn is_coalescible_event(event: &AgentEvent) -> bool {
-    matches!(
-        event,
-        AgentEvent::AgentTextDelta { .. }
-            | AgentEvent::AgentMessage { update: inline_agent_bridge::AgentMessageUpdate::Delta(_), .. }
-            | AgentEvent::Activity { .. }
-            | AgentEvent::ActivityUpsert { .. }
-            | AgentEvent::PlanUpdated { .. }
-            | AgentEvent::FilesChanged { .. }
-    )
+fn append_to_backlog_delta(events: &mut [AgentEvent], event: &AgentEvent) -> bool {
+    let Some(pending) = events.last_mut() else {
+        return false;
+    };
+    match (pending, event) {
+        (
+            AgentEvent::AgentMessage {
+                turn_id: pending_turn,
+                item_id: pending_item,
+                phase: pending_phase,
+                update: inline_agent_bridge::AgentMessageUpdate::Delta(pending_text),
+            },
+            AgentEvent::AgentMessage {
+                turn_id,
+                item_id,
+                phase,
+                update: inline_agent_bridge::AgentMessageUpdate::Delta(text),
+            },
+        ) if pending_turn == turn_id && pending_item == item_id && pending_phase == phase => {
+            pending_text.push_str(text);
+            true
+        }
+        (
+            AgentEvent::AgentTextDelta {
+                turn_id: pending_turn,
+                text: pending_text,
+            },
+            AgentEvent::AgentTextDelta { turn_id, text },
+        ) if pending_turn == turn_id => {
+            pending_text.push_str(text);
+            true
+        }
+        (
+            AgentEvent::ActivityTextDelta {
+                turn_id: pending_turn,
+                activity_id: pending_activity,
+                stream: pending_stream,
+                index: pending_index,
+                delta: pending_delta,
+            },
+            AgentEvent::ActivityTextDelta {
+                turn_id,
+                activity_id,
+                stream,
+                index,
+                delta,
+            },
+        ) if pending_turn == turn_id
+            && pending_activity == activity_id
+            && pending_stream == stream
+            && pending_index == index =>
+        {
+            pending_delta.push_str(delta);
+            true
+        }
+        _ => false,
+    }
 }
 
 fn event_turn_id(event: &AgentEvent) -> &TurnId {
     match event {
-        AgentEvent::AgentMessage { turn_id, .. } | AgentEvent::TurnStarted { turn_id }
+        AgentEvent::AgentMessage { turn_id, .. }
+        | AgentEvent::TurnStarted { turn_id }
         | AgentEvent::AgentTextDelta { turn_id, .. }
         | AgentEvent::AgentTextCompleted { turn_id, .. }
         | AgentEvent::Activity { turn_id, .. }
         | AgentEvent::ActivityUpsert { turn_id, .. }
+        | AgentEvent::ActivityTextDelta { turn_id, .. }
         | AgentEvent::PlanUpdated { turn_id, .. }
         | AgentEvent::ApprovalClosed { turn_id, .. }
         | AgentEvent::FilesChanged { turn_id, .. }
@@ -2355,22 +2402,53 @@ mod tests {
     }
 
     #[test]
-    fn identified_deltas_do_not_overflow_the_unclaimed_control_backlog() {
+    fn identified_deltas_coalesce_exactly_in_the_unclaimed_control_backlog() {
         let routing = Arc::new(StdMutex::new(EventRouting::default()));
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
         let questions = Arc::new(StdMutex::new(HashMap::new()));
         let turn_id = TurnId::new("turn-before-registration").unwrap();
         for update in std::iter::once(inline_agent_bridge::AgentMessageUpdate::Started)
-            .chain((0..MAX_UNCLAIMED_EVENTS_PER_TURN * 2).map(|_| inline_agent_bridge::AgentMessageUpdate::Delta("x".into())))
-            .chain(std::iter::once(inline_agent_bridge::AgentMessageUpdate::Completed("authoritative".into()))) {
-            route_event(AgentEvent::AgentMessage { turn_id: turn_id.clone(), item_id: "item".into(), phase: Some(inline_agent_bridge::AgentMessagePhase::Commentary), update }, &routing, &approvals, &questions);
+            .chain(
+                (0..MAX_UNCLAIMED_EVENTS_PER_TURN * 2)
+                    .map(|_| inline_agent_bridge::AgentMessageUpdate::Delta("x".into())),
+            )
+            .chain(std::iter::once(
+                inline_agent_bridge::AgentMessageUpdate::Completed("authoritative".into()),
+            ))
+        {
+            route_event(
+                AgentEvent::AgentMessage {
+                    turn_id: turn_id.clone(),
+                    item_id: "item".into(),
+                    phase: Some(inline_agent_bridge::AgentMessagePhase::Commentary),
+                    update,
+                },
+                &routing,
+                &approvals,
+                &questions,
+            );
         }
         let routing = routing.lock().unwrap();
         let backlog = &routing.backlog[&turn_id];
         assert!(!backlog.overflowed);
-        assert_eq!(backlog.events.len(), MAX_UNCLAIMED_EVENTS_PER_TURN);
-        assert!(matches!(backlog.events.first(), Some(AgentEvent::AgentMessage { update: inline_agent_bridge::AgentMessageUpdate::Started, .. })));
-        assert!(matches!(backlog.events.last(), Some(AgentEvent::AgentMessage { update: inline_agent_bridge::AgentMessageUpdate::Completed(text), .. }) if text == "authoritative"));
+        assert_eq!(backlog.events.len(), 3);
+        assert!(matches!(
+            backlog.events.first(),
+            Some(AgentEvent::AgentMessage {
+                update: inline_agent_bridge::AgentMessageUpdate::Started,
+                ..
+            })
+        ));
+        assert!(matches!(
+            &backlog.events[1],
+            AgentEvent::AgentMessage {
+                update: inline_agent_bridge::AgentMessageUpdate::Delta(text),
+                ..
+            } if text.len() == MAX_UNCLAIMED_EVENTS_PER_TURN * 2
+        ));
+        assert!(
+            matches!(backlog.events.last(), Some(AgentEvent::AgentMessage { update: inline_agent_bridge::AgentMessageUpdate::Completed(text), .. }) if text == "authoritative")
+        );
     }
 
     #[test]

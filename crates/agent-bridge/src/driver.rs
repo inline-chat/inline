@@ -22,8 +22,6 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 const DEFAULT_AGENT_EVENT_CAPACITY: usize = 128;
-const MAX_COALESCED_TEXT_BYTES: usize = 64 * 1024;
-const TRUNCATED_DELTA_MARKER: &str = "\n[additional agent output omitted]";
 const MAX_ACTIVITY_ID_BYTES: usize = 256;
 const MAX_ACTIVITY_TITLE_CHARS: usize = 240;
 const MAX_ACTIVITY_DETAIL_CHARS: usize = 512;
@@ -701,7 +699,8 @@ pub enum ActivitySemanticKind {
     Execute,
     /// Fetching an external resource.
     Fetch,
-    /// A high-level reasoning state without its private reasoning content.
+    /// A reasoning state. Normal presentation uses its summary; verbose
+    /// presentation can include provider-supplied reasoning content.
     Think,
     /// A provider activity that does not have a more precise stable category.
     Other,
@@ -725,11 +724,70 @@ pub enum ActivityStatus {
     Failed,
 }
 
+/// Presentation style for one provider activity detail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityDetailStyle {
+    /// Ordinary human-readable text.
+    Text,
+    /// Source, command, query, path, or other content best rendered as code.
+    Code,
+}
+
+/// One displayable provider detail retained alongside an activity snapshot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityDetail {
+    /// Human-readable prefix such as `Read`, `Searched for`, or `Prompt`.
+    pub label: String,
+    /// Provider-supplied value. This is intentionally not rewritten by the
+    /// provider-neutral contract; the renderer escapes structural markup.
+    pub value: String,
+    /// Whether the value is ordinary text or code-like content.
+    pub style: ActivityDetailStyle,
+}
+
+impl ActivityDetail {
+    /// Creates an ordinary text detail.
+    pub fn text(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            style: ActivityDetailStyle::Text,
+        }
+    }
+
+    /// Creates a code-like detail.
+    pub fn code(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            style: ActivityDetailStyle::Code,
+        }
+    }
+}
+
+/// Incremental provider text stream associated with an activity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityTextStream {
+    /// A concise provider-authored reasoning or activity summary.
+    Summary,
+    /// Full provider-authored reasoning or explanatory content.
+    Content,
+    /// Command or tool output.
+    Output,
+    /// Input sent to an interactive command or tool process.
+    Input,
+    /// Provider progress text that is not part of the final result.
+    Progress,
+}
+
 /// A replace-all snapshot for one provider activity.
 ///
 /// `activity_id` is opaque and stable only within its provider session. The
 /// bridge never treats it as user-facing text. Drivers must keep title/detail
-/// concise and omit raw reasoning, command output, and arbitrary tool payloads.
+/// concise. Provider-specific fields can be retained losslessly in
+/// `verbose_payload`; normal presentation uses the structured details.
 /// `paths` contains only safe, absolute local paths suitable for a future host
 /// local-file affordance.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -744,6 +802,16 @@ pub struct ActivityUpsert {
     pub title: String,
     /// Optional concise, display-safe progress detail.
     pub detail: Option<String>,
+    /// Structured details shown in normal and verbose progress output.
+    #[serde(default)]
+    pub details: Vec<ActivityDetail>,
+    /// Complete provider item payload for explicit lossless verbose output.
+    #[serde(default)]
+    pub verbose_payload: Option<String>,
+    /// Authoritative complete command or tool output when the provider includes
+    /// it in an item snapshot. Incremental output deltas remain append-only.
+    #[serde(default)]
+    pub output_snapshot: Option<String>,
     /// Safe local paths relevant to the activity.
     pub paths: Vec<PathBuf>,
     /// Command exit code when the provider authoritatively reports one.
@@ -773,6 +841,9 @@ impl ActivityUpsert {
             status,
             title,
             detail: None,
+            details: Vec::new(),
+            verbose_payload: None,
+            output_snapshot: None,
             paths: Vec::new(),
             exit_code: None,
         })
@@ -782,6 +853,27 @@ impl ActivityUpsert {
     #[must_use]
     pub fn with_detail(mut self, detail: impl AsRef<str>) -> Self {
         self.detail = bounded_activity_text(detail.as_ref(), MAX_ACTIVITY_DETAIL_CHARS);
+        self
+    }
+
+    /// Replaces the structured normal-presentation details.
+    #[must_use]
+    pub fn with_details(mut self, details: impl IntoIterator<Item = ActivityDetail>) -> Self {
+        self.details = details.into_iter().collect();
+        self
+    }
+
+    /// Retains the complete provider item for lossless verbose presentation.
+    #[must_use]
+    pub fn with_verbose_payload(mut self, payload: impl Into<String>) -> Self {
+        self.verbose_payload = Some(payload.into());
+        self
+    }
+
+    /// Retains an authoritative complete provider output snapshot.
+    #[must_use]
+    pub fn with_output_snapshot(mut self, output: impl Into<String>) -> Self {
+        self.output_snapshot = Some(output.into());
         self
     }
 
@@ -979,6 +1071,20 @@ pub enum AgentEvent {
         /// Complete current activity snapshot.
         activity: ActivityUpsert,
     },
+    /// Incremental text belonging to one provider activity. Unlike an activity
+    /// snapshot, deltas are append-only and retain provider output ordering.
+    ActivityTextDelta {
+        /// Turn producing this activity text.
+        turn_id: TurnId,
+        /// Provider-owned activity identity.
+        activity_id: String,
+        /// Logical provider stream receiving the text.
+        stream: ActivityTextStream,
+        /// Optional provider part index for multipart summary or content.
+        index: Option<usize>,
+        /// Exact provider delta.
+        delta: String,
+    },
     /// Complete current execution-plan snapshot. Each event replaces the
     /// previous plan for this turn rather than appending transcript entries.
     PlanUpdated {
@@ -1136,9 +1242,9 @@ impl Drop for AgentEventSender {
 
 impl AgentEventSender {
     /// Adds a normalized event without blocking the provider reader loop.
-    /// Text deltas, activity, activity upserts, and plan snapshots are coalesced under pressure.
-    /// If control events alone fill the queue, the stream fails closed with an
-    /// explicit overflow error instead of silently losing an approval or terminal event.
+    /// Adjacent text deltas and replacement snapshots are coalesced exactly.
+    /// If distinct events fill the queue, the stream fails closed with an explicit
+    /// overflow error instead of silently losing provider output or a control event.
     pub fn send(&self, event: DriverResult<AgentEvent>) -> bool {
         let wake = {
             let mut queue = self.inner.lock().expect("agent event queue poisoned");
@@ -1160,48 +1266,6 @@ impl AgentEventSender {
 
 fn enqueue_agent_event(queue: &mut AgentEventQueue, event: AgentEvent) {
     let event = match event {
-        AgentEvent::AgentMessage {
-            turn_id,
-            item_id,
-            phase,
-            update,
-        } => {
-            let update = match update {
-                AgentMessageUpdate::Started => AgentMessageUpdate::Started,
-                AgentMessageUpdate::Delta(text) => {
-                    let mut bounded = String::new();
-                    append_bounded_delta(&mut bounded, &text);
-                    AgentMessageUpdate::Delta(bounded)
-                }
-                AgentMessageUpdate::Completed(text) => {
-                    let mut bounded = String::new();
-                    append_bounded_delta(&mut bounded, &text);
-                    AgentMessageUpdate::Completed(bounded)
-                }
-            };
-            AgentEvent::AgentMessage {
-                turn_id,
-                item_id,
-                phase,
-                update,
-            }
-        }
-        AgentEvent::AgentTextDelta { turn_id, text } => {
-            let mut bounded = String::new();
-            append_bounded_delta(&mut bounded, &text);
-            AgentEvent::AgentTextDelta {
-                turn_id,
-                text: bounded,
-            }
-        }
-        AgentEvent::AgentTextCompleted { turn_id, text } => {
-            let mut bounded = String::new();
-            append_bounded_delta(&mut bounded, &text);
-            AgentEvent::AgentTextCompleted {
-                turn_id,
-                text: bounded,
-            }
-        }
         AgentEvent::FilesChanged { turn_id, files } => AgentEvent::FilesChanged {
             turn_id,
             files: files
@@ -1228,7 +1292,7 @@ fn enqueue_agent_event(queue: &mut AgentEventQueue, event: AgentEvent) {
         && pending_item == item_id
         && pending_phase == phase
     {
-        append_bounded_delta(pending_text, text);
+        pending_text.push_str(text);
         return;
     }
     if let AgentEvent::AgentTextDelta { turn_id, text } = &event
@@ -1238,7 +1302,29 @@ fn enqueue_agent_event(queue: &mut AgentEventQueue, event: AgentEvent) {
         })) = queue.entries.back_mut()
         && pending_turn == turn_id
     {
-        append_bounded_delta(pending_text, text);
+        pending_text.push_str(text);
+        return;
+    }
+    if let AgentEvent::ActivityTextDelta {
+        turn_id,
+        activity_id,
+        stream,
+        index,
+        delta,
+    } = &event
+        && let Some(Ok(AgentEvent::ActivityTextDelta {
+            turn_id: pending_turn,
+            activity_id: pending_activity,
+            stream: pending_stream,
+            index: pending_index,
+            delta: pending_delta,
+        })) = queue.entries.back_mut()
+        && pending_turn == turn_id
+        && pending_activity == activity_id
+        && pending_stream == stream
+        && pending_index == index
+    {
+        pending_delta.push_str(delta);
         return;
     }
     if let AgentEvent::Activity { turn_id, summary } = &event
@@ -1319,22 +1405,13 @@ fn enqueue_agent_event(queue: &mut AgentEventQueue, event: AgentEvent) {
         queue.entries.push_back(Ok(event));
         return;
     }
-    if let Some(position) = queue.entries.iter().position(is_coalescible_event) {
-        queue.entries.remove(position);
-        queue.entries.push_back(Ok(event));
-        return;
-    }
     fail_overflow(queue);
 }
 
 fn enqueue_control(queue: &mut AgentEventQueue, event: DriverResult<AgentEvent>) {
     if queue.entries.len() == queue.capacity {
-        if let Some(position) = queue.entries.iter().position(is_coalescible_event) {
-            queue.entries.remove(position);
-        } else {
-            fail_overflow(queue);
-            return;
-        }
+        fail_overflow(queue);
+        return;
     }
     queue.entries.push_back(event);
 }
@@ -1345,21 +1422,6 @@ fn fail_overflow(queue: &mut AgentEventQueue) {
         "agent event control queue overflowed".to_string(),
     )));
     queue.accepting = false;
-}
-
-fn is_coalescible_event(event: &DriverResult<AgentEvent>) -> bool {
-    matches!(
-        event,
-        Ok(AgentEvent::AgentTextDelta { .. }
-            | AgentEvent::AgentMessage {
-                update: AgentMessageUpdate::Delta(_),
-                ..
-            }
-            | AgentEvent::Activity { .. }
-            | AgentEvent::ActivityUpsert { .. }
-            | AgentEvent::PlanUpdated { .. }
-            | AgentEvent::FilesChanged { .. })
-    )
 }
 
 fn bounded_file_change(mut file: FileChange) -> Option<FileChange> {
@@ -1392,23 +1454,6 @@ fn safe_file_change_summary(summary: &str) -> Option<&'static str> {
         "move" | "moved" | "rename" | "renamed" => Some("renamed"),
         _ => None,
     }
-}
-
-fn append_bounded_delta(target: &mut String, delta: &str) {
-    if target.ends_with(TRUNCATED_DELTA_MARKER) {
-        return;
-    }
-    let remaining = MAX_COALESCED_TEXT_BYTES.saturating_sub(target.len());
-    if delta.len() <= remaining {
-        target.push_str(delta);
-        return;
-    }
-    let mut boundary = remaining.min(delta.len());
-    while boundary > 0 && !delta.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    target.push_str(&delta[..boundary]);
-    target.push_str(TRUNCATED_DELTA_MARKER);
 }
 
 /// Running provider turn and its normalized event stream.
@@ -1727,33 +1772,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bounded_channel_caps_a_single_oversized_text_delta() {
+    async fn bounded_channel_preserves_a_single_large_text_delta() {
         let (sender, mut receiver) = AgentEventReceiver::channel(2);
+        let expected = "x".repeat(128 * 1024);
         assert!(sender.send(Ok(AgentEvent::AgentTextDelta {
             turn_id: turn_id(),
-            text: "x".repeat(MAX_COALESCED_TEXT_BYTES * 2),
+            text: expected.clone(),
         })));
 
         let Some(Ok(AgentEvent::AgentTextDelta { text, .. })) = receiver.next().await else {
-            panic!("expected bounded text delta");
+            panic!("expected text delta");
         };
-        assert!(text.len() <= MAX_COALESCED_TEXT_BYTES + TRUNCATED_DELTA_MARKER.len());
-        assert!(text.ends_with(TRUNCATED_DELTA_MARKER));
+        assert_eq!(text, expected);
     }
 
     #[tokio::test]
-    async fn bounded_channel_caps_a_single_oversized_completed_text() {
+    async fn bounded_channel_preserves_a_single_large_completed_text() {
         let (sender, mut receiver) = AgentEventReceiver::channel(2);
+        let expected = "x".repeat(128 * 1024);
         assert!(sender.send(Ok(AgentEvent::AgentTextCompleted {
             turn_id: turn_id(),
-            text: "x".repeat(MAX_COALESCED_TEXT_BYTES * 2),
+            text: expected.clone(),
         })));
 
         let Some(Ok(AgentEvent::AgentTextCompleted { text, .. })) = receiver.next().await else {
-            panic!("expected bounded completed text");
+            panic!("expected completed text");
         };
-        assert!(text.len() <= MAX_COALESCED_TEXT_BYTES + TRUNCATED_DELTA_MARKER.len());
-        assert!(text.ends_with(TRUNCATED_DELTA_MARKER));
+        assert_eq!(text, expected);
     }
 
     #[tokio::test]
@@ -1973,7 +2018,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn control_events_evict_coalescible_output_under_pressure() {
+    async fn output_pressure_fails_explicitly_instead_of_dropping_text() {
         let (sender, mut receiver) = AgentEventReceiver::channel(2);
         sender.send(Ok(AgentEvent::AgentTextDelta {
             turn_id: turn_id(),
@@ -1996,12 +2041,11 @@ mod tests {
 
         assert!(matches!(
             receiver.next().await,
-            Some(Ok(AgentEvent::ApprovalRequested(_)))
+            Some(Err(DriverError::Protocol(message)))
+                if message == "agent event control queue overflowed"
         ));
-        assert!(matches!(
-            receiver.next().await,
-            Some(Ok(AgentEvent::TurnCompleted { .. }))
-        ));
+        assert_eq!(receiver.next().await, None);
+        assert!(!sender.send(Ok(AgentEvent::TurnStarted { turn_id: turn_id() })));
     }
 
     #[tokio::test]
