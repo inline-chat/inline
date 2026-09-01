@@ -10,7 +10,7 @@ final class RealtimeStateDisplayTests {
     let policy = RealtimeConnectionDisplayPolicy.default
 
     #if os(macOS)
-    #expect(policy.showDelaySeconds(for: .coldStart) == 1)
+    #expect(policy.showDelaySeconds(for: .coldStart) == 0)
     #expect(policy.showDelaySeconds(for: .reconnect) == 1)
     #else
     #expect(policy.showDelaySeconds(for: .coldStart) == 0)

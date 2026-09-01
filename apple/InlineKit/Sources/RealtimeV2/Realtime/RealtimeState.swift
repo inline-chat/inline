@@ -28,7 +28,7 @@ public struct RealtimeConnectionDisplayPolicy: Sendable {
   )
 
   public static let macOS = RealtimeConnectionDisplayPolicy(
-    coldStartDelaySeconds: 1,
+    coldStartDelaySeconds: 0,
     reconnectDelaySeconds: 1,
     hideDelaySeconds: 0
   )

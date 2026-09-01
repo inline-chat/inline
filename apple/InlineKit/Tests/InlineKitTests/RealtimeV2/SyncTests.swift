@@ -16,16 +16,16 @@ final class SyncTests {
 
   @Test("retry cadence jitters fast attempts and remains bounded indefinitely")
   func testRetryCadenceBounds() {
-    for attempt in 0 ..< 6 {
-      let base = Int64(1 << attempt) * 1_000
+    for (attempt, base) in [1_000, 2_000, 4_000, 5_000, 5_000, 5_000].enumerated() {
+      let base = Int64(base)
       #expect(SyncRetryPolicy.delay(attempt: attempt, jitterUnit: 0) == .milliseconds(base * 8 / 10))
       #expect(SyncRetryPolicy.delay(attempt: attempt, jitterUnit: 0.5) == .milliseconds(base))
       #expect(SyncRetryPolicy.delay(attempt: attempt, jitterUnit: 1) == .milliseconds(base * 12 / 10))
     }
-    for attempt in [6, 7, 100, Int.max] {
-      #expect(SyncRetryPolicy.delay(attempt: attempt, jitterUnit: 0) == .seconds(60))
-      #expect(SyncRetryPolicy.delay(attempt: attempt, jitterUnit: 0.5) == .seconds(70))
-      #expect(SyncRetryPolicy.delay(attempt: attempt, jitterUnit: 1) == .seconds(80))
+    for attempt in [0, 3, 100, Int.max] {
+      #expect(SyncRetryPolicy.delay(attempt: attempt, rateLimited: true, jitterUnit: 0) == .seconds(60))
+      #expect(SyncRetryPolicy.delay(attempt: attempt, rateLimited: true, jitterUnit: 0.5) == .seconds(70))
+      #expect(SyncRetryPolicy.delay(attempt: attempt, rateLimited: true, jitterUnit: 1) == .seconds(80))
     }
   }
 
@@ -1754,6 +1754,59 @@ final class SyncTests {
     #expect(await apply.appliedSidecars.isEmpty)
     #expect(await storage.getBucketState(for: .user).seq == 42)
     #expect(await storage.getBucketState(for: .user).date == 100)
+    await actor.invalidate()
+    await actor.waitUntilIdle()
+    await sync.prepareForTermination()
+  }
+
+  @Test("repeated malformed pages retain the cursor without inferring snapshot repair")
+  func testRepeatedMalformedPagesDoNotInferRepair() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let peer = makeChatPeer(chatId: 7)
+    let key = BucketKey.chat(peer: peer)
+    await storage.setBucketState(for: key, state: BucketState(date: 100, seq: 5))
+    let malformed = makeGetUpdatesResult(
+      seq: 6,
+      date: 110,
+      updates: [],
+      final: true,
+      resultType: .slice
+    )
+    let client = FakeProtocolClient(responses: [
+      malformed,
+      malformed,
+      malformed,
+    ])
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: .default)
+    let actor = BucketActor(
+      key: key,
+      seq: 5,
+      date: 100,
+      client: client,
+      sync: sync,
+      fetchLimiter: FetchLimiter(limit: 1),
+      accountMutationToken: nil
+    )
+    await actor.setFetchTarget(upToSeq: 6)
+
+    for attempt in 0 ..< 3 {
+      await actor.fetchNewUpdates()
+      if attempt < 2 {
+        #expect(await actor.wakeRetryIfNeeded())
+      }
+    }
+
+    #expect(await client.getCalledMethods() == [
+      InlineProtocol.Method.getUpdates,
+      .getUpdates,
+      .getUpdates,
+    ])
+    #expect(await apply.repairedChats.isEmpty)
+    #expect(await apply.bucketCommits.isEmpty)
+    let retained = await storage.getBucketState(for: key)
+    #expect(retained.date == 100)
+    #expect(retained.seq == 5)
     await actor.invalidate()
     await actor.waitUntilIdle()
     await sync.prepareForTermination()

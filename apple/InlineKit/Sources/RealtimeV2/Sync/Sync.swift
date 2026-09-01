@@ -25,17 +25,23 @@ public struct SyncConfig: Sendable {
 /// One retry cadence for discovery and bucket owners. Retry count is unbounded,
 /// but its rate is bounded; progress returns the owner to the fast tier.
 enum SyncRetryPolicy {
-  static let fastRetryCount = 6
-
-  static func delay(attempt: Int, jitterUnit: Double = Double.random(in: 0 ... 1)) -> Duration {
+  static func delay(
+    attempt: Int,
+    rateLimited: Bool = false,
+    jitterUnit: Double = Double.random(in: 0 ... 1)
+  ) -> Duration {
     let jitter = min(1, max(0, jitterUnit))
-    let milliseconds: Double
-    if attempt < fastRetryCount {
-      let seconds = Double(1 << max(0, attempt))
-      milliseconds = seconds * 1_000 * (0.8 + 0.4 * jitter)
-    } else {
-      milliseconds = 60_000 + 20_000 * jitter
+    if rateLimited {
+      return .milliseconds(Int64((60_000 + 20_000 * jitter).rounded()))
     }
+
+    let seconds: Double = switch attempt {
+      case ...0: 1
+      case 1: 2
+      case 2: 4
+      default: 5
+    }
+    let milliseconds = seconds * 1_000 * (0.8 + 0.4 * jitter)
     return .milliseconds(Int64(milliseconds.rounded()))
   }
 }
@@ -1400,7 +1406,7 @@ actor Sync {
       "sync state check started",
       category: "sync.lifecycle",
       data: [
-        "retry_policy": "1,2,4,8,16,32,60-80+jitter",
+        "retry_policy": "1,2,4,5,5+jitter; explicit-rate-limit=60-80",
       ]
     )
 
@@ -1629,10 +1635,10 @@ actor Sync {
           "attempt=\(attempt) success=false duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
         )
         log.error("failed to get updates state (attempt \(attempt)): \(error)")
-        if isRateLimitError(error) {
-          retryAttempt = max(retryAttempt, SyncRetryPolicy.fastRetryCount)
-        }
-        let delay = getUpdatesStateRetryDelay(attempt: retryAttempt)
+        let delay = getUpdatesStateRetryDelay(
+          attempt: retryAttempt,
+          rateLimited: isRateLimitError(error)
+        )
         retryAttempt += 1
         log.warning("scheduling getUpdatesState retry in \(delay)")
         await waitForStateRetry(delay)
@@ -1641,8 +1647,8 @@ actor Sync {
     }
   }
 
-  private func getUpdatesStateRetryDelay(attempt: Int) -> Duration {
-    SyncRetryPolicy.delay(attempt: attempt)
+  private func getUpdatesStateRetryDelay(attempt: Int, rateLimited: Bool) -> Duration {
+    SyncRetryPolicy.delay(attempt: attempt, rateLimited: rateLimited)
   }
 
   private func waitForStateRetry(_ delay: Duration) async {
@@ -2390,10 +2396,9 @@ actor BucketActor {
 
   private var retryTask: Task<Void, Never>?
   private var retryAttempt: Int = 0
+  private var retryUsesRateLimitDelay = false
   private var isInvalidated: Bool = false
   private var holdsActivityLease = false
-  private var invalidEnvelopeFingerprintValue: String?
-  private var invalidEnvelopeRepeatCount = 0
   private var activeOperations = 0
   private var idleWaiters: [CheckedContinuation<Void, Never>] = []
   private struct PendingUserRepair {
@@ -2985,6 +2990,7 @@ actor BucketActor {
   /// The page start state is part of the apply-owner CAS, so a same-bucket live
   /// update cannot race a page between its read and cursor commit.
   private func fetchNewUpdatesOnce() async -> Bool {
+    retryUsesRateLimitDelay = false
     guard let client else {
       log.error("client is nil, cannot fetch updates")
       return false
@@ -3176,27 +3182,13 @@ actor BucketActor {
             startSeq: currentSeq,
             targetSeq: hardEndSeq
           )
-          if await shouldRepairInvalidEnvelope(
-            fingerprint: fingerprint,
-            targetSeq: payload.seq,
-            targetDate: payload.date
-          ) {
-            if await repairAuthoritativeSnapshotIfNeeded(
-              targetSeq: payload.seq,
-              targetDate: payload.date,
-              reason: "invalid_page_envelope",
-              latestDemand: passLatestGeneration
-            ) {
-              resultLabel = "repaired_invalid_page_envelope"
-              return true
-            }
-            resultLabel = "invalid_page_repair_failed"
-          } else {
-            resultLabel = "invalid_page_envelope"
-          }
+          // A malformed lossless page is a server/protocol defect, not evidence
+          // that journal history expired. Keep the cursor and exact target;
+          // only an explicit server classification may enter snapshot repair.
+          log.error("rejecting malformed getUpdates page for bucket \(key): \(fingerprint)")
+          resultLabel = "invalid_page_envelope"
           return false
         }
-        resetInvalidEnvelopeFingerprint()
 
         // A declared-final page below a trusted target contradicts the
         // response contract. Reject it before sidecars, rows, or the cursor
@@ -3351,9 +3343,8 @@ actor BucketActor {
         return true
       }
       if isRateLimitError(error) {
-        // A server rate-limit is an explicit signal that the fast retry window
-        // is unsafe; enter the slow tier on the next owner attempt.
-        retryAttempt = max(retryAttempt, SyncRetryPolicy.fastRetryCount)
+        // A server rate-limit is the sole signal for the slow retry lane.
+        retryUsesRateLimitDelay = true
       }
       await sync.recordBucketFetchFailure()
       resultLabel = "error"
@@ -3434,6 +3425,7 @@ actor BucketActor {
 
   private func resetRetryState() {
     retryAttempt = 0
+    retryUsesRateLimitDelay = false
     retryTask?.cancel()
     retryTask = nil
   }
@@ -3443,7 +3435,10 @@ actor BucketActor {
     guard retryTask == nil, !isInvalidated else { return }
 
     needsFetch = true
-    let delay = SyncRetryPolicy.delay(attempt: retryAttempt)
+    let delay = SyncRetryPolicy.delay(
+      attempt: retryAttempt,
+      rateLimited: retryUsesRateLimitDelay
+    )
     retryAttempt += 1
 
     log.warning("scheduling retry for bucket \(key) in \(delay)")
@@ -3725,29 +3720,6 @@ actor BucketActor {
       "skipped=\(payload.skippedSequences.count)",
       "accounted=\(accountedCount)",
     ].joined(separator: "|")
-  }
-
-  private func shouldRepairInvalidEnvelope(
-    fingerprint: String,
-    targetSeq: Int64,
-    targetDate: Int64
-  ) async -> Bool {
-    if invalidEnvelopeFingerprintValue == fingerprint {
-      invalidEnvelopeRepeatCount += 1
-    } else {
-      invalidEnvelopeFingerprintValue = fingerprint
-      invalidEnvelopeRepeatCount = 1
-    }
-    guard invalidEnvelopeRepeatCount >= 3 else { return false }
-    // One scoped repair/cycle per identical envelope. A failed repair leaves the
-    // cursor untouched and starts a fresh three-observation cycle on retry.
-    resetInvalidEnvelopeFingerprint()
-    return targetSeq > seq && targetDate > 0
-  }
-
-  private func resetInvalidEnvelopeFingerprint() {
-    invalidEnvelopeFingerprintValue = nil
-    invalidEnvelopeRepeatCount = 0
   }
 
   private func validatePageEnvelope(
