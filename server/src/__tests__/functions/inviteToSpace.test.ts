@@ -99,6 +99,13 @@ describe("inviteToSpace", () => {
       })
       .returning()
     if (!childChat) throw new Error("Expected descendant chat")
+    await db.insert(schema.acknowledgements).values({
+      chatId: primaryChat.id,
+      userId: owner.id,
+      maxId: 42,
+      revision: 7,
+      cleared: false,
+    })
 
     await inviteToSpace(
       {
@@ -137,6 +144,16 @@ describe("inviteToSpace", () => {
         .filter((update) => update.oneofKind === "userAddedToChat")
         .map((update) => update.userAddedToChat.chatId),
     ).not.toContain(BigInt(childChat.id))
+    const chatOpen = decodedUpdates.find((update) => update.oneofKind === "userChatOpen")
+    expect(
+      chatOpen?.oneofKind === "userChatOpen"
+        ? chatOpen.userChatOpen.chat?.acknowledgements?.cursors.map((cursor) => ({
+            userId: cursor.userId,
+            maxId: cursor.maxId,
+            revision: cursor.revision,
+          }))
+        : undefined,
+    ).toEqual([{ userId: BigInt(owner.id), maxId: 42n, revision: 7n }])
   })
 
   test("commits membership and contiguous space/user updates as one durable invite", async () => {
@@ -188,7 +205,7 @@ describe("inviteToSpace", () => {
     expect(persistedUser?.updateSeq).toBe(userUpdates.at(-1)?.seq)
   })
 
-  test("hydrates primary chat snapshots without requiring a second pool connection", async () => {
+  test("hydrates acknowledgement snapshots without requiring a second pool connection", async () => {
     const owner = await testUtils.createUser("pool-bound-inviter@ex.com")
     const created = await createSpace(
       { name: "Pool Bound Invite Space" },
@@ -200,6 +217,13 @@ describe("inviteToSpace", () => {
       .where(and(eq(schema.chats.spaceId, created.space.id), eq(schema.chats.threadNumber, 1)))
       .limit(1)
     if (!primaryChat) throw new Error("Expected primary chat")
+    await db.insert(schema.acknowledgements).values({
+      chatId: primaryChat.id,
+      userId: owner.id,
+      maxId: 11,
+      revision: 3,
+      cleared: false,
+    })
     const invitees = await db
       .insert(schema.users)
       .values(Array.from({ length: 12 }, () => ({ pendingSetup: true })))
@@ -232,6 +256,11 @@ describe("inviteToSpace", () => {
     expect(
       chatOpen?.oneofKind === "userChatOpen" ? chatOpen.userChatOpen.chat?.id : undefined,
     ).toBe(BigInt(primaryChat.id))
+    expect(
+      chatOpen?.oneofKind === "userChatOpen"
+        ? chatOpen.userChatOpen.chat?.acknowledgements?.cursors.map((cursor) => cursor.maxId)
+        : undefined,
+    ).toEqual([11n])
   })
 
   test("rejects a soft-deleted space under the mutation lock without durable invite rows", async () => {

@@ -328,6 +328,9 @@ message Chat {
 
   // Current sequence of this chat's update bucket.
   optional int32 seq = 16;
+
+  // Explicit per-person acknowledged-through cursors, independent of read state.
+  optional ChatAcknowledgements acknowledgements = 17;
 }
 
 message MessageReplies {
@@ -1505,6 +1508,7 @@ enum Method {
   GET_SPACE_INVITE_LINK = 134;
   SET_SPACE_INVITE_LINK_ENABLED = 135;
   GET_FILE_PART = 136;
+  ACKNOWLEDGE_MESSAGES = 137;
 }
 
 message RpcCall {
@@ -1646,6 +1650,7 @@ message RpcCall {
     GetSpaceInviteLinkInput getSpaceInviteLink = 135;
     SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136;
     GetFilePartInput getFilePart = 137;
+    AcknowledgeMessagesInput acknowledgeMessages = 138;
   }
 }
 
@@ -1789,6 +1794,7 @@ message RpcResult {
     GetSpaceInviteLinkResult getSpaceInviteLink = 135;
     SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
     GetFilePartResult getFilePart = 137;
+    AcknowledgeMessagesResult acknowledgeMessages = 138;
   }
 }
 
@@ -3063,7 +3069,10 @@ message GetChatHistoryInput {
   optional bool include_anchor = 10;
 }
 
-message GetChatHistoryResult { repeated Message messages = 1; }
+message GetChatHistoryResult {
+  repeated Message messages = 1;
+  optional ChatAcknowledgements acknowledgements = 2;
+}
 
 message GetChatTranscriptInput {
   enum Mode {
@@ -3511,6 +3520,7 @@ message Update {
     UpdateDialogFolder dialog_folder = 46;
     UpdateUserAddedToChat user_added_to_chat = 47;
     UpdateUserRemovedFromChat user_removed_from_chat = 48;
+    ChatAcknowledgement acknowledgement = 49;
   }
 }
 
@@ -4506,3 +4516,31 @@ message GetFilePartResult {
   // SHA-256 of data (including the empty range at EOF).
   bytes sha256 = 4;
 }
+
+// One explicit cursor state per chat and actor. max_id remains a monotonic
+// high-water mark; cleared hides its marker without rewinding that boundary.
+message ChatAcknowledgement {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+  int64 max_id = 3;
+  // Optional minimal actor sidecar for first-frame avatar hydration.
+  optional User user = 4;
+  // Viewer-specific routing metadata; not another durable cursor field.
+  optional Peer peer_id = 5;
+  // Chat update sequence that orders snapshots, live updates and replay.
+  int64 revision = 6;
+  // A durable tombstone. The high-water max_id remains available for fencing.
+  bool cleared = 7;
+}
+
+message AcknowledgeMessagesInput {
+  InputPeer peer_id = 1;
+  // Set target, or expected current target when clear is true.
+  int64 max_id = 2;
+  bool clear = 3;
+  // State observed by the actor; fences delayed clear and same-target replay.
+  int64 expected_revision = 4;
+}
+message AcknowledgeMessagesResult { repeated Update updates = 1; }
+
+message ChatAcknowledgements { repeated ChatAcknowledgement cursors = 1; }

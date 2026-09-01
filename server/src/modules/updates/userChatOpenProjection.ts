@@ -1,3 +1,4 @@
+import { getChatAcknowledgements } from "@in/server/db/models/acknowledgements"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import type { DbChat, DbDialog } from "@in/server/db/schema"
@@ -41,11 +42,15 @@ export async function persistPrimarySpaceChatOpenProjectionInTransaction(
   }
 
   // These reads intentionally use the caller's transaction. The encoded
-  // snapshot must reflect the membership, dialog, permissions, and unread
-  // state that commit with its user-bucket sequence.
+  // snapshot must reflect the membership, dialog, permissions, unread state,
+  // and acknowledgement rows that commit with its user-bucket sequence.
   const permissions = await resolveChatPermissions(opened.chat, input.userId, tx)
   const unreadCount = await DialogsModel.getUnreadCount(opened.dialog.chatId, input.userId, tx)
-  const chat = Encoders.chat(opened.chat, { encodingForUserId: input.userId, permissions })
+  const acknowledgementCursors = (await getChatAcknowledgements([opened.chat.id], { tx })).get(opened.chat.id) ?? []
+  const chat = {
+    ...Encoders.chat(opened.chat, { encodingForUserId: input.userId, permissions }),
+    acknowledgements: { cursors: acknowledgementCursors },
+  }
   const dialog = Encoders.dialog(opened.dialog, { unreadCount })
   const update = await UserBucketUpdates.enqueue(
     {

@@ -1,0 +1,1 @@
+CREATE INDEX "chat_acknowledgements_user_id_idx" ON "chat_acknowledgements" USING btree ("user_id");

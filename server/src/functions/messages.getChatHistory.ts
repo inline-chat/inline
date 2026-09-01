@@ -1,4 +1,5 @@
-import type { InputPeer, Message } from "@inline-chat/protocol/core"
+import { getChatAcknowledgements } from "@in/server/db/models/acknowledgements"
+import type { InputPeer, Message, ChatAcknowledgements } from "@inline-chat/protocol/core"
 import { ModelError } from "@in/server/db/models/_errors"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -26,6 +27,7 @@ type Input = {
 
 type Output = {
   messages: Message[]
+  acknowledgements: ChatAcknowledgements
 }
 
 const log = new Log("functions.getChatHistory")
@@ -158,5 +160,6 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
 
   return {
     messages: encodedMessages,
+    acknowledgements: { cursors: (await getChatAcknowledgements([chat.id])).get(chat.id) ?? [] },
   }
 }

@@ -84,6 +84,7 @@ describe("createSpace", () => {
     const chatOpen = payloads[2]
     if (chatOpen?.oneofKind !== "userChatOpen") throw new Error("Expected userChatOpen")
     expect(chatOpen.userChatOpen.chat?.permissions?.canUpdateInfo).toBe(true)
+    expect(chatOpen.userChatOpen.chat?.acknowledgements?.cursors).toEqual([])
     expect(chatOpen.userChatOpen.dialog?.unreadCount).toBe(0)
 
     expect(

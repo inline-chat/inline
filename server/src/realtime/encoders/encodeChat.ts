@@ -1,3 +1,4 @@
+import { getChatAcknowledgements } from "@in/server/db/models/acknowledgements"
 import { Chat, Peer, type ChatPermissions } from "@inline-chat/protocol/core"
 import type { DbChat } from "@in/server/db/schema"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -62,7 +63,8 @@ export function encodeChat(chat: DbChat, { encodingForUserId, permissions }: Enc
 
 export async function encodeChatForUser(chat: DbChat, options: { encodingForUserId: number }): Promise<Chat> {
   const permissions = await resolveChatPermissions(chat, options.encodingForUserId)
-  return encodeChat(chat, { ...options, permissions })
+  const acknowledgements = await getChatAcknowledgements([chat.id])
+  return { ...encodeChat(chat, { ...options, permissions }), acknowledgements: { cursors: acknowledgements.get(chat.id) ?? [] } }
 }
 
 export async function encodeChatsForUser(
@@ -70,23 +72,25 @@ export async function encodeChatsForUser(
   options: { encodingForUserId: number },
 ): Promise<Chat[]> {
   const permissionsByChatId = await resolveChatPermissionsBatch(chats, options.encodingForUserId)
+  const acknowledgements = await getChatAcknowledgements(chats.map(chat => chat.id))
   return chats.map((chat) =>
-    encodeChat(chat, {
+    ({ ...encodeChat(chat, {
       ...options,
       permissions: permissionsByChatId.get(chat.id) ?? { canUpdateInfo: false },
-    }),
+    }), acknowledgements: { cursors: acknowledgements.get(chat.id) ?? [] } }),
   )
 }
 
 export async function encodeChatForUsers(chat: DbChat, userIds: number[]): Promise<Map<number, Chat>> {
   const permissionsByUserId = await resolveChatPermissionsForUsers([chat], userIds)
+  const acknowledgements = { cursors: (await getChatAcknowledgements([chat.id])).get(chat.id) ?? [] }
   return new Map(
     userIds.map((userId) => [
       userId,
-      encodeChat(chat, {
+      { ...encodeChat(chat, {
         encodingForUserId: userId,
         permissions: permissionsByUserId.get(userId)?.get(chat.id) ?? { canUpdateInfo: false },
-      }),
+      }), acknowledgements },
     ]),
   )
 }

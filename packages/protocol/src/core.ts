@@ -904,6 +904,12 @@ export interface Chat {
      * @generated from protobuf field: optional int32 seq = 16;
      */
     seq?: number;
+    /**
+     * Explicit per-person acknowledged-through cursors, independent of read state.
+     *
+     * @generated from protobuf field: optional ChatAcknowledgements acknowledgements = 17;
+     */
+    acknowledgements?: ChatAcknowledgements;
 }
 /**
  * @generated from protobuf message MessageReplies
@@ -4269,6 +4275,12 @@ export interface RpcCall {
          */
         getFilePart: GetFilePartInput;
     } | {
+        oneofKind: "acknowledgeMessages";
+        /**
+         * @generated from protobuf field: AcknowledgeMessagesInput acknowledgeMessages = 138;
+         */
+        acknowledgeMessages: AcknowledgeMessagesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -5093,6 +5105,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetFilePartResult getFilePart = 137;
          */
         getFilePart: GetFilePartResult;
+    } | {
+        oneofKind: "acknowledgeMessages";
+        /**
+         * @generated from protobuf field: AcknowledgeMessagesResult acknowledgeMessages = 138;
+         */
+        acknowledgeMessages: AcknowledgeMessagesResult;
     } | {
         oneofKind: undefined;
     };
@@ -8390,6 +8408,10 @@ export interface GetChatHistoryResult {
      * @generated from protobuf field: repeated Message messages = 1;
      */
     messages: Message[];
+    /**
+     * @generated from protobuf field: optional ChatAcknowledgements acknowledgements = 2;
+     */
+    acknowledgements?: ChatAcknowledgements;
 }
 /**
  * @generated from protobuf message GetChatTranscriptInput
@@ -9634,6 +9656,12 @@ export interface Update {
          * @generated from protobuf field: UpdateUserRemovedFromChat user_removed_from_chat = 48;
          */
         userRemovedFromChat: UpdateUserRemovedFromChat;
+    } | {
+        oneofKind: "acknowledgement";
+        /**
+         * @generated from protobuf field: ChatAcknowledgement acknowledgement = 49;
+         */
+        acknowledgement: ChatAcknowledgement;
     } | {
         oneofKind: undefined;
     };
@@ -12410,6 +12438,93 @@ export interface GetFilePartResult {
     sha256: Uint8Array;
 }
 /**
+ * One explicit cursor state per chat and actor. max_id remains a monotonic
+ * high-water mark; cleared hides its marker without rewinding that boundary.
+ *
+ * @generated from protobuf message ChatAcknowledgement
+ */
+export interface ChatAcknowledgement {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+    /**
+     * @generated from protobuf field: int64 max_id = 3;
+     */
+    maxId: bigint;
+    /**
+     * Optional minimal actor sidecar for first-frame avatar hydration.
+     *
+     * @generated from protobuf field: optional User user = 4;
+     */
+    user?: User;
+    /**
+     * Viewer-specific routing metadata; not another durable cursor field.
+     *
+     * @generated from protobuf field: optional Peer peer_id = 5;
+     */
+    peerId?: Peer;
+    /**
+     * Chat update sequence that orders snapshots, live updates and replay.
+     *
+     * @generated from protobuf field: int64 revision = 6;
+     */
+    revision: bigint;
+    /**
+     * A durable tombstone. The high-water max_id remains available for fencing.
+     *
+     * @generated from protobuf field: bool cleared = 7;
+     */
+    cleared: boolean;
+}
+/**
+ * @generated from protobuf message AcknowledgeMessagesInput
+ */
+export interface AcknowledgeMessagesInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Set target, or expected current target when clear is true.
+     *
+     * @generated from protobuf field: int64 max_id = 2;
+     */
+    maxId: bigint;
+    /**
+     * @generated from protobuf field: bool clear = 3;
+     */
+    clear: boolean;
+    /**
+     * State observed by the actor; fences delayed clear and same-target replay.
+     *
+     * @generated from protobuf field: int64 expected_revision = 4;
+     */
+    expectedRevision: bigint;
+}
+/**
+ * @generated from protobuf message AcknowledgeMessagesResult
+ */
+export interface AcknowledgeMessagesResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message ChatAcknowledgements
+ */
+export interface ChatAcknowledgements {
+    /**
+     * @generated from protobuf field: repeated ChatAcknowledgement cursors = 1;
+     */
+    cursors: ChatAcknowledgement[];
+}
+/**
  * @generated from protobuf enum DialogFollowMode
  */
 export enum DialogFollowMode {
@@ -13142,7 +13257,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_FILE_PART = 136;
      */
-    GET_FILE_PART = 136
+    GET_FILE_PART = 136,
+    /**
+     * @generated from protobuf enum value: ACKNOWLEDGE_MESSAGES = 137;
+     */
+    ACKNOWLEDGE_MESSAGES = 137
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -15492,7 +15611,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions },
-            { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 17, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -15556,6 +15676,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* optional int32 seq */ 16:
                     message.seq = reader.int32();
                     break;
+                case /* optional ChatAcknowledgements acknowledgements */ 17:
+                    message.acknowledgements = ChatAcknowledgements.internalBinaryRead(reader, reader.uint32(), options, message.acknowledgements);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15616,6 +15739,9 @@ class Chat$Type extends MessageType<Chat> {
         /* optional int32 seq = 16; */
         if (message.seq !== undefined)
             writer.tag(16, WireType.Varint).int32(message.seq);
+        /* optional ChatAcknowledgements acknowledgements = 17; */
+        if (message.acknowledgements)
+            ChatAcknowledgements.internalBinaryWrite(message.acknowledgements, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21809,7 +21935,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "input", T: () => JoinSpaceByInviteTokenInput },
             { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "input", T: () => GetSpaceInviteLinkInput },
             { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "input", T: () => SetSpaceInviteLinkEnabledInput },
-            { no: 137, name: "getFilePart", kind: "message", oneof: "input", T: () => GetFilePartInput }
+            { no: 137, name: "getFilePart", kind: "message", oneof: "input", T: () => GetFilePartInput },
+            { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "input", T: () => AcknowledgeMessagesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -22638,6 +22765,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getFilePart: GetFilePartInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getFilePart)
                     };
                     break;
+                case /* AcknowledgeMessagesInput acknowledgeMessages */ 138:
+                    message.input = {
+                        oneofKind: "acknowledgeMessages",
+                        acknowledgeMessages: AcknowledgeMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).acknowledgeMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23058,6 +23191,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetFilePartInput getFilePart = 137; */
         if (message.input.oneofKind === "getFilePart")
             GetFilePartInput.internalBinaryWrite(message.input.getFilePart, writer.tag(137, WireType.LengthDelimited).fork(), options).join();
+        /* AcknowledgeMessagesInput acknowledgeMessages = 138; */
+        if (message.input.oneofKind === "acknowledgeMessages")
+            AcknowledgeMessagesInput.internalBinaryWrite(message.input.acknowledgeMessages, writer.tag(138, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23207,7 +23343,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "result", T: () => JoinSpaceByInviteTokenResult },
             { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "result", T: () => GetSpaceInviteLinkResult },
             { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "result", T: () => SetSpaceInviteLinkEnabledResult },
-            { no: 137, name: "getFilePart", kind: "message", oneof: "result", T: () => GetFilePartResult }
+            { no: 137, name: "getFilePart", kind: "message", oneof: "result", T: () => GetFilePartResult },
+            { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "result", T: () => AcknowledgeMessagesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -24036,6 +24173,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getFilePart: GetFilePartResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getFilePart)
                     };
                     break;
+                case /* AcknowledgeMessagesResult acknowledgeMessages */ 138:
+                    message.result = {
+                        oneofKind: "acknowledgeMessages",
+                        acknowledgeMessages: AcknowledgeMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).acknowledgeMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -24456,6 +24599,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetFilePartResult getFilePart = 137; */
         if (message.result.oneofKind === "getFilePart")
             GetFilePartResult.internalBinaryWrite(message.result.getFilePart, writer.tag(137, WireType.LengthDelimited).fork(), options).join();
+        /* AcknowledgeMessagesResult acknowledgeMessages = 138; */
+        if (message.result.oneofKind === "acknowledgeMessages")
+            AcknowledgeMessagesResult.internalBinaryWrite(message.result.acknowledgeMessages, writer.tag(138, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35418,7 +35564,8 @@ export const GetChatHistoryInput = new GetChatHistoryInput$Type();
 class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
     constructor() {
         super("GetChatHistoryResult", [
-            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
+            { no: 2, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements }
         ]);
     }
     create(value?: PartialMessage<GetChatHistoryResult>): GetChatHistoryResult {
@@ -35436,6 +35583,9 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
                 case /* repeated Message messages */ 1:
                     message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional ChatAcknowledgements acknowledgements */ 2:
+                    message.acknowledgements = ChatAcknowledgements.internalBinaryRead(reader, reader.uint32(), options, message.acknowledgements);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -35451,6 +35601,9 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
         /* repeated Message messages = 1; */
         for (let i = 0; i < message.messages.length; i++)
             Message.internalBinaryWrite(message.messages[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatAcknowledgements acknowledgements = 2; */
+        if (message.acknowledgements)
+            ChatAcknowledgements.internalBinaryWrite(message.acknowledgements, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -38607,7 +38760,8 @@ class Update$Type extends MessageType<Update> {
             { no: 45, name: "dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => UpdateDialogCollapsedMaxId },
             { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder },
             { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
-            { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat }
+            { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
+            { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -38898,6 +39052,12 @@ class Update$Type extends MessageType<Update> {
                         userRemovedFromChat: UpdateUserRemovedFromChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userRemovedFromChat)
                     };
                     break;
+                case /* ChatAcknowledgement acknowledgement */ 49:
+                    message.update = {
+                        oneofKind: "acknowledgement",
+                        acknowledgement: ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).acknowledgement)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -39051,6 +39211,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateUserRemovedFromChat user_removed_from_chat = 48; */
         if (message.update.oneofKind === "userRemovedFromChat")
             UpdateUserRemovedFromChat.internalBinaryWrite(message.update.userRemovedFromChat, writer.tag(48, WireType.LengthDelimited).fork(), options).join();
+        /* ChatAcknowledgement acknowledgement = 49; */
+        if (message.update.oneofKind === "acknowledgement")
+            ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(49, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -47581,3 +47744,260 @@ class GetFilePartResult$Type extends MessageType<GetFilePartResult> {
  * @generated MessageType for protobuf message GetFilePartResult
  */
 export const GetFilePartResult = new GetFilePartResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChatAcknowledgement$Type extends MessageType<ChatAcknowledgement> {
+    constructor() {
+        super("ChatAcknowledgement", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "max_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "user", kind: "message", T: () => User },
+            { no: 5, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 6, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "cleared", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatAcknowledgement>): ChatAcknowledgement {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.userId = 0n;
+        message.maxId = 0n;
+        message.revision = 0n;
+        message.cleared = false;
+        if (value !== undefined)
+            reflectionMergePartial<ChatAcknowledgement>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatAcknowledgement): ChatAcknowledgement {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* int64 max_id */ 3:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                case /* optional User user */ 4:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* optional Peer peer_id */ 5:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 revision */ 6:
+                    message.revision = reader.int64().toBigInt();
+                    break;
+                case /* bool cleared */ 7:
+                    message.cleared = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatAcknowledgement, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        /* int64 max_id = 3; */
+        if (message.maxId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.maxId);
+        /* optional User user = 4; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional Peer peer_id = 5; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* int64 revision = 6; */
+        if (message.revision !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.revision);
+        /* bool cleared = 7; */
+        if (message.cleared !== false)
+            writer.tag(7, WireType.Varint).bool(message.cleared);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatAcknowledgement
+ */
+export const ChatAcknowledgement = new ChatAcknowledgement$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AcknowledgeMessagesInput$Type extends MessageType<AcknowledgeMessagesInput> {
+    constructor() {
+        super("AcknowledgeMessagesInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "max_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "clear", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "expected_revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AcknowledgeMessagesInput>): AcknowledgeMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.maxId = 0n;
+        message.clear = false;
+        message.expectedRevision = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AcknowledgeMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AcknowledgeMessagesInput): AcknowledgeMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 max_id */ 2:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                case /* bool clear */ 3:
+                    message.clear = reader.bool();
+                    break;
+                case /* int64 expected_revision */ 4:
+                    message.expectedRevision = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AcknowledgeMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 max_id = 2; */
+        if (message.maxId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.maxId);
+        /* bool clear = 3; */
+        if (message.clear !== false)
+            writer.tag(3, WireType.Varint).bool(message.clear);
+        /* int64 expected_revision = 4; */
+        if (message.expectedRevision !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.expectedRevision);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AcknowledgeMessagesInput
+ */
+export const AcknowledgeMessagesInput = new AcknowledgeMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AcknowledgeMessagesResult$Type extends MessageType<AcknowledgeMessagesResult> {
+    constructor() {
+        super("AcknowledgeMessagesResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<AcknowledgeMessagesResult>): AcknowledgeMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<AcknowledgeMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AcknowledgeMessagesResult): AcknowledgeMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AcknowledgeMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AcknowledgeMessagesResult
+ */
+export const AcknowledgeMessagesResult = new AcknowledgeMessagesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChatAcknowledgements$Type extends MessageType<ChatAcknowledgements> {
+    constructor() {
+        super("ChatAcknowledgements", [
+            { no: 1, name: "cursors", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ChatAcknowledgement }
+        ]);
+    }
+    create(value?: PartialMessage<ChatAcknowledgements>): ChatAcknowledgements {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.cursors = [];
+        if (value !== undefined)
+            reflectionMergePartial<ChatAcknowledgements>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatAcknowledgements): ChatAcknowledgements {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ChatAcknowledgement cursors */ 1:
+                    message.cursors.push(ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatAcknowledgements, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ChatAcknowledgement cursors = 1; */
+        for (let i = 0; i < message.cursors.length; i++)
+            ChatAcknowledgement.internalBinaryWrite(message.cursors[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatAcknowledgements
+ */
+export const ChatAcknowledgements = new ChatAcknowledgements$Type();

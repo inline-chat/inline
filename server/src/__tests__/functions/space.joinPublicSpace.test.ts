@@ -202,6 +202,7 @@ describe("joinPublicSpace", () => {
     expect(payload.oneofKind).toBe("userChatOpen")
     if (payload.oneofKind !== "userChatOpen") throw new Error("Expected userChatOpen")
     expect(payload.userChatOpen.chat?.permissions?.canUpdateInfo).toBe(true)
+    expect(payload.userChatOpen.chat?.acknowledgements?.cursors).toEqual([])
     expect(payload.userChatOpen.dialog?.unreadCount).toBe(0)
 
   })

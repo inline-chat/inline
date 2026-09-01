@@ -48,5 +48,5 @@ export const getChatHistory = async (
     },
   )
 
-  return { messages: result.messages }
+  return { messages: result.messages, acknowledgements: result.acknowledgements }
 }

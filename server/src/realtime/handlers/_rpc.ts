@@ -66,6 +66,7 @@ import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMess
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
 import { updateDialogFollowMode } from "@in/server/realtime/handlers/messages.updateDialogFollowMode"
+import { acknowledgeMessagesHandler } from "@in/server/realtime/handlers/messages.acknowledgeMessages"
 import { collapseHistoryHandler } from "@in/server/realtime/handlers/messages.collapseHistory"
 import { updatePushNotificationDetailsHandler } from "@in/server/realtime/handlers/user.updatePushNotificationDetails"
 import { reserveChatIds } from "@in/server/realtime/handlers/messages.reserveChatIds"
@@ -835,6 +836,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await updateDialogFollowMode(call.input.updateDialogFollowMode, handlerContext)
       return { oneofKind: "updateDialogFollowMode", updateDialogFollowMode: result }
+    }
+
+    case Method.ACKNOWLEDGE_MESSAGES: {
+      if (call.input.oneofKind !== "acknowledgeMessages") throw RealtimeRpcError.BadRequest()
+      const result = await acknowledgeMessagesHandler(call.input.acknowledgeMessages, handlerContext)
+      return { oneofKind: "acknowledgeMessages", acknowledgeMessages: result }
     }
 
     case Method.COLLAPSE_HISTORY: {

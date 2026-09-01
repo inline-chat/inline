@@ -29,6 +29,7 @@ import { Member } from "@inline-chat/protocol/core";
 import { Reaction } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
+import { ChatAcknowledgement } from "@inline-chat/protocol/core";
 /**
  * @generated from protobuf message server.ServerUpdate
  */
@@ -306,6 +307,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerUserUpdateRemovedFromChat user_removed_from_chat = 46;
          */
         userRemovedFromChat: ServerUserUpdateRemovedFromChat;
+    } | {
+        oneofKind: "acknowledgement";
+        /**
+         * @generated from protobuf field: ChatAcknowledgement acknowledgement = 47;
+         */
+        acknowledgement: ChatAcknowledgement;
     } | {
         oneofKind: undefined;
     };
@@ -1187,7 +1194,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 43, name: "user_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateSettings },
             { no: 44, name: "user_dialog_folder", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogFolder },
             { no: 45, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateAddedToChat },
-            { no: 46, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateRemovedFromChat }
+            { no: 46, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateRemovedFromChat },
+            { no: 47, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1468,6 +1476,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userRemovedFromChat: ServerUserUpdateRemovedFromChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userRemovedFromChat)
                     };
                     break;
+                case /* ChatAcknowledgement acknowledgement */ 47:
+                    message.update = {
+                        oneofKind: "acknowledgement",
+                        acknowledgement: ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).acknowledgement)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1615,6 +1629,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateRemovedFromChat user_removed_from_chat = 46; */
         if (message.update.oneofKind === "userRemovedFromChat")
             ServerUserUpdateRemovedFromChat.internalBinaryWrite(message.update.userRemovedFromChat, writer.tag(46, WireType.LengthDelimited).fork(), options).join();
+        /* ChatAcknowledgement acknowledgement = 47; */
+        if (message.update.oneofKind === "acknowledgement")
+            ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(47, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

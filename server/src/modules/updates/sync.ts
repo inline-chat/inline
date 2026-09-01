@@ -415,6 +415,21 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
     const serverUpdate = update.payload
 
     switch (serverUpdate.update.oneofKind) {
+      case "acknowledgement":
+        if (Number(serverUpdate.update.acknowledgement.chatId) !== chatId) {
+          log.warn("Skipping acknowledgement assigned to the wrong chat bucket", {
+            bucketChatId: chatId,
+            acknowledgementChatId: String(serverUpdate.update.acknowledgement.chatId),
+            seq: update.seq,
+          })
+          inflatedUpdates.push(chatSkipPts(update, chatId))
+          break
+        }
+        inflatedUpdates.push({ seq: update.seq, date: encodeDateStrict(update.date), update: {
+          oneofKind: "acknowledgement", acknowledgement: { ...serverUpdate.update.acknowledgement, peerId },
+        } })
+        break
+
       case "newMessage": {
         const message = msgs.get(serverUpdate.update.newMessage.msgId)
         if (!message) {
@@ -886,6 +901,12 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
 
   for (const update of input.updates) {
     switch (update.update.oneofKind) {
+      case "acknowledgement":
+        if (!update.update.acknowledgement.cleared) {
+          addSafeId(userIds, update.update.acknowledgement.userId)
+        }
+        break
+
       case "newMessage":
         collectMessageSidecarRefs(update.update.newMessage.message, { chatIds, userIds, spaceIds })
         break
@@ -1627,6 +1648,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "chatMoved":
     case "reaction":
     case "reactionDeleted":
+    case "acknowledgement":
     case "userSpaceMemberDelete":
     case "userChatParticipantDelete":
     case "userChatParticipantAdd":
@@ -1977,6 +1999,7 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
     case "chatMoved":
     case "reaction":
     case "reactionDeleted":
+    case "acknowledgement":
     case "spaceRemoveMember":
     case "spaceMemberUpdate":
     case "spaceMemberAdd":
