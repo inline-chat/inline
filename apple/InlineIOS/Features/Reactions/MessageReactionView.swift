@@ -115,19 +115,7 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
     label.text = nil
     label.attributedText = nil
 
-    if emoji == "✓" || emoji == "✔️" {
-      let config = UIImage.SymbolConfiguration(pointSize: Constants.emojiSize, weight: .semibold)
-      let checkmarkColor = (byCurrentUser && !outgoing) || (!byCurrentUser && outgoing) ? UIColor
-        .white : UIColor(hex: "#2AAC28")!
-      let checkmarkImage = UIImage(systemName: "checkmark", withConfiguration: config)?
-        .withTintColor(checkmarkColor, renderingMode: .alwaysOriginal)
-
-      let imageAttachment = NSTextAttachment()
-      imageAttachment.image = checkmarkImage
-      label.attributedText = NSAttributedString(attachment: imageAttachment)
-    } else {
-      label.text = emoji
-    }
+    label.text = emoji
   }
 
   private func configureContainerAppearance() {

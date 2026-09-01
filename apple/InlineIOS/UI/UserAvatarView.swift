@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineUI
 import SwiftUI
@@ -145,5 +146,131 @@ public extension UIColor {
       blue: min(b + (1 - b) * percentage, 1.0),
       alpha: a
     )
+  }
+}
+
+/// A native status accessory; actor identity comes only from the ACK cursor's sidecar.
+final class MessageAcknowledgementView: UIView {
+  private let check = UIImageView(
+    image: UIImage(
+      systemName: "checkmark",
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+    )
+  )
+  private let countLabel = UILabel()
+  private var avatars: [UserAvatarView] = []
+  private var actors: [FullAcknowledgement] = []
+  private var avatarActors: [FullAcknowledgement] = []
+
+  var onToggle: (() -> Void)?
+
+  init() {
+    super.init(frame: .zero)
+    layer.cornerRadius = 8
+    check.tintColor = .label
+    countLabel.font = UIFontMetrics(forTextStyle: .caption2).scaledFont(
+      for: .monospacedDigitSystemFont(ofSize: 9, weight: .semibold),
+      maximumPointSize: 11
+    )
+    countLabel.adjustsFontForContentSizeCategory = true
+    countLabel.textColor = .label
+    countLabel.textAlignment = .center
+    countLabel.adjustsFontSizeToFitWidth = true
+    countLabel.minimumScaleFactor = 0.75
+    addSubview(check)
+    addSubview(countLabel)
+    isAccessibilityElement = true
+    accessibilityTraits = .staticText
+    isHidden = true
+    updateColors()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  func configure(_ message: FullMessage) {
+    actors = message.acknowledgementActors
+    avatarActors = actors.filter { $0.userInfo != nil }
+    isHidden = actors.isEmpty
+    accessibilityLabel = actors.isEmpty ? nil : message.acknowledgementLabel
+
+    if let action = message.acknowledgementAction(currentUserId: Auth.shared.getCurrentUserId()),
+       onToggle != nil
+    {
+      accessibilityCustomActions = [
+        UIAccessibilityCustomAction(
+          name: action.clear ? "Remove Ack" : "Ack",
+          target: self,
+          selector: #selector(performToggleAccessibilityAction)
+        ),
+      ]
+    } else {
+      accessibilityCustomActions = nil
+    }
+
+    for (index, actor) in avatarActors.prefix(3).enumerated() {
+      while avatars.count <= index {
+        let avatar = UserAvatarView()
+        avatar.isUserInteractionEnabled = false
+        avatar.isAccessibilityElement = false
+        avatars.append(avatar)
+        addSubview(avatar)
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+          avatar.leftAnchor.constraint(equalTo: leftAnchor, constant: 14 + CGFloat(index) * 14),
+          avatar.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+        ])
+      }
+      if let userInfo = actor.userInfo {
+        avatars[index].configure(with: userInfo, size: 12)
+      }
+    }
+    setNeedsLayout()
+  }
+
+  @objc private func performToggleAccessibilityAction() -> Bool {
+    guard let onToggle else { return false }
+    onToggle()
+    return true
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    check.frame = CGRect(x: 3, y: 3, width: 10, height: 10)
+
+    let shown = AcknowledgementLayout.visibleAvatarCount(
+      actorCount: actors.count,
+      width: bounds.width,
+      availableAvatarCount: avatarActors.count
+    )
+    for (index, avatar) in avatars.enumerated() {
+      avatar.isHidden = index >= shown
+    }
+
+    let remaining = max(0, actors.count - shown)
+    countLabel.text = remaining > 0 ? (shown == 0 ? "\(remaining)" : "+\(remaining)") : nil
+    countLabel.isHidden = remaining == 0
+    countLabel.frame = CGRect(
+      x: 14 + CGFloat(shown) * 14,
+      y: 1,
+      width: max(0, bounds.width - 16 - CGFloat(shown) * 14),
+      height: 14
+    )
+  }
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle
+      || previousTraitCollection?.accessibilityContrast != traitCollection.accessibilityContrast
+    {
+      updateColors()
+    }
+  }
+
+  private func updateColors() {
+    let alpha: CGFloat = traitCollection.accessibilityContrast == .high ? 0.34 : 0.20
+    backgroundColor = UIColor.systemBlue.withAlphaComponent(alpha)
+    check.tintColor = .label
+    countLabel.textColor = .label
   }
 }

@@ -2458,6 +2458,11 @@ class MessageListAppKit: NSViewController {
     let animationDuration = debug_slowAnimation ? 1.5 : 0.15
     let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage &&
       !isUserScrolling // to prevent jitter when user is scrolling
+    let updateAnchor: VisibleMessageAnchor? = if case .updated = update, !shouldScroll {
+      captureVisibleMessageAnchor()
+    } else {
+      nil
+    }
     let rowUpdate = chatRows.apply(update)
     pruneMessageSelection()
     if rowUpdate != .none {
@@ -2469,12 +2474,14 @@ class MessageListAppKit: NSViewController {
       controller.syncAvatarOverlayAfterTableLayout(animate: animate)
     }
 
-    func reloadAll(animated: Bool) {
-      if animated {
+    func reloadAll(animated: Bool, preserving anchor: VisibleMessageAnchor? = nil) {
+      if animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
         NSAnimationContext.runAnimationGroup { [weak self] context in
           guard let self else { return }
           context.duration = animationDuration
           tableView.reloadData()
+          tableView.layoutSubtreeIfNeeded()
+          if let anchor { restoreVisibleMessageAnchor(anchor) }
           syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
           if shouldScroll { scrollToBottom(animated: true) }
         } completionHandler: { [weak self] in
@@ -2482,6 +2489,8 @@ class MessageListAppKit: NSViewController {
         }
       } else {
         tableView.reloadData()
+        tableView.layoutSubtreeIfNeeded()
+        if let anchor { restoreVisibleMessageAnchor(anchor) }
         syncUpdateAvatarOverlayAfterTableLayout(on: self)
         if shouldScroll { scrollToBottom(animated: false) }
         isPerformingUpdate = false
@@ -2571,13 +2580,15 @@ class MessageListAppKit: NSViewController {
               break
             }
 
-            if animated == true {
+            if animated == true, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
               NSAnimationContext.runAnimationGroup { [weak self] context in
                 guard let self else { return }
                 context.duration = animationDuration
                 tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
                 tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
                 updateHeightsForRows(at: rowsToReload)
+                tableView.layoutSubtreeIfNeeded()
+                if let updateAnchor { restoreVisibleMessageAnchor(updateAnchor) }
                 syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
                 if shouldScroll { scrollToBottom(animated: true) }
               } completionHandler: { [weak self] in
@@ -2587,8 +2598,10 @@ class MessageListAppKit: NSViewController {
               tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
               tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
               updateHeightsForRows(at: rowsToReload)
+              tableView.layoutSubtreeIfNeeded()
+              if let updateAnchor { restoreVisibleMessageAnchor(updateAnchor) }
               syncUpdateAvatarOverlayAfterTableLayout(on: self)
-              if shouldScroll { scrollToBottom(animated: true) }
+              if shouldScroll { scrollToBottom(animated: false) }
               isPerformingUpdate = false
             }
 
@@ -2596,7 +2609,7 @@ class MessageListAppKit: NSViewController {
             isPerformingUpdate = false
 
           case .reloadAll, .insert(_), .remove(_):
-            reloadAll(animated: animated == true)
+            reloadAll(animated: animated == true, preserving: updateAnchor)
         }
 
       case .reload:

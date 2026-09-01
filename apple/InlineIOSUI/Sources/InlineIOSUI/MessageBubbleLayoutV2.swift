@@ -46,6 +46,8 @@ public struct MessageMeasuredNodeV2: Equatable, Codable, Sendable {
   public let forcesMaximumWidth: Bool
   public let horizontalAlignment: HorizontalAlignment
   public let insets: MessageLayoutInsetsV2
+  /// Below-bubble accessories may remain legible without widening the body.
+  public let minimumWidth: CGFloat?
 
   public init(
     id: MessageLayoutNodeIDV2,
@@ -54,7 +56,8 @@ public struct MessageMeasuredNodeV2: Equatable, Codable, Sendable {
     widthBehavior: WidthBehavior = .natural,
     forcesMaximumWidth: Bool = false,
     horizontalAlignment: HorizontalAlignment = .leading,
-    insets: MessageLayoutInsetsV2 = .zero
+    insets: MessageLayoutInsetsV2 = .zero,
+    minimumWidth: CGFloat? = nil
   ) {
     self.id = id
     self.size = size
@@ -63,6 +66,7 @@ public struct MessageMeasuredNodeV2: Equatable, Codable, Sendable {
     self.forcesMaximumWidth = forcesMaximumWidth
     self.horizontalAlignment = horizontalAlignment
     self.insets = insets
+    self.minimumWidth = minimumWidth
   }
 }
 
@@ -363,7 +367,7 @@ public enum MessageBubbleLayoutPlannerV2 {
     for node in input.belowBubbleNodes {
       rootHeight += node.spacingBefore
       let availableNodeWidth = max(
-        0,
+        node.minimumWidth ?? 0,
         resolvedContentWidth - node.insets.leading - node.insets.trailing
       )
       let width = node.widthBehavior == .fill
@@ -391,6 +395,7 @@ public enum MessageBubbleLayoutPlannerV2 {
       $0.size.width.isFinite && $0.size.height.isFinite
         && $0.size.width >= 0 && $0.size.height >= 0
         && isFiniteAndNonnegative($0.spacingBefore)
+        && isFiniteAndNonnegative($0.minimumWidth ?? 0)
         && valid($0.insets)
     }
   }

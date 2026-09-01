@@ -36,6 +36,7 @@ class MinimalMessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
   private let log = Log.scoped("MinimalMessageView", enableTracing: false)
   static let avatarSize: CGFloat = MessageSizeCalculator.minimalAvatarSize
+  private let acknowledgementView = MessageAcknowledgementView()
   private(set) var fullMessage: FullMessage
   private let dependencies: AppDependencies?
   private var props: MessageViewProps
@@ -977,6 +978,28 @@ class MinimalMessageViewAppKit: NSView {
 
   // MARK: - Lifecycle
 
+  override func layout() {
+    super.layout()
+    layoutAcknowledgement()
+  }
+
+  private func layoutAcknowledgement() {
+    guard !isAnchorMessage, !fullMessage.acknowledgementActors.isEmpty, !message.isServiceMessage else {
+      if !acknowledgementView.isAnimatingRemoval {
+        acknowledgementView.isHidden = true
+      }
+      return
+    }
+    acknowledgementView.isHidden = false
+    let content = contentView.convert(contentView.bounds, to: self)
+    let width = min(fullMessage.acknowledgementPillWidth, max(fullMessage.acknowledgementMinimumPillWidth, content.width))
+    let x = acknowledgementView.isRTL ? content.minX : content.maxX - width
+    // Footer height is in the wrapper plan; bubble/text/time geometry stays untouched.
+    let top = props.layout.wrapper.spacing.top + props.layout.wrapper.size.height - 16
+    let y = isFlipped ? top : bounds.height - top - 16
+    acknowledgementView.frame = CGRect(x: x, y: y, width: width, height: 16)
+  }
+
   override func viewDidMoveToSuperview() {
     super.viewDidMoveToSuperview()
 
@@ -1066,6 +1089,15 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func setupView() {
+    addSubview(acknowledgementView)
+    acknowledgementView.onToggle = { [weak self] in
+      self?.acknowledgeMessage()
+    }
+    acknowledgementView.configure(
+      isAnchorMessage ? fullMessage.withoutAcknowledgements : fullMessage,
+      fallbackRTL: props.isRtl || userInterfaceLayoutDirection == .rightToLeft,
+      action: currentAcknowledgementAction()
+    )
     // For performance of animations
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -1841,7 +1873,7 @@ class MinimalMessageViewAppKit: NSView {
       AppSettings.shared.messageDoubleClickAction,
       at: location,
       source: "doubleClick.\(source)",
-      blocksText: true
+      blocksText: AppSettings.shared.messageDoubleClickAction != .toggleAck
     )
   }
 
@@ -1872,6 +1904,8 @@ class MinimalMessageViewAppKit: NSView {
       return
     }
 
+    if action == .toggleAck, isTextEntityPoint(location) { return }
+
     if blocksText, isTextPoint(location) {
       MessageGestureTrace.debug("MinimalMessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=textPoint")
       return
@@ -1882,7 +1916,12 @@ class MinimalMessageViewAppKit: NSView {
       return
     }
 
-    // Provide haptic feedback
+    if action == .toggleAck, currentAcknowledgementAction() == nil {
+      MessageGestureTrace.debug("MinimalMessageView.performMessageGestureAction messageId=\(message.messageId) source=\(source) blocked=ackUnavailable")
+      return
+    }
+
+    // Provide haptic feedback only for an action that can run.
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
     switch action {
@@ -1891,9 +1930,30 @@ class MinimalMessageViewAppKit: NSView {
     case .reactionsMenu:
       resetGestureStateForReactionOverlay(source: source)
       showReactionOverlay()
-    case .toggleAck, .toggleHeart, .toggleThumbsUp:
+    case .toggleAck:
+      acknowledgeMessage()
+    case .toggleHeart, .toggleThumbsUp:
       guard let emoji = action.reactionEmoji else { return }
       toggleReaction(emoji, action: action, source: source)
+    }
+  }
+
+  private func currentAcknowledgementAction() -> AcknowledgementAction? {
+    guard !isAnchorMessage else { return nil }
+    let currentUserId = dependencies?.auth.getCurrentUserId() ?? Auth.shared.getCurrentUserId()
+    return fullMessage.acknowledgementAction(currentUserId: currentUserId)
+  }
+
+  @objc private func acknowledgeMessage() {
+    guard let action = currentAcknowledgementAction() else { return }
+    let targetMessage = fullMessage
+    Task { [weak self] in
+      do {
+        try await Api.realtime.send(.acknowledgeMessages(message: targetMessage, action: action))
+      } catch {
+        self?.log.error("Failed to update acknowledgement", error: error)
+        ToastCenter.shared.showError("Could not update acknowledgement")
+      }
     }
   }
 
@@ -3934,6 +3994,13 @@ class MinimalMessageViewAppKit: NSView {
 
     // update internal props
     self.fullMessage = fullMessage
+    acknowledgementView.configure(
+      isAnchorMessage ? fullMessage.withoutAcknowledgements : fullMessage,
+      fallbackRTL: props.isRtl || userInterfaceLayoutDirection == .rightToLeft,
+      action: currentAcknowledgementAction(),
+      animated: animate
+    )
+    needsLayout = true
     if prev.message.chatId != fullMessage.message.chatId {
       didResolveMessageSpaceId = false
       isResolvingMessageSpaceId = false
@@ -4051,6 +4118,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   func updateSize(props: MessageViewProps) {
+    needsLayout = true
     // update props and reflect changes
     updatePropsAndUpdateLayout(
       props: props,
@@ -4692,6 +4760,7 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
     }
 
     if gestureRecognizer === doubleClickGesture {
+      if isTextEntityPoint(locationInSelf) { return false }
       if handleEntityClick(from: event, source: recognizerName(gestureRecognizer)) {
         MessageGestureTrace.debug(
           "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=entityClick"
@@ -4699,7 +4768,9 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
         return false
       }
 
-      if isTextPoint(locationInSelf) {
+      if AppSettings.shared.messageDoubleClickAction != .toggleAck,
+         isTextPoint(locationInSelf)
+      {
         MessageGestureTrace.debug(
           "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=textPoint"
         )
@@ -4707,7 +4778,12 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
       }
     }
 
-    if let result = interactiveHitTestResult(locationInSelf) {
+    if let result = interactiveHitTestResult(locationInSelf),
+       !(gestureRecognizer === doubleClickGesture
+         && AppSettings.shared.messageDoubleClickAction == .toggleAck
+         && result.view is NSTextView
+         && (result.view as? MessageTextView)?.onPlainSingleClick == nil)
+    {
       MessageGestureTrace.debug(
         "MinimalMessageView.shouldHandleGesture messageId=\(message.messageId) recognizer=\(recognizerName(gestureRecognizer)) point=\(MessageGestureTrace.point(locationInSelf)) allow=false reason=interactive target=\(result.name)"
       )
@@ -4799,6 +4875,19 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
     let menu = NSMenu()
 
     let regularMessage = quickActionsCanReact
+    if regularMessage, let action = currentAcknowledgementAction() {
+      let ack = NSMenuItem(
+        title: action.clear ? "Remove Ack" : "Ack",
+        action: #selector(acknowledgeMessage),
+        keyEquivalent: ""
+      )
+      ack.target = self
+      ack.image = NSImage(
+        systemSymbolName: action.clear ? "xmark" : "checkmark",
+        accessibilityDescription: nil
+      )
+      menu.addItem(ack)
+    }
 
     // Reply
     if regularMessage, !isAnchorMessage {

@@ -3471,6 +3471,7 @@ private extension MessagesCollectionView {
       // reconfigure animation writes the same cell frames and causes bubble-height jumps.
       let animatesDiffableReconfigure = messageViewImplementation == .legacy
         && (animated ?? false)
+        && !UIAccessibility.isReduceMotionEnabled
       safeApplySnapshot(snapshot, animatingDifferences: animatesDiffableReconfigure)
     }
 
@@ -3758,18 +3759,11 @@ private extension MessagesCollectionView {
       var configuration = UIButton.Configuration.plain()
       configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2)
 
-      if reaction == "✔️" || reaction == "✓" {
-        let symbolConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
-        let image = UIImage(systemName: "checkmark", withConfiguration: symbolConfig)?
-          .withTintColor(UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
-        configuration.image = image
-      } else {
-        configuration.title = reaction
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-          var outgoing = incoming
-          outgoing.font = .systemFont(ofSize: 22)
-          return outgoing
-        }
+      configuration.title = reaction
+      configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+        var outgoing = incoming
+        outgoing.font = .systemFont(ofSize: 22)
+        return outgoing
       }
 
       button.configuration = configuration
@@ -4225,6 +4219,31 @@ private extension MessagesCollectionView {
           presentForwardSheet(fullMessage)
         }
         actions.append(forwardAction)
+
+        if let acknowledgementAction = fullMessage.acknowledgementAction(
+          currentUserId: Auth.shared.getCurrentUserId()
+        ) {
+          actions.append(UIAction(
+            title: acknowledgementAction.clear ? "Remove Ack" : "Ack",
+            image: UIImage(systemName: acknowledgementAction.clear ? "xmark" : "checkmark")
+          ) { _ in
+            Task {
+              do {
+                try await Api.realtime.send(.acknowledgeMessages(
+                  message: fullMessage,
+                  action: acknowledgementAction
+                ))
+              } catch {
+                Log.scoped("Acknowledgement").error("Failed to update acknowledgement", error: error)
+                ToastManager.shared.showToast(
+                  "Could not update acknowledgement",
+                  type: .error,
+                  systemImage: "exclamationmark.triangle.fill"
+                )
+              }
+            }
+          })
+        }
 
         let pinned = isMessagePinned(message)
         let pinAction = UIAction(

@@ -177,6 +177,29 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
         return
       }
 
+      if messageViewImplementation == .legacy,
+         isAcknowledgementOnlyUpdate(from: currentMessage, to: message),
+         abs(self.collectionWidth - collectionWidth) <= 0.5,
+         firstInGroup == self.firstInGroup,
+         lastInGroup == self.lastInGroup,
+         spaceId == self.spaceId,
+         outgoing == newOutgoing,
+         displayMode == self.displayMode,
+         self.theme == theme,
+         self.messageViewImplementation == .legacy,
+         let messageView
+      {
+        cancelPendingV2Snapshot()
+        prevText = message.displayText
+        self.message = message
+        canReply = message.canReply && displayMode != .threadAnchor
+        resetSelfSizingState()
+        messageView.updateAcknowledgement(to: message)
+        updateSwipeAvailability()
+        setNeedsLayout()
+        return
+      }
+
       if isReactionOnlyUpdate(from: currentMessage, to: message) {
         animatedReactionEmoji = changedReactionEmoji(from: currentMessage, to: message)
         if abs(self.collectionWidth - collectionWidth) <= 0.5,
@@ -1093,6 +1116,16 @@ extension MessageCollectionViewCell {
     var newWithoutReactions = newMessage
     newWithoutReactions.reactions = []
     return currentWithoutReactions == newWithoutReactions
+  }
+
+  private func isAcknowledgementOnlyUpdate(
+    from currentMessage: FullMessage,
+    to newMessage: FullMessage
+  ) -> Bool {
+    guard currentMessage.acknowledgements != newMessage.acknowledgements
+      || currentMessage.currentUserAcknowledgement != newMessage.currentUserAcknowledgement
+    else { return false }
+    return currentMessage.withoutAcknowledgements == newMessage.withoutAcknowledgements
   }
 
   private func isDeliveryAcknowledgementUpdate(

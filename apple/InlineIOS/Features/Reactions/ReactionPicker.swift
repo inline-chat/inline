@@ -17,15 +17,8 @@ struct ReactionPickerView: View {
           Button(action: {
             onEmojiSelected(emoji)
           }) {
-            if emoji == "✓" || emoji == "✔️" || emoji == "✔" {
-              Image(systemName: "checkmark")
-                .font(.system(size: 24))
-                .fontWeight(.medium)
-                .foregroundColor(Color(uiColor: UIColor(hex: "#2AAC28")!))
-            } else {
-              Text(emoji)
-                .font(.system(size: 24))
-            }
+            Text(emoji)
+              .font(.system(size: 24))
           }
           .buttonStyle(PlainButtonStyle())
         }

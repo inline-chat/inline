@@ -9,7 +9,6 @@ public enum ReactionPickerEmojis {
     "👎",
     "💯",
     "😂",
-    "✔️",
     "🎉",
     "🔥",
     "👏",
@@ -63,6 +62,8 @@ public enum ReactionPickerEmojis {
     return result
   }
 
+  private static let legacyAcknowledgementEmojis: Set<String> = ["✓", "✔", "✔️"]
+
   private static let defaultIndexByEmoji: [String: Int] = Dictionary(
     uniqueKeysWithValues: defaultEmojis.enumerated().map { index, emoji in
       (emoji, index)
@@ -73,7 +74,8 @@ public enum ReactionPickerEmojis {
     var normalizedCounts: [String: Int] = [:]
 
     for (emoji, count) in counts where count > 0 {
-      guard let normalizedEmoji = normalizedEmoji(from: emoji) else { continue }
+      guard let normalizedEmoji = normalizedEmoji(from: emoji),
+            !legacyAcknowledgementEmojis.contains(normalizedEmoji) else { continue }
       normalizedCounts[normalizedEmoji, default: 0] += count
     }
 

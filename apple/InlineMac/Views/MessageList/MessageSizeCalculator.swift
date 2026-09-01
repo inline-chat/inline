@@ -1686,6 +1686,9 @@ class MessageSizeCalculator {
     }
 
     // Fitting width
+    if props.interactionMode != .threadAnchor, !message.acknowledgementActors.isEmpty, !message.message.isServiceMessage {
+      plan.wrapper.size.height += 20
+    }
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
     if richBlockPlan == nil, let textSize {
@@ -2265,6 +2268,9 @@ class MessageSizeCalculator {
     plan.bubble.size.height += plan.topMostContentTopSpacing
     plan.wrapper.size.height += plan.topMostContentTopSpacing
 
+    if props.interactionMode != .threadAnchor, !message.acknowledgementActors.isEmpty, !message.message.isServiceMessage {
+      plan.wrapper.size.height += 20
+    }
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
     if richBlockPlan == nil, let textSize {
       textHeightCache.setObject(NSValue(size: textSize), forKey: cacheKey_)

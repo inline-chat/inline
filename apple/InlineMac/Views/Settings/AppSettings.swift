@@ -138,7 +138,7 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
   var title: String {
     switch self {
     case .toggleAck:
-      return "Toggle ACK"
+      return "Toggle Ack"
     case .reply:
       return "Reply"
     case .toggleHeart:
@@ -153,7 +153,7 @@ enum MessageGestureAction: String, CaseIterable, Identifiable {
   var reactionEmoji: String? {
     let emoji: String? = switch self {
     case .toggleAck:
-      "✔️"
+      nil
     case .toggleHeart:
       "❤️"
     case .toggleThumbsUp:

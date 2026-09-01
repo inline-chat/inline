@@ -471,6 +471,7 @@ final class UIMessageView2: UIMessageView {
     let width = bounds.width > 0 ? bounds.width : maximumBubbleWidth
     let oldLayout = measuredLayout(containerWidth: width)
     replaceFullMessageSnapshot(updatedMessage)
+    acknowledgementView.configure(updatedMessage)
     layoutContentSignature = updatedMessage.hashValue
     metadataView.updateMessage(updatedMessage, animated: true)
     floatingMetadataView.updateMessage(updatedMessage, animated: true)
@@ -483,6 +484,38 @@ final class UIMessageView2: UIMessageView {
     } else {
       apply(layout: newLayout, richPlan: currentRichPlan)
     }
+  }
+
+  override func hasInteractiveTextTarget(atPointInMessageView pointInMessageView: CGPoint) -> Bool {
+    if currentRichPlan != nil {
+      let point = convert(pointInMessageView, to: richContentView)
+      if let hit = richContentView.entityHit(at: point) {
+        return hasInteractiveRichTextTarget(at: hit.characterIndex, in: hit.text)
+      }
+    }
+    return super.hasInteractiveTextTarget(atPointInMessageView: pointInMessageView)
+  }
+
+  private func hasInteractiveRichTextTarget(
+    at characterIndex: Int,
+    in attributedText: NSAttributedString
+  ) -> Bool {
+    guard characterIndex >= 0, characterIndex < attributedText.length else { return false }
+    let interactiveAttributes: [NSAttributedString.Key] = [
+      .mentionUserId,
+      .mentionGroupId,
+      .threadLink,
+      .inlineCode,
+      .botCommand,
+      .emailAddress,
+      .phoneNumber,
+    ]
+    if interactiveAttributes.contains(where: {
+      attributedText.attribute($0, at: characterIndex, effectiveRange: nil) != nil
+    }) {
+      return true
+    }
+    return linkURL(at: characterIndex, in: attributedText) != nil
   }
 
   override func linkURL(atPointInMessageView pointInMessageView: CGPoint) -> URL? {
@@ -540,6 +573,11 @@ final class UIMessageView2: UIMessageView {
       "snapshot message=\(message.stableId) generation=\(geometryTransitionGeneration) reactions=\(fullMessage.reactions.count)->\(updatedMessage.reactions.count) emoji=\(animatedReactionEmoji ?? "nil")"
     )
     let previousMessage = fullMessage
+    let acknowledgementWasVisible = !previousMessage.acknowledgementActors.isEmpty
+    let acknowledgementIsVisible = !updatedMessage.acknowledgementActors.isEmpty
+    if acknowledgementWasVisible, !acknowledgementIsVisible {
+      retainTransitionSnapshot(of: acknowledgementView)
+    }
     let reactionsMoveBetweenContainers = reactionsAreExternal(in: previousMessage)
       != reactionsAreExternal(in: updatedMessage)
     if !reactionsMoveBetweenContainers {
@@ -551,6 +589,10 @@ final class UIMessageView2: UIMessageView {
     }
 
     replaceFullMessageSnapshot(updatedMessage)
+    acknowledgementView.configure(updatedMessage)
+    if !acknowledgementWasVisible, acknowledgementIsVisible {
+      markAppearing(acknowledgementView, scale: 0.96)
+    }
     layoutContentSignature = updatedMessage.hashValue
     reconcileRetainedNodePlacement(from: previousMessage)
     if message.isServiceMessage {
@@ -612,6 +654,8 @@ final class UIMessageView2: UIMessageView {
 
     bubbleView.translatesAutoresizingMaskIntoConstraints = true
     addSubview(bubbleView)
+    registerRootNode(acknowledgementView, id: MessageLayoutNodeIDV2("acknowledgement"))
+    acknowledgementView.configure(fullMessage)
 
     if shouldShowForwardHeader {
       forwardHeaderLabel.textColor = forwardHeaderTextColor
@@ -1039,6 +1083,18 @@ final class UIMessageView2: UIMessageView {
     }
     if externalReactions, let reactionsSize {
       belowBubbleNodes.append(.init(id: NodeID.reactions, size: reactionsSize, spacingBefore: 3))
+    }
+    if displayMode != .threadAnchor, !fullMessage.acknowledgementActors.isEmpty {
+      belowBubbleNodes.append(.init(
+        id: MessageLayoutNodeIDV2("acknowledgement"),
+        size: CGSize(width: fullMessage.acknowledgementPillWidth, height: 16),
+        spacingBefore: 4,
+        horizontalAlignment: AcknowledgementLayout.isRTL(
+          fullMessage.displayText,
+          fallback: effectiveUserInterfaceLayoutDirection == .rightToLeft
+        ) ? .leading : .trailing,
+        minimumWidth: fullMessage.acknowledgementMinimumPillWidth
+      ))
     }
     let belowBubbleMinimumContentWidth = max(
       actionSize?.width ?? 0,

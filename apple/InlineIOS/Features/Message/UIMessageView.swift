@@ -443,6 +443,11 @@ class UIMessageView: UIView {
     return view
   }()
 
+  let acknowledgementView = MessageAcknowledgementView()
+  private var acknowledgementWidthConstraint: NSLayoutConstraint?
+  private var acknowledgementCarrierBottomConstraint: NSLayoutConstraint?
+  private var acknowledgementCarrierBottomBaseConstant: CGFloat = 0
+
   // MARK: - Initialization
 
   deinit {
@@ -473,6 +478,9 @@ class UIMessageView: UIView {
 
     super.init(frame: .zero)
 
+    acknowledgementView.onToggle = { [weak self] in
+      self?.toggleAcknowledgement()
+    }
     handleLinkTap()
     if buildHierarchy {
       setupViews()
@@ -929,6 +937,15 @@ class UIMessageView: UIView {
     }
   }
 
+  func updateAcknowledgement(to updatedMessage: FullMessage) {
+    fullMessage = updatedMessage
+    acknowledgementView.configure(updatedMessage)
+    acknowledgementWidthConstraint?.constant = updatedMessage.acknowledgementPillWidth
+    acknowledgementCarrierBottomConstraint?.constant =
+      acknowledgementCarrierBottomBaseConstant - acknowledgementFooterHeight
+    setNeedsLayout()
+  }
+
   func replaceFullMessageSnapshot(_ updatedMessage: FullMessage) {
     fullMessage = updatedMessage
     reactionGroups = updatedMessage.groupedReactions
@@ -956,9 +973,15 @@ class UIMessageView: UIView {
   private func setupExternalReactionsConstraints() {
     let spacing: CGFloat = 3
     let bottomPadding: CGFloat = spacing + 2
+    let bottomConstraint = reactionsFlowView.bottomAnchor.constraint(
+      equalTo: bottomAnchor,
+      constant: -bottomPadding - acknowledgementFooterHeight
+    )
+    acknowledgementCarrierBottomConstraint = bottomConstraint
+    acknowledgementCarrierBottomBaseConstant = -bottomPadding
     var constraints: [NSLayoutConstraint] = [
       reactionsFlowView.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: spacing),
-      reactionsFlowView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomPadding),
+      bottomConstraint,
       reactionsFlowView.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.contentView.widthAnchor),
     ]
 
@@ -1957,6 +1980,7 @@ class UIMessageView: UIView {
       }
 
       if view !== bubbleView,
+         !(view is UITextView),
          view.gestureRecognizers?.contains(where: { $0 is UITapGestureRecognizer }) == true {
         return true
       }
@@ -2020,7 +2044,7 @@ class UIMessageView: UIView {
     return characterIndex
   }
 
-  private func hasInteractiveTextTarget(atPointInMessageView pointInMessageView: CGPoint) -> Bool {
+  func hasInteractiveTextTarget(atPointInMessageView pointInMessageView: CGPoint) -> Bool {
     let point = convert(pointInMessageView, to: messageLabel)
 
     if let codeTextView = messageLabel as? CodeBlockTextView,
@@ -2165,7 +2189,7 @@ class UIMessageView: UIView {
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-    toggleCheckmarkReaction()
+    toggleAcknowledgement()
   }
 
   @objc private func handleBackgroundDoubleTap(_ gesture: UITapGestureRecognizer) {
@@ -2173,36 +2197,26 @@ class UIMessageView: UIView {
     guard !bubbleView.frame.contains(location) else { return }
     guard bubbleView.frame.minY <= location.y, location.y <= bubbleView.frame.maxY else { return }
 
-    toggleCheckmarkReaction()
+    toggleAcknowledgement()
   }
 
-  private func toggleCheckmarkReaction() {
-    // Don't allow reactions on messages that are still sending
-    if message.status == .sending {
-      return
-    }
-    let checkmark = "✔️"
-    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
-    let hasCheckmark = fullMessage.reactions
-      .contains { $0.reaction.emoji == checkmark && $0.reaction.userId == currentUserId }
-    // Heavy haptic
-    let generator = UIImpactFeedbackGenerator(style: .heavy)
-    generator.prepare()
-    generator.impactOccurred()
-    if hasCheckmark {
-      Transactions.shared.mutate(transaction: .deleteReaction(.init(
-        message: message,
-        emoji: checkmark,
-        peerId: message.peerId,
-        chatId: message.chatId
-      )))
-    } else {
-      Transactions.shared.mutate(transaction: .addReaction(.init(
-        message: message,
-        emoji: checkmark,
-        userId: currentUserId,
-        peerId: message.peerId
-      )))
+  private func toggleAcknowledgement() {
+    guard displayMode != .threadAnchor, let action = fullMessage.acknowledgementAction(
+      currentUserId: Auth.shared.getCurrentUserId()
+    ) else { return }
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    let targetMessage = fullMessage
+    Task {
+      do {
+        try await Api.realtime.send(.acknowledgeMessages(message: targetMessage, action: action))
+      } catch {
+        Log.scoped("Acknowledgement").error("Failed to update acknowledgement", error: error)
+        ToastManager.shared.showToast(
+          "Could not update acknowledgement",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
     }
   }
 
@@ -2220,6 +2234,18 @@ class UIMessageView: UIView {
     static let inlineReactionMetadataSpacing: CGFloat = 6
     static let forwardHeaderVertical: CGFloat = 6
     static let forwardHeaderSpacing: CGFloat = 1
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    if let acknowledgementWidthConstraint {
+      let width = min(fullMessage.acknowledgementPillWidth, max(fullMessage.acknowledgementMinimumPillWidth, bubbleView.contentView.bounds.width))
+      if acknowledgementWidthConstraint.constant != width { acknowledgementWidthConstraint.constant = width }
+    }
+  }
+
+  private var acknowledgementFooterHeight: CGFloat {
+    displayMode == .threadAnchor || fullMessage.acknowledgementActors.isEmpty || message.isServiceMessage ? 0 : 20
   }
 
   func setupConstraints() {
@@ -2345,11 +2371,40 @@ class UIMessageView: UIView {
     if shouldShowReactionsOutsideBubble {
       setupExternalReactionsConstraints()
     } else if hasMessageActionRows {
-      messageActionsContainer.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
+      let bottomConstraint = messageActionsContainer.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -acknowledgementFooterHeight
+      )
+      acknowledgementCarrierBottomConstraint = bottomConstraint
+      acknowledgementCarrierBottomBaseConstant = 0
+      bottomConstraint.isActive = true
     } else {
-      bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
+      let bottomConstraint = bubbleView.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: -acknowledgementFooterHeight
+      )
+      acknowledgementCarrierBottomConstraint = bottomConstraint
+      acknowledgementCarrierBottomBaseConstant = 0
+      bottomConstraint.isActive = true
     }
 
+    if displayMode != .threadAnchor, !message.isServiceMessage {
+      acknowledgementView.configure(fullMessage)
+      acknowledgementView.translatesAutoresizingMaskIntoConstraints = false
+      addSubview(acknowledgementView)
+      let widthConstraint = acknowledgementView.widthAnchor.constraint(equalToConstant: fullMessage.acknowledgementPillWidth)
+      acknowledgementWidthConstraint = widthConstraint
+      NSLayoutConstraint.activate([
+        acknowledgementView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        acknowledgementView.heightAnchor.constraint(equalToConstant: 16),
+        widthConstraint,
+        AcknowledgementLayout.isRTL(
+          fullMessage.displayText,
+          fallback: effectiveUserInterfaceLayoutDirection == .rightToLeft
+        ) ? acknowledgementView.leftAnchor.constraint(equalTo: bubbleView.contentView.leftAnchor)
+          : acknowledgementView.rightAnchor.constraint(equalTo: bubbleView.contentView.rightAnchor),
+      ])
+    }
     updateBubbleHorizontalConstraint(for: bubbleTailSide)
     bubbleHorizontalConstraint?.isActive = true
   }

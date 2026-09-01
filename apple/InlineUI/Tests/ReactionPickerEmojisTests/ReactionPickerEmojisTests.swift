@@ -23,6 +23,16 @@ struct ReactionPickerEmojisTests {
     #expect(suggestions.count == ReactionPickerEmojis.defaultEmojis.count)
   }
 
+  @Test("legacy acknowledgement checks do not return as quick reactions")
+  func legacyAcknowledgementChecksAreExcluded() {
+    let suggestions = ReactionPickerEmojis.suggestions(
+      from: ["✔️": 100, "✓": 99, "🚀": 1],
+      limit: 3
+    )
+
+    #expect(suggestions == ["🚀", "🥹", "❤️"])
+  }
+
   @Test("default emojis are ranked by usage counts")
   func defaultEmojisAreRankedByUsageCounts() {
     let suggestions = ReactionPickerEmojis.suggestions(
