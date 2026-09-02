@@ -31,7 +31,9 @@ public final class LinkDetector: Sendable {
     // unreserved (A–Z a–z 0–9 -._~) and reserved characters (:/?#[]@!$&'()*+,;=%) until it hits
     // a whitespace character. This intentionally excludes angle brackets and other punctuation
     // that typically terminates URLs in plain text. Parentheses are allowed within URLs.
-    let pattern = "[A-Za-z][A-Za-z0-9+.-]*://[^\\s<>\\[\\]{}\"']+"
+    // Anchor once per scheme-shaped token so a failed match cannot retry every suffix. Group 1
+    // excludes any leading digits/punctuation and preserves the range returned by the old pattern.
+    let pattern = "(?<![A-Za-z0-9+.-])[0-9+.-]*([A-Za-z][A-Za-z0-9+.-]*://[^\\s<>\\[\\]{}\"']+)"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
 
@@ -113,7 +115,9 @@ public final class LinkDetector: Sendable {
     // Require a word boundary (\b) immediately after the TLD so we don't match partial overlaps like
     // "test.srt" where "sr" would incorrectly satisfy the "sr" TLD. The boundary still allows
     // valid URL continuations such as whitespace or path/query characters (e.g. "/", "?", "#").
-    let pattern = "\\b[\\w-]+(?:\\.[\\w-]+)*\\.(\(tlds))\\b(?:/[^\\s<>()\\[\\]{}\"']*)?"
+    // The preceding-character policy below already rejects matches that start after a dot or hyphen.
+    // Enforce that boundary in the regex so an invalid dotted token is scanned only once.
+    let pattern = "(?<![\\w.-])\\b[\\w-]+(?:\\.[\\w-]+)*\\.(\(tlds))\\b(?:/[^\\s<>()\\[\\]{}\"']*)?"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
 
@@ -214,19 +218,21 @@ public final class LinkDetector: Sendable {
     let matches = Self.explicitSchemeURLRegex.matches(in: text, options: [], range: searchRange)
 
     return matches.compactMap { match in
+      let linkRange = match.range(at: 1)
+
       // Skip overlaps with already handled ranges
-      let overlaps = handledRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
+      let overlaps = handledRanges.contains { NSIntersectionRange($0, linkRange).length > 0 }
       guard !overlaps else { return nil }
 
-      var urlString = nsText.substring(with: match.range)
+      var urlString = nsText.substring(with: linkRange)
 
       // Trim common trailing punctuation that should not be part of the URL (e.g. ",", ".", "!")
       // For parentheses, only trim unmatched closing ones
       urlString = trimTrailingPunctuation(from: urlString)
 
       // Adjust range length if we trimmed characters
-      let trimmedCount = match.range.length - urlString.utf16.count
-      let adjustedRange = NSRange(location: match.range.location, length: match.range.length - trimmedCount)
+      let trimmedCount = linkRange.length - urlString.utf16.count
+      let adjustedRange = NSRange(location: linkRange.location, length: linkRange.length - trimmedCount)
 
       guard let url = URL(string: urlString), Self.isSupportedLinkURL(url) else {
         return nil

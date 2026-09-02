@@ -1,6 +1,5 @@
 
 import Testing
-
 @testable import TextProcessing
 
 @Suite("LinkDetector")
@@ -205,6 +204,46 @@ struct LinkDetectorTests {
 
     #expect(matches.count == 2, "Should detect both app deep links")
     #expect(matches.map(\.url.absoluteString) == [omnifocus, devonthink])
+  }
+
+  @Test("Preserves explicit links after scheme-token punctuation")
+  func preservesExplicitLinksAfterSchemeTokenPunctuation() {
+    let custom = "custom://resource"
+    let omnifocus = "omnifocus:///task/abc"
+    let text = "Open 9\(custom) and +\(omnifocus)"
+    let matches = detector.detectLinks(in: text)
+
+    #expect(matches.map(\.url.absoluteString) == [custom, omnifocus])
+    #expect(matches.map(\.range.location) == ["Open 9".utf16.count, "Open 9\(custom) and +".utf16.count])
+    #expect(matches.map(\.range.length) == [custom.utf16.count, omnifocus.utf16.count])
+  }
+
+  @Test("Keeps malformed bare-domain prefixes unlinked")
+  func keepsMalformedBareDomainPrefixesUnlinked() {
+    let matches = detector.detectLinks(in: "Do not link .example.com or -example.com.")
+    #expect(matches.isEmpty)
+  }
+
+  @Test("Scans long scheme-less tokens within the render budget")
+  func scansLongSchemeLessTokensWithinRenderBudget() {
+    let text = String(repeating: "a", count: 16_000)
+    let started = ContinuousClock.now
+    let matches = detector.detectLinks(in: text)
+    let elapsed = started.duration(to: .now)
+
+    #expect(matches.isEmpty)
+    #expect(elapsed < .seconds(2), "Link detection took \(elapsed)")
+  }
+
+  @Test("Scans long invalid dotted tokens within the render budget")
+  func scansLongInvalidDottedTokensWithinRenderBudget() {
+    let text = Array(repeating: "segment", count: 2_000).joined(separator: ".") + ".invalid"
+    let started = ContinuousClock.now
+    let matches = detector.detectLinks(in: text)
+    let elapsed = started.duration(to: .now)
+
+    #expect(matches.isEmpty)
+    #expect(elapsed < .seconds(2), "Link detection took \(elapsed)")
   }
 
   @Test("Does not detect Apple data detector pseudo URLs")
