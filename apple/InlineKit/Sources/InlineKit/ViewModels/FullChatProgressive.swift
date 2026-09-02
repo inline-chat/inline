@@ -238,6 +238,8 @@ public class MessagesProgressiveViewModel {
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
   private var loadedWindowMetadataGeneration: UInt64 = 0
+  private var reloadGeneration: UInt64 = 0
+  private var reloadTask: Task<Void, Never>?
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
@@ -420,6 +422,7 @@ public class MessagesProgressiveViewModel {
     switch update {
       case let .add(messageAdd):
         if messageAdd.peer == peer {
+          invalidatePendingReload()
           // Check if we have it to not add it again
           let existingIds = Set(messages.map(\.id))
           let newMessages = reapplyingPendingAcknowledgements(
@@ -460,6 +463,7 @@ public class MessagesProgressiveViewModel {
         }
 
         if messageDelete.peer == peer {
+          invalidatePendingReload()
           let deletedIndices = messages.enumerated()
             .filter { messageDelete.messageIds.contains($0.element.message.messageId) }
             .map(\.offset)
@@ -486,6 +490,7 @@ public class MessagesProgressiveViewModel {
         }
 
         if messageUpdate.peer == peer {
+          invalidatePendingReload()
           guard let index = messages.firstIndex(where: { $0.id == messageUpdate.message.id }) else {
             // not in our range
             return nil
@@ -499,6 +504,7 @@ public class MessagesProgressiveViewModel {
 
       case let .acknowledgements(change):
         guard change.peer == peer else { return nil }
+        invalidatePendingReload()
         var nextMessages = messages
         var updated: [FullMessage] = []
         var indices: [Int] = []
@@ -529,29 +535,115 @@ public class MessagesProgressiveViewModel {
         }
 
         if reloadPeer == self.peer {
-          if atBottom {
-            log.trace("Reloading messages at bottom")
-            // Since user is still at bottom and haven't moved this means we need to ignore the range and show them the
-            // latest messages
-            loadMessages(.limit(initialLimit))
-            // TODO: if new messages were added, we should animate adding them
-          } else if !historyCoverage.isAtCertifiedLiveEnd {
-            // A prepared around-target window can be disconnected from the
-            // live tail. The deferred latest repair publishes this reload;
-            // merge that repaired tail with the prepared island instead of
-            // querying the old date range again or discarding the target.
-            mergeLatestWindowFromLocal()
-          } else {
-            // 90/10 solution TODO: quick way to optimize is to check if updated messages are in the current range
-            // check if actually anything changed then post update
-            refetchCurrentRange()
-          }
-
-          return MessagesChangeSet.reload(animated: animated)
+          scheduleReload(animated: animated)
+          return nil
         }
     }
 
     return nil
+  }
+
+  private enum PublisherReloadMode: Sendable {
+    case replaceLatest(limit: Int)
+    case preserveRange(minDate: Date, maxDate: Date, limit: Int)
+    case mergeLatest(limit: Int)
+  }
+
+  private struct PublisherReloadSnapshot: Sendable {
+    let messages: [FullMessage]
+    let metadata: LoadedWindowMetadata
+  }
+
+  /// Publisher-driven reloads originate on MainActor, but their GRDB snapshot
+  /// must not. A generation fence prevents a delayed snapshot from overwriting
+  /// a newer incremental publication, pagination result, or reload request.
+  private func scheduleReload(animated: Bool?) {
+    let mode: PublisherReloadMode
+    if atBottom {
+      mode = .replaceLatest(limit: initialLimit)
+    } else if !historyCoverage.isAtCertifiedLiveEnd {
+      mode = .mergeLatest(limit: initialLimit)
+    } else {
+      mode = .preserveRange(minDate: minDate, maxDate: maxDate, limit: messages.count)
+    }
+
+    reloadGeneration &+= 1
+    let generation = reloadGeneration
+    reloadTask?.cancel()
+    let database = db
+    let peer = peer
+    let currentUserId = currentUserId
+    let reversed = reversed
+    let existingMessages = messages
+
+    reloadTask = Task { [weak self] in
+      do {
+        let snapshot = try await Self.publisherReloadSnapshot(
+          database: database,
+          peer: peer,
+          currentUserId: currentUserId,
+          reversed: reversed,
+          existingMessages: existingMessages,
+          mode: mode
+        )
+        guard !Task.isCancelled, let self, self.reloadGeneration == generation else { return }
+
+        self.messages = self.reapplyingPendingAcknowledgements(to: snapshot.messages)
+        self.updateRange()
+        let metadataRequest = self.beginLoadedWindowMetadataRequest()
+        _ = self.applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest)
+        self.reloadTask = nil
+        self.callback?(.reload(animated: animated))
+      } catch is CancellationError {
+        return
+      } catch {
+        guard !Task.isCancelled, let self, self.reloadGeneration == generation else { return }
+        self.reloadTask = nil
+        Log.shared.error("Failed to reload messages", error: error)
+      }
+    }
+  }
+
+  private func invalidatePendingReload() {
+    reloadGeneration &+= 1
+    reloadTask?.cancel()
+    reloadTask = nil
+  }
+
+  private nonisolated static func publisherReloadSnapshot(
+    database: AppDatabase,
+    peer: Peer,
+    currentUserId: Int64?,
+    reversed: Bool,
+    existingMessages: [FullMessage],
+    mode: PublisherReloadMode
+  ) async throws -> PublisherReloadSnapshot {
+    try await database.reader.read { db in
+      var query = baseQuery(for: peer, currentUserId: currentUserId)
+        .order(Column("date").desc, Column("messageId").desc)
+      switch mode {
+        case let .replaceLatest(limit), let .mergeLatest(limit):
+          query = query.limit(limit)
+        case let .preserveRange(minDate, maxDate, limit):
+          query = query
+            .filter(Column("date") >= minDate)
+            .filter(Column("date") <= maxDate)
+            .limit(limit)
+      }
+
+      let fetched = try query.fetchAll(db)
+      let normalized = reversed ? fetched : Array(fetched.reversed())
+      let messages = switch mode {
+        case .replaceLatest, .preserveRange:
+          normalized
+        case .mergeLatest:
+          mergingLatestMessages(existing: existingMessages, latest: normalized, reversed: reversed)
+      }
+      return PublisherReloadSnapshot(
+        messages: messages,
+        metadata: try loadedWindowMetadata(db, peer: peer, messages: messages)
+      )
+    }
   }
 
   private func reapplyingPendingAcknowledgements(to message: FullMessage) -> FullMessage {
@@ -982,26 +1074,8 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  private func refetchCurrentRange() {
-    loadMessages(.preserveRange)
-  }
-
-  private func mergeLatestWindowFromLocal() {
-    do {
-      let latest = try fetchMessages(loadMode: .limit(initialLimit), previousCount: messages.count)
-      messages = reapplyingPendingAcknowledgements(
-        to: Self.mergingLatestMessages(existing: messages, latest: latest, reversed: reversed)
-      )
-      updateRange()
-      updateLoadedWindowMetadata()
-    } catch {
-      Log.shared.error("Failed to merge repaired latest message window", error: error)
-    }
-  }
-
   private enum LoadMode {
     case limit(Int)
-    case preserveRange
   }
 
   private func buildAdditionalLoadRequest(direction: MessagesLoadDirection) -> AdditionalLoadRequest {
@@ -1034,13 +1108,6 @@ public class MessagesProgressiveViewModel {
     switch loadMode {
       case let .limit(limit):
         query = query.limit(limit)
-
-      case .preserveRange:
-        query =
-          query
-            .filter(Column("date") >= minDate)
-            .filter(Column("date") <= maxDate)
-            .limit(previousCount)
     }
 
     return query
@@ -1257,8 +1324,6 @@ public class MessagesProgressiveViewModel {
     switch loadMode {
       case let .limit(limit):
         "limit(\(limit))"
-      case .preserveRange:
-        "preserveRange"
     }
   }
 

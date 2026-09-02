@@ -395,6 +395,67 @@ struct MessagesProgressiveViewModelOrderingTests {
     #expect(descending.map(\.message.messageId) == [100, 90, 50, 40])
   }
 
+  @Test("publisher reload defers its database snapshot off the synchronous MainActor publication")
+  @MainActor
+  func testPublisherReloadIsAsynchronous() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let database = try AppDatabase(queue)
+    let publisher = MessagesPublisher(database: database)
+    try await queue.write { (db: Database) throws in
+      try User(id: 1, email: "reload@example.com", firstName: "Reload").insert(db)
+      try Chat(
+        id: 1,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Reload",
+        spaceId: nil,
+        lastMsgId: 1
+      ).insert(db)
+      var message = Message(
+        messageId: 1,
+        fromId: 1,
+        date: Date(timeIntervalSince1970: 1),
+        text: "Reloaded",
+        peerUserId: nil,
+        peerThreadId: 1,
+        chatId: 1
+      )
+      try message.saveMessage(db)
+      try MessageHistoryCoverageStore.subtract(
+        db,
+        chatId: 1,
+        lowerId: 1,
+        upperId: MessageHistoryHole.positiveMessageIDMax
+      )
+    }
+
+    let viewModel = MessagesProgressiveViewModel(
+      peer: .thread(id: 1),
+      initialState: .init(
+        messages: [],
+        loadedWindowMetadata: .init(messages: [], holes: [])
+      ),
+      database: database,
+      publisher: publisher,
+      currentUserId: 1
+    )
+    var didReload = false
+    viewModel.observe { change in
+      if case .reload = change { didReload = true }
+    }
+
+    publisher.messagesReload(peer: .thread(id: 1), animated: false)
+    #expect(!didReload)
+    #expect(viewModel.messages.isEmpty)
+
+    for _ in 0 ..< 100 where !didReload {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(didReload)
+    #expect(viewModel.messages.map(\.message.messageId) == [1])
+    #expect(viewModel.historyCoverage.isAtCertifiedLiveEnd)
+  }
+
   @Test("stale generation or window fingerprint cannot overwrite newer metadata")
   @MainActor
   func testStaleWindowMetadataIsRejected() {
