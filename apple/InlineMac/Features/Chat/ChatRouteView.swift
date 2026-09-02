@@ -182,9 +182,23 @@ struct ChatRouteView: View {
       .toolbar {
         let mainItem =
           MacToolbarItem(placement: .navigation, priority: .high, label: "") {
-            ChatRouteTitleBar(peer: peer, db: db, contextSpaceId: nav.selectedSpaceId) { title in
-              navigationTitle = title
-            }
+            ChatRouteTitleBar(
+              peer: peer,
+              db: db,
+              contextSpaceId: nav.selectedSpaceId,
+              agentThreadToolbarModel: agentThreadToolbarModel,
+              updateAgentContext: { context in
+                _ = try await dependencies.realtimeV2.send(.updateChatInfo(
+                  chatID: agentThreadToolbarModel.chatID,
+                  title: nil,
+                  emoji: nil,
+                  agentContext: context
+                ))
+              },
+              onTitleChange: { title in
+                navigationTitle = title
+              }
+            )
             .macToolbarLayout(toolbarLayout)
             .id(peer.toString())
             .modifier(ChatToolbarTranslationPresentations(
@@ -216,28 +230,6 @@ struct ChatRouteView: View {
 
         if #available(macOS 26.0, *) {
           ToolbarSpacer(.flexible)
-        }
-
-        if agentThreadToolbarModel.presentation != nil {
-          ToolbarItem {
-            AgentThreadToolbarIndicator(
-              model: agentThreadToolbarModel,
-              update: { context in
-                _ = try await dependencies.realtimeV2.send(.updateChatInfo(
-                  chatID: agentThreadToolbarModel.chatID,
-                  title: nil,
-                  emoji: nil,
-                  agentContext: context
-                ))
-              }
-            )
-            .macToolbarLayout(toolbarLayout)
-            .id("agent-context-\(peer.toString())")
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
         }
 
         if botPresenceController.toolbarItem(for: peer) != nil {

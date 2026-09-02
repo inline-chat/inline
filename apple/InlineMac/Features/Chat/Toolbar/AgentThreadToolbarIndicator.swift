@@ -401,16 +401,19 @@ struct AgentThreadToolbarIndicator: View {
           )
         }
       } label: {
-        HStack(spacing: 5) {
-          UserAvatar(userInfo: presentation.userInfo, size: 16)
+        HStack(spacing: 4) {
+          UserAvatar(userInfo: presentation.userInfo, size: 14)
           Text(presentation.name)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
             .lineLimit(1)
+            .truncationMode(.tail)
         }
+        .frame(maxWidth: 120, alignment: .leading)
       }
       .menuStyle(.button)
       .buttonStyle(.plain)
       .menuIndicator(.hidden)
-      .fixedSize(horizontal: true, vertical: true)
       .help(tooltip(presentation))
       .accessibilityLabel("Agent session: \(presentation.name)")
     }
@@ -437,7 +440,7 @@ private struct AgentThreadConfigurationSubmenu: View {
       selectionButton(label: "Provider default", id: nil)
       if !options.isEmpty { Divider() }
       ForEach(options) { option in
-        selectionButton(label: option.menuTitle, id: option.id)
+        selectionButton(label: option.label, id: option.id)
           .help(option.description ?? option.label)
       }
     }
@@ -469,7 +472,7 @@ private struct AgentThreadModelSubmenu: View {
       selectionButton(label: "Provider default", id: nil)
       if !options.isEmpty { Divider() }
       ForEach(options) { option in
-        selectionButton(label: option.menuTitle, id: option.id)
+        selectionButton(label: option.label, id: option.id)
           .help(option.description ?? option.label)
       }
     }
@@ -486,20 +489,5 @@ private struct AgentThreadModelSubmenu: View {
         Text(label)
       }
     }
-  }
-}
-
-
-private extension AgentConfigurationOption {
-  var menuTitle: String {
-    guard let description, !description.isEmpty else { return label }
-    return "\(label) — \(description.prefix(80))"
-  }
-}
-
-private extension AgentModelConfigurationOption {
-  var menuTitle: String {
-    guard let description, !description.isEmpty else { return label }
-    return "\(label) — \(description.prefix(80))"
   }
 }

@@ -1,13 +1,16 @@
 import AppKit
 import InlineKit
-import InlineUI
 import InlineMacUI
+import InlineProtocol
+import InlineUI
 import Observation
 import SwiftUI
 
 struct ChatRouteTitleBar: View {
-  let peer: Peer
+  let peer: InlineKit.Peer
   let contextSpaceId: Int64?
+  @ObservedObject var agentThreadToolbarModel: AgentThreadToolbarModel
+  let updateAgentContext: (InlineProtocol.AgentThreadContext) async throws -> Void
   let onTitleChange: (String) -> Void
 
   @Environment(\.dependencies) private var dependencies
@@ -20,13 +23,17 @@ struct ChatRouteTitleBar: View {
   @FocusState private var isTitleFocused: Bool
 
   init(
-    peer: Peer,
+    peer: InlineKit.Peer,
     db: AppDatabase,
     contextSpaceId: Int64? = nil,
+    agentThreadToolbarModel: AgentThreadToolbarModel,
+    updateAgentContext: @escaping (InlineProtocol.AgentThreadContext) async throws -> Void,
     onTitleChange: @escaping (String) -> Void = { _ in }
   ) {
     self.peer = peer
     self.contextSpaceId = contextSpaceId
+    self.agentThreadToolbarModel = agentThreadToolbarModel
+    self.updateAgentContext = updateAgentContext
     self.onTitleChange = onTitleChange
     _model = State(initialValue: ChatRouteToolbarTitleModel(
       peer: peer,
@@ -44,11 +51,7 @@ struct ChatRouteTitleBar: View {
       VStack(alignment: .leading, spacing: 0) {
         titleView
 
-        if model.status.text != nil {
-          statusView(model.status)
-        } else if let breadcrumb = model.breadcrumb {
-          breadcrumbView(breadcrumb, reference: model.reference)
-        }
+        subtitleView
       }
       .frame(minWidth: 0, alignment: .leading)
       .layoutPriority(1)
@@ -81,6 +84,39 @@ struct ChatRouteTitleBar: View {
     }
     .onDisappear {
       unregisterRenameCommand()
+    }
+  }
+
+  @ViewBuilder
+  private var subtitleView: some View {
+    if agentThreadToolbarModel.presentation != nil {
+      HStack(spacing: 4) {
+        AgentThreadToolbarIndicator(
+          model: agentThreadToolbarModel,
+          update: updateAgentContext
+        )
+
+        if model.status.text != nil || model.breadcrumb != nil {
+          Text("•")
+            .font(.system(size: toolbarLayout.subtitleFontSize))
+            .foregroundStyle(.tertiary)
+        }
+
+        secondarySubtitle(breadcrumbOffset: 0)
+      }
+      .lineLimit(1)
+    } else {
+      secondarySubtitle(breadcrumbOffset: -5)
+    }
+  }
+
+  @ViewBuilder
+  private func secondarySubtitle(breadcrumbOffset: CGFloat) -> some View {
+    if model.status.text != nil {
+      statusView(model.status)
+    } else if let breadcrumb = model.breadcrumb {
+      breadcrumbView(breadcrumb, reference: model.reference)
+        .offset(x: breadcrumbOffset)
     }
   }
 
@@ -215,7 +251,6 @@ struct ChatRouteTitleBar: View {
       }
     }
     .lineLimit(1)
-    .offset(x: -5)
   }
 
   private func copyReference(_ reference: ThreadReference) {

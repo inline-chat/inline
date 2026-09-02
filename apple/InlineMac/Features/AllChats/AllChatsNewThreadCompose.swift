@@ -21,20 +21,6 @@ struct AllChatsAgentChoice: Identifiable, Equatable {
   var id: String {
     "\(bot.id):\(agent?.id ?? 0)"
   }
-
-  var botName: String {
-    InlineKit.User(from: bot).displayName
-  }
-
-  var title: String {
-    let name = agent?.name.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let name, !name.isEmpty { return name }
-    return botName
-  }
-
-  var subtitle: String? {
-    agent == nil ? nil : "via \(botName)"
-  }
 }
 
 private struct AllChatsAgentMentionTarget: Equatable {
@@ -173,7 +159,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private var lastSpaceVisibility: NewThreadComposeDestination.SpaceVisibility
   private var accessMentions = AllChatsComposeAccessMentions()
   private var mentionedAgentTargets: [AllChatsAgentMentionTarget] = []
-  private var hasExplicitAgentSelection = false
+  private var agentCatalogTask: Task<Void, Never>?
   private var cancellables = Set<AnyCancellable>()
 
   init(
@@ -237,10 +223,6 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   var selectedAgentChoice: AllChatsAgentChoice? {
     agentChoices.first { $0.id == selectedAgentChoiceID }
-  }
-
-  var agentTitle: String {
-    selectedAgentChoice?.title ?? "Agent"
   }
 
   var projectTitle: String {
@@ -350,26 +332,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         return MentionableBotAgent(agent: agent, botUserInfo: userInfo)
       })
       applyFirstAgentMentionIfNeeded()
-      if let selectedAgentChoiceID,
-         !choices.contains(where: { $0.id == selectedAgentChoiceID })
-      {
-        selectAgent(nil)
-      }
     } catch {
       log.error("Could not load Agent choices", error: error)
     }
-  }
-
-  func selectAgent(_ choice: AllChatsAgentChoice?, explicitly: Bool = true) {
-    if explicitly { hasExplicitAgentSelection = true }
-    guard selectedAgentChoiceID != choice?.id else { return }
-    selectedAgentChoiceID = choice?.id
-    selectedProjectID = nil
-    selectedModelID = nil
-    selectedReasoningID = nil
-    agentCatalog = nil
-    guard let choice else { return }
-    Task { await loadCatalog(botUserID: choice.bot.id) }
   }
 
   func selectProject(_ id: String?) {
@@ -461,29 +426,67 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   private func applyFirstAgentMentionIfNeeded() {
-    guard !hasExplicitAgentSelection else { return }
-    let choice = mentionedAgentTargets.lazy.compactMap { target in
+    let choice = firstMentionedAgentChoice
+    guard selectedAgentChoiceID != choice?.id || agentCatalog == nil else { return }
+
+    agentCatalogTask?.cancel()
+    clearAgentSelection()
+    guard let choice else { return }
+
+    agentCatalogTask = Task { [weak self] in
+      guard let self else { return }
+      if let cached = await AgentConfigurationCatalogStore.shared.cached(botUserID: choice.bot.id),
+         !Task.isCancelled,
+         isCurrentMention(choice) {
+        applyAgentSelection(choice, catalog: cached)
+      }
+
+      do {
+        let refreshed = try await AgentConfigurationCatalogStore.shared.refresh(botUserID: choice.bot.id)
+        guard !Task.isCancelled, isCurrentMention(choice) else { return }
+        if let refreshed {
+          applyAgentSelection(choice, catalog: refreshed)
+        } else {
+          clearAgentSelection()
+        }
+      } catch {
+        guard !Task.isCancelled else { return }
+        log.error("Could not refresh Agent configuration catalog", error: error)
+      }
+    }
+  }
+
+  private var firstMentionedAgentChoice: AllChatsAgentChoice? {
+    mentionedAgentTargets.lazy.compactMap { target in
       self.agentChoices.first { choice in
         choice.bot.id == target.botUserID && choice.agent?.id == target.agentID
       }
     }.first
-    selectAgent(choice, explicitly: false)
   }
 
-  private func loadCatalog(botUserID: Int64) async {
-    if let cached = await AgentConfigurationCatalogStore.shared.cached(botUserID: botUserID),
-       selectedAgentChoice?.bot.id == botUserID
-    {
-      agentCatalog = cached
+  private func isCurrentMention(_ choice: AllChatsAgentChoice) -> Bool {
+    firstMentionedAgentChoice?.id == choice.id
+  }
+
+  private func applyAgentSelection(
+    _ choice: AllChatsAgentChoice,
+    catalog: AgentConfigurationCatalogSnapshot
+  ) {
+    if selectedAgentChoiceID != choice.id {
+      selectedProjectID = nil
+      selectedModelID = nil
+      selectedReasoningID = nil
     }
-    do {
-      let refreshed = try await AgentConfigurationCatalogStore.shared.refresh(botUserID: botUserID)
-      if selectedAgentChoice?.bot.id == botUserID {
-        agentCatalog = refreshed
-      }
-    } catch {
-      log.error("Could not refresh Agent configuration catalog", error: error)
-    }
+    selectedAgentChoiceID = choice.id
+    agentCatalog = catalog
+  }
+
+  private func clearAgentSelection() {
+    selectedAgentChoiceID = nil
+    agentCatalog = nil
+    selectedProjectID = nil
+    selectedModelID = nil
+    selectedReasoningID = nil
   }
 
   private func selectedLabel(
@@ -1166,7 +1169,6 @@ private struct AllChatsComposeAccessoryView: View {
       .menuStyle(.button)
       .buttonStyle(.plain)
       .menuIndicator(.hidden)
-      .fixedSize(horizontal: true, vertical: true)
       .disabled(model.isSubmitting || model.isDestinationLocked)
       .inlineTooltip(
         verbatim: String(localized: "Thread destination"),
@@ -1179,7 +1181,6 @@ private struct AllChatsComposeAccessoryView: View {
           AllChatsComposePillLabel(title: model.isPublic ? "Public" : "Private")
         }
         .buttonStyle(.plain)
-        .fixedSize(horizontal: true, vertical: true)
         .disabled(model.isSubmitting)
         .inlineTooltip(
           verbatim: model.visibilityTooltipTitle,
@@ -1187,36 +1188,6 @@ private struct AllChatsComposeAccessoryView: View {
           placement: tooltipPlacement
         )
         .transition(.opacity)
-      }
-
-      if !model.agentChoices.isEmpty {
-        Menu {
-          Button("No Agent") { model.selectAgent(nil) }
-          Divider()
-          ForEach(model.agentChoices) { choice in
-            Button {
-              model.selectAgent(choice)
-            } label: {
-              if model.selectedAgentChoiceID == choice.id {
-                Label(choice.subtitle.map { "\(choice.title) — \($0)" } ?? choice.title, systemImage: "checkmark")
-              } else {
-                Text(choice.subtitle.map { "\(choice.title) — \($0)" } ?? choice.title)
-              }
-            }
-          }
-        } label: {
-          AllChatsComposePillLabel(title: model.agentTitle)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize(horizontal: true, vertical: true)
-        .disabled(model.isSubmitting)
-        .inlineTooltip(
-          verbatim: String(localized: "Agent"),
-          description: String(localized: "Bind this new thread to one Agent. The thread gets its own session."),
-          placement: tooltipPlacement
-        )
       }
 
       if let projects = model.agentCatalog?.projects {
@@ -1291,9 +1262,9 @@ private struct AgentConfigurationMenu: View {
           select(option.id)
         } label: {
           if selection == option.id {
-            Label(option.menuTitle, systemImage: "checkmark")
+            Label(option.label, systemImage: "checkmark")
           } else {
-            Text(option.menuTitle)
+            Text(option.label)
           }
         }
         .help(option.description ?? option.label)
@@ -1304,7 +1275,6 @@ private struct AgentConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
-    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: tooltipTitle,
@@ -1332,9 +1302,9 @@ private struct AgentModelConfigurationMenu: View {
           select(option.id)
         } label: {
           if selection == option.id {
-            Label(option.menuTitle, systemImage: "checkmark")
+            Label(option.label, systemImage: "checkmark")
           } else {
-            Text(option.menuTitle)
+            Text(option.label)
           }
         }
         .help(option.description ?? option.label)
@@ -1345,27 +1315,12 @@ private struct AgentModelConfigurationMenu: View {
     .menuStyle(.button)
     .buttonStyle(.plain)
     .menuIndicator(.hidden)
-    .fixedSize(horizontal: true, vertical: true)
     .disabled(isDisabled)
     .inlineTooltip(
       verbatim: "Model",
       description: "Choose the provider model for this thread only.",
       placement: tooltipPlacement
     )
-  }
-}
-
-private extension AgentConfigurationOption {
-  var menuTitle: String {
-    guard let description, !description.isEmpty else { return label }
-    return "\(label) — \(description.prefix(80))"
-  }
-}
-
-private extension AgentModelConfigurationOption {
-  var menuTitle: String {
-    guard let description, !description.isEmpty else { return label }
-    return "\(label) — \(description.prefix(80))"
   }
 }
 
@@ -1380,8 +1335,8 @@ private struct AllChatsComposePillLabel: View {
       .foregroundStyle(.secondary)
       .lineLimit(1)
       .truncationMode(.tail)
-      .frame(maxWidth: 144, alignment: .leading)
       .padding(.horizontal, 8)
+      .frame(maxWidth: 112, alignment: .leading)
       .frame(height: 24)
       .background {
         Capsule()
