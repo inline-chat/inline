@@ -199,6 +199,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     restoresActiveSpace: Bool = true,
     appliesDefaultFrame: Bool = true
   ) {
+    let launchSpan = PerformanceTrace.begin("MainWindowControllerInit", category: .launch)
+    defer { launchSpan.end() }
+
     let windowID = UUID()
     self.windowID = windowID
     self.dependencies = dependencies
@@ -247,6 +250,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   }
 
   override func showWindow(_ sender: Any?) {
+    let span = PerformanceTrace.begin("MainWindowOrderFront", category: .launch)
+    defer { span.end() }
     super.showWindow(sender)
     window?.makeKeyAndOrderFront(sender)
     appBridge.activate(ignoringOtherApps: true)
@@ -287,6 +292,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func windowDidBecomeKey(_ notification: Notification) {
+    PerformanceTrace.event("MainWindowBecameKey", category: .launch)
     // Focusing an older window makes its space the source for the next new window.
     nav3.persistActiveSpaceSelection()
   }
@@ -358,6 +364,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
   }
 
   private func installContent() {
+    let span = PerformanceTrace.begin("MainWindowInstallContent", category: .launch)
+    defer { span.end() }
+
     let root = MainWindowRootView(
       nav3: nav3,
       initialTopLevelRoute: dependencies.viewModel.topLevelRoute,

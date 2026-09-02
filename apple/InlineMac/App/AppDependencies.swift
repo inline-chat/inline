@@ -10,27 +10,41 @@ import SwiftUI
 import os.signpost
 
 @MainActor
+private func tracedLaunchDependency<Value>(
+  _ name: StaticString,
+  _ make: () -> Value
+) -> Value {
+  let span = PerformanceTrace.begin(name, category: .launch)
+  defer { span.end() }
+  return make()
+}
+
+@MainActor
 public struct AppDependencies {
   var appBridge: AppBridge
-  let auth = Auth.shared
-  let viewModel = MainWindowViewModel()
-  var overlay = OverlayManager()
-  let cliInstaller = CLIInstallerController()
+  let auth = tracedLaunchDependency("DependencyAuth") { Auth.shared }
+  let viewModel = tracedLaunchDependency("DependencyMainWindowModel") { MainWindowViewModel() }
+  var overlay = tracedLaunchDependency("DependencyOverlay") { OverlayManager() }
+  let cliInstaller = tracedLaunchDependency("DependencyCLIInstaller") { CLIInstallerController() }
 #if SPARKLE
-  let updates = UpdateController()
+  let updates = tracedLaunchDependency("DependencyUpdater") { UpdateController() }
 #endif
-  let navigation = NavigationModel.shared
-  let transactions = Transactions.shared
-  let realtime = Realtime.shared
-  let realtimeV2 = Api.realtime
-  let database = AppDatabase.shared
-  let data = DataManager(database: AppDatabase.shared)
-  let session = MainWindowSessionRefresher()
-  let unreadCounts = UnreadCountsModel.shared
-  let userSettings = INUserSettings.current
-  let gridRuntime = GridRuntime.shared
-  let commandBarCatalog = CommandBarCatalogService(database: AppDatabase.shared)
-  let appUndo = AppUndoHistory()
+  let navigation = tracedLaunchDependency("DependencyNavigation") { NavigationModel.shared }
+  let transactions = tracedLaunchDependency("DependencyTransactions") { Transactions.shared }
+  let realtime = tracedLaunchDependency("DependencyRealtimeLegacy") { Realtime.shared }
+  let realtimeV2 = tracedLaunchDependency("DependencyRealtimeV2") { Api.realtime }
+  let database = tracedLaunchDependency("DependencyDatabase") { AppDatabase.shared }
+  let data = tracedLaunchDependency("DependencyDataManager") {
+    DataManager(database: AppDatabase.shared)
+  }
+  let session = tracedLaunchDependency("DependencySessionRefresher") { MainWindowSessionRefresher() }
+  let unreadCounts = tracedLaunchDependency("DependencyUnreadCounts") { UnreadCountsModel.shared }
+  let userSettings = tracedLaunchDependency("DependencyUserSettings") { INUserSettings.current }
+  let gridRuntime = tracedLaunchDependency("DependencyGridRuntime") { GridRuntime.shared }
+  let commandBarCatalog = tracedLaunchDependency("DependencyCommandCatalog") {
+    CommandBarCatalogService(database: AppDatabase.shared)
+  }
+  let appUndo = tracedLaunchDependency("DependencyUndo") { AppUndoHistory() }
   var grid: GridRoomService { gridRuntime.rooms }
 
   // Per window
@@ -414,6 +428,8 @@ final class MainWindowSessionRefresher {
       }
       if self?.didFetchCurrentUser == false {
         do {
+          let span = PerformanceTrace.begin("InitialGetMe", category: .launch)
+          defer { span.end() }
           try await realtime.send(.getMe())
           guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
             return
@@ -468,6 +484,8 @@ final class MainWindowSessionRefresher {
           return
         }
         do {
+          let span = PerformanceTrace.begin("InitialGetChats", category: .launch)
+          defer { span.end("attempt=\(attempt)") }
           try Task.checkCancellation()
           let expectedUserState = try await GRDBSyncStorage(db: dependencies.database)
             .getBucketState(for: .user)

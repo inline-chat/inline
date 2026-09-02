@@ -559,6 +559,11 @@ final class SidebarViewModel {
       )
       if nextReady {
         sourceBindStartedAt = nil
+        PerformanceTrace.event(
+          "SidebarModelReadyForLaunch",
+          category: .launch,
+          "active=\(activeItems.count) archived=\(archivedItems.count) temporary=\(temporaryItems.count)"
+        )
         os_signpost(
           .event,
           log: Self.signposts,

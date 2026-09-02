@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import Logger
 import SwiftUI
 
 /// Main app window
@@ -38,6 +39,9 @@ struct MainWindowRootView: View {
     keyMonitor: KeyMonitor,
     windowID: UUID = UUID()
   ) {
+    let span = PerformanceTrace.begin("MainWindowRootInit", category: .launch)
+    defer { span.end() }
+
     self.nav3 = nav3
     self.chatOpenPreloader = chatOpenPreloader
     self.keyMonitor = keyMonitor
@@ -94,6 +98,7 @@ struct MainWindowRootView: View {
     }
     .nativeWindowTab(title: nativeTab.title, icon: nativeTab.iconPeer)
     .onAppear {
+      PerformanceTrace.event("MainWindowRootAppear", category: .launch)
       syncTopLevelRoute(viewModel.topLevelRoute)
       nativeTab.update(peer: currentSelectedPeer)
       syncCurrentPeer()
@@ -452,6 +457,7 @@ private struct MainWindowRoot: View {
     }
     .modifier(ForwardMessagesPresentation(dependencies: dependencies))
     .onAppear {
+      PerformanceTrace.event("MainWindowMainRouteAppear", category: .launch)
       updateWindowMinSize()
     }
     .onChange(of: isSidebarCollapsed) { _, _ in

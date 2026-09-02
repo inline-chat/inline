@@ -1882,6 +1882,11 @@ final class SidebarCollectionBodyController: NSViewController {
       let now = ProcessInfo.processInfo.systemUptime
       if firstCompletedAt == nil {
         firstCompletedAt = now
+        PerformanceTrace.event(
+          "SidebarInitialSceneSettled",
+          category: .launch,
+          "rows=\(presentation.rows.count)"
+        )
       } else if let firstCompletedAt,
                 now - firstCompletedAt < 1,
                 let previousIDs = lastCompletedStructuralIDs,
