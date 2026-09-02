@@ -213,8 +213,10 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
   func consumeNestedHorizontalScroll(_ event: NSEvent) -> Bool {
     guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else { return false }
     let point = convert(event.locationInWindow, from: nil)
+    // NSView.hitTest receives a point in the receiver's superview coordinates.
+    let pointInSuperview = convert(point, to: superview)
     guard bounds.contains(point),
-          var candidate = hitTest(convert(point, to: superview)) else { return false }
+          var candidate = hitTest(pointInSuperview) else { return false }
     while candidate !== self {
       // Native nested scroll views already applied AppKit's natural direction,
       // momentum, and edge behavior. If the event continues up the responder

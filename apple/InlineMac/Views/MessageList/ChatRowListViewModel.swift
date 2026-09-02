@@ -194,6 +194,10 @@ final class ChatRowListViewModel {
     rowIdxByMsgId[id]
   }
 
+  func rowIndexes(forMessageStableId id: Int64) -> IndexSet {
+    rowIdxsByMsgId[id] ?? []
+  }
+
   // MARK: - Update Handling
 
   private func applyAdded(_ added: [FullMessage]) -> UpdateKind {

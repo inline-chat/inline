@@ -1443,20 +1443,19 @@ class MessageListAppKit: NSViewController {
     guard !isDisposed,
           AppSettings.shared.richContentRendererEnabled,
           let stableID = notification.userInfo?["messageStableID"] as? Int64,
-          stableID != 0,
-          let row = chatRows.rowIndex(forMessageStableId: stableID),
-          row >= 0,
-          row < tableView.numberOfRows
+          stableID != 0
     else { return }
 
-    let rows = IndexSet(integer: row)
+    let rows = chatRows.rowIndexes(forMessageStableId: stableID)
+    guard let lastRow = rows.last, lastRow < tableView.numberOfRows else { return }
+
     NSAnimationContext.runAnimationGroup { [weak self] context in
       guard let self else { return }
       // A moving header can leave NSButton's tracking rect between mouse-down
       // and mouse-up when the next disclosure is clicked quickly.
       let isDisclosureToggle = notification.object is RichBlockLocalStateStore
       context.duration = isDisclosureToggle || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.16
-      MessageGestureTrace.debug("MessageList.richLayout row=\(row) disclosure=\(isDisclosureToggle) duration=\(context.duration)")
+      MessageGestureTrace.debug("MessageList.richLayout rows=\(rows) disclosure=\(isDisclosureToggle) duration=\(context.duration)")
       // Do not wrap a reload plus height invalidation in begin/endUpdates.
       // AppKit applies the height delta twice to the reloaded cell, leaving
       // its hit-test bounds smaller or larger than the visible message row.
