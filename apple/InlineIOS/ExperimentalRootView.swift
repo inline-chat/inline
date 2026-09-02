@@ -550,11 +550,9 @@ private struct ExperimentalAuthedRootView: View {
         ExperimentalSearchView(
           query: $searchQuery,
           focusRequested: $searchFocusRequested,
-          interactionRevision: $searchInteractionRevision,
           isActivePresentation: isSearchActivePresentation,
           activeSpaceId: nav.activeSpaceId,
           onFocusChanged: searchFocusChanged,
-          onBeginDeferredResult: beginDeferredSearchResult,
           onClose: closeSearch,
           onOpenResult: openSearchResult
         )
@@ -660,12 +658,6 @@ private struct ExperimentalAuthedRootView: View {
     if !isFocused {
       completePendingSearchExit()
     }
-  }
-
-  private func beginDeferredSearchResult() -> Int {
-    searchInteractionRevision &+= 1
-    pendingSearchExit = nil
-    return searchInteractionRevision
   }
 
   private func closeSearch() {

@@ -312,16 +312,7 @@ struct ChatView: View {
     ) { notification in
       guard canHandleGlobalNavigation else { return }
       if let userId = notification.userInfo?["userId"] as? Int64 {
-        Task {
-          // TODO: hacky
-          do {
-            let peer = try await data.createPrivateChat(userId: userId)
-            guard canHandleGlobalNavigation else { return }
-            router.openPrimaryDestination(.chat(peer: peer))
-          } catch {
-            Log.shared.error("Failed to create private chat for mention", error: error)
-          }
-        }
+        router.openPrimaryDestination(.chat(peer: .user(id: userId)))
       }
     }
     .onReceive(

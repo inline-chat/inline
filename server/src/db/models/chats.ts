@@ -66,29 +66,36 @@ async function createUserChatAndDialog(input: {
     throw ModelError.ChatInvalid
   }
 
-  let minUserId = Math.min(input.peerUserId, input.currentUserId)
-  let maxUserId = Math.max(input.peerUserId, input.currentUserId)
+  const minUserId = Math.min(input.peerUserId, input.currentUserId)
+  const maxUserId = Math.max(input.peerUserId, input.currentUserId)
 
   const result = await db.transaction(async (tx) => {
     let chat: DbChat | undefined
     let createdChat = false
 
-    // Check if already a chat, fetch it
     chat = await tx._query.chats.findFirst({
       where: and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)),
     })
 
     if (!chat) {
-      createdChat = true
-      // Create chat
-      ;[chat] = await tx
+      const [insertedChat] = await tx
         .insert(chats)
         .values({
           type: "private",
           minUserId,
           maxUserId,
         })
+        .onConflictDoNothing({ target: [chats.minUserId, chats.maxUserId] })
         .returning()
+
+      chat = insertedChat
+      createdChat = insertedChat !== undefined
+    }
+
+    if (!chat) {
+      chat = await tx._query.chats.findFirst({
+        where: and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)),
+      })
     }
 
     if (!chat) {
@@ -107,7 +114,7 @@ async function createUserChatAndDialog(input: {
         openDefaults.open === true
           ? await dialogOrderForPlacement(tx, input.currentUserId, defaultDialogOpenPlacement)
           : undefined
-      ;[dialog] = await tx
+      const [insertedDialog] = await tx
         .insert(dialogs)
         .values({
           chatId: chat.id,
@@ -116,7 +123,16 @@ async function createUserChatAndDialog(input: {
           ...openDefaults,
           order,
         })
+        .onConflictDoNothing({ target: [dialogs.chatId, dialogs.userId] })
         .returning()
+
+      dialog = insertedDialog
+    }
+
+    if (!dialog) {
+      dialog = await tx._query.dialogs.findFirst({
+        where: and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, input.currentUserId)),
+      })
     }
 
     if (!dialog) {

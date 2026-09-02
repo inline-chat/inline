@@ -1,10 +1,8 @@
 import InlineKit
-import Logger
 import SwiftUI
 
 struct EmptyHomeView: View {
   @EnvironmentObject private var nav: Navigation
-  @EnvironmentObject private var dataManager: DataManager
   var body: some View {
     VStack(spacing: 8) {
       Text("🫙")
@@ -47,13 +45,6 @@ struct EmptyHomeView: View {
   }
 
   private func navigateToUser(_ userId: Int64) {
-    Task {
-      do {
-        let peer = try await dataManager.createPrivateChat(userId: userId)
-        nav.push(.chat(peer: peer))
-      } catch {
-        Log.shared.error("Failed to create chat", error: error)
-      }
-    }
+    nav.push(.chat(peer: .user(id: userId)))
   }
 }

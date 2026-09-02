@@ -1,12 +1,10 @@
 import InlineKit
-import Logger
 import SwiftUI
 
 struct EmptyChatsView: View {
   let isArchived: Bool
 
   @EnvironmentObject private var nav: Navigation
-  @EnvironmentObject private var dataManager: DataManager
   @State private var isVisible = false
 
   var body: some View {
@@ -79,13 +77,6 @@ struct EmptyChatsView: View {
   }
 
   private func navigateToUser(_ userId: Int64) {
-    Task {
-      do {
-        let peer = try await dataManager.createPrivateChat(userId: userId)
-        nav.push(.chat(peer: peer))
-      } catch {
-        Log.shared.error("Failed to create chat", error: error)
-      }
-    }
+    nav.push(.chat(peer: .user(id: userId)))
   }
 }

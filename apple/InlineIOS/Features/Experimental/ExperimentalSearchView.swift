@@ -1,47 +1,38 @@
 import InlineKit
 import InlineSearch
 import InlineUI
-import Logger
 import RealtimeV2
 import SwiftUI
 
 struct ExperimentalSearchView: View {
   @Binding private var query: String
   @Binding private var focusRequested: Bool
-  @Binding private var interactionRevision: Int
   let isActivePresentation: Bool
   let activeSpaceId: Int64?
   let onFocusChanged: (Bool) -> Void
-  let onBeginDeferredResult: () -> Int
   let onClose: () -> Void
   let onOpenResult: (Peer, Destination) -> Void
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.appDatabase) private var database
-  @EnvironmentObject private var dataManager: DataManager
 
   @State private var searchModel: InlineSearchViewModel?
-  @State private var globalUserOpenGeneration = 0
   @FocusState private var isSearchFocused: Bool
 
   init(
     query: Binding<String>,
     focusRequested: Binding<Bool>,
-    interactionRevision: Binding<Int>,
     isActivePresentation: Bool,
     activeSpaceId: Int64?,
     onFocusChanged: @escaping (Bool) -> Void,
-    onBeginDeferredResult: @escaping () -> Int,
     onClose: @escaping () -> Void,
     onOpenResult: @escaping (Peer, Destination) -> Void
   ) {
     _query = query
     _focusRequested = focusRequested
-    _interactionRevision = interactionRevision
     self.isActivePresentation = isActivePresentation
     self.activeSpaceId = activeSpaceId
     self.onFocusChanged = onFocusChanged
-    self.onBeginDeferredResult = onBeginDeferredResult
     self.onClose = onClose
     self.onOpenResult = onOpenResult
   }
@@ -113,9 +104,6 @@ struct ExperimentalSearchView: View {
       updateSearch(for: query)
     }
     .onDisappear {
-      // A global-user selection can already have persisted optimistic local state.
-      // Let that mutation settle, but invalidate its navigation and error UI.
-      globalUserOpenGeneration &+= 1
       isSearchFocused = false
       focusRequested = false
       onFocusChanged(false)
@@ -221,12 +209,10 @@ struct ExperimentalSearchView: View {
   }
 
   private func openSearchChat(_ result: InlineSearchChatResult) {
-    globalUserOpenGeneration &+= 1
     openSearchDestination(result.peer)
   }
 
   private func openSearchMessage(_ result: LocalMessageSearchResult) {
-    globalUserOpenGeneration &+= 1
     openSearchDestination(
       result.peer,
       destination: .chatMessage(peer: result.peer, messageID: result.messageId)
@@ -234,40 +220,12 @@ struct ExperimentalSearchView: View {
   }
 
   private func openSearchGlobalUser(_ result: InlineSearchGlobalUserResult) {
-    let user = result.user
-    globalUserOpenGeneration &+= 1
-    let generation = globalUserOpenGeneration
-    let selectionRevision = onBeginDeferredResult()
-    dismissSearchFocus()
-    Task {
-      do {
-        try await dataManager.createPrivateChatWithOptimistic(user: user)
-        guard generation == globalUserOpenGeneration,
-              selectionRevision == interactionRevision
-        else { return }
-        openSearchDestination(.user(id: user.id))
-      } catch {
-        guard generation == globalUserOpenGeneration,
-              selectionRevision == interactionRevision
-        else { return }
-        Log.shared.error("Failed to open private chat from experimental search", error: error)
-        showGlobalUserOpenError()
-      }
-    }
+    openSearchDestination(.user(id: result.user.id))
   }
 
   private func openSearchDestination(_ peer: Peer, destination: Destination? = nil) {
     dismissSearchFocus()
     onOpenResult(peer, destination ?? .chat(peer: peer))
-  }
-
-  private func showGlobalUserOpenError() {
-    ToastManager.shared.showToast(
-      "Couldn’t Start Conversation",
-      description: "Try again.",
-      type: .error,
-      systemImage: "exclamationmark.triangle.fill"
-    )
   }
 
   private func activateSearch() {
@@ -278,7 +236,6 @@ struct ExperimentalSearchView: View {
   }
 
   private func closeActiveSearch() {
-    globalUserOpenGeneration &+= 1
     onClose()
   }
 }

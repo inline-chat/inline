@@ -51,7 +51,6 @@ public enum Path: String {
   case createThread
   case checkUsername
   case searchContacts
-  case createPrivateChat
   case getMe
   case deleteSpace
   case leaveSpace
@@ -706,14 +705,6 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     try await request(
       .searchContacts,
       queryItems: [URLQueryItem(name: "q", value: query)],
-      includeToken: true
-    )
-  }
-
-  public func createPrivateChat(userId: Int64) async throws -> CreatePrivateChat {
-    try await request(
-      .createPrivateChat,
-      queryItems: [URLQueryItem(name: "userId", value: "\(userId)")],
       includeToken: true
     )
   }
@@ -1896,12 +1887,6 @@ public struct CheckUsername: Codable, Sendable {
 
 public struct SearchContacts: Codable, Sendable {
   public let users: [ApiUser]
-}
-
-public struct CreatePrivateChat: Codable, Sendable {
-  public let chat: ApiChat
-  public let dialog: ApiDialog
-  public let user: ApiUser
 }
 
 public struct GetMe: Codable, Sendable {

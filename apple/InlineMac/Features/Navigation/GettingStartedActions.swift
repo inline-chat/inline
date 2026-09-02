@@ -1,5 +1,4 @@
 import Foundation
-import GRDB
 import InlineKit
 
 @MainActor
@@ -27,13 +26,6 @@ enum GettingStartedActions {
     }
 
     let peer = Peer.user(id: resolvedFounder.id)
-    let hasDialog = try await dependencies.database.reader.read { db in
-      try Dialog.fetchOne(db, id: Dialog.getDialogId(peerUserId: resolvedFounder.id)) != nil
-    }
-    if hasDialog == false {
-      _ = try await dependencies.data.createPrivateChat(userId: resolvedFounder.id)
-    }
-    _ = try await dependencies.realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
     dependencies.requestOpenChat(peer: peer)
   }
 

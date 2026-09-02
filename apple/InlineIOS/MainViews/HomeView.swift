@@ -197,15 +197,7 @@ struct HomeView: View {
   }
 
   private func openSearchGlobalUser(_ result: InlineSearchGlobalUserResult) {
-    let apiUser = result.user
-    Task {
-      do {
-        try await dataManager.createPrivateChatWithOptimistic(user: apiUser)
-        router.push(.chat(peer: .user(id: apiUser.id)))
-      } catch {
-        Log.shared.error("Failed to open a private chat with \(apiUser.anyName)", error: error)
-      }
-    }
+    router.push(.chat(peer: .user(id: result.user.id)))
   }
 
 }

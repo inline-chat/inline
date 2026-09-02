@@ -101,6 +101,44 @@ describe("getChat", () => {
     expect(storedDialogs).toHaveLength(1)
   })
 
+  test("concurrent first opens create one private chat with both dialogs", async () => {
+    const userA = await testUtils.createUser("concurrent-first-open-a@example.com")
+    const userB = await testUtils.createUser("concurrent-first-open-b@example.com")
+    if (!userA || !userB) throw new Error("Users not created")
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        index % 2 === 0
+          ? getChat({ peerId: makeInputPeerUser(userB.id) }, makeHandlerContext(userA.id))
+          : getChat({ peerId: makeInputPeerUser(userA.id) }, makeHandlerContext(userB.id)),
+      ),
+    )
+
+    const storedChats = await db
+      .select()
+      .from(schema.chats)
+      .where(
+        and(
+          eq(schema.chats.type, "private"),
+          eq(schema.chats.minUserId, Math.min(userA.id, userB.id)),
+          eq(schema.chats.maxUserId, Math.max(userA.id, userB.id)),
+        ),
+      )
+    expect(storedChats).toHaveLength(1)
+
+    const [storedChat] = storedChats
+    if (!storedChat) throw new Error("Private chat not created")
+    expect(results.every((result) => result.chat.id === BigInt(storedChat.id))).toBe(true)
+    expect(results.every((result) => result.dialog !== undefined)).toBe(true)
+
+    const storedDialogs = await db
+      .select()
+      .from(schema.dialogs)
+      .where(eq(schema.dialogs.chatId, storedChat.id))
+    expect(storedDialogs).toHaveLength(2)
+    expect(new Set(storedDialogs.map((dialog) => dialog.userId))).toEqual(new Set([userA.id, userB.id]))
+  })
+
   test("passes the DM peer profile photo to the user encoder", async () => {
     const currentUser = await testUtils.createUser("profile-photo-current@example.com")
     const peerUser = await testUtils.createUser("profile-photo-peer@example.com")

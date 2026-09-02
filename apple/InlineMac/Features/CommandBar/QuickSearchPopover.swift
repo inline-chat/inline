@@ -530,7 +530,6 @@ final class QuickSearchViewModel {
           } else {
             dependencies.requestOpenChat(peer: chatResult.peer)
           }
-          openInSidebar(peer: chatResult.peer)
         }
       case let .knownUser(user):
         openKnownUser(user)
@@ -568,20 +567,10 @@ final class QuickSearchViewModel {
   private func openRemoteUser(_ user: ApiUser) {
     recordSelection(peer: .user(id: user.id))
     Task { @MainActor in
-      do {
-        let hasDialog = await hasExistingDialog(userId: user.id)
-        if hasDialog == false {
-          try await dependencies.data.createPrivateChatWithOptimistic(user: user)
-        }
-        if let nav2 = dependencies.nav2 {
-          await nav2.openChat(peer: .user(id: user.id))
-        } else {
-          dependencies.requestOpenChat(peer: .user(id: user.id))
-        }
-        openInSidebar(peer: .user(id: user.id))
-      } catch {
-        Log.shared.error("Failed to open a private chat", error: error)
-        dependencies.overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
+      if let nav2 = dependencies.nav2 {
+        await nav2.openChat(peer: .user(id: user.id))
+      } else {
+        dependencies.requestOpenChat(peer: .user(id: user.id))
       }
     }
   }
@@ -589,42 +578,10 @@ final class QuickSearchViewModel {
   private func openKnownUser(_ user: User) {
     recordSelection(peer: .user(id: user.id))
     Task { @MainActor in
-      do {
-        let hasDialog = await hasExistingDialog(userId: user.id)
-        if hasDialog == false {
-          _ = try await dependencies.data.createPrivateChat(userId: user.id)
-        }
-        if let nav2 = dependencies.nav2 {
-          await nav2.openChat(peer: .user(id: user.id))
-        } else {
-          dependencies.requestOpenChat(peer: .user(id: user.id))
-        }
-        openInSidebar(peer: .user(id: user.id))
-      } catch {
-        Log.shared.error("Failed to open a private chat", error: error)
-        dependencies.overlay.showError(message: "Failed to open a private chat with \(user.displayName)")
-      }
-    }
-  }
-
-  private func hasExistingDialog(userId: Int64) async -> Bool {
-    do {
-      let dialog = try await dependencies.database.reader.read { db in
-        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerUserId: userId))
-      }
-      return dialog != nil
-    } catch {
-      Log.shared.error("Failed to inspect cached private-chat dialog", error: error)
-      return false
-    }
-  }
-
-  private func openInSidebar(peer: Peer) {
-    Task(priority: .userInitiated) { [realtimeV2 = dependencies.realtimeV2] in
-      do {
-        _ = try await realtimeV2.send(.updateDialogOpen(peerId: peer, open: true))
-      } catch {
-        Log.shared.error("Failed to open chat in sidebar", error: error)
+      if let nav2 = dependencies.nav2 {
+        await nav2.openChat(peer: .user(id: user.id))
+      } else {
+        dependencies.requestOpenChat(peer: .user(id: user.id))
       }
     }
   }
@@ -806,7 +763,6 @@ final class QuickSearchViewModel {
       } else {
         dependencies.requestOpenChat(peer: peer, targetMessageId: messageId)
       }
-      openInSidebar(peer: peer)
     }
   }
 

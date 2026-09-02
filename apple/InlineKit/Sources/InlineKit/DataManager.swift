@@ -110,64 +110,6 @@ public class DataManager: ObservableObject {
     }
   }
 
-  public func createPrivateChat(userId: Int64) async throws -> Peer {
-    log.trace("createPrivateChat")
-    let mutationToken = try beginAccountMutation()
-    do {
-      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
-
-      try await writeAccountProjection(token: mutationToken) { db in
-        try result.user.saveFull(db)
-
-        var chat = Chat(from: result.chat)
-        try chat.saveWithValidLastMsg(db)
-
-        try result.dialog.saveFull(db)
-      }
-
-      return Peer.user(id: result.user.id)
-    } catch {
-      log.error("Failed to create private chat", error: error)
-      throw error
-    }
-  }
-
-  public func createPrivateChatWithOptimistic(user: ApiUser) async throws {
-    log.trace("createPrivateChat with optimistic")
-    let mutationToken = try beginAccountMutation()
-
-    // Optimistic
-    try await writeAccountProjection(token: mutationToken) { db in
-      try user.saveFull(db)
-      let dialog = Dialog(optimisticForUserId: user.id)
-      try dialog.save(db, onConflict: .ignore)
-    }
-    log.trace("saved optimistic")
-
-    let userId = user.id
-
-    // Do in background
-    // FIXME: this should be in background but UI will fail
-    // Task { @MainActor in
-    do {
-      // Remote call
-      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
-      try await writeAccountProjection(token: mutationToken) { db in
-        try result.user.saveFull(db)
-
-        var chat = Chat(from: result.chat)
-        try chat.saveWithValidLastMsg(db)
-
-        try result.dialog.saveFull(db)
-      }
-      log.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
-    } catch {
-      Log.shared.error("Failed to create private chat", error: error)
-      throw error
-    }
-    /// }
-  }
-
   /// Returns the user-space catalog already owned by realtime sync.
   ///
   /// Screens observe this same table, so this compatibility method must not
@@ -184,22 +126,6 @@ public class DataManager: ObservableObject {
     }
     try auth.validateAccountMutation(mutationToken)
     return spaces
-  }
-
-  /// Get one user
-  public func getUser(id: Int64) async throws {
-    log.trace("getUser")
-    let mutationToken = try beginAccountMutation()
-    do {
-      let result = try await InlineRPCClient.shared.getChat(peerID: .user(id: id))
-      guard result.hasUser else { throw InlineRPCClientError.unexpectedResponse }
-
-      let _ = try await writeAccountProjection(token: mutationToken) { db in
-        try User.save(db, user: result.user)
-      }
-    } catch {
-      throw error
-    }
   }
 
   public func deleteSpace(spaceId: Int64) async throws {

@@ -109,6 +109,11 @@ if git_grep --quiet --fixed-strings 'Not Loaded Title' -- 'apple/**/*.swift'; th
   failures=1
 fi
 
+if git_grep --quiet --fixed-strings 'createPrivateChat' -- 'apple/**/*.swift'; then
+  printf 'error: Apple DM selection must navigate to a user peer and let V3 GET_CHAT own get-or-create\n' >&2
+  failures=1
+fi
+
 require_ordered_fragments() {
   local path="$1"
   shift
