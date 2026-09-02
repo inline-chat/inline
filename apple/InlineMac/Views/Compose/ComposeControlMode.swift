@@ -52,7 +52,7 @@ enum ComposeControlPresentation {
   var sendSymbolName: String {
     switch self {
       case .standard: "arrow.up"
-      case .accessoryBar: "arrow.right"
+      case .accessoryBar: "arrow.up"
     }
   }
 }
