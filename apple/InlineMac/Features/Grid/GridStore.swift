@@ -57,6 +57,7 @@ final class GridRoomService {
   @ObservationIgnored private var lastNetworkPathSnapshot: GridNetworkPathSnapshot?
   @ObservationIgnored private let lifecycle: GridRoomLifecycle
   @ObservationIgnored private var pendingReloadSpaceIDs = Set<Int64>()
+  @ObservationIgnored private var pendingConnectionSpaceIDs = Set<Int64>()
   @ObservationIgnored private var roomMutationRevisions: [OptimisticRoomMutationKey: Int] = [:]
   @ObservationIgnored private var pendingRoomMutations: [OptimisticRoomMutationKey: OptimisticRoomMutation] = [:]
   @ObservationIgnored private var membershipMutationRevision = 0
@@ -156,6 +157,7 @@ final class GridRoomService {
       .union(enabledSpaceIDs)
       .union(loadingSpaceIDs)
       .union(pendingReloadSpaceIDs)
+      .union(pendingConnectionSpaceIDs)
     pendingCredentialTarget = nil
     resetCredentialRetry()
     cancelAloneAutoMute()
@@ -167,6 +169,7 @@ final class GridRoomService {
     loadingSpaceIDs.removeAll()
     failedLoadSpaceIDs.removeAll()
     pendingReloadSpaceIDs.removeAll()
+    pendingConnectionSpaceIDs.removeAll()
     for spaceID in invalidatedSpaceIDs {
       spaceAccessRevisions[spaceID, default: 0] &+= 1
     }
@@ -197,6 +200,10 @@ final class GridRoomService {
   }
 
   func loadHome() async {
+    guard realtimeReady else {
+      log.debug("GRID_TRACE phase=home_load_deferred reason=realtime_not_ready")
+      return
+    }
     homeLoadRevision &+= 1
     let revision = homeLoadRevision
     do {
@@ -212,6 +219,10 @@ final class GridRoomService {
       lastError = nil
     } catch {
       guard revision == homeLoadRevision else { return }
+      guard realtimeReady, networkAvailable else {
+        log.debug("GRID_TRACE phase=home_load_deferred reason=connection_lost")
+        return
+      }
       lastError = String(describing: error)
       log.warning("GRID_TRACE phase=home_load_failed")
       PerformanceTrace.breadcrumb(
@@ -301,6 +312,15 @@ final class GridRoomService {
   }
 
   func load(spaceID: Int64) async {
+    guard realtimeReady else {
+      failedLoadSpaceIDs.remove(spaceID)
+      pendingConnectionSpaceIDs.insert(spaceID)
+      log.debug(
+        "GRID_TRACE phase=load_deferred space=\(spaceID) reason=realtime_not_ready"
+      )
+      return
+    }
+    pendingConnectionSpaceIDs.remove(spaceID)
     let accessRevision = spaceAccessRevisions[spaceID, default: 0]
     guard loadingSpaceIDs.insert(spaceID).inserted else {
       pendingReloadSpaceIDs.insert(spaceID)
@@ -326,6 +346,13 @@ final class GridRoomService {
       try await reloadGrid(spaceID: spaceID)
     } catch {
       guard accessRevision == spaceAccessRevisions[spaceID, default: 0] else { return }
+      guard realtimeReady, networkAvailable else {
+        pendingConnectionSpaceIDs.insert(spaceID)
+        log.debug(
+          "GRID_TRACE phase=load_deferred space=\(spaceID) reason=connection_lost"
+        )
+        return
+      }
       failedLoadSpaceIDs.insert(spaceID)
       lastError = String(describing: error)
       log.error("GRID_TRACE phase=load_failed space=\(spaceID)", error: error)
@@ -608,6 +635,7 @@ final class GridRoomService {
       }
       grids[grid.spaceID] = grid
       failedLoadSpaceIDs.remove(grid.spaceID)
+      pendingConnectionSpaceIDs.remove(grid.spaceID)
       applyEnabled(grid.enabled, spaceID: grid.spaceID)
     }
     applyPendingMembershipIntent()
@@ -1148,6 +1176,7 @@ final class GridRoomService {
     enabledSpaceIDs.remove(spaceID)
     homeSpaces.removeAll { $0.spaceID == spaceID }
     pendingReloadSpaceIDs.remove(spaceID)
+    pendingConnectionSpaceIDs.remove(spaceID)
     failedLoadSpaceIDs.remove(spaceID)
     reconcileAvatarStateOwnership()
 
@@ -1386,8 +1415,18 @@ final class GridRoomService {
         avatarStateSync.retryLatestFailure()
         mediaCoordinator.networkBecameAvailable()
         await loadHome()
+        await retryPendingConnectionLoads()
         await refreshOwnedPresence()
       }
+    }
+  }
+
+  private var realtimeReady: Bool {
+    switch lastRealtimeConnectionState {
+    case .connected, .updating:
+      true
+    case .connecting, nil:
+      false
     }
   }
 
@@ -1406,7 +1445,16 @@ final class GridRoomService {
       avatarStateSync.retryLatestFailure()
       mediaCoordinator.networkBecameAvailable()
       await loadHome()
+      await retryPendingConnectionLoads()
       await refreshOwnedPresence()
+    }
+  }
+
+  private func retryPendingConnectionLoads() async {
+    let deferredSpaceIDs = pendingConnectionSpaceIDs.sorted()
+    pendingConnectionSpaceIDs.removeAll()
+    for spaceID in deferredSpaceIDs {
+      await load(spaceID: spaceID)
     }
   }
 
