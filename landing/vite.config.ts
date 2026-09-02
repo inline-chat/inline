@@ -83,6 +83,7 @@ const securityHeaders = {
     "font-src 'self' data:",
     "style-src 'self' 'unsafe-inline'",
     "script-src 'self' 'unsafe-inline'",
+    "frame-src https://www.youtube-nocookie.com",
     "connect-src 'self' https://api.inline.chat wss://api.inline.chat https://public-assets.inline.chat",
     "worker-src 'self' blob:",
     "manifest-src 'self'",

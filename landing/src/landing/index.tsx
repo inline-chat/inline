@@ -42,9 +42,27 @@ const GALLERY_SLIDES = [
 const IS_PRODUCT_GALLERY_ENABLED = true
 const IOS_TESTFLIGHT_URL = "https://testflight.apple.com/join/FkC3f7fz"
 
+const LANDING_VIDEOS = [
+  {
+    id: "beta-announcement",
+    title: "Inline Beta: The Interface for Multiplayer Work",
+    thumbnailUrl: "https://i.ytimg.com/vi/rjb4MVZbglg/maxresdefault.jpg",
+    embedUrl: "https://www.youtube-nocookie.com/embed/rjb4MVZbglg?rel=0",
+    watchUrl: "https://www.youtube.com/watch?v=rjb4MVZbglg",
+  },
+  {
+    id: "faq",
+    title: "Q&A with Mo, Inline's CEO",
+    thumbnailUrl: "https://i.ytimg.com/vi/ruJnO_ty74g/maxresdefault.jpg",
+    embedUrl: "https://www.youtube-nocookie.com/embed/ruJnO_ty74g?rel=0",
+    watchUrl: "https://www.youtube.com/watch?v=ruJnO_ty74g",
+  },
+] as const
+
 export function Landing({ isIOS }: { isIOS: boolean }) {
   const [activeSlide, setActiveSlide] = useState(0)
   const [isGalleryHovered, setIsGalleryHovered] = useState(false)
+  const [playingVideoIds, setPlayingVideoIds] = useState<ReadonlySet<string>>(() => new Set())
 
   useEffect(() => {
     if (!IS_PRODUCT_GALLERY_ENABLED || isGalleryHovered) return
@@ -141,6 +159,54 @@ export function Landing({ isIOS }: { isIOS: boolean }) {
               </p>
             </>
           ) : null}
+        </section>
+
+        <section className="landing-redesign__videos" aria-labelledby="landing-videos-title">
+          <h2 id="landing-videos-title" className="landing-redesign__visually-hidden">
+            Inline videos
+          </h2>
+          <div className="landing-redesign__video-grid">
+            {LANDING_VIDEOS.map((video) => (
+              <article className="landing-redesign__video-card" key={video.id}>
+                <div className="landing-redesign__video-frame">
+                  {playingVideoIds.has(video.id) ? (
+                    <iframe
+                      src={`${video.embedUrl}&autoplay=1`}
+                      title={video.title}
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                    />
+                  ) : (
+                    <button
+                      className="landing-redesign__video-preview"
+                      type="button"
+                      aria-label={`Play ${video.title}`}
+                      onClick={() =>
+                        setPlayingVideoIds((currentIds) => {
+                          const nextIds = new Set(currentIds)
+                          nextIds.add(video.id)
+                          return nextIds
+                        })
+                      }
+                    >
+                      <img src={video.thumbnailUrl} alt="" width="1280" height="720" decoding="async" />
+                      <span className="landing-redesign__video-play" aria-hidden="true">
+                        <svg viewBox="0 0 20 20" fill="none">
+                          <path d="m7.5 5.75 6.25 4.25-6.25 4.25Z" fill="currentColor" />
+                        </svg>
+                      </span>
+                    </button>
+                  )}
+                </div>
+                <h3 className="landing-redesign__video-title">
+                  <a href={video.watchUrl} target="_blank" rel="noopener noreferrer">
+                    {video.title}
+                  </a>
+                </h3>
+              </article>
+            ))}
+          </div>
         </section>
 
         {/* Temporarily hidden until the replacement story copy is ready.
