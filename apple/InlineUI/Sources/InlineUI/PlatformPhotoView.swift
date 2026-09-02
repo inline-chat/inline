@@ -95,32 +95,7 @@ struct PlatformPhotoLoadPolicy {
   }
 
   static func localPhotoSizeCandidates(from photoInfo: PhotoInfo) -> [PhotoSize] {
-    var candidates: [PhotoSize] = []
-    if let bestSize = photoInfo.bestPhotoSize(), bestSize.localPath?.isEmpty == false {
-      candidates.append(bestSize)
-    }
-
-    let fallbackSizes = photoInfo.sizes
-      .filter { $0.type != "s" && $0.localPath?.isEmpty == false }
-      .sorted { lhs, rhs in
-        let lhsArea = max((lhs.width ?? 0) * (lhs.height ?? 0), 0)
-        let rhsArea = max((rhs.width ?? 0) * (rhs.height ?? 0), 0)
-        if lhsArea != rhsArea {
-          return lhsArea > rhsArea
-        }
-
-        return (lhs.size ?? 0) > (rhs.size ?? 0)
-      }
-
-    for size in fallbackSizes {
-      let localPath = size.localPath ?? ""
-      let alreadyAdded = candidates.contains { $0.localPath == localPath }
-      if !alreadyAdded {
-        candidates.append(size)
-      }
-    }
-
-    return candidates
+    photoInfo.localPhotoSizeCandidates()
   }
 
   static func bestLocalPhotoSize(from photoInfo: PhotoInfo) -> PhotoSize? {
@@ -229,12 +204,18 @@ public final class PlatformPhotoView: PlatformView {
   private var currentLoadingSize: CGSize = .zero
   private var currentLoadingScale: CGFloat = 0
   private var currentLoadingUrl: URL?
-  private var downloadRequestedPhotoId: Int64?
+  private var failedLoadURLs = Set<URL>()
+  private var downloadRequestedSource: PhotoDownloadSourceKey?
   private var pendingPhotoInfo: PhotoInfo?
   private var reloadMessage: Message?
   private var currentTask: DownloadTask?
   private var pendingLoadWorkItem: DispatchWorkItem?
   private var loadGeneration = 0
+  private var cachedPhotoURL: (PhotoInfo) -> URL? = { FileCache.cachedLocalURL(photo: $0) }
+  private var cachedPhotoURLs: (PhotoInfo) -> [URL] = { FileCache.cachedLocalURLCandidates(photo: $0) }
+  private var downloadPhoto: @MainActor (PhotoInfo, Message?) async -> URL? = { photo, message in
+    await FileCache.shared.downloadAndWait(photo: photo, reloadMessageOnFinish: message)
+  }
 
   public convenience init() {
     self.init(frame: .zero)
@@ -245,21 +226,34 @@ public final class PlatformPhotoView: PlatformView {
     setupView()
   }
 
+  convenience init(
+    cachedPhotoURL: @escaping (PhotoInfo) -> URL?,
+    downloadPhoto: @escaping @MainActor (PhotoInfo, Message?) async -> URL?
+  ) {
+    self.init(frame: .zero)
+    self.cachedPhotoURL = cachedPhotoURL
+    cachedPhotoURLs = { photo in cachedPhotoURL(photo).map { [$0] } ?? [] }
+    self.downloadPhoto = downloadPhoto
+  }
+
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
 
-  deinit {
+  isolated deinit {
     cancelPendingLoad()
     cancelCurrentTask()
   }
 
   public func setPhoto(_ photoInfo: PhotoInfo?, reloadMessageOnFinish message: Message? = nil) {
-    let nextPhotoId = photoInfo?.id
+    let nextPhotoId = photoInfo?.photo.photoId
+    let sourceChanged = pendingPhotoInfo != photoInfo
     if nextPhotoId != currentPhotoId {
       resetImageState()
-      downloadRequestedPhotoId = nil
+      downloadRequestedSource = nil
+    } else if sourceChanged {
+      failedLoadURLs.removeAll(keepingCapacity: true)
     }
 
     currentPhotoId = nextPhotoId
@@ -372,7 +366,7 @@ public final class PlatformPhotoView: PlatformView {
     let scale = backingScaleFactor()
     let sizeKey = "\(Int(targetSize.width))x\(Int(targetSize.height))"
     let scaleKey = Int((scale * 100).rounded())
-    let loadKey = "\(photoInfo.id)-\(localUrl.path)-\(sizeKey)-\(scaleKey)-\(photoContentMode)"
+    let loadKey = "\(photoInfo.photo.photoId)-\(localUrl.path)-\(sizeKey)-\(scaleKey)-\(photoContentMode)"
 
     if loadKey == currentLoadKey {
       if imageView.hasImage {
@@ -525,6 +519,7 @@ public final class PlatformPhotoView: PlatformView {
 
       switch result {
       case let .success(value):
+        self.failedLoadURLs.remove(url)
         self.currentLocalUrl = url
         self.currentLoadedSize = value.image.size
         self.currentLoadedScale = scale
@@ -532,9 +527,16 @@ public final class PlatformPhotoView: PlatformView {
         self.hidePlaceholder()
         self.updateImageIfNeeded()
       case .failure:
+        self.failedLoadURLs.insert(url)
         self.currentLoadKey = nil
         if !self.imageView.hasImage {
           self.showPlaceholder()
+        }
+        // Try a deterministic download or a smaller local representation once;
+        // failed URLs remain fenced until the photo metadata changes.
+        if let photo = self.pendingPhotoInfo {
+          self.requestDownloadIfNeeded(photo)
+          self.updateImageIfNeeded()
         }
       }
     }
@@ -588,6 +590,7 @@ public final class PlatformPhotoView: PlatformView {
     currentLoadedSize = .zero
     currentLoadedScale = 0
     currentLocalUrl = nil
+    failedLoadURLs.removeAll(keepingCapacity: true)
     imageView.setImage(nil as PlatformImage?)
   }
 
@@ -625,12 +628,20 @@ public final class PlatformPhotoView: PlatformView {
   }
 
   private func requestDownloadIfNeeded(_ photoInfo: PhotoInfo) {
-    guard let cdnUrl = photoInfo.bestPhotoSize()?.cdnUrl, !cdnUrl.isEmpty else { return }
-    guard downloadRequestedPhotoId != photoInfo.id else { return }
-    downloadRequestedPhotoId = photoInfo.id
+    guard let source = photoInfo.downloadSourceKey(), downloadRequestedSource != source else { return }
+    downloadRequestedSource = source
 
-    Task.detached { [message = reloadMessage] in
-      await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: message)
+    Task { [weak self, message = reloadMessage, downloadPhoto] in
+      let repaired = await downloadPhoto(photoInfo, message)
+      // A rich message can remain byte-for-byte equal after its photo downloads.
+      // Refresh this view directly instead of relying on a message-list reload.
+      guard let self, self.currentPhotoId == photoInfo.photo.photoId,
+            self.pendingPhotoInfo?.downloadSourceKey() == source,
+            self.downloadRequestedSource == source else { return }
+      if let repaired {
+        self.failedLoadURLs.remove(repaired)
+      }
+      self.updateImageIfNeeded()
     }
   }
 
@@ -640,26 +651,11 @@ public final class PlatformPhotoView: PlatformView {
           !cdnUrl.isEmpty
     else { return false }
 
-    return localUrl(for: size) == nil
+    return cachedPhotoURL(photoInfo) == nil
   }
 
   private func localDisplayUrl(for photoInfo: PhotoInfo) -> URL? {
-    for size in PlatformPhotoLoadPolicy.localPhotoSizeCandidates(from: photoInfo) {
-      if let url = localUrl(for: size) {
-        return url
-      }
-    }
-
-    return nil
-  }
-
-  private func localUrl(for size: PhotoSize?) -> URL? {
-    guard let localPath = size?.localPath, !localPath.isEmpty
-    else { return nil }
-
-    let url = FileCache.getUrl(for: .photos, localPath: localPath)
-    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-    return url
+    cachedPhotoURLs(photoInfo).first { !failedLoadURLs.contains($0) }
   }
 
   private func resolveTargetSize(from photoInfo: PhotoInfo) -> CGSize? {

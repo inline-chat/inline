@@ -58,7 +58,13 @@ final class SimplePhotoView: NSView {
   private var overlaySymbol: String?
   private let sizingMode: SizingMode
   private var imageLoadGeneration = 0
+  private var imageDecodeGeneration = 0
   private var imageResolutionTask: Task<Void, Never>?
+  private var failedImageURLs = Set<URL>()
+  private var downloadAttemptSource: PhotoDownloadSourceKey?
+
+  /// The existing decoded image, for native preview transitions. No second cache.
+  var displayedImage: NSImage? { imageLayer.contents as? NSImage }
 
   init(
     photoInfo: PhotoInfo,
@@ -167,30 +173,54 @@ final class SimplePhotoView: NSView {
   }
 
   private func updateImage() {
-    imageLoadGeneration += 1
-    let generation = imageLoadGeneration
-    imageResolutionTask?.cancel()
-
-    if let url = imageLocalUrl() {
-      loadImage(from: url, generation: generation)
-      return
-    }
-
     guard let photoInfo else {
       Self.log.warning("Photo view has no photo metadata")
       return
     }
+    let localCandidate = FileCache.cachedLocalURLCandidates(photo: photoInfo)
+      .first(where: { !failedImageURLs.contains($0) })
+    let bestLocalAvailable = FileCache.cachedLocalURL(photo: photoInfo)
+      .map { !failedImageURLs.contains($0) } ?? false
+    if imageResolutionTask != nil, downloadAttemptSource == photoInfo.downloadSourceKey(), !bestLocalAvailable {
+      if let localCandidate { loadImage(from: localCandidate, generation: imageLoadGeneration) }
+      return
+    }
+    imageLoadGeneration += 1
+    let generation = imageLoadGeneration
+    imageResolutionTask?.cancel()
+    if imageResolutionTask != nil {
+      downloadAttemptSource = nil
+      imageResolutionTask = nil
+    }
+    if let url = localCandidate {
+      loadImage(from: url, generation: generation)
+    }
+    // A local thumbnail remains visible while the full remote representation
+    // is resolved. It must not prevent the best-size upgrade.
+    if bestLocalAvailable { return }
+    guard let source = photoInfo.downloadSourceKey(), downloadAttemptSource != source else { return }
+    downloadAttemptSource = source
     let relatedMessage = relatedMessage
     imageResolutionTask = Task { [weak self] in
-      if let cachedURL = await FileCache.shared.cachedLocalURL(photo: photoInfo) {
+      defer {
+        if self?.imageLoadGeneration == generation { self?.imageResolutionTask = nil }
+      }
+      if let cachedURL = await FileCache.shared.cachedLocalURL(photo: photoInfo),
+         self?.failedImageURLs.contains(cachedURL) == false
+      {
         guard !Task.isCancelled else { return }
         self?.loadImage(from: cachedURL, generation: generation)
         return
       }
-      await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: relatedMessage)
-      await FileCache.shared.waitForDownload(photoId: photoInfo.id)
-      guard !Task.isCancelled else { return }
-      guard let localURL = await FileCache.shared.cachedLocalURL(photo: photoInfo) else {
+      let repaired = await FileCache.shared.downloadAndWait(photo: photoInfo, reloadMessageOnFinish: relatedMessage)
+      guard !Task.isCancelled, self?.imageLoadGeneration == generation,
+            self?.photoInfo?.downloadSourceKey() == source else { return }
+      if let repaired {
+        self?.failedImageURLs.remove(repaired)
+      }
+      let candidates = await FileCache.shared.cachedLocalURLCandidates(photo: photoInfo)
+      guard let localURL = repaired ?? candidates.first(where: { self?.failedImageURLs.contains($0) == false })
+      else {
         Self.log.warning("Photo cache did not produce a local file for photo \(photoInfo.id)")
         return
       }
@@ -200,6 +230,8 @@ final class SimplePhotoView: NSView {
 
   private func loadImage(from url: URL, generation: Int) {
     guard imageLoadGeneration == generation else { return }
+    imageDecodeGeneration += 1
+    let decodeGeneration = imageDecodeGeneration
     let targetSize = preferredImageTargetSize()
     let scale = backingScale
     let isMemoryCached = ImageCacheManager.shared.cachedImage(
@@ -215,12 +247,16 @@ final class SimplePhotoView: NSView {
       scale: scale
     ) { [weak self] image in
       guard let self else { return }
-      guard self.imageLoadGeneration == generation else { return }
+      guard self.imageLoadGeneration == generation, self.imageDecodeGeneration == decodeGeneration else { return }
       guard let image else {
+        self.failedImageURLs.insert(url)
         Self.log.warning("Image decode failed for photo \(self.photoInfo?.id ?? 0)")
         self.showLoadingView()
+        self.updateImage()
         return
       }
+
+      self.failedImageURLs.remove(url)
 
       if !isMemoryCached, shouldFadeImageIn {
         animateImageTransition(to: image)
@@ -335,18 +371,10 @@ final class SimplePhotoView: NSView {
     #endif
   }
 
-  private func imageLocalUrl() -> URL? {
-    guard let photoSize = photoInfo?.bestPhotoSize() else { return nil }
-
-    if let localPath = photoSize.localPath {
-      let url = FileCache.getUrl(for: .photos, localPath: localPath)
-      return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
-    return nil
-  }
-
   func update(with photoInfo: PhotoInfo, overlaySymbol: String? = nil) {
+    if self.photoInfo != photoInfo {
+      failedImageURLs.removeAll(keepingCapacity: true)
+    }
     self.photoInfo = photoInfo
     self.overlaySymbol = overlaySymbol
     updateTinyThumbnailBackground()
