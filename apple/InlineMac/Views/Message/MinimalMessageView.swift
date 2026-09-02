@@ -179,6 +179,10 @@ class MinimalMessageViewAppKit: NSView {
     props.layout.reactionsOutsideBubble
   }
 
+  private var hasAcknowledgement: Bool {
+    props.layout.hasAcknowledgement
+  }
+
   private var textWidth: CGFloat {
     props.layout.text?.size.width ?? 1.0
   }
@@ -984,7 +988,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func layoutAcknowledgement() {
-    guard !isAnchorMessage, !fullMessage.acknowledgementActors.isEmpty, !message.isServiceMessage else {
+    guard hasAcknowledgement else {
       if !acknowledgementView.isAnimatingRemoval {
         acknowledgementView.isHidden = true
       }
@@ -993,10 +997,15 @@ class MinimalMessageViewAppKit: NSView {
     acknowledgementView.isHidden = false
     let content = contentView.convert(contentView.bounds, to: self)
     let width = min(fullMessage.acknowledgementPillWidth, max(fullMessage.acknowledgementMinimumPillWidth, content.width))
-    let x = acknowledgementView.isRTL ? content.minX : content.maxX - width
-    // Footer height is in the wrapper plan; bubble/text/time geometry stays untouched.
-    let top = props.layout.wrapper.spacing.top + props.layout.wrapper.size.height - 16
-    let y = isFlipped ? top : bounds.height - top - 16
+    let x = content.maxX - width
+    let y: CGFloat
+    if let reactionsView {
+      let reactions = reactionsView.convert(reactionsView.bounds, to: self)
+      y = isFlipped ? reactions.maxY - 6 - 16 : reactions.minY + 6
+    } else {
+      let top = props.layout.wrapper.spacing.top + props.layout.wrapper.size.height - 16
+      y = isFlipped ? top : bounds.height - top - 16
+    }
     acknowledgementView.frame = CGRect(x: x, y: y, width: width, height: 16)
   }
 
@@ -1662,13 +1671,23 @@ class MinimalMessageViewAppKit: NSView {
           equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
-        reactionViewLeadingConstraint = sideConstraint(for: reactionsView, in: bubbleView, spacing: reactionsPlan.spacing)
+        reactionViewLeadingConstraint = hasAcknowledgement
+          ? reactionsView.leftAnchor.constraint(
+            equalTo: bubbleView.leftAnchor,
+            constant: reactionsPlan.spacing.left
+          )
+          : sideConstraint(for: reactionsView, in: bubbleView, spacing: reactionsPlan.spacing)
       } else {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
           equalTo: contentView.topAnchor,
           constant: props.layout.reactionsViewTop
         )
-        reactionViewLeadingConstraint = sideConstraint(for: reactionsView, in: contentView, spacing: reactionsPlan.spacing)
+        reactionViewLeadingConstraint = hasAcknowledgement
+          ? reactionsView.leftAnchor.constraint(
+            equalTo: contentView.leftAnchor,
+            constant: reactionsPlan.spacing.left
+          )
+          : sideConstraint(for: reactionsView, in: contentView, spacing: reactionsPlan.spacing)
       }
 
       NSLayoutConstraint.activate(
@@ -1951,8 +1970,8 @@ class MinimalMessageViewAppKit: NSView {
       do {
         try await Api.realtime.send(.acknowledgeMessages(message: targetMessage, action: action))
       } catch {
-        self?.log.error("Failed to update acknowledgement", error: error)
-        ToastCenter.shared.showError("Could not update acknowledgement")
+        self?.log.error("Failed to update Ack", error: error)
+        ToastCenter.shared.showError("Could not update Ack")
       }
     }
   }
@@ -5161,6 +5180,19 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
     menu.addItem(indexItem)
 
     #endif
+
+    if let attribution = fullMessage.acknowledgementAttributionLabel {
+      if !menu.items.isEmpty, menu.items.last?.isSeparatorItem == false {
+        menu.addItem(.separator())
+      }
+      let attributionItem = NSMenuItem(title: attribution, action: nil, keyEquivalent: "")
+      attributionItem.image = NSImage(
+        systemSymbolName: "person.2",
+        accessibilityDescription: attribution
+      )
+      attributionItem.isEnabled = false
+      menu.addItem(attributionItem)
+    }
 
     menu.delegate = self
     return menu

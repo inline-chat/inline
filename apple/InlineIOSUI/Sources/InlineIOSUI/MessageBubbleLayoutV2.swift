@@ -116,6 +116,8 @@ public struct MessageBubbleLayoutInputV2: Equatable, Codable, Sendable {
     public let metadataSize: CGSize
     public let reactionsNodeID: MessageLayoutNodeIDV2?
     public let reactionsSize: CGSize?
+    public let acknowledgementNodeID: MessageLayoutNodeIDV2?
+    public let acknowledgementSize: CGSize?
     public let isTextSingleLine: Bool
     public let isRTL: Bool
     public let trailingTextLine: MessageFooterLayoutV2.TrailingTextLine?
@@ -128,6 +130,8 @@ public struct MessageBubbleLayoutInputV2: Equatable, Codable, Sendable {
       metadataSize: CGSize,
       reactionsNodeID: MessageLayoutNodeIDV2? = nil,
       reactionsSize: CGSize? = nil,
+      acknowledgementNodeID: MessageLayoutNodeIDV2? = nil,
+      acknowledgementSize: CGSize? = nil,
       isTextSingleLine: Bool,
       isRTL: Bool = false,
       trailingTextLine: MessageFooterLayoutV2.TrailingTextLine? = nil,
@@ -139,6 +143,8 @@ public struct MessageBubbleLayoutInputV2: Equatable, Codable, Sendable {
       self.metadataSize = metadataSize
       self.reactionsNodeID = reactionsNodeID
       self.reactionsSize = reactionsSize
+      self.acknowledgementNodeID = acknowledgementNodeID
+      self.acknowledgementSize = acknowledgementSize
       self.isTextSingleLine = isTextSingleLine
       self.isRTL = isRTL
       self.trailingTextLine = trailingTextLine
@@ -248,10 +254,18 @@ public enum MessageBubbleLayoutPlannerV2 {
     }
 
     if let footer = input.footer {
+      let footerNodeIDs = [
+        footer.metadataNodeID,
+        footer.reactionsNodeID,
+        footer.acknowledgementNodeID,
+      ].compactMap({ $0 })
       guard let textNode = input.flowNodes.first(where: { $0.id == footer.textNodeID }),
             !allIDs.contains(footer.metadataNodeID),
             footer.reactionsNodeID.map({ !allIDs.contains($0) }) ?? true,
-            (footer.reactionsNodeID == nil) == (footer.reactionsSize == nil)
+            footer.acknowledgementNodeID.map({ !allIDs.contains($0) }) ?? true,
+            (footer.reactionsNodeID == nil) == (footer.reactionsSize == nil),
+            (footer.acknowledgementNodeID == nil) == (footer.acknowledgementSize == nil),
+            Set(footerNodeIDs).count == footerNodeIDs.count
       else { return nil }
 
       let maximumFooterWidth = maximumContentWidth
@@ -263,6 +277,7 @@ public enum MessageBubbleLayoutPlannerV2 {
         textSize: CGSize(width: min(textNode.size.width, maximumFooterWidth), height: textNode.size.height),
         metadataSize: footer.metadataSize,
         reactionsSize: footer.reactionsSize,
+        acknowledgementSize: footer.acknowledgementSize,
         isTextSingleLine: footer.isTextSingleLine,
         isRTL: footer.isRTL,
         trailingTextLine: footer.trailingTextLine,
@@ -306,6 +321,10 @@ public enum MessageBubbleLayoutPlannerV2 {
            let reactionsNodeID = footer.reactionsNodeID {
           nodeFrames[reactionsNodeID] = reactionsFrame.offsetBy(dx: footerX, dy: y)
         }
+        if let acknowledgementFrame = resolvedFooter.acknowledgementFrame,
+           let acknowledgementNodeID = footer.acknowledgementNodeID {
+          nodeFrames[acknowledgementNodeID] = acknowledgementFrame.offsetBy(dx: footerX, dy: y)
+        }
         y += resolvedFooter.size.height + node.insets.bottom
         footerPlacement = resolvedFooter.placement
       } else {
@@ -341,6 +360,25 @@ public enum MessageBubbleLayoutPlannerV2 {
       height: max(0, bubbleHeight - input.contentInsets.top - input.contentInsets.bottom)
     )
 
+    var rootHeight = bubbleHeight
+    for node in input.belowBubbleNodes {
+      rootHeight += node.spacingBefore
+      let availableNodeWidth = max(
+        node.minimumWidth ?? 0,
+        resolvedContentWidth - node.insets.leading - node.insets.trailing
+      )
+      let width = node.widthBehavior == .fill
+        ? availableNodeWidth
+        : min(node.size.width, availableNodeWidth)
+      let x = node.horizontalAlignment == .leading
+        ? contentX + node.insets.leading
+        : contentX + resolvedContentWidth - node.insets.trailing - width
+      let nodeY = rootHeight + node.insets.top
+      nodeFrames[node.id] = CGRect(x: x, y: nodeY, width: width, height: node.size.height)
+      rootHeight = nodeY + node.size.height + node.insets.bottom
+    }
+
+    // Resolve overlays after below-bubble rows so compact accessories can share those rows.
     for overlay in input.overlayNodes {
       guard let targetFrame = nodeFrames[overlay.targetID] else { return nil }
       let origin: CGPoint = switch overlay.anchor {
@@ -361,24 +399,6 @@ public enum MessageBubbleLayoutPlannerV2 {
           )
       }
       nodeFrames[overlay.id] = CGRect(origin: origin, size: overlay.size)
-    }
-
-    var rootHeight = bubbleHeight
-    for node in input.belowBubbleNodes {
-      rootHeight += node.spacingBefore
-      let availableNodeWidth = max(
-        node.minimumWidth ?? 0,
-        resolvedContentWidth - node.insets.leading - node.insets.trailing
-      )
-      let width = node.widthBehavior == .fill
-        ? availableNodeWidth
-        : min(node.size.width, availableNodeWidth)
-      let x = node.horizontalAlignment == .leading
-        ? contentX + node.insets.leading
-        : contentX + resolvedContentWidth - node.insets.trailing - width
-      let nodeY = rootHeight + node.insets.top
-      nodeFrames[node.id] = CGRect(x: x, y: nodeY, width: width, height: node.size.height)
-      rootHeight = nodeY + node.size.height + node.insets.bottom
     }
 
     return MessageBubbleLayoutV2(

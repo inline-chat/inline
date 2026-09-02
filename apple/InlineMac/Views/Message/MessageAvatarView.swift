@@ -230,7 +230,7 @@ final class MessageAcknowledgementView: NSView {
     layer?.cornerRadius = 8
     check.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
     check.symbolConfiguration = .init(pointSize: 10, weight: .bold)
-    countLabel.font = .monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+    countLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
     countLabel.alignment = .center
     countLabel.lineBreakMode = .byClipping
     addSubview(check)
@@ -261,7 +261,7 @@ final class MessageAcknowledgementView: NSView {
 
     let wasVisible = !isHidden
     let nextActors = message.acknowledgementActors
-    let nextAvatarActors = nextActors.filter { $0.userInfo != nil }
+    let nextAvatarActors = nextActors.count <= 3 ? nextActors.filter { $0.userInfo != nil } : []
     let isVisible = !nextActors.isEmpty
     let shouldAnimateRemoval = animated
       && wasVisible
@@ -294,13 +294,13 @@ final class MessageAcknowledgementView: NSView {
     for (index, actor) in avatarActors.prefix(3).enumerated() {
       guard let userInfo = actor.userInfo else { continue }
       while avatars.count <= index {
-        let avatar = UserAvatarView(userInfo: userInfo, size: 12)
+        let avatar = UserAvatarView(userInfo: userInfo, size: AcknowledgementLayout.avatarSize)
         avatar.acceptsMouseInteraction = false
         avatar.setAccessibilityElement(false)
         avatars.append(avatar)
         addSubview(avatar)
       }
-      avatars[index].update(userInfo: userInfo, size: 12)
+      avatars[index].update(userInfo: userInfo, size: AcknowledgementLayout.avatarSize)
     }
     for avatar in avatars.dropFirst(min(3, avatarActors.count)) {
       avatar.isHidden = true
@@ -352,15 +352,21 @@ final class MessageAcknowledgementView: NSView {
     )
     for (index, avatar) in avatars.enumerated() {
       avatar.isHidden = index >= shown
-      avatar.frame = CGRect(x: 14 + CGFloat(index) * 14, y: 2, width: 12, height: 12)
+      avatar.frame = CGRect(
+        x: AcknowledgementLayout.avatarOriginX(at: index),
+        y: 2,
+        width: AcknowledgementLayout.avatarSize,
+        height: AcknowledgementLayout.avatarSize
+      )
     }
     let remaining = max(0, actors.count - shown)
     countLabel.stringValue = remaining > 0 ? (shown == 0 ? "\(remaining)" : "+\(remaining)") : ""
     countLabel.isHidden = remaining == 0
+    let countX = AcknowledgementLayout.countOriginX(visibleAvatarCount: shown)
     countLabel.frame = CGRect(
-      x: 14 + CGFloat(shown) * 14,
+      x: countX,
       y: 1,
-      width: max(0, bounds.width - 16 - CGFloat(shown) * 14),
+      width: max(0, bounds.width - countX - 2),
       height: 14
     )
   }

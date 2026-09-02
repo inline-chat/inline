@@ -178,6 +178,12 @@ class UIMessageView: UIView {
     (message.hasPhoto || message.hasVideo) && !message.hasText && !shouldShowReactionsInsideBubble
   }
 
+  private var hasAcknowledgement: Bool {
+    displayMode != .threadAnchor
+      && !message.isServiceMessage
+      && !fullMessage.acknowledgementActors.isEmpty
+  }
+
   private var shouldClearBubbleForMedia: Bool {
     shouldShowFloatingMetadata
       && message.forwardFromUserId == nil
@@ -326,7 +332,9 @@ class UIMessageView: UIView {
   }
 
   private var requiresMultilineContentLayout: Bool {
-    !fullMessage.reactions.isEmpty ||
+    hasAcknowledgement ||
+      hasMessageActionRows ||
+      !fullMessage.reactions.isEmpty ||
       shouldShowVoiceMessage ||
       fullMessage.message.documentId != nil ||
       fullMessage.file != nil ||
@@ -445,8 +453,6 @@ class UIMessageView: UIView {
 
   let acknowledgementView = MessageAcknowledgementView()
   private var acknowledgementWidthConstraint: NSLayoutConstraint?
-  private var acknowledgementCarrierBottomConstraint: NSLayoutConstraint?
-  private var acknowledgementCarrierBottomBaseConstant: CGFloat = 0
 
   // MARK: - Initialization
 
@@ -886,14 +892,40 @@ class UIMessageView: UIView {
   }
 
   func addFloatingMetadata(relativeTo mediaView: UIView) {
+    if hasAcknowledgement, shouldShowReactionsOutsideBubble {
+      addSubview(floatingMetadataView)
+      return
+    }
     bubbleView.contentView.addSubview(floatingMetadataView)
 
     let padding: CGFloat = 12
-
-    NSLayoutConstraint.activate([
-      floatingMetadataView.trailingAnchor.constraint(equalTo: bubbleView.contentView.trailingAnchor, constant: -padding),
+    var constraints = [
       floatingMetadataView.bottomAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: -10),
-    ])
+    ]
+
+    if hasAcknowledgement, !shouldShowReactionsOutsideBubble {
+      installAcknowledgementView(in: bubbleView.contentView)
+      constraints += [
+        acknowledgementView.rightAnchor.constraint(
+          equalTo: bubbleView.contentView.rightAnchor,
+          constant: -padding
+        ),
+        acknowledgementView.bottomAnchor.constraint(equalTo: floatingMetadataView.bottomAnchor),
+        floatingMetadataView.rightAnchor.constraint(
+          equalTo: acknowledgementView.leftAnchor,
+          constant: -5
+        ),
+      ]
+    } else {
+      constraints.append(
+        floatingMetadataView.trailingAnchor.constraint(
+          equalTo: bubbleView.contentView.trailingAnchor,
+          constant: -padding
+        )
+      )
+    }
+
+    NSLayoutConstraint.activate(constraints)
   }
 
   func setupReactionsIfNeeded(animatedEmoji: String? = nil) {
@@ -941,9 +973,48 @@ class UIMessageView: UIView {
     fullMessage = updatedMessage
     acknowledgementView.configure(updatedMessage)
     acknowledgementWidthConstraint?.constant = updatedMessage.acknowledgementPillWidth
-    acknowledgementCarrierBottomConstraint?.constant =
-      acknowledgementCarrierBottomBaseConstant - acknowledgementFooterHeight
     setNeedsLayout()
+  }
+
+  func canUpdateAcknowledgementInPlace(to updatedMessage: FullMessage) -> Bool {
+    let wasVisible = hasAcknowledgement
+    let isVisible = displayMode != .threadAnchor
+      && !updatedMessage.message.isServiceMessage
+      && !updatedMessage.acknowledgementActors.isEmpty
+    guard wasVisible == isVisible else { return false }
+    return !isVisible
+      || abs(fullMessage.acknowledgementPillWidth - updatedMessage.acknowledgementPillWidth) <= 0.5
+  }
+
+  private func configureAcknowledgementView() {
+    acknowledgementView.configure(fullMessage)
+    acknowledgementView.translatesAutoresizingMaskIntoConstraints = false
+    acknowledgementView.setContentHuggingPriority(.required, for: .horizontal)
+    acknowledgementView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+    guard acknowledgementWidthConstraint == nil else { return }
+    let widthConstraint = acknowledgementView.widthAnchor.constraint(
+      equalToConstant: fullMessage.acknowledgementPillWidth
+    )
+    acknowledgementWidthConstraint = widthConstraint
+    NSLayoutConstraint.activate([
+      widthConstraint,
+      acknowledgementView.heightAnchor.constraint(equalToConstant: 16),
+    ])
+  }
+
+  private func installAcknowledgementView(in container: UIView) {
+    guard hasAcknowledgement else { return }
+    configureAcknowledgementView()
+    if acknowledgementView.superview == nil {
+      container.addSubview(acknowledgementView)
+    }
+  }
+
+  private func addAcknowledgementIfNeeded(to stack: UIStackView) {
+    guard hasAcknowledgement else { return }
+    configureAcknowledgementView()
+    stack.addArrangedSubview(acknowledgementView)
   }
 
   func replaceFullMessageSnapshot(_ updatedMessage: FullMessage) {
@@ -975,17 +1046,38 @@ class UIMessageView: UIView {
     let bottomPadding: CGFloat = spacing + 2
     let bottomConstraint = reactionsFlowView.bottomAnchor.constraint(
       equalTo: bottomAnchor,
-      constant: -bottomPadding - acknowledgementFooterHeight
+      constant: -bottomPadding
     )
-    acknowledgementCarrierBottomConstraint = bottomConstraint
-    acknowledgementCarrierBottomBaseConstant = -bottomPadding
     var constraints: [NSLayoutConstraint] = [
       reactionsFlowView.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: spacing),
       bottomConstraint,
       reactionsFlowView.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.contentView.widthAnchor),
     ]
 
-    if outgoing {
+    if hasAcknowledgement {
+      installAcknowledgementView(in: self)
+      reactionsFlowView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+      var reactionRightAnchor = acknowledgementView.leftAnchor
+      if shouldShowFloatingMetadata {
+        reactionRightAnchor = floatingMetadataView.leftAnchor
+        constraints += [
+          floatingMetadataView.rightAnchor.constraint(
+            equalTo: acknowledgementView.leftAnchor,
+            constant: -5
+          ),
+          floatingMetadataView.bottomAnchor.constraint(equalTo: reactionsFlowView.bottomAnchor),
+        ]
+      }
+      constraints += [
+        reactionsFlowView.leftAnchor.constraint(equalTo: bubbleView.contentView.leftAnchor),
+        reactionsFlowView.rightAnchor.constraint(
+          lessThanOrEqualTo: reactionRightAnchor,
+          constant: -6
+        ),
+        acknowledgementView.rightAnchor.constraint(equalTo: bubbleView.contentView.rightAnchor),
+        acknowledgementView.bottomAnchor.constraint(equalTo: reactionsFlowView.bottomAnchor),
+      ]
+    } else if outgoing {
       constraints.append(reactionsFlowView.trailingAnchor.constraint(equalTo: bubbleView.contentView.trailingAnchor))
       constraints.append(reactionsFlowView.leadingAnchor.constraint(greaterThanOrEqualTo: bubbleView.contentView.leadingAnchor))
     } else {
@@ -1469,24 +1561,30 @@ class UIMessageView: UIView {
         setupReactionsIfNeeded()
       }
 
-      let metadataContainer = UIStackView()
-      metadataContainer.axis = .horizontal
-      metadataContainer.translatesAutoresizingMaskIntoConstraints = false
-      metadataContainer.addArrangedSubview(UIView())
-      metadataContainer.addArrangedSubview(metadataView)
-      metadataContainerView = metadataContainer
+      if shouldShowReactionsInsideBubble, hasAcknowledgement {
+        addReactionMetadataFooter(to: innerContainer)
+      } else {
+        let metadataContainer = UIStackView()
+        metadataContainer.axis = .horizontal
+        metadataContainer.semanticContentAttribute = .forceLeftToRight
+        metadataContainer.translatesAutoresizingMaskIntoConstraints = false
+        metadataContainer.addArrangedSubview(UIView())
+        metadataContainer.addArrangedSubview(metadataView)
+        addAcknowledgementIfNeeded(to: metadataContainer)
+        metadataContainerView = metadataContainer
 
-      if shouldShowReactionsInsideBubble {
-        if isEmojiOnlyMessage {
-          innerContainer.addArrangedSubview(metadataContainer)
-          innerContainer.addArrangedSubview(reactionsFlowView)
+        if shouldShowReactionsInsideBubble {
+          if isEmojiOnlyMessage {
+            innerContainer.addArrangedSubview(metadataContainer)
+            innerContainer.addArrangedSubview(reactionsFlowView)
+          } else {
+            innerContainer.addArrangedSubview(reactionsFlowView)
+            innerContainer.addArrangedSubview(metadataContainer)
+          }
+          applyEmojiReactionSpacing(to: innerContainer)
         } else {
-          innerContainer.addArrangedSubview(reactionsFlowView)
           innerContainer.addArrangedSubview(metadataContainer)
         }
-        applyEmojiReactionSpacing(to: innerContainer)
-      } else {
-        innerContainer.addArrangedSubview(metadataContainer)
       }
 
       applyReactionMetadataSpacing(to: innerContainer)
@@ -1519,8 +1617,9 @@ class UIMessageView: UIView {
         setupReactionsIfNeeded()
       }
       let sharesReactionRowWithMetadata = shouldShareReactionRowWithMetadata
+        || (hasAcknowledgement && shouldShowReactionsInsideBubble)
 
-      if isEmojiOnlyMessage, shouldShowReactionsInsideBubble {
+      if isEmojiOnlyMessage, shouldShowReactionsInsideBubble, !hasAcknowledgement {
         if message.hasText || isSticker {
           setupMultilineMetadata()
         }
@@ -1548,17 +1647,37 @@ class UIMessageView: UIView {
   }
 
   private func addReactionMetadataFooter(to stack: UIStackView) {
-    let footer = UIStackView(arrangedSubviews: [reactionsFlowView, metadataView])
+    let arrangedSubviews: [UIView]
+    if hasAcknowledgement {
+      arrangedSubviews = [reactionsFlowView, UIView(), metadataView, acknowledgementView]
+      configureAcknowledgementView()
+    } else {
+      arrangedSubviews = [reactionsFlowView, metadataView]
+    }
+
+    let footer = UIStackView(arrangedSubviews: arrangedSubviews)
     footer.axis = .horizontal
+    if hasAcknowledgement {
+      footer.semanticContentAttribute = .forceLeftToRight
+    }
     footer.alignment = .bottom
-    footer.distribution = .equalSpacing
+    footer.distribution = hasAcknowledgement ? .fill : .equalSpacing
     footer.spacing = StackPadding.inlineReactionMetadataSpacing
     footer.translatesAutoresizingMaskIntoConstraints = false
 
-    reactionsFlowView.setContentHuggingPriority(.required, for: .horizontal)
-    reactionsFlowView.setContentCompressionResistancePriority(.required, for: .horizontal)
+    reactionsFlowView.setContentHuggingPriority(
+      hasAcknowledgement ? .defaultLow : .required,
+      for: .horizontal
+    )
+    reactionsFlowView.setContentCompressionResistancePriority(
+      hasAcknowledgement ? .defaultHigh : .required,
+      for: .horizontal
+    )
     metadataView.setContentHuggingPriority(.required, for: .horizontal)
     metadataView.setContentCompressionResistancePriority(.required, for: .horizontal)
+    if hasAcknowledgement {
+      footer.setCustomSpacing(5, after: metadataView)
+    }
 
     metadataContainerView = footer
     stack.addArrangedSubview(footer)
@@ -1600,6 +1719,9 @@ class UIMessageView: UIView {
   func setupMultilineMetadata() {
     let metadataContainer = UIStackView()
     metadataContainer.axis = .horizontal
+    if hasAcknowledgement {
+      metadataContainer.semanticContentAttribute = .forceLeftToRight
+    }
     metadataContainer.addArrangedSubview(UIView()) // Spacer
     if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
       metadataContainer.addSubview(floatingMetadataView)
@@ -1610,15 +1732,28 @@ class UIMessageView: UIView {
       } else {
         -18
       }
-      NSLayoutConstraint.activate([
+      var constraints = [
         floatingMetadataView.topAnchor.constraint(
           equalTo: metadataContainer.topAnchor,
           constant: floatingTopOffset
         ),
-        floatingMetadataView.trailingAnchor.constraint(equalTo: metadataContainer.trailingAnchor, constant: -4),
-      ])
+      ]
+      if hasAcknowledgement {
+        installAcknowledgementView(in: metadataContainer)
+        constraints += [
+          acknowledgementView.rightAnchor.constraint(equalTo: metadataContainer.rightAnchor, constant: -4),
+          acknowledgementView.bottomAnchor.constraint(equalTo: floatingMetadataView.bottomAnchor),
+          floatingMetadataView.rightAnchor.constraint(equalTo: acknowledgementView.leftAnchor, constant: -5),
+        ]
+      } else {
+        constraints.append(
+          floatingMetadataView.trailingAnchor.constraint(equalTo: metadataContainer.trailingAnchor, constant: -4)
+        )
+      }
+      NSLayoutConstraint.activate(constraints)
     } else {
       metadataContainer.addArrangedSubview(metadataView)
+      addAcknowledgementIfNeeded(to: metadataContainer)
     }
     metadataContainerView = metadataContainer
     multiLineContainer.addArrangedSubview(metadataContainer)
@@ -2210,9 +2345,9 @@ class UIMessageView: UIView {
       do {
         try await Api.realtime.send(.acknowledgeMessages(message: targetMessage, action: action))
       } catch {
-        Log.scoped("Acknowledgement").error("Failed to update acknowledgement", error: error)
+        Log.scoped("Acknowledgement").error("Failed to update Ack", error: error)
         ToastManager.shared.showToast(
-          "Could not update acknowledgement",
+          "Could not update Ack",
           type: .error,
           systemImage: "exclamationmark.triangle.fill"
         )
@@ -2242,10 +2377,6 @@ class UIMessageView: UIView {
       let width = min(fullMessage.acknowledgementPillWidth, max(fullMessage.acknowledgementMinimumPillWidth, bubbleView.contentView.bounds.width))
       if acknowledgementWidthConstraint.constant != width { acknowledgementWidthConstraint.constant = width }
     }
-  }
-
-  private var acknowledgementFooterHeight: CGFloat {
-    displayMode == .threadAnchor || fullMessage.acknowledgementActors.isEmpty || message.isServiceMessage ? 0 : 20
   }
 
   func setupConstraints() {
@@ -2371,39 +2502,9 @@ class UIMessageView: UIView {
     if shouldShowReactionsOutsideBubble {
       setupExternalReactionsConstraints()
     } else if hasMessageActionRows {
-      let bottomConstraint = messageActionsContainer.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
-        constant: -acknowledgementFooterHeight
-      )
-      acknowledgementCarrierBottomConstraint = bottomConstraint
-      acknowledgementCarrierBottomBaseConstant = 0
-      bottomConstraint.isActive = true
+      messageActionsContainer.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     } else {
-      let bottomConstraint = bubbleView.bottomAnchor.constraint(
-        equalTo: bottomAnchor,
-        constant: -acknowledgementFooterHeight
-      )
-      acknowledgementCarrierBottomConstraint = bottomConstraint
-      acknowledgementCarrierBottomBaseConstant = 0
-      bottomConstraint.isActive = true
-    }
-
-    if displayMode != .threadAnchor, !message.isServiceMessage {
-      acknowledgementView.configure(fullMessage)
-      acknowledgementView.translatesAutoresizingMaskIntoConstraints = false
-      addSubview(acknowledgementView)
-      let widthConstraint = acknowledgementView.widthAnchor.constraint(equalToConstant: fullMessage.acknowledgementPillWidth)
-      acknowledgementWidthConstraint = widthConstraint
-      NSLayoutConstraint.activate([
-        acknowledgementView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        acknowledgementView.heightAnchor.constraint(equalToConstant: 16),
-        widthConstraint,
-        AcknowledgementLayout.isRTL(
-          fullMessage.displayText,
-          fallback: effectiveUserInterfaceLayoutDirection == .rightToLeft
-        ) ? acknowledgementView.leftAnchor.constraint(equalTo: bubbleView.contentView.leftAnchor)
-          : acknowledgementView.rightAnchor.constraint(equalTo: bubbleView.contentView.rightAnchor),
-      ])
+      bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     }
     updateBubbleHorizontalConstraint(for: bubbleTailSide)
     bubbleHorizontalConstraint?.isActive = true

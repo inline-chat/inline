@@ -4234,9 +4234,9 @@ private extension MessagesCollectionView {
                   action: acknowledgementAction
                 ))
               } catch {
-                Log.scoped("Acknowledgement").error("Failed to update acknowledgement", error: error)
+                Log.scoped("Acknowledgement").error("Failed to update Ack", error: error)
                 ToastManager.shared.showToast(
-                  "Could not update acknowledgement",
+                  "Could not update Ack",
                   type: .error,
                   systemImage: "exclamationmark.triangle.fill"
                 )
@@ -4300,6 +4300,19 @@ private extension MessagesCollectionView {
 
         let deleteMenu = UIMenu(title: "", options: .displayInline, children: [deleteAction])
         menuChildren.append(deleteMenu)
+
+        if let attribution = fullMessage.acknowledgementAttributionLabel {
+          let attributionAction = UIAction(
+            title: attribution,
+            image: UIImage(systemName: "person.2"),
+            attributes: .disabled
+          ) { _ in }
+          menuChildren.append(UIMenu(
+            title: "",
+            options: .displayInline,
+            children: [attributionAction]
+          ))
+        }
 
         return UIMenu(children: menuChildren)
       }

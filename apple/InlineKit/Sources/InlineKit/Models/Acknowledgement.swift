@@ -243,15 +243,11 @@ public extension FullMessage {
   }
 
   var acknowledgementPillWidth: CGFloat {
-    let count = acknowledgementActors.count
-    guard count > 0 else { return 0 }
-    let avatarWidth = 28 + CGFloat(min(count, 3) - 1) * 14
-    guard count > 3 else { return avatarWidth }
-    return avatarWidth + 2 + AcknowledgementLayout.countWidth(count - 3, includesPlus: true)
+    AcknowledgementLayout.pillWidth(actorCount: acknowledgementActors.count)
   }
 
   var acknowledgementMinimumPillWidth: CGFloat {
-    max(28, 16 + AcknowledgementLayout.countWidth(acknowledgementActors.count))
+    acknowledgementPillWidth
   }
 
   var acknowledgementLabel: String {
@@ -259,43 +255,100 @@ public extension FullMessage {
     let confirmedActors = actors.filter { !$0.acknowledgement.isOptimisticProjection }
     let hasPendingActor = confirmedActors.count != actors.count
     guard !confirmedActors.isEmpty else {
-      return hasPendingActor ? "Acknowledging through this message" : "Acknowledged through this message"
+      return hasPendingActor ? "Sending your Ack through this message" : "Ack through this message"
     }
     let names = confirmedActors.compactMap { $0.userInfo?.user.shortDisplayName }
     let confirmedLabel: String
     if confirmedActors.count == 1, let name = names.first {
-      confirmedLabel = "Acknowledged through this message by \(name)"
+      confirmedLabel = "Ack through this message by \(name)"
     } else {
       let shown = Array(names.prefix(3))
       let hiddenCount = confirmedActors.count - shown.count
       if shown.isEmpty {
-        confirmedLabel = "Acknowledged through this message by \(confirmedActors.count) people"
+        confirmedLabel = "Ack through this message by \(confirmedActors.count) people"
       } else {
-        let prefix = "Acknowledged through this message by " + shown.joined(separator: ", ")
+        let prefix = "Ack through this message by " + shown.joined(separator: ", ")
         confirmedLabel = hiddenCount > 0 ? prefix + ", and \(hiddenCount) more" : prefix
       }
     }
     if hasPendingActor {
-      return confirmedLabel + ". Your acknowledgement is syncing"
+      return confirmedLabel + ". Your Ack is syncing"
     }
     return confirmedLabel
+  }
+
+  /// Compact, non-interactive context-menu attribution for the active cursor actors.
+  var acknowledgementAttributionLabel: String? {
+    let actors = acknowledgementActors
+    guard !actors.isEmpty else { return nil }
+
+    let names = actors.compactMap { $0.userInfo?.user.shortDisplayName }
+    let shown = Array(names.prefix(3))
+    let hiddenCount = actors.count - shown.count
+    guard !shown.isEmpty else {
+      return actors.count == 1
+        ? "Ack by 1 person"
+        : "Ack by \(actors.count) people"
+    }
+
+    if hiddenCount > 0 {
+      return "Ack by \(shown.joined(separator: ", ")), and \(hiddenCount) more"
+    }
+
+    let visibleNames: String
+    switch shown.count {
+      case 1:
+        visibleNames = shown[0]
+      case 2:
+        visibleNames = "\(shown[0]) and \(shown[1])"
+      default:
+        visibleNames = "\(shown[0]), \(shown[1]), and \(shown[2])"
+    }
+    return "Ack by \(visibleNames)"
   }
 }
 
 public enum AcknowledgementLayout {
+  public static let avatarSize: CGFloat = 12
+  public static let avatarStride: CGFloat = 9
+  public static let avatarStartX: CGFloat = 14
+
   /// Both native leaves cap the count font at 11pt. Eight points per monospaced
   /// digit (including the plus) leaves room without changing message wrapping.
   public static func countWidth(_ count: Int, includesPlus: Bool = false) -> CGFloat {
     CGFloat(String(max(0, count)).count + (includesPlus ? 1 : 0)) * 8
   }
 
+  public static func pillWidth(actorCount: Int) -> CGFloat {
+    guard actorCount > 0 else { return 0 }
+    if actorCount <= 3 {
+      return 28 + CGFloat(actorCount - 1) * avatarStride
+    }
+    return max(28, 16 + countWidth(actorCount))
+  }
+
+  public static func avatarOriginX(at index: Int) -> CGFloat {
+    avatarStartX + CGFloat(max(0, index)) * avatarStride
+  }
+
+  public static func countOriginX(visibleAvatarCount: Int) -> CGFloat {
+    guard visibleAvatarCount > 0 else { return avatarStartX }
+    return avatarStartX
+      + avatarSize
+      + CGFloat(visibleAvatarCount - 1) * avatarStride
+      + 2
+  }
+
   public static func visibleAvatarCount(actorCount: Int, width: CGFloat, availableAvatarCount: Int = .max) -> Int {
+    guard actorCount <= 3 else { return 0 }
     let maximum = max(0, min(3, actorCount, availableAvatarCount))
     for shown in stride(from: maximum, through: 0, by: -1) {
       let remaining = actorCount - shown
       let required = remaining == 0
-        ? 14 + CGFloat(shown) * 14
-        : 16 + CGFloat(shown) * 14 + countWidth(remaining, includesPlus: shown > 0)
+        ? pillWidth(actorCount: shown)
+        : countOriginX(visibleAvatarCount: shown)
+          + countWidth(remaining, includesPlus: shown > 0)
+          + 2
       if width >= required { return shown }
     }
     return 0

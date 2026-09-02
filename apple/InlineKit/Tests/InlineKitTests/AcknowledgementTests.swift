@@ -5,7 +5,7 @@ import InlineProtocol
 import Testing
 @testable import InlineKit
 
-@Suite("Explicit acknowledgement cursor")
+@Suite("Explicit Ack cursor")
 struct AcknowledgementTests {
   @Test func revisionedCursorMovesClearsReactivatesAndSurvivesDeletion() throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
@@ -70,6 +70,10 @@ struct AcknowledgementTests {
         .fetchAll(db)
       #expect(rows.first { $0.message.messageId == 10 }?.acknowledgementActors.map(\.acknowledgement.userId) == [2])
       #expect(rows.first { $0.message.messageId == 12 }?.acknowledgementActors.map(\.acknowledgement.userId) == [1])
+      #expect(rows.first { $0.message.messageId == 10 }?.acknowledgementAttributionLabel
+        == "Ack by Other actor")
+      #expect(rows.first { $0.message.messageId == 12 }?.acknowledgementAttributionLabel
+        == "Ack by Actor")
 
       try InlineKit.Message
         .filter(InlineKit.Message.Columns.chatId == 100)
@@ -377,7 +381,7 @@ struct AcknowledgementTests {
       animated: true
     ))
     #expect(try row(12).acknowledgementActors.map(\.acknowledgement.revision) == [-1])
-    #expect(try row(12).acknowledgementLabel == "Acknowledging through this message")
+    #expect(try row(12).acknowledgementLabel == "Sending your Ack through this message")
     #expect(model.messages.allSatisfy { $0.acknowledgementAction(currentUserId: 1) == nil })
     #expect(!publisher.beginOptimisticAcknowledgement(
       requestId: UUID(),
@@ -526,19 +530,27 @@ struct AcknowledgementTests {
 
   @Test(arguments: [100, 1000], [CGFloat(28), CGFloat(40)])
   func largeCountsReserveLegibleMinimumWidth(count: Int, contentWidth: CGFloat) {
-    let minimum = max(28, 16 + AcknowledgementLayout.countWidth(count))
+    let minimum = AcknowledgementLayout.pillWidth(actorCount: count)
     let width = max(contentWidth, minimum)
     let shown = AcknowledgementLayout.visibleAvatarCount(actorCount: count, width: width)
-    let countSpace = width - 16 - CGFloat(shown) * 14
-    #expect(countSpace >= AcknowledgementLayout.countWidth(count - shown, includesPlus: shown > 0))
+    let countSpace = width - AcknowledgementLayout.countOriginX(visibleAvatarCount: shown) - 2
+    #expect(shown == 0)
+    #expect(countSpace >= AcknowledgementLayout.countWidth(count))
   }
 
-  @Test func narrowGroupsKeepATruthfulCount() {
+  @Test func compactAggregationUsesAvatarsThenTotalCount() {
     #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 1, width: 28) == 1)
-    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 4, width: 78) == 3)
+    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 2, width: 37) == 2)
+    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 3, width: 46) == 3)
+    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 4, width: 78) == 0)
     #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 4, width: 28) == 0)
-    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 2, width: 42, availableAvatarCount: 1) == 0)
-    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 3, width: 56, availableAvatarCount: 2) == 1)
+    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 2, width: 37, availableAvatarCount: 1) == 0)
+    #expect(AcknowledgementLayout.visibleAvatarCount(actorCount: 3, width: 46, availableAvatarCount: 2) == 1)
+    #expect(AcknowledgementLayout.pillWidth(actorCount: 1) == 28)
+    #expect(AcknowledgementLayout.pillWidth(actorCount: 2) == 37)
+    #expect(AcknowledgementLayout.pillWidth(actorCount: 3) == 46)
+    #expect(AcknowledgementLayout.pillWidth(actorCount: 4) == 28)
+    #expect(AcknowledgementLayout.avatarStride < AcknowledgementLayout.avatarSize)
   }
 
   @Test(arguments: ["Hello", "😀 Hello", "۱۲۳ Hello", "42 😀", "你好"])

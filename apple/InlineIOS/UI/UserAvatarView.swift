@@ -169,7 +169,7 @@ final class MessageAcknowledgementView: UIView {
     layer.cornerRadius = 8
     check.tintColor = .label
     countLabel.font = UIFontMetrics(forTextStyle: .caption2).scaledFont(
-      for: .monospacedDigitSystemFont(ofSize: 9, weight: .semibold),
+      for: .monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
       maximumPointSize: 11
     )
     countLabel.adjustsFontForContentSizeCategory = true
@@ -190,7 +190,7 @@ final class MessageAcknowledgementView: UIView {
 
   func configure(_ message: FullMessage) {
     actors = message.acknowledgementActors
-    avatarActors = actors.filter { $0.userInfo != nil }
+    avatarActors = actors.count <= 3 ? actors.filter { $0.userInfo != nil } : []
     isHidden = actors.isEmpty
     accessibilityLabel = actors.isEmpty ? nil : message.acknowledgementLabel
 
@@ -217,12 +217,15 @@ final class MessageAcknowledgementView: UIView {
         addSubview(avatar)
         avatar.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-          avatar.leftAnchor.constraint(equalTo: leftAnchor, constant: 14 + CGFloat(index) * 14),
+          avatar.leftAnchor.constraint(
+            equalTo: leftAnchor,
+            constant: AcknowledgementLayout.avatarOriginX(at: index)
+          ),
           avatar.topAnchor.constraint(equalTo: topAnchor, constant: 2),
         ])
       }
       if let userInfo = actor.userInfo {
-        avatars[index].configure(with: userInfo, size: 12)
+        avatars[index].configure(with: userInfo, size: AcknowledgementLayout.avatarSize)
       }
     }
     setNeedsLayout()
@@ -250,10 +253,11 @@ final class MessageAcknowledgementView: UIView {
     let remaining = max(0, actors.count - shown)
     countLabel.text = remaining > 0 ? (shown == 0 ? "\(remaining)" : "+\(remaining)") : nil
     countLabel.isHidden = remaining == 0
+    let countX = AcknowledgementLayout.countOriginX(visibleAvatarCount: shown)
     countLabel.frame = CGRect(
-      x: 14 + CGFloat(shown) * 14,
+      x: countX,
       y: 1,
-      width: max(0, bounds.width - 16 - CGFloat(shown) * 14),
+      width: max(0, bounds.width - countX - 2),
       height: 14
     )
   }

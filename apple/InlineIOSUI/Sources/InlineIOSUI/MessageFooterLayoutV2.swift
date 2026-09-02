@@ -18,6 +18,8 @@ public struct MessageFooterLayoutV2: Equatable, Codable, Sendable {
     case trailingTextLineMetadata
     case metadataBelow
     case reactionsAndMetadataFooter
+    case metadataAndAcknowledgementFooter
+    case reactionsMetadataAndAcknowledgementFooter
     case stackedFooter
   }
 
@@ -25,6 +27,7 @@ public struct MessageFooterLayoutV2: Equatable, Codable, Sendable {
   public let textFrame: CGRect
   public let metadataFrame: CGRect
   public let reactionsFrame: CGRect?
+  public let acknowledgementFrame: CGRect?
   public let placement: Placement
 }
 
@@ -33,6 +36,7 @@ public enum MessageFooterLayoutPlannerV2 {
     textSize: CGSize,
     metadataSize: CGSize,
     reactionsSize: CGSize?,
+    acknowledgementSize: CGSize? = nil,
     isTextSingleLine: Bool,
     isRTL: Bool = false,
     trailingTextLine: MessageFooterLayoutV2.TrailingTextLine? = nil,
@@ -43,6 +47,7 @@ public enum MessageFooterLayoutPlannerV2 {
     guard isValid(textSize),
           isValid(metadataSize),
           reactionsSize.map(isValid) ?? true,
+          acknowledgementSize.map(isValid) ?? true,
           trailingTextLine.map(isValid) ?? true,
           maximumWidth.isFinite,
           maximumWidth > 0,
@@ -54,6 +59,61 @@ public enum MessageFooterLayoutPlannerV2 {
     else { return nil }
 
     let textFrame = CGRect(origin: .zero, size: textSize)
+
+    if let acknowledgementSize {
+      let availableAcknowledgementWidth = max(
+        0,
+        maximumWidth - metadataSize.width - horizontalSpacing
+      )
+      let resolvedAcknowledgementSize = CGSize(
+        width: min(acknowledgementSize.width, availableAcknowledgementWidth),
+        height: acknowledgementSize.height
+      )
+      let trailingWidth = metadataSize.width + horizontalSpacing + resolvedAcknowledgementSize.width
+      let footerY = textSize.height + verticalSpacing
+      let reactionsWidth = reactionsSize.map {
+        min($0.width, max(0, maximumWidth - trailingWidth - horizontalSpacing))
+      } ?? 0
+      let footerWidth = reactionsSize == nil
+        ? trailingWidth
+        : reactionsWidth + horizontalSpacing + trailingWidth
+      let width = max(textSize.width, min(maximumWidth, footerWidth))
+      let footerHeight = max(
+        metadataSize.height,
+        resolvedAcknowledgementSize.height,
+        reactionsSize?.height ?? 0
+      )
+      let acknowledgementX = width - resolvedAcknowledgementSize.width
+      let metadataX = acknowledgementX - horizontalSpacing - metadataSize.width
+
+      return MessageFooterLayoutV2(
+        size: CGSize(width: width, height: footerY + footerHeight),
+        textFrame: textFrame,
+        metadataFrame: CGRect(
+          x: metadataX,
+          y: footerY + footerHeight - metadataSize.height,
+          width: metadataSize.width,
+          height: metadataSize.height
+        ),
+        reactionsFrame: reactionsSize.map { size in
+          CGRect(
+            x: 0,
+            y: footerY + footerHeight - size.height,
+            width: reactionsWidth,
+            height: size.height
+          )
+        },
+        acknowledgementFrame: CGRect(
+          x: acknowledgementX,
+          y: footerY + footerHeight - resolvedAcknowledgementSize.height,
+          width: resolvedAcknowledgementSize.width,
+          height: resolvedAcknowledgementSize.height
+        ),
+        placement: reactionsSize == nil
+          ? .metadataAndAcknowledgementFooter
+          : .reactionsMetadataAndAcknowledgementFooter
+      )
+    }
 
     guard let reactionsSize else {
       if let trailingTextLine,
@@ -73,6 +133,7 @@ public enum MessageFooterLayoutPlannerV2 {
             height: metadataSize.height
           ),
           reactionsFrame: nil,
+          acknowledgementFrame: nil,
           placement: .trailingTextLineMetadata
         )
       }
@@ -95,6 +156,7 @@ public enum MessageFooterLayoutPlannerV2 {
             height: metadataSize.height
           ),
           reactionsFrame: nil,
+          acknowledgementFrame: nil,
           placement: .inlineMetadata
         )
       }
@@ -111,6 +173,7 @@ public enum MessageFooterLayoutPlannerV2 {
           height: metadataSize.height
         ),
         reactionsFrame: nil,
+        acknowledgementFrame: nil,
         placement: .metadataBelow
       )
     }
@@ -135,6 +198,7 @@ public enum MessageFooterLayoutPlannerV2 {
           width: reactionsSize.width,
           height: reactionsSize.height
         ),
+        acknowledgementFrame: nil,
         placement: .reactionsAndMetadataFooter
       )
     }
@@ -154,6 +218,7 @@ public enum MessageFooterLayoutPlannerV2 {
         origin: CGPoint(x: isRTL ? width - reactionsSize.width : 0, y: footerY),
         size: reactionsSize
       ),
+      acknowledgementFrame: nil,
       placement: .stackedFooter
     )
   }

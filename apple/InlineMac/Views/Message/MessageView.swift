@@ -170,6 +170,10 @@ class MessageViewAppKit: NSView {
     props.layout.reactionsOutsideBubble
   }
 
+  private var hasAcknowledgement: Bool {
+    props.layout.hasAcknowledgement
+  }
+
   private var shouldUseTransparentOutgoingReactions: Bool {
     outgoing && (emojiMessage || reactionsOutsideBubble)
   }
@@ -1053,7 +1057,7 @@ class MessageViewAppKit: NSView {
   }
 
   private func layoutAcknowledgement() {
-    guard !isAnchorMessage, !fullMessage.acknowledgementActors.isEmpty, !message.isServiceMessage else {
+    guard hasAcknowledgement else {
       if !acknowledgementView.isAnimatingRemoval {
         acknowledgementView.isHidden = true
       }
@@ -1062,10 +1066,11 @@ class MessageViewAppKit: NSView {
     acknowledgementView.isHidden = false
     let content = contentView.convert(contentView.bounds, to: self)
     let width = min(fullMessage.acknowledgementPillWidth, max(fullMessage.acknowledgementMinimumPillWidth, content.width))
-    let x = acknowledgementView.isRTL ? content.minX : content.maxX - width
-    // Footer height is in the wrapper plan; bubble/text/time geometry stays untouched.
-    let top = props.layout.wrapper.spacing.top + props.layout.wrapper.size.height - 16
-    let y = isFlipped ? top : bounds.height - top - 16
+    let x = content.maxX - MessageSizeCalculator.acknowledgementTrailingInset - width
+    let targetRect = timeAndStateView.convert(timeAndStateView.bounds, to: self)
+    let y = isFlipped
+      ? targetRect.maxY - 16
+      : targetRect.minY
     acknowledgementView.frame = CGRect(x: x, y: y, width: width, height: 16)
   }
 
@@ -1712,7 +1717,12 @@ class MessageViewAppKit: NSView {
           equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
-        if outgoing {
+        if hasAcknowledgement {
+          reactionViewLeadingConstraint = reactionsView.leftAnchor.constraint(
+            equalTo: bubbleView.leftAnchor,
+            constant: reactionsPlan.spacing.left
+          )
+        } else if outgoing {
           reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
             equalTo: bubbleView.trailingAnchor,
             constant: -reactionsPlan.spacing.right
@@ -2013,8 +2023,8 @@ class MessageViewAppKit: NSView {
       do {
         try await Api.realtime.send(.acknowledgeMessages(message: targetMessage, action: action))
       } catch {
-        self?.log.error("Failed to update acknowledgement", error: error)
-        ToastCenter.shared.showError("Could not update acknowledgement")
+        self?.log.error("Failed to update Ack", error: error)
+        ToastCenter.shared.showError("Could not update Ack")
       }
     }
   }
@@ -2349,19 +2359,30 @@ class MessageViewAppKit: NSView {
       let timeHeightConstraint = timeAndStateView.heightAnchor.constraint(
         equalToConstant: time.size.height
       )
-      let timeTrailingConstraint = timeAndStateView.trailingAnchor
-        .constraint(
+      let timeTrailingConstraint = hasAcknowledgement
+        ? timeAndStateView.rightAnchor.constraint(
+          equalTo: bubbleView.rightAnchor,
+          constant: -time.spacing.right
+        )
+        : timeAndStateView.trailingAnchor.constraint(
           equalTo: bubbleView.trailingAnchor,
           constant: -time.spacing.right
         )
 
+      self.timeViewTrailingConstraint = timeTrailingConstraint
       constraints.append(contentsOf: [
         timeWidthConstraint,
         timeHeightConstraint,
         timeTrailingConstraint,
       ])
 
-      if layout.placesTimeAboveReactions {
+      if reactionsOutsideBubble, hasAcknowledgement, let reactionsView {
+        timeViewBottomConstraint = timeAndStateView.bottomAnchor.constraint(
+          equalTo: reactionsView.bottomAnchor,
+          constant: -6
+        )
+        constraints.append(timeViewBottomConstraint!)
+      } else if layout.placesTimeAboveReactions {
         timeViewTopConstraint = timeAndStateView.topAnchor.constraint(
           equalTo: contentView.topAnchor,
           constant: layout.timeViewTop
@@ -2561,6 +2582,7 @@ class MessageViewAppKit: NSView {
 
   private var timeViewTopConstraint: NSLayoutConstraint?
   private var timeViewBottomConstraint: NSLayoutConstraint?
+  private var timeViewTrailingConstraint: NSLayoutConstraint?
 
   private var contentViewWidthConstraint: NSLayoutConstraint!
   private var contentViewHeightConstraint: NSLayoutConstraint!
@@ -2939,7 +2961,13 @@ class MessageViewAppKit: NSView {
       } else if existingReactionViewTopConstraint.constant != reactionTopConstant {
         existingReactionViewTopConstraint.constant = reactionTopConstant
       }
-      if props.layout.reactionsOutsideBubble, outgoing {
+      if props.layout.reactionsOutsideBubble, hasAcknowledgement {
+        if let reactionViewLeadingConstraint,
+           reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left
+        {
+          reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
+        }
+      } else if props.layout.reactionsOutsideBubble, outgoing {
         if let reactionViewTrailingConstraint,
            reactionViewTrailingConstraint.constant != -reactionsPlan.spacing.right
         {
@@ -2955,6 +2983,10 @@ class MessageViewAppKit: NSView {
     }
 
     if let time = props.layout.time {
+      let trailingConstant = -time.spacing.right
+      if timeViewTrailingConstraint?.constant != trailingConstant {
+        timeViewTrailingConstraint?.constant = trailingConstant
+      }
       if props.layout.placesTimeAboveReactions {
         if let timeViewTopConstraint {
           if timeViewTopConstraint.constant != props.layout.timeViewTop {
@@ -2970,7 +3002,9 @@ class MessageViewAppKit: NSView {
           timeViewTopConstraint?.isActive = true
         }
       } else {
-        let bottomConstant = -time.spacing.bottom
+        let bottomConstant = reactionsOutsideBubble && hasAcknowledgement
+          ? -6
+          : -time.spacing.bottom
         if let timeViewBottomConstraint {
           if timeViewBottomConstraint.constant != bottomConstant {
             timeViewBottomConstraint.constant = bottomConstant
@@ -5189,6 +5223,19 @@ extension MessageViewAppKit: NSMenuDelegate {
     menu.addItem(indexItem)
 
     #endif
+
+    if let attribution = fullMessage.acknowledgementAttributionLabel {
+      if !menu.items.isEmpty, menu.items.last?.isSeparatorItem == false {
+        menu.addItem(.separator())
+      }
+      let attributionItem = NSMenuItem(title: attribution, action: nil, keyEquivalent: "")
+      attributionItem.image = NSImage(
+        systemSymbolName: "person.2",
+        accessibilityDescription: attribution
+      )
+      attributionItem.isEnabled = false
+      menu.addItem(attributionItem)
+    }
 
     menu.delegate = self
     return menu

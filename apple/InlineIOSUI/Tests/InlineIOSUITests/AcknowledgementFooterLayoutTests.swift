@@ -4,57 +4,141 @@ import Testing
 
 @Suite("Acknowledgement footer geometry")
 struct AcknowledgementFooterLayoutTests {
-  @Test(arguments: [false, true], [CGSize(width: 28, height: 28), CGSize(width: 90, height: 20), CGSize(width: 180, height: 80), CGSize(width: 220, height: 160)])
-  func footerUsesActualContentEdgeWithoutReflow(rtl: Bool, body: CGSize) throws {
-    let text = MessageLayoutNodeIDV2("body")
-    let ack = MessageLayoutNodeIDV2("acknowledgement")
-    let input = MessageBubbleLayoutInputV2(
-      containerWidth: 600, maximumBubbleWidth: 420,
+  private let text = MessageLayoutNodeIDV2("body")
+  private let metadata = MessageLayoutNodeIDV2("metadata")
+  private let reactions = MessageLayoutNodeIDV2("reactions")
+  private let acknowledgement = MessageLayoutNodeIDV2("acknowledgement")
+
+  @Test(arguments: [false, true])
+  func acknowledgementForcesPhysicalRightFooter(rtl: Bool) throws {
+    let plan = try #require(MessageBubbleLayoutPlannerV2.layout(.init(
+      containerWidth: 320,
+      maximumBubbleWidth: 240,
       alignment: .leading,
-      contentInsets: .init(top: 8, leading: 12, bottom: 8, trailing: 12),
-      flowNodes: [.init(id: text, size: body)]
-    )
-    let before = try #require(MessageBubbleLayoutPlannerV2.layout(input))
-    let after = try #require(MessageBubbleLayoutPlannerV2.layout(.init(
-      containerWidth: input.containerWidth, maximumBubbleWidth: input.maximumBubbleWidth,
-      alignment: input.alignment, contentInsets: input.contentInsets, flowNodes: input.flowNodes,
-      belowBubbleNodes: [.init(id: ack, size: CGSize(width: 78, height: 16), spacingBefore: 4,
-                              horizontalAlignment: rtl ? .leading : .trailing)]
+      contentInsets: .init(top: 8, leading: 0, bottom: 8, trailing: 0),
+      flowNodes: [
+        .init(
+          id: text,
+          size: CGSize(width: 90, height: 20),
+          insets: .init(top: 0, leading: 12, bottom: 0, trailing: 12)
+        ),
+      ],
+      footer: .init(
+        textNodeID: text,
+        metadataNodeID: metadata,
+        metadataSize: CGSize(width: 42, height: 14),
+        acknowledgementNodeID: acknowledgement,
+        acknowledgementSize: CGSize(width: 28, height: 16),
+        isTextSingleLine: true,
+        isRTL: rtl,
+        horizontalSpacing: 5,
+        verticalSpacing: 4
+      )
     )))
-    let frame = try #require(after.nodeFrames[ack])
-    #expect(before.bubbleFrame == after.bubbleFrame)
-    #expect(before.nodeFrames[text] == after.nodeFrames[text])
-    #expect(after.size.height == before.size.height + 20)
-    #expect(frame.height == 16)
-    #expect(frame.width <= body.width)
-    #expect(rtl ? frame.minX == after.bubbleContentFrame.minX : frame.maxX == after.bubbleContentFrame.maxX)
-    #expect(frame.maxX < input.maximumBubbleWidth)
+
+    let metadataFrame = try #require(plan.nodeFrames[metadata])
+    let acknowledgementFrame = try #require(plan.nodeFrames[acknowledgement])
+    #expect(plan.footerPlacement == .metadataAndAcknowledgementFooter)
+    #expect(metadataFrame.maxX + 5 == acknowledgementFrame.minX)
+    #expect(acknowledgementFrame.maxX == plan.bubbleFrame.maxX - 12)
+    #expect(metadataFrame.maxY == acknowledgementFrame.maxY)
   }
 
-  @Test(arguments: [false, true], [CGFloat(40), CGFloat(48)])
-  func largeActorCountDoesNotWidenTinyMessage(rtl: Bool, minimumWidth: CGFloat) throws {
-    let text = MessageLayoutNodeIDV2("body")
-    let ack = MessageLayoutNodeIDV2("acknowledgement")
-    let input = MessageBubbleLayoutInputV2(
-      containerWidth: 600, maximumBubbleWidth: 420, alignment: .leading,
-      contentInsets: .init(top: 8, leading: 12, bottom: 8, trailing: 12),
-      flowNodes: [.init(id: text, size: CGSize(width: 20, height: 20))]
-    )
-    let before = try #require(MessageBubbleLayoutPlannerV2.layout(input))
-    let after = try #require(MessageBubbleLayoutPlannerV2.layout(.init(
-      containerWidth: input.containerWidth, maximumBubbleWidth: input.maximumBubbleWidth,
-      alignment: input.alignment, contentInsets: input.contentInsets, flowNodes: input.flowNodes,
-      belowBubbleNodes: [.init(
-        id: ack, size: CGSize(width: 90, height: 16), spacingBefore: 4,
-        horizontalAlignment: rtl ? .leading : .trailing, minimumWidth: minimumWidth
-      )]
+  @Test(arguments: [false, true])
+  func reactionsTimeAndAcknowledgementShareOneFooter(rtl: Bool) throws {
+    let plan = try #require(MessageBubbleLayoutPlannerV2.layout(.init(
+      containerWidth: 360,
+      maximumBubbleWidth: 280,
+      alignment: .trailing,
+      contentInsets: .init(top: 8, leading: 0, bottom: 8, trailing: 0),
+      flowNodes: [
+        .init(
+          id: text,
+          size: CGSize(width: 180, height: 40),
+          insets: .init(top: 0, leading: 12, bottom: 0, trailing: 12)
+        ),
+      ],
+      footer: .init(
+        textNodeID: text,
+        metadataNodeID: metadata,
+        metadataSize: CGSize(width: 42, height: 14),
+        reactionsNodeID: reactions,
+        reactionsSize: CGSize(width: 74, height: 24),
+        acknowledgementNodeID: acknowledgement,
+        acknowledgementSize: CGSize(width: 42, height: 16),
+        isTextSingleLine: false,
+        isRTL: rtl,
+        horizontalSpacing: 5,
+        verticalSpacing: 4
+      )
     )))
-    let frame = try #require(after.nodeFrames[ack])
-    #expect(before.bubbleFrame == after.bubbleFrame)
-    #expect(before.nodeFrames[text] == after.nodeFrames[text])
-    #expect(frame.width == minimumWidth)
-    #expect(after.size.height == before.size.height + 20)
-    #expect(rtl ? frame.minX == after.bubbleContentFrame.minX : frame.maxX == after.bubbleContentFrame.maxX)
+
+    let reactionsFrame = try #require(plan.nodeFrames[reactions])
+    let metadataFrame = try #require(plan.nodeFrames[metadata])
+    let acknowledgementFrame = try #require(plan.nodeFrames[acknowledgement])
+    #expect(plan.footerPlacement == .reactionsMetadataAndAcknowledgementFooter)
+    #expect(reactionsFrame.maxX < metadataFrame.minX)
+    #expect(metadataFrame.maxX + 5 == acknowledgementFrame.minX)
+    #expect(reactionsFrame.maxY == acknowledgementFrame.maxY)
+    #expect(metadataFrame.maxY == acknowledgementFrame.maxY)
+    #expect(acknowledgementFrame.maxX == plan.bubbleFrame.maxX - 12)
   }
 
+  @Test func mediaReactionsTimeAndAcknowledgementShareExternalRow() throws {
+    let media = MessageLayoutNodeIDV2("media")
+    let accessoryRow = MessageLayoutNodeIDV2("accessory-row")
+    let plan = try #require(MessageBubbleLayoutPlannerV2.layout(.init(
+      containerWidth: 320,
+      maximumBubbleWidth: 220,
+      alignment: .leading,
+      contentInsets: .zero,
+      flowNodes: [
+        .init(
+          id: media,
+          size: CGSize(width: 220, height: 130),
+          widthBehavior: .fill,
+          forcesMaximumWidth: true
+        ),
+      ],
+      overlayNodes: [
+        .init(
+          id: reactions,
+          targetID: accessoryRow,
+          size: CGSize(width: 74, height: 24),
+          anchor: .bottomLeading
+        ),
+        .init(
+          id: metadata,
+          targetID: accessoryRow,
+          size: CGSize(width: 42, height: 14),
+          anchor: .bottomTrailing,
+          insets: .init(top: 0, leading: 0, bottom: 0, trailing: 33)
+        ),
+        .init(
+          id: acknowledgement,
+          targetID: accessoryRow,
+          size: CGSize(width: 28, height: 16),
+          anchor: .bottomTrailing
+        ),
+      ],
+      belowBubbleNodes: [
+        .init(
+          id: accessoryRow,
+          size: CGSize(width: 0, height: 24),
+          spacingBefore: 3,
+          widthBehavior: .fill
+        ),
+      ]
+    )))
+
+    let accessoryFrame = try #require(plan.nodeFrames[accessoryRow])
+    let reactionsFrame = try #require(plan.nodeFrames[reactions])
+    let metadataFrame = try #require(plan.nodeFrames[metadata])
+    let acknowledgementFrame = try #require(plan.nodeFrames[acknowledgement])
+    #expect(reactionsFrame.minX == accessoryFrame.minX)
+    #expect(metadataFrame.maxX + 5 == acknowledgementFrame.minX)
+    #expect(acknowledgementFrame.maxX == accessoryFrame.maxX)
+    #expect(reactionsFrame.maxY == acknowledgementFrame.maxY)
+    #expect(metadataFrame.maxY == acknowledgementFrame.maxY)
+  }
 }

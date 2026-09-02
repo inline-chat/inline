@@ -187,7 +187,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
          displayMode == self.displayMode,
          self.theme == theme,
          self.messageViewImplementation == .legacy,
-         let messageView
+         let messageView,
+         messageView.canUpdateAcknowledgementInPlace(to: message)
       {
         cancelPendingV2Snapshot()
         prevText = message.displayText

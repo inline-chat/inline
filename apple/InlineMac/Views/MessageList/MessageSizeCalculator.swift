@@ -63,6 +63,9 @@ class MessageSizeCalculator {
   static let minimalReactionTopSpacing: CGFloat = 3
   static let minimalReactionBottomSpacing: CGFloat = 4
   static let minimalNameAvatarOffset: CGFloat = 2
+  static let acknowledgementFooterSpacing: CGFloat = 5
+  static let acknowledgementTrailingInset: CGFloat = 6
+  static let acknowledgementStandaloneFooterHeight: CGFloat = 20
   static var minimalContentLeadingInset: CGFloat {
     minimalHoverSideInset + minimalHoverContentInset + minimalContentExtraLeadingInset
   }
@@ -343,6 +346,7 @@ class MessageSizeCalculator {
     var reactionsOutsideBubble: Bool
     var reactionsOutsideBubbleTopInset: CGFloat
     var timeInContentFlow: Bool
+    var hasAcknowledgement: Bool
 
     /// time can be beside text or below it. it doesn't define vertical spacing.
     var time: LayoutPlan?
@@ -384,7 +388,7 @@ class MessageSizeCalculator {
       return wrapper.spacing.top + name.spacing.top + name.size.height + name.spacing.bottom
     }
     var placesTimeAboveReactions: Bool {
-      timeInContentFlow && emojiMessage && hasReactions && !reactionsOutsideBubble
+      timeInContentFlow && emojiMessage && hasReactions && !reactionsOutsideBubble && !hasAcknowledgement
     }
 
     private var attachmentConstraintTopology: [(URLPreviewAttachmentLayout.Mode?, UrlPreviewLargeStyle?)] {
@@ -425,6 +429,7 @@ class MessageSizeCalculator {
         hasActionsRows == other.hasActionsRows &&
         hasTime == other.hasTime &&
         timeInContentFlow == other.timeInContentFlow &&
+        hasAcknowledgement == other.hasAcknowledgement &&
         reactionsOutsideBubble == other.reactionsOutsideBubble &&
         placesTimeAboveReactions == other.placesTimeAboveReactions
     }
@@ -799,7 +804,14 @@ class MessageSizeCalculator {
     let hasReplyThreadSummary = props.interactionMode != .threadAnchor && message.message.hasReplyThreadSummary
     let renderableActionRows = actionRows(for: message)
     let hasActionRows = !renderableActionRows.isEmpty
+    let hasAcknowledgement = props.interactionMode != .threadAnchor
+      && !message.acknowledgementActors.isEmpty
+      && !message.message.isServiceMessage
     let isOutgoing = message.message.out == true
+    let acknowledgementWidth = hasAcknowledgement ? message.acknowledgementPillWidth : 0
+    let timeWidth = isOutgoing
+      ? MessageTimeAndState.timeWidth + MessageTimeAndState.symbolWidth
+      : MessageTimeAndState.timeWidth
     var isSingleLine = false
     var isSticker = message.message.isSticker == true
     var textSize: CGSize?
@@ -1072,14 +1084,19 @@ class MessageSizeCalculator {
       isSingleLine = false
     }
 
-    let canShareReactionRowWithTime =
-      isSingleLine &&
-      hasReactions &&
-      isTextOnly &&
-      !hasReply &&
-      !hasForwardHeader &&
-      !hasActionRows &&
-      !emojiMessage
+    let textWasSingleLine = isSingleLine
+    if isSingleLine, hasAcknowledgement || hasActionRows {
+      isSingleLine = false
+    }
+
+    let canShareReactionRowWithTime = hasAcknowledgement && hasReactions
+      || (textWasSingleLine
+        && hasReactions
+        && isTextOnly
+        && !hasReply
+        && !hasForwardHeader
+        && !hasActionRows
+        && !emojiMessage)
 
     // Reaction messages use the multiline content flow. A later measured-layout pass can still
     // reclaim the time row when the final reaction line leaves enough trailing space.
@@ -1340,6 +1357,14 @@ class MessageSizeCalculator {
       )
 
       let reactionsSpacing = 6.0
+      let acknowledgementClusterWidth = hasAcknowledgement
+        ? timeWidth + Self.acknowledgementFooterSpacing + acknowledgementWidth
+          + Self.acknowledgementTrailingInset
+        : 0
+      let reactionLineWidth = max(
+        1,
+        availableWidth - acknowledgementClusterWidth - (hasAcknowledgement ? reactionsSpacing : 0)
+      )
       let reactionSpacing = NSEdgeInsets(
         top: reactionsSpacing,
         left: 0,
@@ -1359,7 +1384,7 @@ class MessageSizeCalculator {
         let reactionSize = ReactionChipMetrics.size(group: reaction)
 
         // Check if we need to move to next line
-        if currentLineWidth + reactionSize.width + reactionsSpacing > availableWidth {
+        if currentLineWidth + reactionSize.width + reactionsSpacing > reactionLineWidth {
           // go to next line
           reactionsCurrentLine += 1
           currentLineWidth = 0
@@ -1397,9 +1422,7 @@ class MessageSizeCalculator {
 
     timePlan = LayoutPlan(size: .zero, spacing: .zero)
     timePlan!.size = CGSize(
-      width: isOutgoing ?
-        MessageTimeAndState.timeWidth + MessageTimeAndState.symbolWidth :
-        MessageTimeAndState.timeWidth,
+      width: timeWidth,
       height: Theme.messageTimeHeight
     )
 
@@ -1408,6 +1431,11 @@ class MessageSizeCalculator {
     } else {
       //timePlan!.spacing = .init(top: 1.0, left: 9.0, bottom: 5.0, right: 9.0)
       timePlan!.spacing = .init(top: 1.0, left: 0.0, bottom: 5.0, right: 6.0)
+    }
+    if hasAcknowledgement {
+      timePlan!.spacing.right = acknowledgementWidth
+        + Self.acknowledgementFooterSpacing
+        + Self.acknowledgementTrailingInset
     }
 
     // modify isSingleLine to be false if we have media and text won't fit in a single line with time
@@ -1437,11 +1465,14 @@ class MessageSizeCalculator {
     }
     let maxBubbleWidth = richBlockPlan?.size.width
       ?? (availableWidth + (textPlan?.spacing.horizontalTotal ?? 0))
-    let timeSharesReactionRow = sharedReactionTimeWidth.map { $0 <= maxBubbleWidth } ?? false
+    let timeSharesReactionRow = hasAcknowledgement && hasReactions && !reactionsOutsideBubble
+      ? true
+      : (sharedReactionTimeWidth.map { $0 <= maxBubbleWidth } ?? false)
     let timeSharesRichFooter: Bool = if let trailing = richBlockPlan?.trailingTextLine,
       let timePlan,
       !trailing.isRTL,
       !hasReactions,
+      !hasAcknowledgement,
       !hasAttachments,
       !hasReplyThreadSummary
     {
@@ -1639,6 +1670,16 @@ class MessageSizeCalculator {
         wrapperWidth,
         avatarWidth + reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal
       )
+      if hasAcknowledgement, let timePlan {
+        wrapperWidth = max(
+          wrapperWidth,
+          avatarWidth
+            + reactionsPlan.size.width
+            + reactionTimeSpacing
+            + timePlan.size.width
+            + timePlan.spacing.right
+        )
+      }
     }
 
     wrapperPlan.size = CGSize(width: wrapperWidth, height: wrapperHeight)
@@ -1672,6 +1713,7 @@ class MessageSizeCalculator {
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: reactionsOutsideBubble ? reactionsOutsideBubbleTopInset : 0,
       timeInContentFlow: true,
+      hasAcknowledgement: hasAcknowledgement,
       time: timePlan,
       singleLine: isSingleLine,
       emojiMessage: emojiMessage,
@@ -1690,9 +1732,6 @@ class MessageSizeCalculator {
     }
 
     // Fitting width
-    if props.interactionMode != .threadAnchor, !message.acknowledgementActors.isEmpty, !message.message.isServiceMessage {
-      plan.wrapper.size.height += 20
-    }
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
 
     if richBlockPlan == nil, let textSize {
@@ -1723,7 +1762,11 @@ class MessageSizeCalculator {
     let hasReplyThreadSummary = props.interactionMode != .threadAnchor && message.message.hasReplyThreadSummary
     let renderableActionRows = actionRows(for: message)
     let hasActionRows = !renderableActionRows.isEmpty
+    let hasAcknowledgement = props.interactionMode != .threadAnchor
+      && !message.acknowledgementActors.isEmpty
+      && !message.message.isServiceMessage
     let isOutgoing = message.message.out == true
+    let acknowledgementWidth = hasAcknowledgement ? message.acknowledgementPillWidth : 0
     var textSize: CGSize?
     var richBlockPlan: RichBlockLayoutPlan?
     var photoSize: CGSize?
@@ -2087,6 +2130,13 @@ class MessageSizeCalculator {
           max(photoPlan?.size.width ?? 0, max(videoPlan?.size.width ?? 0, documentPlan?.size.width ?? 0))
         )
       )
+      let reactionLineWidth = max(
+        1,
+        reactionMaxWidth
+          - (hasAcknowledgement
+            ? acknowledgementWidth + Self.acknowledgementFooterSpacing
+            : 0)
+      )
 
       var reactionsCurrentLine = 0
       var currentLineWidth: CGFloat = 0
@@ -2095,7 +2145,7 @@ class MessageSizeCalculator {
       for reaction in sortedReactions {
         let emoji = reaction.emoji
         let reactionSize = ReactionChipMetrics.size(group: reaction)
-        if currentLineWidth + reactionSize.width + reactionsSpacing > reactionMaxWidth {
+        if currentLineWidth + reactionSize.width + reactionsSpacing > reactionLineWidth {
           reactionsCurrentLine += 1
           currentLineWidth = 0
         }
@@ -2183,6 +2233,16 @@ class MessageSizeCalculator {
       bubbleHeight += reactionsPlan.size.height
       bubbleHeight += reactionsPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
+      if hasAcknowledgement {
+        bubbleWidth = max(
+          bubbleWidth,
+          reactionsPlan.size.width + Self.acknowledgementFooterSpacing + acknowledgementWidth
+        )
+      }
+    }
+
+    if hasAcknowledgement {
+      bubbleWidth = max(bubbleWidth, acknowledgementWidth)
     }
 
     if hasActionRows {
@@ -2266,6 +2326,7 @@ class MessageSizeCalculator {
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: 0,
       timeInContentFlow: false,
+      hasAcknowledgement: hasAcknowledgement,
       time: timePlan,
       singleLine: isSingleLine,
       emojiMessage: emojiMessage,
@@ -2276,8 +2337,8 @@ class MessageSizeCalculator {
     plan.bubble.size.height += plan.topMostContentTopSpacing
     plan.wrapper.size.height += plan.topMostContentTopSpacing
 
-    if props.interactionMode != .threadAnchor, !message.acknowledgementActors.isEmpty, !message.message.isServiceMessage {
-      plan.wrapper.size.height += 20
+    if hasAcknowledgement, !hasReactions {
+      plan.wrapper.size.height += Self.acknowledgementStandaloneFooterHeight
     }
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)
     if richBlockPlan == nil, let textSize {

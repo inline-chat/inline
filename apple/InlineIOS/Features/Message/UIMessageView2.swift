@@ -34,6 +34,9 @@ final class UIMessageView2: UIMessageView {
     static let metadata = MessageLayoutNodeIDV2("metadata")
     static let floatingMetadata = MessageLayoutNodeIDV2("floating-metadata")
     static let reactions = MessageLayoutNodeIDV2("reactions")
+    static let acknowledgement = MessageLayoutNodeIDV2("acknowledgement")
+    static let bubbleAccessoryRow = MessageLayoutNodeIDV2("bubble-accessory-row")
+    static let accessoryRow = MessageLayoutNodeIDV2("accessory-row")
     static let replyThreadSummary = MessageLayoutNodeIDV2("reply-thread-summary")
     static let actions = MessageLayoutNodeIDV2("actions")
 
@@ -675,7 +678,7 @@ final class UIMessageView2: UIMessageView {
 
     bubbleView.translatesAutoresizingMaskIntoConstraints = true
     addSubview(bubbleView)
-    registerRootNode(acknowledgementView, id: MessageLayoutNodeIDV2("acknowledgement"))
+    registerRootNode(acknowledgementView, id: NodeID.acknowledgement)
     acknowledgementView.configure(fullMessage)
 
     if shouldShowForwardHeader {
@@ -760,7 +763,11 @@ final class UIMessageView2: UIMessageView {
     }
 
     if floatingMetadataTargetV2 != nil {
-      registerBubbleNode(floatingMetadataView, id: NodeID.floatingMetadata)
+      if floatingMetadataUsesExternalAccessoryRowV2 {
+        registerRootNode(floatingMetadataView, id: NodeID.floatingMetadata)
+      } else {
+        registerBubbleNode(floatingMetadataView, id: NodeID.floatingMetadata)
+      }
     } else {
       registerBubbleNode(metadataView, id: NodeID.metadata)
     }
@@ -1108,12 +1115,22 @@ final class UIMessageView2: UIMessageView {
     }
 
     let metadataSize = metadataView.intrinsicContentSize
+    let hasAcknowledgement = displayMode != .threadAnchor
+      && !fullMessage.acknowledgementActors.isEmpty
+    let acknowledgementSize: CGSize? = hasAcknowledgement
+      ? CGSize(width: fullMessage.acknowledgementPillWidth, height: 16)
+      : nil
+    let externalReactions = reactionsAreExternal(in: fullMessage)
+    let footerMaximumWidth = max(1, maximumContentWidth - 24)
+    let acknowledgementTrailingWidth = acknowledgementSize.map {
+      externalReactions ? $0.width + 5 : metadataSize.width + 5 + $0.width + 5
+    } ?? 0
+    let reactionsMaximumWidth = max(1, footerMaximumWidth - acknowledgementTrailingWidth)
     let reactionsSize: CGSize? = if fullMessage.reactions.isEmpty {
       nil
     } else {
-      reactionsFlowView.measuredSizeV2(maximumWidth: max(1, maximumContentWidth - 24))
+      reactionsFlowView.measuredSizeV2(maximumWidth: reactionsMaximumWidth)
     }
-    let externalReactions = reactionsAreExternal(in: fullMessage)
     let usesTextFooter = shouldUseTextFooterV2
 
     if bubbleNodeViews[NodeID.replyThreadSummary] != nil {
@@ -1130,7 +1147,44 @@ final class UIMessageView2: UIMessageView {
       )
     }
 
-    if !usesTextFooter {
+    let usesBubbleAccessoryRow = !usesTextFooter
+      && !externalReactions
+      && hasAcknowledgement
+      && bubbleNodeViews[NodeID.metadata] != nil
+    if usesBubbleAccessoryRow, let acknowledgementSize {
+      let rowHeight = max(metadataSize.height, acknowledgementSize.height, reactionsSize?.height ?? 0)
+      let rowWidth = metadataSize.width
+        + 5
+        + acknowledgementSize.width
+        + (reactionsSize.map { $0.width + 5 } ?? 0)
+      append(
+        NodeID.bubbleAccessoryRow,
+        size: CGSize(width: rowWidth, height: rowHeight),
+        widthBehavior: .fill,
+        insets: standardInsets
+      )
+      if let reactionsSize {
+        overlayNodes.append(.init(
+          id: NodeID.reactions,
+          targetID: NodeID.bubbleAccessoryRow,
+          size: reactionsSize,
+          anchor: .bottomLeading
+        ))
+      }
+      overlayNodes.append(.init(
+        id: NodeID.metadata,
+        targetID: NodeID.bubbleAccessoryRow,
+        size: metadataSize,
+        anchor: .bottomTrailing,
+        insets: .init(top: 0, leading: 0, bottom: 0, trailing: acknowledgementSize.width + 5)
+      ))
+      overlayNodes.append(.init(
+        id: NodeID.acknowledgement,
+        targetID: NodeID.bubbleAccessoryRow,
+        size: acknowledgementSize,
+        anchor: .bottomTrailing
+      ))
+    } else if !usesTextFooter {
       if !externalReactions, let reactionsSize {
         append(
           NodeID.reactions,
@@ -1149,18 +1203,35 @@ final class UIMessageView2: UIMessageView {
       }
     }
 
-    if bubbleNodeViews[NodeID.floatingMetadata] != nil {
+    let hasFloatingMetadata = bubbleNodeViews[NodeID.floatingMetadata] != nil
+      || rootNodeViews[NodeID.floatingMetadata] != nil
+    let floatingMetadataSize: CGSize? = hasFloatingMetadata
+      ? measuredSize(
+        of: floatingMetadataView,
+        nodeID: NodeID.floatingMetadata,
+        maximumWidth: maximumContentWidth
+      )
+      : nil
+    if hasFloatingMetadata, !floatingMetadataUsesExternalAccessoryRowV2 {
       guard let targetID = floatingMetadataTargetV2 else { return nil }
+      let sharesFloatingMetadata = hasAcknowledgement && !externalReactions
+      var metadataInsets = floatingMetadataInsetsV2
+      if sharesFloatingMetadata, let acknowledgementSize {
+        metadataInsets.trailing += acknowledgementSize.width + 5
+        overlayNodes.append(.init(
+          id: NodeID.acknowledgement,
+          targetID: targetID,
+          size: acknowledgementSize,
+          anchor: .bottomTrailing,
+          insets: floatingMetadataInsetsV2
+        ))
+      }
       overlayNodes.append(.init(
         id: NodeID.floatingMetadata,
         targetID: targetID,
-        size: measuredSize(
-          of: floatingMetadataView,
-          nodeID: NodeID.floatingMetadata,
-          maximumWidth: maximumContentWidth
-        ),
+        size: floatingMetadataSize ?? .zero,
         anchor: .bottomTrailing,
-        insets: floatingMetadataInsetsV2
+        insets: metadataInsets
       ))
     }
 
@@ -1182,23 +1253,61 @@ final class UIMessageView2: UIMessageView {
       ))
     }
     if externalReactions, let reactionsSize {
-      belowBubbleNodes.append(.init(id: NodeID.reactions, size: reactionsSize, spacingBefore: 3))
+      if let acknowledgementSize {
+        let accessoryMetadataSize = floatingMetadataSize ?? .zero
+        belowBubbleNodes.append(.init(
+          id: NodeID.accessoryRow,
+          size: CGSize(
+            width: 0,
+            height: max(reactionsSize.height, accessoryMetadataSize.height, acknowledgementSize.height)
+          ),
+          spacingBefore: 3,
+          widthBehavior: .fill
+        ))
+        overlayNodes.append(.init(
+          id: NodeID.reactions,
+          targetID: NodeID.accessoryRow,
+          size: reactionsSize,
+          anchor: .bottomLeading
+        ))
+        overlayNodes.append(.init(
+          id: NodeID.floatingMetadata,
+          targetID: NodeID.accessoryRow,
+          size: accessoryMetadataSize,
+          anchor: .bottomTrailing,
+          insets: .init(top: 0, leading: 0, bottom: 0, trailing: acknowledgementSize.width + 5)
+        ))
+        overlayNodes.append(.init(
+          id: NodeID.acknowledgement,
+          targetID: NodeID.accessoryRow,
+          size: acknowledgementSize,
+          anchor: .bottomTrailing
+        ))
+      } else {
+        belowBubbleNodes.append(.init(id: NodeID.reactions, size: reactionsSize, spacingBefore: 3))
+      }
     }
-    if displayMode != .threadAnchor, !fullMessage.acknowledgementActors.isEmpty {
+    let acknowledgementUsesFooter = hasAcknowledgement && usesTextFooter
+    let acknowledgementUsesOverlay = hasAcknowledgement
+      && (usesBubbleAccessoryRow || externalReactions || bubbleNodeViews[NodeID.floatingMetadata] != nil)
+    if hasAcknowledgement, !acknowledgementUsesFooter, !acknowledgementUsesOverlay,
+       let acknowledgementSize
+    {
       belowBubbleNodes.append(.init(
-        id: MessageLayoutNodeIDV2("acknowledgement"),
-        size: CGSize(width: fullMessage.acknowledgementPillWidth, height: 16),
+        id: NodeID.acknowledgement,
+        size: acknowledgementSize,
         spacingBefore: 4,
-        horizontalAlignment: AcknowledgementLayout.isRTL(
-          fullMessage.displayText,
-          fallback: effectiveUserInterfaceLayoutDirection == .rightToLeft
-        ) ? .leading : .trailing,
+        horizontalAlignment: .trailing,
         minimumWidth: fullMessage.acknowledgementMinimumPillWidth
       ))
     }
     let belowBubbleMinimumContentWidth = max(
       actionSize?.width ?? 0,
-      externalReactions ? (reactionsSize?.width ?? 0) : 0
+      externalReactions
+        ? (reactionsSize?.width ?? 0)
+          + (floatingMetadataSize?.width ?? 0)
+          + (acknowledgementSize.map { $0.width + 10 } ?? 0)
+        : 0
     )
 
     let lastIsFullBleedMedia = flowNodes.last.map {
@@ -1217,7 +1326,9 @@ final class UIMessageView2: UIMessageView {
         metadataSize: metadataSize,
         reactionsNodeID: externalReactions ? nil : reactionsSize.map { _ in NodeID.reactions },
         reactionsSize: externalReactions ? nil : reactionsSize,
-        isTextSingleLine: textMeasurement.isSingleLine,
+        acknowledgementNodeID: acknowledgementSize.map { _ in NodeID.acknowledgement },
+        acknowledgementSize: acknowledgementSize,
+        isTextSingleLine: textMeasurement.isSingleLine && !hasAcknowledgement,
         isRTL: textIsRTLV2,
         trailingTextLine: currentRichPlan?.trailingTextLine.map {
           .init(usedWidth: $0.usedWidth, height: $0.height, isRTL: $0.isRTL)
@@ -1348,6 +1459,8 @@ final class UIMessageView2: UIMessageView {
   }
 
   private var shouldUseTextFooterV2: Bool {
+    let hasAcknowledgement = displayMode != .threadAnchor
+      && !fullMessage.acknowledgementActors.isEmpty
     message.hasText
       && fullMessage.file == nil
       && fullMessage.photoInfo == nil
@@ -1358,10 +1471,10 @@ final class UIMessageView2: UIMessageView {
       && message.repliedToMessageId == nil
       && !shouldShowForwardHeader
       && !shouldShowReplyThreadSummary
-      && !hasMessageActionRowsV2
+      && (!hasMessageActionRowsV2 || hasAcknowledgement)
       && !isEmojiOnlyMessage
       && fullMessage.displayText?.containsEmoji != true
-      && (fullMessage.reactions.isEmpty || shouldShareReactionsWithMetadataV2)
+      && (fullMessage.reactions.isEmpty || shouldShareReactionsWithMetadataV2 || hasAcknowledgement)
   }
 
   private var shouldShareReactionsWithMetadataV2: Bool {
@@ -1388,6 +1501,13 @@ final class UIMessageView2: UIMessageView {
     if fullMessage.photoInfo != nil { return NodeID.photo }
     if fullMessage.videoInfo != nil { return NodeID.video }
     return nil
+  }
+
+  private var floatingMetadataUsesExternalAccessoryRowV2: Bool {
+    displayMode != .threadAnchor
+      && !fullMessage.acknowledgementActors.isEmpty
+      && reactionsAreExternal(in: fullMessage)
+      && floatingMetadataTargetV2 != nil
   }
 
   private var floatingMetadataInsetsV2: MessageLayoutInsetsV2 {
@@ -1592,9 +1712,15 @@ final class UIMessageView2: UIMessageView {
     }
 
     let wantsFloating = floatingMetadataTargetV2 != nil
-    let hasFloating = bubbleNodeViews[NodeID.floatingMetadata] === floatingMetadataView
-    if wantsFloating != hasFloating {
+    let wantsFloatingAsRoot = floatingMetadataUsesExternalAccessoryRowV2
+    let hasFloatingInBubble = bubbleNodeViews[NodeID.floatingMetadata] === floatingMetadataView
+    let hasFloatingAtRoot = rootNodeViews[NodeID.floatingMetadata] === floatingMetadataView
+    let hasFloating = hasFloatingInBubble || hasFloatingAtRoot
+    if wantsFloating != hasFloating || (wantsFloating && wantsFloatingAsRoot != hasFloatingAtRoot) {
       if let old = bubbleNodeViews.removeValue(forKey: NodeID.floatingMetadata) {
+        removeWithTransition(old)
+      }
+      if let old = rootNodeViews.removeValue(forKey: NodeID.floatingMetadata) {
         removeWithTransition(old)
       }
       if let old = bubbleNodeViews.removeValue(forKey: NodeID.metadata) {
@@ -1602,7 +1728,11 @@ final class UIMessageView2: UIMessageView {
       }
       let appearing: UIView
       if wantsFloating {
-        registerBubbleNode(floatingMetadataView, id: NodeID.floatingMetadata)
+        if wantsFloatingAsRoot {
+          registerRootNode(floatingMetadataView, id: NodeID.floatingMetadata)
+        } else {
+          registerBubbleNode(floatingMetadataView, id: NodeID.floatingMetadata)
+        }
         appearing = floatingMetadataView
       } else {
         registerBubbleNode(metadataView, id: NodeID.metadata)
