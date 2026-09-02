@@ -3,11 +3,19 @@ title: "OpenClaw"
 description: "Configure the official Inline OpenClaw plugin."
 ---
 
-Add Inline as an OpenClaw channel. You need OpenClaw 2026.6.11 or newer, a configured model provider, and an [Inline bot token](/docs/creating-a-bot).
+Add Inline as an OpenClaw channel. The current plugin targets the OpenClaw 2026.8 line from 2026.8.2. You also need a configured model provider and an [Inline bot token](/docs/creating-a-bot).
 
 For guided setup, use `inline agents setup --target openclaw`. The manual path follows.
 
 ## Install
+
+Choose the plugin version for your OpenClaw release line:
+
+- OpenClaw `2026.8.x` (`>=2026.8.2`): Inline plugin `0.0.64` — `openclaw plugins install --force @inline-openclaw/inline@0.0.64`
+- OpenClaw `2026.7.x`: Inline plugin `0.0.63` — `openclaw plugins install --force @inline-openclaw/inline@0.0.63`
+- OpenClaw `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`): Inline plugin `0.0.63` — `openclaw plugins install --force @inline-openclaw/inline@0.0.63`
+
+The unversioned install follows the newest supported OpenClaw line:
 
 ```bash
 openclaw plugins install @inline-openclaw/inline

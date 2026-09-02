@@ -3,7 +3,7 @@ title: "Hermes Agent"
 description: "Run Hermes Agent from Inline chats."
 ---
 
-Requirements: Node.js 20+ and Hermes Agent with the external platform plugin loader (available in 0.17.x). The adapter's compatibility reference records validation against Hermes 0.20.6. Configure a model provider in Hermes before testing a conversation.
+Requirements: Node.js 20+ and Hermes Agent with the external platform plugin loader (available in 0.17.x). The current adapter is validated against Hermes 0.21.0 (tag `v2026.8.31`, commit `29112bef`). Configure a model provider in Hermes before testing a conversation.
 
 For guided setup, use `inline agents setup --target hermes`. The manual path follows.
 
