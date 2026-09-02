@@ -11,14 +11,11 @@ describe("Hermes Python adapter error telemetry", () => {
     const script = String.raw`
 import json
 import importlib.util
-import os
-import sys
 
 telemetry_path = ${JSON.stringify(path.join(packageRoot, "plugin", "inline", "telemetry.py"))}
 spec = importlib.util.spec_from_file_location("inline_telemetry_test", telemetry_path)
 telemetry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(telemetry)
-capture_plugin_error = telemetry.capture_plugin_error
 
 received = []
 class Response:
@@ -37,26 +34,26 @@ class Opener:
 
 telemetry.urllib.request.build_opener = lambda *_args: Opener()
 secret = "private-hermes-token"
-os.environ["NODE_ENV"] = "test"
-os.environ.pop("DO_NOT_TRACK", None)
-os.environ.pop("INLINE_PLUGIN_TELEMETRY", None)
-os.environ["INLINE_HERMES_SENTRY_DSN"] = "http://fixture@127.0.0.1:4318/123"
-os.environ["INLINE_TOKEN"] = secret
+dsn = "http://fixture@127.0.0.1:4318/123"
+event_env = {"INLINE_HERMES_SENTRY_DSN": dsn, "INLINE_TOKEN": secret}
 try:
     raise RuntimeError(f"failed at /Users/mo/private/adapter.py with Bearer {secret}")
 except Exception as error:
-    sender = capture_plugin_error("adapter.inbound", error, secrets=(secret,))
-    if sender:
-        sender.join(3)
-os.environ.pop("INLINE_HERMES_SENTRY_DSN", None)
-default_disabled = capture_plugin_error("adapter.inbound", RuntimeError("not sent"))
-os.environ["INLINE_HERMES_SENTRY_DSN"] = "http://fixture@127.0.0.1:1/123"
-os.environ["INLINE_PLUGIN_TELEMETRY"] = "off"
-disabled = capture_plugin_error("adapter.inbound", RuntimeError("not sent"))
+    event = telemetry.build_sentry_event(
+        "adapter.inbound", error, env=event_env, secrets=(secret,)
+    )
+target = telemetry._sentry_target(dsn)
+assert target is not None
+telemetry._send_envelope(target, dsn, event)
+default_disabled = telemetry._resolve_dsn({}) == ""
+disabled = telemetry._resolve_dsn({
+    "INLINE_HERMES_SENTRY_DSN": dsn,
+    "INLINE_PLUGIN_TELEMETRY": "off",
+}) == ""
 print(json.dumps({
     "received": received,
-    "default_disabled": default_disabled is None,
-    "disabled": disabled is None,
+    "default_disabled": default_disabled,
+    "disabled": disabled,
 }))
 `
     const result = spawnSync(python, ["-c", script], {
