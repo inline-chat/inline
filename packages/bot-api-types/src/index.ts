@@ -48,6 +48,10 @@ export type BotMessageEntityType =
   | "email"
   | "bold"
   | "italic"
+  | "underline"
+  | "strikethrough"
+  | "highlight"
+  | "math"
   | "code"
   | "pre"
   | "phone_number"
@@ -106,10 +110,11 @@ export type BotRichText =
   | string
   | BotRichText[]
   | {
-      type: "bold" | "italic" | "code"
+      type: "bold" | "italic" | "underline" | "strikethrough" | "highlight" | "code"
       text: BotRichText
     }
   | { type: "url"; text: BotRichText; url: string }
+  | { type: "math"; text: BotRichText; latex: string }
   | {
       type: "email_address"
       text: BotRichText
@@ -154,6 +159,7 @@ export type BotRichText =
 
 export type BotRichBlock =
   | { type: "paragraph"; text: BotRichText; is_rtl?: true }
+  | { type: "math"; latex: string }
   | {
       type: "heading"
       text: BotRichText
