@@ -157,6 +157,20 @@ describe("native upload coordinator", () => {
     expect(creates).toBe(2)
   })
 
+  test("does not replay a create failure the transport knows is definitive", async () => {
+    const transport = new MemoryUploadTransport()
+    let creates = 0
+    transport.create = async () => {
+      creates += 1
+      throw new Error("definitive application rejection")
+    }
+    transport.shouldReplayCreate = () => false
+
+    await expect(new NativeUploadClient(transport).upload(virtualInput(62, 12)))
+      .rejects.toThrow("definitive application rejection")
+    expect(creates).toBe(1)
+  })
+
   test("surfaces the replayed create failure when both bounded attempts fail", async () => {
     const transport = new MemoryUploadTransport()
     const first = new Error("first create failure")

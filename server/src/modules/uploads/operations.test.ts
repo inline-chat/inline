@@ -8,14 +8,13 @@ import { db } from "@in/server/db"
 import { PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
 import {
   InlineUploadRepository,
-  inlineUploadFileUniqueId,
   inlineUploadPublicationPath,
 } from "@in/server/db/models/inlineUploads"
 import { inlineUploads, sessions } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { UploadIntegrityError, type MediaUploadFinalizer } from "./finalizer"
+import type { MediaUploadFinalizer } from "./finalizer"
 import { MEDIA_UPLOAD_MAX_BYTES } from "@in/server/modules/files/metadata"
 import { NativeUploadOperations } from "./operations"
 import type { UploadPartStore } from "./partStore"
@@ -111,6 +110,9 @@ const finalizer: MediaUploadFinalizer = {
       },
     }
   },
+  async prepareStoredPublication() {
+    throw new Error("Stored publication is worker-owned in operations tests")
+  },
   async discardPublication() {},
   async project(_kind, fileUniqueId) {
     return complete(fileUniqueId)
@@ -195,17 +197,36 @@ describe("native upload operations", () => {
     expect(ownerLookups).toBe(0)
   })
 
-  test("does not report terminal failure after another finalizer takes the fence", async () => {
+  test("accepts only JPEG or PNG as native photos while preserving WebP documents", async () => {
+    const user = await testUtils.createUser("native-upload-photo-formats@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = new NativeUploadOperations(
+      new InlineUploadRepository(), new MemoryPartStore(), finalizer,
+    )
+    const requestContext = context(user.id, account.session.id)
+    const base = {
+      clientUploadId: new Uint8Array(16).fill(81),
+      fileName: "image.webp",
+      mimeType: "image/webp",
+      byteCount: 1n,
+      sha256: createHash("sha256").update(new Uint8Array([1])).digest(),
+      metadata: { oneofKind: undefined } as const,
+    }
+    await expect(operations.create({ ...base, kind: UploadKind.PHOTO }, requestContext))
+      .rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect((await operations.create({
+      ...base,
+      clientUploadId: new Uint8Array(16).fill(82),
+      kind: UploadKind.DOCUMENT,
+    }, requestContext)).partCount).toBe(1)
+  })
+
+  test("persists processing without executing finalization in the request", async () => {
     const user = await testUtils.createUser("native-upload-stolen-fence@example.com")
     const account = await testUtils.createSessionForUser(user.id)
-    class Repository extends InlineUploadRepository {
-      override async fail(input: Parameters<InlineUploadRepository["fail"]>[0]) {
-        await db.update(inlineUploads).set({ lockToken: Buffer.alloc(16, 77) }).where(eq(inlineUploads.id, input.uploadDbId))
-        return super.fail(input)
-      }
-    }
-    const operations = new NativeUploadOperations(new Repository(), new MemoryPartStore(), {
-      ...finalizer, async preparePublication() { throw new UploadIntegrityError() },
+    let prepared = false
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), new MemoryPartStore(), {
+      ...finalizer, async preparePublication(input) { prepared = true; return finalizer.preparePublication(input) },
     })
     const requestContext = context(user.id, account.session.id)
     const body = new Uint8Array([1, 2, 3])
@@ -216,9 +237,10 @@ describe("native upload operations", () => {
     await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
     expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
     expect((await operations.state({ uploadId: created.uploadId }, requestContext)).status).toBe(UploadStatus.PROCESSING)
+    expect(prepared).toBe(false)
   })
 
-  test("bounds a hung lease renewal and releases the finalizer request", async () => {
+  test("finish latency is independent of a worker lease renewal", async () => {
     class Repository extends InlineUploadRepository {
       override async renew(): Promise<boolean> {
         return new Promise(() => {})
@@ -227,7 +249,7 @@ describe("native upload operations", () => {
     const user = await testUtils.createUser("native-upload-hung-renewal@example.com")
     const account = await testUtils.createSessionForUser(user.id)
     const store = new MemoryPartStore()
-    const operations = new NativeUploadOperations(new Repository(), store, finalizer, 10)
+    const operations = new NativeUploadOperations(new Repository(), store, finalizer)
     const requestContext = context(user.id, account.session.id)
     const body = new Uint8Array([7, 8, 9])
     const created = await operations.create({
@@ -239,12 +261,12 @@ describe("native upload operations", () => {
 
     const result = await Promise.race([
       operations.finish({ uploadId: created.uploadId }, requestContext),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("lease renewal pinned finish")), 250)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("finish request was pinned")), 250)),
     ])
     expect(result.state.oneofKind).toBe("processing")
   })
 
-  test("runs create, durable save, reconciliation, finish, and cached finish", async () => {
+  test("runs create, durable save, reconciliation, and durable finish intent", async () => {
     const user = await testUtils.createUser("native-upload-operations@example.com")
     const account = await testUtils.createSessionForUser(user.id)
     const permanentKey = new Uint8Array(256).fill(0x51)
@@ -254,10 +276,9 @@ describe("native upload operations", () => {
     await keys.authorize(permanentKeyId, user.id, account.session.id)
 
     const store = new MemoryPartStore()
+    const wakes: number[] = []
     const operations = new NativeUploadOperations(
-      new InlineUploadRepository(),
-      store,
-      finalizer,
+      new InlineUploadRepository(), store, finalizer, (uploadDbId) => wakes.push(uploadDbId),
     )
     const requestContext = context(user.id, account.session.id, permanentKeyId)
     const body = new TextEncoder().encode("native upload body")
@@ -288,15 +309,41 @@ describe("native upload operations", () => {
     expect(await operations.state({ uploadId: create.uploadId }, requestContext))
       .toMatchObject({ status: UploadStatus.UPLOADING, acceptedParts: [0] })
 
-    const expectedComplete = complete(inlineUploadFileUniqueId({
-      uploadId: create.uploadId,
-      kind: "document",
-    }))
     expect(await operations.finish({ uploadId: create.uploadId }, requestContext))
-      .toEqual({ state: { oneofKind: "complete", complete: expectedComplete } })
-    expect(store.objects.size).toBe(0)
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 2 } } })
+    expect(store.objects.size).toBe(1)
+    expect(wakes.length).toBeGreaterThanOrEqual(2)
     expect(await operations.finish({ uploadId: create.uploadId }, requestContext))
-      .toEqual({ state: { oneofKind: "complete", complete: expectedComplete } })
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 2 } } })
+  })
+
+  test("does not turn a lost in-process wake into a lost part ACK or finish intent", async () => {
+    const user = await testUtils.createUser("native-upload-lost-wake@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = new NativeUploadOperations(
+      new InlineUploadRepository(),
+      new MemoryPartStore(),
+      finalizer,
+      () => { throw new Error("worker unavailable") },
+    )
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([3, 2, 1])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(83),
+      fileName: "lost-wake.bin",
+      mimeType: "application/octet-stream",
+      byteCount: 3n,
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    expect(await operations.savePart({
+      uploadId: created.uploadId, partIndex: 0, data: body,
+    }, requestContext)).toEqual({ alreadyPresent: false })
+    expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind)
+      .toBe("processing")
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).status)
+      .toBe(UploadStatus.PROCESSING)
   })
 
   test("supports the approved Realtime V2 upload fallback without a V3 authorization key", async () => {
@@ -333,11 +380,8 @@ describe("native upload operations", () => {
     expect(await operations.finish({ uploadId: create.uploadId }, requestContext))
       .toEqual({
         state: {
-          oneofKind: "complete",
-          complete: complete(inlineUploadFileUniqueId({
-            uploadId: create.uploadId,
-            kind: "document",
-          })),
+          oneofKind: "processing",
+          processing: { retryAfterSeconds: 2 },
         },
       })
   })
@@ -393,7 +437,7 @@ describe("native upload operations", () => {
       metadata: { oneofKind: undefined },
     }, requestContext)
     store.afterPut = async () => {
-      expect(await repository.cancel(create.uploadId, owner)).toEqual({
+      expect((await repository.cancel(create.uploadId, owner))?.result).toEqual({
         canceled: true,
         alreadyTerminal: false,
       })
@@ -408,6 +452,46 @@ describe("native upload operations", () => {
     const upload = await repository.get(create.uploadId, owner)
     expect(upload).toBeDefined()
     expect(await repository.getPart(upload!.id, 0)).toBeUndefined()
+  })
+
+  test("aborts the multipart session locked by cancel instead of a stale pre-cancel snapshot", async () => {
+    const storageUploadId = "session-installed-during-cancel"
+    class Repository extends InlineUploadRepository {
+      override async cancel(
+        uploadId: Uint8Array,
+        owner: Parameters<InlineUploadRepository["cancel"]>[1],
+      ): ReturnType<InlineUploadRepository["cancel"]> {
+        await db.update(inlineUploads).set({ storageUploadId })
+          .where(eq(inlineUploads.uploadId, Buffer.from(uploadId)))
+        return super.cancel(uploadId, owner)
+      }
+    }
+    const user = await testUtils.createUser("native-upload-storage-cancel-race@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const discarded: string[] = []
+    const operations = new NativeUploadOperations(
+      new Repository(),
+      new MemoryPartStore(),
+      finalizer,
+      () => {},
+      async (upload) => { if (upload.storageUploadId) discarded.push(upload.storageUploadId) },
+    )
+    const requestContext = context(user.id, account.session.id)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(84),
+      fileName: "cancel-session-race.bin",
+      mimeType: "application/octet-stream",
+      byteCount: 1n,
+      sha256: createHash("sha256").update(new Uint8Array([1])).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+
+    expect(await operations.cancel({ uploadId: created.uploadId }, requestContext)).toEqual({
+      canceled: true,
+      alreadyTerminal: false,
+    })
+    expect(discarded).toEqual([storageUploadId])
   })
 
   test("rejects existing and new parts after the upload hard expiry", async () => {
@@ -439,6 +523,9 @@ describe("native upload operations", () => {
     const fresh = await createUpload(7)
     await db.update(inlineUploads).set({ hardExpiresAt: new Date(0) })
       .where(eq(inlineUploads.accountSessionId, account.session.id))
+
+    expect((await operations.state({ uploadId: fresh.uploadId }, requestContext)).status)
+      .toBe(UploadStatus.EXPIRED)
 
     await expect(operations.savePart({
       uploadId: existing.uploadId,

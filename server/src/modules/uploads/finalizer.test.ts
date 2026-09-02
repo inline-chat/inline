@@ -14,6 +14,8 @@ const part: InlineUploadPartRecord = {
   partIndex: 0,
   byteCount: bytes.length,
   sha256: createHash("sha256").update(bytes).digest(),
+  storedByteCount: bytes.length,
+  storedSha256: createHash("sha256").update(bytes).digest(),
   objectKey: "part-0",
 }
 
@@ -43,7 +45,9 @@ describe("native upload finalizer integrity", () => {
     const slow = new Promise<void>((resolve) => { unblock = resolve })
     const partBytes = Array.from({ length: 6 }, (_, index) => new Uint8Array([index]))
     const parts = partBytes.map((data, partIndex) => ({
-      partIndex, byteCount: 1, sha256: createHash("sha256").update(data).digest(), objectKey: String(partIndex),
+      partIndex, byteCount: 1, sha256: createHash("sha256").update(data).digest(),
+      storedByteCount: 1, storedSha256: createHash("sha256").update(data).digest(),
+      objectKey: String(partIndex),
     }))
     const reads: number[] = []
     const store: UploadPartStore = {
@@ -112,6 +116,31 @@ describe("native upload finalizer integrity", () => {
     expect(reads).toBe(0)
   })
 
+  test("cancels a stalled stored-object body after response headers", async () => {
+    const store: UploadPartStore = {
+      async put() { throw new Error("not used") },
+      async read() { throw new Error("not used") },
+      async remove() {},
+    }
+    const controller = new AbortController()
+    let canceled = false
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {},
+      cancel() { canceled = true },
+    })
+    const finalization = new UploadMediaFinalizer(store).prepareStoredPublication({
+      upload,
+      stream,
+      assertOwnership: async () => {},
+      signal: controller.signal,
+    })
+    await Bun.sleep(1)
+    controller.abort(new DOMException("test cancellation", "AbortError"))
+
+    await expect(finalization).rejects.toMatchObject({ name: "AbortError" })
+    expect(canceled).toBe(true)
+  })
+
   test("rejects substituted part bytes before media publication", async () => {
     const store: UploadPartStore = {
       async put() { throw new Error("not used") },
@@ -149,6 +178,8 @@ describe("native upload finalizer integrity", () => {
       partIndex,
       byteCount: value.length,
       sha256: createHash("sha256").update(value).digest(),
+      storedByteCount: value.length,
+      storedSha256: createHash("sha256").update(value).digest(),
       objectKey: `part-${partIndex}`,
     }))
     let activeReads = 0

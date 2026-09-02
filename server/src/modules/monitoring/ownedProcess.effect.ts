@@ -11,6 +11,7 @@ export type OwnedProcessName =
   | "bot-webhook-delivery"
   | "database-health-monitor"
   | "grid-provider-effects"
+  | "native-upload"
   | "realtime-state"
   | "user-settings-cache-cleanup"
 

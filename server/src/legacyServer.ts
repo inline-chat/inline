@@ -49,6 +49,7 @@ import { admin } from "./controllers/admin"
 import { media } from "./controllers/media"
 import type { Server } from "bun"
 import { EventEmitter } from "events"
+import { acquireNativeUploadWorker } from "@in/server/modules/uploads/operations"
 
 const port = PORT
 const log = new Log("server", LogLevel.INFO)
@@ -215,9 +216,11 @@ export const startCurrentServer = (
   connectionManager.setServer(server)
   startDatabaseHealthMonitor()
   startGridProviderEffectWorker()
+  const nativeUploadLease = acquireNativeUploadWorker()
+  const shutdownDeps = { stopNativeUploadWorker: nativeUploadLease.release }
   const gracefulShutdown = options.installSignalHandlers === false
-    ? createGracefulShutdownManager({ server })
-    : registerGracefulShutdown(server)
+    ? createGracefulShutdownManager({ server, deps: shutdownDeps })
+    : registerGracefulShutdown(server, shutdownDeps)
   log.info(`Running on http://${server.hostname}:${server.port}`)
 
   return {

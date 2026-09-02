@@ -3,7 +3,7 @@ import { type FileTypes } from "@in/server/modules/files/types"
 import { generateFileUniqueId } from "@in/server/modules/files/fileId"
 import { uploadToBucket } from "@in/server/modules/files/uploadToBucket"
 import { files, type DbNewFile } from "@in/server/db/schema"
-import { encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
+import { encrypt } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { ApiError, InlineError } from "@in/server/types/errors"
@@ -58,12 +58,50 @@ export type UploadedFileObject = {
   prefix?: string
 }
 
+export function prepareFileObjectRecord(
+  fileSize: number,
+  fileType: FileTypes,
+  metadata: FileMetadata,
+  context: { userId: number },
+  identity?: FileObjectIdentity,
+): UploadedFileObject {
+  const normalizedMetadata = normalizeMetadata(metadata)
+  if (!Number.isSafeInteger(fileSize) || fileSize <= 0) throw badRequest("Uploaded file is empty")
+  const fileUniqueId = identity?.fileUniqueId ?? generateFileUniqueId(fileType)
+  const suffix = normalizedMetadata.extension ? `.${normalizedMetadata.extension}` : ""
+  const prefix = identity ? undefined : nanoid(32)
+  const path = identity?.path ?? `${fileUniqueId}/${prefix}${suffix}`
+  const encryptedPath = encrypt(path)
+  const encryptedName = encrypt(normalizedMetadata.fileName)
+  return {
+    fileUniqueId,
+    path,
+    prefix,
+    dbFile: {
+      fileUniqueId,
+      userId: context.userId,
+      pathEncrypted: encryptedPath.encrypted,
+      pathIv: encryptedPath.iv,
+      pathTag: encryptedPath.authTag,
+      nameEncrypted: encryptedName.encrypted,
+      nameIv: encryptedName.iv,
+      nameTag: encryptedName.authTag,
+      fileType,
+      fileSize,
+      width: normalizedMetadata.width,
+      height: normalizedMetadata.height,
+      mimeType: normalizedMetadata.mimeType,
+    },
+  }
+}
+
 export async function uploadFileObject(
   file: File,
   fileType: FileTypes,
   metadata: FileMetadata,
   context: { userId: number },
   identity?: FileObjectIdentity,
+  signal?: AbortSignal,
 ): Promise<UploadedFileObject> {
   let normalizedMetadata = metadata
   try {
@@ -80,14 +118,12 @@ export async function uploadFileObject(
       userId: context.userId,
     })
 
-    const fileUniqueId = identity?.fileUniqueId ?? generateFileUniqueId(fileType)
-    const suffix = normalizedMetadata.extension ? `.${normalizedMetadata.extension}` : ""
-    const prefix = identity ? undefined : nanoid(32)
-    const path = identity?.path ?? `${fileUniqueId}/${prefix}${suffix}`
+    const prepared = prepareFileObjectRecord(file.size, fileType, normalizedMetadata, context, identity)
     try {
       await uploadToBucket(file, {
-        path: `${FILES_PATH_PREFIX}/${path}`,
+        path: `${FILES_PATH_PREFIX}/${prepared.path}`,
         type: normalizedMetadata.mimeType,
+        signal,
       })
       log.info("File uploaded to bucket successfully", { fileType, userId: context.userId })
     } catch (error) {
@@ -103,37 +139,8 @@ export async function uploadFileObject(
       throw new Error("Failed to upload file to storage", { cause: error as Error })
     }
 
-    let encryptedPath: EncryptedData
-    let encryptedName: EncryptedData
-    try {
-      encryptedPath = encrypt(path)
-      encryptedName = encrypt(normalizedMetadata.fileName)
-      log.info("File metadata encrypted successfully")
-    } catch (error) {
-      log.error("Failed to encrypt file metadata", { error })
-      throw new Error("Failed to encrypt file metadata", { cause: error as Error })
-    }
-
-    return {
-      fileUniqueId,
-      path,
-      prefix,
-      dbFile: {
-        fileUniqueId,
-        userId: context.userId,
-        pathEncrypted: encryptedPath.encrypted,
-        pathIv: encryptedPath.iv,
-        pathTag: encryptedPath.authTag,
-        nameEncrypted: encryptedName.encrypted,
-        nameIv: encryptedName.iv,
-        nameTag: encryptedName.authTag,
-        fileType,
-        fileSize: file.size,
-        width: normalizedMetadata.width,
-        height: normalizedMetadata.height,
-        mimeType: normalizedMetadata.mimeType,
-      },
-    }
+    log.info("File metadata encrypted successfully")
+    return prepared
   } catch (error) {
     log.error("File upload failed", {
       error,

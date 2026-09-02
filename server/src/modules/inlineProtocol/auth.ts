@@ -80,12 +80,18 @@ const clientRecord = (request: AuthBeginRequest): Record<string, string> => {
   }).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0))
 }
 
-const requirePermanentUnauthorised = (context: InlineProtocolApplicationContext): Uint8Array => {
-  if (!context.authorization.permanent || context.authorization.userId !== undefined ||
-      context.authorization.authKeyId.length !== 8) {
+const requirePermanentKey = (context: InlineProtocolApplicationContext): Uint8Array => {
+  if (!context.authorization.permanent || context.authorization.authKeyId.length !== 8) {
     throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
   }
   return context.authorization.authKeyId
+}
+
+const requirePermanentUnauthorised = (context: InlineProtocolApplicationContext): Uint8Array => {
+  if (context.authorization.userId !== undefined) {
+    throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+  }
+  return requirePermanentKey(context)
 }
 
 type NormalizedIdentifier = {
@@ -148,7 +154,10 @@ export class InlineProtocolAuthOperations {
     request: AuthBrowserStatusRequest,
     context: InlineProtocolApplicationContext,
   ): Promise<AuthBrowserStatusResult> {
-    const authKeyId = requirePermanentUnauthorised(context)
+    // Authorization can commit between two polls. The transaction lookup is
+    // still exact-key scoped, so the newly authenticated permanent key must be
+    // allowed to collect its own terminal result.
+    const authKeyId = requirePermanentKey(context)
     const status = await inlineProtocolBrowserLoginStatus({
       transactionId: request.loginTransactionId,
       authKeyId,

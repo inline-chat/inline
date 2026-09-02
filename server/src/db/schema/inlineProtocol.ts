@@ -214,6 +214,10 @@ export const inlineUploads = pgTable(
     failureRetryable: boolean("failure_retryable"),
     lockToken: bytea("lock_token"),
     lockedAt: protocolTimestamp("locked_at"),
+    storageFormat: varchar("storage_format", { length: 32 }),
+    storageUploadId: text("storage_upload_id"),
+    retryAt: protocolTimestamp("retry_at"),
+    attempts: integer("attempts").default(0).notNull(),
     resultFileUniqueId: varchar("result_file_unique_id", { length: 128 }),
     resultMediaId: bigint("result_media_id", { mode: "number" }),
     createdAt: protocolTimestamp("created_at").defaultNow().notNull(),
@@ -251,6 +255,15 @@ export const inlineUploads = pgTable(
       "inline_uploads_status_valid",
       sql`${table.status} in ('uploading', 'processing', 'complete', 'failed', 'canceled')`,
     ),
+    storageFormatValid: check(
+      "inline_uploads_storage_format_valid",
+      sql`${table.storageFormat} is null or ${table.storageFormat} = 'identity_v1'`,
+    ),
+    storageSessionValid: check(
+      "inline_uploads_storage_session_valid",
+      sql`${table.storageUploadId} is null or ${table.storageFormat} is not null`,
+    ),
+    attemptsValid: check("inline_uploads_attempts_valid", sql`${table.attempts} >= 0`),
     uploadIdUnique: uniqueIndex("inline_uploads_upload_id_unique").on(table.uploadId),
     clientIdUnique: uniqueIndex("inline_uploads_session_client_id_unique").on(
       table.accountSessionId,
@@ -263,6 +276,7 @@ export const inlineUploads = pgTable(
       table.createdAt,
     ),
     expiryIndex: index("inline_uploads_expiry_idx").on(table.status, table.expiresAt),
+    processingRetryIndex: index("inline_uploads_processing_retry_idx").on(table.status, table.retryAt),
   }),
 )
 
@@ -275,6 +289,10 @@ export const inlineUploadParts = pgTable(
     partIndex: integer("part_index").notNull(),
     byteCount: integer("byte_count").notNull(),
     sha256: bytea("sha256").notNull(),
+    // Nullable through the mixed-version rollout: an older server can still
+    // accept legacy/null-format uploads while new servers dual-write these.
+    storedByteCount: integer("stored_byte_count"),
+    storedSha256: bytea("stored_sha256"),
     objectKey: text("object_key").notNull(),
     acceptedAt: protocolTimestamp("accepted_at").defaultNow().notNull(),
   },
@@ -289,6 +307,51 @@ export const inlineUploadParts = pgTable(
       sql`${table.byteCount} between 1 and 524288`,
     ),
     shaLength: check("inline_upload_parts_sha_length", sql`octet_length(${table.sha256}) = 32`),
+    storedByteCountValid: check(
+      "inline_upload_parts_stored_byte_count_valid",
+      sql`${table.storedByteCount} > 0`,
+    ),
+    storedShaLength: check(
+      "inline_upload_parts_stored_sha_length",
+      sql`octet_length(${table.storedSha256}) = 32`,
+    ),
+  }),
+)
+
+export const inlineUploadStorageParts = pgTable(
+  "inline_upload_storage_parts",
+  {
+    uploadDbId: bigint("upload_id", { mode: "number" })
+      .notNull()
+      .references(() => inlineUploads.id, { onDelete: "cascade" }),
+    storageUploadId: text("storage_upload_id").notNull(),
+    partNumber: integer("part_number").notNull(),
+    storedByteCount: integer("stored_byte_count").notNull(),
+    storedSha256: bytea("stored_sha256").notNull(),
+    etag: text("etag").notNull(),
+    completedAt: protocolTimestamp("completed_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    identity: primaryKey({
+      name: "inline_upload_storage_parts_pk",
+      columns: [table.uploadDbId, table.partNumber],
+    }),
+    partNumberValid: check(
+      "inline_upload_storage_parts_number_valid",
+      sql`${table.partNumber} between 1 and 1000`,
+    ),
+    storedByteCountValid: check(
+      "inline_upload_storage_parts_byte_count_valid",
+      sql`${table.storedByteCount} > 0`,
+    ),
+    storedShaLength: check(
+      "inline_upload_storage_parts_sha_length",
+      sql`octet_length(${table.storedSha256}) = 32`,
+    ),
+    etagValid: check(
+      "inline_upload_storage_parts_etag_valid",
+      sql`length(${table.etag}) between 1 and 128`,
+    ),
   }),
 )
 
@@ -299,3 +362,4 @@ export type DbInlineProtocolAuthChallenge = typeof inlineProtocolAuthChallenges.
 export type DbInlineProtocolUpload = typeof inlineProtocolUploads.$inferSelect
 export type DbInlineUpload = typeof inlineUploads.$inferSelect
 export type DbInlineUploadPart = typeof inlineUploadParts.$inferSelect
+export type DbInlineUploadStoragePart = typeof inlineUploadStorageParts.$inferSelect

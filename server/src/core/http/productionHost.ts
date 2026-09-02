@@ -29,6 +29,9 @@ import {
   BlockContentImageProcess,
 } from "../../modules/message/blockContentImageWorker.effect"
 import {
+  NativeUploadProcess,
+} from "../../modules/uploads/worker.effect"
+import {
   markServerShuttingDown,
   type ShutdownSignal,
 } from "../../lifecycle/shutdownState"
@@ -338,6 +341,9 @@ export const startCoreProductionServer = async <
   const bridge = makeRuntimeBridge(
     runnableRuntimeLayer,
   )
+  let runtimeDisposePromise: Promise<void> | undefined
+  const disposeRuntime = (): Promise<void> =>
+    runtimeDisposePromise ??= bridge.dispose()
   const contextExit =
     await bridge.runPromiseExit(
       Effect.context<
@@ -348,7 +354,7 @@ export const startCoreProductionServer = async <
     )
 
   if (Exit.isFailure(contextExit)) {
-    await bridge.dispose()
+    await disposeRuntime()
     throw new CoreProductionStartupError({
       cause: contextExit.cause,
     })
@@ -495,7 +501,7 @@ export const startCoreProductionServer = async <
 
     if (startBackgroundProcesses) {
       // Preserve the pre-Effect production contract: the listener and
-      // realtime registry bind before either worker launches its first poll.
+      // realtime registry bind before any worker launches its first poll.
       const processStartExit =
         await bridge.runPromiseExit(
           Effect.all(
@@ -504,6 +510,9 @@ export const startCoreProductionServer = async <
                 (process) => process.start,
               ),
               BlockContentImageProcess.use(
+                (process) => process.start,
+              ),
+              NativeUploadProcess.use(
                 (process) => process.start,
               ),
             ],
@@ -517,8 +526,14 @@ export const startCoreProductionServer = async <
       }
     }
   } catch (cause) {
-    await server?.stop(true)
-    await bridge.dispose()
+    // Bun stops the listener synchronously, but its bookkeeping Promise may
+    // remain pending after WebSocket callbacks. Startup rollback must still
+    // release the Effect runtime and surface the original failure.
+    if (server) {
+      void Promise.resolve(server.stop(true)).catch(() => {})
+      server.unref()
+    }
+    await disposeRuntime()
     throw new CoreProductionStartupError({
       cause: startupCause(cause),
     })
@@ -574,14 +589,20 @@ export const startCoreProductionServer = async <
           })
           shutdownStage =
             "Effect runtime disposal"
-          await bridge.dispose()
+          await disposeRuntime()
         },
         gracefulShutdownMillis,
         () => {
           markShuttingDown("timeout")
-          void server.stop(true)
+          try {
+            void Promise.resolve(server.stop(true)).catch(() => {
+              process.exitCode = 1
+            })
+          } catch {
+            process.exitCode = 1
+          }
           server.unref()
-          void bridge.dispose().catch(
+          void disposeRuntime().catch(
             () => {
               process.exitCode = 1
             },

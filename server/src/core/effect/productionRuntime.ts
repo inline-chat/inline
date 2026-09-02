@@ -18,6 +18,9 @@ import {
   BlockContentImageProcessLive,
 } from "../../modules/message/blockContentImageWorker.effect"
 import {
+  NativeUploadProcessLive,
+} from "../../modules/uploads/worker.effect"
+import {
   LegacyRealtimeSessionsLive,
 } from "../../realtime/legacyHostAdapter.effect"
 import {
@@ -43,6 +46,7 @@ const OwnedProcessServicesLive =
         BotWebhookDeliveryProcessLive,
         DatabaseHealthMonitorProcessLive,
         GridProviderEffectsProcessLive,
+        NativeUploadProcessLive,
         UserSettingsCleanupProcessLive,
         RealtimeStateProcessLive,
       ),

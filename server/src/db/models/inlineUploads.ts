@@ -4,11 +4,15 @@ import {
   count,
   desc,
   eq,
+  getTableColumns,
   gt,
+  isNotNull,
   isNull,
   inArray,
   lt,
+  lte,
   or,
+  sql,
 } from "drizzle-orm"
 import { createHash, randomBytes } from "node:crypto"
 import { db } from "@in/server/db"
@@ -17,6 +21,7 @@ import {
   files,
   inlineProtocolAuthKeys,
   inlineUploadParts,
+  inlineUploadStorageParts,
   inlineUploads,
   photos,
   photoSizes,
@@ -32,7 +37,10 @@ export const INLINE_UPLOAD_PART_SIZE = INLINE_TRANSFER_PART_SIZE
 export { INLINE_UPLOAD_MAX_PARTS }
 export const INLINE_UPLOAD_IDLE_TTL_MS = 24 * 60 * 60 * 1_000
 export const INLINE_UPLOAD_HARD_TTL_MS = 7 * 24 * 60 * 60 * 1_000
-const INLINE_UPLOAD_PROCESSING_LEASE_MS = 5 * 60 * 1_000
+// Provider operations are independently deadline-bounded and the lock token
+// fences every durable transition. A short renewable lease keeps crash
+// recovery prompt without allowing a stale worker to publish.
+export const INLINE_UPLOAD_PROCESSING_LEASE_MS = 30_000
 const INLINE_UPLOAD_PUBLICATION_PREFIX = "native-uploads/v1"
 
 export type InlineUploadKind = "photo" | "video" | "document" | "voice"
@@ -63,17 +71,51 @@ export type InlineUploadRecord = DbInlineUpload & {
   acceptedParts: number[]
 }
 
+export type InlineUploadStateRecord = InlineUploadRecord & {
+  expired: boolean
+}
+
 export type InlineUploadPartRecord = {
   partIndex: number
   byteCount: number
   sha256: Uint8Array
+  storedByteCount: number
+  storedSha256: Uint8Array
   objectKey: string
+}
+
+export type InlineUploadStoragePartRecord = {
+  storageUploadId: string
+  partNumber: number
+  storedByteCount: number
+  storedSha256: Uint8Array
+  etag: string
+  completedAt: Date
 }
 
 export type InlineUploadPartTarget = Pick<
   DbInlineUpload,
-  "id" | "byteCount" | "partSize" | "partCount" | "status" | "expiresAt" | "hardExpiresAt"
->
+  | "id"
+  | "byteCount"
+  | "partSize"
+  | "partCount"
+  | "status"
+  | "expiresAt"
+  | "hardExpiresAt"
+  | "storageFormat"
+> & {
+  expired: boolean
+}
+
+export type InlineUploadStorageWork = {
+  upload: InlineUploadRecord
+  parts: InlineUploadPartRecord[]
+  storageParts: InlineUploadStoragePartRecord[]
+}
+
+export type InlineUploadProcessingClaim = InlineUploadStorageWork & {
+  lockToken: Uint8Array
+}
 
 export type InlineUploadPartAcceptance = {
   kind: "accepted" | "already-present" | "conflict" | "terminal"
@@ -83,6 +125,7 @@ export type InlineUploadPartAcceptance = {
 
 export class InlineUploadAdmissionCapacityError extends Error {}
 export class InlineUploadAdmissionOwnerInvalidError extends Error {}
+export class InlineUploadStorageConflictError extends Error {}
 
 type InlineUploadPublicationFile = {
   record: {
@@ -164,6 +207,12 @@ export const inlineUploadPublicationPath = (fileUniqueId: string): string =>
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
   Buffer.from(left).equals(Buffer.from(right))
 
+const databaseTimestamp = (value: string | Date | undefined): Date => {
+  const timestamp = value instanceof Date ? value : value ? new Date(value) : undefined
+  if (!timestamp || Number.isNaN(timestamp.getTime())) throw new Error("Database clock unavailable")
+  return timestamp
+}
+
 const sameOptionalBytes = (left: Uint8Array | null, right?: Uint8Array): boolean =>
   left === null ? right === undefined : right !== undefined && sameBytes(left, right)
 
@@ -191,6 +240,22 @@ const acceptedPartsFor = async (uploadDbId: number): Promise<number[]> =>
     .where(eq(inlineUploadParts.uploadDbId, uploadDbId))
     .orderBy(asc(inlineUploadParts.partIndex)))
     .map(({ partIndex }) => partIndex)
+
+const uploadPartRecord = (part: typeof inlineUploadParts.$inferSelect): InlineUploadPartRecord => ({
+  ...part,
+  sha256: Uint8Array.from(part.sha256),
+  // Old servers intentionally leave stored integrity null during the rolling
+  // compatibility window. Such rows are legacy identity frames.
+  storedByteCount: part.storedByteCount ?? part.byteCount,
+  storedSha256: Uint8Array.from(part.storedSha256 ?? part.sha256),
+})
+
+const storagePartRecord = (
+  part: typeof inlineUploadStorageParts.$inferSelect,
+): InlineUploadStoragePartRecord => ({
+  ...part,
+  storedSha256: Uint8Array.from(part.storedSha256),
+})
 
 const decryptRequiredText = (input: {
   encrypted: Buffer | null
@@ -373,6 +438,7 @@ export class InlineUploadRepository {
       const uploadId = randomBytes(16)
       const partCount = Number((metadata.byteCount + BigInt(INLINE_UPLOAD_PART_SIZE - 1)) /
         BigInt(INLINE_UPLOAD_PART_SIZE))
+      const resultFileUniqueId = inlineUploadFileUniqueId({ uploadId, kind: metadata.kind })
       const [inserted] = await tx.insert(inlineUploads).values({
         uploadId,
         clientUploadId: Buffer.from(metadata.clientUploadId),
@@ -395,6 +461,8 @@ export class InlineUploadRepository {
         waveform: metadata.waveform ? Buffer.from(metadata.waveform) : undefined,
         partSize: INLINE_UPLOAD_PART_SIZE,
         partCount,
+        storageFormat: "identity_v1",
+        resultFileUniqueId,
         expiresAt: new Date(now.getTime() + INLINE_UPLOAD_IDLE_TTL_MS),
         hardExpiresAt: new Date(now.getTime() + INLINE_UPLOAD_HARD_TTL_MS),
       }).onConflictDoNothing({
@@ -421,15 +489,25 @@ export class InlineUploadRepository {
     })
   }
 
-  async get(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<InlineUploadRecord | undefined> {
+  async get(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<InlineUploadStateRecord | undefined> {
     if (uploadId.length !== 16) return undefined
-    const row = (await db.select().from(inlineUploads).where(and(
+    const result = (await db.select({
+      ...getTableColumns(inlineUploads),
+      databaseNow: sql<Date>`CURRENT_TIMESTAMP`,
+    }).from(inlineUploads).where(and(
       eq(inlineUploads.uploadId, Buffer.from(uploadId)),
       eq(inlineUploads.userId, owner.userId),
       eq(inlineUploads.accountSessionId, owner.accountSessionId),
       ownerKeyMatches(owner),
     )).limit(1))[0]
-    return row ? { ...row, acceptedParts: await acceptedPartsFor(row.id) } : undefined
+    if (!result) return undefined
+    const { databaseNow, ...row } = result
+    const now = databaseTimestamp(databaseNow)
+    return {
+      ...row,
+      acceptedParts: await acceptedPartsFor(row.id),
+      expired: row.expiresAt <= now || row.hardExpiresAt <= now,
+    }
   }
 
   async getPartTarget(
@@ -437,7 +515,7 @@ export class InlineUploadRepository {
     owner: InlineUploadOwner,
   ): Promise<InlineUploadPartTarget | undefined> {
     if (uploadId.length !== 16) return undefined
-    return (await db.select({
+    const result = (await db.select({
       id: inlineUploads.id,
       byteCount: inlineUploads.byteCount,
       partSize: inlineUploads.partSize,
@@ -445,12 +523,21 @@ export class InlineUploadRepository {
       status: inlineUploads.status,
       expiresAt: inlineUploads.expiresAt,
       hardExpiresAt: inlineUploads.hardExpiresAt,
+      storageFormat: inlineUploads.storageFormat,
+      databaseNow: sql<Date>`CURRENT_TIMESTAMP`,
     }).from(inlineUploads).where(and(
       eq(inlineUploads.uploadId, Buffer.from(uploadId)),
       eq(inlineUploads.userId, owner.userId),
       eq(inlineUploads.accountSessionId, owner.accountSessionId),
       ownerKeyMatches(owner),
     )).limit(1))[0]
+    if (!result) return undefined
+    const { databaseNow, ...upload } = result
+    const now = databaseTimestamp(databaseNow)
+    return {
+      ...upload,
+      expired: upload.expiresAt <= now || upload.hardExpiresAt <= now,
+    }
   }
 
   async getPart(uploadDbId: number, partIndex: number): Promise<InlineUploadPartRecord | undefined> {
@@ -458,7 +545,7 @@ export class InlineUploadRepository {
       eq(inlineUploadParts.uploadDbId, uploadDbId),
       eq(inlineUploadParts.partIndex, partIndex),
     )).limit(1))[0]
-    return row ? { ...row, sha256: Uint8Array.from(row.sha256) } : undefined
+    return row ? uploadPartRecord(row) : undefined
   }
 
   async completedPhotoId(fileUniqueId: string, owner: InlineUploadOwner): Promise<number | undefined> {
@@ -478,10 +565,15 @@ export class InlineUploadRepository {
     partIndex: number
     byteCount: number
     sha256: Uint8Array
+    storedByteCount: number
+    storedSha256: Uint8Array
     objectKey: string
   }): Promise<InlineUploadPartAcceptance> {
     return db.transaction(async (tx) => {
-      const now = new Date()
+      const [clock] = await tx.execute<{ now: string | Date }>(sql`
+        select CURRENT_TIMESTAMP as now
+      `)
+      const now = databaseTimestamp(clock?.now)
       const [locked] = await tx.select().from(inlineUploads)
         .where(eq(inlineUploads.id, input.upload.id)).for("update").limit(1)
       const existing = locked
@@ -499,13 +591,17 @@ export class InlineUploadRepository {
         partIndex: input.partIndex,
         byteCount: input.byteCount,
         sha256: Buffer.from(input.sha256),
+        storedByteCount: input.storedByteCount,
+        storedSha256: Buffer.from(input.storedSha256),
         objectKey: input.objectKey,
       }).onConflictDoNothing({
         target: [inlineUploadParts.uploadDbId, inlineUploadParts.partIndex],
       }).returning({ partIndex: inlineUploadParts.partIndex })
       if (!inserted) {
         if (!existing || existing.byteCount !== input.byteCount ||
-            !sameBytes(existing.sha256, input.sha256)) {
+            !sameBytes(existing.sha256, input.sha256) ||
+            (existing.storedByteCount ?? existing.byteCount) !== input.storedByteCount ||
+            !sameBytes(existing.storedSha256 ?? existing.sha256, input.storedSha256)) {
           return { kind: "conflict", durableObjectKey: existing?.objectKey }
         }
         return { kind: "already-present", durableObjectKey: existing.objectKey }
@@ -520,24 +616,27 @@ export class InlineUploadRepository {
     })
   }
 
-  async claimFinish(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<
+  async requestFinish(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<
     | { kind: "missing"; partIndices: number[] }
     | { kind: "processing" }
-    | { kind: "claimed"; upload: InlineUploadRecord; lockToken: Uint8Array; parts: InlineUploadPartRecord[] }
+    | { kind: "queued"; uploadDbId: number }
     | { kind: "complete"; upload: InlineUploadRecord }
     | { kind: "failed"; upload: InlineUploadRecord }
     | { kind: "rejected" }
   > {
     if (uploadId.length !== 16) return { kind: "rejected" }
     return db.transaction(async (tx) => {
-      const now = new Date()
+      const [clock] = await tx.execute<{ now: string | Date }>(sql`
+        select CURRENT_TIMESTAMP as now
+      `)
+      const now = databaseTimestamp(clock?.now)
       const [row] = await tx.select().from(inlineUploads).where(and(
         eq(inlineUploads.uploadId, Buffer.from(uploadId)),
         eq(inlineUploads.userId, owner.userId),
         eq(inlineUploads.accountSessionId, owner.accountSessionId),
         ownerKeyMatches(owner),
       )).for("update").limit(1)
-      if (!row || row.status === "canceled" || row.expiresAt <= now || row.hardExpiresAt <= now) {
+      if (!row || row.status === "canceled") {
         return { kind: "rejected" } as const
       }
       const parts = await tx.select().from(inlineUploadParts)
@@ -546,37 +645,267 @@ export class InlineUploadRepository {
       const upload = { ...row, acceptedParts: parts.map(({ partIndex }) => partIndex) }
       if (row.status === "complete") return { kind: "complete", upload } as const
       if (row.status === "failed") return { kind: "failed", upload } as const
-      if (row.status === "processing" && (
-        (row.lockToken !== null && row.lockedAt === null) ||
-        (row.lockedAt && row.lockedAt > new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS))
-      )) {
-        return { kind: "processing" } as const
-      }
+      if (row.status === "processing") return { kind: "processing" } as const
+      if (row.expiresAt <= now || row.hardExpiresAt <= now) return { kind: "rejected" } as const
       const accepted = new Set(parts.map(({ partIndex }) => partIndex))
       const missing = Array.from({ length: row.partCount }, (_, index) => index)
         .filter((index) => !accepted.has(index))
       if (missing.length > 0) return { kind: "missing", partIndices: missing } as const
-      const lockToken = randomBytes(32)
       const resultFileUniqueId = row.resultFileUniqueId ?? inlineUploadFileUniqueId(row)
       await tx.update(inlineUploads).set({
         status: "processing",
         resultFileUniqueId,
+        retryAt: now,
+        attempts: 0,
+      }).where(eq(inlineUploads.id, row.id))
+      return { kind: "queued", uploadDbId: row.id } as const
+    })
+  }
+
+  async claimProcessing(uploadDbId?: number): Promise<InlineUploadProcessingClaim | undefined> {
+    return db.transaction(async (tx) => {
+      const [clock] = await tx.execute<{ now: string | Date }>(sql`
+        select CURRENT_TIMESTAMP as now
+      `)
+      const now = databaseTimestamp(clock?.now)
+      const staleAt = new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS)
+      const conditions = [
+        eq(inlineUploads.status, "processing"),
+        or(isNull(inlineUploads.retryAt), lte(inlineUploads.retryAt, now)),
+        or(
+          isNull(inlineUploads.lockToken),
+          isNull(inlineUploads.lockedAt),
+          lte(inlineUploads.lockedAt, staleAt),
+        ),
+      ]
+      if (uploadDbId !== undefined) conditions.push(eq(inlineUploads.id, uploadDbId))
+      const [row] = await tx.select().from(inlineUploads)
+        .where(and(...conditions))
+        .orderBy(asc(inlineUploads.retryAt), asc(inlineUploads.createdAt))
+        .limit(1)
+        .for("update", { skipLocked: true })
+      if (!row) return undefined
+
+      const lockToken = randomBytes(32)
+      const [claimed] = await tx.update(inlineUploads).set({
         lockToken,
         lockedAt: now,
-      }).where(eq(inlineUploads.id, row.id))
+      }).where(and(
+        eq(inlineUploads.id, row.id),
+        eq(inlineUploads.status, "processing"),
+      )).returning()
+      if (!claimed) return undefined
+
+      const parts = await tx.select().from(inlineUploadParts)
+        .where(eq(inlineUploadParts.uploadDbId, row.id))
+        .orderBy(asc(inlineUploadParts.partIndex))
+      const storageParts = claimed.storageUploadId
+        ? await tx.select().from(inlineUploadStorageParts).where(and(
+          eq(inlineUploadStorageParts.uploadDbId, row.id),
+          eq(inlineUploadStorageParts.storageUploadId, claimed.storageUploadId),
+        )).orderBy(asc(inlineUploadStorageParts.partNumber))
+        : []
       return {
-        kind: "claimed",
-        upload: {
-          ...upload,
-          status: "processing",
-          resultFileUniqueId,
-          lockToken,
-          lockedAt: now,
-        },
+        upload: { ...claimed, acceptedParts: parts.map(({ partIndex }) => partIndex) },
         lockToken: Uint8Array.from(lockToken),
-        parts: parts.map((part) => ({ ...part, sha256: Uint8Array.from(part.sha256) })),
-      } as const
+        parts: parts.map(uploadPartRecord),
+        storageParts: storageParts.map(storagePartRecord),
+      }
     })
+  }
+
+  async claimUploadingCompaction(uploadDbId: number): Promise<InlineUploadProcessingClaim | undefined> {
+    return db.transaction(async (tx) => {
+      const [clock] = await tx.execute<{ now: string | Date }>(sql`
+        select CURRENT_TIMESTAMP as now
+      `)
+      const now = databaseTimestamp(clock?.now)
+      const staleAt = new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS)
+      const [row] = await tx.select().from(inlineUploads).where(and(
+        eq(inlineUploads.id, uploadDbId),
+        eq(inlineUploads.status, "uploading"),
+        isNotNull(inlineUploads.storageFormat),
+        or(
+          isNull(inlineUploads.lockToken),
+          isNull(inlineUploads.lockedAt),
+          lte(inlineUploads.lockedAt, staleAt),
+        ),
+      )).for("update", { skipLocked: true }).limit(1)
+      if (!row) return undefined
+
+      const lockToken = randomBytes(32)
+      const [claimed] = await tx.update(inlineUploads).set({
+        lockToken,
+        lockedAt: now,
+      }).where(and(
+        eq(inlineUploads.id, row.id),
+        eq(inlineUploads.status, "uploading"),
+      )).returning()
+      if (!claimed) return undefined
+
+      const parts = await tx.select().from(inlineUploadParts)
+        .where(eq(inlineUploadParts.uploadDbId, row.id))
+        .orderBy(asc(inlineUploadParts.partIndex))
+      const storageParts = claimed.storageUploadId
+        ? await tx.select().from(inlineUploadStorageParts).where(and(
+          eq(inlineUploadStorageParts.uploadDbId, row.id),
+          eq(inlineUploadStorageParts.storageUploadId, claimed.storageUploadId),
+        )).orderBy(asc(inlineUploadStorageParts.partNumber))
+        : []
+      return {
+        upload: { ...claimed, acceptedParts: parts.map(({ partIndex }) => partIndex) },
+        lockToken: Uint8Array.from(lockToken),
+        parts: parts.map(uploadPartRecord),
+        storageParts: storageParts.map(storagePartRecord),
+      }
+    })
+  }
+
+  async getStorageWork(uploadDbId: number): Promise<InlineUploadStorageWork | undefined> {
+    const row = (await db.select().from(inlineUploads).where(and(
+      eq(inlineUploads.id, uploadDbId),
+      inArray(inlineUploads.status, ["uploading", "processing"]),
+    )).limit(1))[0]
+    if (!row) return undefined
+    const parts = await db.select().from(inlineUploadParts)
+      .where(eq(inlineUploadParts.uploadDbId, row.id))
+      .orderBy(asc(inlineUploadParts.partIndex))
+    const storageParts = row.storageUploadId
+      ? await db.select().from(inlineUploadStorageParts).where(and(
+        eq(inlineUploadStorageParts.uploadDbId, row.id),
+        eq(inlineUploadStorageParts.storageUploadId, row.storageUploadId),
+      )).orderBy(asc(inlineUploadStorageParts.partNumber))
+      : []
+    return {
+      upload: { ...row, acceptedParts: parts.map(({ partIndex }) => partIndex) },
+      parts: parts.map(uploadPartRecord),
+      storageParts: storageParts.map(storagePartRecord),
+    }
+  }
+
+  async installStorageSession(input: {
+    uploadDbId: number
+    expectedStorageUploadId: string | null
+    storageUploadId: string
+    lockToken?: Uint8Array
+  }): Promise<{ installed: boolean; storageUploadId?: string }> {
+    return db.transaction(async (tx) => {
+      const [row] = await tx.select().from(inlineUploads)
+        .where(eq(inlineUploads.id, input.uploadDbId)).for("update").limit(1)
+      if (!row) return { installed: false }
+      const ownsStatus = input.lockToken
+        ? (row.status === "uploading" || row.status === "processing") &&
+          row.lockToken && sameBytes(row.lockToken, input.lockToken)
+        : row.status === "uploading"
+      if (!ownsStatus) return { installed: false }
+      if (row.storageUploadId !== input.expectedStorageUploadId) {
+        return { installed: false, storageUploadId: row.storageUploadId ?? undefined }
+      }
+      await tx.delete(inlineUploadStorageParts)
+        .where(eq(inlineUploadStorageParts.uploadDbId, row.id))
+      await tx.update(inlineUploads).set({ storageUploadId: input.storageUploadId })
+        .where(eq(inlineUploads.id, row.id))
+      return { installed: true, storageUploadId: input.storageUploadId }
+    })
+  }
+
+  async resetStorageSession(input: {
+    uploadDbId: number
+    storageUploadId: string
+    lockToken: Uint8Array
+  }): Promise<boolean> {
+    return db.transaction(async (tx) => {
+      const [row] = await tx.select().from(inlineUploads).where(and(
+        eq(inlineUploads.id, input.uploadDbId),
+        eq(inlineUploads.status, "processing"),
+        eq(inlineUploads.lockToken, Buffer.from(input.lockToken)),
+      )).for("update").limit(1)
+      if (!row || row.storageUploadId !== input.storageUploadId) return false
+      await tx.delete(inlineUploadStorageParts)
+        .where(eq(inlineUploadStorageParts.uploadDbId, row.id))
+      await tx.update(inlineUploads).set({ storageUploadId: null })
+        .where(eq(inlineUploads.id, row.id))
+      return true
+    })
+  }
+
+  async recordStoragePart(input: {
+    uploadDbId: number
+    storageUploadId: string
+    partNumber: number
+    storedByteCount: number
+    storedSha256: Uint8Array
+    etag: string
+    lockToken?: Uint8Array
+  }): Promise<"recorded" | "already-present" | "stale"> {
+    return db.transaction(async (tx) => {
+      const [row] = await tx.select({
+        status: inlineUploads.status,
+        storageUploadId: inlineUploads.storageUploadId,
+        lockToken: inlineUploads.lockToken,
+      }).from(inlineUploads).where(eq(inlineUploads.id, input.uploadDbId))
+        .for("update").limit(1)
+      if (!row || row.storageUploadId !== input.storageUploadId) return "stale"
+      const ownsStatus = input.lockToken
+        ? (row.status === "uploading" || row.status === "processing") &&
+          row.lockToken && sameBytes(row.lockToken, input.lockToken)
+        : row.status === "uploading"
+      if (!ownsStatus) return "stale"
+      const [inserted] = await tx.insert(inlineUploadStorageParts).values({
+        uploadDbId: input.uploadDbId,
+        storageUploadId: input.storageUploadId,
+        partNumber: input.partNumber,
+        storedByteCount: input.storedByteCount,
+        storedSha256: Buffer.from(input.storedSha256),
+        etag: input.etag,
+      }).onConflictDoNothing({
+        target: [inlineUploadStorageParts.uploadDbId, inlineUploadStorageParts.partNumber],
+      }).returning({ partNumber: inlineUploadStorageParts.partNumber })
+      if (inserted) return "recorded"
+      const existing = (await tx.select().from(inlineUploadStorageParts).where(and(
+        eq(inlineUploadStorageParts.uploadDbId, input.uploadDbId),
+        eq(inlineUploadStorageParts.partNumber, input.partNumber),
+      )).limit(1))[0]
+      if (existing?.storageUploadId === input.storageUploadId &&
+          existing.storedByteCount === input.storedByteCount &&
+          sameBytes(existing.storedSha256, input.storedSha256) &&
+          existing.etag === input.etag) return "already-present"
+      throw new InlineUploadStorageConflictError()
+    })
+  }
+
+  async scheduleProcessingRetry(input: {
+    uploadDbId: number
+    lockToken: Uint8Array
+    retryDelayMs: number
+  }): Promise<boolean> {
+    const rows = await db.update(inlineUploads).set({
+      attempts: sql`${inlineUploads.attempts} + 1`,
+      retryAt: sql<Date>`CURRENT_TIMESTAMP + (${input.retryDelayMs} * interval '1 millisecond')`,
+      lockToken: null,
+      lockedAt: null,
+    }).where(and(
+      eq(inlineUploads.id, input.uploadDbId),
+      eq(inlineUploads.status, "processing"),
+      eq(inlineUploads.lockToken, Buffer.from(input.lockToken)),
+    )).returning({ id: inlineUploads.id })
+    return rows.length === 1
+  }
+
+  async releaseProcessingClaim(input: { uploadDbId: number; lockToken: Uint8Array }): Promise<boolean> {
+    const rows = await db.update(inlineUploads).set({
+      // NULL is the canonical "ready now" value. Using CURRENT_TIMESTAMP here
+      // can retain sub-millisecond precision that the JS claim clock cannot
+      // represent, briefly making an intentionally released row unclaimable.
+      retryAt: null,
+      lockToken: null,
+      lockedAt: null,
+    }).where(and(
+      eq(inlineUploads.id, input.uploadDbId),
+      inArray(inlineUploads.status, ["uploading", "processing"]),
+      eq(inlineUploads.lockToken, Buffer.from(input.lockToken)),
+    )).returning({ id: inlineUploads.id })
+    return rows.length === 1
   }
 
   async publishComplete(input: {
@@ -727,6 +1056,7 @@ export class InlineUploadRepository {
         status: "complete",
         resultMediaId: mediaId,
         completedAt: new Date(),
+        retryAt: null,
         lockToken: null,
         lockedAt: null,
       }).where(and(
@@ -739,15 +1069,31 @@ export class InlineUploadRepository {
     })
   }
 
-  async renew(input: { uploadDbId: number; lockToken: Uint8Array }): Promise<boolean> {
-    const rows = await db.update(inlineUploads).set({
-      lockedAt: new Date(),
-    }).where(and(
-      eq(inlineUploads.id, input.uploadDbId),
-      eq(inlineUploads.status, "processing"),
-      eq(inlineUploads.lockToken, Buffer.from(input.lockToken)),
-    )).returning({ id: inlineUploads.id })
-    return rows.length === 1
+  async renew(
+    input: { uploadDbId: number; lockToken: Uint8Array },
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    signal?.throwIfAborted()
+    const query = db.$client<{ id: number }[]>`
+      update inline_uploads
+      set locked_at = CURRENT_TIMESTAMP
+      where id = ${input.uploadDbId}
+        and status in ('uploading', 'processing')
+        and lock_token = ${Buffer.from(input.lockToken)}
+      returning id
+    `
+    const cancel = () => query.cancel()
+    signal?.addEventListener("abort", cancel, { once: true })
+    try {
+      const rows = await query.execute()
+      signal?.throwIfAborted()
+      return rows.length === 1
+    } catch (cause) {
+      if (signal?.aborted) throw signal.reason
+      throw cause
+    } finally {
+      signal?.removeEventListener("abort", cancel)
+    }
   }
 
   async fail(input: {
@@ -760,19 +1106,7 @@ export class InlineUploadRepository {
       status: "failed",
       failureCode: input.code,
       failureRetryable: input.retryable,
-      lockToken: null,
-      lockedAt: null,
-    }).where(and(
-      eq(inlineUploads.id, input.uploadDbId),
-      eq(inlineUploads.status, "processing"),
-      eq(inlineUploads.lockToken, Buffer.from(input.lockToken)),
-    )).returning({ id: inlineUploads.id })
-    return rows.length === 1
-  }
-
-  async release(input: { uploadDbId: number; lockToken: Uint8Array }): Promise<boolean> {
-    const rows = await db.update(inlineUploads).set({
-      status: "uploading",
+      retryAt: null,
       lockToken: null,
       lockedAt: null,
     }).where(and(
@@ -784,8 +1118,8 @@ export class InlineUploadRepository {
   }
 
   async cancel(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<{
-    canceled: boolean
-    alreadyTerminal: boolean
+    result: { canceled: boolean; alreadyTerminal: boolean }
+    upload: InlineUploadRecord
   } | undefined> {
     if (uploadId.length !== 16) return undefined
     return db.transaction(async (tx) => {
@@ -796,14 +1130,25 @@ export class InlineUploadRepository {
         ownerKeyMatches(owner),
       )).for("update").limit(1)
       if (!row) return undefined
+      const upload = (status: InlineUploadRecord["status"] = row.status): InlineUploadRecord => ({
+        ...row,
+        status,
+        acceptedParts: [],
+      })
       if (row.status === "complete" || row.status === "failed" || row.status === "canceled") {
-        return { canceled: row.status === "canceled", alreadyTerminal: true }
+        return {
+          result: { canceled: row.status === "canceled", alreadyTerminal: true },
+          upload: upload(),
+        }
       }
       // Finalization owns the terminal transition once it has claimed the row.
       // Canceling here would revoke its fence and delete staging bytes while the
       // finalizer may already be assembling or publishing permanent media.
       if (row.status === "processing") {
-        return { canceled: false, alreadyTerminal: false }
+        return {
+          result: { canceled: false, alreadyTerminal: false },
+          upload: upload(),
+        }
       }
       await tx.update(inlineUploads).set({
         status: "canceled",
@@ -811,17 +1156,26 @@ export class InlineUploadRepository {
         lockToken: null,
         lockedAt: null,
       }).where(eq(inlineUploads.id, row.id))
-      return { canceled: true, alreadyTerminal: false }
+      return {
+        result: { canceled: true, alreadyTerminal: false },
+        upload: upload("canceled"),
+      }
     })
   }
 
   async listExpired(limit = 100): Promise<Array<{ id: number }>> {
-    const now = new Date()
     return db.select({ id: inlineUploads.id }).from(inlineUploads)
       .where(and(
-        or(lt(inlineUploads.expiresAt, now), lt(inlineUploads.hardExpiresAt, now)),
+        inArray(inlineUploads.status, ["uploading", "complete", "failed", "canceled"]),
+        or(
+          lt(inlineUploads.expiresAt, sql<Date>`CURRENT_TIMESTAMP`),
+          lt(inlineUploads.hardExpiresAt, sql<Date>`CURRENT_TIMESTAMP`),
+        ),
         or(isNull(inlineUploads.lockToken),
-          lt(inlineUploads.lockedAt, new Date(now.getTime() - INLINE_UPLOAD_PROCESSING_LEASE_MS))),
+          lt(
+            inlineUploads.lockedAt,
+            sql<Date>`CURRENT_TIMESTAMP - (${INLINE_UPLOAD_PROCESSING_LEASE_MS} * interval '1 millisecond')`,
+          )),
       ))
       .orderBy(asc(inlineUploads.expiresAt))
       .limit(limit)
@@ -831,7 +1185,7 @@ export class InlineUploadRepository {
     return (await db.select().from(inlineUploadParts)
       .where(eq(inlineUploadParts.uploadDbId, uploadDbId))
       .orderBy(asc(inlineUploadParts.partIndex)))
-      .map((part) => ({ ...part, sha256: Uint8Array.from(part.sha256) }))
+      .map(uploadPartRecord)
   }
 
   async claimExpiredCleanup(uploadDbId: number): Promise<{
@@ -839,10 +1193,14 @@ export class InlineUploadRepository {
     upload: InlineUploadRecord
   } | undefined> {
     return db.transaction(async (tx) => {
-      const now = new Date()
+      const [clock] = await tx.execute<{ now: string | Date }>(sql`
+        select CURRENT_TIMESTAMP as now
+      `)
+      const now = databaseTimestamp(clock?.now)
       const [row] = await tx.select().from(inlineUploads)
         .where(eq(inlineUploads.id, uploadDbId)).for("update").limit(1)
       if (!row || (row.expiresAt > now && row.hardExpiresAt > now)) return undefined
+      if (row.status === "processing") return undefined
       // Processing and cleanup use the same lease fields. A fresh cleanup
       // owner must not be stolen by another process while it deletes parts.
       if (row.lockToken && (!row.lockedAt ||
@@ -862,7 +1220,7 @@ export class InlineUploadRepository {
       return claimed
         ? {
           cleanupToken: Uint8Array.from(cleanupToken),
-          upload: { ...row, status: completed ? "complete" : row.status, acceptedParts: [] },
+          upload: { ...row, status: completed ? "complete" : "canceled", acceptedParts: [] },
         }
         : undefined
     })
@@ -870,6 +1228,18 @@ export class InlineUploadRepository {
 
   async removeCleanupClaim(uploadDbId: number, cleanupToken: Uint8Array): Promise<boolean> {
     const rows = await db.delete(inlineUploads).where(and(
+      eq(inlineUploads.id, uploadDbId),
+      inArray(inlineUploads.status, ["canceled", "complete"]),
+      eq(inlineUploads.lockToken, Buffer.from(cleanupToken)),
+    )).returning({ id: inlineUploads.id })
+    return rows.length === 1
+  }
+
+  async releaseCleanupClaim(uploadDbId: number, cleanupToken: Uint8Array): Promise<boolean> {
+    const rows = await db.update(inlineUploads).set({
+      lockToken: null,
+      lockedAt: null,
+    }).where(and(
       eq(inlineUploads.id, uploadDbId),
       inArray(inlineUploads.status, ["canceled", "complete"]),
       eq(inlineUploads.lockToken, Buffer.from(cleanupToken)),

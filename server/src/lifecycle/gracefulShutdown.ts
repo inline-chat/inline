@@ -7,6 +7,7 @@ import { stopGridProviderEffectWorker } from "@in/server/modules/grid/providerEf
 import { shutdownBotChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
 import { stopBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
 import { stopBlockContentImageWorker } from "@in/server/modules/message/blockContentImageWorker"
+import { nativeUploadWorker } from "@in/server/modules/uploads/operations"
 import { Log } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { presenceManager } from "@in/server/ws/presence"
@@ -27,6 +28,7 @@ export type GracefulShutdownDeps = {
   stopDatabaseMonitor: Step
   stopBotWebhookDeliveryWorker: Step
   stopBlockContentImageWorker: Step
+  stopNativeUploadWorker: Step
   stopUserSettingsCleanup: Step
   stopGridProviderEffects: Step
   stopBotChatSettings: Step
@@ -71,6 +73,7 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   stopDatabaseMonitor: () => stopDatabaseHealthMonitor(),
   stopBotWebhookDeliveryWorker: () => stopBotWebhookDeliveryWorker(),
   stopBlockContentImageWorker: () => stopBlockContentImageWorker(),
+  stopNativeUploadWorker: () => nativeUploadWorker.stop(),
   stopUserSettingsCleanup: () => stopUserSettingsCacheCleanup(),
   stopGridProviderEffects: () => stopGridProviderEffectWorker(),
   stopBotChatSettings: () => shutdownBotChatSettingsBroker(),
@@ -151,6 +154,7 @@ export const createGracefulShutdownManager = ({
       hasErrors = !(await runStep("stop_database_monitor", runtime.stopDatabaseMonitor)) || hasErrors
       hasErrors = !(await runStep("stop_bot_webhook_delivery_worker", runtime.stopBotWebhookDeliveryWorker)) || hasErrors
       hasErrors = !(await runStep("stop_block_content_image_worker", runtime.stopBlockContentImageWorker)) || hasErrors
+      hasErrors = !(await runStep("stop_native_upload_worker", runtime.stopNativeUploadWorker)) || hasErrors
       hasErrors = !(await runStep("stop_user_settings_cleanup", runtime.stopUserSettingsCleanup)) || hasErrors
       hasErrors = !(await runStep("stop_grid_provider_effects", runtime.stopGridProviderEffects)) || hasErrors
       hasErrors = !(await runStep("stop_bot_chat_settings", runtime.stopBotChatSettings)) || hasErrors
@@ -202,12 +206,15 @@ export const createGracefulShutdownManager = ({
 
 let globalManager: GracefulShutdownManager | null = null
 
-export const registerGracefulShutdown = (server: Server<unknown>): GracefulShutdownManager => {
+export const registerGracefulShutdown = (
+  server: Server<unknown>,
+  deps?: Partial<GracefulShutdownDeps>,
+): GracefulShutdownManager => {
   if (globalManager) {
     return globalManager
   }
 
-  const manager = createGracefulShutdownManager({ server })
+  const manager = createGracefulShutdownManager({ server, deps })
   manager.installSignalHandlers()
   globalManager = manager
   return manager

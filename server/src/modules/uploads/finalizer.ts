@@ -13,7 +13,7 @@ import {
   type InlineUploadRecord,
 } from "@in/server/db/models/inlineUploads"
 import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption"
-import { uploadFileObject } from "@in/server/modules/files/uploadAFile"
+import { prepareFileObjectRecord, uploadFileObject } from "@in/server/modules/files/uploadAFile"
 import {
   getDocumentMetadataAndValidate,
   getPhotoMetadataAndValidate,
@@ -24,7 +24,6 @@ import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
 import { FileTypes } from "@in/server/modules/files/types"
 import { FileByteLengthError } from "@in/server/modules/files/readFileBytes"
-import { normalizePhotoUpload } from "@in/server/modules/files/uploadPhoto"
 import { encodeDocument } from "@in/server/realtime/encoders/encodeDocument"
 import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
 import { encodeVideo } from "@in/server/realtime/encoders/encodeVideo"
@@ -81,6 +80,13 @@ export interface MediaUploadFinalizer {
     assertOwnership: () => Promise<void>
     signal?: AbortSignal
   }): Promise<InlineUploadPublication>
+  prepareStoredPublication(input: {
+    upload: InlineUploadRecord
+    stream: ReadableStream<Uint8Array>
+    thumbnailPhotoId?: number
+    assertOwnership: () => Promise<void>
+    signal?: AbortSignal
+  }): Promise<InlineUploadPublication>
   discardPublication(upload: InlineUploadRecord): Promise<void>
   project(
     kind: InlineUploadRecord["kind"],
@@ -92,8 +98,40 @@ export interface MediaUploadFinalizer {
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
   Buffer.from(left).equals(Buffer.from(right))
 
+const readWithSignal = async <T>(
+  reader: ReadableStreamDefaultReader<T>,
+  signal?: AbortSignal,
+) => {
+  throwIfAborted(signal)
+  if (!signal) return reader.read()
+  let rejectAborted!: (reason?: unknown) => void
+  let didAbort = false
+  const aborted = new Promise<never>((_, reject) => { rejectAborted = reject })
+  const onAbort = () => {
+    if (didAbort) return
+    didAbort = true
+    const reason = signal.reason ?? new DOMException("The operation was aborted", "AbortError")
+    rejectAborted(reason)
+    void reader.cancel(reason).catch(() => {})
+  }
+  signal.addEventListener("abort", onAbort, { once: true })
+  if (signal.aborted) onAbort()
+  try {
+    return await Promise.race([reader.read(), aborted])
+  } finally {
+    signal.removeEventListener("abort", onAbort)
+  }
+}
+
 export class UploadMediaFinalizer implements MediaUploadFinalizer {
-  constructor(private readonly partStore: UploadPartStore) {}
+  constructor(
+    private readonly partStore: UploadPartStore,
+    private readonly removePublication: (key: string) => Promise<void> = async (key) => {
+      const r2 = getR2()
+      if (!r2) throw new Error("R2 is not initialized")
+      await r2.file(key).delete()
+    },
+  ) {}
 
   async preparePublication(input: {
     upload: InlineUploadRecord
@@ -174,6 +212,62 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     }
   }
 
+  async prepareStoredPublication(input: {
+    upload: InlineUploadRecord
+    stream: ReadableStream<Uint8Array>
+    thumbnailPhotoId?: number
+    assertOwnership: () => Promise<void>
+    signal?: AbortSignal
+  }): Promise<InlineUploadPublication> {
+    throwIfAborted(input.signal)
+    const directory = await mkdtemp(join(tmpdir(), "inline-native-upload-stored-"))
+    const path = join(directory, "body")
+    let handle: FileHandle | undefined
+    const reader = input.stream.getReader()
+    const digest = createHash("sha256")
+    let byteCount = 0n
+    try {
+      handle = await open(path, "wx")
+      await input.assertOwnership()
+      while (true) {
+        throwIfAborted(input.signal)
+        const result = await readWithSignal(reader, input.signal)
+        if (result.done) break
+        const bytes = result.value
+        digest.update(bytes)
+        byteCount += BigInt(bytes.byteLength)
+        if (byteCount > input.upload.byteCount) throw new UploadIntegrityError()
+        let written = 0
+        while (written < bytes.byteLength) {
+          const result = await handle.write(bytes, written, bytes.byteLength - written)
+          if (result.bytesWritten <= 0) throw new Error("Stored upload write made no progress")
+          written += result.bytesWritten
+        }
+      }
+      await handle.sync()
+      await handle.close()
+      handle = undefined
+      if (byteCount !== input.upload.byteCount ||
+          !sameBytes(digest.digest(), input.upload.sha256)) throw new UploadIntegrityError()
+      const file = new File([Bun.file(path)], input.upload.fileName, { type: input.upload.mimeType })
+      const publication = await this.#preparePublication(
+        file,
+        input.upload,
+        input.thumbnailPhotoId,
+        input.signal,
+        true,
+      )
+      await input.assertOwnership()
+      return publication
+    } finally {
+      await reader.cancel().catch(() => {})
+      reader.releaseLock()
+      await handle?.close().catch(() => {})
+      await unlink(path).catch(() => {})
+      await rmdir(directory).catch(() => {})
+    }
+  }
+
   async project(kind: InlineUploadRecord["kind"], fileUniqueId: string, mediaId: number): Promise<UploadComplete> {
     switch (kind) {
       case "photo": {
@@ -206,9 +300,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
   async discardPublication(upload: InlineUploadRecord): Promise<void> {
     const fileUniqueId = upload.resultFileUniqueId
     if (!fileUniqueId) return
-    const r2 = getR2()
-    if (!r2) throw new Error("R2 is not initialized")
-    await r2.file(`${FILES_PATH_PREFIX}/${inlineUploadPublicationPath(fileUniqueId)}`).delete()
+    await this.removePublication(`${FILES_PATH_PREFIX}/${inlineUploadPublicationPath(fileUniqueId)}`)
   }
 
   async #preparePublication(
@@ -216,12 +308,15 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     upload: InlineUploadRecord,
     thumbnailPhotoId?: number,
     signal?: AbortSignal,
+    alreadyStored = false,
   ): Promise<InlineUploadPublication> {
     switch (upload.kind) {
       case "photo": {
         const metadata = await getPhotoMetadataAndValidate(file)
-        const normalized = await normalizePhotoUpload(file, metadata)
-        const stripped = await generateStrippedThumbnail(normalized.file).catch((error) => {
+        if (metadata.mimeType !== "image/jpeg" && metadata.mimeType !== "image/png") {
+          throw new UploadInvalidMediaError()
+        }
+        const stripped = await generateStrippedThumbnail(file).catch((error) => {
           log.warn("Failed to generate stripped thumbnail for native upload", {
             error,
             userId: upload.userId,
@@ -230,12 +325,12 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         })
         const encryptedStripped = stripped ? encryptBinary(stripped.bytes) : null
         return {
-          file: await this.#uploadFileObject(normalized.file, FileTypes.PHOTO, normalized.metadata, upload, signal),
+          file: await this.#prepareFileObject(file, FileTypes.PHOTO, metadata, upload, signal, alreadyStored),
           media: {
             kind: "photo",
-            format: normalized.metadata.mimeType === "image/jpeg" ? "jpeg" : "png",
-            width: normalized.metadata.width,
-            height: normalized.metadata.height,
+            format: metadata.mimeType === "image/jpeg" ? "jpeg" : "png",
+            width: metadata.width,
+            height: metadata.height,
             stripped: encryptedStripped?.encrypted ?? null,
             strippedIv: encryptedStripped?.iv ?? null,
             strippedTag: encryptedStripped?.authTag ?? null,
@@ -250,7 +345,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
           upload.duration ?? 0,
         )
         return {
-          file: await this.#uploadFileObject(file, FileTypes.VIDEO, metadata, upload, signal),
+          file: await this.#prepareFileObject(file, FileTypes.VIDEO, metadata, upload, signal, alreadyStored),
           media: {
             kind: "video",
             width: metadata.width,
@@ -266,7 +361,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         const metadata = await getDocumentMetadataAndValidate(file)
         const encryptedFileName = encrypt(metadata.fileName)
         return {
-          file: await this.#uploadFileObject(file, FileTypes.DOCUMENT, metadata, upload, signal),
+          file: await this.#prepareFileObject(file, FileTypes.DOCUMENT, metadata, upload, signal, alreadyStored),
           media: {
             kind: "document",
             fileName: encryptedFileName.encrypted,
@@ -283,7 +378,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
           upload.waveform ?? new Uint8Array(),
         )
         return {
-          file: await this.#uploadFileObject(file, FileTypes.VOICE, metadata, upload, signal),
+          file: await this.#prepareFileObject(file, FileTypes.VOICE, metadata, upload, signal, alreadyStored),
           media: {
             kind: "voice",
             duration: metadata.duration,
@@ -296,7 +391,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     }
   }
 
-  async #uploadFileObject(
+  async #prepareFileObject(
     file: File,
     fileType: FileTypes,
     metadata: {
@@ -308,18 +403,17 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     },
     upload: InlineUploadRecord,
     signal?: AbortSignal,
+    alreadyStored = false,
   ): Promise<InlineUploadPublication["file"]> {
-    // uploadFileObject writes the irreversible object-store publication and
-    // does not currently accept AbortSignal. Do not begin it for a request
-    // that was already canceled; cancellation after this point is not a
-    // rollback signal.
+    // Publication is deterministic and fenced before the database commit.
+    // The provider request is canceled when worker ownership is lost.
     throwIfAborted(signal)
     const fileUniqueId = upload.resultFileUniqueId ?? inlineUploadFileUniqueId(upload)
     const path = inlineUploadPublicationPath(fileUniqueId)
-    const prepared = await uploadFileObject(file, fileType, metadata, { userId: upload.userId }, {
-      fileUniqueId,
-      path,
-    })
+    const identity = { fileUniqueId, path }
+    const prepared = alreadyStored
+      ? prepareFileObjectRecord(file.size, fileType, metadata, { userId: upload.userId }, identity)
+      : await uploadFileObject(file, fileType, metadata, { userId: upload.userId }, identity, signal)
     return {
       record: prepared.dbFile,
       path,
@@ -339,9 +433,9 @@ export class UploadIntegrityError extends Error {
   }
 }
 
-export class UploadFinalizationOwnershipLostError extends Error {
+export class UploadInvalidMediaError extends Error {
   constructor() {
-    super("Upload finalization ownership was lost")
-    this.name = "UploadFinalizationOwnershipLostError"
+    super("Uploaded media format is not supported")
+    this.name = "UploadInvalidMediaError"
   }
 }

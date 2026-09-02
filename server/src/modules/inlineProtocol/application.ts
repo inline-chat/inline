@@ -215,6 +215,15 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
       }
       const context = { authorization, metadata: input.metadata, signal }
       try {
+        if (authorization.permanent && request.body.oneofKind === "authBrowserStatus") {
+          const result = await input.operations.authBrowserStatus(request.body.authBrowserStatus, context)
+          return {
+            kind: "result",
+            payload: RealtimeV3Response.toBinary({
+              body: { oneofKind: "authBrowserStatus", authBrowserStatus: result },
+            }),
+          }
+        }
         if (authorization.permanent && authorization.userId === undefined) {
           if (request.body.oneofKind === "authBegin") {
             markExecutionStarted()
@@ -243,15 +252,6 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
               kind: "result",
               payload: RealtimeV3Response.toBinary({
                 body: { oneofKind: "authBeginBrowser", authBeginBrowser: result },
-              }),
-            }
-          }
-          if (request.body.oneofKind === "authBrowserStatus") {
-            const result = await input.operations.authBrowserStatus(request.body.authBrowserStatus, context)
-            return {
-              kind: "result",
-              payload: RealtimeV3Response.toBinary({
-                body: { oneofKind: "authBrowserStatus", authBrowserStatus: result },
               }),
             }
           }

@@ -24,6 +24,9 @@ describe("graceful shutdown lifecycle", () => {
         stopBlockContentImageWorker: async () => {
           calls.push("block-image-worker.stop")
         },
+        stopNativeUploadWorker: async () => {
+          calls.push("native-upload-worker.stop")
+        },
         stopUserSettingsCleanup: () => {
           calls.push("cache.stop")
         },
@@ -71,6 +74,7 @@ describe("graceful shutdown lifecycle", () => {
       "timer.start:5000",
       "monitor.stop",
       "block-image-worker.stop",
+      "native-upload-worker.stop",
       "cache.stop",
       "grid-provider.stop",
       "server.stop:false",
@@ -105,6 +109,9 @@ describe("graceful shutdown lifecycle", () => {
         },
         stopBlockContentImageWorker: async () => {
           calls.push("block-image-worker.stop")
+        },
+        stopNativeUploadWorker: async () => {
+          calls.push("native-upload-worker.stop")
         },
         stopUserSettingsCleanup: () => {
           calls.push("cache.stop")
@@ -143,6 +150,7 @@ describe("graceful shutdown lifecycle", () => {
 
     expect(calls).toContain("connections.close")
     expect(calls).toContain("block-image-worker.stop")
+    expect(calls).toContain("native-upload-worker.stop")
     expect(calls).toContain("grid-provider.stop")
     expect(calls).toContain("presence.shutdown")
     expect(calls).toContain("db.close")

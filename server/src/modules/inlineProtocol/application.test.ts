@@ -15,6 +15,49 @@ const deferred = () => {
 }
 
 describe("Inline Protocol application ordering", () => {
+  test("lets an authorized permanent key collect its browser-login result", async () => {
+    let statusCalls = 0
+    const dispatcher = makeInlineProtocolApplicationDispatcher({
+      connectionId: "browser-status-after-auth-test",
+      authorizationKeys: { load: async () => undefined },
+      operations: {
+        authBegin: async () => { throw new Error("unexpected auth") },
+        authComplete: async () => { throw new Error("unexpected auth") },
+        authBeginBrowser: async () => { throw new Error("unexpected auth") },
+        authBrowserStatus: async () => {
+          statusCalls += 1
+          return { state: { oneofKind: "authorized", authorized: { accountSessionId: 9n } } }
+        },
+      },
+    })
+    const dispatched = await dispatcher.dispatch({
+      payload: RealtimeV3Request.toBinary({
+        body: {
+          oneofKind: "authBrowserStatus",
+          authBrowserStatus: { loginTransactionId: "transaction" },
+        },
+      }),
+      authorization: {
+        authKeyId: new Uint8Array(8),
+        permanent: true,
+        temporaryBound: false,
+        userId: 7,
+        accountSessionId: 9,
+      },
+      messageId: 1n,
+      sessionId: 2n,
+      signal: new AbortController().signal,
+      markExecutionStarted: () => {},
+      sendUpdate: () => {},
+    })
+
+    expect(statusCalls).toBe(1)
+    expect(dispatched.kind).toBe("result")
+    if (dispatched.kind !== "result") throw new Error("expected browser status result")
+    expect(RealtimeV3Response.fromBinary(dispatched.payload).body.oneofKind)
+      .toBe("authBrowserStatus")
+  })
+
   test("returns full file bytes once and a compact fresh-request replay response", async () => {
     const authorization = {
       authKeyId: new Uint8Array(8).fill(1),

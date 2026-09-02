@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { authKeyId } from "@inline-chat/protocol/secure"
@@ -34,6 +34,16 @@ const authorizationKeys = () => new PermanentAuthorizationKeyRepository(
     keys: new Map([["test", new Uint8Array(32).fill(0x31)]]),
   }),
 )
+
+const partIntegrity = (bytes: Uint8Array) => {
+  const sha256 = createHash("sha256").update(bytes).digest()
+  return {
+    byteCount: bytes.byteLength,
+    sha256,
+    storedByteCount: bytes.byteLength,
+    storedSha256: sha256,
+  }
+}
 
 const publicationFile = (
   upload: InlineUploadRecord,
@@ -146,6 +156,57 @@ describe("native upload repository", () => {
     expect(await repository.get(v3Upload.upload.uploadId, legacyOwner)).toBeUndefined()
   })
 
+  test("cancels a blocked lease renewal without a late ownership extension", async () => {
+    const user = await testUtils.createUser("native-upload-renew-cancel@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new InlineUploadRepository()
+    const created = await repository.create(owner, {
+      clientUploadId: new Uint8Array(16).fill(31),
+      fileName: "renew-cancel.bin",
+      mimeType: "application/octet-stream",
+      byteCount: 1n,
+      sha256: createHash("sha256").update(new Uint8Array([1])).digest(),
+      kind: "document",
+    })
+    const lockToken = randomBytes(32)
+    await db.update(inlineUploads).set({
+      status: "processing",
+      lockToken,
+      lockedAt: new Date(0),
+    }).where(eq(inlineUploads.id, created.upload.id))
+
+    let locked!: () => void
+    let release!: () => void
+    const lockedPromise = new Promise<void>((resolve) => { locked = resolve })
+    const releasePromise = new Promise<void>((resolve) => { release = resolve })
+    const blocker = db.transaction(async (tx) => {
+      await tx.select({ id: inlineUploads.id }).from(inlineUploads)
+        .where(eq(inlineUploads.id, created.upload.id)).for("update")
+      locked()
+      await releasePromise
+    })
+    await lockedPromise
+
+    const controller = new AbortController()
+    const renewal = repository.renew({
+      uploadDbId: created.upload.id,
+      lockToken,
+    }, controller.signal)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    controller.abort(new DOMException("renewal deadline", "TimeoutError"))
+    try {
+      await expect(renewal).rejects.toMatchObject({ name: "TimeoutError" })
+    } finally {
+      release()
+      await blocker
+    }
+
+    const row = (await db.select().from(inlineUploads)
+      .where(eq(inlineUploads.id, created.upload.id)).limit(1))[0]
+    expect(row?.lockedAt?.getTime()).toBe(0)
+  })
+
   test("reconciles parts and deterministically publishes through the current fence", async () => {
     const user = await testUtils.createUser("native-upload@example.com")
     const account = await testUtils.createSessionForUser(user.id)
@@ -181,58 +242,57 @@ describe("native upload repository", () => {
 
     await expect(repository.create(owner, { ...metadata, fileName: "changed.bin" }))
       .rejects.toBeInstanceOf(InlineUploadMetadataConflictError)
-    expect(await repository.claimFinish(created.upload.uploadId, owner))
+    expect(await repository.requestFinish(created.upload.uploadId, owner))
       .toEqual({ kind: "missing", partIndices: [0, 1] })
 
     const second = bytes.subarray(INLINE_UPLOAD_PART_SIZE)
     expect(await repository.acceptPart({
       upload: created.upload,
       partIndex: 1,
-      byteCount: second.length,
-      sha256: createHash("sha256").update(second).digest(),
+      ...partIntegrity(second),
       objectKey: "part-1",
     })).toEqual({ kind: "accepted", durableObjectKey: "part-1" })
     expect((await repository.get(created.upload.uploadId, owner))?.acceptedParts).toEqual([1])
     const partTarget = await repository.getPartTarget(created.upload.uploadId, owner)
     expect(Object.keys(partTarget ?? {}).sort()).toEqual([
       "byteCount",
+      "expired",
       "expiresAt",
       "hardExpiresAt",
       "id",
       "partCount",
       "partSize",
       "status",
+      "storageFormat",
     ])
+    expect(partTarget?.expired).toBe(false)
 
     const first = bytes.subarray(0, INLINE_UPLOAD_PART_SIZE)
-    const firstDigest = createHash("sha256").update(first).digest()
     expect(await repository.acceptPart({
       upload: created.upload,
       partIndex: 0,
-      byteCount: first.length,
-      sha256: firstDigest,
+      ...partIntegrity(first),
       objectKey: "part-0",
     })).toEqual({ kind: "accepted", durableObjectKey: "part-0" })
     expect(await repository.acceptPart({
       upload: created.upload,
       partIndex: 0,
-      byteCount: first.length,
-      sha256: firstDigest,
+      ...partIntegrity(first),
       objectKey: "ignored-duplicate-key",
     })).toEqual({ kind: "already-present", durableObjectKey: "part-0" })
 
-    const claim = await repository.claimFinish(created.upload.uploadId, owner)
-    expect(claim.kind).toBe("claimed")
-    if (claim.kind !== "claimed") throw new Error("Expected an upload finalization claim")
+    const queued = await repository.requestFinish(created.upload.uploadId, owner)
+    expect(queued.kind).toBe("queued")
+    const claim = await repository.claimProcessing(created.upload.id)
+    if (!claim) throw new Error("Expected an upload finalization claim")
     expect(claim.parts.map(({ partIndex }) => partIndex)).toEqual([0, 1])
     const fileUniqueId = inlineUploadFileUniqueId({ uploadId: created.upload.uploadId, kind: "document" })
     expect(claim.upload.resultFileUniqueId).toBe(fileUniqueId)
     const publication = publicationFor(claim.upload)
 
-    await repository.release({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
-    const reclaimed = await repository.claimFinish(created.upload.uploadId, owner)
-    expect(reclaimed.kind).toBe("claimed")
-    if (reclaimed.kind !== "claimed") throw new Error("Expected a replacement finalization claim")
+    await repository.releaseProcessingClaim({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
+    const reclaimed = await repository.claimProcessing(created.upload.id)
+    if (!reclaimed) throw new Error("Expected a replacement finalization claim")
     expect(reclaimed.upload.resultFileUniqueId).toBe(fileUniqueId)
 
     expect(await repository.publishComplete({
@@ -276,7 +336,7 @@ describe("native upload repository", () => {
       publication: publicationFor(reclaimed.upload),
     })
 
-    const cached = await repository.claimFinish(created.upload.uploadId, owner)
+    const cached = await repository.requestFinish(created.upload.uploadId, owner)
     expect(cached.kind).toBe("complete")
     if (cached.kind === "complete") {
       expect(cached.upload.resultFileUniqueId).toBe(fileUniqueId)
@@ -292,6 +352,12 @@ describe("native upload repository", () => {
     expect(cleanupClaim?.upload.status).toBe("complete")
     expect(await repository.claimExpiredCleanup(reclaimed.upload.id)).toBeUndefined()
     expect((await repository.listExpired()).map(({ id }) => id)).not.toContain(reclaimed.upload.id)
+    expect(await repository.releaseCleanupClaim(
+      reclaimed.upload.id,
+      cleanupClaim!.cleanupToken,
+    )).toBe(true)
+    const releasedCleanup = await repository.claimExpiredCleanup(reclaimed.upload.id)
+    expect(releasedCleanup?.upload.status).toBe("complete")
     // Simulate a cleanup crash after deleting only some staging parts. A new
     // owner must still see completion and preserve the permanent publication.
     await db.update(inlineUploads).set({ lockedAt: new Date(0) })
@@ -302,7 +368,7 @@ describe("native upload repository", () => {
     expect((await repository.get(created.upload.uploadId, owner))?.status).toBe("complete")
     expect(await repository.removeCleanupClaim(
       reclaimed.upload.id,
-      cleanupClaim!.cleanupToken,
+      releasedCleanup!.cleanupToken,
     )).toBe(false)
     // Recover an interrupted cleanup created by the older implementation that
     // incorrectly changed a completed row to canceled.
@@ -350,13 +416,12 @@ describe("native upload repository", () => {
       await repository.acceptPart({
         upload: created.upload,
         partIndex: 0,
-        byteCount: bytes.length,
-        sha256: createHash("sha256").update(bytes).digest(),
+        ...partIntegrity(bytes),
         objectKey: `${kind}-part`,
       })
-      const claim = await repository.claimFinish(created.upload.uploadId, owner)
-      expect(claim.kind).toBe("claimed")
-      if (claim.kind !== "claimed") throw new Error("Expected an upload finalization claim")
+      expect((await repository.requestFinish(created.upload.uploadId, owner)).kind).toBe("queued")
+      const claim = await repository.claimProcessing(created.upload.id)
+      if (!claim) throw new Error("Expected an upload finalization claim")
       const fileUniqueId = claim.upload.resultFileUniqueId
       if (!fileUniqueId) throw new Error("Expected a reserved publication identity")
       const result = await repository.publishComplete({
@@ -411,11 +476,11 @@ describe("native upload repository", () => {
     expect(expired.map(({ id }) => id)).toContain(created.upload.id)
     expect(expired.every((row) => Object.keys(row).length === 1)).toBe(true)
 
-    expect(await repository.cancel(created.upload.uploadId, owner))
+    expect((await repository.cancel(created.upload.uploadId, owner))?.result)
       .toEqual({ canceled: true, alreadyTerminal: false })
-    expect(await repository.cancel(created.upload.uploadId, owner))
+    expect((await repository.cancel(created.upload.uploadId, owner))?.result)
       .toEqual({ canceled: true, alreadyTerminal: true })
-    expect(await repository.claimFinish(created.upload.uploadId, owner))
+    expect(await repository.requestFinish(created.upload.uploadId, owner))
       .toEqual({ kind: "rejected" })
   })
 
@@ -445,15 +510,14 @@ describe("native upload repository", () => {
     await repository.acceptPart({
       upload: created.upload,
       partIndex: 0,
-      byteCount: bytes.length,
-      sha256: createHash("sha256").update(bytes).digest(),
+      ...partIntegrity(bytes),
       objectKey: "fenced-part",
     })
-    const claim = await repository.claimFinish(created.upload.uploadId, owner)
-    expect(claim.kind).toBe("claimed")
-    if (claim.kind !== "claimed") throw new Error("Expected an upload finalization claim")
+    expect((await repository.requestFinish(created.upload.uploadId, owner)).kind).toBe("queued")
+    const claim = await repository.claimProcessing(created.upload.id)
+    if (!claim) throw new Error("Expected an upload finalization claim")
 
-    expect(await repository.cancel(created.upload.uploadId, owner))
+    expect((await repository.cancel(created.upload.uploadId, owner))?.result)
       .toEqual({ canceled: false, alreadyTerminal: false })
     expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: claim.lockToken }))
       .toBe(true)
@@ -466,7 +530,7 @@ describe("native upload repository", () => {
 
     await db.update(inlineUploads).set({ lockedAt: null, expiresAt: new Date(Date.now() + 60_000) })
       .where(eq(inlineUploads.id, claim.upload.id))
-    expect(await repository.claimFinish(created.upload.uploadId, owner)).toEqual({ kind: "processing" })
+    expect(await repository.requestFinish(created.upload.uploadId, owner)).toEqual({ kind: "processing" })
     await db.update(inlineUploads).set({ expiresAt: new Date(0) })
       .where(eq(inlineUploads.id, claim.upload.id))
     expect(await repository.claimExpiredCleanup(claim.upload.id)).toBeUndefined()
@@ -474,11 +538,15 @@ describe("native upload repository", () => {
 
     await db.update(inlineUploads).set({ lockedAt: new Date(Date.now() - 6 * 60 * 1_000) })
       .where(eq(inlineUploads.id, claim.upload.id))
-    const cleanupClaim = await repository.claimExpiredCleanup(claim.upload.id)
-    expect(cleanupClaim?.upload.status).toBe("processing")
     expect(await repository.claimExpiredCleanup(claim.upload.id)).toBeUndefined()
+    const recovered = await repository.claimProcessing(claim.upload.id)
+    expect(recovered).toBeDefined()
+    expect(recovered?.lockToken).not.toEqual(claim.lockToken)
     expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: claim.lockToken }))
       .toBe(false)
-    expect(await repository.removeCleanupClaim(claim.upload.id, cleanupClaim!.cleanupToken)).toBe(true)
+    expect(await repository.releaseProcessingClaim({
+      uploadDbId: claim.upload.id,
+      lockToken: recovered!.lockToken,
+    })).toBe(true)
   })
 })
