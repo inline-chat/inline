@@ -6,18 +6,17 @@ export function landingHead(locale: Locale) {
   return {
     meta: [
       {
-        title: "Inline - A fast, lightweight and powerful work chat app",
+        title: "Inline — The interface for multiplayer work",
       },
       {
         name: "description",
-        content: "A fast, lightweight and powerful chat app for teams that makes sharing ideas an absolute joy.",
+        content: "A work chat app redesigned from scratch around threads for people and agents.",
       },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:title", content: "Inline - Work chat 2.0" },
+      { name: "twitter:title", content: "Inline — The interface for multiplayer work" },
       {
         name: "twitter:description",
-        content:
-          "Inline is a fast, lightweight, scalable, and powerful work chat app designed to spark new ideas, enable maximum sharing, while allowing longest possible focus time.",
+        content: "A work chat app redesigned from scratch around threads for people and agents.",
       },
       { name: "twitter:image", content: `${productionOrigin}/twitter-og.jpg` },
       { name: "og:image", content: `${productionOrigin}/twitter-og.jpg` },
@@ -26,10 +25,10 @@ export function landingHead(locale: Locale) {
       { rel: "canonical", href: `${productionOrigin}${landingPathForLocale(locale)}` },
       ...locales.map((alternate) => ({
         rel: "alternate",
-        hreflang: alternate.hrefLang,
+        hrefLang: alternate.hrefLang,
         href: `${productionOrigin}${landingPathForLocale(alternate.code)}`,
       })),
-      { rel: "alternate", hreflang: "x-default", href: `${productionOrigin}/beta` },
+      { rel: "alternate", hrefLang: "x-default", href: `${productionOrigin}/beta` },
     ],
   }
 }
