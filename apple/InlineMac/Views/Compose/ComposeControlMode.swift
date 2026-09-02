@@ -258,13 +258,11 @@ enum ComposeControlMode {
     }
   }
 
-  var sendButtonTrailingInset: CGFloat {
-    switch self {
-      case .legacy:
-        pillContentInset
-      case .glass:
-        pillContentInset + 2
-    }
+  /// Centers the fixed-size send button inside the compact pill's trailing cap.
+  /// Deriving both axes from the same geometry keeps the three visible edge
+  /// insets equal if the pill or button size changes.
+  var sendButtonEdgeInset: CGFloat {
+    (textMinHeight - sendButtonSize) / 2
   }
 
   var usesInputStyleTextInsets: Bool {
@@ -284,15 +282,6 @@ enum ComposeControlMode {
         0
       case .glass:
         max(0, (textMinHeight - inlineButtonSize) / 2)
-    }
-  }
-
-  var sendButtonBottomInset: CGFloat {
-    switch self {
-      case .legacy:
-        inlineButtonBottomInset
-      case .glass:
-        inlineButtonBottomInset + 1
     }
   }
 

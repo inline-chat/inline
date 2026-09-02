@@ -836,16 +836,13 @@ class GlassComposeAppKit: NSView {
           glassTextTrailingConstraint!,
           sendButton.trailingAnchor.constraint(
             equalTo: glassEditorRowView.trailingAnchor,
-            constant: -controlMode.sendButtonTrailingInset
+            constant: -controlMode.sendButtonEdgeInset
           ),
           sendButton.bottomAnchor.constraint(
             equalTo: glassEditorRowView.bottomAnchor,
-            constant: -controlMode.sendButtonBottomInset
+            constant: -controlMode.sendButtonEdgeInset
           ),
-          silentModeButton.bottomAnchor.constraint(
-            equalTo: glassEditorRowView.bottomAnchor,
-            constant: -controlMode.sendButtonBottomInset
-          ),
+          silentModeButton.bottomAnchor.constraint(equalTo: sendButton.bottomAnchor),
           silentModeButtonWidthConstraint!,
           silentModeButton.heightAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
           silentModeToSendConstraint!,
@@ -1087,7 +1084,7 @@ class GlassComposeAppKit: NSView {
     let buttonWidth = showsSend
       ? controlMode.sendButtonSize
       : (showsEmoji ? controlMode.emojiButtonSize : 0)
-    let trailingInset = showsSend ? controlMode.sendButtonTrailingInset : controlMode.pillContentInset
+    let trailingInset = showsSend ? controlMode.sendButtonEdgeInset : controlMode.pillContentInset
     var width = trailingInset + buttonWidth + rightButtonSpacing
 
     let sendsSilently = if case .chat = usage {
