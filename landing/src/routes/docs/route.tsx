@@ -1,12 +1,12 @@
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 
 import { DOCS_NAV, TECHNICAL_DOCS_NAV, type DocsNavGroup } from "~/docs/nav"
-import { MoonIcon, SunIcon } from "~/docs/lucide"
-import { SUPPORT_EMAIL, emailValue, useHydratedEmail } from "~/lib/email"
+import { SiteFooter, SiteHeader } from "~/landing/SiteChrome"
 
 import styleCssUrl from "../../landing/styles/style.css?url"
 import docsCssUrl from "../../landing/styles/docs.css?url"
+import siteChromeCssUrl from "../../landing/styles/site-chrome.css?url"
 import "../../landing/styles/page-content.css"
 
 const normalizePath = (path: string) => (path.length > 1 ? path.replace(/\/+$/g, "") : path)
@@ -51,6 +51,7 @@ export const Route = createFileRoute("/docs")({
     links: [
       { rel: "stylesheet", href: styleCssUrl },
       { rel: "stylesheet", href: docsCssUrl },
+      { rel: "stylesheet", href: siteChromeCssUrl },
     ],
   }),
 })
@@ -69,25 +70,6 @@ function DocsLayout() {
     (item) => normalizePath(item.to) === activePath,
   )?.title
 
-  const [theme, setTheme] = useState<"light" | "dark" | null>(null)
-  const [isFooterEmailCopied, setIsFooterEmailCopied] = useState(false)
-  const footerEmail = useHydratedEmail(SUPPORT_EMAIL)
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-
-    const stored = window.localStorage.getItem("inline_docs_theme")
-    const resolved: "light" | "dark" =
-      stored === "light" || stored === "dark"
-        ? stored
-        : window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
-          ? "dark"
-          : "light"
-
-    document.documentElement.dataset.theme = resolved
-    setTheme(resolved)
-  }, [])
-
   useEffect(() => {
     if (typeof document === "undefined") return
     if (!hash) return
@@ -105,35 +87,7 @@ function DocsLayout() {
 
   return (
     <div className="docs-page">
-      <header className="docs-topbar" aria-label="Docs top bar">
-        <div className="docs-container">
-          <div className="docs-topbar-inner">
-            <a href="/" className="docs-topbar-home" aria-label="Inline home">
-              <img className="docs-topbar-icon docs-topbar-icon--light" src="/favicon-black.png?v=2" alt="" />
-              <img className="docs-topbar-icon docs-topbar-icon--dark" src="/favicon-white.png?v=2" alt="" />
-              <span className="docs-topbar-wordmark" aria-hidden="true">
-                Inline
-              </span>
-            </a>
-            <div className="docs-topbar-actions">
-              <button
-                type="button"
-                className="docs-theme-toggle"
-                aria-label="Toggle theme"
-                onClick={() => {
-                  if (theme === null) return
-                  const next = theme === "dark" ? "light" : "dark"
-                  document.documentElement.dataset.theme = next
-                  window.localStorage.setItem("inline_docs_theme", next)
-                  setTheme(next)
-                }}
-              >
-                {theme === "dark" ? <SunIcon /> : <MoonIcon />}
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <SiteHeader layout="docs" />
 
       <div className="docs-body">
         <div className="docs-container">
@@ -165,40 +119,7 @@ function DocsLayout() {
         </div>
       </div>
 
-      <footer className="docs-footer" aria-label="Docs footer">
-        <div className="docs-container">
-          <div className="docs-footer-inner">
-            <div className="docs-footer-brand">
-              <span className="docs-footer-wordmark">Inline</span>
-              <span className="docs-footer-muted">Work chat for high-performance teams.</span>
-            </div>
-            <div className="docs-footer-links">
-              <a href="https://github.com/inline-chat/inline">GitHub</a>
-              <a href="https://x.com/inline_chat">X</a>
-              <a href="https://www.youtube.com/@inlinechat">YouTube</a>
-              <a href="https://status.inline.chat">Status</a>
-              <a href="/docs/security">Security</a>
-              <a href="/legal/terms">Terms</a>
-              <a href="/legal/privacy">Privacy</a>
-              <button
-                type="button"
-                className="docs-footer-copy"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(emailValue(SUPPORT_EMAIL))
-                    setIsFooterEmailCopied(true)
-                    window.setTimeout(() => setIsFooterEmailCopied(false), 900)
-                  } catch {
-                    // If clipboard is unavailable, fail silently.
-                  }
-                }}
-              >
-                {isFooterEmailCopied ? "email copied" : footerEmail.label}
-              </button>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter ariaLabel="Docs footer" />
     </div>
   )
 }

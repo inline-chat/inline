@@ -219,10 +219,11 @@ function PreWithCopy({ children, code, language, ...props }: { children?: ReactN
   const [copied, setCopied] = useState(false)
   const codeText = code.replace(/\n$/, "")
   const label = LANGUAGE_LABELS[language] ?? titleCaseLanguage(language)
+  const hideLanguageLabel = language === "bash"
 
   return (
-    <div className="docs-codeblock">
-      <div className="docs-codeblock-language">{label}</div>
+    <div className={`docs-codeblock${hideLanguageLabel ? " docs-codeblock--without-language" : ""}`}>
+      {hideLanguageLabel ? null : <div className="docs-codeblock-language">{label}</div>}
       <button
         type="button"
         className="docs-codeblock-copy"
@@ -237,8 +238,10 @@ function PreWithCopy({ children, code, language, ...props }: { children?: ReactN
           }
         }}
       >
-        {copied ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
-        <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
+        {copied ? <CheckIcon size={20} /> : <CopyIcon size={20} />}
+        <span className="docs-visually-hidden" aria-live="polite">
+          {copied ? "Copied" : "Copy"}
+        </span>
       </button>
       <pre {...props}>{children}</pre>
     </div>
@@ -308,7 +311,7 @@ function CodeTabs({ children, labelsJson }: { children?: ReactNode; labelsJson: 
 export function DocsMarkdown({ markdown, className, renderVideoLinks = false, metadata }: DocsMarkdownProps) {
   const slugger = createSlugger()
   const toc = extractToc(markdown)
-  const showToc = toc.length >= 5 && markdown.split("\n").length >= 45
+  const showToc = toc.length > 0
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null)
   const [hydrated, setHydrated] = useState(false)
   const copiedEmailTimeout = useRef<number | null>(null)
