@@ -121,11 +121,16 @@ export async function acknowledgeMessages(input: AcknowledgeMessagesInput, conte
       throw RealtimeRpcError.BadRequest()
     }
 
-    const advances = !previous || requestedMaxId > previous.maxId
-    const reactivates = previous?.cleared === true
-      && requestedMaxId === previous.maxId
-      && expectedRevision === previous.revision
-    if (!advances && !reactivates) {
+    const alreadyActive = previous?.cleared === false && requestedMaxId === previous.maxId
+    const matchesObservedState = previous
+      ? expectedRevision === previous.revision
+      : expectedRevision === 0
+    // Compatibility for clients released with the old high-water contract.
+    // They send revision zero when advancing, but still cannot move backward.
+    const legacyAdvance = previous !== undefined
+      && expectedRevision === 0
+      && requestedMaxId > previous.maxId
+    if (alreadyActive || (!matchesObservedState && !legacyAdvance)) {
       return {
         acknowledgement: previous ? encodeCursor(chat.id, context.currentUserId, previous) : undefined,
         changed: false as const,

@@ -63,8 +63,6 @@ public struct Acknowledgement: Codable, FetchableRecord, PersistableRecord, Hash
             (previous?.revision ?? 0) == 0,
             cursor.maxID > (previous?.maxId ?? 0) else { return [] }
     }
-    guard cursor.maxID >= (previous?.maxId ?? 0) else { return [] }
-
     if cursor.hasUser, cursor.user.id == cursor.userID {
       _ = try User.save(db, user: cursor.user)
     }
@@ -183,10 +181,9 @@ public extension FullMessage {
     // Negative revisions exist only in resident rows while one admitted Ack is
     // awaiting authoritative state. Do not build a second request from it.
     guard state?.isOptimisticProjection != true else { return nil }
-    guard message.messageId >= (state?.maxId ?? 0) else { return nil }
     return AcknowledgementAction(
       clear: state?.maxId == message.messageId && state?.cleared == false,
-      expectedRevision: state?.maxId == message.messageId ? (state?.revision ?? 0) : 0
+      expectedRevision: state?.revision ?? 0
     )
   }
 
@@ -255,19 +252,19 @@ public extension FullMessage {
     let confirmedActors = actors.filter { !$0.acknowledgement.isOptimisticProjection }
     let hasPendingActor = confirmedActors.count != actors.count
     guard !confirmedActors.isEmpty else {
-      return hasPendingActor ? "Sending your Ack through this message" : "Ack through this message"
+      return hasPendingActor ? "Sending your Ack" : "Ack"
     }
     let names = confirmedActors.compactMap { $0.userInfo?.user.shortDisplayName }
     let confirmedLabel: String
     if confirmedActors.count == 1, let name = names.first {
-      confirmedLabel = "Ack through this message by \(name)"
+      confirmedLabel = "Ack by \(name)"
     } else {
       let shown = Array(names.prefix(3))
       let hiddenCount = confirmedActors.count - shown.count
       if shown.isEmpty {
-        confirmedLabel = "Ack through this message by \(confirmedActors.count) people"
+        confirmedLabel = "Ack by \(confirmedActors.count) people"
       } else {
-        let prefix = "Ack through this message by " + shown.joined(separator: ", ")
+        let prefix = "Ack by " + shown.joined(separator: ", ")
         confirmedLabel = hiddenCount > 0 ? prefix + ", and \(hiddenCount) more" : prefix
       }
     }

@@ -21073,8 +21073,8 @@ public nonisolated struct GetFilePartResult: Sendable {
   public init() {}
 }
 
-/// One explicit cursor state per chat and actor. max_id remains a monotonic
-/// high-water mark; cleared hides its marker without rewinding that boundary.
+/// One explicit target state per chat and actor. max_id is the exact message
+/// carrying the marker; its legacy field name is retained for wire compatibility.
 public nonisolated struct ChatAcknowledgement: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -21109,7 +21109,7 @@ public nonisolated struct ChatAcknowledgement: Sendable {
   /// Chat update sequence that orders snapshots, live updates and replay.
   public var revision: Int64 = 0
 
-  /// A durable tombstone. The high-water max_id remains available for fencing.
+  /// A durable tombstone. max_id retains the hidden target for idempotent retry.
   public var cleared: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -21139,7 +21139,7 @@ public nonisolated struct AcknowledgeMessagesInput: Sendable {
 
   public var clear: Bool = false
 
-  /// State observed by the actor; fences delayed clear and same-target replay.
+  /// State observed by the actor; fences delayed clear and target movement.
   public var expectedRevision: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()

@@ -147,7 +147,7 @@ public struct AcknowledgeMessagesTransaction: Transaction2 {
     guard case let .acknowledgeMessages(response) = result else { throw TransactionExecutionError.invalid }
     await Api.realtime.applyUpdatesAndWait(response.updates)
     // Always project the canonical post-reducer row. A stale RPC response may
-    // be rejected by the monotonic reducer and must not bypass it in memory.
+    // be rejected by the revision fence and must not bypass it in memory.
     if let confirmed = await loadCanonicalAcknowledgement() {
       await MainActor.run {
         guard Auth.shared.getCurrentUserId() == context.userId else { return }

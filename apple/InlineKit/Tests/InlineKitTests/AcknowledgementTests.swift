@@ -7,7 +7,7 @@ import Testing
 
 @Suite("Explicit Ack cursor")
 struct AcknowledgementTests {
-  @Test func revisionedCursorMovesClearsReactivatesAndSurvivesDeletion() throws {
+  @Test func revisionedCursorMovesBothDirectionsClearsReactivatesAndSurvivesDeletion() throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
     try queue.write { db in
@@ -44,10 +44,12 @@ struct AcknowledgementTests {
 
       #expect(try Acknowledgement.save(db, cursor: cursor(1, 10, revision: 1)) == [10])
       #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 2)) == [10, 12])
+      #expect(try Acknowledgement.save(db, cursor: cursor(1, 10, revision: 3)) == [10, 12])
       #expect(try Acknowledgement.save(db, cursor: cursor(1, 10, revision: 1)).isEmpty)
       #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 2)).isEmpty)
+      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 4)) == [10, 12])
 
-      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 3, cleared: true)) == [12])
+      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 5, cleared: true)) == [12])
       var rows = try FullMessage.queryRequest()
         .filter(InlineKit.Message.Columns.chatId == 100)
         .fetchAll(db)
@@ -56,15 +58,15 @@ struct AcknowledgementTests {
       #expect(clearedMessage.acknowledgementState(for: 1)?.cleared == true)
       #expect(clearedMessage.acknowledgementAction(currentUserId: 1) == AcknowledgementAction(
         clear: false,
-        expectedRevision: 3
+        expectedRevision: 5
       ))
 
       // Reordered active state cannot resurrect the cleared marker.
-      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 2)).isEmpty)
-      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 4)) == [12])
-      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 3, cleared: true)).isEmpty)
+      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 4)).isEmpty)
+      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 6)) == [12])
+      #expect(try Acknowledgement.save(db, cursor: cursor(1, 12, revision: 5, cleared: true)).isEmpty)
 
-      try Acknowledgement.save(db, cursor: cursor(2, 10, revision: 5))
+      try Acknowledgement.save(db, cursor: cursor(2, 10, revision: 7))
       rows = try FullMessage.queryRequest()
         .filter(InlineKit.Message.Columns.chatId == 100)
         .fetchAll(db)
@@ -81,7 +83,7 @@ struct AcknowledgementTests {
         .deleteAll(db)
       let actor = try #require(try Acknowledgement.filter(Acknowledgement.Columns.userId == 1).fetchOne(db))
       #expect(actor.maxId == 12)
-      #expect(actor.revision == 4)
+      #expect(actor.revision == 6)
       #expect(actor.cleared == false)
       #expect(try Acknowledgement.fetchCount(db) == 2)
     }
@@ -243,7 +245,7 @@ struct AcknowledgementTests {
   }
 
   @Test @MainActor
-  func olderMessagesHaveNoActionEvenWhenTheTargetIsOutsideTheLoadedPage() throws {
+  func everyEligibleMessageCanMoveTheAckEvenWhenTheTargetIsOutsideTheLoadedPage() throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     let database = try AppDatabase(queue)
     try queue.write { db in
@@ -265,13 +267,22 @@ struct AcknowledgementTests {
         let old = try #require(try FullMessage.queryRequest(currentUserId: 1)
           .filter(InlineKit.Message.Columns.messageId == 10).fetchOne(db))
         #expect(old.acknowledgementActors.isEmpty)
-        #expect(old.acknowledgementAction(currentUserId: 1) == nil)
+        #expect(old.acknowledgementAction(currentUserId: 1) == AcknowledgementAction(
+          clear: false,
+          expectedRevision: cleared ? 2 : 1
+        ))
         let target = try #require(try FullMessage.queryRequest(currentUserId: 1)
           .filter(InlineKit.Message.Columns.messageId == 12).fetchOne(db))
-        #expect(target.acknowledgementAction(currentUserId: 1)?.clear == !cleared)
+        #expect(target.acknowledgementAction(currentUserId: 1) == AcknowledgementAction(
+          clear: !cleared,
+          expectedRevision: cleared ? 2 : 1
+        ))
         let later = try #require(try FullMessage.queryRequest(currentUserId: 1)
           .filter(InlineKit.Message.Columns.messageId == 14).fetchOne(db))
-        #expect(later.acknowledgementAction(currentUserId: 1) == AcknowledgementAction(clear: false, expectedRevision: 0))
+        #expect(later.acknowledgementAction(currentUserId: 1) == AcknowledgementAction(
+          clear: false,
+          expectedRevision: cleared ? 2 : 1
+        ))
       }
     }
     let model = MessagesProgressiveViewModel(
@@ -280,7 +291,10 @@ struct AcknowledgementTests {
     )
     let old = try #require(model.messages.first { $0.message.messageId == 10 })
     #expect(old.currentUserAcknowledgement?.userId == 1)
-    #expect(old.acknowledgementAction(currentUserId: 1) == nil)
+    #expect(old.acknowledgementAction(currentUserId: 1) == AcknowledgementAction(
+      clear: false,
+      expectedRevision: 2
+    ))
   }
 
   @Test @MainActor
@@ -323,15 +337,21 @@ struct AcknowledgementTests {
     #expect(model.messages[0].acknowledgementActors.count == 1)
     publish(12, revision: 2)
     #expect(model.messages[0].acknowledgementActors.isEmpty)
-    #expect(model.messages[0].acknowledgementAction(currentUserId: 1) == nil)
-    #expect(model.messages[1].acknowledgementAction(currentUserId: 1) == nil)
+    #expect(model.messages[0].acknowledgementAction(currentUserId: 1)?.expectedRevision == 2)
+    #expect(model.messages[1].acknowledgementAction(currentUserId: 1)?.expectedRevision == 2)
     #expect(model.messages[2].acknowledgementActors.count == 1)
-    #expect(model.messages[3].acknowledgementAction(currentUserId: 1) != nil)
-    #expect(updatedIDs == [[10], [10, 11, 12]])
+    #expect(model.messages[2].acknowledgementAction(currentUserId: 1) == AcknowledgementAction(
+      clear: true,
+      expectedRevision: 2
+    ))
+    #expect(model.messages[3].acknowledgementAction(currentUserId: 1)?.expectedRevision == 2)
+    // The current actor's revision changes every eligible row action. Keep all
+    // resident rows current so an immediate backward move cannot submit stale state.
+    #expect(updatedIDs == [[10, 11, 12, 14], [10, 11, 12, 14]])
     publish(12, revision: 3, cleared: true)
     #expect(model.messages[2].acknowledgementActors.isEmpty)
     #expect(model.messages[2].acknowledgementAction(currentUserId: 1)?.expectedRevision == 3)
-    #expect(model.messages[0].acknowledgementAction(currentUserId: 1) == nil)
+    #expect(model.messages[0].acknowledgementAction(currentUserId: 1)?.expectedRevision == 3)
   }
 
   @Test @MainActor
@@ -381,7 +401,7 @@ struct AcknowledgementTests {
       animated: true
     ))
     #expect(try row(12).acknowledgementActors.map(\.acknowledgement.revision) == [-1])
-    #expect(try row(12).acknowledgementLabel == "Sending your Ack through this message")
+    #expect(try row(12).acknowledgementLabel == "Sending your Ack")
     #expect(model.messages.allSatisfy { $0.acknowledgementAction(currentUserId: 1) == nil })
     #expect(!publisher.beginOptimisticAcknowledgement(
       requestId: UUID(),
@@ -477,9 +497,11 @@ struct AcknowledgementTests {
       chatId: 100, userId: 1, maxId: 10, revision: 7, cleared: false
     )
     let requestId = UUID()
+    let action = try #require(message.acknowledgementAction(currentUserId: 1))
+    #expect(action == AcknowledgementAction(clear: false, expectedRevision: 7))
     let transaction = AcknowledgeMessagesTransaction(
       message: message,
-      action: .init(clear: false, expectedRevision: 0),
+      action: action,
       currentUserId: 1,
       optimisticRequestId: requestId
     )

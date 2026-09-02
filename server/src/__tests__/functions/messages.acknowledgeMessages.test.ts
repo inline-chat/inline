@@ -42,11 +42,12 @@ describe("explicit acknowledgement cursors", () => {
     return { user, other, chat, peerId, context, call }
   }
 
-  test("advances monotonically, survives retries/deletion, and never creates dialog state", async () => {
+  test("moves forward and backward, survives retries/deletion, and never creates dialog state", async () => {
     const { user, chat, call } = await fixture()
     const first = await call(10n)
     const retry = await call(10n)
-    const next = await call(12n)
+    const forward = await call(12n, false, BigInt(first.updates[0]?.seq ?? 0))
+    const backward = await call(10n, false, BigInt(forward.updates[0]?.seq ?? 0))
 
     expect(first.updates[0]?.update.oneofKind).toBe("acknowledgement")
     if (first.updates[0]?.update.oneofKind === "acknowledgement") {
@@ -55,31 +56,36 @@ describe("explicit acknowledgement cursors", () => {
       expect(first.updates[0].update.acknowledgement.cleared).toBe(false)
     }
     expect(retry.updates[0]?.seq).toBeUndefined()
-    expect(next.updates[0]?.seq).toBe((first.updates[0]?.seq ?? 0) + 1)
+    expect(forward.updates[0]?.seq).toBe((first.updates[0]?.seq ?? 0) + 1)
+    expect(backward.updates[0]?.seq).toBe((forward.updates[0]?.seq ?? 0) + 1)
 
-    await db.delete(messages).where(and(eq(messages.chatId, chat.id), eq(messages.messageId, 12)))
-    for (const maxId of [12n, 10n]) {
-      const value = (await call(maxId)).updates[0]
-      expect(value?.seq).toBeUndefined()
-      if (value?.update.oneofKind === "acknowledgement") {
-        expect(value.update.acknowledgement.maxId).toBe(12n)
-        expect(value.update.acknowledgement.cleared).toBe(false)
-      }
+    await db.delete(messages).where(and(eq(messages.chatId, chat.id), eq(messages.messageId, 10)))
+    const deletedTargetRetry = (await call(10n, false, BigInt(backward.updates[0]?.seq ?? 0))).updates[0]
+    expect(deletedTargetRetry?.seq).toBeUndefined()
+    if (deletedTargetRetry?.update.oneofKind === "acknowledgement") {
+      expect(deletedTargetRetry.update.acknowledgement.maxId).toBe(10n)
+      expect(deletedTargetRetry.update.acknowledgement.cleared).toBe(false)
     }
 
     const [row] = await db.select().from(acknowledgements).where(eq(acknowledgements.chatId, chat.id))
-    expect(row).toMatchObject({ chatId: chat.id, userId: user.id, maxId: 12, revision: next.updates[0]?.seq, cleared: false })
+    expect(row).toMatchObject({ chatId: chat.id, userId: user.id, maxId: 10, revision: backward.updates[0]?.seq, cleared: false })
     expect(await db.select().from(dialogs).where(eq(dialogs.chatId, chat.id))).toHaveLength(0)
     expect(await db.select().from(reactions).where(eq(reactions.chatId, chat.id))).toHaveLength(0)
     const durable = await db.select().from(updates)
       .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, chat.id)))
-    expect(durable.filter(row => UpdatesModel.decrypt(row).payload.update.oneofKind === "acknowledgement")).toHaveLength(2)
+    expect(durable.filter(row => UpdatesModel.decrypt(row).payload.update.oneofKind === "acknowledgement")).toHaveLength(3)
   })
 
-  test("clears only the exact active target, retains the high-water mark, and can reactivate it", async () => {
+  test("clears only the exact active target and fences stale movement", async () => {
     const { chat, call } = await fixture()
-    await call(10n)
-    const advanced = await call(12n)
+    const first = await call(10n)
+    const advanced = await call(12n, false, BigInt(first.updates[0]?.seq ?? 0))
+
+    const staleMove = await call(10n, false, BigInt(first.updates[0]?.seq ?? 0))
+    expect(staleMove.updates[0]?.seq).toBeUndefined()
+    if (staleMove.updates[0]?.update.oneofKind === "acknowledgement") {
+      expect(staleMove.updates[0].update.acknowledgement.maxId).toBe(12n)
+    }
 
     const stale = await call(10n, true, BigInt(advanced.updates[0]?.seq ?? 0))
     expect(stale.updates[0]?.seq).toBeUndefined()
@@ -97,21 +103,31 @@ describe("explicit acknowledgement cursors", () => {
 
     const repeated = await call(12n, true, BigInt(advanced.updates[0]?.seq ?? 0))
     expect(repeated.updates[0]?.seq).toBeUndefined()
-    const olderSet = await call(10n)
-    expect(olderSet.updates[0]?.seq).toBeUndefined()
-    if (olderSet.updates[0]?.update.oneofKind === "acknowledgement") {
-      expect(olderSet.updates[0].update.acknowledgement.cleared).toBe(true)
-    }
-
     const reactivated = await call(12n, false, BigInt(cleared.updates[0]?.seq ?? 0))
     expect(reactivated.updates[0]?.seq).toBe((cleared.updates[0]?.seq ?? 0) + 1)
+    const olderSet = await call(10n, false, BigInt(reactivated.updates[0]?.seq ?? 0))
+    expect(olderSet.updates[0]?.seq).toBe((reactivated.updates[0]?.seq ?? 0) + 1)
     const delayedClear = await call(12n, true, BigInt(advanced.updates[0]?.seq ?? 0))
     expect(delayedClear.updates[0]?.seq).toBeUndefined()
     if (delayedClear.updates[0]?.update.oneofKind === "acknowledgement") {
+      expect(delayedClear.updates[0].update.acknowledgement.maxId).toBe(10n)
       expect(delayedClear.updates[0].update.acknowledgement.cleared).toBe(false)
     }
     const [row] = await db.select().from(acknowledgements).where(eq(acknowledgements.chatId, chat.id))
-    expect(row).toMatchObject({ maxId: 12, revision: reactivated.updates[0]?.seq, cleared: false })
+    expect(row).toMatchObject({ maxId: 10, revision: olderSet.updates[0]?.seq, cleared: false })
+  })
+
+  test("keeps revision-zero clients forward-only during rollout", async () => {
+    const { call } = await fixture()
+    await call(10n)
+    const legacyForward = await call(12n)
+    expect(legacyForward.updates[0]?.seq).toBeGreaterThan(0)
+
+    const legacyBackward = await call(10n)
+    expect(legacyBackward.updates[0]?.seq).toBeUndefined()
+    if (legacyBackward.updates[0]?.update.oneofKind === "acknowledgement") {
+      expect(legacyBackward.updates[0].update.acknowledgement.maxId).toBe(12n)
+    }
   })
 
   test("clear remains durable after target deletion and replays as a tombstone", async () => {
