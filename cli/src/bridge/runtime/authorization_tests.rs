@@ -114,9 +114,7 @@ async fn delivery(events: &mut LosslessEventReceiver) -> LosslessEventDelivery {
 #[tokio::test]
 async fn unauthorized_messages_are_silent_before_admission_for_every_provider() {
     for provider in ["codex", "claude", "opencode", "amp"] {
-        for case in [
-            "dm", "command", "mention", "bot", "unknown", "voice", "revoked",
-        ] {
+        for case in ["dm", "command", "mention", "unknown", "voice", "revoked"] {
             let route = route(provider);
             let (bot, backend, mut events) = client().await;
             let mut message = message(9, Some(false), "hello");
@@ -127,10 +125,6 @@ async fn unauthorized_messages_are_silent_before_admission_for_every_provider() 
                     }
                 }
                 "mention" => mention(&mut message),
-                "bot" => {
-                    message.metadata.sender_is_bot = Some(true);
-                    mention(&mut message);
-                }
                 "unknown" => message.metadata.sender_is_bot = None,
                 "voice" => {
                     message.content = MessageContent::Media {

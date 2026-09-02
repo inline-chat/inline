@@ -396,7 +396,7 @@ mod tests {
         };
         let bot_guidance = inline_delivery_guidance(&bot_record, Some(&bot_sender), true);
         assert!(bot_guidance.contains("authored by another bot and explicitly addressed to you"));
-        assert!(bot_guidance.contains("answer without mentioning it back"));
+        assert!(bot_guidance.contains("Do not mention it in an ordinary reply"));
         assert!(!bot_guidance.contains("[@Other bot]"));
     }
 }

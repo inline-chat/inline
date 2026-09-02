@@ -41,11 +41,11 @@ pub(super) fn normalize_inbound_content(content: &MessageContent) -> Option<Inbo
                 .filter(|name| !name.trim().is_empty())
                 .map_or_else(|| format!("{kind:?}").to_lowercase(), str::to_string);
             let text = caption
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|caption| !caption.is_empty())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| default_media_direction(*kind).to_string());
+                .as_deref()
+                .map(str::trim)
+                .filter(|caption| !caption.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| default_media_direction(*kind).to_string());
             let attachment = url
                 .as_deref()
                 .map(str::trim)

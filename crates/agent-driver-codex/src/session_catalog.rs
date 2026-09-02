@@ -6,9 +6,8 @@ use std::pin::Pin;
 
 use inline_agent_bridge::{
     AgentMessagePhase, AgentSessionCatalog, CatalogCapabilities, DirectionId, DriverError,
-    DriverFuture, DriverResult,
-    HistoryWindow, MAX_SESSION_PREVIEW_CHARS, MAX_SESSION_TITLE_CHARS, ProviderHealth,
-    ProviderInstanceRef, ProviderSessionId, ProviderSessionRef, ProviderSurface,
+    DriverFuture, DriverResult, HistoryWindow, MAX_SESSION_PREVIEW_CHARS, MAX_SESSION_TITLE_CHARS,
+    ProviderHealth, ProviderInstanceRef, ProviderSessionId, ProviderSessionRef, ProviderSurface,
     RenameSessionRequest, SessionActivityKind, SessionActivityStatus, SessionAttachmentSupport,
     SessionAvailability, SessionCapabilities, SessionEventOrigin, SessionInputCorrelation,
     SessionItem, SessionItemKey, SessionItemPayload, SessionItemVersion, SessionMessageRole,
@@ -884,10 +883,12 @@ fn normalizable_visible_message_count(turn: &CodexTurn) -> usize {
 }
 
 fn turn_has_final_answer(turn: &CodexTurn) -> bool {
-    turn.items.iter().any(|item| matches!(item,
-        CodexThreadItem::AgentMessage { phase: Some(AgentMessagePhase::FinalAnswer), text, .. }
-            if bounded_transcript(text).is_some()
-    ))
+    turn.items.iter().any(|item| {
+        matches!(item,
+            CodexThreadItem::AgentMessage { phase: Some(AgentMessagePhase::FinalAnswer), text, .. }
+                if bounded_transcript(text).is_some()
+        )
+    })
 }
 
 fn import_assistant_phase(phase: Option<AgentMessagePhase>, has_final: bool) -> bool {
@@ -1219,11 +1220,14 @@ mod tests {
                 {"id":"c", "type":"agentMessage", "text":"Late commentary", "phase":"commentary"},
                 {"id":"d", "type":"agentMessage", "text":"Unphased"}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(normalizable_visible_message_count(&turn), 1);
         let items = normalize_turn(turn).unwrap();
         assert_eq!(items.len(), 1);
-        assert!(matches!(&items[0].payload, SessionItemPayload::Message { text, .. } if text == "Answer"));
+        assert!(
+            matches!(&items[0].payload, SessionItemPayload::Message { text, .. } if text == "Answer")
+        );
     }
 
     #[test]
@@ -1235,7 +1239,8 @@ mod tests {
                 {"id":"c", "type":"agentMessage", "text":"Legacy answer"},
                 {"id":"d", "type":"agentMessage", "text":"Future answer", "phase":"future_phase"}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let count = normalizable_visible_message_count(&turn);
         let items = normalize_turn(turn).unwrap();
         assert_eq!(count, 2);

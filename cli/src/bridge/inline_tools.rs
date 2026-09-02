@@ -18,6 +18,15 @@ pub(super) struct InlineToolHost {
     bot_token: String,
 }
 
+struct ToolMessage<'a> {
+    chat_id: i64,
+    text: &'a str,
+    target: Option<&'a proto::AgentThreadContext>,
+    source_chat_id: i64,
+    random_kind: &'a str,
+    call_id: &'a str,
+}
+
 impl InlineToolHost {
     pub fn new(
         bot: InlineClient,
@@ -581,12 +590,14 @@ impl InlineToolHost {
         match self
             .send_tool_message(
                 &mut realtime,
-                chat_id,
-                &initial_message,
-                agent_context.as_ref(),
-                record.delivery_chat_id,
-                "create-chat-message",
-                &call.call_id,
+                ToolMessage {
+                    chat_id,
+                    text: &initial_message,
+                    target: agent_context.as_ref(),
+                    source_chat_id: record.delivery_chat_id,
+                    random_kind: "create-chat-message",
+                    call_id: &call.call_id,
+                },
             )
             .await
         {
@@ -677,12 +688,14 @@ impl InlineToolHost {
         match self
             .send_tool_message(
                 &mut realtime,
-                chat_id,
-                &child_instruction,
-                Some(&agent_context),
-                record.delivery_chat_id,
-                "create-subthread-message",
-                &call.call_id,
+                ToolMessage {
+                    chat_id,
+                    text: &child_instruction,
+                    target: Some(&agent_context),
+                    source_chat_id: record.delivery_chat_id,
+                    random_kind: "create-subthread-message",
+                    call_id: &call.call_id,
+                },
             )
             .await
         {
@@ -735,12 +748,14 @@ impl InlineToolHost {
         match self
             .send_tool_message(
                 &mut realtime,
-                chat_id,
-                &text,
-                target.as_ref(),
-                current_chat_id,
-                "send-message",
-                &call.call_id,
+                ToolMessage {
+                    chat_id,
+                    text: &text,
+                    target: target.as_ref(),
+                    source_chat_id: current_chat_id,
+                    random_kind: "send-message",
+                    call_id: &call.call_id,
+                },
             )
             .await
         {
@@ -758,20 +773,15 @@ impl InlineToolHost {
     async fn send_tool_message(
         &self,
         realtime: &mut RealtimeClient,
-        chat_id: i64,
-        text: &str,
-        target: Option<&proto::AgentThreadContext>,
-        source_chat_id: i64,
-        random_kind: &str,
-        call_id: &str,
+        request: ToolMessage<'_>,
     ) -> Result<(), ()> {
-        let (message, entities) = message_with_agent_mention(text, target);
+        let (message, entities) = message_with_agent_mention(request.text, request.target);
         realtime
             .call(proto::SendMessageInput {
-                peer_id: Some(chat_peer(chat_id)),
+                peer_id: Some(chat_peer(request.chat_id)),
                 message: Some(message),
                 reply_to_msg_id: None,
-                random_id: Some(interaction_random_id(random_kind, call_id).get()),
+                random_id: Some(interaction_random_id(request.random_kind, request.call_id).get()),
                 media: None,
                 is_sticker: None,
                 entities,
@@ -779,7 +789,7 @@ impl InlineToolHost {
                 send_mode: None,
                 actions: None,
                 initial_agent_context: None,
-                source_chat_id: target.map(|_| source_chat_id),
+                source_chat_id: request.target.map(|_| request.source_chat_id),
                 temporary_send_date: Some(now_seconds()),
                 has_link: None,
             })

@@ -28,13 +28,13 @@ fn capability_comparison_is_order_independent_and_exact() {
     ));
     assert!(!same_capabilities(
         &[chat_settings.clone(), agent_configuration],
-        &[chat_settings.clone()],
+        std::slice::from_ref(&chat_settings),
     ));
     assert!(!same_capabilities(
-        &[chat_settings.clone()],
+        std::slice::from_ref(&chat_settings),
         &[BotCapability {
             version: SETTINGS_VERSION + 1,
-            ..chat_settings
+            ..chat_settings.clone()
         }],
     ));
 }

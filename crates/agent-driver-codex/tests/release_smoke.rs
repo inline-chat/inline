@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use inline_agent_bridge::{
-    AgentDriver, AgentEvent, AgentMessagePhase, AgentMessageUpdate, AgentSessionCatalog, HistoryWindow, InstallationId, ProviderId,
-    ProviderInstanceRef, ProviderSessionId, ProviderSessionRef, ResumeSessionSpec,
-    SessionItemPayload, SessionPageSize, SessionQuery, SessionReadRequest, SessionReplay,
-    SessionSpec, TurnInput, TurnOptions, TurnOutcome, WorkspaceId,
+    AgentDriver, AgentEvent, AgentMessagePhase, AgentMessageUpdate, AgentSessionCatalog,
+    HistoryWindow, InstallationId, ProviderId, ProviderInstanceRef, ProviderSessionId,
+    ProviderSessionRef, ResumeSessionSpec, SessionItemPayload, SessionPageSize, SessionQuery,
+    SessionReadRequest, SessionReplay, SessionSpec, TurnInput, TurnOptions, TurnOutcome,
+    WorkspaceId,
 };
 use inline_agent_driver_codex::{
     CodexAppServerTransport, CodexDriverWriter, CodexLaunchConfig, CodexSessionCatalog,
@@ -40,14 +41,23 @@ async fn reply(
         match event? {
             AgentEvent::AgentTextDelta { text, .. } => answer.push_str(&text),
             AgentEvent::AgentTextCompleted { text, .. } => answer = text,
-            AgentEvent::AgentMessage { item_id, phase, update, .. } => {
-                let index = messages.iter().position(|(id, _, _)| id == &item_id)
+            AgentEvent::AgentMessage {
+                item_id,
+                phase,
+                update,
+                ..
+            } => {
+                let index = messages
+                    .iter()
+                    .position(|(id, _, _)| id == &item_id)
                     .unwrap_or_else(|| {
                         messages.push((item_id, None, String::new()));
                         messages.len() - 1
                     });
                 let (_, current_phase, text) = &mut messages[index];
-                if phase.is_some() { *current_phase = phase; }
+                if phase.is_some() {
+                    *current_phase = phase;
+                }
                 match update {
                     AgentMessageUpdate::Started => {}
                     AgentMessageUpdate::Delta(delta) => text.push_str(&delta),
@@ -58,11 +68,17 @@ async fn reply(
                 outcome: TurnOutcome::Completed,
                 ..
             } => {
-                let final_message = messages.iter().rev().find(|(_, phase, text)| {
-                    *phase == Some(AgentMessagePhase::FinalAnswer) && !text.trim().is_empty()
-                }).or_else(|| messages.iter().rev().find(|(_, phase, text)| {
-                    *phase != Some(AgentMessagePhase::Commentary) && !text.trim().is_empty()
-                }));
+                let final_message = messages
+                    .iter()
+                    .rev()
+                    .find(|(_, phase, text)| {
+                        *phase == Some(AgentMessagePhase::FinalAnswer) && !text.trim().is_empty()
+                    })
+                    .or_else(|| {
+                        messages.iter().rev().find(|(_, phase, text)| {
+                            *phase != Some(AgentMessagePhase::Commentary) && !text.trim().is_empty()
+                        })
+                    });
                 return Ok(final_message.map_or(answer, |(_, _, text)| text.clone()));
             }
             AgentEvent::TurnCompleted { .. } => return Err("provider turn did not complete".into()),
