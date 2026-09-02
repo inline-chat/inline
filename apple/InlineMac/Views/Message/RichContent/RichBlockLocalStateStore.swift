@@ -2,44 +2,37 @@ import Foundation
 import InlineKit
 
 extension Notification.Name {
-  static let richBlockDisclosureStateDidChange = Notification.Name(
-    "chat.inline.richBlockDisclosureStateDidChange"
+  static let richBlockLayoutStateDidChange = Notification.Name(
+    "chat.inline.richBlockLayoutStateDidChange"
   )
 }
 
 final class RichBlockLocalStateStore: @unchecked Sendable {
   static let shared = RichBlockLocalStateStore()
 
-  private struct MessageIdentity: Hashable {
-    let chatID: Int64
-    let messageID: Int64
-    let randomID: Int64?
-
-    init(message: Message) {
-      chatID = message.chatId
-      messageID = message.messageId
-      randomID = message.messageId == 0 ? message.randomId : nil
-    }
-  }
-
   private let lock = NSLock()
-  private var disclosureStates: [MessageIdentity: [BlockContentPath: Bool]] = [:]
-  private var recency: [MessageIdentity] = []
+  private var disclosureStates: [BlockContentMessageIdentity: BlockContentDisclosureState] = [:]
+  private var recency: [BlockContentMessageIdentity] = []
   private let capacity = 512
 
   private init() {}
 
   func disclosureOverrides(for message: Message) -> [BlockContentPath: Bool] {
-    let identity = MessageIdentity(message: message)
+    let identity = BlockContentMessageIdentity(message: message)
     lock.lock()
     defer { lock.unlock() }
-    return disclosureStates[identity] ?? [:]
+    guard var state = disclosureStates[identity] else { return [:] }
+    let overrides = state.overrides(content: message.blockContentPayload, source: message.text ?? "")
+    disclosureStates[identity] = state
+    return overrides
   }
 
   func setDisclosure(_ expanded: Bool, path: BlockContentPath, message: Message) {
-    let identity = MessageIdentity(message: message)
+    let identity = BlockContentMessageIdentity(message: message)
     lock.lock()
-    disclosureStates[identity, default: [:]][path] = expanded
+    disclosureStates[identity, default: .init()].set(
+      expanded, path: path, content: message.blockContentPayload, source: message.text ?? ""
+    )
     recency.removeAll { $0 == identity }
     recency.append(identity)
     while recency.count > capacity {
@@ -48,7 +41,7 @@ final class RichBlockLocalStateStore: @unchecked Sendable {
     lock.unlock()
     Task { @MainActor in
       NotificationCenter.default.post(
-        name: .richBlockDisclosureStateDidChange,
+        name: .richBlockLayoutStateDidChange,
         object: self,
         userInfo: ["messageStableID": message.stableId]
       )
