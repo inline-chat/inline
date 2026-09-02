@@ -369,8 +369,157 @@ fn unbound_chat_with_a_replaced_default_workspace_binds_the_user_home() {
     assert_ne!(snapshot.binding.workspace_id, workspace_id);
 }
 
-#[test]
-fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
+#[tokio::test]
+async fn unbound_children_inherit_the_nearest_bound_parent_workspace() {
+    let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
+    let installation_id = InstallationId::new("codex").expect("installation");
+    store
+        .put_installation(&InstallationRecord {
+            installation_id: installation_id.clone(),
+            provider_id: ProviderId::new("codex").expect("provider"),
+            display_name: "Codex".to_string(),
+            created_at: 1,
+            updated_at: 1,
+        })
+        .expect("put installation");
+    let root = tempfile::tempdir().expect("workspace root");
+    let parent_path = root.path().join("parent-project");
+    let default_path = root.path().join("installation-default");
+    fs::create_dir(&parent_path).expect("parent workspace");
+    fs::create_dir(&default_path).expect("default workspace");
+    let parent_workspace = WorkspaceId::new("workspace-parent").expect("parent workspace id");
+    let default_workspace = WorkspaceId::new("workspace-default").expect("default workspace id");
+    store
+        .select_workspace(&installation_id, &parent_workspace, &parent_path, 1)
+        .expect("select parent workspace");
+    store
+        .select_workspace(&installation_id, &default_workspace, &default_path, 2)
+        .expect("select installation default");
+    store
+        .bind_chat_workspace(&installation_id, 100, &parent_workspace, 3)
+        .expect("bind parent workspace");
+    store
+        .bind_chat_workspace(&installation_id, 104, &default_workspace, 4)
+        .expect("bind explicit child workspace");
+    let route = InboundRoute {
+        store: store.clone(),
+        installation_id: installation_id.clone(),
+        provider_id: ProviderId::new("codex").expect("provider"),
+        policy: Arc::new(RwLock::new(OperatorPolicy::owner_only(7))),
+        owner_user_id: 7,
+        host_label: "Test Mac".to_string(),
+        owner_dm_chat_id: 706,
+        bot_user_id: 17,
+        bot_username: "mo_codex_bot".to_string(),
+        bot_store: SqliteStore::open_in_memory().expect("bot store"),
+        attachment_cache_dir: PathBuf::from("/tmp/inline-agent-bridge-test-attachments"),
+        owner_control: None,
+        accept_messages_after: 0,
+        deferred_inbound_tx: tokio::sync::mpsc::channel(MAX_PENDING_VOICE_TRANSCRIPTS).0,
+        pending_voice_messages: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        claude_history: None,
+        control_lane: Arc::new(tokio::sync::Semaphore::new(1)),
+        control_epoch: ControlTaskEpoch::new(),
+        bot_agent_resolver: BotAgentResolver::disabled(),
+    };
+    let record_child = |chat_id: i64, parent_chat_id: i64, parent_message_id: Option<i64>| {
+        let mut dialog = inline_client::DialogRecord::new(InlineId::new(chat_id));
+        dialog.parent_chat_id = Some(InlineId::new(parent_chat_id));
+        dialog.parent_message_id = parent_message_id.map(InlineId::new);
+        route
+            .bot_store
+            .upsert_dialog(dialog)
+            .expect("record child dialog");
+    };
+    record_child(101, 100, Some(10));
+    record_child(102, 100, None);
+    record_child(103, 102, Some(11));
+    record_child(104, 100, Some(12));
+    record_child(105, 100, Some(13));
+
+    let reply = conversation_for_chat_inheriting_parent(&route, 101)
+        .await
+        .expect("reply thread should inherit");
+    assert_eq!(reply.snapshot().binding.workspace_id, parent_workspace);
+
+    let nested = conversation_for_chat_inheriting_parent(&route, 103)
+        .await
+        .expect("nested subthread should inherit nearest bound ancestor");
+    assert_eq!(nested.snapshot().binding.workspace_id, parent_workspace);
+
+    let plain = conversation_for_chat_inheriting_parent(&route, 102)
+        .await
+        .expect("parent-only subthread should inherit");
+    assert_eq!(plain.snapshot().binding.workspace_id, parent_workspace);
+
+    let explicit = conversation_for_chat_inheriting_parent(&route, 104)
+        .await
+        .expect("explicit child binding should win");
+    assert_eq!(explicit.snapshot().binding.workspace_id, default_workspace);
+    assert_eq!(
+        store
+            .bound_chat_workspace(&installation_id, 101)
+            .expect("read reply binding")
+            .expect("reply binding")
+            .workspace_id,
+        parent_workspace
+    );
+    assert_eq!(
+        store
+            .bound_chat_workspace(&installation_id, 103)
+            .expect("read nested binding")
+            .expect("nested binding")
+            .workspace_id,
+        parent_workspace
+    );
+
+    store
+        .bind_chat_workspace(&installation_id, 100, &default_workspace, 5)
+        .expect("change parent workspace");
+    let stable_reply = conversation_for_chat_inheriting_parent(&route, 101)
+        .await
+        .expect("inherited child binding should remain stable");
+    assert_eq!(
+        stable_reply.snapshot().binding.workspace_id,
+        parent_workspace
+    );
+    store
+        .bind_chat_workspace(&installation_id, 100, &parent_workspace, 6)
+        .expect("restore parent workspace");
+
+    let moved_parent_path = root.path().join("parent-project-moved");
+    fs::rename(&parent_path, moved_parent_path).expect("move inherited workspace");
+    let error = conversation_for_chat_inheriting_parent(&route, 105)
+        .await
+        .expect_err("an unavailable inherited workspace must fail closed");
+    assert!(matches!(
+        error,
+        ConversationResolutionError::MissingWorkspace
+    ));
+    let settings_event = ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
+        request_id: 10,
+        chat_id: InlineId::new(105),
+        actor_user_id: InlineId::new(route.owner_user_id),
+        version: 1,
+    });
+    let resolution = conversation_for_settings_event(&route, &settings_event, None)
+        .await
+        .expect("settings should retain inherited project identity for recovery");
+    let SettingsConversationResolution::Ready(recovery) = resolution else {
+        panic!("owner settings should remain available for inherited project recovery");
+    };
+    assert_eq!(recovery.snapshot().binding.workspace_id, parent_workspace);
+    assert!(
+        store
+            .bound_chat_workspace(&installation_id, 105)
+            .expect("read unavailable child binding")
+            .is_none(),
+        "an unavailable inherited workspace must not create a runnable child binding"
+    );
+}
+
+#[tokio::test]
+async fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
     let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
     let installation_id = InstallationId::new("codex").expect("installation");
     let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace");
@@ -431,6 +580,7 @@ fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
     });
 
     let resolution = conversation_for_settings_event(&route, &event, None)
+        .await
         .expect("authorization should be resolved without storage mutation");
 
     assert!(matches!(
@@ -451,6 +601,7 @@ fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
         version: 1,
     });
     let resolution = conversation_for_settings_event(&route, &owner_dm_event, None)
+        .await
         .expect("owner DM settings should resolve");
     let SettingsConversationResolution::Ready(conversation) = resolution else {
         panic!("owner thread settings should be ready");
@@ -499,6 +650,7 @@ fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
     );
 
     let resolution = conversation_for_settings_event(&route, &owner_dm_event, Some(&conversation))
+        .await
         .expect("stale cached settings conversation should be repaired");
     let SettingsConversationResolution::Ready(repaired) = resolution else {
         panic!("owner DM settings should remain ready after reply-thread promotion");
@@ -512,8 +664,8 @@ fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
     );
 }
 
-#[test]
-fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
+#[tokio::test]
+async fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
     let store = Arc::new(BridgeStore::open_in_memory().expect("bridge store"));
     let installation_id = InstallationId::new("codex").expect("installation");
     let workspace_id = WorkspaceId::new("workspace-inline").expect("workspace");
@@ -586,6 +738,7 @@ fn unavailable_bound_workspace_does_not_silently_switch_to_home() {
         version: 1,
     });
     let resolution = conversation_for_settings_event(&route, &settings_event, None)
+        .await
         .expect("owner settings should remain available for explicit folder recovery");
     let SettingsConversationResolution::Ready(recovery) = resolution else {
         panic!("missing workspace recovery should open settings");

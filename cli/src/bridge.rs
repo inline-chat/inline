@@ -1739,11 +1739,13 @@ async fn run_provider_installation(
                         delivery.event(),
                         ClientEvent::BotInteraction(_)
                     ) {
-                        match conversation_for_settings_event(
+                        let resolution = conversation_for_settings_event(
                             &inbound_route,
                             delivery.event(),
                             conversations.get(&chat_id),
-                        ) {
+                        )
+                        .await;
+                        match resolution {
                             Ok(SettingsConversationResolution::Unauthorized) => {
                                 handle_unavailable_settings_event(
                                     &bot,

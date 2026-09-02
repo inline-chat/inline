@@ -647,9 +647,9 @@ pub(super) async fn inbound_from_delivery(
         && (is_workspace_recovery_command(&direction.text, &route.bot_username)
             || is_provider_epoch_release_command(&direction.text, &route.bot_username))
     {
-        conversation_for_workspace_selection(route, message.chat_id.get())
+        conversation_for_workspace_selection_inheriting_parent(route, message.chat_id.get()).await
     } else {
-        conversation_for_chat(route, message.chat_id.get())
+        conversation_for_chat_inheriting_parent(route, message.chat_id.get()).await
     };
     let conversation = match resolved {
         Ok(conversation) => conversation.snapshot(),
