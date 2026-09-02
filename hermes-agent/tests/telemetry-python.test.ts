@@ -39,6 +39,8 @@ thread = threading.Thread(target=server.handle_request, daemon=True)
 thread.start()
 secret = "private-hermes-token"
 os.environ["NODE_ENV"] = "test"
+os.environ.pop("DO_NOT_TRACK", None)
+os.environ.pop("INLINE_PLUGIN_TELEMETRY", None)
 os.environ["INLINE_HERMES_SENTRY_DSN"] = f"http://fixture@127.0.0.1:{server.server_port}/123"
 os.environ["INLINE_TOKEN"] = secret
 try:
