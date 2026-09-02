@@ -122,7 +122,10 @@ public enum FileHelpers {
   }
 
   /// Documents directory with media type specific folders appended
-  public static func getLocalCacheDirectory(for directory: FileLocalCacheDirectory) -> URL {
+  public static func getLocalCacheDirectory(
+    for directory: FileLocalCacheDirectory,
+    createIfNeeded: Bool = true
+  ) -> URL {
     let documentsDirectory = getApplicationSupportDirectory()
     let fileManager = FileManager.default
 
@@ -137,6 +140,8 @@ public enum FileHelpers {
     case .voices:
       documentsDirectory.appendingPathComponent("Voices", isDirectory: true)
     }
+
+    guard createIfNeeded else { return subdirectoryPath }
 
     // Create the directory if it doesn't exist
     if !fileManager.fileExists(atPath: subdirectoryPath.path) {

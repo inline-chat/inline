@@ -395,6 +395,13 @@ public struct PhotoInfo: Codable, Equatable, FetchableRecord, Hashable, Persista
     }
 
     return nonStrippedSizes.max { lhs, rhs in
+      // A metadata-only larger size cannot be loaded by the image view or
+      // FileCache. Prefer a regular representation with a source, then retain
+      // the existing quality ordering (remote originals still beat cached thumbs).
+      let lhsHasSource = photoAvailabilityPriority(lhs) > 0
+      let rhsHasSource = photoAvailabilityPriority(rhs) > 0
+      if lhsHasSource != rhsHasSource { return !lhsHasSource }
+
       let lhsTypePriority = photoTypePriority(lhs.type)
       let rhsTypePriority = photoTypePriority(rhs.type)
       if lhsTypePriority != rhsTypePriority {
@@ -417,6 +424,43 @@ public struct PhotoInfo: Codable, Equatable, FetchableRecord, Hashable, Persista
       let rhsAvailability = photoAvailabilityPriority(rhs)
       return lhsAvailability < rhsAvailability
     }
+  }
+
+  /// Existing regular representations ordered for local display fallback.
+  /// The primary server representation remains `bestPhotoSize()`; this list is
+  /// only for choosing among files that are already materialized on the client.
+  public func localPhotoSizeCandidates() -> [PhotoSize] {
+    var candidates: [PhotoSize] = []
+    if let best = bestPhotoSize(), best.localPath?.isEmpty == false {
+      candidates.append(best)
+    }
+
+    let fallbacks = sizes
+      .filter { $0.type != "s" && $0.localPath?.isEmpty == false }
+      .sorted { lhs, rhs in
+        let lhsArea = max((lhs.width ?? 0) * (lhs.height ?? 0), 0)
+        let rhsArea = max((rhs.width ?? 0) * (rhs.height ?? 0), 0)
+        if lhsArea != rhsArea { return lhsArea > rhsArea }
+        return (lhs.size ?? 0) > (rhs.size ?? 0)
+      }
+
+    for size in fallbacks {
+      guard let localPath = size.localPath,
+            !candidates.contains(where: { $0.localPath == localPath })
+      else { continue }
+      candidates.append(size)
+    }
+    return candidates
+  }
+
+  public func downloadSourceKey() -> PhotoDownloadSourceKey? {
+    guard let size = bestPhotoSize(), let cdnURL = size.cdnUrl, !cdnURL.isEmpty else { return nil }
+    return PhotoDownloadSourceKey(
+      photoID: photo.photoId,
+      sizeType: size.type,
+      format: photo.format,
+      cdnURL: cdnURL
+    )
   }
 
   /// Whether this photo has a regular representation that the shared photo view can load.
@@ -451,6 +495,20 @@ public struct PhotoInfo: Codable, Equatable, FetchableRecord, Hashable, Persista
     default:
       return 0
     }
+  }
+}
+
+public struct PhotoDownloadSourceKey: Equatable, Hashable, Sendable {
+  public let photoID: Int64
+  public let sizeType: String
+  public let format: ImageFormat
+  public let cdnURL: String
+
+  public init(photoID: Int64, sizeType: String, format: ImageFormat, cdnURL: String) {
+    self.photoID = photoID
+    self.sizeType = sizeType
+    self.format = format
+    self.cdnURL = cdnURL
   }
 }
 

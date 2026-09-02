@@ -15,16 +15,25 @@ import AppKit
 public actor FileCache: Sendable {
   public static let shared = FileCache()
 
-  private let database = AppDatabase.shared
+  typealias PhotoDataLoader = @Sendable (URL) async throws -> (Data, URLResponse)
+
+  private let database: AppDatabase
+  private let photoDataLoader: PhotoDataLoader
   private let log = Log.scoped("FileCache")
 
-  var downloadingPhotos: [Int64: Task<Void, Never>] = [:]
+  private var downloadingPhotos: [Int64: Task<URL?, Never>] = [:]
   private var downloadGenerations: [Int64: UUID] = [:]
+  private var downloadSources: [Int64: PhotoDownloadSourceKey] = [:]
   private var resetTask: Task<Void, Never>?
   // TODO: Create a message asset downloader middleware over the file cache which tracks messages and downloads, but for now we do it in this file directly
   var messagesToReload: [Int64: Set<Message>] = [:]
 
-  private init() {}
+  init(database: AppDatabase = .shared, photoDataLoader: @escaping PhotoDataLoader = {
+    try await URLSession.shared.data(from: $0)
+  }) {
+    self.database = database
+    self.photoDataLoader = photoDataLoader
+  }
 
   deinit {
     // Cancel all ongoing downloads
@@ -38,6 +47,7 @@ public actor FileCache: Sendable {
     guard downloadGenerations[id] == generation else { return }
     downloadingPhotos[id] = nil
     downloadGenerations[id] = nil
+    downloadSources[id] = nil
     messagesToReload[id] = nil
     log.debug("Released terminal photo download state for \(id)")
   }
@@ -46,9 +56,11 @@ public actor FileCache: Sendable {
   public func cancelDownload(photoId: Int64) {
     if let task = downloadingPhotos[photoId] {
       task.cancel()
-      downloadingPhotos[photoId] = nil
+      // Keep the task until its cleanup finishes so a replacement can drain it.
+    } else {
+      downloadGenerations[photoId] = nil
     }
-    downloadGenerations[photoId] = nil
+    downloadSources[photoId] = nil
     messagesToReload[photoId] = nil
     log.debug("Cancelled download for photo \(photoId)")
   }
@@ -67,11 +79,12 @@ public actor FileCache: Sendable {
     }
     downloadingPhotos.removeAll()
     downloadGenerations.removeAll()
+    downloadSources.removeAll()
     messagesToReload.removeAll()
 
     let reset = Task {
       for task in tasks {
-        await task.value
+        _ = await task.value
       }
     }
     resetTask = reset
@@ -81,20 +94,101 @@ public actor FileCache: Sendable {
 
   /// Wait for a specific photo download to finish
   public func waitForDownload(photoId: Int64) async {
-    await downloadingPhotos[photoId]?.value
+    _ = await downloadingPhotos[photoId]?.value
+  }
+
+  public func waitForDownload(photo: PhotoInfo) async {
+    _ = await downloadingPhotos[Self.photoCacheID(photo)]?.value
   }
 
   /// Resolves the deterministic cache file used by `download(photo:)` without
   /// requiring a new message snapshot to project the persisted local path.
   public func cachedLocalURL(photo: PhotoInfo) -> URL? {
-    guard let size = photo.bestPhotoSize() else { return nil }
-    if let localPath = size.localPath {
-      let url = Self.getUrl(for: .photos, localPath: localPath)
-      if FileManager.default.fileExists(atPath: url.path) { return url }
+    Self.cachedLocalURL(photo: photo)
+  }
+
+  public func cachedLocalURLCandidates(photo: PhotoInfo) -> [URL] {
+    Self.cachedLocalURLCandidates(photo: photo)
+  }
+
+  public static func cachedLocalURL(
+    photo: PhotoInfo,
+    fileExists: (String) -> Bool = FileManager.default.fileExists(atPath:)
+  ) -> URL? {
+    bestLocalURLCandidates(photo: photo, fileExists: fileExists).first
+  }
+
+  /// Ordered, existing local files for one photo. The deterministic best-size
+  /// download is considered before smaller explicit fallbacks, while unsafe or
+  /// duplicate relative paths fail closed.
+  public static func cachedLocalURLCandidates(
+    photo: PhotoInfo,
+    fileExists: (String) -> Bool = FileManager.default.fileExists(atPath:)
+  ) -> [URL] {
+    guard photo.bestPhotoSize() != nil else { return [] }
+    var result: [URL] = []
+    var seen = Set<URL>()
+    func append(_ url: URL) {
+      guard seen.insert(url).inserted else { return }
+      result.append(url)
     }
-    let localPath = "IMG" + size.type + String(photo.id) + photo.photo.format.toExt()
-    let url = Self.getUrl(for: .photos, localPath: localPath)
-    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    bestLocalURLCandidates(photo: photo, fileExists: fileExists).forEach(append)
+
+    let directory = FileHelpers.getLocalCacheDirectory(for: .photos, createIfNeeded: false)
+    for size in photo.localPhotoSizeCandidates() {
+      guard let localPath = size.localPath, !localPath.isEmpty else { continue }
+      guard let url = localCacheURL(localPath: localPath, directory: directory), fileExists(url.path) else { continue }
+      append(url)
+    }
+    return result
+  }
+
+  private static func bestLocalURLCandidates(
+    photo: PhotoInfo,
+    fileExists: (String) -> Bool
+  ) -> [URL] {
+    guard let size = photo.bestPhotoSize() else { return [] }
+    let directory = FileHelpers.getLocalCacheDirectory(for: .photos, createIfNeeded: false)
+    var result: [URL] = []
+    var seen = Set<URL>()
+    func append(_ localPath: String?) {
+      guard let localPath, !localPath.isEmpty,
+            let url = localCacheURL(localPath: localPath, directory: directory),
+            fileExists(url.path), seen.insert(url).inserted
+      else { return }
+      result.append(url)
+    }
+
+    append(size.localPath)
+    append(photoLocalPath(photo))
+    // Legacy filenames used local row IDs. Only an explicit persisted path
+    // proves their ownership; inferring either ID can display another photo.
+    return result
+  }
+
+  private static func photoCacheID(_ photo: PhotoInfo) -> Int64 {
+    photo.photo.photoId
+  }
+
+  private static func photoLocalPath(_ photo: PhotoInfo) -> String {
+    let sizeType = (photo.bestPhotoSize()?.type ?? "").addingPercentEncoding(
+      withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+    ) ?? ""
+    return "IMG-server-" + String(photoCacheID(photo)) + "-" + sizeType + photo.photo.format.toExt()
+  }
+
+  /// Rich block projections may carry protocol/server IDs in their detached
+  /// `PhotoSize` values. Persist onto the existing local row instead of saving
+  /// that detached value, because `PhotoSize.photoId` is a local foreign key.
+  static func persistDownloadedPhotoPath(_ localPath: String, for photo: PhotoInfo, in db: Database) throws {
+    guard let selectedSize = photo.bestPhotoSize() else { throw FileCacheError.failedToSave }
+    guard let localPhotoID = try Photo.filter(Photo.Columns.photoId == photo.photo.photoId).fetchOne(db)?.id
+    else { throw FileCacheError.failedToSave }
+    let updated = try PhotoSize
+      .filter(PhotoSize.Columns.photoId == localPhotoID)
+      .filter(PhotoSize.Columns.type == selectedSize.type)
+      .updateAll(db, [PhotoSize.Columns.localPath.set(to: localPath)])
+    guard updated > 0 else { throw FileCacheError.failedToSave }
   }
 
   // MARK: -  Fetches
@@ -107,53 +201,78 @@ public actor FileCache: Sendable {
   // MARK: -  Remote downloads
 
   public func download(photo: PhotoInfo, reloadMessageOnFinish: Message? = nil) async {
-    guard resetTask == nil else { return }
+    _ = startDownload(photo: photo, reloadMessageOnFinish: reloadMessageOnFinish)
+  }
+
+  /// Returns only the file successfully persisted by this exact transfer.
+  /// Looking up a task by photo ID after awaiting can join a newer source.
+  public func downloadAndWait(photo: PhotoInfo, reloadMessageOnFinish: Message? = nil) async -> URL? {
+    guard let task = startDownload(photo: photo, reloadMessageOnFinish: reloadMessageOnFinish) else { return nil }
+    return await task.value
+  }
+
+  private func startDownload(photo: PhotoInfo, reloadMessageOnFinish: Message?) -> Task<URL?, Never>? {
+    guard resetTask == nil else { return nil }
+    let photoID = Self.photoCacheID(photo)
 
     // Validate the remote location before retaining a message for a future reload.
-    guard let remoteURLString = photo.bestPhotoSize()?.cdnUrl,
-          let remoteURL = URL(string: remoteURLString)
+    guard let source = photo.downloadSourceKey(),
+          let remoteURL = URL(string: source.cdnURL)
     else {
       log.warning("No valid remote URL found for photo")
-      messagesToReload[photo.id] = nil
-      return
+      return nil
     }
 
     // Register the message for reloading if provided
     if let message = reloadMessageOnFinish {
-      if messagesToReload[photo.id] == nil {
-        messagesToReload[photo.id] = Set<Message>()
+      if messagesToReload[photoID] == nil {
+        messagesToReload[photoID] = Set<Message>()
       }
-      messagesToReload[photo.id]?.insert(message)
-      log.debug("Registered message \(message.id) for reload when photo \(photo.id) downloads")
+      messagesToReload[photoID]?.insert(message)
+      log.debug("Registered message \(message.id) for reload when photo \(photoID) downloads")
     }
 
-    guard downloadingPhotos[photo.id] == nil else {
-      log.debug("Photo \(photo.id) is already being downloaded")
-      return
+    let previousTask = downloadingPhotos[photoID]
+    if previousTask != nil, downloadSources[photoID] == source {
+      log.debug("Photo \(photoID) is already being downloaded")
+      return previousTask
     }
+    previousTask?.cancel()
 
-    log.debug("downloading photo \(photo.id) for message \(reloadMessageOnFinish?.id ?? 0)")
+    log.debug("downloading photo \(photoID) for message \(reloadMessageOnFinish?.id ?? 0)")
 
     let generation = UUID()
-    downloadGenerations[photo.id] = generation
-    downloadingPhotos[photo.id] = Task {
+    downloadGenerations[photoID] = generation
+    downloadSources[photoID] = source
+    let task = Task<URL?, Never> {
+      // A superseded transfer may be awaiting persistence with file cleanup
+      // still pending. Drain it before replacing the same canonical file.
+      _ = await previousTask?.value
+      guard !Task.isCancelled, downloadGenerations[photoID] == generation else {
+        finishDownload(photoID, generation: generation)
+        return nil
+      }
       // TODO: make it smarter about max retries
-      await downloadWithRetries(
+      return await downloadWithRetries(
         photo: photo,
+        photoID: photoID,
         remoteURL: remoteURL,
         maxRetries: 20,
         generation: generation
       )
     }
+    downloadingPhotos[photoID] = task
+    return task
   }
 
   private func downloadWithRetries(
     photo: PhotoInfo,
+    photoID: Int64,
     remoteURL: URL,
     maxRetries: Int,
     generation: UUID
-  ) async {
-    defer { finishDownload(photo.id, generation: generation) }
+  ) async -> URL? {
+    defer { finishDownload(photoID, generation: generation) }
     var attempt = 0
 
     while attempt < maxRetries {
@@ -161,21 +280,21 @@ public actor FileCache: Sendable {
 
       // Check for cancellation before each attempt
       guard !Task.isCancelled else {
-        log.debug("Downloading photo \(photo.id) was cancelled before attempt \(attempt)")
+        log.debug("Downloading photo \(photoID) was cancelled before attempt \(attempt)")
         break
       }
-      guard downloadGenerations[photo.id] == generation else { return }
+      guard downloadGenerations[photoID] == generation else { return nil }
 
       do {
-        log.debug("Downloading photo \(photo.id), attempt \(attempt)")
+        log.debug("Downloading photo \(photoID), attempt \(attempt)")
 
-        let (data, response) = try await URLSession.shared.data(from: remoteURL)
+        let (data, response) = try await photoDataLoader(remoteURL)
 
         // Validate response
         if let httpResponse = response as? HTTPURLResponse {
           guard 200 ... 299 ~= httpResponse.statusCode else {
             if httpResponse.statusCode == 404 {
-              log.error("Photo \(photo.id) not found (404) - will not retry")
+              log.error("Photo \(photoID) not found (404) - will not retry")
               break
             }
             throw URLError(.badServerResponse)
@@ -184,7 +303,7 @@ public actor FileCache: Sendable {
 
         // Validate data
         guard !data.isEmpty else {
-          log.error("Empty data received for photo \(photo.id)")
+          log.error("Empty data received for photo \(photoID)")
           if attempt < maxRetries {
             try? await Task.sleep(for: .seconds(Double(attempt)))
             continue
@@ -193,10 +312,13 @@ public actor FileCache: Sendable {
         }
 
         // Success - same logic as original
-        log.debug("Successfully downloaded photo \(photo.id) (\(data.count) bytes)")
+        log.debug("Successfully downloaded photo \(photoID) (\(data.count) bytes)")
+
+        try Task.checkCancellation()
+        guard downloadGenerations[photoID] == generation else { return nil }
 
         // Generate a new file name (same as original)
-        let localPath = "IMG" + (photo.bestPhotoSize()?.type ?? "") + String(photo.id) + photo.photo.format.toExt()
+        let localPath = Self.photoLocalPath(photo)
         let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
         let createdLocalFile = !FileManager.default.fileExists(atPath: localUrl.path)
         var shouldRemoveLocalFile = createdLocalFile
@@ -214,7 +336,7 @@ public actor FileCache: Sendable {
           try data.write(to: localUrl, options: .atomic)
         } catch {
           if Self.isCancellation(error) || Task.isCancelled {
-            log.debug("Downloading photo \(photo.id) was cancelled")
+            log.debug("Downloading photo \(photoID) was cancelled")
             break
           }
           log.error("Error saving downloaded image locally", error: error)
@@ -222,43 +344,42 @@ public actor FileCache: Sendable {
         }
 
         try Task.checkCancellation()
-        guard downloadGenerations[photo.id] == generation else { return }
+        guard downloadGenerations[photoID] == generation else { return nil }
         try await database.dbWriter.write { db in
-          guard var matchingSize = photo.bestPhotoSize() else { return }
-          matchingSize.localPath = localPath
-          try matchingSize.save(db)
+          try Self.persistDownloadedPhotoPath(localPath, for: photo, in: db)
         }
         // Once persistence commits, the cache file is referenced state even if
         // cancellation wins before the UI reload notification.
         shouldRemoveLocalFile = false
-        guard downloadGenerations[photo.id] == generation else { return }
-        log.debug("Saved downloaded photo size for \(photo.id)")
+        guard downloadGenerations[photoID] == generation else { return nil }
+        log.debug("Saved downloaded photo size for \(photoID)")
 
-        await reloadAllMessagesForPhoto(photo.id, generation: generation)
-        return
+        await reloadAllMessagesForPhoto(photoID, generation: generation)
+        return !Task.isCancelled && downloadGenerations[photoID] == generation ? localUrl : nil
 
       } catch {
         if Self.isCancellation(error) || Task.isCancelled {
-          log.debug("Downloading photo \(photo.id) was cancelled during attempt \(attempt)")
+          log.debug("Downloading photo \(photoID) was cancelled during attempt \(attempt)")
           break
         }
 
-        log.error("Failed to download photo \(photo.id), attempt \(attempt)", error: error)
+        log.error("Failed to download photo \(photoID), attempt \(attempt)", error: error)
 
         // Check if we should retry based on error type
         if attempt < maxRetries, shouldRetryError(error) {
           let delay = Double(attempt) // 1s, 2s, 3s
-          log.debug("Retrying photo \(photo.id) in \(delay) seconds")
+          log.debug("Retrying photo \(photoID) in \(delay) seconds")
           try? await Task.sleep(for: .seconds(delay))
         } else if attempt >= maxRetries {
-          log.error("Failed to download photo \(photo.id) after \(maxRetries) attempts")
+          log.error("Failed to download photo \(photoID) after \(maxRetries) attempts")
           break
         } else {
-          log.error("Photo \(photo.id) download failed with non-recoverable error", error: error)
+          log.error("Photo \(photoID) download failed with non-recoverable error", error: error)
           break
         }
       }
     }
+    return nil
   }
 
   private static func isCancellation(_ error: Error) -> Bool {
@@ -287,13 +408,12 @@ public actor FileCache: Sendable {
   }
 
   private func reloadAllMessagesForPhoto(_ photoId: Int64, generation: UUID) async {
-    guard let messages = messagesToReload[photoId] else { return }
-
-    log.debug("Triggering message reload for photo \(photoId) for \(messages.count) messages")
-    messagesToReload[photoId] = nil
-
-    for message in messages {
-      guard !Task.isCancelled, downloadGenerations[photoId] == generation else { return }
+    var notified = Set<Message>()
+    while !Task.isCancelled, downloadGenerations[photoId] == generation {
+      guard let message = messagesToReload[photoId]?.popFirst() else { return }
+      guard notified.insert(message).inserted else { continue }
+      // Publication suspends this actor. Leave unprocessed registrations in
+      // the queue so a replacement source inherits them if it arrives here.
       await MessagesPublisher.shared
         .messageUpdated(message: message, peer: message.peerId, animated: true)
     }
