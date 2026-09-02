@@ -26,7 +26,9 @@ import { and, eq, inArray } from "drizzle-orm"
 import {
   clearChatHistoryData,
   clearSpaceHistoryData,
+  planClearChatHistoryData,
   planClearSpaceHistoryData,
+  type ClearChatHistoryPlan,
   type ClearHistoryAccessLoss,
   type ClearHistoryDeletedChat,
   type ClearHistorySideEffects,
@@ -83,13 +85,13 @@ type RemovedChatAccessUpdate = {
 
 const MAX_KEEP_LAST_DAYS = 36_500
 const DAY_SECONDS = 24 * 60 * 60
-const MAX_SPACE_CLEAR_PLAN_ATTEMPTS = 3
+const MAX_CLEAR_HISTORY_PLAN_ATTEMPTS = 3
 
 const log = new Log("modules.historyClear")
 
-class ClearSpaceHistoryPlanChanged extends Error {
+class ClearHistoryPlanChanged extends Error {
   constructor() {
-    super("Space history clear plan changed while locking mutation owners")
+    super("History clear plan changed while locking mutation owners")
   }
 }
 
@@ -130,21 +132,73 @@ async function clearPeerHistory(input: {
     chatId: chat.id,
     beforeDate: input.cutoff?.date,
   })
+  const planInput = {
+    chatId: chat.id,
+    beforeDate: input.cutoff?.date,
+    deleteReplyThreads: input.deleteReplyThreads,
+  }
+  let expectedPlan = await db.transaction((tx) => planClearChatHistoryData(tx, planInput))
+  let committed: Awaited<ReturnType<typeof clearLockedChatHistory>> | undefined
 
-  const { clearUpdate, sideEffects, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } =
-    await db.transaction(async (tx) => {
-      const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
-      if (!lockedChat) {
-        throw RealtimeRpcError.ChatIdInvalid()
-      }
+  for (let attempt = 0; attempt < MAX_CLEAR_HISTORY_PLAN_ATTEMPTS; attempt += 1) {
+    try {
+      committed = await db.transaction(async (tx) => {
+        const lockedUserIds = uniqueSortedUserIds([
+          ...expectedPlan.recipientUserIds,
+          input.context.currentUserId,
+        ])
+        const lockedUsers = await tx
+          .select({ id: users.id, deleted: users.deleted })
+          .from(users)
+          .where(inArray(users.id, lockedUserIds))
+          .orderBy(users.id)
+          .for("update", { noWait: true })
+        const actor = lockedUsers.find((user) => user.id === input.context.currentUserId)
+        if (!actor || actor.deleted === true) {
+          throw RealtimeRpcError.Unauthenticated()
+        }
 
-      return clearLockedChatHistory({
-        tx,
-        chat: lockedChat,
-        cutoff: input.cutoff,
-        deleteReplyThreads: input.deleteReplyThreads,
+        const lockedChats = await tx
+          .select()
+          .from(chats)
+          .where(inArray(chats.id, expectedPlan.affectedChatIds))
+          .orderBy(chats.id)
+          .for("update", { noWait: true })
+        const lockedChat = lockedChats.find((item) => item.id === chat.id)
+        if (!lockedChat) {
+          throw RealtimeRpcError.ChatIdInvalid()
+        }
+
+        await ensureCanClearHistory(lockedChat, input.context.currentUserId, tx)
+        const lockedPlan = await planClearChatHistoryData(tx, planInput)
+        if (!sameClearHistoryPlan(expectedPlan, lockedPlan)) {
+          throw new ClearHistoryPlanChanged()
+        }
+
+        return clearLockedChatHistory({
+          tx,
+          chat: lockedChat,
+          cutoff: input.cutoff,
+          deleteReplyThreads: input.deleteReplyThreads,
+          lockedUserIds: new Set(lockedUserIds),
+        })
       })
-    })
+      break
+    } catch (error) {
+      const resourceBusy = isResourceLockUnavailable(error)
+      if (!(error instanceof ClearHistoryPlanChanged) && !resourceBusy) throw error
+      if (attempt + 1 === MAX_CLEAR_HISTORY_PLAN_ATTEMPTS) {
+        throw RealtimeRpcError.InternalError()
+      }
+      if (resourceBusy) {
+        await Bun.sleep(50 * (attempt + 1) + Math.floor(Math.random() * 50))
+      }
+      expectedPlan = await db.transaction((tx) => planClearChatHistoryData(tx, planInput))
+    }
+  }
+
+  if (!committed) throw RealtimeRpcError.InternalError()
+  const { clearUpdate, sideEffects, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } = committed
 
   const { selfUpdates } = await pushClearHistoryUpdates({
     currentUserId: input.context.currentUserId,
@@ -223,7 +277,7 @@ async function clearSpaceHistory(input: {
     | Awaited<ReturnType<typeof clearLockedSpaceHistory>> & { clearHistoryUpdates: ClearHistoryUpdate[] }
     | undefined
 
-  for (let attempt = 0; attempt < MAX_SPACE_CLEAR_PLAN_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < MAX_CLEAR_HISTORY_PLAN_ATTEMPTS; attempt += 1) {
     try {
       committed = await db.transaction(async (tx) => {
         const lockedUserIds = uniqueSortedUserIds([
@@ -271,8 +325,8 @@ async function clearSpaceHistory(input: {
         }
 
         const lockedPlan = await planClearSpaceHistoryData(tx, planInput)
-        if (!sameClearSpaceHistoryPlan(expectedPlan, lockedPlan)) {
-          throw new ClearSpaceHistoryPlanChanged()
+        if (!sameClearHistoryPlan(expectedPlan, lockedPlan)) {
+          throw new ClearHistoryPlanChanged()
         }
 
         const result = await clearLockedSpaceHistory({
@@ -302,8 +356,8 @@ async function clearSpaceHistory(input: {
       break
     } catch (error) {
       const resourceBusy = isResourceLockUnavailable(error)
-      if (!(error instanceof ClearSpaceHistoryPlanChanged) && !resourceBusy) throw error
-      if (attempt + 1 === MAX_SPACE_CLEAR_PLAN_ATTEMPTS) {
+      if (!(error instanceof ClearHistoryPlanChanged) && !resourceBusy) throw error
+      if (attempt + 1 === MAX_CLEAR_HISTORY_PLAN_ATTEMPTS) {
         throw RealtimeRpcError.InternalError()
       }
       if (resourceBusy) {
@@ -365,6 +419,7 @@ async function clearLockedChatHistory(input: {
   chat: DbChat
   cutoff: Cutoff | undefined
   deleteReplyThreads: boolean
+  lockedUserIds: ReadonlySet<number>
 }): Promise<{
   clearUpdate: UpdateSeqAndDate
   sideEffects: ClearHistorySideEffects
@@ -383,6 +438,7 @@ async function clearLockedChatHistory(input: {
     },
     {
       beforeDeleteChats: async (deletedChats) => {
+        ensurePlannedUsers(deletedChats.flatMap((chat) => chat.userIds), input.lockedUserIds)
         deletedChatUpdates = await persistDeletedChatUpdates(input.tx, deletedChats)
       },
     },
@@ -579,9 +635,13 @@ async function persistRemovedChatAccessUpdates(
   }))
 }
 
-async function ensureCanClearHistory(chat: DbChat, currentUserId: number): Promise<void> {
+async function ensureCanClearHistory(
+  chat: DbChat,
+  currentUserId: number,
+  query: Pick<Transaction, "select"> | typeof db = db,
+): Promise<void> {
   if (chat.type === "private") {
-    await AccessGuards.ensureChatAccess(chat, currentUserId)
+    await AccessGuards.ensureChatAccess(chat, currentUserId, query)
     return
   }
 
@@ -590,7 +650,7 @@ async function ensureCanClearHistory(chat: DbChat, currentUserId: number): Promi
   }
 
   if (chat.spaceId != null) {
-    const [member] = await db
+    const [member] = await query
       .select({ role: members.role })
       .from(members)
       .where(and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)))
@@ -828,7 +888,10 @@ function uniqueSortedUserIds(userIds: number[]): number[] {
   return uniqueUserIds(userIds).sort((left, right) => left - right)
 }
 
-function sameClearSpaceHistoryPlan(left: ClearSpaceHistoryPlan, right: ClearSpaceHistoryPlan): boolean {
+function sameClearHistoryPlan(
+  left: ClearChatHistoryPlan | ClearSpaceHistoryPlan,
+  right: ClearChatHistoryPlan | ClearSpaceHistoryPlan,
+): boolean {
   return sameIds(left.affectedChatIds, right.affectedChatIds) && sameIds(left.recipientUserIds, right.recipientUserIds)
 }
 
@@ -838,7 +901,7 @@ function sameIds(left: number[], right: number[]): boolean {
 
 function ensurePlannedUsers(userIds: number[], lockedUserIds: ReadonlySet<number>): void {
   if (userIds.some((userId) => !lockedUserIds.has(userId))) {
-    throw new ClearSpaceHistoryPlanChanged()
+    throw new ClearHistoryPlanChanged()
   }
 }
 

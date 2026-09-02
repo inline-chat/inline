@@ -32,8 +32,66 @@ const fixture = async (label: string) => {
   return { owner, recipient, space, root, child }
 }
 
-describe("space history clear mutation owners", () => {
+describe("history clear mutation owners", () => {
   setupTestLifecycle()
+
+  test("peer clear yields before owning the root when a user-first writer needs it", async () => {
+    const owner = await testUtils.createUser("clear-peer-lock-owner@example.com")
+    const root = await testUtils.createChat(null, "Home root", "thread", false, owner.id)
+    if (!root) throw new Error("Fixture root missing")
+    await db.insert(chatParticipants).values({ chatId: root.id, userId: owner.id })
+    await db.insert(messages).values({ chatId: root.id, messageId: 1, fromId: owner.id })
+    const [child] = await db.insert(chats).values({
+      type: "thread",
+      spaceId: null,
+      parentChatId: root.id,
+      parentMessageId: 1,
+      publicThread: false,
+      createdBy: owner.id,
+    }).returning()
+    if (!child) throw new Error("Fixture child missing")
+
+    const userLocked = deferred()
+    const requestRoot = deferred()
+    const writer = db.transaction(async (tx) => {
+      await tx.select().from(users).where(eq(users.id, owner.id)).for("update")
+      userLocked.resolve()
+      await requestRoot.promise
+      await tx.execute(sql`select set_config('lock_timeout', '500ms', true)`)
+      await tx.select().from(chats).where(eq(chats.id, root.id)).for("update")
+    })
+    await userLocked.promise
+
+    const plan = historyData.planClearChatHistoryData
+    let calls = 0
+    const planning = spyOn(historyData, "planClearChatHistoryData").mockImplementation(async (tx, input) => {
+      if (++calls === 2) {
+        // The failed NOWAIT user prelock rolled back before this fresh plan.
+        // A user-first reply writer can now acquire its parent Chat and finish.
+        requestRoot.resolve()
+        await writer
+      }
+      return await plan(tx, input)
+    })
+
+    try {
+      await clearChatHistory(
+        {
+          peer: { type: { oneofKind: "chat", chat: { chatId: BigInt(root.id) } } },
+          keepLastDays: 0,
+          deleteReplyThreads: true,
+        },
+        { currentUserId: owner.id },
+      )
+      expect(calls).toBe(3)
+      expect(await db.select().from(chats).where(eq(chats.id, child.id))).toHaveLength(0)
+      expect(await db.select().from(messages).where(eq(messages.chatId, root.id))).toHaveLength(0)
+    } finally {
+      requestRoot.resolve()
+      await Promise.allSettled([writer])
+      planning.mockRestore()
+    }
+  })
 
   for (const change of ["demoted actor", "deleted space", "deleted actor"] as const) {
     test(`revalidates ${change} after optimistic admission`, async () => {

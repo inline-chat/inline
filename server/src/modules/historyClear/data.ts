@@ -37,6 +37,11 @@ export type ClearSpaceHistoryPlan = {
   recipientUserIds: number[]
 }
 
+export type ClearChatHistoryPlan = {
+  affectedChatIds: number[]
+  recipientUserIds: number[]
+}
+
 export type ClearHistoryDeletedChat = {
   chat: DbChat
   userIds: number[]
@@ -79,6 +84,25 @@ type DeleteSpaceReplyThreadsResult = DeleteReplyThreadsResult & {
 type DetachReplyThreadsResult = {
   chatIds: number[]
   accessLosses: ClearHistoryAccessLoss[]
+}
+
+export async function planClearChatHistoryData(
+  tx: Transaction,
+  input: ClearChatHistoryInput,
+): Promise<ClearChatHistoryPlan> {
+  const affectedChildIds = input.deleteReplyThreads
+    ? (await getChatReplyThreadDepths(tx, input.chatId, input.beforeDate)).map((row) => row.chatId)
+    : await getDirectReplyThreadIdsForClearedChatMessages(tx, input.chatId, input.beforeDate)
+  const recipients = input.deleteReplyThreads
+    ? await getChatAccessMap(tx, affectedChildIds)
+    : new Map<number, Set<number>>()
+
+  return {
+    affectedChatIds: uniqueSortedNumbers([input.chatId, ...affectedChildIds]),
+    recipientUserIds: uniqueSortedNumbers(
+      Array.from(recipients.values()).flatMap((userIds) => Array.from(userIds)),
+    ),
+  }
 }
 
 export async function planClearSpaceHistoryData(
@@ -451,6 +475,22 @@ async function orphanReplyThreadsForClearedChatMessages(
   chatId: number,
   beforeDate: Date | undefined,
 ): Promise<number[]> {
+  const chatIds = await getDirectReplyThreadIdsForClearedChatMessages(tx, chatId, beforeDate)
+  if (chatIds.length === 0) return []
+
+  await tx
+    .update(chats)
+    .set({ parentMessageId: null })
+    .where(inArray(chats.id, chatIds))
+
+  return chatIds
+}
+
+async function getDirectReplyThreadIdsForClearedChatMessages(
+  tx: Transaction,
+  chatId: number,
+  beforeDate: Date | undefined,
+): Promise<number[]> {
   const parentMessageClause = beforeDate
     ? sql`
         and exists (
@@ -464,12 +504,12 @@ async function orphanReplyThreadsForClearedChatMessages(
     : sql``
 
   const rows = await tx.execute<ChatIdRow>(sql`
-    update chats child
-    set parent_message_id = null
+    select child.id as "chatId"
+    from chats child
     where child.parent_chat_id = ${chatId}
       and child.parent_message_id is not null
       ${parentMessageClause}
-    returning child.id as "chatId"
+    order by child.id
   `)
 
   return rows.map((row) => row.chatId)
