@@ -414,7 +414,7 @@ private struct ChatListComposeActivityPreview: View {
         VStack(alignment: .leading, spacing: 0) {
           Text(senderName)
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(Color.primary.opacity(0.84))
+            .foregroundStyle(Color.primary.opacity(0.72))
             .lineLimit(1)
 
           Text(text)
@@ -457,7 +457,7 @@ private struct ChatListPreviewText: View {
   var body: some View {
     if let senderName, senderName.isEmpty == false {
       Text(
-        "\(Text(senderName).fontWeight(.medium).foregroundStyle(Color.primary.opacity(0.80))): \(Text(text).foregroundStyle(.secondary))"
+        "\(Text(senderName).fontWeight(.medium).foregroundStyle(Color.primary.opacity(0.70))): \(Text(text).foregroundStyle(.secondary))"
       )
     } else {
       Text(text)
