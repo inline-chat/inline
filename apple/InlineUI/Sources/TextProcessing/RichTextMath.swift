@@ -78,22 +78,25 @@ public enum RichTextMath {
   /// renderer's existing style function. Styling must not alter source bytes.
   public static func snapshot(
     content: InlineProtocol.BlockContent, text: NSAttributedString, fontSize: CGFloat,
+    includeInlineAttachments: Bool = true,
     style: (NSRange, TextRole) -> NSAttributedString?
   ) -> Snapshot {
     var inputs: [(NSRange, Request)] = []
     var inlineRanges: [NSRange] = []
-    text.enumerateAttribute(.richTextMath, in: NSRange(location: 0, length: text.length)) { value, range, stop in
-      guard (value as? NSValue)?.rangeValue == range else { return }
-      guard text.attribute(.richTextMathDisplay, at: range.location, effectiveRange: nil) as? Bool != true else { return }
-      var protected = false
-      for key in [NSAttributedString.Key.inlineCode, .codeBlock] {
-        text.enumerateAttribute(key, in: range) { value, _, stop in
-          if (value as? Bool) == true { protected = true; stop.pointee = true }
+    if includeInlineAttachments {
+      text.enumerateAttribute(.richTextMath, in: NSRange(location: 0, length: text.length)) { value, range, stop in
+        guard (value as? NSValue)?.rangeValue == range else { return }
+        guard text.attribute(.richTextMathDisplay, at: range.location, effectiveRange: nil) as? Bool != true else { return }
+        var protected = false
+        for key in [NSAttributedString.Key.inlineCode, .codeBlock] {
+          text.enumerateAttribute(key, in: range) { value, _, stop in
+            if (value as? Bool) == true { protected = true; stop.pointee = true }
+          }
         }
+        guard !protected else { return }
+        inlineRanges.append(range)
+        if inlineRanges.count >= maximumFormulas { stop.pointee = true }
       }
-      guard !protected else { return }
-      inlineRanges.append(range)
-      if inlineRanges.count >= maximumFormulas { stop.pointee = true }
     }
     var visited = 0
     func append(_ span: InlineProtocol.BlockText, role: TextRole?) {

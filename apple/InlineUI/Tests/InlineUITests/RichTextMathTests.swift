@@ -48,6 +48,49 @@ struct RichTextMathTests {
     #expect(RichTextMath.request(text: tooManyBytes, range: NSRange(location: 0, length: tooManyBytes.length), fontSize: 17) == nil)
   }
 
+  @Test("The inline attachment gate does not suppress display math")
+  func inlineAttachmentGate() {
+    let source = NSMutableAttributedString(
+      string: "x y",
+      attributes: [.font: PlatformFont.systemFont(ofSize: 17), .foregroundColor: PlatformColor.black]
+    )
+    let inlineRange = NSRange(location: 0, length: 1)
+    let displayRange = NSRange(location: 2, length: 1)
+    source.addAttribute(.richTextMath, value: NSValue(range: inlineRange), range: inlineRange)
+    source.addAttribute(.richTextMath, value: NSValue(range: displayRange), range: displayRange)
+    source.addAttribute(.richTextMathDisplay, value: true, range: displayRange)
+    let content = BlockContent.with {
+      $0.blocks = [
+        Block.with { $0.paragraph = BlockText.with { $0.offset = 0; $0.length = 1 } },
+        Block.with { $0.math = BlockText.with { $0.offset = 2; $0.length = 1 } },
+      ]
+    }
+    let style: (NSRange, RichTextMath.TextRole) -> NSAttributedString? = { range, _ in
+      source.attributedSubstring(from: range)
+    }
+
+    let displayOnly = RichTextMath.snapshot(
+      content: content,
+      text: source,
+      fontSize: 17,
+      includeInlineAttachments: false,
+      style: style
+    )
+    #expect(displayOnly.requests.count == 1)
+    #expect(displayOnly.requests.allSatisfy { $0.display })
+
+    let withInline = RichTextMath.snapshot(
+      content: content,
+      text: source,
+      fontSize: 17,
+      includeInlineAttachments: true,
+      style: style
+    )
+    #expect(withInline.requests.count == 2)
+    #expect(withInline.requests.contains { !$0.display })
+    #expect(withInline.requests.contains { $0.display })
+  }
+
   @Test("Raster readiness changes layout identity without mutating canonical text or offsets")
   func preparation() async throws {
     let source = text("😀 " + #"\frac{x_{732891}}{y}+\sqrt{z}"# + " tail")

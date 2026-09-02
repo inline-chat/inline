@@ -19,7 +19,7 @@ final class RichBlockLayoutPlanner {
     let availableWidth: CGFloat
     let contentHorizontalInset: CGFloat
     let baseFontSize: CGFloat
-    let nativeMathEnabled: Bool
+    let inlineMathAttachmentsEnabled: Bool
     let disclosureOverrides: [BlockContentPath: Bool]
 
     init(
@@ -30,7 +30,7 @@ final class RichBlockLayoutPlanner {
       availableWidth: CGFloat,
       contentHorizontalInset: CGFloat,
       baseFontSize: CGFloat,
-      nativeMathEnabled: Bool,
+      inlineMathAttachmentsEnabled: Bool,
       disclosureOverrides: [BlockContentPath: Bool]
     ) {
       var geometry = plan
@@ -42,7 +42,7 @@ final class RichBlockLayoutPlanner {
       self.availableWidth = availableWidth
       self.contentHorizontalInset = contentHorizontalInset
       self.baseFontSize = baseFontSize
-      self.nativeMathEnabled = nativeMathEnabled
+      self.inlineMathAttachmentsEnabled = inlineMathAttachmentsEnabled
       self.disclosureOverrides = disclosureOverrides
     }
 
@@ -53,7 +53,7 @@ final class RichBlockLayoutPlanner {
       availableWidth: CGFloat,
       contentHorizontalInset: CGFloat,
       baseFontSize: CGFloat,
-      nativeMathEnabled: Bool,
+      inlineMathAttachmentsEnabled: Bool,
       disclosureOverrides: [BlockContentPath: Bool]
     ) -> Bool {
       self.contentCacheSignature == contentCacheSignature
@@ -63,7 +63,7 @@ final class RichBlockLayoutPlanner {
         && self.availableWidth == availableWidth
         && self.contentHorizontalInset == contentHorizontalInset
         && self.baseFontSize == baseFontSize
-        && self.nativeMathEnabled == nativeMathEnabled
+        && self.inlineMathAttachmentsEnabled == inlineMathAttachmentsEnabled
         && self.disclosureOverrides == disclosureOverrides
     }
   }
@@ -85,7 +85,7 @@ final class RichBlockLayoutPlanner {
     baseFontSize: CGFloat,
     primaryColor: NSColor = .labelColor,
     secondaryColor: NSColor = .secondaryLabelColor,
-    nativeMathEnabled: Bool,
+    inlineMathAttachmentsEnabled: Bool,
     disclosureOverrides: [BlockContentPath: Bool] = [:]
   ) -> RichBlockLayoutPlan? {
     guard availableWidth.isFinite, availableWidth >= 1,
@@ -103,10 +103,14 @@ final class RichBlockLayoutPlanner {
     ) else {
       return nil
     }
-    let math = nativeMathEnabled
-      ? Self.mathSnapshot(content: content, text: attributedText, fontSize: baseFontSize,
-                          primaryColor: primaryColor, secondaryColor: secondaryColor)
-      : RichTextMath.snapshot(ranges: [], text: attributedText, fontSize: baseFontSize)
+    let math = Self.mathSnapshot(
+      content: content,
+      text: attributedText,
+      fontSize: baseFontSize,
+      primaryColor: primaryColor,
+      secondaryColor: secondaryColor,
+      includeInlineAttachments: inlineMathAttachmentsEnabled
+    )
     let resolvedContentInset = min(max(0, contentHorizontalInset), max(0, (availableWidth - 1) / 2))
     let key = cacheKey(
       contentCacheSignature: contentCacheSignature,
@@ -114,7 +118,7 @@ final class RichBlockLayoutPlanner {
       availableWidth: availableWidth,
       contentHorizontalInset: resolvedContentInset,
       baseFontSize: baseFontSize,
-      nativeMathEnabled: nativeMathEnabled,
+      inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
       disclosureOverrides: disclosureOverrides,
       mathSignature: math.signature
     )
@@ -126,7 +130,7 @@ final class RichBlockLayoutPlanner {
          availableWidth: availableWidth,
          contentHorizontalInset: resolvedContentInset,
          baseFontSize: baseFontSize,
-         nativeMathEnabled: nativeMathEnabled,
+         inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
          disclosureOverrides: disclosureOverrides
        )
     {
@@ -173,7 +177,7 @@ final class RichBlockLayoutPlanner {
       availableWidth: availableWidth,
       contentHorizontalInset: resolvedContentInset,
       baseFontSize: baseFontSize,
-      nativeMathEnabled: nativeMathEnabled,
+      inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
       disclosureOverrides: disclosureOverrides
     )
     let estimatedCost = contentByteCount + attributedText.length * 8 + plan.nodes.count * 128
@@ -233,7 +237,7 @@ final class RichBlockLayoutPlanner {
     availableWidth: CGFloat,
     contentHorizontalInset: CGFloat,
     baseFontSize: CGFloat,
-    nativeMathEnabled: Bool,
+    inlineMathAttachmentsEnabled: Bool,
     disclosureOverrides: [BlockContentPath: Bool],
     mathSignature: Int
   ) -> NSString {
@@ -242,13 +246,19 @@ final class RichBlockLayoutPlanner {
       .sorted()
       .joined(separator: ",")
     return NSString(
-      string: "\(contentCacheSignature)_\(Data(attributedText.string.utf8).hashValue)_\(attributedText.hash)_\(Int(availableWidth.rounded()))_\(contentHorizontalInset)_\(baseFontSize)_\(nativeMathEnabled)_\(overrides)_\(mathSignature)"
+      string: "\(contentCacheSignature)_\(Data(attributedText.string.utf8).hashValue)_\(attributedText.hash)_\(Int(availableWidth.rounded()))_\(contentHorizontalInset)_\(baseFontSize)_\(inlineMathAttachmentsEnabled)_\(overrides)_\(mathSignature)"
     )
   }
 
   static func mathSnapshot(content: InlineProtocol.BlockContent, text: NSAttributedString,
-                           fontSize: CGFloat, primaryColor: NSColor, secondaryColor: NSColor) -> RichTextMath.Snapshot {
-    RichTextMath.snapshot(content: content, text: text, fontSize: fontSize) { range, role in
+                           fontSize: CGFloat, primaryColor: NSColor, secondaryColor: NSColor,
+                           includeInlineAttachments: Bool) -> RichTextMath.Snapshot {
+    RichTextMath.snapshot(
+      content: content,
+      text: text,
+      fontSize: fontSize,
+      includeInlineAttachments: includeInlineAttachments
+    ) { range, role in
       let nativeRole: RichBlockTextRole
       switch role {
       case .paragraph: nativeRole = .paragraph
