@@ -875,6 +875,37 @@ Done!`)
       })
     })
 
+    test("link destinations decode escaped punctuation without ending early", () => {
+      const cases: [string, string][] = [
+        [String.raw`[x](https://e/a\)b)`, "https://e/a)b"],
+        [String.raw`[x](https://e/a\(b)`, "https://e/a(b"],
+        [String.raw`[x](https://e/a(b\)c)d)`, "https://e/a(b)c)d"],
+        [String.raw`[x](https://e/a\\)`, "https://e/a\\"],
+        [String.raw`[x](https://e/a\q)`, String.raw`https://e/a\q`],
+      ]
+      for (const [input, url] of cases) {
+        const parsed = parseMarkdownWithSourceMap(`😀 ${input} **end**`)
+        expect(parsed.text).toBe("😀 x end")
+        expect(parsed.entities[0]).toMatchObject({
+          offset: 3n,
+          length: 1n,
+          type: MessageEntity_Type.TEXT_URL,
+          entity: { oneofKind: "textUrl", textUrl: { url } },
+        })
+        expect(parsed.sourceToOutput.at(-1)).toBe(parsed.text.length)
+      }
+    })
+
+    test("a streamed escaped close cannot terminate a link before its real delimiter", () => {
+      const input = String.raw`before [x](https://e/a\)b)`
+      for (let end = input.indexOf("\\"); end < input.length; end++) {
+        const parsed = parseMarkdown(input.slice(0, end))
+        expect(parsed.entities.some((entity) => entity.type === MessageEntity_Type.TEXT_URL)).toBe(false)
+        expect(parsed.text).toContain("[x](https://e/a")
+      }
+      expect(parseMarkdown(input).text).toBe("before x")
+    })
+
     test("unbalanced markdown link parentheses stay unchanged", () => {
       const result = parseMarkdown("[label](https://example.com/a(b)")
       expect(result.text).toBe("[label](https://example.com/a(b)")
@@ -985,8 +1016,7 @@ describe("processMessageText", () => {
     expect(result.entities?.entities).toHaveLength(1)
   })
 
-  test("discards client entities when markdown is parsed", () => {
-    // Client sent entities for original text, but markdown changes offsets
+  test("preserves unrelated client entities when markdown is parsed", () => {
     const result = processMessageText({
       text: "Hello **bold** world",
       entities: {
@@ -1002,9 +1032,123 @@ describe("processMessageText", () => {
     })
 
     expect(result.text).toBe("Hello bold world")
-    // Only the parsed bold entity, not the client's italic
-    expect(result.entities?.entities).toHaveLength(1)
-    expect(result.entities?.entities[0]!.type).toBe(MessageEntity_Type.BOLD)
+    expect(result.entities?.entities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: MessageEntity_Type.ITALIC, offset: 0n, length: 5n }),
+      expect.objectContaining({ type: MessageEntity_Type.BOLD, offset: 6n, length: 4n }),
+    ]))
+    expect(result.entities?.entities).toHaveLength(2)
+  })
+
+  test("remaps explicit Agent mentions after Unicode, escapes, and nested markup", () => {
+    const text = "😀 " + String.raw`\* **bold** [label](https://example.com) Maya`
+    const entity = {
+      type: MessageEntity_Type.MENTION,
+      offset: BigInt(text.indexOf("Maya")),
+      length: 4n,
+      entity: { oneofKind: "mention" as const, mention: { userId: 7n, agentId: 9n } },
+    }
+    const parsed = parseMarkdownWithSourceMap(text)
+    const result = processMessageText({ text, entities: { entities: [entity] }, parsedMarkdown: parsed })
+
+    expect(result.text).toBe("😀 * bold label Maya")
+    expect(result.entities?.entities).toContainEqual({
+      ...entity,
+      offset: BigInt(result.text.indexOf("Maya")),
+    })
+    expect(entity.offset).toBe(BigInt(text.indexOf("Maya")))
+  })
+
+  test("remaps a formatting span across nested Markdown content", () => {
+    const text = "before **bold [link](https://example.com)** after"
+    const result = processMessageText({
+      text,
+      entities: { entities: [{
+        type: MessageEntity_Type.ITALIC,
+        offset: 7n,
+        length: BigInt(text.indexOf(" after") - 7),
+        entity: { oneofKind: undefined },
+      }] },
+    })
+    expect(result.text).toBe("before bold link after")
+    expect(result.entities?.entities).toContainEqual({
+      type: MessageEntity_Type.ITALIC,
+      offset: 7n,
+      length: 9n,
+      entity: { oneofKind: undefined },
+    })
+  })
+
+  test("discards removed, invalid, and split-surrogate source ranges", () => {
+    const text = "😀 **bold** [link](hidden)"
+    const ranges: [bigint, bigint][] = [
+      [-1n, 1n], [0n, 0n], [0n, 100n], [2n ** 62n, 1n],
+      [0n, 1n], [1n, 1n], [3n, 2n], [BigInt(text.indexOf("hidden")), 6n],
+    ]
+    const result = processMessageText({
+      text,
+      entities: { entities: ranges.map(([offset, length]) => ({
+        type: MessageEntity_Type.MENTION,
+        offset, length,
+        entity: { oneofKind: "mention" as const, mention: { userId: 7n } },
+      })) },
+    })
+    expect(result.entities?.entities.some((entity) => entity.type === MessageEntity_Type.MENTION)).toBe(false)
+  })
+
+  test("does not turn explicit mentions inside parsed code into interactive text", () => {
+    for (const text of ["`Maya` **bold**", "```\nMaya\n```\n**bold**"]) {
+      const result = processMessageText({
+        text,
+        entities: { entities: [{
+          type: MessageEntity_Type.MENTION,
+          offset: BigInt(text.indexOf("Maya")), length: 4n,
+          entity: { oneofKind: "mention", mention: { userId: 7n } },
+        }] },
+      })
+      expect(result.entities?.entities.some((entity) => entity.type === MessageEntity_Type.MENTION)).toBe(false)
+      expect(result.text).toContain("Maya")
+    }
+  })
+
+  test("checks large client entity sets against merged verbatim ranges", () => {
+    const chunks: string[] = []
+    const entities = []
+    let sourceLength = 0
+    for (let index = 0; index < 2_048; index++) {
+      const prefix = index === 0 ? "" : " "
+      const chunk = `${prefix}\`x\` y`
+      const codeOffset = sourceLength + prefix.length + 1
+      const textOffset = sourceLength + chunk.length - 1
+      chunks.push(chunk)
+      entities.push(
+        { type: MessageEntity_Type.MENTION, offset: BigInt(codeOffset), length: 1n,
+          entity: { oneofKind: "mention" as const, mention: { userId: 7n } } },
+        { type: MessageEntity_Type.MENTION, offset: BigInt(textOffset), length: 1n,
+          entity: { oneofKind: "mention" as const, mention: { userId: 8n } } },
+      )
+      sourceLength += chunk.length
+    }
+
+    const result = processMessageText({ text: chunks.join(""), entities: { entities } })
+    const mentions = result.entities?.entities.filter((entity) => entity.type === MessageEntity_Type.MENTION) ?? []
+    expect(mentions).toHaveLength(2_048)
+    expect(mentions.every((entity) => entity.entity.oneofKind === "mention"
+      && entity.entity.mention.userId === 8n)).toBe(true)
+  })
+
+  test("keeps parser precedence for duplicate or conflicting client entities", () => {
+    const text = "**bold** [label](https://parsed.example)"
+    const result = processMessageText({
+      text,
+      entities: { entities: [
+        { type: MessageEntity_Type.BOLD, offset: 2n, length: 4n, entity: { oneofKind: undefined } },
+        {
+          type: MessageEntity_Type.TEXT_URL, offset: 10n, length: 5n,
+          entity: { oneofKind: "textUrl", textUrl: { url: "https://client.example" } },
+        },
+      ] },
+    })
+    expect(result.entities?.entities).toEqual(parseMarkdown(text).entities)
   })
 
   test("preserves normal URLs", () => {

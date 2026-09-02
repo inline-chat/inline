@@ -31,10 +31,15 @@ const nodeSignature = (node: RichTextNode): string => {
   switch (node.type) {
     case "bold":
     case "italic":
+    case "underline":
+    case "strikethrough":
+    case "highlight":
     case "code":
       return node.type
     case "url":
       return `${node.type}:${node.url}`
+    case "math":
+      return `${node.type}:${node.latex}`
     case "email_address":
       return `${node.type}:${node.email_address}`
     case "phone_number":
@@ -108,6 +113,14 @@ const wrapEntity = (
       return { type: "bold", text: child }
     case MessageEntity_Type.ITALIC:
       return { type: "italic", text: child }
+    case MessageEntity_Type.UNDERLINE:
+      return { type: "underline", text: child }
+    case MessageEntity_Type.STRIKETHROUGH:
+      return { type: "strikethrough", text: child }
+    case MessageEntity_Type.HIGHLIGHT:
+      return { type: "highlight", text: child }
+    case MessageEntity_Type.MATH:
+      return { type: "math", text: child, latex: source }
     case MessageEntity_Type.CODE:
     case MessageEntity_Type.PRE:
       return { type: "code", text: child }
@@ -277,6 +290,8 @@ const encodeBlocks = (input: {
 
   return input.blocks.flatMap<BotRichBlock>((block) => {
     switch (block.kind.oneofKind) {
+      case "math":
+        return [{ type: "math", latex: input.text.slice(Number(block.kind.math.offset), Number(block.kind.math.offset + block.kind.math.length)) }]
       case "paragraph":
         return [{ type: "paragraph", text: richText(block.kind.paragraph), is_rtl: trueOrUndefined(block.kind.paragraph.isRtl) }]
       case "heading":
@@ -309,16 +324,20 @@ const encodeBlocks = (input: {
         }]
       case "list": {
         const list = block.kind.list
-        const start = Number(list.start ?? 1n)
+        const start = list.start ?? 1n
         return [{
           type: "list",
-          items: list.items.map((item, index) => ({
-            label: list.kind === BlockList_Kind.ORDERED ? String(start + index) : "•",
-            blocks: blocks(item.children),
-            has_checkbox: item.checked === undefined ? undefined : true,
-            is_checked: trueOrUndefined(item.checked),
-            value: list.kind === BlockList_Kind.ORDERED ? start + index : undefined,
-          })),
+          items: list.items.map((item, index) => {
+            const ordinal = start + BigInt(index)
+            return {
+              label: list.kind === BlockList_Kind.ORDERED ? String(ordinal) : "•",
+              blocks: blocks(item.children),
+              has_checkbox: item.checked === undefined ? undefined : true,
+              is_checked: trueOrUndefined(item.checked),
+              value: list.kind === BlockList_Kind.ORDERED && ordinal >= 0n && ordinal <= BigInt(Number.MAX_SAFE_INTEGER)
+                ? Number(ordinal) : undefined,
+            }
+          }),
           is_rtl: trueOrUndefined(list.isRtl),
         }]
       }

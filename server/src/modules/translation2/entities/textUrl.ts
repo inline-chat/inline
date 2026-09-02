@@ -17,14 +17,14 @@ export const textUrlEntity = (input: {
     length: BigInt(input.length),
   }
 
-  const userId = parseMentionMdUrl(input.url)
-  if (userId) {
+  const mention = parseMentionMdUrl(input.url)
+  if (mention) {
     return {
       ...base,
       type: MessageEntity_Type.MENTION,
       entity: {
         oneofKind: "mention",
-        mention: { userId },
+        mention,
       },
     }
   }

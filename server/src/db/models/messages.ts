@@ -649,7 +649,7 @@ function decodeBlockContentProjection(
       return null
     }
 
-    validateBlockContent(text, stored.blockContent)
+    validateBlockContent(text, stored.blockContent, "persisted")
     return stored.blockContent
   } catch (error) {
     log.error("invalid block content projection", {

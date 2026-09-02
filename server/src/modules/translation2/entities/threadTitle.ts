@@ -8,6 +8,8 @@ export const threadTitleMdUrl = (input: { spaceId: bigint; title: string }): str
   return `inline://thread?${params.toString()}`
 }
 
+const maxInt64 = 9_223_372_036_854_775_807n
+
 export const parseThreadTitleMdUrl = (rawUrl: string): { spaceId: bigint; title: string } | null => {
   let url: URL
   try {
@@ -39,5 +41,5 @@ export const parseThreadTitleMdUrl = (rawUrl: string): { spaceId: bigint; title:
   }
 
   const spaceId = BigInt(rawSpaceId)
-  return { spaceId, title }
+  return spaceId <= maxInt64 ? { spaceId, title } : null
 }

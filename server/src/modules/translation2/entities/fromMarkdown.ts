@@ -1,17 +1,19 @@
 import { MessageEntity_Type, type MessageEntity } from "@inline-chat/protocol/core"
-import { unescapeLinkUrl } from "./escape"
+import { isMarkdownEscapable } from "./escape"
+import { additionalInlineStyles, literalHTMLTokenEnd, maxInlineStyleDepth, readInlineStyle, readPaddedEmphasis } from "./inlineStyles"
+import { isBlockMathSpan, mathLimits, readMathCandidate } from "./math"
+import { urlEntities } from "./url"
+import { linkLabelEnd, readInlineLinkDestination } from "./linkSyntax"
+import { readFencedCode } from "./fences"
 import { detectLiteralEntities } from "./literalDetectors"
 import { sortEntities } from "./offsets"
 import { textUrlEntity } from "./textUrl"
-import type { MarkdownText } from "./types"
+import type { EntityRange, MarkdownText } from "./types"
+import { parseMarkdownDocument, relativeReferences } from "../../message/parseMarkdown"
+import { hasVisibleMarkdownContent, relativeInlineCodes, relativeEmphasis, relativeInlineRanges, relativeCharacterReferences, type MarkdownCharacterReference, type MarkdownEmphasis, type MarkdownInlineCode, type MarkdownReference } from "../../message/markdownDocument"
+import { removeSourceRanges } from "../../message/markdownSourceMap"
 
-type StackItem =
-  {
-    kind: "format"
-    type: MessageEntity_Type.BOLD | MessageEntity_Type.ITALIC
-    marker: string
-    offset: number
-  }
+type ParsedMarkdownText = MarkdownText & { opaqueRanges: EntityRange[] }
 
 type CodeParseResult = {
   type: MessageEntity_Type.CODE | MessageEntity_Type.PRE
@@ -22,6 +24,7 @@ type CodeParseResult = {
 
 type LinkParseResult = {
   label: string
+  labelStart: number
   url: string
   end: number
 }
@@ -29,34 +32,164 @@ type LinkParseResult = {
 const allowedLinkLabelEntityTypes = new Set<MessageEntity_Type>([
   MessageEntity_Type.BOLD,
   MessageEntity_Type.ITALIC,
+  MessageEntity_Type.UNDERLINE,
+  MessageEntity_Type.STRIKETHROUGH,
+  MessageEntity_Type.HIGHLIGHT,
+  MessageEntity_Type.MATH,
   MessageEntity_Type.CODE,
   MessageEntity_Type.PRE,
 ])
 
 export const fromMd = (markdown: string): MarkdownText => {
+  const { text, entities } = parseFromMd(markdown, 0)
+  return { text, entities }
+}
+
+const parseFromMd = (markdown: string, depth: number, references: MarkdownReference[] = [], inlineCodes: MarkdownInlineCode[] = [], emphasis: MarkdownEmphasis[] = [], inlineRanges?: EntityRange[], characterReferences: MarkdownCharacterReference[] = []): ParsedMarkdownText => {
+  if (depth >= maxInlineStyleDepth) return { text: markdown, entities: { entities: [] }, opaqueRanges: [{ start: 0, end: markdown.length }] }
   let text = ""
   const entities: MessageEntity[] = []
-  const stack: StackItem[] = []
+  const opaqueRanges: EntityRange[] = []
+  const originalMarkdown = markdown
+  const document = depth === 0 ? parseMarkdownDocument(markdown) : { codeBlocks: [], inlineCodes, emphasis, inlineRanges, characterReferences, definitions: [], references, prefixes: [], paragraphRanges: [] }
+  if (!document) return { text: markdown, entities: { entities: [] }, opaqueRanges: [{ start: 0, end: markdown.length }] }
+  let codeBlocks = document.codeBlocks, definitions = document.definitions
+  references = document.references
+  inlineCodes = document.inlineCodes
+  emphasis = document.emphasis
+  inlineRanges = document.inlineRanges
+  characterReferences = document.characterReferences
+  if (document.prefixes.length) {
+    const projected = removeSourceRanges(markdown, document.prefixes)
+    const boundary = (offset: number) => projected.sourceToOutput[offset]!
+    markdown = projected.text
+    // The original AST stays in source coordinates. Only the local scanner's
+    // metadata moves; parsing the stripped source again would change nesting.
+    codeBlocks = codeBlocks.map((block) => ({ ...block, start: boundary(block.start), end: boundary(block.end) }))
+    inlineCodes = inlineCodes.map((code) => ({ ...code, start: boundary(code.start), end: boundary(code.end) }))
+    characterReferences = characterReferences.map((span) => ({ ...span, start: boundary(span.start), end: boundary(span.end) }))
+    emphasis = emphasis.map((span) => ({ ...span, start: boundary(span.start), end: boundary(span.end),
+      contentStart: boundary(span.contentStart), contentEnd: boundary(span.contentEnd) }))
+    inlineRanges = inlineRanges?.map((range) => ({ start: boundary(range.start), end: boundary(range.end) }))
+    definitions = definitions.map((range) => ({ start: boundary(range.start), end: boundary(range.end) }))
+    references = references.map((reference) => ({ ...reference, start: boundary(reference.start), end: boundary(reference.end),
+      labelStart: boundary(reference.labelStart), labelEnd: boundary(reference.labelEnd) }))
+  }
+  const literalURLs = markdown.includes("$") ? urlEntities(markdown).map((url) => ({
+    start: Number(url.offset), end: Number(url.offset + url.length),
+  })) : []
+  let urlIndex = 0
+  let characterReferenceIndex = 0
+  let codeIndex = 0
+  let inlineCodeIndex = 0
+  let definitionIndex = 0, referenceIndex = 0, emphasisIndex = 0, inlineRangeIndex = 0
 
   for (let i = 0; i < markdown.length; ) {
-    const top = stack[stack.length - 1]
-
-    if (top?.kind === "format" && markdown.startsWith(top.marker, i)) {
-      closeFormat(top, text.length, entities)
-      stack.pop()
-      i += top.marker.length
+    while (inlineRanges?.[inlineRangeIndex] && inlineRanges[inlineRangeIndex]!.end <= i) inlineRangeIndex++
+    const inlineRange = inlineRanges?.[inlineRangeIndex]
+    const sourceEnd = !inlineRanges ? markdown.length : inlineRange && inlineRange.start <= i ? inlineRange.end : i
+    while (definitions[definitionIndex] && definitions[definitionIndex]!.end <= i) definitionIndex++
+    const definition = definitions[definitionIndex]
+    if (definition?.start === i) {
+      i = definition.end
+      continue
+    }
+    while (references[referenceIndex] && references[referenceIndex]!.end <= i) referenceIndex++
+    while (inlineCodes[inlineCodeIndex] && inlineCodes[inlineCodeIndex]!.end <= i) inlineCodeIndex++
+    while (codeBlocks[codeIndex] && codeBlocks[codeIndex]!.end <= i) codeIndex++
+    const block = codeBlocks[codeIndex]
+    if (block?.start === i) {
+      if (block.content.length > 0) entities.push(codeEntity({ ...block, type: MessageEntity_Type.PRE }, text.length))
+      text += block.content
+      i = block.end
+      continue
+    }
+    // Nested label/style projection must not reclassify verified inline code
+    // as a root fence. Embedded PRE retains its transport policy below.
+    if ((i === 0 || markdown[i - 1] === "\n") && inlineCodes[inlineCodeIndex]?.start !== i) {
+      const fence = readFencedCode(markdown, i)
+      if (fence) {
+        // Keep translation's existing whitespace-preserving code body policy.
+        text += markdown.slice(i, fence.start)
+        const content = markdown.slice(fence.contentStart, fence.contentEnd)
+        if (content.length > 0) entities.push(codeEntity({ type: MessageEntity_Type.PRE, content,
+          language: fence.language, end: fence.end }, text.length))
+        text += content
+        i = fence.end
+        continue
+      }
+    }
+    while (emphasis[emphasisIndex] && emphasis[emphasisIndex]!.end <= i) emphasisIndex++
+    const emphasisSpan = emphasis[emphasisIndex]
+    if (emphasisSpan?.start === i) {
+      const offset = text.length
+      const content = parseFromMd(markdown.slice(emphasisSpan.contentStart, emphasisSpan.contentEnd), depth + 1,
+        relativeReferences(references, emphasisSpan.contentStart, emphasisSpan.contentEnd),
+        relativeInlineCodes(inlineCodes, emphasisSpan.contentStart, emphasisSpan.contentEnd),
+        relativeEmphasis(emphasis, emphasisSpan.contentStart, emphasisSpan.contentEnd),
+        relativeInlineRanges(inlineRanges, emphasisSpan.contentStart, emphasisSpan.contentEnd),
+        relativeCharacterReferences(characterReferences, emphasisSpan.contentStart, emphasisSpan.contentEnd))
+      opaqueRanges.push(...content.opaqueRanges.map((range) => ({ start: offset + range.start, end: offset + range.end })))
+      text += content.text
+      if (content.text.length) entities.push({
+        type: emphasisSpan.kind === "strong" ? MessageEntity_Type.BOLD : MessageEntity_Type.ITALIC,
+        offset: BigInt(offset), length: BigInt(content.text.length), entity: { oneofKind: undefined },
+      })
+      entities.push(...content.entities.entities.map((entity) => ({ ...entity, offset: entity.offset + BigInt(offset) })))
+      i = emphasisSpan.end
+      continue
+    }
+    while (literalURLs[urlIndex] && literalURLs[urlIndex]!.end <= i) urlIndex++
+    const math = markdown[i] === "$"
+      && !(literalURLs[urlIndex] && literalURLs[urlIndex]!.start <= i)
+      && readMathCandidate(markdown, i)
+    if (math) {
+      const content = markdown.slice(math.contentStart, math.contentEnd)
+      if (content.length <= (math.display ? mathLimits.displaySource : mathLimits.inlineSource)) {
+        entities.push({
+          type: MessageEntity_Type.MATH, offset: BigInt(text.length), length: BigInt(content.length),
+          entity: depth === 0 && isBlockMathSpan(markdown, i, math)
+            ? { oneofKind: "math", math: { display: true } }
+            : { oneofKind: undefined },
+        })
+        text += content
+      } else {
+        opaqueRanges.push({ start: text.length, end: text.length + math.end - i })
+        text += markdown.slice(i, math.end)
+      }
+      i = math.end
       continue
     }
 
-    if (markdown[i] === "\\" && i + 1 < markdown.length) {
+    if (markdown[i] === "\\" && isMarkdownEscapable(markdown[i + 1])) {
       text += markdown[i + 1]
       i += 2
       continue
     }
+    const htmlEnd = literalHTMLTokenEnd(markdown, i)
+    if (htmlEnd !== undefined) {
+      text += markdown.slice(i, htmlEnd)
+      i = htmlEnd
+      continue
+    }
+
+    while (characterReferences[characterReferenceIndex] && characterReferences[characterReferenceIndex]!.end <= i) characterReferenceIndex++
+    const characterReference = characterReferences[characterReferenceIndex]
+    if (characterReference?.start === i) {
+      text += characterReference.content
+      i = characterReference.end
+      continue
+    }
 
     if (markdown[i] === "`") {
-      const parsed = readCode(markdown, i)
-      if (parsed) {
+      const mapped = inlineCodes[inlineCodeIndex]?.start === i ? inlineCodes[inlineCodeIndex] : undefined
+      const legacy = readCode(markdown, i)
+      // Embedded PRE is an established transport convention. Preserve its
+      // language/whitespace only when it also fits a real inline-code span.
+      const parsed = legacy?.type === MessageEntity_Type.PRE
+        ? (mapped?.end === legacy.end ? legacy : null)
+        : mapped ? { ...mapped, type: MessageEntity_Type.CODE as const } : legacy
+      if (parsed && parsed.end <= sourceEnd) {
         const offset = text.length
         text += parsed.content
         if (parsed.content.length > 0) {
@@ -68,10 +201,20 @@ export const fromMd = (markdown: string): MarkdownText => {
     }
 
     if (markdown[i] === "[") {
-      const link = readMarkdownLink(markdown, i)
-      if (link) {
+      const reference = references[referenceIndex]
+      const link = reference && reference.start + (reference.image ? 1 : 0) === i
+        ? { label: markdown.slice(reference.labelStart, reference.labelEnd), labelStart: reference.labelStart,
+          url: reference.url, end: reference.end }
+        : readMarkdownLink(markdown, i, inlineCodes)
+      if (link && link.end <= sourceEnd) {
         const offset = text.length
-        const label = fromMd(link.label)
+        const label = parseFromMd(link.label, depth + 1,
+          relativeReferences(references, link.labelStart, link.labelStart + link.label.length),
+          relativeInlineCodes(inlineCodes, link.labelStart, link.labelStart + link.label.length),
+          relativeEmphasis(emphasis, link.labelStart, link.labelStart + link.label.length),
+          relativeInlineRanges(inlineRanges, link.labelStart, link.labelStart + link.label.length),
+          relativeCharacterReferences(characterReferences, link.labelStart, link.labelStart + link.label.length))
+        opaqueRanges.push(...label.opaqueRanges.map((range) => ({ start: offset + range.start, end: offset + range.end })))
         text += label.text
         for (const entity of label.entities.entities) {
           if (!allowedLinkLabelEntityTypes.has(entity.type)) {
@@ -100,15 +243,23 @@ export const fromMd = (markdown: string): MarkdownText => {
       continue
     }
 
-    if (markdown.startsWith("**", i)) {
-      stack.push({ kind: "format", type: MessageEntity_Type.BOLD, marker: "**", offset: text.length })
-      i += 2
-      continue
-    }
-
-    if (markdown[i] === "*") {
-      stack.push({ kind: "format", type: MessageEntity_Type.ITALIC, marker: "*", offset: text.length })
-      i += 1
+    const style = additionalInlineStyles.find((candidate) => markdown.startsWith(candidate.open, i))
+    const padded = !style && readPaddedEmphasis(markdown, i, sourceEnd, references)
+    const span = style ? readInlineStyle(markdown, i, style, sourceEnd, { links: references }) : padded || undefined
+    const styleType = style?.type ?? (padded ? padded.type : undefined)
+    if (styleType !== undefined && span && !(block && i < block.start && block.start < span.end)) {
+      const offset = text.length
+      const content = parseFromMd(markdown.slice(span.contentStart, span.contentEnd), depth + 1,
+        relativeReferences(references, span.contentStart, span.contentEnd),
+        relativeInlineCodes(inlineCodes, span.contentStart, span.contentEnd),
+        relativeEmphasis(emphasis, span.contentStart, span.contentEnd),
+        relativeInlineRanges(inlineRanges, span.contentStart, span.contentEnd),
+        relativeCharacterReferences(characterReferences, span.contentStart, span.contentEnd))
+      opaqueRanges.push(...content.opaqueRanges.map((range) => ({ start: offset + range.start, end: offset + range.end })))
+      text += content.text
+      entities.push({ type: styleType, offset: BigInt(offset), length: BigInt(content.text.length), entity: { oneofKind: undefined } })
+      entities.push(...content.entities.entities.map((entity) => ({ ...entity, offset: entity.offset + BigInt(offset) })))
+      i = span.end
       continue
     }
 
@@ -116,13 +267,17 @@ export const fromMd = (markdown: string): MarkdownText => {
     i += 1
   }
 
-  text = restoreUnclosedMarkers(text, stack, entities)
+  if (document.definitions.length && (text.trim().length === 0 || (!opaqueRanges.length
+    && !entities.some((entity) => entity.type === MessageEntity_Type.MATH) && !hasVisibleMarkdownContent(document)))) {
+    return { text: originalMarkdown, entities: { entities: [] }, opaqueRanges: [{ start: 0, end: originalMarkdown.length }] }
+  }
 
   return {
     text,
     entities: {
-      entities: detectLiteralEntities(text, sortEntities(entities)),
+      entities: detectLiteralEntities(text, sortEntities(entities), opaqueRanges),
     },
+    opaqueRanges,
   }
 }
 
@@ -157,52 +312,6 @@ const normalizeParsedLinkEntity = (text: string, entity: MessageEntity | null): 
     offset: BigInt(nextStart),
     length: BigInt(nextEnd - nextStart),
   }
-}
-
-const restoreUnclosedMarkers = (text: string, stack: StackItem[], entities: MessageEntity[]): string => {
-  if (stack.length === 0) {
-    return text
-  }
-
-  let result = text
-  let added = 0
-  const markers = stack
-    .map((item) => ({
-      offset: item.offset,
-      marker: item.marker,
-    }))
-    .sort((a, b) => a.offset - b.offset)
-
-  for (const item of markers) {
-    const offset = item.offset + added
-    result = result.slice(0, offset) + item.marker + result.slice(offset)
-    shiftEntities(entities, offset, item.marker.length)
-    added += item.marker.length
-  }
-
-  return result
-}
-
-const shiftEntities = (entities: MessageEntity[], offset: number, amount: number): void => {
-  for (const entity of entities) {
-    if (Number(entity.offset) >= offset) {
-      entity.offset += BigInt(amount)
-    }
-  }
-}
-
-const closeFormat = (item: Extract<StackItem, { kind: "format" }>, end: number, entities: MessageEntity[]): void => {
-  const length = end - item.offset
-  if (length <= 0) {
-    return
-  }
-
-  entities.push({
-    type: item.type,
-    offset: BigInt(item.offset),
-    length: BigInt(length),
-    entity: { oneofKind: undefined },
-  })
 }
 
 const codeEntity = (parsed: CodeParseResult, offset: number): MessageEntity => {
@@ -243,7 +352,7 @@ const readCode = (markdown: string, start: number): CodeParseResult | null => {
 
   const contentStart = start + marker.length
   const close = markdown.indexOf(marker, contentStart)
-  if (close === -1) {
+  if (close === -1 || /[\r\n]/.test(markdown.slice(contentStart, close))) {
     return null
   }
 
@@ -293,115 +402,22 @@ const readBackticks = (text: string, start: number): string | null => {
   return text.slice(start, end)
 }
 
-const readMarkdownLink = (markdown: string, start: number): LinkParseResult | null => {
-  return readDoubleBracketLink(markdown, start) ?? readBracketLink(markdown, start)
+const readMarkdownLink = (markdown: string, start: number, inlineCodes: MarkdownInlineCode[]): LinkParseResult | null => {
+  return readDoubleBracketLink(markdown, start, inlineCodes) ?? readBracketLink(markdown, start, inlineCodes)
 }
 
-const readDoubleBracketLink = (markdown: string, start: number): LinkParseResult | null => {
-  if (!markdown.startsWith("[[", start)) {
-    return null
-  }
-
-  for (let i = start + 2; i < markdown.length - 2; i++) {
-    if (markdown[i] === "\\" && i + 1 < markdown.length) {
-      i += 1
-      continue
-    }
-
-    if (!markdown.startsWith("]](", i)) {
-      continue
-    }
-
-    const parsedUrl = readLinkUrl(markdown, i + 3)
-    if (!parsedUrl) {
-      return null
-    }
-
-    return {
-      label: markdown.slice(start, i + 2),
-      url: parsedUrl.url,
-      end: parsedUrl.end,
-    }
-  }
-
-  return null
+const readDoubleBracketLink = (markdown: string, start: number, inlineCodes: MarkdownInlineCode[]): LinkParseResult | null => {
+  if (!markdown.startsWith("[[", start)) return null
+  const end = linkLabelEnd(markdown, start)
+  if (end === undefined || markdown[end - 1] !== "]" || markdown[end + 1] !== "(") return null
+  const parsedUrl = readInlineLinkDestination(markdown, end + 2, start, inlineCodes)
+  // Keep the historical visible [[thread label]] form.
+  return parsedUrl ? { label: markdown.slice(start, end + 1), labelStart: start, url: parsedUrl.url, end: parsedUrl.end } : null
 }
 
-const readBracketLink = (markdown: string, start: number): LinkParseResult | null => {
-  let depth = 1
-
-  for (let i = start + 1; i < markdown.length; i++) {
-    const char = markdown[i]
-
-    if (char === "\\" && i + 1 < markdown.length) {
-      i += 1
-      continue
-    }
-
-    if (char === "[") {
-      depth += 1
-      continue
-    }
-
-    if (char !== "]") {
-      continue
-    }
-
-    depth -= 1
-    if (depth !== 0) {
-      continue
-    }
-
-    if (markdown[i + 1] !== "(") {
-      return null
-    }
-
-    const parsedUrl = readLinkUrl(markdown, i + 2)
-    if (!parsedUrl) {
-      return null
-    }
-
-    return {
-      label: markdown.slice(start + 1, i),
-      url: parsedUrl.url,
-      end: parsedUrl.end,
-    }
-  }
-
-  return null
-}
-
-const readLinkUrl = (markdown: string, start: number): { url: string; end: number } | null => {
-  let url = ""
-  let depth = 1
-
-  for (let i = start; i < markdown.length; i++) {
-    const char = markdown[i]
-
-    if (char === "\\" && i + 1 < markdown.length) {
-      url += markdown[i]
-      url += markdown[i + 1]
-      i += 1
-      continue
-    }
-
-    if (char === "(") {
-      depth += 1
-      url += char
-      continue
-    }
-
-    if (char === ")") {
-      depth -= 1
-      if (depth === 0) {
-        return { url: unescapeLinkUrl(url), end: i + 1 }
-      }
-      url += char
-      continue
-    }
-
-    url += char
-  }
-
-  return null
+const readBracketLink = (markdown: string, start: number, inlineCodes: MarkdownInlineCode[]): LinkParseResult | null => {
+  const end = linkLabelEnd(markdown, start)
+  if (end === undefined || markdown[end + 1] !== "(") return null
+  const parsedUrl = readInlineLinkDestination(markdown, end + 2, start, inlineCodes)
+  return parsedUrl ? { label: markdown.slice(start + 1, end), labelStart: start + 1, url: parsedUrl.url, end: parsedUrl.end } : null
 }

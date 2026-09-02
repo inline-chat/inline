@@ -73,6 +73,9 @@ function annotateBlock(
       return annotateLeafText(text, block.kind.heading.text, emitLeafDirection)
     case "footer":
       return annotateLeafText(text, block.kind.footer, emitLeafDirection)
+    case "math":
+      clearTextDirection(block.kind.math)
+      return undefined
     case "code":
       clearTextDirection(block.kind.code.text)
       // Clients force code LTR. It does not decide a surrounding prose group.

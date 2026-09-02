@@ -2,19 +2,25 @@ import {
   BlockDisclosure_Kind,
   BlockList_Kind,
   BlockTable_Alignment,
+  MessageEntity_Type,
   type Block,
   type BlockContent,
   type BlockImage,
   type BlockText,
+  type MessageEntities,
   type Photo,
 } from "@inline-chat/protocol/core"
-import type { Paragraph, RootContent, Table, TableCell } from "mdast"
+import type { Image, Paragraph, PhrasingContent, RootContent, Table, TableCell } from "mdast"
 import { fromMarkdown } from "mdast-util-from-markdown"
 import { gfmFromMarkdown } from "mdast-util-gfm"
 import { gfm } from "micromark-extension-gfm"
 import { cleanPreLanguage } from "../translation2/entities/code"
+import { mathLimits, readMathSpan } from "../translation2/entities/math"
+import { splitsSurrogatePair } from "../translation2/entities/offsets"
 import { annotateBlockContentDirections } from "./blockDirection"
 import { parseMarkdownWithSourceMap, type ParsedMarkdownWithSourceMap } from "./parseMarkdown"
+import { linkLabelEnd } from "../translation2/entities/linkSyntax"
+import type { MarkdownReference } from "./markdownDocument"
 
 export const blockContentLimits = {
   maxBlocks: 1_024,
@@ -28,7 +34,7 @@ export const blockContentLimits = {
   // bounded; oversized GFM tables retain the ordinary flat-text projection.
   maxTableCells: 256,
   // Stored snapshots written before the native-surface ceiling was reduced
-  // remain mutable so pending image jobs can finish instead of retrying forever.
+  // remain readable and mutable. Clients still enforce their rendering budget.
   maxPersistedTableCells: 4_096,
   maxImageDimension: 16_384,
   maxImageRatio: 100,
@@ -43,11 +49,24 @@ export type BlockImageSource = {
 export type ParsedBlockContent = {
   blockContent: BlockContent
   imageSources: BlockImageSource[]
+  warnings?: BlockContentWarning[]
 }
+
+export type BlockContentWarning = "unsupported_table_content"
+export type BlockContentFallbackReason = "empty" | "invalid_projection"
+
+export type BlockContentParseResult =
+  | { kind: "parsed"; value: ParsedBlockContent }
+  | { kind: "fallback"; reason: BlockContentFallbackReason }
 
 type PositionedImageSource = {
   image: BlockImage
   url: string
+}
+
+type BlockParseContext = {
+  sources: PositionedImageSource[]
+  warnings: Set<BlockContentWarning>
 }
 
 type Line = {
@@ -66,23 +85,103 @@ export function parseBlockContent(
   markdown: string,
   parsedMarkdown?: ParsedMarkdownWithSourceMap,
 ): ParsedBlockContent | undefined {
+  const result = parseBlockContentResult(markdown, parsedMarkdown)
+  return result.kind === "parsed" ? result.value : undefined
+}
+
+/** Native entity input is already canonical. Give inline math a render surface
+ * without interpreting literal Markdown, tags, links, or image syntax again. */
+export function projectLiteralMathContent(text: string, entities: MessageEntities | undefined): ParsedBlockContent | undefined {
+  if (text.length === 0 || text.length > 131_072) return undefined
+  const values = entities?.entities ?? []
+  const length = BigInt(text.length)
+  const validRange = (entity: (typeof values)[number]): boolean => {
+    if (!entity || entity.offset < 0n || entity.length <= 0n || entity.offset + entity.length > length) return false
+    for (const offset of [Number(entity.offset), Number(entity.offset + entity.length)]) {
+      if (offset > 0 && offset < text.length && /[\uD800-\uDBFF]/.test(text[offset - 1]!) && /[\uDC00-\uDFFF]/.test(text[offset]!)) {
+        return false
+      }
+    }
+    return true
+  }
+  const code = values.filter((entity) => entity && (entity.type === MessageEntity_Type.CODE || entity.type === MessageEntity_Type.PRE) && validRange(entity))
+  const math = values.filter((entity) => entity?.type === MessageEntity_Type.MATH && validRange(entity)
+    && !code.some((range) => entity.offset < range.offset + range.length && range.offset < entity.offset + entity.length))
+  if (math.length === 0) return undefined
+
+  const lineStart = (offset: number): number => {
+    let cursor = offset
+    while (cursor > 0 && text[cursor - 1] !== "\n" && text[cursor - 1] !== "\r") cursor--
+    return cursor
+  }
+  const lineEnd = (offset: number): number => {
+    let cursor = offset
+    while (cursor < text.length && text[cursor] !== "\n" && text[cursor] !== "\r") cursor++
+    return cursor
+  }
+  const consumeLineBreak = (offset: number): number => {
+    if (text[offset] === "\r" && text[offset + 1] === "\n") return offset + 2
+    return text[offset] === "\r" || text[offset] === "\n" ? offset + 1 : offset
+  }
+  const display = math.filter((entity) => entity.entity.oneofKind === "math" && entity.entity.math.display)
+    .map((entity) => ({ entity, start: Number(entity.offset), end: Number(entity.offset + entity.length) }))
+    .filter(({ start, end }) => {
+      const prefix = text.slice(lineStart(start), start)
+      const suffix = text.slice(end, lineEnd(end))
+      return /^ {0,3}$/.test(prefix) && suffix.trim().length === 0
+    })
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+  const nonOverlappingDisplay: typeof display = []
+  for (const range of display) {
+    if (range.start >= (nonOverlappingDisplay.at(-1)?.end ?? 0)) nonOverlappingDisplay.push(range)
+  }
+
+  const blocks: Block[] = []
+  const appendParagraph = (start: number, end: number): void => {
+    while (start < end && (text[start] === "\n" || text[start] === "\r")) start++
+    while (end > start && (text[end - 1] === "\n" || text[end - 1] === "\r")) end--
+    if (text.slice(start, end).trim().length > 0) {
+      blocks.push(paragraphBlock({ offset: BigInt(start), length: BigInt(end - start) }))
+    }
+  }
+  let cursor = 0
+  for (const range of nonOverlappingDisplay) {
+    const start = lineStart(range.start)
+    appendParagraph(cursor, start)
+    blocks.push({ kind: { oneofKind: "math", math: { offset: range.entity.offset, length: range.entity.length } } })
+    cursor = consumeLineBreak(lineEnd(range.end))
+  }
+  appendParagraph(cursor, text.length)
+  if (blocks.length === 0) blocks.push(paragraphBlock({ offset: 0n, length }))
+  const blockContent: BlockContent = {
+    blocks,
+  }
+  annotateBlockContentDirections(text, blockContent)
+  return { blockContent, imageSources: [] }
+}
+
+/** Content-free diagnostics distinguish intentional flat fallback from a rich projection. */
+export function parseBlockContentResult(
+  markdown: string,
+  parsedMarkdown?: ParsedMarkdownWithSourceMap,
+): BlockContentParseResult {
   if (markdown.length === 0) {
-    return undefined
+    return { kind: "fallback", reason: "empty" }
   }
 
   try {
     const legacy = parsedMarkdown ?? parseMarkdownWithSourceMap(markdown)
-    const positionedSources: PositionedImageSource[] = []
-    const blocks = coalesceImages(parseRegion(markdown, legacy, 0, markdown.length, positionedSources))
+    const context: BlockParseContext = { sources: [], warnings: new Set() }
+    const blocks = coalesceImages(parseRegion(markdown, legacy, 0, markdown.length, context))
     if (blocks.length === 0) {
-      return undefined
+      return { kind: "fallback", reason: "empty" }
     }
 
     const blockContent: BlockContent = { blocks }
     annotateBlockContentDirections(legacy.text, blockContent)
     validateBlockContent(legacy.text, blockContent)
 
-    const sourceByImage = new Map(positionedSources.map((source) => [source.image, source.url]))
+    const sourceByImage = new Map(context.sources.map((source) => [source.image, source.url]))
     const imageSources: BlockImageSource[] = []
     visitImages(blocks, [], (image, path) => {
       const url = sourceByImage.get(image)
@@ -91,9 +190,12 @@ export function parseBlockContent(
       }
     })
 
-    return { blockContent, imageSources }
+    return {
+      kind: "parsed",
+      value: { blockContent, imageSources, ...(context.warnings.size ? { warnings: [...context.warnings] } : {}) },
+    }
   } catch {
-    return undefined
+    return { kind: "fallback", reason: "invalid_projection" }
   }
 }
 
@@ -102,21 +204,30 @@ function parseRegion(
   legacy: ParsedMarkdownWithSourceMap,
   start: number,
   end: number,
-  sources: PositionedImageSource[],
+  context: BlockParseContext,
 ): Block[] {
   const blocks: Block[] = []
   let ordinaryStart = start
   let cursor = start
   let fence: Fence | undefined
+  let mathIndex = 0
 
   const flushOrdinary = (ordinaryEnd: number): void => {
     if (ordinaryEnd > ordinaryStart) {
-      blocks.push(...parseOrdinaryRegion(markdown, legacy, ordinaryStart, ordinaryEnd, sources))
+      blocks.push(...parseOrdinaryRegion(markdown, legacy, ordinaryStart, ordinaryEnd, context))
     }
   }
 
   while (cursor < end) {
     const line = readLine(markdown, cursor, end)
+    // A mixed paragraph formula can contain fence/tag-looking lines. Only the
+    // formula's opening line participates in structural block recognition.
+    while (legacy.mathRanges?.[mathIndex] && legacy.mathRanges[mathIndex]!.end <= cursor) mathIndex++
+    const containingMath = legacy.mathRanges?.[mathIndex]
+    if (containingMath && containingMath.start < cursor) {
+      cursor = readLine(markdown, Math.min(containingMath.end, end), end).next
+      continue
+    }
     if (fence) {
       if (isClosingFence(line.value, fence)) fence = undefined
       cursor = line.next
@@ -130,6 +241,22 @@ function parseRegion(
       continue
     }
 
+    const mathOpening = /^( {0,3})\$\$/.exec(line.value)
+    const math = mathOpening && readMathSpan(markdown, line.start + mathOpening[1]!.length)
+    if (math && math.display && math.end <= end) {
+      const endingLine = readLine(markdown, math.end, end)
+      const range = mapText(legacy, math.contentStart, math.contentEnd)
+      const hasMathEntity = legacy.entities.some((entity) => entity.type === MessageEntity_Type.MATH
+        && entity.offset === range.offset && entity.length === range.length)
+      if (hasMathEntity && endingLine.value.trim().length === 0) {
+        flushOrdinary(line.start)
+        blocks.push({ kind: { oneofKind: "math", math: range } })
+        cursor = endingLine.next
+        ordinaryStart = cursor
+        continue
+      }
+    }
+
     const details = /^<details( open)?>$/.exec(line.value)
     if (details) {
       const summaryLine = line.next < end ? readLine(markdown, line.next, end) : undefined
@@ -139,7 +266,7 @@ function parseRegion(
 
       if (summaryLine && summary) {
         flushOrdinary(line.start)
-        const close = findDetailsClose(markdown, summaryLine.next, end)
+        const close = findDetailsClose(markdown, summaryLine.next, end, legacy.mathRanges)
         const childrenEnd = close?.start ?? end
         const summaryPrefixLength = summaryLine.value.indexOf(">") + 1
         const summaryStart = summaryLine.start + summaryPrefixLength
@@ -153,7 +280,7 @@ function parseRegion(
                 summary[1] === "progress" ? BlockDisclosure_Kind.PROGRESS : BlockDisclosure_Kind.DEFAULT,
               initiallyOpen: details[1] !== undefined,
               children: coalesceImages(
-                parseRegion(markdown, legacy, summaryLine.next, childrenEnd, sources),
+                parseRegion(markdown, legacy, summaryLine.next, childrenEnd, context),
               ),
             },
           },
@@ -191,19 +318,46 @@ function parseOrdinaryRegion(
   legacy: ParsedMarkdownWithSourceMap,
   start: number,
   end: number,
-  sources: PositionedImageSource[],
+  context: BlockParseContext,
 ): Block[] {
   const source = markdown.slice(start, end)
   if (source.trim().length === 0) {
     return []
   }
 
-  const root = fromMarkdown(source, {
+  // Ordinary regions can share the canonical document, including definitions
+  // outside this region. Fall back only when a structural boundary cuts a node.
+  if (legacy.document?.root && !legacy.mathRanges?.length) {
+    const nodes = legacy.document.root.children.filter((node) => {
+      const range = nodeRange(node, 0)
+      return range && range.start < end && start < range.end
+    })
+    if (nodes.every((node) => {
+      const range = nodeRange(node, 0)
+      return range && start <= range.start && range.end <= end
+    })) return nodes.flatMap((node) => convertNode(markdown, legacy, node, 0, context))
+  }
+
+  // mdast must see one opaque token per formula, including its line endings.
+  // Replacing UTF-16 units keeps every node offset in the original source and
+  // prevents TeX pipes, images, fences or blank lines from becoming structure.
+  const syntaxParts: string[] = []
+  let syntaxCursor = 0
+  for (const range of legacy.mathRanges ?? []) {
+    const lower = Math.max(start + syntaxCursor, range.start) - start
+    const upper = Math.min(end, range.end) - start
+    if (upper <= lower) continue
+    syntaxParts.push(source.slice(syntaxCursor, lower), "x".repeat(upper - lower))
+    syntaxCursor = upper
+  }
+  syntaxParts.push(source.slice(syntaxCursor))
+  const syntax = syntaxParts.join("")
+  const root = fromMarkdown(syntax, {
     extensions: [gfm()],
     mdastExtensions: [gfmFromMarkdown()],
   })
 
-  return root.children.flatMap((node) => convertNode(markdown, legacy, node, start, sources))
+  return root.children.flatMap((node) => convertNode(markdown, legacy, node, start, context))
 }
 
 function convertNode(
@@ -211,7 +365,7 @@ function convertNode(
   legacy: ParsedMarkdownWithSourceMap,
   node: RootContent,
   baseOffset: number,
-  sources: PositionedImageSource[],
+  context: BlockParseContext,
 ): Block[] {
   const range = nodeRange(node, baseOffset)
   if (!range) {
@@ -219,8 +373,11 @@ function convertNode(
   }
 
   switch (node.type) {
+    case "definition":
+      return legacy.document?.definitions.some((definition) => definition.start === range.start && definition.end === range.end)
+        ? [] : [paragraphBlock(mapText(legacy, range.start, range.end))]
     case "paragraph":
-      return convertParagraph(markdown, legacy, node, baseOffset, sources)
+      return convertParagraph(markdown, legacy, node, baseOffset, context)
     case "heading": {
       const childRanges = node.children.map((child) => nodeRange(child, baseOffset)).filter(isRange)
       const textRange = childRanges.length > 0
@@ -234,7 +391,8 @@ function convertNode(
       }]
     }
     case "code": {
-      const contentRange = findFencedCodeContentRange(markdown, range.start, range.end)
+      const contentRange = legacy.codeRanges?.find((code) => code.start === range.start && code.end === range.end)
+        ?? findFencedCodeContentRange(markdown, range.start, range.end)
       if (!contentRange) {
         return [paragraphBlock(mapText(legacy, range.start, range.end))]
       }
@@ -257,7 +415,7 @@ function convertNode(
             start: node.ordered ? BigInt(node.start ?? 1) : undefined,
             items: node.children.map((item) => ({
               children: coalesceImages(
-                item.children.flatMap((child) => convertNode(markdown, legacy, child, baseOffset, sources)),
+                item.children.flatMap((child) => convertNode(markdown, legacy, child, baseOffset, context)),
               ),
               checked: item.checked ?? undefined,
             })),
@@ -266,13 +424,20 @@ function convertNode(
       }]
     case "blockquote": {
       const children = coalesceImages(
-        node.children.flatMap((child) => convertNode(markdown, legacy, child, baseOffset, sources)),
+        node.children.flatMap((child) => convertNode(markdown, legacy, child, baseOffset, context)),
       )
       return children.length > 0
         ? [{ kind: { oneofKind: "quote", quote: { children } } }]
         : [paragraphBlock(mapText(legacy, range.start, range.end))]
     }
     case "table":
+      // Keep completed neighbors stable when an unsupported table arrives while streaming.
+      // A cell is BlockText-only; preserve this table as one literal paragraph.
+      if (node.children.some((row) => row.children.some((cell) => !cell.children.every(isSupportedTableChild)))
+        || legacy.document?.references.some((reference) => reference.image && range.start <= reference.start && reference.end <= range.end)) {
+        context.warnings.add("unsupported_table_content")
+        return [paragraphBlock(mapText(legacy, range.start, range.end))]
+      }
       return [convertTable(legacy, node, baseOffset)]
     case "thematicBreak":
       return [{ kind: { oneofKind: "separator", separator: {} } }]
@@ -311,6 +476,24 @@ function convertTable(
   }
 }
 
+function isSupportedTableChild(node: PhrasingContent): boolean {
+  switch (node.type) {
+    case "text":
+    case "inlineCode":
+    case "break":
+    case "html": // Includes supported <u> markers; other HTML remains literal source.
+      return true
+    case "strong":
+    case "emphasis":
+    case "delete":
+    case "link":
+    case "linkReference":
+      return node.children.every(isSupportedTableChild)
+    default:
+      return false
+  }
+}
+
 function mapTableCell(
   legacy: ParsedMarkdownWithSourceMap,
   cell: TableCell,
@@ -330,36 +513,59 @@ function convertParagraph(
   legacy: ParsedMarkdownWithSourceMap,
   node: Paragraph,
   baseOffset: number,
-  sources: PositionedImageSource[],
+  context: BlockParseContext,
 ): Block[] {
   const paragraphRange = nodeRange(node, baseOffset)
   if (!paragraphRange) {
     return []
   }
+  // GFM removes a task checkbox from the AST but can leave its paragraph start
+  // at the old marker when the first remaining child is a style or inline code.
+  const firstChildRange = node.children[0] && nodeRange(node.children[0], baseOffset)
+  paragraphRange.start = firstChildRange?.start ?? paragraphRange.end
+  // The outer line scanner cannot see display math introduced by a quote/list
+  // prefix. A paragraph consisting solely of a verified formula uses the same
+  // math block and canonical source range as top-level display math.
+  const math = readMathSpan(markdown, paragraphRange.start)
+  if (math?.display && math.end <= paragraphRange.end && markdown.slice(math.end, paragraphRange.end).trim().length === 0) {
+    const range = mapText(legacy, math.contentStart, math.contentEnd)
+    if (legacy.entities.some((entity) => entity.type === MessageEntity_Type.MATH
+      && entity.offset === range.offset && entity.length === range.length)) {
+      return [{ kind: { oneofKind: "math", math: range } }]
+    }
+  }
 
-  const images = node.children.filter((child) => child.type === "image")
+  const images: { range: { start: number; end: number }; image?: Image; reference?: MarkdownReference }[] = []
+  for (const child of node.children) {
+    const range = nodeRange(child, baseOffset)
+    if (child.type === "image" && range) images.push({ range, image: child })
+  }
+  for (const reference of legacy.document?.references ?? []) {
+    if (reference.blockImage && paragraphRange.start <= reference.start && reference.end <= paragraphRange.end) {
+      images.push({ range: reference, reference })
+    }
+  }
+  images.sort((a, b) => a.range.start - b.range.start)
   if (images.length === 0) {
     return [paragraphBlock(mapText(legacy, paragraphRange.start, paragraphRange.end))]
   }
 
   const blocks: Block[] = []
   let cursor = paragraphRange.start
-  for (const imageNode of images) {
-    const imageRange = nodeRange(imageNode, baseOffset)
-    if (!imageRange) {
-      continue
-    }
+  for (const { range: imageRange, image: imageNode, reference } of images) {
 
-    pushParagraphIfVisible(blocks, markdown, legacy, cursor, imageRange.start)
-    const parsedToken = parseImageToken(markdown, imageRange.start, imageRange.end)
+    pushParagraphIfVisible(blocks, legacy, cursor, imageRange.start)
+    const parsedToken = reference
+      ? { altStart: reference.labelStart, altEnd: reference.labelEnd }
+      : parseImageToken(markdown, imageRange.start, imageRange.end)
     if (!parsedToken) {
-      pushParagraphIfVisible(blocks, markdown, legacy, imageRange.start, imageRange.end)
+      pushParagraphIfVisible(blocks, legacy, imageRange.start, imageRange.end)
       cursor = imageRange.end
       continue
     }
 
     const hint = parseDimensionHint(markdown, imageRange.end, paragraphRange.end)
-    const normalizedURL = normalizeImageURL(imageNode.url)
+    const normalizedURL = normalizeImageURL(imageNode?.url ?? reference?.url ?? "")
     const image: BlockImage = {
       alt: mapText(legacy, parsedToken.altStart, parsedToken.altEnd),
       state: normalizedURL
@@ -377,26 +583,27 @@ function convertParagraph(
     }
     blocks.push({ kind: { oneofKind: "image", image } })
     if (normalizedURL) {
-      sources.push({ image, url: normalizedURL })
+      context.sources.push({ image, url: normalizedURL })
     }
     cursor = hint?.end ?? imageRange.end
   }
 
-  pushParagraphIfVisible(blocks, markdown, legacy, cursor, paragraphRange.end)
+  pushParagraphIfVisible(blocks, legacy, cursor, paragraphRange.end)
   return blocks
 }
 
 function pushParagraphIfVisible(
   blocks: Block[],
-  markdown: string,
   legacy: ParsedMarkdownWithSourceMap,
   start: number,
   end: number,
 ): void {
-  if (end <= start || markdown.slice(start, end).trim().length === 0) {
-    return
-  }
-  blocks.push(paragraphBlock(mapText(legacy, start, end)))
+  if (end <= start) return
+  const range = mapText(legacy, start, end)
+  // Source-only quote/list prefixes between images are not visible text and
+  // must not introduce a phantom row that breaks an otherwise contiguous album.
+  if (legacy.text.slice(Number(range.offset), Number(range.offset + range.length)).trim().length === 0) return
+  blocks.push(paragraphBlock(range))
 }
 
 function paragraphBlock(text: BlockText): Block {
@@ -421,11 +628,11 @@ function parseImageToken(
   if (!raw.startsWith("![")) {
     return undefined
   }
-  const altEndInRaw = raw.indexOf("](", 2)
-  if (altEndInRaw < 0) {
+  const altEnd = linkLabelEnd(markdown, start + 1)
+  if (altEnd === undefined || altEnd >= end || markdown[altEnd + 1] !== "(") {
     return undefined
   }
-  return { altStart: start + 2, altEnd: start + altEndInRaw }
+  return { altStart: start + 2, altEnd }
 }
 
 function parseDimensionHint(
@@ -493,8 +700,11 @@ function coalesceImages(blocks: Block[]): Block[] {
 export function validateBlockContent(
   text: string,
   content: BlockContent,
-  options?: { maxTableCells?: number },
+  profile: "native" | "persisted" = "native",
 ): void {
+  const maxTableCells = profile === "persisted"
+    ? blockContentLimits.maxPersistedTableCells
+    : blockContentLimits.maxTableCells
   let blockCount = 0
   let imageCount = 0
   let tableCellCount = 0
@@ -506,6 +716,11 @@ export function validateBlockContent(
     const end = range.offset + range.length
     if (end > BigInt(text.length)) {
       throw new Error("Block text range exceeds message text")
+    }
+    const startOffset = Number(range.offset)
+    const endOffset = Number(end)
+    if (splitsSurrogatePair(text, startOffset) || splitsSurrogatePair(text, endOffset)) {
+      throw new Error("Block text range splits a Unicode scalar")
     }
   }
 
@@ -567,6 +782,15 @@ export function validateBlockContent(
             throw new Error("List prose leaf direction must be absent")
           }
           break
+        case "math": {
+          validateText(block.kind.math)
+          if (block.kind.math.isRtl !== undefined) throw new Error("Math direction must be absent")
+          if (block.kind.math.length > BigInt(mathLimits.displaySource)) throw new Error("Math source is too long")
+          const start = Number(block.kind.math.offset)
+          const end = Number(block.kind.math.offset + block.kind.math.length)
+          if (text.slice(start, end).trim().length === 0) throw new Error("Math source is empty")
+          break
+        }
         case "code":
           validateText(block.kind.code.text)
           if (block.kind.code.text?.isRtl !== undefined) throw new Error("Code direction must be absent")
@@ -574,8 +798,15 @@ export function validateBlockContent(
           break
         case "list":
           if (listDepth + 1 > blockContentLimits.maxListDepth) throw new Error("List tree is too deep")
-          if (block.kind.list.kind === BlockList_Kind.UNSPECIFIED || block.kind.list.items.length === 0) {
+          if ((block.kind.list.kind !== BlockList_Kind.ORDERED && block.kind.list.kind !== BlockList_Kind.UNORDERED)
+            || block.kind.list.items.length === 0) {
             throw new Error("Invalid block list")
+          }
+          // CommonMark permits at most nine digits. Bound persisted/native
+          // snapshots alike before clients calculate ordinal labels.
+          if (block.kind.list.kind === BlockList_Kind.ORDERED && block.kind.list.start !== undefined
+            && (block.kind.list.start < 0n || block.kind.list.start > 999_999_999n)) {
+            throw new Error("Invalid ordered list start")
           }
           for (const item of block.kind.list.items) {
             if (item.children.length === 0) throw new Error("Empty block list item")
@@ -622,7 +853,7 @@ export function validateBlockContent(
           for (const row of block.kind.table.rows) {
             if (row.cells.length !== columnCount) throw new Error("Inconsistent block table row")
             tableCellCount += row.cells.length
-            if (tableCellCount > (options?.maxTableCells ?? blockContentLimits.maxTableCells)) {
+            if (tableCellCount > maxTableCells) {
               throw new Error("Too many block table cells")
             }
             for (const cell of row.cells) {
@@ -881,12 +1112,19 @@ function readLine(markdown: string, start: number, end: number): Line {
   }
 }
 
-function findDetailsClose(markdown: string, start: number, end: number): Line | undefined {
+function findDetailsClose(markdown: string, start: number, end: number, mathRanges: { start: number; end: number }[] = []): Line | undefined {
   let cursor = start
   let depth = 1
   let fence: Fence | undefined
+  let mathIndex = 0
   while (cursor < end) {
     const line = readLine(markdown, cursor, end)
+    while (mathRanges[mathIndex] && mathRanges[mathIndex]!.end <= cursor) mathIndex++
+    const math = mathRanges[mathIndex]
+    if (math && math.start < cursor) {
+      cursor = readLine(markdown, Math.min(math.end, end), end).next
+      continue
+    }
     if (fence) {
       if (isClosingFence(line.value, fence)) fence = undefined
       cursor = line.next

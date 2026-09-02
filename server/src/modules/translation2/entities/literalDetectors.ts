@@ -10,17 +10,22 @@ import type { EntityRange } from "./types"
 const protectedTypes = new Set<MessageEntity_Type>([
   MessageEntity_Type.CODE,
   MessageEntity_Type.PRE,
+  MessageEntity_Type.MATH,
   MessageEntity_Type.TEXT_URL,
   MessageEntity_Type.MENTION,
   MessageEntity_Type.THREAD,
   MessageEntity_Type.THREAD_TITLE,
 ])
 
-export const detectLiteralEntities = (text: string, existing: MessageEntity[]): MessageEntity[] => {
-  const protectedRanges = existing
+export const detectLiteralEntities = (
+  text: string,
+  existing: MessageEntity[],
+  additionalProtected: readonly EntityRange[] = [],
+): MessageEntity[] => {
+  const protectedRanges = [...additionalProtected, ...existing
     .filter((entity) => protectedTypes.has(entity.type))
     .map((entity) => toRange(text, entity))
-    .filter((range): range is EntityRange => range !== null)
+    .filter((range): range is EntityRange => range !== null)]
 
   const entities = [...existing]
   const takenLiteralRanges: EntityRange[] = []

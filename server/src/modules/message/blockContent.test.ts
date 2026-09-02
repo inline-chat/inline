@@ -4,6 +4,7 @@ import {
   BlockTable_Alignment,
   MessageEntity_Type,
   type Block,
+  type BlockContent,
   type BlockText,
 } from "@inline-chat/protocol/core"
 import { describe, expect, test } from "bun:test"
@@ -11,11 +12,13 @@ import { parseMarkdown } from "./parseMarkdown"
 import {
   getBlockImageAtPath,
   parseBlockContent,
+  parseBlockContentResult,
   replaceBlockImageAtPath,
   validateBlockContent,
 } from "./blockContent"
 import { encodeBlockContentToMarkdown } from "./blockContentMarkdown"
 import { detectFirstStrongIsRtl } from "./blockDirection"
+import { processOutgoingText } from "./processOutgoingText"
 
 const textFor = (markdown: string, range: BlockText | undefined): string => {
   if (!range) return ""
@@ -26,6 +29,96 @@ const textFor = (markdown: string, range: BlockText | undefined): string => {
 const kind = (block: Block | undefined): string | undefined => block?.kind.oneofKind
 
 describe("block content parser", () => {
+  test("all BlockText-bearing nodes reject surrogate-splitting ranges", () => {
+    const text = "😀x"
+    const malformed = [{ offset: 1n, length: 1n }, { offset: 0n, length: 1n }]
+    const contents = (range: BlockText): BlockContent[] => [
+      { blocks: [{ kind: { oneofKind: "paragraph", paragraph: range } }] },
+      { blocks: [{ kind: { oneofKind: "footer", footer: range } }] },
+      { blocks: [{ kind: { oneofKind: "heading", heading: { level: 2, text: range } } }] },
+      { blocks: [{ kind: { oneofKind: "code", code: { text: range, language: "swift" } } }] },
+      { blocks: [{ kind: { oneofKind: "disclosure", disclosure: {
+        kind: BlockDisclosure_Kind.DEFAULT,
+        summary: range, children: [{ kind: { oneofKind: "separator", separator: {} } }],
+      } } }] },
+      { blocks: [{ kind: { oneofKind: "quote", quote: {
+        children: [{ kind: { oneofKind: "paragraph", paragraph: range } }],
+      } } }] },
+      { blocks: [{ kind: { oneofKind: "list", list: {
+        kind: BlockList_Kind.UNORDERED,
+        items: [{ children: [{ kind: { oneofKind: "paragraph", paragraph: range } }] }],
+      } } }] },
+      { blocks: [{ kind: { oneofKind: "image", image: {
+        alt: range, state: { oneofKind: "unavailable", unavailable: {} },
+      } } }] },
+      { blocks: [{ kind: { oneofKind: "table", table: {
+        alignments: [BlockTable_Alignment.LEFT], rows: [{ cells: [range] }],
+      } } }] },
+    ]
+
+    for (const profile of ["native", "persisted"] as const) {
+      for (const range of malformed) {
+        for (const content of contents(range)) {
+          expect(() => validateBlockContent(text, content, profile))
+            .toThrow("Block text range splits a Unicode scalar")
+        }
+      }
+    }
+  })
+
+  test("reports content-free table fallback and retains neighboring blocks and their media jobs", () => {
+    for (const cell of ["![photo](https://example.com/a.png)", "**![photo](https://example.com/a.png)**", "[![photo](https://example.com/a.png)](https://example.com)"]) {
+      const markdown = "![before](https://example.com/b.png)\n\n| Item |\n| --- |\n| " + cell + " |"
+      const result = parseBlockContentResult(markdown)
+      expect(result.kind).toBe("parsed")
+      if (result.kind !== "parsed") throw new Error("missing projection")
+      expect(result.value.warnings).toEqual(["unsupported_table_content"])
+      expect(result.value.blockContent.blocks.map(kind)).toEqual(["image", "paragraph"])
+      expect(result.value.imageSources).toEqual([{ path: [0], url: "https://example.com/b.png" }])
+      const table = result.value.blockContent.blocks[1]
+      expect(textFor(markdown, table?.kind.oneofKind === "paragraph" ? table.kind.paragraph : undefined)).toBe(parseMarkdown(markdown.slice(markdown.indexOf("| Item"))).text)
+    }
+    expect(parseBlockContentResult("")).toEqual({ kind: "fallback", reason: "empty" })
+    const oversized = "| x |\n| --- |\n" + "| x |\n".repeat(256)
+    expect(parseBlockContentResult(oversized)).toEqual({ kind: "fallback", reason: "invalid_projection" })
+  })
+
+  test("outgoing table fallback preserves canonical text/entities and only schedules supported media", async () => {
+    const markdown = "![before](https://example.com/b.png)\n\n| Item |\n| --- |\n| ![photo](https://example.com/a.png) |"
+    const flat = parseMarkdown(markdown)
+    const output = await processOutgoingText({ text: markdown, entities: undefined, parseMarkdown: true })
+    expect(output.text).toBe(flat.text)
+    expect(output.entities?.entities).toEqual(flat.entities)
+    expect(output.blockContent?.blocks.map(kind)).toEqual(["image", "paragraph"])
+    expect(output.blockImageSources).toEqual([{ path: [0], url: "https://example.com/b.png" }])
+    expect(output.blockContentWarnings).toEqual(["unsupported_table_content"])
+    expect(output.blockContentFallbackReason).toBeUndefined()
+    const literal = await processOutgoingText({ text: markdown, entities: undefined, parseMarkdown: false })
+    expect(literal.text).toBe(markdown)
+    expect(literal.blockContentFallbackReason).toBeUndefined()
+    expect(literal.blockContentWarnings).toBeUndefined()
+  })
+
+  test("text-only tables retain supported inline styles and TeX without interpreting math as media", () => {
+    const markdown = "| Value |\n| --- |\n| **b** <u>u</u> ~~s~~ ==h== [link](https://example.com) $\\text{![x](a)}$ |"
+    const result = parseBlockContentResult(markdown)
+    expect(result.kind).toBe("parsed")
+    if (result.kind !== "parsed") return
+    expect(result.value.blockContent.blocks.map(kind)).toEqual(["table"])
+    expect(result.value.imageSources).toEqual([])
+  })
+
+  test("an unsupported streamed table never removes or retypes completed prefix blocks", () => {
+    const prefix = "# Finished\n\n```ts\nconst value = 1\n```\n\n"
+    const tail = "| Item |\n| --- |\n| ![photo](https://example.com/a.png) |"
+    const completed = parseBlockContent(prefix)!.blockContent.blocks
+    expect(completed.map(kind)).toEqual(["heading", "code"])
+    for (let length = 0; length <= tail.length; length++) {
+      const result = parseBlockContent(prefix + tail.slice(0, length))
+      expect(result?.blockContent.blocks.slice(0, 2)).toEqual(completed)
+    }
+  })
+
   test("adds structure without changing the legacy projection", () => {
     const markdown = "# Hello **world**\n\nParagraph with `code`.\n\n---\n\n```swift\nlet x = 1\n```"
     const parsed = parseBlockContent(markdown)
@@ -325,7 +418,7 @@ describe("block content parser", () => {
     )
   })
 
-  test("keeps container-prefixed fences literal when no contiguous code range exists", () => {
+  test("projects completed and streaming container fences through canonical code ranges", () => {
     const markdown = [
       "> ```ts",
       "> const first = true",
@@ -338,9 +431,12 @@ describe("block content parser", () => {
 
     expect(quote?.kind.oneofKind).toBe("quote")
     expect(quote?.kind.oneofKind === "quote" ? quote.kind.quote.children.map(kind) : []).toEqual([
-      "paragraph",
-      "paragraph",
+      "code",
+      "code",
     ])
+    const children = quote?.kind.oneofKind === "quote" ? quote.kind.quote.children : []
+    expect(children.map((child) => textFor(markdown, child.kind.oneofKind === "code" ? child.kind.code.text : undefined)))
+      .toEqual(["const first = true", "let second = `value`"])
   })
 
   test("all structural streaming prefixes remain deterministic and valid", () => {
@@ -390,6 +486,38 @@ describe("block content parser", () => {
 
     expect(parseBlockContent(tooManyCells)).toBeUndefined()
     expect(parseMarkdown(tooManyCells).text).toBe(tooManyCells)
+  })
+
+  test("persisted tables retain the historical budget without relaxing native or structural validation", () => {
+    const table = (rows: number, columns: number): BlockContent => ({
+      blocks: [{
+        kind: {
+          oneofKind: "table",
+          table: {
+            alignments: Array.from({ length: columns }, () => BlockTable_Alignment.LEFT),
+            rows: Array.from({ length: rows }, () => ({
+              cells: Array.from({ length: columns }, () => ({ offset: 0n, length: 1n })),
+            })),
+          },
+        },
+      }],
+    })
+    const native = table(16, 16)
+    expect(() => validateBlockContent("x", native)).not.toThrow()
+    expect(() => validateBlockContent("x", native, "persisted")).not.toThrow()
+
+    const historical = table(256, 16)
+    expect(() => validateBlockContent("x", historical)).toThrow("Too many block table cells")
+    expect(() => validateBlockContent("x", historical, "persisted")).not.toThrow()
+    expect(() => encodeBlockContentToMarkdown({ text: "x", blockContent: historical })).not.toThrow()
+
+    expect(() => validateBlockContent("x", table(256, 17), "persisted")).toThrow("Too many block table cells")
+    expect(() => validateBlockContent("x", {
+      blocks: [...historical.blocks, ...native.blocks],
+    }, "persisted")).toThrow("Too many block table cells")
+    expect(() => validateBlockContent("", historical, "persisted")).toThrow("Block text range exceeds message text")
+    expect(() => validateBlockContent("x", table(257, 1), "persisted")).toThrow("Invalid block table dimensions")
+    expect(() => validateBlockContent("x", table(1, 65), "persisted")).toThrow("Invalid block table dimensions")
   })
 
   test("canonical Markdown is semantically idempotent", () => {

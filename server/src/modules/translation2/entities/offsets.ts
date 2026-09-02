@@ -11,12 +11,23 @@ export const toRange = (text: string, entity: MessageEntity): EntityRange | null
     !Number.isSafeInteger(length) ||
     start < 0 ||
     length <= 0 ||
-    end > text.length
+    end > text.length ||
+    splitsSurrogatePair(text, start) ||
+    splitsSurrogatePair(text, end)
   ) {
     return null
   }
 
   return { start, end }
+}
+
+/** Entity boundaries use UTF-16 units, but must not cut a Unicode scalar in
+ * half. Inserting Markdown between surrogate halves produces invalid UTF-8
+ * when the transport is encoded, even if stripping its markers could rejoin it. */
+export const splitsSurrogatePair = (text: string, offset: number): boolean => {
+  if (offset <= 0 || offset >= text.length) return false
+  const previous = text.charCodeAt(offset - 1), next = text.charCodeAt(offset)
+  return previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff
 }
 
 export const hasPartialOverlap = (a: EntityRange, b: EntityRange): boolean => {

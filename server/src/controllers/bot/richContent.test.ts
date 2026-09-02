@@ -14,6 +14,34 @@ import { encodeBotRichMessage } from "./richContent"
 const none = { oneofKind: undefined } as const
 
 describe("Bot rich content projection", () => {
+  test("ordered labels remain exact and unsafe numeric values are omitted", () => {
+    for (const start of [999_999_999n, 9_223_372_036_854_775_807n]) {
+      const rich = encodeBotRichMessage({ text: "ab", blockContent: { blocks: [{ kind: {
+        oneofKind: "list", list: { kind: BlockList_Kind.ORDERED, start, items: [0, 1].map((offset) => ({
+          children: [{ kind: { oneofKind: "paragraph", paragraph: { offset: BigInt(offset), length: 1n } } }],
+        })) },
+      } }] } })
+      const list = rich?.blocks[0]
+      expect(list?.type).toBe("list")
+      if (list?.type !== "list") throw new Error("missing list")
+      expect(list.items.map((item) => item.label)).toEqual([String(start), String(start + 1n)])
+      expect(list.items.map((item) => item.value)).toEqual(start <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? [Number(start), Number(start + 1n)] : [undefined, undefined])
+    }
+  })
+
+  test("nests all v2 styles while retaining Unicode text and ranges", () => {
+    const types = [MessageEntity_Type.UNDERLINE, MessageEntity_Type.STRIKETHROUGH, MessageEntity_Type.HIGHLIGHT]
+    const rich = encodeBotRichMessage({
+      text: "😀 hello",
+      entities: { entities: types.map((type) => ({ type, offset: 3n, length: 5n, entity: none })) },
+      blockContent: { blocks: [{ kind: { oneofKind: "paragraph", paragraph: { offset: 0n, length: 8n } } }] },
+    })
+    expect(rich).toEqual({ blocks: [{ type: "paragraph", text: ["😀 ", {
+      type: "underline", text: { type: "strikethrough", text: { type: "highlight", text: "hello" } },
+    }] }] })
+  })
+
   test("uses Telegram mention names and UTF-16 ranges for ordinary text", () => {
     const usersById = new Map([[7, { id: 7, is_bot: false, username: "maya" }]])
     const encoded = encodeBotEntities({

@@ -2,6 +2,7 @@ import type { InputTranslation } from "@in/server/db/models/translations"
 import { HARDCODED_TRANSLATION_CONTEXT, isProd } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import { fromMd, toMd } from "./entities"
+import { restoreCodeTrailingNewlines } from "./codeWhitespace"
 import { translateMarkdowns } from "./markdownTranslation"
 import type { MarkdownTranslationCallInput, TranslationCallInput } from "./types"
 
@@ -49,7 +50,7 @@ async function translateMessages(
       throw new Error(`Original message not found for messageId: ${translation.messageId}`)
     }
 
-    const parsed = fromMd(translation.markdown)
+    const parsed = restoreCodeTrailingNewlines(fromMd(translation.markdown), sourceMessage.text ?? "", sourceMessage.entities)
     const date = new Date()
     const msgRev = sourceMessage.rev ?? 0
 

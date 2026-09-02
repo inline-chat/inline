@@ -117,9 +117,13 @@ export async function translateMarkdowns(input: MarkdownTranslationCallInput): P
 
         # Markdown rules
         - Preserve links as markdown links and keep link URLs exactly unchanged.
-        - Preserve Inline links such as inline://user/... and inline://thread?... exactly; only translate the visible label.
+        - Preserve Inline links such as inline://user/..., inline://group/..., and inline://thread?... exactly, including every query parameter; only translate the visible label. Group links identify groups, never individual users.
+        - Preserve intentional underline (<u>text</u>), strikethrough (~~text~~), and highlight (==text==) around the corresponding translated words, including nested styles. These delimiters carry formatting, not prose or HTML to rewrite.
+        - Exact <b>, <i>, <u>, <s>, and <mark> tags without attributes also carry formatting, including on punctuation or whitespace. Preserve their matching closing tags around the corresponding content.
+        - Preserve character references such as &#32; and &#9; exactly; they carry literal whitespace. Preserve backslash escapes that keep literal text from becoming Markdown syntax.
         - Preserve inline code and code blocks exactly unless translating surrounding prose.
-        - If a formatting/entity span no longer applies naturally after translation, omit that markdown syntax.
+        - Preserve TeX formulas and their math delimiters exactly; translate only surrounding prose, never formula source, operators, variable names, or commands.
+        - If a formatting/entity span truly has no corresponding translated content, omit that markdown syntax; do not remove styles merely because their delimiters are unfamiliar.
         - Return markdown text only in the structured response. Never return entity JSON, offsets, explanations, or comments.
 
         # Guidelines

@@ -2,6 +2,8 @@ export const threadMdUrl = (chatId: bigint): string => {
   return `inline://thread?id=${encodeURIComponent(chatId.toString())}`
 }
 
+const maxInt64 = 9_223_372_036_854_775_807n
+
 export const parseThreadMdUrl = (rawUrl: string): bigint | null => {
   let url: URL
   try {
@@ -25,5 +27,5 @@ export const parseThreadMdUrl = (rawUrl: string): bigint | null => {
   }
 
   const chatId = BigInt(id)
-  return chatId > 0n ? chatId : null
+  return chatId > 0n && chatId <= maxInt64 ? chatId : null
 }

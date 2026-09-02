@@ -3,12 +3,16 @@ import { db } from "@in/server/db"
 import { botAgents, lower, userNotDeleted, users } from "@in/server/db/schema"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
-import { parseBlockContent, type BlockImageSource } from "@in/server/modules/message/blockContent"
+import { parseBlockContentResult, projectLiteralMathContent, type BlockContentFallbackReason, type BlockContentWarning, type BlockImageSource } from "@in/server/modules/message/blockContent"
 import {
   normalizeMarkdownInput,
+  mathOutputRanges,
   parseMarkdownWithSourceMap,
 } from "@in/server/modules/message/parseMarkdown"
 import { validateOutgoingMessageText } from "@in/server/modules/message/messageTextLimits"
+import { Log } from "@in/server/utils/log"
+
+const log = new Log("message.processOutgoingText")
 
 type ProcessOutgoingTextInput = {
   text: string
@@ -21,6 +25,9 @@ type ProcessOutgoingTextOutput = {
   entities: MessageEntities | undefined
   blockContent?: BlockContent
   blockImageSources?: BlockImageSource[]
+  /** Internal diagnostic only; not persisted, logged with text, or sent over the wire. */
+  blockContentFallbackReason?: BlockContentFallbackReason
+  blockContentWarnings?: BlockContentWarning[]
 }
 
 type MentionCandidate = {
@@ -51,6 +58,44 @@ type InlineThreadLinkTarget =
       spaceId: number | null
       title: string
     }
+
+const normalizeDisplayMathEntities = (
+  entities: MessageEntities | undefined,
+  blockContent: BlockContent | undefined,
+): MessageEntities | undefined => {
+  if (!entities) return undefined
+  const display = new Set<string>()
+  let visited = 0
+  const visit = (blocks: BlockContent["blocks"], depth: number): void => {
+    if (depth > 16) return
+    for (const block of blocks) {
+      if (++visited > 2_048) return
+      switch (block.kind.oneofKind) {
+        case "math":
+          display.add(`${block.kind.math.offset}:${block.kind.math.length}`)
+          break
+        case "list":
+          for (const item of block.kind.list.items) visit(item.children, depth + 1)
+          break
+        case "quote":
+          visit(block.kind.quote.children, depth + 1)
+          break
+        case "disclosure":
+          visit(block.kind.disclosure.children, depth + 1)
+          break
+      }
+    }
+  }
+  if (blockContent) visit(blockContent.blocks, 0)
+  return {
+    entities: entities.entities.map((entity) => {
+      if (entity.type !== MessageEntity_Type.MATH) return entity
+      const isDisplay = display.has(`${entity.offset}:${entity.length}`)
+      if (isDisplay) return { ...entity, entity: { oneofKind: "math", math: { display: true } } }
+      return entity.entity.oneofKind === "math" ? { ...entity, entity: { oneofKind: undefined } } : entity
+    }),
+  }
+}
 
 const isMentionChar = (char: string): boolean => {
   const code = char.charCodeAt(0)
@@ -604,9 +649,11 @@ const resolveInlineThreadLinks = (
 const parseMissingBotCommandEntities = ({
   text,
   entities,
+  protectedRanges = [],
 }: {
   text: string | undefined
   entities: MessageEntities | undefined
+  protectedRanges?: Array<{ start: number; end: number }>
 }): MessageEntities | undefined => {
   if (!text || !text.includes("/")) {
     return entities
@@ -617,7 +664,7 @@ const parseMissingBotCommandEntities = ({
     return entities
   }
 
-  const clientEntityRanges = getClientEntityRanges(entities)
+  const clientEntityRanges = [...getClientEntityRanges(entities), ...protectedRanges]
   const parsedCommandEntities = commandCandidates
     .filter((candidate) => {
       return !isRangeOverlappingClientEntity(
@@ -645,9 +692,11 @@ const parseMissingBotCommandEntities = ({
 const parseMissingMentionEntitiesByUsername = async ({
   text,
   entities,
+  protectedRanges = [],
 }: {
   text: string | undefined
   entities: MessageEntities | undefined
+  protectedRanges?: Array<{ start: number; end: number }>
 }): Promise<MessageEntities | undefined> => {
   if (!text || !text.includes("@")) {
     return entities
@@ -658,7 +707,7 @@ const parseMissingMentionEntitiesByUsername = async ({
     return entities
   }
 
-  const clientEntityRanges = getClientEntityRanges(entities)
+  const clientEntityRanges = [...getClientEntityRanges(entities), ...protectedRanges]
   const unresolvedMentionCandidates = mentionCandidates.filter((candidate) => {
     return !isRangeOverlappingClientEntity(
       { start: candidate.offset, end: candidate.offset + candidate.length },
@@ -734,7 +783,15 @@ export const processOutgoingText = async (
   let entities = input.entities
   const markdown = input.parseMarkdown ? normalizeMarkdownInput(input.text) : input.text
   const parsedMarkdown = input.parseMarkdown ? parseMarkdownWithSourceMap(markdown) : undefined
-  const parsedBlocks = parsedMarkdown ? parseBlockContent(markdown, parsedMarkdown) : undefined
+  const blockResult = parsedMarkdown ? parseBlockContentResult(markdown, parsedMarkdown) : undefined
+  const parsedBlocks = blockResult?.kind === "parsed"
+    ? blockResult.value
+    : !parsedMarkdown ? projectLiteralMathContent(input.text, input.entities) : undefined
+  if (blockResult?.kind === "fallback" && blockResult.reason !== "empty") {
+    log.warn("rich content projection fell back to flat text", { reason: blockResult.reason })
+  } else if (parsedBlocks?.warnings?.length) {
+    log.warn("rich content projection used a bounded fallback", { warnings: parsedBlocks.warnings })
+  }
 
   if (parsedMarkdown) {
     const processed = processMessageText({
@@ -746,17 +803,22 @@ export const processOutgoingText = async (
     entities = processed.entities
   }
 
+  entities = normalizeDisplayMathEntities(entities, parsedBlocks?.blockContent)
+
   entities = await resolveInlineMentionLinks(entities)
   entities = await validateAgentMentions(entities)
   entities = normalizeMentionRanges(text, entities)
   entities = resolveInlineThreadLinks(text, entities)
+  const protectedRanges = parsedMarkdown ? mathOutputRanges(parsedMarkdown) : []
   entities = parseMissingBotCommandEntities({
     text,
     entities,
+    protectedRanges,
   })
   entities = await parseMissingMentionEntitiesByUsername({
     text,
     entities,
+    protectedRanges,
   })
 
   return {
@@ -764,5 +826,7 @@ export const processOutgoingText = async (
     entities,
     blockContent: parsedBlocks?.blockContent,
     blockImageSources: parsedBlocks?.imageSources,
+    blockContentFallbackReason: blockResult?.kind === "fallback" ? blockResult.reason : undefined,
+    blockContentWarnings: parsedBlocks?.warnings,
   }
 }

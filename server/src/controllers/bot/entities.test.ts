@@ -3,6 +3,16 @@ import { MessageEntity_Type } from "@inline-chat/protocol/core"
 import { encodeBotEntities, parseBotEntities } from "./entities"
 
 describe("bot entities", () => {
+  test("round-trips range-only v2 styles without payload fields", () => {
+    const input = (["underline", "strikethrough", "highlight"] as const).map((type) => ({ type, offset: 3, length: 5 }))
+    const parsed = parseBotEntities(input)
+    expect(parsed?.entities.map((entity) => entity.type)).toEqual([
+      MessageEntity_Type.UNDERLINE, MessageEntity_Type.STRIKETHROUGH, MessageEntity_Type.HIGHLIGHT,
+    ])
+    expect(parsed?.entities.every((entity) => entity.entity.oneofKind === undefined)).toBe(true)
+    expect(encodeBotEntities(parsed)).toEqual(input)
+  })
+
   test("parses thread entities", () => {
     const entities = parseBotEntities([
       {

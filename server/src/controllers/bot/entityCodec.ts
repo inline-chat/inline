@@ -107,6 +107,14 @@ const parseEntityType = (
       return MessageEntity_Type.BOLD
     case "italic":
       return MessageEntity_Type.ITALIC
+    case "underline":
+      return MessageEntity_Type.UNDERLINE
+    case "strikethrough":
+      return MessageEntity_Type.STRIKETHROUGH
+    case "highlight":
+      return MessageEntity_Type.HIGHLIGHT
+    case "math":
+      return MessageEntity_Type.MATH
     case "username_mention":
       return MessageEntity_Type.USERNAME_MENTION
     case "code":
@@ -154,6 +162,14 @@ const typeToString = (
       return "bold"
     case MessageEntity_Type.ITALIC:
       return "italic"
+    case MessageEntity_Type.UNDERLINE:
+      return "underline"
+    case MessageEntity_Type.STRIKETHROUGH:
+      return "strikethrough"
+    case MessageEntity_Type.HIGHLIGHT:
+      return "highlight"
+    case MessageEntity_Type.MATH:
+      return "math"
     case MessageEntity_Type.USERNAME_MENTION:
       return "mention"
     case MessageEntity_Type.CODE:

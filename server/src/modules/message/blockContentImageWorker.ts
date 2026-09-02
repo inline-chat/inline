@@ -33,7 +33,6 @@ import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, not, or, sql } from "drizzle-orm"
 import {
-  blockContentLimits,
   getBlockImageAtPath,
   replaceBlockImageAtPath,
   validateBlockContent,
@@ -976,9 +975,7 @@ async function publishJob(
       throw new Error("Block image path changed while publishing")
     }
     try {
-      validateBlockContent(stored.text, stored.blockContent, {
-        maxTableCells: blockContentLimits.maxPersistedTableCells,
-      })
+      validateBlockContent(stored.text, stored.blockContent, "persisted")
       assertStoredBlockContentPayloadFits(stored)
     } catch (error) {
       throw new InvalidStoredBlockContentError(error)

@@ -78,6 +78,7 @@
     "mdast-util-from-markdown": "^2.0.2",
     "mdast-util-gfm": "^3.1.0",
     "micromark-extension-gfm": "^3.0.0",
+    "micromark-util-decode-string": "2.0.1",
     "nanoid": "^5.0.7",
     "nanoid-dictionary": "^4.3.0",
     "openai": "7.1.0",

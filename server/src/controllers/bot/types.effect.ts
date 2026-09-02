@@ -97,6 +97,10 @@ export const BotMessageEntityType = Schema.Literals([
   "email",
   "bold",
   "italic",
+  "underline",
+  "strikethrough",
+  "highlight",
+  "math",
   "code",
   "pre",
   "phone_number",
@@ -119,6 +123,10 @@ export const BotMessageEntityOutput = Schema.Struct({
     "email",
     "bold",
     "italic",
+    "underline",
+    "strikethrough",
+    "highlight",
+    "math",
     "code",
     "pre",
     "phone_number",
@@ -286,8 +294,9 @@ export const BotRichText: Schema.Codec<NeutralBotRichText> = Schema.suspend(
   (): Schema.Codec<NeutralBotRichText> => Schema.Union([
     Schema.String,
     Schema.mutable(Schema.Array(BotRichText)),
-    Schema.Struct({ type: Schema.Literals(["bold", "italic", "code"]), text: BotRichText }),
+    Schema.Struct({ type: Schema.Literals(["bold", "italic", "underline", "strikethrough", "highlight", "code"]), text: BotRichText }),
     Schema.Struct({ type: Schema.Literal("url"), text: BotRichText, url: Schema.String }),
+    Schema.Struct({ type: Schema.Literal("math"), text: BotRichText, latex: Schema.String }),
     Schema.Struct({
       type: Schema.Literal("email_address"),
       text: BotRichText,
@@ -325,6 +334,7 @@ export const BotRichText: Schema.Codec<NeutralBotRichText> = Schema.suspend(
 
 export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
   (): Schema.Codec<NeutralBotRichBlock> => Schema.Union([
+    Schema.Struct({ type: Schema.Literal("math"), latex: Schema.String }),
     Schema.Struct({
       type: Schema.Literal("paragraph"),
       text: BotRichText,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { MessageEntity_Type, type MessageEntities, type MessageEntity } from "@inline-chat/protocol/core"
 import { entityPolicies, fromMd, toMd } from "."
+import { parseMarkdown } from "../../message/parseMarkdown"
 
 const base = (type: MessageEntity_Type, offset: number, length: number): MessageEntity => ({
   type,
@@ -121,6 +122,81 @@ describe("translation2 entity toMd/fromMd", () => {
         entity: { oneofKind: "mention", mention: { userId: 10600n } },
       },
     ])
+  })
+
+  test("round-trips Agent identity alongside formatting and UTF-16 offsets", () => {
+    const text = "😀 Maya and Mo"
+    const entities = pack([
+      {
+        ...base(MessageEntity_Type.MENTION, 3, 4),
+        entity: { oneofKind: "mention", mention: { userId: 42n, agentId: 9_007_199_254_740_993n } },
+      },
+      base(MessageEntity_Type.BOLD, 3, 4),
+      {
+        ...base(MessageEntity_Type.MENTION, 12, 2),
+        entity: { oneofKind: "mention", mention: { userId: 43n } },
+      },
+    ])
+    const markdown = toMd(text, entities)
+    expect(markdown).toBe("😀 [**Maya**](inline://user?id=42&agent_id=9007199254740993) and [Mo](inline://user/43)")
+    expect(fromMd(markdown)).toEqual({ text, entities })
+  })
+
+  test("accepts existing user link forms with an Agent target", () => {
+    for (const url of [
+      "inline://user/42?agent_id=7",
+      "inline://user?id=42&agent_id=7",
+      "inline://user?user_id=42&agent_id=7",
+    ]) {
+      const parsed = fromMd(`[Maya](${url})`)
+      expect(parsed.text).toBe("Maya")
+      expect(parsed.entities.entities).toEqual([{
+        ...base(MessageEntity_Type.MENTION, 0, 4),
+        entity: { oneofKind: "mention", mention: { userId: 42n, agentId: 7n } },
+      }])
+    }
+  })
+
+  test("malformed Agent targets remain links instead of becoming backing-user mentions", () => {
+    for (const agentId of ["", "0", "-1", "1.5", "bad", "9223372036854775808"]) {
+      const url = `inline://user?id=42&agent_id=${agentId}`
+      const parsed = fromMd(`[Maya](${url})`)
+      expect(parsed.text).toBe("Maya")
+      expect(parsed.entities.entities).toEqual([{
+        ...base(MessageEntity_Type.TEXT_URL, 0, 4),
+        entity: { oneofKind: "textUrl", textUrl: { url } },
+      }])
+    }
+  })
+
+  test("invalid semantic targets never change entity kind during export", () => {
+    const target = "target"
+    const invalid: MessageEntity[] = [
+      { ...base(MessageEntity_Type.TEXT_URL, 0, target.length),
+        entity: { oneofKind: "textUrl", textUrl: { url: "inline://user/42" } } },
+      { ...base(MessageEntity_Type.MENTION, 0, target.length),
+        entity: { oneofKind: "mention", mention: { userId: 0n } } },
+      { ...base(MessageEntity_Type.MENTION, 0, target.length),
+        entity: { oneofKind: "mention", mention: { userId: 42n, agentId: 0n } } },
+      { ...base(MessageEntity_Type.MENTION, 0, target.length),
+        entity: { oneofKind: "mention", mention: { userId: 9_223_372_036_854_775_808n } } },
+      { ...base(MessageEntity_Type.THREAD, 0, target.length),
+        entity: { oneofKind: "thread", thread: { chatId: 0n } } },
+      { ...base(MessageEntity_Type.THREAD, 0, target.length),
+        entity: { oneofKind: "thread", thread: { chatId: 9_223_372_036_854_775_808n } } },
+      { ...base(MessageEntity_Type.THREAD_TITLE, 0, target.length),
+        entity: { oneofKind: "threadTitle", threadTitle: { spaceId: -1n, title: "Title" } } },
+      { ...base(MessageEntity_Type.THREAD_TITLE, 0, target.length),
+        entity: { oneofKind: "threadTitle", threadTitle: { spaceId: 9_223_372_036_854_775_808n, title: "Title" } } },
+      { ...base(MessageEntity_Type.THREAD_TITLE, 0, target.length),
+        entity: { oneofKind: "threadTitle", threadTitle: { spaceId: 0n, title: "   " } } },
+    ]
+
+    for (const entity of invalid) {
+      const markdown = toMd(target, pack([entity]))
+      expect(markdown).toBe(target)
+      expect(fromMd(markdown)).toEqual({ text: target, entities: pack([]) })
+    }
   })
 
   test("trims whitespace inside parsed mention link labels", () => {
@@ -250,6 +326,34 @@ describe("translation2 entity toMd/fromMd", () => {
     expect(markdown).toBe("literal \\* \\[x\\]\\(y\\) \\_ok\\_ \\`code\\`")
     expect(fromMd(markdown).text).toBe(text)
     expect(fromMd(markdown).entities.entities).toEqual([])
+  })
+
+  test("message and translation parsers preserve non-punctuation backslashes", () => {
+    for (const markdown of [String.raw`C:\notes\math`, String.raw`\α \9 \*literal\*`, "trailing\\"]) {
+      expect(fromMd(markdown).text).toBe(parseMarkdown(markdown).text)
+    }
+    expect(fromMd(String.raw`C:\notes\math`).text).toBe(String.raw`C:\notes\math`)
+  })
+
+  test("round-trips URLs with unbalanced parentheses and literal backslashes through both parsers", () => {
+    for (const url of ["https://example.com/a(b", "https://example.com/a)b", String.raw`https://example.com/a\q`,
+      String.raw`https://example.com/a\(b)c`]) {
+      const entities = pack([{
+        ...base(MessageEntity_Type.TEXT_URL, 0, 4),
+        entity: { oneofKind: "textUrl", textUrl: { url } },
+      }])
+      const markdown = toMd("link", entities)
+      expect(fromMd(markdown)).toEqual({ text: "link", entities })
+      expect(parseMarkdown(markdown)).toEqual({ text: "link", entities: entities.entities })
+    }
+  })
+
+  test("message and translation link parsing use the same punctuation escape rules", () => {
+    for (const markdown of [String.raw`[link](https://example.com/a\)b)`, String.raw`[link](https://example.com/a\q)`,
+      String.raw`[link](https://example.com/a(b)c)`]) {
+      const parsed = parseMarkdown(markdown)
+      expect(fromMd(markdown)).toEqual({ text: parsed.text, entities: pack(parsed.entities) })
+    }
   })
 
   test("detects literal entities after markdown parsing", () => {

@@ -10,7 +10,11 @@ import {
   type MessageEntities,
   type MessageEntity,
 } from "@inline-chat/protocol/core"
-import { cleanPreLanguage, codeDelimiter, preFence } from "../translation2/entities/code"
+import { cleanPreLanguage, preFence } from "../translation2/entities/code"
+import { toMd } from "../translation2/entities/toMarkdown"
+import { mathMarkdown } from "../translation2/entities/math"
+import { escapeLinkUrl, escapeMarkdownLineStarts } from "../translation2/entities/escape"
+import { toRange } from "../translation2/entities/offsets"
 import { validateBlockContent } from "./blockContent"
 
 export type BlockContentMarkdownEncoderOptions = {
@@ -23,7 +27,7 @@ export function encodeBlockContentToMarkdown(input: {
   blockContent: BlockContent
   options?: BlockContentMarkdownEncoderOptions
 }): string {
-  validateBlockContent(input.text, input.blockContent)
+  validateBlockContent(input.text, input.blockContent, "persisted")
   return encodeBlocks(input.blockContent.blocks, [], input).join("\n\n")
 }
 
@@ -44,6 +48,10 @@ function encodeBlock(block: Block, path: number[], input: EncoderInput): string 
       return encodeText(block.kind.paragraph, input)
     case "heading":
       return `${"#".repeat(block.kind.heading.level)} ${encodeText(block.kind.heading.text!, input)}`
+    case "math": {
+      const source = sliceText(block.kind.math, input.text)
+      return mathMarkdown(source, true) ?? escapePlainMarkdown(source)
+    }
     case "code": {
       const code = sliceText(block.kind.code.text!, input.text)
       const fence = preFence(code)
@@ -105,12 +113,15 @@ function encodeList(
   path: number[],
   input: EncoderInput,
 ): string {
-  let orderedNumber = Number(list.start ?? 1n)
+  let orderedNumber = list.start ?? 1n
   return list.items
     .map((item, itemIndex) => {
       const children = encodeBlocks(item.children, [...path, itemIndex], input).join("\n\n")
       const lines = children.split("\n")
-      const baseMarker = list.kind === BlockList_Kind.ORDERED ? `${orderedNumber++}. ` : "- "
+      // Only the first marker controls the parsed list's start; later markers
+      // must still fit CommonMark's nine-digit grammar.
+      const ordinal = orderedNumber++
+      const baseMarker = list.kind === BlockList_Kind.ORDERED ? `${ordinal <= 999_999_999n ? ordinal : 1n}. ` : "- "
       const marker = item.checked === undefined
         ? baseMarker
         : `${baseMarker}${item.checked ? "[x] " : "[ ] "}`
@@ -125,7 +136,7 @@ function encodeImage(image: BlockImage, path: number[], input: EncoderInput): st
   const url = input.options?.imageURL?.(path, image) ?? fallbackImageURL(image)
   const dimensions = imageDimensions(image)
   const hint = dimensions ? `{width=${dimensions.width} height=${dimensions.height}}` : ""
-  return `![${alt}](${escapeURL(url)})${hint}`
+  return `![${alt}](${escapeLinkUrl(url)})${hint}`
 }
 
 function fallbackImageURL(image: BlockImage): string {
@@ -148,96 +159,43 @@ function imageDimensions(image: BlockImage): { width: number; height: number } |
 function encodeText(range: BlockText, input: EncoderInput): string {
   const start = Number(range.offset)
   const end = Number(range.offset + range.length)
-  const entities = (input.entities?.entities ?? []).filter((entity) => {
-    const entityStart = Number(entity.offset)
-    const entityEnd = Number(entity.offset + entity.length)
-    return entityStart >= start && entityEnd <= end && entity.length > 0n
+  const entities = (input.entities?.entities ?? []).flatMap((entity) => {
+    const source = toRange(input.text, entity)
+    if (!source) return []
+    if (source.start >= start && source.end <= end) return [entity]
+    // Native formatting may cross paragraph/cell boundaries. Project only
+    // range-only styles into each text slice; partial links, mentions, code
+    // and TeX would change meaning if independently split here.
+    if (!rangeOnlyStyles.has(entity.type)) return []
+    const clippedStart = Math.max(start, source.start), clippedEnd = Math.min(end, source.end)
+    return clippedStart < clippedEnd ? [{ ...entity, offset: BigInt(clippedStart), length: BigInt(clippedEnd - clippedStart) }] : []
   })
   return encodeInline(input.text.slice(start, end), entities, start)
 }
 
+const rangeOnlyStyles = new Set([
+  MessageEntity_Type.BOLD, MessageEntity_Type.ITALIC, MessageEntity_Type.UNDERLINE,
+  MessageEntity_Type.STRIKETHROUGH, MessageEntity_Type.HIGHLIGHT,
+])
+
 function encodeInline(text: string, entities: MessageEntity[], globalStart: number): string {
-  const opens = new Map<number, MessageEntity[]>()
-  const closes = new Map<number, MessageEntity[]>()
-  for (const entity of entities) {
-    if (!inlineMarkers(entity, text, globalStart)) continue
-    const start = Number(entity.offset) - globalStart
-    const end = start + Number(entity.length)
-    opens.set(start, [...(opens.get(start) ?? []), entity])
-    closes.set(end, [...(closes.get(end) ?? []), entity])
-  }
-
-  for (const values of opens.values()) {
-    values.sort((left, right) => Number(right.length - left.length))
-  }
-  for (const values of closes.values()) {
-    values.sort((left, right) => Number(right.offset - left.offset))
-  }
-
-  let output = ""
-  let codeDepth = 0
-  for (let boundary = 0; boundary <= text.length; boundary++) {
-    for (const entity of closes.get(boundary) ?? []) {
-      const markers = inlineMarkers(entity, text, globalStart)
-      if (!markers) continue
-      output += markers.close
-      if (entity.type === MessageEntity_Type.CODE) codeDepth = Math.max(0, codeDepth - 1)
-    }
-    for (const entity of opens.get(boundary) ?? []) {
-      const markers = inlineMarkers(entity, text, globalStart)
-      if (!markers) continue
-      output += markers.open
-      if (entity.type === MessageEntity_Type.CODE) codeDepth += 1
-    }
-    if (boundary < text.length) {
-      const character = text[boundary]!
-      output += codeDepth > 0 ? character : escapePlainMarkdown(character)
-    }
-  }
-  return output
-}
-
-function inlineMarkers(
-  entity: MessageEntity,
-  text?: string,
-  globalStart = 0,
-): { open: string; close: string } | undefined {
-  switch (entity.type) {
-    case MessageEntity_Type.BOLD:
-      return { open: "**", close: "**" }
-    case MessageEntity_Type.ITALIC:
-      return { open: "*", close: "*" }
-    case MessageEntity_Type.CODE:
-      if (text === undefined) return { open: "`", close: "`" }
-      const start = Number(entity.offset) - globalStart
-      const end = start + Number(entity.length)
-      const delimiter = codeDelimiter(text.slice(start, end))
-      return { open: delimiter, close: delimiter }
-    case MessageEntity_Type.TEXT_URL:
-      return entity.entity.oneofKind === "textUrl"
-        ? { open: "[", close: `](${escapeURL(entity.entity.textUrl.url)})` }
-        : undefined
-    default:
-      return undefined
-  }
+  return toMd(text, {
+    entities: entities.map((entity) => ({ ...entity, offset: entity.offset - BigInt(globalStart) })),
+  }, escapePlainMarkdown)
 }
 
 function sliceText(range: BlockText, text: string): string {
   return text.slice(Number(range.offset), Number(range.offset + range.length))
 }
 
-function escapePlainMarkdown(value: string): string {
+function escapePlainMarkdown(value: string, atLineStart = true): string {
   let output = ""
   for (const character of value) {
     output += markdownEscapablePunctuation.has(character) ? `\\${character}` : character
   }
-  return output
+  return escapeMarkdownLineStarts(output, atLineStart)
 }
 
 const markdownEscapablePunctuation = new Set(
   Array.from("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"),
 )
-
-function escapeURL(value: string): string {
-  return value.replace(/\\/g, "%5C").replace(/\)/g, "%29").replace(/\(/g, "%28")
-}
