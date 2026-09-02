@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { eq } from "drizzle-orm"
 import { db } from "@in/server/db"
-import { users } from "@in/server/db/schema"
+import { inviteCodes, users } from "@in/server/db/schema"
 import { setupTestLifecycle } from "@in/server/__tests__/setup"
 import {
   getOrCreateUserByEmailForSignup,
@@ -104,6 +105,23 @@ describe("signup invite user setup state", () => {
     await expect(
       getOrCreateUserByPhoneForSignup("+15555550999"),
     ).rejects.toMatchObject({ type: "SIGNUPS_DISABLED", code: 400 })
+  })
+
+  it("does not let a valid invite code bypass disabled sign-ups", async () => {
+    process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = "disabled"
+    resetServerConfigCacheForTests()
+    await db.insert(inviteCodes).values({ code: "STOP1234" })
+
+    await expect(
+      getOrCreateUserByEmailForSignup("disabled-invited-signup@example.com", "STOP1234"),
+    ).rejects.toMatchObject({ type: "SIGNUPS_DISABLED", code: 400 })
+
+    expect(
+      await db.select().from(users).where(eq(users.email, "disabled-invited-signup@example.com")),
+    ).toHaveLength(0)
+    expect(
+      await db.select().from(inviteCodes).where(eq(inviteCodes.code, "STOP1234")),
+    ).toEqual([expect.objectContaining({ redeemedAt: null, redeemedByUserId: null })])
   })
 
   it("lets an existing pending user continue while new sign-ups are disabled", async () => {

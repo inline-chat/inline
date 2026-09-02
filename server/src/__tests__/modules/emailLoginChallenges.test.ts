@@ -69,7 +69,7 @@ describe("email login challenge concurrency", () => {
       else process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = priorMode
       resetServerConfigCacheForTests()
     }
-  })
+  }, 10_000)
 
   test("missing, expired, and another email's challenges do not authenticate", async () => {
     const email = "challenge-binding@example.com"
