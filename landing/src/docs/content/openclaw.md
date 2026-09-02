@@ -1,29 +1,49 @@
 ---
 title: "OpenClaw"
-description: "Configure the official Inline OpenClaw plugin."
+description: "Install the Inline plugin for OpenClaw."
 ---
 
-Add Inline as an OpenClaw channel. The current plugin targets the OpenClaw 2026.8 line from 2026.8.2. You also need a configured model provider and an [Inline bot token](/docs/creating-a-bot).
+## Easy setup
 
-For guided setup, use `inline agents setup --target openclaw`. The manual path follows.
+```bash
+inline agents setup --target openclaw
+```
+
+The command checks the installed OpenClaw version before creating a bot, installs
+the matching trusted plugin, restarts the gateway, and only reports ready after a
+live Inline probe. If it stops, the error includes the failed phase and retry
+command; no failed or partial run is reported as ready.
 
 ## Install
 
-Choose the plugin version for your OpenClaw release line:
-
-- OpenClaw `2026.8.x` (`>=2026.8.2`): Inline plugin `0.0.64` — `openclaw plugins install --force @inline-openclaw/inline@0.0.64`
-- OpenClaw `2026.7.x`: Inline plugin `0.0.63` — `openclaw plugins install --force @inline-openclaw/inline@0.0.63`
-- OpenClaw `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`): Inline plugin `0.0.63` — `openclaw plugins install --force @inline-openclaw/inline@0.0.63`
-
-The unversioned install follows the newest supported OpenClaw line:
+Install the compatible plugin for the current OpenClaw line:
 
 ```bash
-openclaw plugins install @inline-openclaw/inline
+openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
 ```
+
+### Version Match
+
+| OpenClaw                                          | Inline plugin |
+| ------------------------------------------------- | ------------- |
+| `2026.8.x` (`>=2026.8.2`)                         | `0.0.65`      |
+| `2026.7.x` (`>=2026.7.1`)                         | `0.0.63`      |
+| `2026.6.x` (`>=2026.6.11`, including `2026.6.34`) | `0.0.63`      |
+
+Install a matched version with:
+
+```bash
+openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
+```
+
+On OpenClaw 2026.8, `--accept-capabilities` approves the capabilities declared
+by Inline's trusted first-party package so the noninteractive install cannot
+stall on a prompt. Older supported hosts do not recognize that flag; install
+their matched `0.0.63` package with `--force` only.
 
 ## Configure
 
-Set `channels.inline` in your OpenClaw configuration. The example token is a placeholder; keep the real token out of source control and shared logs. You may leave `token` unset and provide `INLINE_TOKEN` in the gateway environment instead.
+Set `channels.inline`:
 
 ```yaml
 channels:
@@ -32,58 +52,66 @@ channels:
     token: "<INLINE_BOT_TOKEN>"
 ```
 
-| Default | Meaning |
-| --- | --- |
-| `dmPolicy: "pairing"` | DM users request access through pairing. |
-| `groupPolicy: "open"` | The integration does not restrict group chats to an allowlist. |
-| `requireMention: true` | Group messages require a bot mention by default. Following and reply-thread settings can change activation. |
+You may omit `token` and provide `INLINE_TOKEN` to the gateway.
 
-Review these defaults before adding the bot to shared chats. For a restricted bot, configure the user/group allowlists in the [access policy reference](https://github.com/inline-chat/inline/tree/main/openclaw#who-can-talk-to-the-bot). A mention gate is not an operator allowlist.
+Defaults:
 
-## Run
+- `dmPolicy: "pairing"`
+- `groupPolicy: "open"`
+- `requireMention: true`
 
-```bash
-openclaw gateway run
-```
+Configure allowlists for a restricted bot. A mention requirement is not an operator allowlist.
 
-Keep this foreground process running, or use your existing gateway service. Inspect the plugin and channel:
+## Restart
 
-```bash
-openclaw plugins list
-```
-
-```bash
-openclaw channels status
-```
-
-```bash
-openclaw plugins inspect inline --json
-```
-
-Open a DM with the bot, complete pairing if requested, and ask for a short reply. Verify the final response in Inline. “Configured” or “running” alone does not verify the model provider or message delivery.
-
-## Update
-
-```bash
-openclaw plugins install --force @inline-openclaw/inline@latest
-```
-
-This replaces the installed plugin package. Restart the gateway after updating; restarting can interrupt active work:
+Restart the gateway:
 
 ```bash
 openclaw gateway restart
 ```
 
-Recheck the plugin version and channel status.
+List plugins:
 
-## Troubleshooting
+```bash
+openclaw plugins list
+```
 
-| Symptom | Check |
-| --- | --- |
-| Plugin `inline` not found | Check `openclaw plugins list` and install the package in the same OpenClaw environment as the gateway. |
-| Channel reports no token | Provide the token through `channels.inline.token` or the gateway's `INLINE_TOKEN` environment. |
-| Bot ignores a DM | Complete pairing or check the configured sender allowlist. |
-| Bot ignores a group message | Check group policy, sender policy, and an explicit mention. |
-| Plugin runs but no reply arrives | Confirm provider sign-in and send a small DM test; inspect the gateway's error summary without sharing credentials. |
+Check the Inline channel:
 
-[Plugin source and reference](https://github.com/inline-chat/inline/tree/main/openclaw)
+```bash
+openclaw channels status --channel inline --probe --json
+```
+
+Inspect the plugin:
+
+```bash
+openclaw plugins inspect inline --json
+```
+
+Open a DM with the bot, complete pairing, and verify it works.
+
+## Update
+
+Ask OpenClaw to update the tracked Inline plugin:
+
+```bash
+openclaw plugins update inline --accept-capabilities
+```
+
+Restart after active work finishes:
+
+```bash
+openclaw gateway restart
+```
+
+## Checks
+
+- Plugin missing: check `openclaw plugins list` and the gateway's install environment.
+- Token missing: set `channels.inline.token` or `INLINE_TOKEN`.
+- DM ignored: complete pairing or check the sender allowlist.
+- Group ignored: check group policy, sender policy, and the mention.
+- No reply: check provider sign-in and gateway errors.
+
+---
+
+[Plugin source and configuration](https://github.com/inline-chat/inline/tree/main/openclaw)

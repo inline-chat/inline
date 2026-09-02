@@ -9,7 +9,10 @@ description: "Install Inline for Hermes Agent."
 inline agents setup --target hermes
 ```
 
-Note: This is brittle given all the moving parts and constant releases. If it fails, proceed with manual setup or ask your agent to follow this guide and set it up for you. It's easier if you install the Inline CLI first.
+The command installs and configures the adapter, restarts the gateway, and only
+reports ready after Hermes verifies the credential and the new gateway process.
+If a step fails, Inline shows the failed phase and a retry command instead of
+reporting the setup as ready.
 
 ## Install Manually
 
@@ -44,14 +47,18 @@ Select **Inline**, then create a bot or paste an existing [bot token](/docs/crea
 Check the installation:
 
 ```bash
-inline-hermes doctor
+inline-hermes doctor --json
 ```
 
 Probe Inline connectivity:
 
 ```bash
-hermes inline status
+hermes inline status --json --probe
+hermes gateway status
 ```
+
+The interactive Hermes wizard saves configuration first; restart and the probe
+above are the readiness check.
 
 Start the Hermes gateway, message the bot in Inline, and verify a final reply.
 Find your bot by entering its username in CMD+K on macOS or the Search tab on iOS.
