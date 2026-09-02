@@ -13,6 +13,7 @@ final class RichBlockTextShimmerView: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
+    isHidden = true
     layer?.masksToBounds = true
     shine.contents = NSImage(named: "shine")
     shine.contentsGravity = .resizeAspect
@@ -35,6 +36,7 @@ final class RichBlockTextShimmerView: NSView {
   }
 
   func updateMask(from surface: RichBlockTextSurface) {
+    guard !isHidden else { return }
     let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
     guard maskRevision != surface.renderRevision || maskSize != bounds.size || maskScale != scale else {
       return
@@ -48,9 +50,9 @@ final class RichBlockTextShimmerView: NSView {
   }
 
   func setAnimating(_ animate: Bool) {
+    isHidden = !animate
     guard animate != isAnimating else { return }
     isAnimating = animate
-    isHidden = !animate
     if animate {
       installAnimation()
     } else {

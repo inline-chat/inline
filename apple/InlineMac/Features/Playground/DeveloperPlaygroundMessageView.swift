@@ -53,7 +53,7 @@ struct DeveloperPlaygroundMessageView: View {
       }
     }
     .background(Color(nsColor: .windowBackgroundColor))
-    .onReceive(NotificationCenter.default.publisher(for: .richBlockDisclosureStateDidChange)) { notification in
+    .onReceive(NotificationCenter.default.publisher(for: .richBlockLayoutStateDidChange)) { notification in
       guard let messageStableID = notification.userInfo?["messageStableID"] as? Int64 else { return }
       richInteractionRevisions[messageStableID, default: 0] &+= 1
     }

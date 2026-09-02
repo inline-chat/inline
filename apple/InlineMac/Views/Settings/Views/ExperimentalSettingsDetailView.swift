@@ -36,6 +36,12 @@ struct ExperimentalSettingsDetailView: View {
             description: "Replace supported inline LaTeX with native formula attachments. Display formulas always render normally."
           )
         }
+        Toggle(isOn: $settings.richTextMultiSurfaceSelectionEnabled) {
+          SettingsRowLabel(
+            "Rich Message Multi-Block Selection",
+            description: "Select and copy across text blocks within one rich message."
+          )
+        }
       } header: {
         SettingsSectionHeader("Messages")
       }

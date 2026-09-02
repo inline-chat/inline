@@ -2,8 +2,13 @@ import InlineIOSUI
 import InlineKit
 import InlineProtocol
 import InlineUI
-import TextProcessing
 import UIKit
+import TextProcessing
+
+@MainActor
+func richTextHasInteractiveEntity(at index: Int, in text: NSAttributedString) -> Bool {
+  RichBlockEntityAccessibilityActionsV2.hasInteractiveEntity(at: index, in: text)
+}
 
 private func richTextCharacterIndex(
   at point: CGPoint,
@@ -56,10 +61,230 @@ struct RichBlockPaletteV2 {
 }
 
 struct RichBlockImageGallerySelectionV2 {
-  let photos: [PhotoInfo]
-  let initialIndex: Int
+  let image: BlockImageOccurrence
   let sourceView: UIView
   let sourceImage: UIImage?
+}
+
+@MainActor
+private final class RichBlockEntityAccessibilityActionsV2: NSObject {
+  private struct Binding {
+    let characterIndex: Int
+  }
+
+  private struct Occurrence {
+    let key: NSAttributedString.Key
+    let range: NSRange
+    let characterIndex: Int
+  }
+
+  private var text: NSAttributedString?
+  private var actions: [UIAccessibilityCustomAction]?
+  private var bindings: [ObjectIdentifier: Binding] = [:]
+  private var onActivate: ((NSAttributedString, Int) -> Bool)?
+
+  func update(
+    text next: NSAttributedString?,
+    onActivate: @escaping (NSAttributedString, Int) -> Bool
+  ) -> [UIAccessibilityCustomAction]? {
+    self.onActivate = onActivate
+    guard let next, next.length > 0 else {
+      clear()
+      return nil
+    }
+    if text?.isEqual(to: next) == true { return actions }
+
+    bindings.removeAll(keepingCapacity: true)
+    let snapshot = NSAttributedString(attributedString: next)
+    let occurrences = Self.occurrences(in: snapshot)
+    text = snapshot
+    guard !occurrences.isEmpty else {
+      actions = nil
+      return nil
+    }
+
+    let baseNames = occurrences.map { Self.actionName(for: $0, in: snapshot) }
+    let totals = Dictionary(grouping: baseNames, by: { $0 }).mapValues(\.count)
+    var positions: [String: Int] = [:]
+    let rebuilt = zip(occurrences, baseNames).map { occurrence, baseName in
+      positions[baseName, default: 0] += 1
+      let name: String
+      if let total = totals[baseName], total > 1 {
+        name = String.localizedStringWithFormat(
+          NSLocalizedString("%@ (%lld of %lld)", comment: "Disambiguates repeated VoiceOver rich-text actions"),
+          baseName,
+          Int64(positions[baseName, default: 1]),
+          Int64(total)
+        )
+      } else {
+        name = baseName
+      }
+      let action = UIAccessibilityCustomAction(
+        name: name,
+        target: self,
+        selector: #selector(performEntityAction(_:))
+      )
+      bindings[ObjectIdentifier(action)] = Binding(characterIndex: occurrence.characterIndex)
+      return action
+    }
+    actions = rebuilt
+    return rebuilt
+  }
+
+  func clear() {
+    text = nil
+    actions = nil
+    bindings.removeAll(keepingCapacity: true)
+    onActivate = nil
+  }
+
+  @objc private func performEntityAction(_ action: UIAccessibilityCustomAction) -> Bool {
+    guard let binding = bindings[ObjectIdentifier(action)],
+          let text,
+          binding.characterIndex >= 0,
+          binding.characterIndex < text.length,
+          let onActivate
+    else { return false }
+    return onActivate(text, binding.characterIndex)
+  }
+
+  private static func occurrences(in text: NSAttributedString) -> [Occurrence] {
+    let fullRange = NSRange(location: 0, length: text.length)
+    let keys: [NSAttributedString.Key] = [
+      .mentionUserId,
+      .mentionGroupId,
+      .threadLink,
+      .inlineCode,
+      .botCommand,
+      .emailAddress,
+      .phoneNumber,
+      .link,
+    ]
+    var accepted: [Occurrence] = []
+    var claimed: [NSRange] = []
+
+    for key in keys {
+      var newlyClaimed: [NSRange] = []
+      var location = 0
+      while location < text.length {
+        var range = NSRange(location: 0, length: 0)
+        let value = text.attribute(key, at: location, longestEffectiveRange: &range, in: fullRange)
+        let next = max(location + 1, NSMaxRange(range))
+        defer { location = next }
+        guard range.length > 0,
+              valid(value, for: key),
+              let characterIndex = firstUnclaimedIndex(in: range, claimed: claimed)
+        else { continue }
+        accepted.append(Occurrence(key: key, range: range, characterIndex: characterIndex))
+        newlyClaimed.append(range)
+      }
+      // Effective ranges for one key never overlap. Merge once per key,
+      // rather than sorting the growing claim set for every occurrence.
+      var merged: [NSRange] = []
+      for range in (claimed + newlyClaimed).sorted(by: { $0.location < $1.location }) {
+        if let last = merged.last, range.location <= NSMaxRange(last) {
+          merged[merged.count - 1].length = max(NSMaxRange(last), NSMaxRange(range)) - last.location
+        } else {
+          merged.append(range)
+        }
+      }
+      claimed = merged
+    }
+
+    return accepted.sorted {
+      if $0.range.location != $1.range.location { return $0.range.location < $1.range.location }
+      return $0.range.length < $1.range.length
+    }
+  }
+
+  private static func firstUnclaimedIndex(in range: NSRange, claimed: [NSRange]) -> Int? {
+    var location = range.location
+    let end = NSMaxRange(range)
+    var low = 0, high = claimed.count
+    while low < high {
+      let middle = (low + high) / 2
+      if NSMaxRange(claimed[middle]) <= location { low = middle + 1 } else { high = middle }
+    }
+    for occupied in claimed.dropFirst(low) {
+      if occupied.location >= end { break }
+      if occupied.location > location { return location }
+      location = max(location, NSMaxRange(occupied))
+      if location >= end { return nil }
+    }
+    return location < end ? location : nil
+  }
+
+  static func hasInteractiveEntity(at index: Int, in text: NSAttributedString) -> Bool {
+    guard index >= 0, index < text.length else { return false }
+    let keys: [NSAttributedString.Key] = [
+      .mentionUserId, .mentionGroupId, .threadLink, .inlineCode,
+      .botCommand, .emailAddress, .phoneNumber, .link,
+    ]
+    return keys.contains { valid(text.attribute($0, at: index, effectiveRange: nil), for: $0) }
+  }
+
+  private static func valid(_ value: Any?, for key: NSAttributedString.Key) -> Bool {
+    if key == .mentionUserId || key == .mentionGroupId {
+      return (value as? Int64).map { $0 > 0 } ?? false
+    }
+    if key == .threadLink { return value is ThreadLinkTarget }
+    if key == .inlineCode { return value as? Bool == true }
+    if key == .botCommand { return value is String }
+    if key == .emailAddress || key == .phoneNumber {
+      guard let value = value as? String else { return false }
+      return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    if key == .link { return resolvedLinkURL(value) != nil }
+    return false
+  }
+
+  private static func resolvedLinkURL(_ value: Any?) -> URL? {
+    if let url = value as? URL, LinkDetector.isSupportedLinkURL(url) { return url }
+    guard let string = value as? String, !string.isEmpty else { return nil }
+    if let url = URL(string: string), LinkDetector.isSupportedLinkURL(url) { return url }
+    guard !string.contains("://"),
+          let url = URL(string: "https://\(string)"),
+          LinkDetector.isSupportedLinkURL(url)
+    else { return nil }
+    return url
+  }
+
+  private static func actionName(for occurrence: Occurrence, in text: NSAttributedString) -> String {
+    let source = RichTextMath.sourceText(text, range: occurrence.range)
+      ?? (text.string as NSString).substring(with: occurrence.range)
+    let collapsed = source.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    let snippet = collapsed.count > 60 ? String(collapsed.prefix(59)) + "…" : collapsed
+
+    let name: String
+    let format: String
+    switch occurrence.key {
+    case .mentionUserId:
+      name = NSLocalizedString("Open mention", comment: "VoiceOver action for a rich-text user mention")
+      format = NSLocalizedString("Open mention: %@", comment: "VoiceOver action for a labeled rich-text user mention")
+    case .mentionGroupId:
+      name = NSLocalizedString("Open group mention", comment: "VoiceOver action for a rich-text group mention")
+      format = NSLocalizedString("Open group mention: %@", comment: "VoiceOver action for a labeled rich-text group mention")
+    case .threadLink:
+      name = NSLocalizedString("Open thread", comment: "VoiceOver action for a rich-text thread link")
+      format = NSLocalizedString("Open thread: %@", comment: "VoiceOver action for a labeled rich-text thread link")
+    case .inlineCode:
+      name = NSLocalizedString("Copy code", comment: "VoiceOver action for inline code")
+      format = NSLocalizedString("Copy code: %@", comment: "VoiceOver action for labeled inline code")
+    case .botCommand:
+      name = NSLocalizedString("Send command", comment: "VoiceOver action for a bot command")
+      format = NSLocalizedString("Send command: %@", comment: "VoiceOver action for a labeled bot command")
+    case .emailAddress:
+      name = NSLocalizedString("Copy email", comment: "VoiceOver action for an email address")
+      format = NSLocalizedString("Copy email: %@", comment: "VoiceOver action for a labeled email address")
+    case .phoneNumber:
+      name = NSLocalizedString("Copy number", comment: "VoiceOver action for a phone number")
+      format = NSLocalizedString("Copy number: %@", comment: "VoiceOver action for a labeled phone number")
+    default:
+      name = NSLocalizedString("Open link", comment: "VoiceOver action for a rich-text link")
+      format = NSLocalizedString("Open link: %@", comment: "VoiceOver action for a labeled rich-text link")
+    }
+    return snippet.isEmpty ? name : String.localizedStringWithFormat(format, snippet)
+  }
 }
 
 private struct RichBlockRenderContextV2 {
@@ -69,7 +294,7 @@ private struct RichBlockRenderContextV2 {
   let palette: RichBlockPaletteV2
   let message: InlineKit.Message
   let onDisclosureToggle: (BlockContentPath, Bool) -> Void
-  let onEntityTap: (NSAttributedString, Int) -> Void
+  let onEntityTap: (NSAttributedString, Int) -> Bool
   let onImageTap: (RichBlockImageGallerySelectionV2) -> Void
 
   func text(for node: RichBlockLayoutPlanV2.TextNode, maximumWidth: CGFloat? = nil) -> NSAttributedString {
@@ -162,11 +387,7 @@ private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
           math.range.length <= context.attributedText.length - math.range.location
     else { prepareForReuse(); return }
     source = (context.attributedText.string as NSString).substring(with: math.range)
-    let next = RichTextMath.request(
-      text: context.attributedText,
-      range: math.range,
-      fontSize: context.baseFontSize
-    )
+    let next = RichTextMath.request(text: context.attributedText, range: math.range, fontSize: context.baseFontSize)
     if request != next {
       imageView.image = nil
       scrollView.contentOffset = .zero
@@ -182,9 +403,7 @@ private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
     scrollView.isHidden = !rendered
     if rendered, imageView.image == nil { progress.startAnimating() } else { progress.stopAnimating() }
     if !rendered {
-      sourceView.attributedText = context.text(
-        for: .init(range: math.range, role: .paragraph, literal: nil, isRTL: false)
-      )
+      sourceView.attributedText = context.text(for: .init(range: math.range, role: .paragraph, literal: nil, isRTL: false))
     }
     isAccessibilityElement = rendered
     if rendered {
@@ -209,12 +428,7 @@ private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
     sourceView.frame = bounds
     scrollView.frame = bounds
     let size = imageSize ?? .zero
-    imageView.frame = CGRect(
-      x: 0,
-      y: max(0, (bounds.height - size.height) / 2),
-      width: size.width,
-      height: size.height
-    )
+    imageView.frame = CGRect(x: 0, y: max(0, (bounds.height - size.height) / 2), width: size.width, height: size.height)
     scrollView.contentSize = CGSize(width: max(bounds.width, size.width), height: bounds.height)
     progress.center = CGPoint(x: min(bounds.width / 2, 16), y: bounds.height / 2)
   }
@@ -241,14 +455,16 @@ private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
 
 private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
   RichBlockEntityHittableV2,
-  RichBlockTextSurfaceProvidingV2
+  RichBlockTextSurfaceProvidingV2,
+  UIGestureRecognizerDelegate
 {
   private let textView = CodeBlockTextView()
+  private let entityAccessibility = RichBlockEntityAccessibilityActionsV2()
   var textSurface: UITextView {
     textView
   }
 
-  private var onEntityTap: ((NSAttributedString, Int) -> Void)?
+  private var onEntityTap: ((NSAttributedString, Int) -> Bool)?
 
   init(kind: RichBlockRenderKindV2 = .text) {
     super.init(kind)
@@ -261,7 +477,9 @@ private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
     textView.dataDetectorTypes = []
     textView.isUserInteractionEnabled = true
     addSubview(textView)
-    textView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap(_:))))
+    let entityTap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+    entityTap.delegate = self
+    textView.addGestureRecognizer(entityTap)
   }
 
   override func layoutSubviews() {
@@ -271,15 +489,36 @@ private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
 
   override func apply(node: RichBlockLayoutPlanV2.Node, context: RichBlockRenderContextV2) {
     guard case let .text(text) = node.kind else { return }
-    textView.attributedText = context.text(for: text, maximumWidth: node.frame.width)
+    let attributed = context.text(for: text, maximumWidth: node.frame.width)
+    if textView.attributedText?.isEqual(to: attributed) != true { textView.attributedText = attributed }
     onEntityTap = context.onEntityTap
     isAccessibilityElement = true
+    if case .heading = text.role { accessibilityTraits = [.staticText, .header] }
+    else { accessibilityTraits = [.staticText] }
     accessibilityLabel = RichTextMath.sourceText(textView.attributedText) ?? textView.attributedText.string
+    accessibilityCustomActions = entityAccessibility.update(
+      text: textView.attributedText,
+      onActivate: context.onEntityTap
+    )
+  }
+
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    textView.attributedText = nil
+    onEntityTap = nil
+    accessibilityLabel = nil
+    accessibilityCustomActions = nil
+    entityAccessibility.clear()
+  }
+
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    guard let hit = entityHit(at: gestureRecognizer.location(in: self)) else { return false }
+    return richTextHasInteractiveEntity(at: hit.characterIndex, in: hit.text)
   }
 
   @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
     guard let hit = entityHit(at: gesture.location(in: self)) else { return }
-    onEntityTap?(hit.text, hit.characterIndex)
+    _ = onEntityTap?(hit.text, hit.characterIndex)
   }
 
   func entityHit(at point: CGPoint) -> (text: NSAttributedString, characterIndex: Int)? {
@@ -313,7 +552,14 @@ private final class RichBlockListMarkerNodeViewV2: RichBlockRenderableViewV2 {
     color = context.palette.primary
     font = .systemFont(ofSize: context.baseFontSize)
     setNeedsDisplay()
-    isAccessibilityElement = false
+    isAccessibilityElement = true
+    accessibilityTraits = .staticText
+    accessibilityLabel = switch marker {
+      case "•": String(localized: "List item")
+      case "☑": String(localized: "Checked item")
+      case "☐": String(localized: "Unchecked item")
+      default: String(localized: "Item \(marker)")
+    }
   }
 
   override func draw(_ rect: CGRect) {
@@ -377,19 +623,24 @@ private final class RichBlockListMarkerNodeViewV2: RichBlockRenderableViewV2 {
   override func prepareForReuse() {
     super.prepareForReuse()
     marker = ""
+    accessibilityLabel = nil
+    isAccessibilityElement = false
   }
 }
 
 private final class RichBlockTextShimmerViewV2: UIView {
   private let gradient = CAGradientLayer()
   private let glyphMask = CALayer()
+  private var maskNeedsUpdate = true
+  private var maskSize = CGSize.zero
+  private var maskScale: CGFloat = 0
 
   override init(frame: CGRect) {
     super.init(frame: frame)
     isUserInteractionEnabled = false
     gradient.colors = [
       UIColor.clear.cgColor,
-      UIColor.white.withAlphaComponent(0.92).cgColor,
+      UIColor.white.cgColor,
       UIColor.clear.cgColor,
     ]
     gradient.startPoint = CGPoint(x: 0, y: 0.5)
@@ -411,17 +662,26 @@ private final class RichBlockTextShimmerViewV2: UIView {
   }
 
   func updateMask(from textView: UITextView) {
-    guard bounds.width > 0, bounds.height > 0 else { return }
+    guard !isHidden, bounds.width > 0, bounds.height > 0 else { return }
+    let scale = max(window?.screen.scale ?? UIScreen.main.scale, 1)
+    guard maskNeedsUpdate || maskSize != bounds.size || maskScale != scale else { return }
+    maskNeedsUpdate = false
+    maskSize = bounds.size
+    maskScale = scale
     textView.layoutIfNeeded()
     let format = UIGraphicsImageRendererFormat()
     format.opaque = false
-    format.scale = max(window?.screen.scale ?? UIScreen.main.scale, 1)
+    format.scale = scale
     let renderer = UIGraphicsImageRenderer(size: bounds.size, format: format)
     let image = renderer.image { context in
       textView.layer.render(in: context.cgContext)
     }
     glyphMask.contents = image.cgImage
     glyphMask.contentsScale = format.scale
+  }
+
+  func invalidateMask() {
+    maskNeedsUpdate = true
   }
 
   func setAnimating(_ animating: Bool) {
@@ -444,6 +704,7 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
   RichBlockEntityHittableV2
 {
   private let title = CodeBlockTextView()
+  private let entityAccessibility = RichBlockEntityAccessibilityActionsV2()
   private let chevron = UIImageView()
   private let shimmer = RichBlockTextShimmerViewV2()
   private var path = BlockContentPath()
@@ -451,7 +712,7 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
   private var progress = false
   private var isRTL = false
   private var onToggle: ((BlockContentPath, Bool) -> Void)?
-  private var onEntityTap: ((NSAttributedString, Int) -> Void)?
+  private var onEntityTap: ((NSAttributedString, Int) -> Bool)?
 
   init() {
     super.init(.disclosure)
@@ -491,23 +752,28 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
     isRTL = text.isRTL
     onToggle = context.onDisclosureToggle
     onEntityTap = context.onEntityTap
-    let attributed = NSMutableAttributedString(
-      attributedString: context.text(for: text, maximumWidth: max(1, node.frame.width - 24))
+    let attributed = NSMutableAttributedString(attributedString: context.text(for: text, maximumWidth: max(1, node.frame.width - 24)))
+    attributed.addAttribute(
+      .foregroundColor,
+      value: context.palette.secondary,
+      range: NSRange(location: 0, length: attributed.length)
     )
-    if progress {
-      attributed.addAttribute(
-        .foregroundColor,
-        value: context.palette.primary.withAlphaComponent(0.78),
-        range: NSRange(location: 0, length: attributed.length)
-      )
+    if title.attributedText?.isEqual(to: attributed) != true {
+      title.attributedText = attributed
+      shimmer.invalidateMask()
     }
-    title.attributedText = attributed
     updateChevron()
     chevron.tintColor = context.palette.secondary
     backgroundColor = .clear
     shimmer.isHidden = !progress
     accessibilityLabel = RichTextMath.sourceText(attributed) ?? attributed.string
-    accessibilityValue = isExpanded ? "Expanded" : "Collapsed"
+    accessibilityValue = isExpanded
+      ? NSLocalizedString("Expanded", comment: "Expanded disclosure accessibility state")
+      : NSLocalizedString("Collapsed", comment: "Collapsed disclosure accessibility state")
+    accessibilityCustomActions = entityAccessibility.update(
+      text: title.attributedText,
+      onActivate: context.onEntityTap
+    )
     updateShimmerAnimation()
   }
 
@@ -552,27 +818,36 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
     super.prepareForReuse()
     onToggle = nil
     onEntityTap = nil
+    title.attributedText = nil
+    shimmer.invalidateMask()
+    accessibilityLabel = nil
+    accessibilityCustomActions = nil
+    entityAccessibility.clear()
     shimmer.setAnimating(false)
   }
 
   @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
     let point = gesture.location(in: self)
     if let hit = entityHit(at: point),
-       isInteractiveEntity(in: hit.text, at: hit.characterIndex)
+       isInteractiveEntity(in: hit.text, at: hit.characterIndex),
+       onEntityTap?(hit.text, hit.characterIndex) == true
     {
-      onEntityTap?(hit.text, hit.characterIndex)
       return
     }
     expanded.toggle()
     updateChevron()
-    accessibilityValue = expanded ? "Expanded" : "Collapsed"
+    accessibilityValue = expanded
+      ? NSLocalizedString("Expanded", comment: "Expanded disclosure accessibility state")
+      : NSLocalizedString("Collapsed", comment: "Collapsed disclosure accessibility state")
     onToggle?(path, expanded)
   }
 
   override func accessibilityActivate() -> Bool {
     expanded.toggle()
     updateChevron()
-    accessibilityValue = expanded ? "Expanded" : "Collapsed"
+    accessibilityValue = expanded
+      ? NSLocalizedString("Expanded", comment: "Expanded disclosure accessibility state")
+      : NSLocalizedString("Collapsed", comment: "Collapsed disclosure accessibility state")
     onToggle?(path, expanded)
     return true
   }
@@ -640,16 +915,22 @@ private enum RichCodeSyntaxHighlighterV2 {
   }
 
   static func tokens(for text: String, language: String?) -> [RichCodeTokenV2] {
-    guard let language = normalized(language),
+    guard !Task.isCancelled, let language = normalized(language),
           text.utf16.count <= maximumUTF16Length,
           text.lazy.filter({ $0 == "\n" }).prefix(maximumLines).count < maximumLines
     else { return [] }
 
     let fullRange = NSRange(location: 0, length: (text as NSString).length)
+    // Advisory wall-time bound in addition to source limits. ICU progress
+    // callbacks let cancellation stop searches that have not found a match.
+    let deadline = ContinuousClock.now + .milliseconds(25)
     var candidates: [(priority: Int, token: RichCodeTokenV2)] = []
     func append(pattern: String, kind: RichCodeTokenKindV2, priority: Int, options: NSRegularExpression.Options = []) {
-      guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return }
-      for match in expression.matches(in: text, range: fullRange) where match.range.length > 0 {
+      guard !Task.isCancelled, ContinuousClock.now < deadline,
+            let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return }
+      expression.enumerateMatches(in: text, options: .reportProgress, range: fullRange) { match, _, stop in
+        guard !Task.isCancelled, ContinuousClock.now < deadline else { stop.pointee = true; return }
+        guard let match, match.range.length > 0 else { return }
         candidates.append((priority, .init(range: match.range, kind: kind)))
       }
     }
@@ -681,9 +962,11 @@ private enum RichCodeSyntaxHighlighterV2 {
 
     var occupied = IndexSet()
     var accepted: [RichCodeTokenV2] = []
+    guard !Task.isCancelled, ContinuousClock.now < deadline else { return [] }
     for candidate in candidates.sorted(by: {
       $0.priority == $1.priority ? $0.token.range.location < $1.token.range.location : $0.priority < $1.priority
     }) {
+      guard !Task.isCancelled else { return [] }
       let range = candidate.token.range.location ..< NSMaxRange(candidate.token.range)
       guard !occupied.intersects(integersIn: range) else { continue }
       occupied.insert(integersIn: range)
@@ -922,6 +1205,24 @@ private enum RichCodeSyntaxHighlighterV2 {
 }
 
 private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBlockTextSurfaceProvidingV2 {
+  private struct HighlightSignature: Equatable {
+    let code: String
+    let language: String?
+    let font: UIFont
+    let primary: UIColor
+    let secondary: UIColor
+    let accent: UIColor
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+      lhs.code.utf8.elementsEqual(rhs.code.utf8)
+        && lhs.language == rhs.language
+        && lhs.font == rhs.font
+        && lhs.primary.isEqual(rhs.primary)
+        && lhs.secondary.isEqual(rhs.secondary)
+        && lhs.accent.isEqual(rhs.accent)
+    }
+  }
+
   private let languageLabel = UILabel()
   private let copyButton = UIButton(type: .system)
   private let gutterLabel = UILabel()
@@ -937,6 +1238,8 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
   private var codeContentWidth: CGFloat = 0
   private var highlightGeneration: UInt64 = 0
   private var highlightTask: Task<Void, Never>?
+  private var highlightSignature: HighlightSignature?
+  private var completedHighlightSignature: HighlightSignature?
   private var copyFeedbackTask: Task<Void, Never>?
 
   init() {
@@ -992,23 +1295,31 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
       ofSize: context.baseFontSize * 0.9,
       weight: .regular
     )
-    textView.attributedText = NSAttributedString(
-      string: code,
-      attributes: [
-        .font: UIFont.monospacedSystemFont(ofSize: context.baseFontSize * 0.9, weight: .regular),
-        .foregroundColor: context.palette.primary,
-      ]
+    let font = UIFont.monospacedSystemFont(ofSize: context.baseFontSize * 0.9, weight: .regular)
+    let signature = HighlightSignature(
+      code: code,
+      language: language,
+      font: font,
+      primary: context.palette.primary,
+      secondary: context.palette.secondary,
+      accent: context.palette.accent
     )
+    if highlightSignature != signature {
+      highlightSignature = signature
+      completedHighlightSignature = nil
+      textView.attributedText = NSAttributedString(
+        string: code,
+        attributes: [.font: font, .foregroundColor: context.palette.primary]
+      )
+      startHighlight(for: signature)
+    } else if highlightTask == nil, completedHighlightSignature != signature {
+      startHighlight(for: signature)
+    }
     gutterLabel.text = codeNode.gutterWidth > 0
       ? (1 ... codeNode.lineCount).map(String.init).joined(separator: "\n")
       : nil
     gutterLabel.textColor = context.palette.secondary.withAlphaComponent(0.7)
     gutterLabel.isHidden = codeNode.gutterWidth == 0
-    requestHighlight(
-      primary: context.palette.primary,
-      secondary: context.palette.secondary,
-      accent: context.palette.accent
-    )
     setNeedsLayout()
   }
 
@@ -1020,6 +1331,11 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
       highlightTask = nil
       copyFeedbackTask?.cancel()
       copyFeedbackTask = nil
+    } else if let signature = highlightSignature,
+              highlightTask == nil,
+              completedHighlightSignature != signature
+    {
+      startHighlight(for: signature)
     }
   }
 
@@ -1028,6 +1344,8 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     highlightGeneration &+= 1
     highlightTask?.cancel()
     highlightTask = nil
+    highlightSignature = nil
+    completedHighlightSignature = nil
     copyFeedbackTask?.cancel()
     copyFeedbackTask = nil
     setCopyFeedback(copied: false)
@@ -1118,31 +1436,43 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
     }
   }
 
-  private func requestHighlight(primary: UIColor, secondary: UIColor, accent: UIColor) {
+  private func startHighlight(for signature: HighlightSignature) {
     highlightGeneration &+= 1
     let generation = highlightGeneration
     highlightTask?.cancel()
-    guard RichCodeSyntaxHighlighterV2.supports(language: language), !code.isEmpty else {
+    guard RichCodeSyntaxHighlighterV2.supports(language: signature.language),
+          !signature.code.isEmpty
+    else {
+      highlightTask = nil
+      completedHighlightSignature = signature
+      return
+    }
+    guard window != nil else {
       highlightTask = nil
       return
     }
 
-    let code = code
-    let language = language
-    let font = textView.font ?? UIFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+    let code = signature.code
+    let language = signature.language
     highlightTask = Task { @MainActor [weak self] in
-      let tokens = await Task.detached(priority: .utility) {
+      let worker = Task.detached(priority: .utility) {
         RichCodeSyntaxHighlighterV2.tokens(for: code, language: language)
-      }.value
+      }
+      let tokens = await withTaskCancellationHandler {
+        await worker.value
+      } onCancel: {
+        worker.cancel()
+      }
       guard !Task.isCancelled,
             let self,
             highlightGeneration == generation,
-            self.code == code
+            self.highlightSignature == signature,
+            self.code.utf8.elementsEqual(code.utf8)
       else { return }
 
       let highlighted = NSMutableAttributedString(
         string: code,
-        attributes: [.font: font, .foregroundColor: primary]
+        attributes: [.font: signature.font, .foregroundColor: signature.primary]
       )
       for token in tokens where token.range.location >= 0
         && token.range.location <= highlighted.length
@@ -1150,11 +1480,18 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
       {
         highlighted.addAttribute(
           .foregroundColor,
-          value: Self.tokenColor(token.kind, primary: primary, secondary: secondary, accent: accent),
+          value: Self.tokenColor(
+            token.kind,
+            primary: signature.primary,
+            secondary: signature.secondary,
+            accent: signature.accent
+          ),
           range: token.range
         )
       }
       textView.attributedText = highlighted
+      completedHighlightSignature = signature
+      highlightTask = nil
     }
   }
 
@@ -1184,9 +1521,7 @@ private final class RichBlockCodeNodeViewV2: RichBlockRenderableViewV2, RichBloc
 private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
   private let photoView = PlatformPhotoView()
   private let unavailable = UIImageView(image: UIImage(systemName: "photo"))
-  private var currentPhoto: PhotoInfo?
-  private var galleryPhotos: [PhotoInfo] = []
-  private var galleryIndex = 0
+  private var currentImage: BlockImageOccurrence?
   private var onImageTap: ((RichBlockImageGallerySelectionV2) -> Void)?
 
   init() {
@@ -1207,35 +1542,36 @@ private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
     image: RichBlockLayoutPlanV2.ImageNode,
     palette: RichBlockPaletteV2,
     message: InlineKit.Message,
-    galleryPhotos: [PhotoInfo]? = nil,
-    galleryIndex: Int = 0,
     onImageTap: @escaping (RichBlockImageGallerySelectionV2) -> Void
   ) {
     backgroundColor = palette.placeholder
     unavailable.tintColor = palette.secondary
     switch image.state {
       case .pending:
-        currentPhoto = nil
-        self.galleryPhotos = []
-        self.galleryIndex = 0
+        currentImage = nil
         self.onImageTap = nil
         photoView.setPhoto(nil)
         unavailable.isHidden = true
         accessibilityLabel = "Image loading"
         accessibilityTraits = [.image]
       case let .ready(photo):
-        currentPhoto = photo
-        self.galleryPhotos = galleryPhotos ?? [photo]
-        self.galleryIndex = min(max(0, galleryIndex), max(0, self.galleryPhotos.count - 1))
+        guard photo.hasDisplayablePreview else {
+          currentImage = nil
+          self.onImageTap = nil
+          photoView.setPhoto(nil)
+          unavailable.isHidden = false
+          accessibilityLabel = "Image unavailable"
+          accessibilityTraits = [.image]
+          return
+        }
+        currentImage = BlockImageOccurrence(path: image.path, photo: photo)
         self.onImageTap = onImageTap
         photoView.setPhoto(photo, reloadMessageOnFinish: message)
         unavailable.isHidden = true
         accessibilityLabel = "Image"
         accessibilityTraits = [.image, .button]
       case .unavailable:
-        currentPhoto = nil
-        self.galleryPhotos = []
-        self.galleryIndex = 0
+        currentImage = nil
         self.onImageTap = nil
         photoView.setPhoto(nil)
         unavailable.isHidden = false
@@ -1256,10 +1592,11 @@ private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
 
   override func prepareForReuse() {
     super.prepareForReuse()
-    currentPhoto = nil
-    galleryPhotos = []
-    galleryIndex = 0
+    currentImage = nil
     onImageTap = nil
+    // The viewer may still hold a weak reference to a suppressed source while
+    // this node is pooled. That visibility must not leak into the next image.
+    photoView.alpha = 1
     photoView.setPhoto(nil)
   }
 
@@ -1270,29 +1607,28 @@ private final class RichBlockImageNodeViewV2: RichBlockRenderableViewV2 {
   }
 
   @objc private func openImage() {
-    guard currentPhoto != nil, !galleryPhotos.isEmpty else { return }
+    guard let currentImage else { return }
     onImageTap?(.init(
-      photos: galleryPhotos,
-      initialIndex: galleryIndex,
+      image: currentImage,
       sourceView: photoView,
       sourceImage: photoView.displayedImage
     ))
   }
 
   override func accessibilityActivate() -> Bool {
-    guard currentPhoto != nil, !galleryPhotos.isEmpty else { return false }
+    guard currentImage != nil else { return false }
     openImage()
     return true
   }
 
   func sourceView(forPhotoID photoID: Int64) -> UIView? {
-    currentPhoto?.id == photoID ? photoView : nil
+    currentImage?.photo.id == photoID ? photoView : nil
   }
 }
 
 private final class RichBlockAlbumNodeViewV2: RichBlockRenderableViewV2 {
   private let scrollView = UIScrollView()
-  private var itemViews: [BlockContentPath: RichBlockImageNodeViewV2] = [:]
+  private var itemViews: [RichBlockImageNodeViewV2] = []
   private var items: [RichBlockLayoutPlanV2.ImageNode] = []
 
   init() {
@@ -1306,30 +1642,24 @@ private final class RichBlockAlbumNodeViewV2: RichBlockRenderableViewV2 {
   override func apply(node: RichBlockLayoutPlanV2.Node, context: RichBlockRenderContextV2) {
     guard case let .album(album) = node.kind else { return }
     items = album.items
-    let readyPhotos = items.compactMap { item -> PhotoInfo? in
-      guard case let .ready(photo) = item.state else { return nil }
-      return photo
+    // The parent reconciler only retains albums with the same ordered photo
+    // prefix. Index reuse here survives a change to the album's structural path.
+    while itemViews.count > items.count {
+      let removed = itemViews.removeLast()
+      removed.prepareForReuse()
+      removed.removeFromSuperview()
     }
-    let paths = Set(items.map(\.path))
-    for path in Array(itemViews.keys) where !paths.contains(path) {
-      itemViews.removeValue(forKey: path)?.removeFromSuperview()
-    }
-    for item in items {
-      let view = itemViews[item.path] ?? {
+    for (index, item) in items.enumerated() {
+      if index == itemViews.count {
         let view = RichBlockImageNodeViewV2()
-        itemViews[item.path] = view
+        itemViews.append(view)
         scrollView.addSubview(view)
-        return view
-      }()
+      }
+      let view = itemViews[index]
       view.apply(
         image: item,
         palette: context.palette,
         message: context.message,
-        galleryPhotos: readyPhotos,
-        galleryIndex: {
-          guard case let .ready(photo) = item.state else { return 0 }
-          return readyPhotos.firstIndex(where: { $0.id == photo.id }) ?? 0
-        }(),
         onImageTap: context.onImageTap
       )
       view.frame = item.frame
@@ -1343,18 +1673,26 @@ private final class RichBlockAlbumNodeViewV2: RichBlockRenderableViewV2 {
     scrollView.frame = bounds
     scrollView.contentSize.height = bounds.height
     scrollView.alwaysBounceHorizontal = scrollView.contentSize.width > bounds.width + 1
-    for item in items {
-      itemViews[item.path]?.frame = item.frame
+    for (item, view) in zip(items, itemViews) {
+      view.frame = item.frame
     }
   }
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    for view in itemViews {
+      view.prepareForReuse()
+      view.removeFromSuperview()
+    }
+    itemViews.removeAll(keepingCapacity: true)
+    items.removeAll(keepingCapacity: true)
+    scrollView.contentSize = .zero
     scrollView.setContentOffset(.zero, animated: false)
   }
 
-  func sourceView(forPhotoID photoID: Int64) -> UIView? {
-    itemViews.values.lazy.compactMap { $0.sourceView(forPhotoID: photoID) }.first
+  func sourceView(forImagePath path: BlockContentPath, photoID: Int64) -> UIView? {
+    guard let index = items.firstIndex(where: { $0.path == path }), itemViews.indices.contains(index) else { return nil }
+    return itemViews[index].sourceView(forPhotoID: photoID)
   }
 }
 
@@ -1394,9 +1732,10 @@ private final class RichBlockSeparatorNodeViewV2: RichBlockRenderableViewV2 {
   }
 }
 
-private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2 {
+private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2, UIGestureRecognizerDelegate {
   private let textView = CodeBlockTextView()
-  private var onEntityTap: ((NSAttributedString, Int) -> Void)?
+  private let entityAccessibility = RichBlockEntityAccessibilityActionsV2()
+  private var onEntityTap: ((NSAttributedString, Int) -> Bool)?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -1408,7 +1747,9 @@ private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2 
     textView.textContainer.lineFragmentPadding = 0
     textView.isUserInteractionEnabled = true
     addSubview(textView)
-    addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap(_:))))
+    let entityTap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+    entityTap.delegate = self
+    textView.addGestureRecognizer(entityTap)
   }
 
   @available(*, unavailable)
@@ -1421,16 +1762,31 @@ private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2 
     alignment: NSTextAlignment,
     isHeader: Bool,
     palette: RichBlockPaletteV2,
-    onEntityTap: @escaping (NSAttributedString, Int) -> Void
+    onEntityTap: @escaping (NSAttributedString, Int) -> Bool
   ) {
-    textView.attributedText = text
-    textView.textAlignment = alignment
+    if let text {
+      if textView.attributedText?.isEqual(to: text) != true { textView.attributedText = text }
+    } else if textView.attributedText != nil { textView.attributedText = nil }
+    if textView.textAlignment != alignment { textView.textAlignment = alignment }
     self.onEntityTap = onEntityTap
     backgroundColor = .clear
     layer.borderWidth = 0
     isAccessibilityElement = true
-    accessibilityLabel = text?.string
+    accessibilityLabel = text.flatMap { RichTextMath.sourceText($0) } ?? text?.string
     accessibilityTraits = isHeader ? [.header] : [.staticText]
+    accessibilityCustomActions = entityAccessibility.update(
+      text: textView.attributedText,
+      onActivate: onEntityTap
+    )
+  }
+
+  func prepareForReuse() {
+    textView.attributedText = nil
+    onEntityTap = nil
+    accessibilityLabel = nil
+    accessibilityValue = nil
+    accessibilityCustomActions = nil
+    entityAccessibility.clear()
   }
 
   override func layoutSubviews() {
@@ -1445,9 +1801,14 @@ private final class RichBlockTableCellViewV2: UIView, RichBlockEntityHittableV2 
     return (attributedText, character)
   }
 
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    guard let hit = entityHit(at: gestureRecognizer.location(in: self)) else { return false }
+    return richTextHasInteractiveEntity(at: hit.characterIndex, in: hit.text)
+  }
+
   @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
     guard let hit = entityHit(at: gesture.location(in: self)) else { return }
-    onEntityTap?(hit.text, hit.characterIndex)
+    _ = onEntityTap?(hit.text, hit.characterIndex)
   }
 }
 
@@ -1512,6 +1873,8 @@ private final class RichBlockTableNodeViewV2: RichBlockRenderableViewV2 {
       canvas.addSubview(cellView)
       cellViews.append(cellView)
     }
+    let firstRowY = table.cells.first?.frame.minY
+    let columnCount = max(1, table.cells.prefix { $0.frame.minY == firstRowY }.count)
     for (index, cellView) in cellViews.enumerated() {
       guard index < table.cells.count else {
         cellView.isHidden = true
@@ -1548,8 +1911,16 @@ private final class RichBlockTableNodeViewV2: RichBlockRenderableViewV2 {
         palette: context.palette,
         onEntityTap: context.onEntityTap
       )
+      let position = String(localized: "Row \(index / columnCount + 1), column \(index % columnCount + 1)")
+      if !cell.isHeader, table.cells[index % columnCount].isHeader,
+         let heading = cellViews[index % columnCount].accessibilityLabel, !heading.isEmpty {
+        cellView.accessibilityValue = "\(heading), \(position)"
+      } else {
+        cellView.accessibilityValue = position
+      }
     }
     canvas.apply(cells: table.cells, separatorColor: context.palette.separator)
+    accessibilityElements = cellViews.prefix(table.cells.count).map { $0 as Any }
     canvas.frame = CGRect(x: 0, y: 0, width: table.contentWidth, height: bounds.height)
     scrollView.contentSize = canvas.bounds.size
     scrollView.alwaysBounceHorizontal = table.contentWidth > bounds.width + 1
@@ -1573,9 +1944,11 @@ private final class RichBlockTableNodeViewV2: RichBlockRenderableViewV2 {
   override func prepareForReuse() {
     super.prepareForReuse()
     table = nil
+    for cell in cellViews { cell.prepareForReuse() }
     didSetInitialOffset = false
     lastIsRTL = false
     scrollView.contentOffset = .zero
+    accessibilityElements = nil
   }
 }
 
@@ -1586,16 +1959,18 @@ final class RichBlockContentViewV2: UIView {
   }
 
   var onDisclosureToggle: ((BlockContentPath, Bool) -> Void)?
-  var onEntityTap: ((NSAttributedString, Int) -> Void)?
+  var onEntityTap: ((NSAttributedString, Int) -> Bool)?
   var onImageTap: ((RichBlockImageGallerySelectionV2) -> Void)?
   var onMathPrepared: (() -> Void)?
 
   private var nodeViews: [BlockContentPath: RichBlockRenderableViewV2] = [:]
   private var reusePool: [RichBlockRenderKindV2: [RichBlockRenderableViewV2]] = [:]
+  private var previousSource: String?
+  private var messageIdentity: BlockContentMessageIdentity?
   private var previousContent: InlineProtocol.BlockContent?
   private var currentPlan: RichBlockLayoutPlanV2?
   private var mathSnapshot: RichTextMath.Snapshot?
-  private var mathLayoutSignature = 0
+  private var mathLayoutSignature: Int = 0
   private var mathPreparationTask: Task<Void, Never>?
   private var mathGeneration: UInt64 = 0
   private var mathPrepared = false
@@ -1622,24 +1997,35 @@ final class RichBlockContentViewV2: UIView {
     deferLayout: Bool,
     transitionGeneration: UInt
   ) {
+    // Cache readiness may change after sizing. Bind only the projection that
+    // produced this geometry, then commit readiness through onMathPrepared.
     guard let math = plan.mathSnapshot, math.signature == plan.mathSignature else {
       assertionFailure("Rich block geometry must be prepared before binding")
       return
     }
-    let reconciliation = BlockContentReconciler.reconcile(previous: previousContent, current: content)
-    previousContent = content
-
-    for move in reconciliation.photoMoves {
-      guard nodeViews[move.to] == nil,
-            let moved = nodeViews.removeValue(forKey: move.from),
-            moved.reuseKind == .image
-      else { continue }
-      nodeViews[move.to] = moved
+    let identity = BlockContentMessageIdentity(message: message)
+    if messageIdentity != identity {
+      prepareForReuse()
+      messageIdentity = identity
     }
+    let reconciliation = BlockContentReconciler.reconcile(
+      previous: previousContent, current: content,
+      previousSource: previousSource, currentSource: message.text ?? ""
+    )
+    previousContent = content
+    previousSource = message.text
 
-    let paths = Set(plan.nodes.map(\.path))
-    for path in Array(nodeViews.keys) where !paths.contains(path) {
-      guard let removed = nodeViews.removeValue(forKey: path) else { continue }
+    // Resolve all moves from the old dictionary, including swaps and occupied
+    // destinations, before putting unmatched views into the reuse pool.
+    var remainingViews = nodeViews
+    nodeViews.removeAll(keepingCapacity: true)
+    for node in plan.nodes {
+      guard let oldPath = reconciliation.previousPathByCurrentPath[node.path],
+            let view = remainingViews[oldPath], view.reuseKind == node.reuseKind
+      else { continue }
+      nodeViews[node.path] = remainingViews.removeValue(forKey: oldPath)
+    }
+    for removed in remainingViews.values {
       if deferLayout { retainRemovalSnapshot(of: removed, generation: transitionGeneration) }
       enqueue(removed)
     }
@@ -1654,7 +2040,7 @@ final class RichBlockContentViewV2: UIView {
         self?.onDisclosureToggle?(path, expanded)
       },
       onEntityTap: { [weak self] text, character in
-        self?.onEntityTap?(text, character)
+        self?.onEntityTap?(text, character) ?? false
       },
       onImageTap: { [weak self] selection in
         self?.onImageTap?(selection)
@@ -1664,19 +2050,11 @@ final class RichBlockContentViewV2: UIView {
     for node in plan.nodes {
       let view: RichBlockRenderableViewV2
       let animatesInsertion: Bool
-      if reconciliation.reusablePaths.contains(node.path),
-         let existing = nodeViews[node.path],
+      if let existing = nodeViews[node.path],
          existing.reuseKind == node.reuseKind
       {
         view = existing
         animatesInsertion = false
-      } else if let existing = nodeViews.removeValue(forKey: node.path) {
-        if deferLayout { retainRemovalSnapshot(of: existing, generation: transitionGeneration) }
-        enqueue(existing)
-        view = dequeue(kind: node.reuseKind)
-        nodeViews[node.path] = view
-        insertNodeView(view, for: node)
-        animatesInsertion = true
       } else {
         view = dequeue(kind: node.reuseKind)
         nodeViews[node.path] = view
@@ -1698,10 +2076,8 @@ final class RichBlockContentViewV2: UIView {
       }
     }
     currentPlan = plan
-    updateMathPreparation(
-      mathPreparationEnabled ? math : nil,
-      layoutSignature: plan.mathSignature
-    )
+    updateAccessibilityOrder()
+    updateMathPreparation(mathPreparationEnabled ? math : nil, layoutSignature: plan.mathSignature)
   }
 
   func applyLayout(_ plan: RichBlockLayoutPlanV2) {
@@ -1717,6 +2093,7 @@ final class RichBlockContentViewV2: UIView {
       snapshot.view.alpha = 0
       snapshot.view.transform = CGAffineTransform(scaleX: 0.98, y: 0.98)
     }
+    updateAccessibilityOrder()
   }
 
   func restorePresentationGeometry() {
@@ -1772,7 +2149,10 @@ final class RichBlockContentViewV2: UIView {
     }
     disappearingSnapshots.removeAll(keepingCapacity: true)
     previousContent = nil
+    previousSource = nil
+    messageIdentity = nil
     currentPlan = nil
+    accessibilityElements = nil
   }
 
   override func didMoveToWindow() {
@@ -1824,9 +2204,10 @@ final class RichBlockContentViewV2: UIView {
             self.mathGeneration == generation else { return }
       self.mathPreparationTask = nil
       self.mathPrepared = true
+      // Cached success alone is not a change. In particular, rebinding a ready
+      // row must never trigger a notification/reload/rebind loop.
       let ready = snapshot.refreshed()
-      guard ready.signature != self.mathLayoutSignature
-        || ready.signature != self.mathSnapshot?.signature else { return }
+      guard ready.signature != self.mathLayoutSignature || ready.signature != self.mathSnapshot?.signature else { return }
       self.onMathPrepared?()
     }
   }
@@ -1843,20 +2224,52 @@ final class RichBlockContentViewV2: UIView {
     return nil
   }
 
-  func sourceView(forRichPhotoID photoID: Int64) -> UIView? {
-    for view in nodeViews.values {
-      if let image = view as? RichBlockImageNodeViewV2,
-         let source = image.sourceView(forPhotoID: photoID)
-      {
-        return source
+  var readyImageOccurrences: [BlockImageOccurrence] {
+    currentPlan?.nodes.flatMap { node -> [BlockImageOccurrence] in
+      switch node.kind {
+      case let .image(image):
+        guard case let .ready(photo) = image.state, photo.hasDisplayablePreview else { return [] }
+        return [.init(path: image.path, photo: photo)]
+      case let .album(album):
+        return album.items.compactMap { item in
+          guard case let .ready(photo) = item.state, photo.hasDisplayablePreview else { return nil }
+          return .init(path: item.path, photo: photo)
+        }
+      default: return []
       }
-      if let album = view as? RichBlockAlbumNodeViewV2,
-         let source = album.sourceView(forPhotoID: photoID)
-      {
-        return source
-      }
+    } ?? []
+  }
+
+  func sourceView(forImagePath path: BlockContentPath, photoID: Int64) -> UIView? {
+    let source: UIView?
+    if let image = nodeViews[path] as? RichBlockImageNodeViewV2 {
+      source = image.sourceView(forPhotoID: photoID)
+    } else if case .albumImage? = path.components.last {
+      let parent = BlockContentPath(Array(path.components.dropLast()))
+      source = (nodeViews[parent] as? RichBlockAlbumNodeViewV2)?.sourceView(forImagePath: path, photoID: photoID)
+    } else {
+      source = nil
     }
-    return nil
+    guard let source, isVisibleImageSource(source) else { return nil }
+    return source
+  }
+
+  private func isVisibleImageSource(_ source: UIView) -> Bool {
+    guard source.window != nil, !source.isHidden,
+          source.bounds.width > 0, source.bounds.height > 0
+    else { return false }
+    var current = source
+    var visibleRect = source.bounds
+    while let parent = current.superview {
+      visibleRect = current.convert(visibleRect, to: parent)
+      guard !parent.isHidden else { return false }
+      if parent.clipsToBounds {
+        visibleRect = visibleRect.intersection(parent.bounds)
+        guard !visibleRect.isNull, visibleRect.width > 0, visibleRect.height > 0 else { return false }
+      }
+      current = parent
+    }
+    return true
   }
 
   private func insertNodeView(_ view: RichBlockRenderableViewV2, for node: RichBlockLayoutPlanV2.Node) {
@@ -1864,6 +2277,23 @@ final class RichBlockContentViewV2: UIView {
       insertSubview(view, at: 0)
     } else {
       addSubview(view)
+    }
+  }
+
+  private func updateAccessibilityOrder() {
+    guard let currentPlan else {
+      accessibilityElements = nil
+      return
+    }
+    func accessibleDescendants(of view: UIView) -> [Any] {
+      guard !view.isHidden, view.alpha > 0.01 else { return [] }
+      if view.isAccessibilityElement { return [view] }
+      if let explicit = view.accessibilityElements, !explicit.isEmpty { return explicit }
+      return view.subviews.flatMap(accessibleDescendants(of:))
+    }
+    accessibilityElements = currentPlan.nodes.flatMap { node -> [Any] in
+      guard let view = nodeViews[node.path] else { return [] }
+      return accessibleDescendants(of: view)
     }
   }
 

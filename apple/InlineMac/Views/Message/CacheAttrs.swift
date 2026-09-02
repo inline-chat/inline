@@ -9,7 +9,8 @@ class CacheAttrs {
 
   init() {
     cache = NSCache<NSString, NSAttributedString>()
-    cache.countLimit = 2_000 // Set appropriate limit
+    cache.countLimit = 2_000
+    cache.totalCostLimit = 32 * 1_024 * 1_024
   }
 
   func get(key: String) -> NSAttributedString? {
@@ -35,11 +36,14 @@ class CacheAttrs {
     let displayText = message.displayText ?? ""
     let displayEntities = message.translationEntities ?? message.message.entities
 
+    var textHasher = Hasher()
+    for byte in displayText.utf8 { textHasher.combine(byte) }
+
     return CacheKey(
       // TODO: Optimize
       isTranslated: message.translationText != nil,
-      textCount: displayText.count,
-      textHash: displayText.hashValue,
+      textCount: displayText.utf16.count,
+      textHash: textHasher.finalize(),
       stableId: message.message.stableId,
       entitiesHash: displayEntities?.hashValue ?? 0,
       renderStyle: renderStyle,
@@ -56,11 +60,15 @@ class CacheAttrs {
 
   func set(message: FullMessage, renderStyle: MessageRenderStyle = .bubble, styleKey: String = "", value: NSAttributedString) {
     let key = getKey(message, renderStyle: renderStyle, styleKey: styleKey)
-    cache.setObject(value, forKey: "\(key.stringValue)" as NSString)
+    cache.setObject(
+      value,
+      forKey: "\(key.stringValue)" as NSString,
+      cost: max(128, value.length * 8)
+    )
   }
 
   func set(key: String, value: NSAttributedString) {
-    cache.setObject(value, forKey: NSString(string: key))
+    cache.setObject(value, forKey: NSString(string: key), cost: max(128, value.length * 8))
   }
 
   func invalidate() {

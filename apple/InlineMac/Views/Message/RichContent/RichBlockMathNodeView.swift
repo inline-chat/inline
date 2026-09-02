@@ -9,6 +9,7 @@ final class RichBlockMathNodeView: RichBlockRenderableView {
   private var request: RichTextMath.Request?
   private var imageSize: CGSize?
   private var source = ""
+  private(set) var selectionSource = NSAttributedString()
 
   override var orderedTextSurfaces: [RichBlockTextSurface] {
     sourceSurface.isHidden ? [] : [sourceSurface]
@@ -46,6 +47,8 @@ final class RichBlockMathNodeView: RichBlockRenderableView {
           math.range.length <= context.attributedText.length - math.range.location
     else { prepareForReuse(); return }
     source = (context.attributedText.string as NSString).substring(with: math.range)
+    selectionSource = RichTextMath.sourceAttributedText(context.attributedText, range: math.range)
+      ?? NSAttributedString(string: source)
     let next = RichTextMath.request(text: context.attributedText, range: math.range, fontSize: context.baseFontSize)
     if request != next {
       imageView.image = nil
@@ -91,9 +94,19 @@ final class RichBlockMathNodeView: RichBlockRenderableView {
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
-    let menu = NSMenu()
+    var ancestor = superview
+    var inherited: NSMenu?
+    while let view = ancestor {
+      if let provider = view as? RichBlockTextMenuProviding {
+        inherited = provider.richBlockMessageMenu()
+        break
+      }
+      ancestor = view.superview
+    }
+    let menu = inherited ?? NSMenu()
     let item = NSMenuItem(title: "Copy LaTeX", action: #selector(copySource), keyEquivalent: "")
     item.target = self
+    if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
     menu.insertItem(item, at: 0)
     return menu
   }
@@ -112,6 +125,7 @@ final class RichBlockMathNodeView: RichBlockRenderableView {
     request = nil
     imageSize = nil
     source = ""
+    selectionSource = NSAttributedString()
     sourceSurface.isHidden = true
     scrollView.isHidden = true
     toolTip = nil

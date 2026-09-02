@@ -11,6 +11,16 @@ final class RichBlockImageNodeView: RichBlockRenderableView {
 
   private var photoView: SimplePhotoView?
   private var currentPhoto: PhotoInfo?
+  private var occurrence: BlockImageOccurrence?
+  private var onImageClick: ((BlockImageOccurrence) -> Void)?
+  private var previewSpinner: NSProgressIndicator?
+
+  var displayedImage: NSImage? { photoView?.displayedImage }
+  var canOpenPreview: Bool {
+    occurrence?.photo.hasDisplayablePreview == true && onImageClick != nil
+  }
+
+  func matches(photoID: Int64) -> Bool { occurrence?.photo.id == photoID }
 
   init() {
     super.init(reuseKind: .image)
@@ -21,6 +31,7 @@ final class RichBlockImageNodeView: RichBlockRenderableView {
     addSubview(placeholder)
     addSubview(unavailableIcon)
     setAccessibilityRole(.image)
+    addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(openImage)))
   }
 
   @available(*, unavailable)
@@ -65,6 +76,43 @@ final class RichBlockImageNodeView: RichBlockRenderableView {
         addSubview(view)
       }
       currentPhoto = photoInfo
+      occurrence = BlockImageOccurrence(path: image.path, photo: photoInfo)
+      onImageClick = context.interactions.onImageClick
+    }
+    window?.invalidateCursorRects(for: self)
+    needsLayout = true
+  }
+
+  @objc private func openImage() {
+    guard let occurrence, occurrence.photo.hasDisplayablePreview else { return }
+    onImageClick?(occurrence)
+  }
+
+  override func accessibilityPerformPress() -> Bool {
+    guard canOpenPreview else { return false }
+    openImage()
+    return true
+  }
+
+  override func resetCursorRects() {
+    super.resetCursorRects()
+    if occurrence?.photo.hasDisplayablePreview == true { addCursorRect(bounds, cursor: .pointingHand) }
+  }
+
+  func setPreviewLoading(_ loading: Bool) {
+    if loading, previewSpinner == nil {
+      let spinner = NSProgressIndicator()
+      spinner.style = .spinning
+      spinner.controlSize = .small
+      spinner.isDisplayedWhenStopped = false
+      addSubview(spinner)
+      previewSpinner = spinner
+    }
+    if loading, let previewSpinner {
+      addSubview(previewSpinner, positioned: .above, relativeTo: nil)
+      previewSpinner.startAnimation(nil)
+    } else {
+      previewSpinner?.stopAnimation(nil)
     }
     needsLayout = true
   }
@@ -79,6 +127,8 @@ final class RichBlockImageNodeView: RichBlockRenderableView {
       width: 24,
       height: 24
     )
+    previewSpinner?.frame = CGRect(x: floor((bounds.width - 16) / 2), y: floor((bounds.height - 16) / 2),
+                                  width: 16, height: 16)
   }
 
   override func prepareForReuse() {
@@ -87,8 +137,11 @@ final class RichBlockImageNodeView: RichBlockRenderableView {
   }
 
   private func clearPhoto() {
+    setPreviewLoading(false)
     photoView?.removeFromSuperview()
     photoView = nil
     currentPhoto = nil
+    occurrence = nil
+    onImageClick = nil
   }
 }

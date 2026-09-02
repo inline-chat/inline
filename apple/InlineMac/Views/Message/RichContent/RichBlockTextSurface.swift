@@ -2,6 +2,7 @@ import AppKit
 import TextProcessing
 
 protocol RichBlockTextMenuProviding: AnyObject {
+  func richBlockMessageMenu() -> NSMenu
   func richBlockTextMenu(
     nativeMenu: NSMenu,
     event: NSEvent,
@@ -52,6 +53,102 @@ final class RichBlockTextSurface: NSView {
     ).width)
   }
 
+  var selectionLength: Int { text.length }
+  var selectionAttributedText: NSAttributedString { text }
+
+  func configureMultiSurfaceSelection(
+    mouseDown: ((RichBlockTextSurface, NSEvent) -> Void)?,
+    mouseDragged: ((RichBlockTextSurface, NSEvent) -> Bool)?,
+    mouseUp: ((RichBlockTextSurface, NSEvent) -> Bool)?,
+    trackingEnded: ((RichBlockTextSurface, NSPoint) -> Bool)?,
+    shouldSuppressPlainClick: (() -> Bool)?
+  ) {
+    guard let mouseDown else {
+      label.onSelectionMouseDown = nil
+      label.onSelectionMouseDragged = nil
+      label.onSelectionMouseUp = nil
+      label.onSelectionTrackingEnded = nil
+      label.shouldSuppressPlainSingleClick = nil
+      label.preservesSelectionOnResign = false
+      return
+    }
+    label.onSelectionMouseDown = { [weak self] _, event in
+      guard let self else { return }
+      mouseDown(self, event)
+    }
+    label.onSelectionMouseDragged = { [weak self] _, event in
+      guard let self else { return false }
+      return mouseDragged?(self, event) ?? false
+    }
+    label.onSelectionMouseUp = { [weak self] _, event in
+      guard let self else { return false }
+      return mouseUp?(self, event) ?? false
+    }
+    label.onSelectionTrackingEnded = { [weak self, weak label] point in
+      guard let self, let label else { return false }
+      return trackingEnded?(self, self.convert(point, from: label)) ?? false
+    }
+    label.shouldSuppressPlainSingleClick = shouldSuppressPlainClick
+  }
+
+  func configurePlainSingleClick(_ handler: (() -> Void)?) {
+    guard let handler else {
+      label.onPlainSingleClick = nil
+      return
+    }
+    label.onPlainSingleClick = { _, _ in handler() }
+  }
+
+  func configureTextLongPress(_ handler: ((NSEvent) -> Void)?) {
+    guard let handler else {
+      label.onTextLongPress = nil
+      return
+    }
+    label.onTextLongPress = { _, event in handler(event) }
+  }
+
+  func selectionInsertionOffset(at point: NSPoint, from ancestor: NSView) -> Int? {
+    let local = label.convert(point, from: ancestor)
+    guard let offset = label.selectionInsertionIndex(at: local), isUTF16Boundary(offset) else { return nil }
+    return offset
+  }
+
+  func visibleSelectionRect(in ancestor: NSView) -> CGRect? {
+    guard !isHidden, !label.isHidden, window != nil else { return nil }
+    // Non-clipping AppKit surfaces may report visibility beyond their bounds.
+    // Selection must not resolve a following block to an earlier paragraph.
+    let rect = convert(bounds.intersection(visibleRect), to: ancestor)
+    guard rect.width > 0, rect.height > 0 else { return nil }
+    return rect
+  }
+
+  func setCoordinatedSelection(_ range: NSRange?) {
+    let next = range ?? NSRange(location: 0, length: 0)
+    guard next.location >= 0, next.length >= 0,
+          next.location <= text.length, next.length <= text.length - next.location,
+          isUTF16Boundary(next.location), isUTF16Boundary(NSMaxRange(next))
+    else { return }
+    label.preservesSelectionOnResign = next.length > 0
+    if label.selectedRange() != next {
+      label.selectedRanges = [NSValue(range: next)]
+    }
+  }
+
+  func sourceAttributedText(for range: NSRange) -> NSAttributedString? {
+    guard range.location >= 0, range.length > 0,
+          range.location <= text.length, range.length <= text.length - range.location,
+          isUTF16Boundary(range.location), isUTF16Boundary(NSMaxRange(range))
+    else { return nil }
+    return RichTextMath.sourceAttributedText(text, range: range)
+  }
+
+  func clearCoordinatedSelection() {
+    label.preservesSelectionOnResign = false
+    if label.selectedRange().length > 0 {
+      label.selectedRanges = [NSValue(range: NSRange(location: 0, length: 0))]
+    }
+  }
+
   func apply(
     text: NSAttributedString,
     linkColor: NSColor,
@@ -78,14 +175,6 @@ final class RichBlockTextSurface: NSView {
     if textChanged {
       needsLayout = true
     }
-  }
-
-  func configureTextLongPress(_ handler: ((NSEvent) -> Void)?) {
-    guard let handler else {
-      label.onTextLongPress = nil
-      return
-    }
-    label.onTextLongPress = { _, event in handler(event) }
   }
 
   func updateInteraction(
@@ -116,6 +205,10 @@ final class RichBlockTextSurface: NSView {
       else { return nil }
       return NSValue(range: clamped)
     }
+  }
+
+  private func isUTF16Boundary(_ offset: Int) -> Bool {
+    isUTF16Boundary(offset, in: text)
   }
 
   private func isUTF16Boundary(_ offset: Int, in text: NSAttributedString) -> Bool {
@@ -151,15 +244,20 @@ final class RichBlockTextSurface: NSView {
     }
     let glyphRange = layoutManager.glyphRange(for: textContainer)
     var result: [(number: Int, y: CGFloat, height: CGFloat)] = []
+    var logicalLineIndex = 0
     layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, usedRect, _, fragmentGlyphRange, _ in
       let characterRange = layoutManager.characterRange(
         forGlyphRange: fragmentGlyphRange,
         actualGlyphRange: nil
       )
-      guard let lineIndex = logicalLineStarts.lastIndex(where: { $0 <= characterRange.location }),
-            logicalLineStarts[lineIndex] == characterRange.location
+      while logicalLineIndex + 1 < logicalLineStarts.count,
+            logicalLineStarts[logicalLineIndex + 1] <= characterRange.location
+      {
+        logicalLineIndex += 1
+      }
+      guard logicalLineStarts[logicalLineIndex] == characterRange.location
       else { return }
-      result.append((lineIndex + 1, usedRect.minY, usedRect.height))
+      result.append((logicalLineIndex + 1, usedRect.minY, usedRect.height))
     }
     return result
   }

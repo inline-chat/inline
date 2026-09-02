@@ -126,9 +126,13 @@ class MessageTextView: NSTextView {
   // when the click should not continue into AppKit text selection.
   var onEntityClick: ((NSPoint, NSEvent) -> Bool)?
   var onTextLongPress: ((NSPoint, NSEvent) -> Void)?
-  // Existing message gesture routing reads this optional hook. The focused
-  // rich-text path leaves it unset and does not install custom click tracking.
+  var onSelectionMouseDown: ((NSPoint, NSEvent) -> Void)?
+  var onSelectionMouseDragged: ((NSPoint, NSEvent) -> Bool)?
+  var onSelectionMouseUp: ((NSPoint, NSEvent) -> Bool)?
+  var onSelectionTrackingEnded: ((NSPoint) -> Bool)?
+  var shouldSuppressPlainSingleClick: (() -> Bool)?
   var onPlainSingleClick: ((NSPoint, NSEvent) -> Void)?
+  var preservesSelectionOnResign = false
 
   private var textHoldTimer: Timer?
   private var textHoldMonitor: Any?
@@ -161,16 +165,17 @@ class MessageTextView: NSTextView {
     case .html: documentType = .html
     default: return false
     }
-    guard let data = try? source.data(
-      from: NSRange(location: 0, length: source.length),
-      documentAttributes: [.documentType: documentType]
-    ) else { return false }
+    guard let data = try? source.data(from: NSRange(location: 0, length: source.length),
+                                      documentAttributes: [.documentType: documentType]) else { return false }
     return pasteboard.setData(data, forType: type)
   }
 
   override func resignFirstResponder() -> Bool {
-    // Clear out selection when user clicks somewhere else
-    selectedRanges = [NSValue(range: NSRange(location: 0, length: 0))]
+    if !preservesSelectionOnResign {
+      // The experimental multi-surface owner keeps native ranges visible while
+      // it receives Copy. Every other message text view retains existing behavior.
+      selectedRanges = [NSValue(range: NSRange(location: 0, length: 0))]
+    }
 
     return super.resignFirstResponder()
   }
@@ -198,6 +203,7 @@ class MessageTextView: NSTextView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    defer { MessageGestureTrace.trace("MessageTextView.mouseDown ended selectionLength=\(selectedRange().length) plainClick=\(onPlainSingleClick != nil)") }
     disableSystemTextChecking()
     let location = convert(event.locationInWindow, from: nil)
     MessageGestureTrace.debug(
@@ -218,18 +224,87 @@ class MessageTextView: NSTextView {
       return
     }
 
+    var plainClickOrigin: NSPoint?
     if event.type == .leftMouseDown, event.clickCount == 1 {
       let handled = onEntityClick?(location, event) ?? false
       MessageGestureTrace.debug(
         "MessageTextView.mouseDown entityClickAttempt point=\(MessageGestureTrace.point(location)) handled=\(handled)"
       )
       if handled { return }
+      onSelectionMouseDown?(location, event)
+      if onPlainSingleClick != nil {
+        plainClickOrigin = event.locationInWindow
+      }
       startTextHold(at: location, event: event)
     }
 
     MessageGestureTrace.trace("MessageTextView.mouseDown forwardingToSuper")
     super.mouseDown(with: event)
     cancelTextHold(reason: "mouseDownReturn")
+    // NSTextView tracks through mouse-up inside mouseDown. Use that event's
+    // location: the global cursor may already have moved, or differ entirely
+    // from the location of an accessibility-generated click.
+    let trackingEvent = NSApp.currentEvent
+    let mouseUp = trackingEvent.flatMap { candidate -> NSEvent? in
+      guard candidate.type == .leftMouseUp,
+            candidate.windowNumber == event.windowNumber,
+            candidate.timestamp >= event.timestamp else { return nil }
+      return candidate
+    }
+    let finalWindowPoint = mouseUp?.locationInWindow ?? event.locationInWindow
+    MessageGestureTrace.trace(
+      "MessageTextView.trackingEnded native=\(trackingEvent.map(MessageGestureTrace.eventDescription) ?? "nil") origin=\(MessageGestureTrace.point(event.locationInWindow)) final=\(MessageGestureTrace.point(finalWindowPoint)) cursor=\(MessageGestureTrace.point(window.convertPoint(fromScreen: NSEvent.mouseLocation)))"
+    )
+    let coordinatedSelection: Bool
+    if let onSelectionTrackingEnded {
+      let finalLocalPoint = convert(finalWindowPoint, from: nil)
+      coordinatedSelection = onSelectionTrackingEnded(finalLocalPoint)
+    } else {
+      coordinatedSelection = false
+    }
+    if let plainClickOrigin,
+       mouseUp != nil,
+       !coordinatedSelection,
+       !(shouldSuppressPlainSingleClick?() ?? false),
+       !selectedRanges.contains(where: { $0.rangeValue.length > 0 })
+    {
+      let dx = finalWindowPoint.x - plainClickOrigin.x
+      let dy = finalWindowPoint.y - plainClickOrigin.y
+      MessageGestureTrace.debug("MessageTextView.plainClick movementSquared=\(dx * dx + dy * dy)")
+      if dx * dx + dy * dy < 9 {
+        onPlainSingleClick?(location, event)
+      }
+    }
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTextView.mouseDragged \(MessageGestureTrace.eventDescription(event)) coordinated=\(onSelectionMouseDragged != nil)")
+    guard let onSelectionMouseDragged else {
+      super.mouseDragged(with: event)
+      return
+    }
+    let location = convert(event.locationInWindow, from: nil)
+    if onSelectionMouseDragged(location, event) {
+      MessageGestureTrace.debug("MessageTextView.mouseDragged consumed=multiSurfaceSelection")
+      cancelTextHold(reason: "multiSurfaceDrag")
+      return
+    }
+    super.mouseDragged(with: event)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    MessageGestureTrace.trace("MessageTextView.mouseUp \(MessageGestureTrace.eventDescription(event)) coordinated=\(onSelectionMouseUp != nil)")
+    guard let onSelectionMouseUp else {
+      super.mouseUp(with: event)
+      return
+    }
+    let location = convert(event.locationInWindow, from: nil)
+    if onSelectionMouseUp(location, event) {
+      MessageGestureTrace.debug("MessageTextView.mouseUp consumed=multiSurfaceSelection")
+      cancelTextHold(reason: "multiSurfaceMouseUp")
+      return
+    }
+    super.mouseUp(with: event)
   }
 
   private func startTextHold(at location: NSPoint, event: NSEvent) {
@@ -498,6 +573,15 @@ class MessageTextView: NSTextView {
     let characterIndex = characterIndexForInsertion(at: point)
     guard characterIndex != NSNotFound, characterIndex < textStorage.length else { return nil }
     return characterIndex
+  }
+
+  /// Native insertion offset used by the message-local rich selection owner.
+  /// Unlike entity hit testing, the trailing text boundary is a valid endpoint.
+  func selectionInsertionIndex(at point: NSPoint) -> Int? {
+    guard let textStorage, textStorage.length > 0 else { return nil }
+    let index = characterIndexForInsertion(at: point)
+    guard index != NSNotFound, (0 ... textStorage.length).contains(index) else { return nil }
+    return index
   }
 
   private func renderedCharacterRange(at point: NSPoint) -> NSRange? {

@@ -173,9 +173,9 @@ class MessageListAppKit: NSViewController {
     rebuildRowItems()
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(richBlockDisclosureStateDidChange),
-      name: .richBlockDisclosureStateDidChange,
-      object: RichBlockLocalStateStore.shared
+      selector: #selector(richBlockLayoutStateDidChange),
+      name: .richBlockLayoutStateDidChange,
+      object: nil
     )
 
     // observe data
@@ -1439,7 +1439,7 @@ class MessageListAppKit: NSViewController {
     )
   }
 
-  @objc private func richBlockDisclosureStateDidChange(_ notification: Notification) {
+  @objc private func richBlockLayoutStateDidChange(_ notification: Notification) {
     guard !isDisposed,
           AppSettings.shared.richContentRendererEnabled,
           let stableID = notification.userInfo?["messageStableID"] as? Int64,

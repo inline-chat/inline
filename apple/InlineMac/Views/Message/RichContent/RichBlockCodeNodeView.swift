@@ -35,6 +35,8 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
   private var highlightInput: HighlightInput?
   private var renderSignature: RenderSignature?
 
+  override var orderedTextSurfaces: [RichBlockTextSurface] { [surface] }
+
   private struct HighlightInput {
     let baseText: NSAttributedString
     let language: String?

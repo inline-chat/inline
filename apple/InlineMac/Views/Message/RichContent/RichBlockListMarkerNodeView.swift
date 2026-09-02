@@ -5,6 +5,7 @@ final class RichBlockListMarkerNodeView: RichBlockRenderableView {
   private var isRTL = false
   private var color = NSColor.labelColor
   private var font = NSFont.systemFont(ofSize: 15)
+  private(set) var selectionSource = NSAttributedString()
 
   init() {
     super.init(reuseKind: .listMarker)
@@ -24,6 +25,10 @@ final class RichBlockListMarkerNodeView: RichBlockRenderableView {
     isRTL = text.isRTL
     color = context.palette.primary
     font = ChatTypography.current.font(sized: context.baseFontSize)
+    selectionSource = NSAttributedString(
+      string: marker,
+      attributes: [.font: font, .foregroundColor: color]
+    )
     needsDisplay = true
   }
 

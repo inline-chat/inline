@@ -26,6 +26,8 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
   private var isRTL = false
   private var onToggle: ((BlockContentPath, Bool) -> Void)?
 
+  override var orderedTextSurfaces: [RichBlockTextSurface] { [surface] }
+
   init() {
     super.init(reuseKind: .disclosure)
     toggleButton.target = self
@@ -45,7 +47,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     guard case let .text(text) = node.kind,
           case let .disclosureSummary(progress, expanded) = text.role
     else { return }
-    let attributed = context.text(for: text)
+    let attributed = context.text(for: text, maximumWidth: RichBlockDisclosureMetrics.titleViewportWidth(containerWidth: node.frame.width))
     self.path = node.path
     self.progress = progress
     self.expanded = expanded
@@ -58,6 +60,9 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
       linkColor: context.palette.link,
       onEntityClick: context.interactions.onTextEntityClick
     )
+    surface.configurePlainSingleClick { [weak self] in
+      self?.toggleDisclosure()
+    }
     shimmer.apply(color: .white)
     toggleButton.setAccessibilityLabel(attributed.string)
     toggleButton.setAccessibilityValue(expanded ? "Expanded" : "Collapsed")
@@ -81,6 +86,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
 
   override func prepareForReuse() {
     super.prepareForReuse()
+    surface.configurePlainSingleClick(nil)
     onToggle = nil
   }
 
@@ -103,12 +109,18 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     interactiveHitTest(convert(point, from: superview))
   }
 
-  /// Manual message routing supplies node-local coordinates.
+  /// Message gesture routing already supplies a point in this node's coordinates.
   func interactiveHitTest(_ point: NSPoint) -> NSView? {
+    MessageGestureTrace.trace("Disclosure.hitTest local=\(MessageGestureTrace.point(point)) node=\(MessageGestureTrace.view(self)) selection=\(AppSettings.shared.richTextMultiSurfaceSelectionEnabled)")
     guard !isHidden, bounds.contains(point) else { return nil }
     let surfacePoint = surface.convert(point, from: self)
     if surface.hasInteractiveEntity(at: surfacePoint) {
-      return surface.hitTest(point) ?? toggleButton
+      return surface.hitTest(surfacePoint) ?? toggleButton
+    }
+    if AppSettings.shared.richTextMultiSurfaceSelectionEnabled,
+       let hit = surface.hitTest(surfacePoint)
+    {
+      return hit
     }
     return toggleButton
   }

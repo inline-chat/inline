@@ -258,6 +258,14 @@ enum MessageView2PlaygroundFixtures {
       outgoing: false,
       allowsInteraction: true
     ),
+    .init(
+      id: 10_008,
+      title: "Native display math",
+      detail: "Fractions, matrices, horizontal overflow, and unsupported-source fallback. Copy LaTeX is available to accessibility.",
+      message: richFixture(id: 10_008, rich: richMath()),
+      outgoing: false,
+      allowsInteraction: true
+    ),
   ]
 
   private static func fixture(
@@ -481,6 +489,40 @@ enum MessageView2PlaygroundFixtures {
         $0.alignments = Array(repeating: .left, count: rows.first?.count ?? 0)
       }
     }
+  }
+
+  private static func richMath() -> RichFixture {
+    var builder = RichTextBuilder()
+    let heading = builder.segment("Native math: source is preserved")
+    let formulas = [
+      #"\frac{-b\pm\sqrt{b^2-4ac}}{2a}"#,
+      #"\begin{pmatrix}1&2\\3&4\end{pmatrix}"#,
+      (1...12).map { "\\frac{a_{\($0)}}{b_{\($0)}}" }.joined(separator: "+"),
+      #"\notAnInlineMathCommand{x}"#,
+    ]
+    let inlineFormula = #"\frac{x_1}{y}+\sqrt{z}"#
+    let inlineText = "Before " + inlineFormula + " after 😀."
+    let inlineSpan = builder.segment(inlineText)
+    let local = (inlineText as NSString).range(of: inlineFormula)
+    let inlineRange = BlockText.with { $0.offset = inlineSpan.offset + Int64(local.location); $0.length = Int64(local.length) }
+    let tableHeader = builder.segment("Formula in a table cell")
+    let tableFormula = builder.segment(#"e^{i\pi}+1=0"#)
+    let ranges = formulas.map { builder.segment($0) }
+    let base = builder.finish(blocks: [
+      .with { $0.paragraph = heading },
+      .with { $0.paragraph = inlineSpan },
+      .with { $0.table = .with {
+        $0.rows = [.with { $0.cells = [tableHeader] }, .with { $0.cells = [tableFormula] }]
+        $0.alignments = [.left]
+      } },
+    ] + ranges.map { range in
+      .with { $0.math = range }
+    })
+    return RichFixture(text: base.text, entities: .with {
+      $0.entities = ([inlineRange, tableFormula] + ranges).map { range in
+        .with { $0.type = .math; $0.offset = range.offset; $0.length = range.length }
+      }
+    }, blockContent: base.blockContent)
   }
 
   private struct RichFixture {

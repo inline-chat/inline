@@ -804,8 +804,7 @@ class MinimalMessageViewAppKit: NSView {
       // does not have any effect.
       textView.linkTextAttributes = [
         .foregroundColor: linkColor,
-        .underlineStyle: 0,
-        // .underlineStyle: NSUnderlineStyle.single.rawValue,
+        // Intentional underline is carried by each attributed run.
         .cursor: NSCursor.pointingHand,
       ]
 
@@ -848,7 +847,6 @@ class MinimalMessageViewAppKit: NSView {
       textView.textContainerInset = MessageTextConfiguration.containerInset
       textView.linkTextAttributes = [
         .foregroundColor: linkColor,
-        .underlineStyle: 0,
         .cursor: NSCursor.pointingHand,
       ]
       textView.delegate = self
@@ -3008,61 +3006,49 @@ class MinimalMessageViewAppKit: NSView {
     let richBlockPlan = props.layout.richBlockContent
     let blockContent = richBlockPlan == nil ? nil : fullMessage.message.blockContent
 
-    // From Cache
-
-    if richBlockPlan == nil,
-      let cachedAttributedString = CacheAttrs.shared.get(
-        message: fullMessage,
-        renderStyle: .minimal,
-        styleKey: richTextStyleKey
-      )
-    {
-      let attributedString = cachedAttributedString
-      textView.setMessageAttributedString(
-        attributedString,
-        isRtl: props.isRtl,
-        layoutSize: props.layout.text?.size ?? .zero,
-        useTextKit2: useTextKit2
-      )
-    }
-
-    let codeBlockBackgroundColor = textColor.withAlphaComponent(0.05)
-    let inlineCodeBackgroundColor = textColor.withAlphaComponent(0.06)
-
-    /// Apply entities to text and create an NSAttributedString
-    let attributedString = ProcessEntities.toAttributedString(
-      text: text,
-      entities: entities,
-      configuration: .init(
-        font: ChatTypography.current.font.withSize(props.layout.fontSize),
-        boldWeight: .semibold,
-        monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
-        palette: richTextPalette,
-        codeBlockBackgroundColor: codeBlockBackgroundColor,
-        inlineCodeBackgroundColor: inlineCodeBackgroundColor
-      )
-    )
-
-    // Detect and add links using centralized LinkDetector
-    let linkMatches = LinkDetector.shared.applyLinkStyling(
-      to: attributedString,
-      linkColor: linkColor,
-      cursor: NSCursor.pointingHand
-    )
-    for match in linkMatches {
-      attributedString.removeAttribute(.underlineStyle, range: match.range)
-      attributedString.removeAttribute(.underlineColor, range: match.range)
-    }
-
-    // Store links for tap handling
-    detectedLinks = linkMatches.map { (range: $0.range, url: $0.url) }
-
-    CacheAttrs.shared.set(
+    let renderCacheStyleKey = "\(richTextStyleKey)|links-v1"
+    let attributedString: NSAttributedString
+    if let cached = CacheAttrs.shared.get(
       message: fullMessage,
       renderStyle: .minimal,
-      styleKey: richTextStyleKey,
-      value: attributedString
-    )
+      styleKey: renderCacheStyleKey
+    ) {
+      attributedString = cached
+      detectedLinks = LinkDetector.shared.detectLinks(in: text).map { (range: $0.range, url: $0.url) }
+    } else {
+      let codeBlockBackgroundColor = textColor.withAlphaComponent(0.05)
+      let inlineCodeBackgroundColor = textColor.withAlphaComponent(0.06)
+      let processed = ProcessEntities.toAttributedString(
+        text: text,
+        entities: entities,
+        configuration: .init(
+          font: ChatTypography.current.font.withSize(props.layout.fontSize),
+          boldWeight: .semibold,
+          monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
+          palette: richTextPalette,
+          codeBlockBackgroundColor: codeBlockBackgroundColor,
+          inlineCodeBackgroundColor: inlineCodeBackgroundColor
+        )
+      )
+      let linkMatches = LinkDetector.shared.applyLinkStyling(
+        to: processed,
+        linkColor: linkColor,
+        cursor: NSCursor.pointingHand
+      )
+      for match in linkMatches {
+        processed.removeAttribute(.underlineStyle, range: match.range)
+        processed.removeAttribute(.underlineColor, range: match.range)
+      }
+      InlineTextStyle.reapply(to: processed)
+      detectedLinks = linkMatches.map { (range: $0.range, url: $0.url) }
+      attributedString = NSAttributedString(attributedString: processed)
+      CacheAttrs.shared.set(
+        message: fullMessage,
+        renderStyle: .minimal,
+        styleKey: renderCacheStyleKey,
+        value: attributedString
+      )
+    }
 
     if let richBlockPlan, let blockContent {
       let richView = richBlockContentView ?? {
@@ -4531,6 +4517,12 @@ extension MinimalMessageViewAppKit {
   }
 
   private func interactiveHitTestResult(_ point: NSPoint) -> InteractiveHitResult? {
+    if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden,
+       let hit = richBlockContentView.interactiveImageHitTest(richBlockContentView.convert(point, from: self))
+    {
+      return InteractiveHitResult(name: "richImage", view: hit)
+    }
+
     if let richBlockContentView, richBlockContentView.superview != nil,
        let hit = richBlockContentView.interactiveTextHitTest(richBlockContentView.convert(point, from: self)) {
       return InteractiveHitResult(name: "rich-text", view: hit)
@@ -4877,7 +4869,13 @@ extension MinimalMessageViewAppKit: NSTextViewDelegate, RichBlockTextMenuProvidi
     attributedText: NSAttributedString
   ) -> NSMenu? {
     let linkURL = linkURL(at: characterIndex, in: attributedText)
-    return createMenu(context: .textView, nativeMenu: nativeMenu, linkURL: linkURL)
+    let menu = createMenu(context: .textView, nativeMenu: nativeMenu, linkURL: linkURL)
+    return richBlockContentView?.retargetMultiSurfaceCopy(in: menu) ?? menu
+  }
+
+  func richBlockMessageMenu() -> NSMenu {
+    let menu = createMenu(context: .message)
+    return richBlockContentView?.retargetMultiSurfaceCopy(in: menu) ?? menu
   }
 
   // func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
@@ -4895,7 +4893,7 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     guard menu === self.menu else { return }
-    let updatedMenu = createMenu(context: .message)
+    let updatedMenu = richBlockMessageMenu()
     menu.removeAllItems()
     for item in updatedMenu.items {
       // NSMenuItem can only belong to one NSMenu. Copy before inserting to avoid:
@@ -5041,7 +5039,7 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
     // Add native copy for selected text if in text view context
     if context == .textView,
        let nativeMenu,
-       let nativeCopyItem = nativeMenu.items.first(where: { $0.title == "Copy" })
+       let nativeCopyItem = nativeMenu.items.first(where: { $0.action == #selector(NSText.copy(_:)) })
     {
       let newItem = nativeCopyItem.copy() as! NSMenuItem
       newItem.title = "Copy Selected Text"

@@ -216,6 +216,7 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
       ]
     case .richContent:
       [
+        .init(.richMath, "Native display math", "Fractions, matrices, horizontal overflow, source fallback and Copy LaTeX"),
         .init(
           .richCompactText,
           "Compact paragraph + reply",
@@ -413,6 +414,7 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case richRTLBlocks
   case richQuote
   case richTable
+  case richMath
   case groupStart
   case groupMiddle
   case groupEnd
@@ -468,6 +470,8 @@ private enum DeveloperMessageCatalogFactory {
         text: "این یک پیام نمونه برای بررسی چیدمان راست به چپ است.",
         isRtl: true
       )
+    case .richMath:
+      return richFixture(id: id, content: richMath())
     case .richCompactText:
       return richFixture(id: id, content: richCompactText(), reply: true)
     case .richInlineEntities:
@@ -1013,12 +1017,12 @@ private enum DeveloperMessageCatalogFactory {
   private static func richAlbum(hasReadyPhoto: Bool) -> RichCatalogFixture {
     var builder = RichCatalogTextBuilder()
     let title = builder.segment("Visual references")
-    let body = builder.segment("Six ordinary image children exercise the native horizontally scrolling album row.")
+    let body = builder.segment("Two local photos, a repeated occurrence, an unavailable image, a missing local file, and a pending image exercise album navigation and failure handling without network requests.")
     let first = builder.segment("Inline application artwork")
-    let second = builder.segment("Portrait settings")
-    let third = builder.segment("Square app icon")
+    let second = builder.segment("Inline logo artwork")
+    let third = builder.segment("Repeated application artwork")
     let fourth = builder.segment("Unavailable architecture diagram")
-    let fifth = builder.segment("Wide timeline")
+    let fifth = builder.segment("Intentionally missing local image")
     let sixth = builder.segment("Tall mobile capture")
     let images = [
       hasReadyPhoto
@@ -1029,11 +1033,17 @@ private enum DeveloperMessageCatalogFactory {
           height: 384
         )
         : pendingImage(alt: first, width: 384, height: 384),
-      pendingImage(alt: second, width: 900, height: 1_200),
-      pendingImage(alt: third, width: 1_024, height: 1_024),
+      hasReadyPhoto
+        ? readyImage(alt: second, photoID: DeveloperRichMediaFixtureCache.logoPhotoID, width: 148, height: 130)
+        : pendingImage(alt: second, width: 148, height: 130),
+      hasReadyPhoto
+        ? readyImage(alt: third, photoID: DeveloperRichMediaFixtureCache.photoID, width: 384, height: 384)
+        : pendingImage(alt: third, width: 384, height: 384),
       unavailableImage(alt: fourth, width: 1_400, height: 900),
-      pendingImage(alt: fifth, width: 1_800, height: 800),
-      unavailableImage(alt: sixth, width: 800, height: 1_400),
+      hasReadyPhoto
+        ? readyImage(alt: fifth, photoID: DeveloperRichMediaFixtureCache.missingPhotoID, width: 1_800, height: 800)
+        : pendingImage(alt: fifth, width: 1_800, height: 800),
+      pendingImage(alt: sixth, width: 800, height: 1_400),
     ]
     return builder.finish(blocks: [
       headingBlock(title, level: 2),
@@ -1327,10 +1337,13 @@ private enum DeveloperMessageCatalogFactory {
     height: Int32
   ) -> BlockImage {
     var size = InlineProtocol.PhotoSize()
-    size.type = "f"
+    size.type = DeveloperRichMediaFixtureCache.sizeType
     size.w = width
     size.h = height
     size.size = 112_000
+    // The protocol's source field carries a local URL only in this developer
+    // fixture. Production photo projection/eligibility stays unchanged.
+    size.cdnURL = DeveloperRichMediaFixtureCache.cacheURL(for: photoID).absoluteString
     var photo = InlineProtocol.Photo()
     photo.id = photoID
     photo.date = Int64(fixtureDate.timeIntervalSince1970)
@@ -1352,6 +1365,39 @@ private enum DeveloperMessageCatalogFactory {
     image.alt = alt
     image.unavailable = unavailable
     return image
+  }
+
+  private static func richMath() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let heading = builder.segment("Native math: source is preserved")
+    let formulas = [
+      #"\frac{-b\pm\sqrt{b^2-4ac}}{2a}"#,
+      #"\begin{pmatrix}1&2\\3&4\end{pmatrix}"#,
+      (1...12).map { "\\frac{a_{\($0)}}{b_{\($0)}}" }.joined(separator: "+"),
+      #"\notAnInlineMathCommand{x}"#,
+    ]
+    let inlineFormula = #"\frac{x_1}{y}+\sqrt{z}"#
+    let inlineText = "Before " + inlineFormula + " after 😀."
+    let inlineSpan = builder.segment(inlineText)
+    let tableHeader = builder.segment("Formula in a table cell")
+    let tableFormula = builder.segment(#"e^{i\pi}+1=0"#)
+    builder.addEntity(.math, matching: inlineFormula, in: inlineSpan)
+    builder.addEntity(.math, matching: #"e^{i\pi}+1=0"#, in: tableFormula)
+    let ranges = formulas.map { formula in
+      let range = builder.segment(formula)
+      builder.addEntity(.math, matching: formula, in: range)
+      return range
+    }
+    return builder.finish(blocks: [
+      .with { $0.paragraph = heading },
+      .with { $0.paragraph = inlineSpan },
+      .with { $0.table = .with {
+        $0.rows = [.with { $0.cells = [tableHeader] }, .with { $0.cells = [tableFormula] }]
+        $0.alignments = [.left]
+      } },
+    ] + ranges.map { range in
+      .with { $0.math = range }
+    })
   }
 
   private struct RichCatalogFixture {
@@ -1560,16 +1606,12 @@ private enum DeveloperMessageCatalogFactory {
       .groupStart, .groupMiddle, .groupEnd, .reply, .forwarded, .reactions, .sending, .failed,
       .compactUrlPreview, .largeUrlPreview, .multipleUrlPreviews,
       .photo, .photoCaption, .video, .pdf, .archive, .voice,
-      .replyPhotoUrlReactions, .forwardedDocument, .outgoingPhotoLink,
+      .replyPhotoUrlReactions, .forwardedDocument, .outgoingPhotoLink, .richMath,
     ]
     return all.firstIndex(of: kind) ?? 0
   }
 
-  private static let localImagePath: String = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()
-    .deletingLastPathComponent()
-    .appendingPathComponent("Assets.xcassets/AppIcon.imageset/AppIcon-384.png")
-    .path
+  private static let localImagePath = DeveloperRichMediaFixtureCache.sourceURL.path
 
   private static let incomingUser = User(
     id: 7_001,
@@ -1600,33 +1642,44 @@ private enum DeveloperMessageCatalogFactory {
 }
 
 enum DeveloperRichMediaFixtureCache {
-  static let photoID: Int64 = 90_001
+  // A dedicated size type keeps fixture cache files separate from production
+  // photo sizes, including when their IDs happen to coincide.
+  static let sizeType = "playground-f"
+  static let photoID: Int64 = 9_000_000_000_001
+  static let logoPhotoID: Int64 = 9_000_000_000_002
+  static let missingPhotoID: Int64 = 9_000_000_000_003
 
-  private static let sourceURL = URL(fileURLWithPath: #filePath)
+  private static let assetsURL = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
-    .appendingPathComponent("Assets.xcassets/AppIcon.imageset/AppIcon-384.png")
+    .deletingLastPathComponent()
+    .appendingPathComponent("Assets.xcassets")
+
+  static let sourceURL = assetsURL.appendingPathComponent("AppIcon.imageset/AppIcon-384.png")
+  private static let logoSourceURL = assetsURL.appendingPathComponent("inline-logo-bg.imageset/inline-logo-bg.png")
+
+  static func cacheURL(for photoID: Int64) -> URL {
+    FileHelpers.getLocalCacheDirectory(for: .photos, createIfNeeded: false)
+      .appendingPathComponent("IMG-server-\(photoID)-\(sizeType).png")
+  }
 
   static func prepare() async -> Bool {
     await Task.detached(priority: .utility) {
-      let destination = FileCache.getUrl(
-        for: .photos,
-        localPath: "IMGf\(photoID).png"
-      )
       let fileManager = FileManager.default
-      if fileManager.fileExists(atPath: destination.path) {
-        return true
-      }
-      guard fileManager.fileExists(atPath: sourceURL.path) else { return false }
       do {
-        try fileManager.createDirectory(
-          at: destination.deletingLastPathComponent(),
-          withIntermediateDirectories: true
-        )
-        try fileManager.copyItem(at: sourceURL, to: destination)
+        for (id, source) in [(photoID, sourceURL), (logoPhotoID, logoSourceURL)] {
+          let destination = cacheURL(for: id)
+          if fileManager.fileExists(atPath: destination.path) { continue }
+          guard fileManager.fileExists(atPath: source.path) else { return false }
+          try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+          )
+          try fileManager.copyItem(at: source, to: destination)
+        }
         return true
       } catch {
-        return fileManager.fileExists(atPath: destination.path)
+        return false
       }
     }.value
   }

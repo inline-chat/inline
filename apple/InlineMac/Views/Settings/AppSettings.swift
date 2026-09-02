@@ -175,6 +175,7 @@ final class AppSettings: ObservableObject {
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let richTextInlineMathEnabledKey = "experimental.richTextInlineMathEnabled"
   static let legacyRichTextNativeMathEnabledKey = "experimental.richTextNativeMathEnabled"
+  static let richTextMultiSurfaceSelectionEnabledKey = "experimental.richTextMultiSurfaceSelectionEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -457,6 +458,15 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var richTextMultiSurfaceSelectionEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(
+        richTextMultiSurfaceSelectionEnabled,
+        forKey: Self.richTextMultiSurfaceSelectionEnabledKey
+      )
+    }
+  }
+
   @Published var showMainTabStrip: Bool {
     didSet {
       UserDefaults.standard.set(showMainTabStrip, forKey: "showMainTabStrip")
@@ -560,6 +570,9 @@ final class AppSettings: ObservableObject {
       forKey: Self.richTextInlineMathEnabledKey
     ) as? Bool ?? UserDefaults.standard.object(
       forKey: Self.legacyRichTextNativeMathEnabledKey
+    ) as? Bool ?? false
+    richTextMultiSurfaceSelectionEnabled = UserDefaults.standard.object(
+      forKey: Self.richTextMultiSurfaceSelectionEnabledKey
     ) as? Bool ?? false
     let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
       .flatMap(SidebarMode.init(rawValue:))

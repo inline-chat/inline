@@ -66,7 +66,10 @@ final class RichBlockAlbumNodeView: RichBlockRenderableView {
     let preservedOffset = scrollView.contentView.bounds.minX
     let preservesTopology = items.count == album.items.count
       && zip(items, album.items).allSatisfy { previous, current in
-        previous.path == current.path
+        if case let .ready(oldPhoto) = previous.state, case let .ready(newPhoto) = current.state {
+          return oldPhoto.id == newPhoto.id
+        }
+        return previous.path == current.path
       }
     items = album.items
     self.context = context
@@ -133,6 +136,28 @@ final class RichBlockAlbumNodeView: RichBlockRenderableView {
     )
     scrollView.reflectScrolledClipView(scrollView.contentView)
   }
+
+  func imageView(at path: BlockContentPath, photoID: Int64) -> RichBlockImageNodeView? {
+    guard let index = items.firstIndex(where: { $0.path == path }),
+          let item = collectionView.item(at: IndexPath(item: index, section: 0)) as? RichBlockAlbumCollectionItem,
+          item.imageNodeView.matches(photoID: photoID)
+    else { return nil }
+    return item.imageNodeView
+  }
+
+  func interactiveImageHitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, bounds.contains(point) else { return nil }
+    for case let item as RichBlockAlbumCollectionItem in collectionView.visibleItems() {
+      let image = item.imageNodeView
+      if !image.isHidden, image.canOpenPreview,
+         image.bounds.contains(image.convert(point, from: self)),
+         image.visibleRect.contains(image.convert(point, from: self))
+      {
+        return image
+      }
+    }
+    return nil
+  }
 }
 
 extension RichBlockAlbumNodeView: NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout {
@@ -171,7 +196,7 @@ extension RichBlockAlbumNodeView: NSCollectionViewDataSource, NSCollectionViewDe
 }
 
 private final class RichBlockAlbumCollectionItem: NSCollectionViewItem {
-  private let imageNodeView = RichBlockImageNodeView()
+  let imageNodeView = RichBlockImageNodeView()
 
   override func loadView() {
     view = RichBlockAlbumItemContainerView(frame: .zero)

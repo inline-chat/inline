@@ -17,6 +17,8 @@ final class ImageViewerController: UIViewController {
   private let videoURL: URL?
   private weak var sourceView: UIView?
   private let sourceImage: UIImage?
+  private let sourceImageIndex: Int
+  private var imageLoadGeneration: UInt64 = 0
   private var sourceFrame: CGRect
   private let sourceCornerRadius: CGFloat
   private let destinationCornerRadius: CGFloat = 0
@@ -31,8 +33,7 @@ final class ImageViewerController: UIViewController {
   private var audioSessionSnapshot: AudioSessionSnapshot?
   private var playerViewController: AVPlayerViewController?
   private var didRestoreAudioSession = false
-  private var didRegisterImageObserver = false
-  private var didApplySourceImage = false
+  private var didBeginPresentation = false
   private weak var suppressedSourceView: UIView?
   private var suppressedSourceAlpha: CGFloat?
   private var suppressedSourceItemID: Int64?
@@ -71,12 +72,34 @@ final class ImageViewerController: UIViewController {
     imageView.layer.cornerRadius = 18
     imageView.transition = nil
     imageView.isResetEnabled = false
-    let activityIndicator = UIActivityIndicatorView(style: .medium)
-    activityIndicator.color = .white
-    activityIndicator.startAnimating()
-    imageView.placeholderView = activityIndicator
+    imageView.placeholderView = imageLoadingIndicator
+    imageView.placeholderViewPosition = .center
       
     return imageView
+  }()
+
+  private lazy var imageLoadingIndicator: UIActivityIndicatorView = {
+    let indicator = UIActivityIndicatorView(style: .medium)
+    indicator.color = .white
+    indicator.startAnimating()
+    return indicator
+  }()
+
+  private lazy var imageRetryButton: UIButton = {
+    var configuration = UIButton.Configuration.filled()
+    configuration.title = NSLocalizedString("Retry Loading Image", comment: "Image viewer failed download retry button")
+    configuration.image = UIImage(systemName: "arrow.clockwise")
+    configuration.imagePadding = 8
+    configuration.baseForegroundColor = .white
+    configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.6)
+    configuration.cornerStyle = .capsule
+    configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16)
+    let button = UIButton(configuration: configuration)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.titleLabel?.numberOfLines = 0
+    button.isHidden = true
+    button.addTarget(self, action: #selector(retryImageLoad), for: .touchUpInside)
+    return button
   }()
     
   private lazy var videoContainerView: UIView = {
@@ -176,6 +199,7 @@ final class ImageViewerController: UIViewController {
     self.sourceCornerRadius = max(0, sourceCornerRadius)
     self.imageItems = []
     self.currentIndex = 0
+    self.sourceImageIndex = 0
     self.sourceViewProvider = nil
       
     super.init(nibName: nil, bundle: nil)
@@ -200,6 +224,7 @@ final class ImageViewerController: UIViewController {
     self.sourceCornerRadius = max(0, sourceCornerRadius)
     self.imageItems = []
     self.currentIndex = 0
+    self.sourceImageIndex = 0
     self.sourceViewProvider = nil
 
     super.init(nibName: nil, bundle: nil)
@@ -222,10 +247,12 @@ final class ImageViewerController: UIViewController {
     if imageItems.isEmpty {
       self.imageURL = nil
       self.currentIndex = 0
+      self.sourceImageIndex = 0
     } else {
       let safeIndex = max(0, min(initialIndex, imageItems.count - 1))
       self.imageURL = imageItems[safeIndex].url
       self.currentIndex = safeIndex
+      self.sourceImageIndex = safeIndex
     }
 
     self.videoURL = nil
@@ -260,6 +287,7 @@ final class ImageViewerController: UIViewController {
       imageView.imageView.image = sourceImage
       updateImageViewConstraints()
     }
+    shareButton.isEnabled = isVideo || imageView.imageView.image != nil
         
     // Hide the main content initially
     scrollView.alpha = 0
@@ -268,8 +296,12 @@ final class ImageViewerController: UIViewController {
     
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
+    guard !didBeginPresentation else { return }
+    didBeginPresentation = true
+    let generation = imageLoadGeneration
     animateImageIn { [weak self] in
-      self?.loadMedia()
+      guard let self, !self.didNotifyDismiss, self.imageLoadGeneration == generation else { return }
+      self.loadMedia()
     }
   }
 
@@ -297,6 +329,7 @@ final class ImageViewerController: UIViewController {
     mediaContainerView.addSubview(videoContainerView)
     mediaContainerView.addSubview(imageView)
         
+    view.addSubview(imageRetryButton)
     view.addSubview(controlsContainerView)
     controlsContainerView.addSubview(closeButton)
     controlsContainerView.addSubview(shareButton)
@@ -322,6 +355,11 @@ final class ImageViewerController: UIViewController {
       videoContainerView.leadingAnchor.constraint(equalTo: mediaContainerView.leadingAnchor),
       videoContainerView.trailingAnchor.constraint(equalTo: mediaContainerView.trailingAnchor),
       videoContainerView.bottomAnchor.constraint(equalTo: mediaContainerView.bottomAnchor),
+
+      imageRetryButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      imageRetryButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+      imageRetryButton.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -32),
+      imageRetryButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             
       controlsContainerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
       controlsContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -379,18 +417,24 @@ final class ImageViewerController: UIViewController {
   }
 
   private func updateImageViewConstraints() {
-    guard let image = imageView.imageView.image else { return }
+    guard let image = imageView.imageView.image else {
+      setupImageViewConstraints()
+      return
+    }
+    let imageWidth = image.size.width
+    let imageHeight = image.size.height
+    let containerWidth = scrollView.bounds.width
+    let containerHeight = scrollView.bounds.height
+    guard [imageWidth, imageHeight, containerWidth, containerHeight].allSatisfy({ $0.isFinite && $0 > 0 }) else {
+      setupImageViewConstraints()
+      return
+    }
         
     if !imageViewConstraints.isEmpty {
       NSLayoutConstraint.deactivate(imageViewConstraints)
       imageViewConstraints.removeAll()
     }
-        
-    let imageWidth = image.size.width
-    let imageHeight = image.size.height
-    let containerWidth = scrollView.bounds.width
-    let containerHeight = scrollView.bounds.height
-        
+
     let widthRatio = containerWidth / imageWidth
     let heightRatio = containerHeight / imageHeight
         
@@ -414,10 +458,12 @@ final class ImageViewerController: UIViewController {
   private func setupGestures() {
     let singleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
     singleTapGesture.numberOfTapsRequired = 1
+    singleTapGesture.delegate = self
     view.addGestureRecognizer(singleTapGesture)
       
     let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
     doubleTapGesture.numberOfTapsRequired = 2
+    doubleTapGesture.delegate = self
     view.addGestureRecognizer(doubleTapGesture)
       
     singleTapGesture.require(toFail: doubleTapGesture)
@@ -459,6 +505,9 @@ final class ImageViewerController: UIViewController {
 
   private func showImage(at index: Int, direction: UISwipeGestureRecognizer.Direction) {
     guard index >= 0, index < imageItems.count else { return }
+    // The opening thumbnail belongs to the initial occurrence only. It must
+    // not cover a different page while that page's request is still pending.
+    removeTransitionImage()
     currentIndex = index
     imageURL = imageItems[index].url
     updateSourceViewForCurrentItem()
@@ -486,46 +535,40 @@ final class ImageViewerController: UIViewController {
   }
 
   private func loadImage() {
-    guard let imageURL else { return }
-
-    if let sourceImage = sourceImage, !didApplySourceImage {
+    guard let imageURL, !didNotifyDismiss else { return }
+    imageLoadGeneration &+= 1
+    let generation = imageLoadGeneration
+    imageRetryButton.isHidden = true
+    imageLoadingIndicator.startAnimating()
+    imageView.placeholderView = currentSourceImage == nil ? imageLoadingIndicator : nil
+    if let sourceImage = currentSourceImage {
       imageView.imageView.image = sourceImage
-      updateImageViewConstraints()
-      imageView.placeholderView = nil
-      didApplySourceImage = true
+      imageView.imageView.isHidden = false
     }
+    shareButton.isEnabled = imageView.imageView.image != nil
+    updateImageViewConstraints()
 
     imageView.onSuccess = { [weak self] _ in
-      DispatchQueue.main.async {
-        self?.handleImageLoadCompletion()
-      }
+      guard let self, self.imageLoadGeneration == generation else { return }
+      self.handleImageLoadCompletion()
     }
 
     imageView.onFailure = { [weak self] _ in
-      DispatchQueue.main.async {
-        guard let self else { return }
-        if let sourceImage = self.sourceImage {
-          self.imageView.imageView.image = sourceImage
-        }
-        self.handleImageLoadCompletion()
-      }
+      guard let self, self.imageLoadGeneration == generation else { return }
+      self.imageView.imageView.image = self.currentSourceImage
+      // Nuke resets/hides its underlying view before this main-actor callback.
+      // Restore both pixels and visibility in the same presentation pass.
+      self.imageView.imageView.isHidden = self.currentSourceImage == nil
+      self.imageRetryButton.isHidden = false
+      self.handleImageLoadCompletion()
     }
 
     imageView.url = imageURL
-
-    if !didRegisterImageObserver {
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(imageDidLoad),
-        name: .imageLoadingDidFinish,
-        object: nil
-      )
-      didRegisterImageObserver = true
-    }
   }
 
-  @objc private func imageDidLoad() {
-    handleImageLoadCompletion()
+  @objc private func retryImageLoad() {
+    guard !isVideo else { return }
+    loadImage()
   }
 
   private func loadVideo() {
@@ -574,6 +617,8 @@ final class ImageViewerController: UIViewController {
   }
 
   private func handleImageLoadCompletion() {
+    imageLoadingIndicator.stopAnimating()
+    shareButton.isEnabled = imageView.imageView.image != nil
     // Reset zoom scale when a new image loads
     scrollView.zoomScale = scrollView.minimumZoomScale
       
@@ -670,7 +715,7 @@ final class ImageViewerController: UIViewController {
     let tempImageView = UIImageView(frame: view.bounds)
     tempImageView.contentMode = .scaleAspectFit
     tempImageView.clipsToBounds = true
-    tempImageView.image = imageView.imageView.image ?? sourceImage
+    tempImageView.image = imageView.imageView.image ?? currentSourceImage
     tempImageView.layer.cornerRadius = destinationCornerRadius
     view.addSubview(tempImageView)
       
@@ -713,7 +758,9 @@ final class ImageViewerController: UIViewController {
   }
 
   private func removeTransitionImage() {
+    keepTransitionImageUntilLoad = false
     guard let transitionImageView else { return }
+    transitionImageView.layer.removeAllAnimations()
     transitionImageView.removeFromSuperview()
     self.transitionImageView = nil
   }
@@ -777,7 +824,7 @@ final class ImageViewerController: UIViewController {
         let tempImageView = UIImageView(frame: currentFrame)
         tempImageView.contentMode = .scaleAspectFit
         tempImageView.clipsToBounds = true
-        tempImageView.image = imageView.imageView.image ?? sourceImage
+        tempImageView.image = imageView.imageView.image ?? currentSourceImage
         tempImageView.layer.cornerRadius = destinationCornerRadius
         
         view.insertSubview(tempImageView, at: 0)
@@ -922,13 +969,18 @@ final class ImageViewerController: UIViewController {
     
   isolated deinit {
     restoreSuppressedSource(animated: false)
-    NotificationCenter.default.removeObserver(self)
   }
 
   // MARK: - Helpers
 
   private var mediaContentView: UIView {
     mediaContainerView
+  }
+
+  /// The opening thumbnail belongs to one occurrence, even when two pages use
+  /// the same photo ID or URL. A failed neighbor must never display that image.
+  private var currentSourceImage: UIImage? {
+    currentIndex == sourceImageIndex ? sourceImage : nil
   }
 
   private var currentImageItemID: Int64? {
@@ -1038,6 +1090,9 @@ final class ImageViewerController: UIViewController {
   private func notifyDidDismiss() {
     guard !didNotifyDismiss else { return }
     didNotifyDismiss = true
+    imageLoadGeneration &+= 1
+    imageView.cancel()
+    imageLoadingIndicator.stopAnimating()
     onDismiss?()
   }
 
@@ -1096,10 +1151,6 @@ final class ImageViewerController: UIViewController {
   }
 }
 
-private extension Notification.Name {
-  static let imageLoadingDidFinish = Notification.Name("imageLoadingDidFinish")
-}
-
 // MARK: - UIScrollViewDelegate
 
 extension ImageViewerController: UIScrollViewDelegate {
@@ -1137,9 +1188,12 @@ extension ImageViewerController: UIGestureRecognizerDelegate {
   }
     
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-    // Prevent gesture recognizers from triggering when tapping on buttons
-    if touch.view is UIControl {
-      return false
+    // UIButton labels/images can be the hit view. Keep all control descendants
+    // out of viewer tap/swipe/dismiss gestures so retry and toolbar actions work.
+    var target = touch.view
+    while let candidate = target, candidate !== view {
+      if candidate is UIControl { return false }
+      target = candidate.superview
     }
     return true
   }

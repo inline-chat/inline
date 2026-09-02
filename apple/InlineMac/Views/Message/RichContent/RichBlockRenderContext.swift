@@ -40,6 +40,7 @@ struct RichBlockPalette {
 struct RichBlockInteractions {
   let onTextEntityClick: (MessageTextEntityHit, NSAttributedString) -> Bool
   let onDisclosureToggle: (BlockContentPath, Bool) -> Void
+  let onImageClick: (BlockImageOccurrence) -> Void
 }
 
 struct RichBlockRenderContext {

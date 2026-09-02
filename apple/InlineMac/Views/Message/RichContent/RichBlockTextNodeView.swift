@@ -18,7 +18,7 @@ final class RichBlockTextNodeView: RichBlockRenderableView {
   override func apply(node: RichBlockLayoutPlan.Node, context: RichBlockRenderContext) {
     guard case let .text(text) = node.kind else { return }
     surface.apply(
-      text: context.text(for: text),
+      text: context.text(for: text, maximumWidth: node.frame.width),
       linkColor: context.palette.link,
       onEntityClick: context.interactions.onTextEntityClick
     )

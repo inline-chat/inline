@@ -81,6 +81,7 @@ final class UIMessageView2: UIMessageView {
   private static let attributedTextCache: NSCache<NSString, NSAttributedString> = {
     let cache = NSCache<NSString, NSAttributedString>()
     cache.countLimit = 1_000
+    cache.totalCostLimit = 24 * 1_024 * 1_024
     return cache
   }()
 
@@ -109,7 +110,7 @@ final class UIMessageView2: UIMessageView {
   private var activeGeometryTransitionGeneration: UInt?
   private var renderedRichContentSignature: Int?
   private var renderedRichContentByteCount: Int?
-  private var renderedRichTextHash: Int?
+  private var renderedRichSource: String?
   private weak var richLinkLongPress: UILongPressGestureRecognizer?
   private var didInstallReplyTap = false
   private var didInstallRichInteractions = false
@@ -205,7 +206,7 @@ final class UIMessageView2: UIMessageView {
     }
     renderedRichContentSignature = nil
     renderedRichContentByteCount = nil
-    renderedRichTextHash = nil
+    renderedRichSource = nil
     leafMeasurements.removeAll(keepingCapacity: true)
     invalidateMeasuredContent()
   }
@@ -215,7 +216,7 @@ final class UIMessageView2: UIMessageView {
     super.applyTheme(theme)
     renderedRichContentSignature = nil
     renderedRichContentByteCount = nil
-    renderedRichTextHash = nil
+    renderedRichSource = nil
     leafMeasurements.removeAll(keepingCapacity: true)
     invalidateMeasuredContent()
   }
@@ -865,6 +866,18 @@ final class UIMessageView2: UIMessageView {
     fileprivate let message: FullMessage
   }
 
+  /// The fixture's existing preparation task awaits pixel values before measuring.
+  /// UIKit measurement itself remains synchronous and on main.
+  func prepareListMath() async {
+    precondition(renderingMode == .fixtureMeasurement)
+    guard shouldRenderRichContentV2, let payload = message.blockContentPayload else { return }
+    let text = attributedMessageText() ?? NSAttributedString(string: message.text ?? "")
+    let snapshot = RichBlockLayoutPlannerV2.mathSnapshot(
+      content: payload.content, text: text, fontSize: richBaseFontSize, primaryColor: richPalette.primary, secondaryColor: richPalette.secondary
+    )
+    _ = await RichTextMath.prepare(snapshot.requests)
+  }
+
   func prepareListLayout(width: CGFloat) -> PreparedListLayout? {
     precondition(renderingMode == .fixtureMeasurement)
     guard let bubble = measuredLayout(containerWidth: width) else { return nil }
@@ -880,7 +893,8 @@ final class UIMessageView2: UIMessageView {
   func installListLayout(_ prepared: PreparedListLayout, message updated: FullMessage, animated: Bool) -> Bool {
     precondition(renderingMode == .fixtureDisplay)
     guard prepared.message == updated, canApplySnapshot(updated),
-          prepared.bubble.size.width == bounds.width
+          prepared.bubble.size.width == bounds.width,
+          prepared.key == layoutCacheKey(containerWidth: bounds.width, contentSignature: updated.hashValue, mathSignature: prepared.rich?.mathSignature ?? 0)
     else { return false }
     let oldLayout = currentLayout
     let oldRichPlan = currentRichPlan
@@ -889,13 +903,6 @@ final class UIMessageView2: UIMessageView {
       applySnapshot(updated)
     } else {
       geometryTransitionGeneration &+= 1
-    }
-    guard prepared.key == layoutCacheKey(
-      containerWidth: bounds.width,
-      mathSignature: prepared.rich?.mathSignature ?? 0
-    ) else {
-      cancelPendingGeometryTransitions()
-      return false
     }
     // A newly attached fixture inherits traits after initialization, before its first display.
     messageLabel.attributedText = attributedMessageText()
@@ -909,7 +916,7 @@ final class UIMessageView2: UIMessageView {
         baseFontSize: richBaseFontSize,
         palette: richPalette,
         message: message,
-        mathPreparationEnabled: false,
+        mathPreparationEnabled: renderingMode == .automatic,
         deferLayout: shouldAnimate,
         transitionGeneration: geometryTransitionGeneration
       )
@@ -1364,13 +1371,13 @@ final class UIMessageView2: UIMessageView {
     bubbleView.side
   }
 
-  private func layoutCacheKey(containerWidth: CGFloat, mathSignature: Int? = nil) -> NSString {
+  private func layoutCacheKey(containerWidth: CGFloat, contentSignature: Int? = nil, mathSignature: Int? = nil) -> NSString {
     let scale = max(traitCollection.displayScale, 1)
     let widthPixels = Int((containerWidth * scale).rounded())
     let maximumWidthPixels = Int((maximumBubbleWidth * scale).rounded())
     return [
       String(message.stableId),
-      String(layoutContentSignature),
+      String(contentSignature ?? layoutContentSignature),
       String(widthPixels),
       String(maximumWidthPixels),
       String(describing: displayMode),
@@ -1421,7 +1428,7 @@ final class UIMessageView2: UIMessageView {
     if renderingMode != .fixtureMeasurement, currentRichPlan != plan
       || renderedRichContentSignature != payload.cacheSignature
       || renderedRichContentByteCount != payload.byteCount
-      || renderedRichTextHash != attributedText.hash
+      || renderedRichSource?.utf8.elementsEqual(attributedText.string.utf8) != true
     {
       richContentView.update(
         plan: plan,
@@ -1431,12 +1438,12 @@ final class UIMessageView2: UIMessageView {
         palette: richPalette,
         message: message,
         mathPreparationEnabled: renderingMode == .automatic,
-        deferLayout: transitionOldRichPlan != nil,
+        deferLayout: transitionOldRichPlan != nil && !UIAccessibility.isReduceMotionEnabled,
         transitionGeneration: geometryTransitionGeneration
       )
       renderedRichContentSignature = payload.cacheSignature
       renderedRichContentByteCount = payload.byteCount
-      renderedRichTextHash = attributedText.hash
+      renderedRichSource = attributedText.string
     }
     currentRichPlan = plan
     return true
@@ -1461,7 +1468,7 @@ final class UIMessageView2: UIMessageView {
   private var shouldUseTextFooterV2: Bool {
     let hasAcknowledgement = displayMode != .threadAnchor
       && !fullMessage.acknowledgementActors.isEmpty
-    message.hasText
+    return message.hasText
       && fullMessage.file == nil
       && fullMessage.photoInfo == nil
       && fullMessage.videoInfo == nil
@@ -1485,7 +1492,9 @@ final class UIMessageView2: UIMessageView {
   }
 
   private var shouldRenderRichContentV2: Bool {
+    // Structural ranges address canonical text, never service/voice display copy.
     message.blockContentPayload != nil && fullMessage.translationText == nil
+      && (fullMessage.displayText ?? "").utf8.elementsEqual((message.text ?? "").utf8)
   }
 
   private var floatingMetadataTargetV2: MessageLayoutNodeIDV2? {
@@ -1908,7 +1917,7 @@ final class UIMessageView2: UIMessageView {
       self?.toggleDisclosure(path: path, expanded: expanded)
     }
     richContentView.onEntityTap = { [weak self] text, character in
-      self?.handleRichEntityTap(text: text, characterIndex: character)
+      self?.handleRichEntityTap(text: text, characterIndex: character) ?? false
     }
     richContentView.onMathPrepared = { [weak self] in self?.mathPrepared() }
     richContentView.onImageTap = { [weak self] selection in
@@ -2047,9 +2056,14 @@ final class UIMessageView2: UIMessageView {
     !filteredMessageActionRows(in: fullMessage).isEmpty
   }
 
+  private func messageActionTopology(in fullMessage: FullMessage) -> [[String]] {
+    filteredMessageActionRows(in: fullMessage).map { $0.map(\.actionID) }
+  }
+
   private func mathPrepared() {
     guard renderingMode == .automatic, window != nil else { return }
     let width = bounds.width > 0 ? bounds.width : maximumBubbleWidth
+    // Do not remeasure the old layout: the shared cache already contains pixels.
     let oldLayout = currentLayout
     finishGeometryTransition(generation: geometryTransitionGeneration)
     transitionOldRichPlan = currentRichPlan
@@ -2071,10 +2085,6 @@ final class UIMessageView2: UIMessageView {
     }
   }
 
-  private func messageActionTopology(in fullMessage: FullMessage) -> [[String]] {
-    filteredMessageActionRows(in: fullMessage).map { $0.map(\.actionID) }
-  }
-
   private func toggleDisclosure(path: BlockContentPath, expanded: Bool) {
     let width = bounds.width > 0 ? bounds.width : maximumBubbleWidth
     let oldLayout = measuredLayout(containerWidth: width)
@@ -2090,9 +2100,11 @@ final class UIMessageView2: UIMessageView {
     onGeometryChange?(oldLayout, newLayout)
   }
 
-  private func handleRichEntityTap(text: NSAttributedString, characterIndex: Int) {
-    guard characterIndex >= 0, characterIndex < text.length else { return }
-    if let userID = text.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) as? Int64 {
+  private func handleRichEntityTap(text: NSAttributedString, characterIndex: Int) -> Bool {
+    guard characterIndex >= 0, characterIndex < text.length else { return false }
+    if let userID = text.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) as? Int64,
+       userID > 0
+    {
       if let agentID = text.attribute(.mentionAgentId, at: characterIndex, effectiveRange: nil) as? Int64 {
         Task { @MainActor in
           guard !(await BotAgentMentionNavigator.open(
@@ -2106,26 +2118,28 @@ final class UIMessageView2: UIMessageView {
             userInfo: ["userId": userID]
           )
         }
-        return
+        return true
       }
       NotificationCenter.default.post(
         name: Notification.Name("MentionTapped"),
         object: nil,
         userInfo: ["userId": userID]
       )
-      return
+      return true
     }
-    if let groupID = text.attribute(.mentionGroupId, at: characterIndex, effectiveRange: nil) as? Int64 {
+    if let groupID = text.attribute(.mentionGroupId, at: characterIndex, effectiveRange: nil) as? Int64,
+       groupID > 0
+    {
       NotificationCenter.default.post(
         name: .userGroupMentionTapped,
         object: nil,
         userInfo: ["target": UserGroupMentionTarget(groupId: groupID, spaceId: spaceId)]
       )
-      return
+      return true
     }
     if let thread = text.attribute(.threadLink, at: characterIndex, effectiveRange: nil) as? ThreadLinkTarget {
       ThreadLinkNavigator.open(target: thread)
-      return
+      return true
     }
 
     var effectiveRange = NSRange(location: 0, length: 0)
@@ -2136,7 +2150,7 @@ final class UIMessageView2: UIMessageView {
     ) as? Bool, inlineCode {
       UIPasteboard.general.string = (text.string as NSString).substring(with: effectiveRange)
       ToastManager.shared.showToast("Copied code", type: .success, systemImage: "doc.on.doc")
-      return
+      return true
     }
     if let command = text.attribute(
       .botCommand,
@@ -2144,21 +2158,27 @@ final class UIMessageView2: UIMessageView {
       effectiveRange: &effectiveRange
     ) as? String {
       sendBotCommand(command.isEmpty ? (text.string as NSString).substring(with: effectiveRange) : command)
-      return
+      return true
     }
-    if let email = text.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
+    if let email = text.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String,
+       !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
       UIPasteboard.general.string = email
       ToastManager.shared.showToast("Copied email", type: .success, systemImage: "doc.on.doc")
-      return
+      return true
     }
-    if let phone = text.attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String {
+    if let phone = text.attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String,
+       !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
       UIPasteboard.general.string = phone
       ToastManager.shared.showToast("Copied number", type: .success, systemImage: "doc.on.doc")
-      return
+      return true
     }
     if let url = linkURL(at: characterIndex, in: text) {
       linkTapHandler?(url)
+      return true
     }
+    return false
   }
 
   @objc private func handleRichLinkLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -2175,58 +2195,32 @@ final class UIMessageView2: UIMessageView {
   }
 
   private func richImageURL(for photo: PhotoInfo) -> URL? {
-    guard let size = photo.bestPhotoSize() else { return nil }
-    return if let localPath = size.localPath, !localPath.isEmpty {
-      FileCache.getUrl(for: .photos, localPath: localPath)
-    } else if let cdnURL = size.cdnUrl {
-      URL(string: cdnURL)
-    } else {
-      nil
-    }
+    if let cached = FileCache.cachedLocalURL(photo: photo) { return cached }
+    guard let size = photo.bestPhotoSize(), size.type != "s", let cdnURL = size.cdnUrl else { return nil }
+    return URL(string: cdnURL)
   }
 
   private func openRichImages(_ selection: RichBlockImageGallerySelectionV2) {
-    let selectedPhoto = selection.photos.indices.contains(selection.initialIndex)
-      ? selection.photos[selection.initialIndex]
-      : selection.photos.first
-    guard let selectedPhoto else { return }
-
-    var seenPhotoIDs: Set<Int64> = []
-    var galleryPhotos = currentRichPlan?.nodes.flatMap { node -> [PhotoInfo] in
-      switch node.kind {
-        case let .image(image):
-          if case let .ready(photo) = image.state { return [photo] }
-          return []
-        case let .album(album):
-          return album.items.compactMap { item in
-            if case let .ready(photo) = item.state { return photo }
-            return nil
-          }
-        default:
-          return []
-      }
-    }.filter { seenPhotoIDs.insert($0.id).inserted } ?? []
-    if !seenPhotoIDs.contains(selectedPhoto.id) {
-      galleryPhotos.append(selectedPhoto)
-    }
-
-    let resolved = galleryPhotos.compactMap { photo -> (Int64, ImageViewerItem)? in
-      guard let url = richImageURL(for: photo) else { return nil }
-      return (photo.id, ImageViewerItem(id: photo.id, url: url))
-    }
-    guard !resolved.isEmpty,
-          let viewController = findViewController(),
-          viewController.presentedViewController == nil
+    guard let gallery = BlockImageGallery(
+      images: richContentView.readyImageOccurrences,
+      selectedPath: selection.image.path,
+      selectedPhotoID: selection.image.photo.id,
+      resolveURL: richImageURL(for:)
+    ), let viewController = findViewController(), viewController.presentedViewController == nil
     else { return }
-    let initialIndex = resolved.firstIndex { $0.0 == selectedPhoto.id } ?? 0
+    let sourceMessage = BlockContentMessageIdentity(message: message)
     let viewer = ImageViewerController(
-      imageItems: resolved.map(\.1),
-      initialIndex: initialIndex,
+      imageItems: gallery.items.map { ImageViewerItem(id: $0.occurrenceID, url: $0.url) },
+      initialIndex: gallery.initialIndex,
       sourceView: selection.sourceView,
       sourceImage: selection.sourceImage,
       sourceCornerRadius: 7,
-      sourceViewProvider: { [weak richContentView = self.richContentView] photoID in
-        richContentView?.sourceView(forRichPhotoID: photoID)
+      sourceViewProvider: { [weak self] occurrenceID in
+        guard let self, BlockContentMessageIdentity(message: self.message) == sourceMessage,
+              let item = gallery.items.first(where: { $0.occurrenceID == occurrenceID }),
+              let path = gallery.sourcePath(for: occurrenceID, in: self.richContentView.readyImageOccurrences)
+        else { return nil }
+        return self.richContentView.sourceView(forImagePath: path, photoID: item.image.photo.id)
       }
     )
     viewController.present(viewer, animated: false)
