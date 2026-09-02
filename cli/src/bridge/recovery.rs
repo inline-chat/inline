@@ -237,7 +237,10 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
             InboundState::Failed => "Failed",
             _ => "Stopped",
         };
-        let progress_header = tracker.terminal_header().unwrap_or(fallback_header).to_string();
+        let progress_header = tracker
+            .terminal_header()
+            .unwrap_or(fallback_header)
+            .to_string();
         tracker.set_terminal_header(progress_header.clone());
         let chunks = tracker.render_chunks(tracker.visibility_mode(), &progress_header, None);
         let mut progress_message_ids = durable_progress
