@@ -1033,17 +1033,19 @@ actor AuthStore {
         // V3 record must not publish authentication or silently fall back to V2.
         return AuthSnapshot(status: .reauthRequired(userIdHint: userIdHint), didHydrate: true)
       }
-    case .notFound, .interactionNotAllowed, .error:
+    case .notFound:
       inlineProtocol = nil
-    }
-
-    if case .interactionNotAllowed = inlineProtocolOutcome {
+    case .interactionNotAllowed, .error:
+      // Existing authority may still be present but unreadable. Keep launch fail-closed until
+      // Keychain access recovers instead of silently selecting another authority.
       return AuthSnapshot(status: .locked(userIdHint: userIdHint), didHydrate: true)
     }
 
     if let inlineProtocol {
-      let hasBearerAuthority: Bool = if mocked {
-        AuthKeychainConfig.mockGetData(credentialsV2Key, namespace: namespace) != nil
+      // V3 is exclusive only when both bearer slots were read successfully and found empty.
+      let hasBearerAuthority: Bool
+      if mocked {
+        hasBearerAuthority = AuthKeychainConfig.mockGetData(credentialsV2Key, namespace: namespace) != nil
           || AuthKeychainConfig.mockGetData(legacyTokenKey, namespace: namespace) != nil
       } else {
         switch AuthKeychainConfig.readData(
@@ -1051,15 +1053,22 @@ actor AuthStore {
           primary: primaryKeychain,
           fallback: fallbackKeychain
         ) {
-        case .success: true
-        case .notFound, .interactionNotAllowed, .error:
+        case .success:
+          hasBearerAuthority = true
+        case .interactionNotAllowed, .error:
+          return AuthSnapshot(status: .locked(userIdHint: userIdHint), didHydrate: true)
+        case .notFound:
           switch AuthKeychainConfig.readData(
             legacyTokenKey,
             primary: primaryKeychain,
             fallback: fallbackKeychain
           ) {
-          case .success: true
-          case .notFound, .interactionNotAllowed, .error: false
+          case .success:
+            hasBearerAuthority = true
+          case .notFound:
+            hasBearerAuthority = false
+          case .interactionNotAllowed, .error:
+            return AuthSnapshot(status: .locked(userIdHint: userIdHint), didHydrate: true)
           }
         }
       }

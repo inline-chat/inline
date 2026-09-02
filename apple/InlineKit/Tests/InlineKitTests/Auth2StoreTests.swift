@@ -1266,6 +1266,73 @@ final class Auth2StoreTests {
     #expect(snapshot.status == .authenticated(creds))
   }
 
+  @Test("snapshot stays locked when V3 authority cannot be read")
+  func snapshotStaysLockedWhenV3AuthorityCannotBeRead() {
+    let userDefaultsKey = "test_\(UUID().uuidString)_userId"
+    UserDefaults.standard.set(NSNumber(value: Int64(42)), forKey: userDefaultsKey)
+    defer { UserDefaults.standard.removeObject(forKey: userDefaultsKey) }
+
+    let primary = FakeKeychain(statusByKey: [
+      "inline_protocol_credentials_v1": errSecDecode,
+    ])
+
+    let snapshot = AuthStore.readSnapshot(
+      primaryKeychain: primary,
+      fallbackKeychain: nil,
+      userDefaultsKey: userDefaultsKey,
+      mocked: false,
+      namespace: nil
+    )
+
+    #expect(snapshot.status == .locked(userIdHint: 42))
+  }
+
+  @Test("snapshot stays locked when V2 authority check fails beside V3")
+  func snapshotStaysLockedWhenV2AuthorityCheckFailsBesideV3() throws {
+    let userDefaultsKey = "test_\(UUID().uuidString)_userId"
+    UserDefaults.standard.set(NSNumber(value: Int64(42)), forKey: userDefaultsKey)
+    defer { UserDefaults.standard.removeObject(forKey: userDefaultsKey) }
+
+    let v3 = try JSONEncoder().encode(v3Credentials())
+    let primary = FakeKeychain(
+      dataByKey: ["inline_protocol_credentials_v1": v3],
+      statusByKey: ["credentials_v2": errSecDecode]
+    )
+
+    let snapshot = AuthStore.readSnapshot(
+      primaryKeychain: primary,
+      fallbackKeychain: nil,
+      userDefaultsKey: userDefaultsKey,
+      mocked: false,
+      namespace: nil
+    )
+
+    #expect(snapshot.status == .locked(userIdHint: 42))
+  }
+
+  @Test("snapshot stays locked when legacy authority check fails beside V3")
+  func snapshotStaysLockedWhenLegacyAuthorityCheckFailsBesideV3() throws {
+    let userDefaultsKey = "test_\(UUID().uuidString)_userId"
+    UserDefaults.standard.set(NSNumber(value: Int64(42)), forKey: userDefaultsKey)
+    defer { UserDefaults.standard.removeObject(forKey: userDefaultsKey) }
+
+    let v3 = try JSONEncoder().encode(v3Credentials())
+    let primary = FakeKeychain(
+      dataByKey: ["inline_protocol_credentials_v1": v3],
+      statusByKey: ["token": errSecDecode]
+    )
+
+    let snapshot = AuthStore.readSnapshot(
+      primaryKeychain: primary,
+      fallbackKeychain: nil,
+      userDefaultsKey: userDefaultsKey,
+      mocked: false,
+      namespace: nil
+    )
+
+    #expect(snapshot.status == .locked(userIdHint: 42))
+  }
+
   @Test("snapshot preserves reauthRequired when v2 errors but legacy token is missing")
   func snapshotPreservesReauthRequiredWhenV2ErrorsButLegacyTokenMissing() {
     let userDefaultsKey = "test_\(UUID().uuidString)_userId"
