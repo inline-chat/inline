@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { SiteFooter, SiteHeader } from "./SiteChrome"
 
@@ -8,30 +8,44 @@ const GALLERY_SLIDES = [
   {
     id: "workspace",
     label: "Workspace overview",
+    src: "/inline-macos-codex.webp",
+    width: 2265,
+    height: 1542,
     imageClassName: "landing-redesign__product-image--workspace",
   },
   {
-    id: "threads",
-    label: "Thread detail",
-    imageClassName: "landing-redesign__product-image--threads",
+    id: "compose",
+    label: "Composing a message",
+    src: "/inline-macos-compose.webp",
+    width: 2239,
+    height: 1475,
+    imageClassName: "landing-redesign__product-image--screenshot",
   },
   {
-    id: "sidebar",
-    label: "Sidebar organization",
-    imageClassName: "landing-redesign__product-image--sidebar",
-  },
-  {
-    id: "agents",
-    label: "Teammate and agent conversation",
-    imageClassName: "landing-redesign__product-image--agents",
+    id: "agent-settings",
+    label: "Agent settings",
+    src: "/inline-macos-agent-settings.webp",
+    width: 2465,
+    height: 1534,
+    imageClassName: "landing-redesign__product-image--screenshot",
   },
 ] as const
 
-// Temporary: turn this back on when the additional approved product images arrive.
-const IS_PRODUCT_GALLERY_ENABLED = false
+const IS_PRODUCT_GALLERY_ENABLED = true
 
 export function Landing() {
   const [activeSlide, setActiveSlide] = useState(0)
+  const [isGalleryHovered, setIsGalleryHovered] = useState(false)
+
+  useEffect(() => {
+    if (!IS_PRODUCT_GALLERY_ENABLED || isGalleryHovered) return
+
+    const timer = window.setTimeout(() => {
+      setActiveSlide((currentSlide) => (currentSlide + 1) % GALLERY_SLIDES.length)
+    }, 5_000)
+
+    return () => window.clearTimeout(timer)
+  }, [activeSlide, isGalleryHovered])
 
   return (
     <main className="landing-redesign">
@@ -66,6 +80,8 @@ export function Landing() {
           className="landing-redesign__product"
           aria-label={IS_PRODUCT_GALLERY_ENABLED ? "Inline product gallery" : "Inline product preview"}
           aria-roledescription={IS_PRODUCT_GALLERY_ENABLED ? "carousel" : undefined}
+          onMouseEnter={() => setIsGalleryHovered(true)}
+          onMouseLeave={() => setIsGalleryHovered(false)}
         >
           <div className="landing-redesign__product-frame">
             <div
@@ -80,10 +96,10 @@ export function Landing() {
                 >
                   <img
                     className={`landing-redesign__product-image ${slide.imageClassName}`}
-                    src="/inline-macos-codex.webp"
+                    src={slide.src}
                     alt={`Inline for macOS — ${slide.label}`}
-                    width="2265"
-                    height="1542"
+                    width={slide.width}
+                    height={slide.height}
                     fetchPriority={index === 0 ? "high" : "auto"}
                   />
                 </figure>

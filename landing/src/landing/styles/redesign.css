@@ -252,22 +252,9 @@
   user-select: none;
 }
 
-.landing-redesign__product-image--threads {
-  top: 52%;
-  left: 39%;
-  width: 126%;
-}
-
-.landing-redesign__product-image--sidebar {
-  top: 50%;
-  left: 61%;
-  width: 128%;
-}
-
-.landing-redesign__product-image--agents {
-  top: 61%;
-  left: 36%;
-  width: 142%;
+.landing-redesign__product-image--screenshot {
+  width: auto;
+  height: 100%;
 }
 
 .landing-redesign__pagination {
