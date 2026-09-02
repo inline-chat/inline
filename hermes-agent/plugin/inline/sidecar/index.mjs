@@ -2702,7 +2702,7 @@ var require_commonjs = __commonJS(function(exports) {
   } });
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/constants.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/constants.js
 var require_constants = __commonJS(function(exports, module) {
   var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
   var hasBlob = typeof Blob !== "undefined";
@@ -2722,7 +2722,7 @@ var require_constants = __commonJS(function(exports, module) {
   };
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/buffer-util.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS(function(exports, module) {
   var { EMPTY_BUFFER } = require_constants();
   var FastBuffer = Buffer[Symbol.species];
@@ -2800,7 +2800,7 @@ var require_buffer_util = __commonJS(function(exports, module) {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/limiter.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS(function(exports, module) {
   var kDone = Symbol("kDone");
   var kRun = Symbol("kRun");
@@ -2832,7 +2832,7 @@ var require_limiter = __commonJS(function(exports, module) {
   module.exports = Limiter;
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/permessage-deflate.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS(function(exports, module) {
   var zlib = __require("zlib");
   var bufferUtil = require_buffer_util();
@@ -2904,7 +2904,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
     acceptAsServer(offers) {
       const opts = this._options;
       const accepted = offers.find((params) => {
-        if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && !params.client_max_window_bits) {
+        if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && (typeof params.client_max_window_bits === "number" ? opts.clientMaxWindowBits > params.client_max_window_bits : !params.client_max_window_bits)) {
           return false;
         }
         return true;
@@ -3096,7 +3096,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/validation.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/validation.js
 var require_validation = __commonJS(function(exports, module) {
   var { isUtf8 } = __require("buffer");
   var { hasBlob } = require_constants();
@@ -3283,7 +3283,7 @@ var require_validation = __commonJS(function(exports, module) {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/receiver.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS(function(exports, module) {
   var { Writable } = __require("stream");
   var PerMessageDeflate = require_permessage_deflate();
@@ -3327,6 +3327,7 @@ var require_receiver = __commonJS(function(exports, module) {
       this._opcode = 0;
       this._totalPayloadLength = 0;
       this._messageLength = 0;
+      this._numFragments = 0;
       this._fragments = [];
       this._errored = false;
       this._loop = false;
@@ -3536,17 +3537,17 @@ var require_receiver = __commonJS(function(exports, module) {
         this.controlMessage(data, cb);
         return;
       }
+      if (this._maxFragments > 0 && ++this._numFragments > this._maxFragments) {
+        const error = this.createError(RangeError, "Too many message fragments", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS");
+        cb(error);
+        return;
+      }
       if (this._compressed) {
         this._state = INFLATING;
         this.decompress(data, cb);
         return;
       }
       if (data.length) {
-        if (this._maxFragments > 0 && this._fragments.length >= this._maxFragments) {
-          const error = this.createError(RangeError, "Too many message fragments", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS");
-          cb(error);
-          return;
-        }
         this._messageLength = this._totalPayloadLength;
         this._fragments.push(data);
       }
@@ -3561,11 +3562,6 @@ var require_receiver = __commonJS(function(exports, module) {
           this._messageLength += buf.length;
           if (this._messageLength > this._maxPayload && this._maxPayload > 0) {
             const error = this.createError(RangeError, "Max payload size exceeded", false, 1009, "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH");
-            cb(error);
-            return;
-          }
-          if (this._maxFragments > 0 && this._fragments.length >= this._maxFragments) {
-            const error = this.createError(RangeError, "Too many message fragments", false, 1008, "WS_ERR_TOO_MANY_BUFFERED_PARTS");
             cb(error);
             return;
           }
@@ -3586,6 +3582,7 @@ var require_receiver = __commonJS(function(exports, module) {
       this._totalPayloadLength = 0;
       this._messageLength = 0;
       this._fragmented = 0;
+      this._numFragments = 0;
       this._fragments = [];
       if (this._opcode === 2) {
         let data;
@@ -3680,7 +3677,7 @@ var require_receiver = __commonJS(function(exports, module) {
   module.exports = Receiver;
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/sender.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/sender.js
 var require_sender = __commonJS(function(exports, module) {
   var { Duplex } = __require("stream");
   var { randomFillSync } = __require("crypto");
@@ -4039,7 +4036,7 @@ var require_sender = __commonJS(function(exports, module) {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/event-target.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS(function(exports, module) {
   var { kForOnEventAttribute, kListener } = require_constants();
   var kCode = Symbol("kCode");
@@ -4190,7 +4187,7 @@ var require_event_target = __commonJS(function(exports, module) {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/extension.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/extension.js
 var require_extension = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function push(dest, name, elem) {
@@ -4355,7 +4352,7 @@ var require_extension = __commonJS(function(exports, module) {
   module.exports = { format, parse };
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/websocket.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var https = __require("https");
@@ -4720,8 +4717,8 @@ var require_websocket = __commonJS(function(exports, module) {
       autoPong: true,
       closeTimeout: CLOSE_TIMEOUT,
       protocolVersion: protocolVersions[1],
-      maxBufferedChunks: 1024 * 1024,
-      maxFragments: 128 * 1024,
+      maxBufferedChunks: 256 * 1024,
+      maxFragments: 16 * 1024,
       maxPayload: 100 * 1024 * 1024,
       skipUTF8Validation: false,
       perMessageDeflate: true,
@@ -5127,7 +5124,7 @@ var require_websocket = __commonJS(function(exports, module) {
   }
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/stream.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/stream.js
 var require_stream = __commonJS(function(exports, module) {
   var WebSocket = require_websocket();
   var { Duplex } = __require("stream");
@@ -5230,7 +5227,7 @@ var require_stream = __commonJS(function(exports, module) {
   module.exports = createWebSocketStream;
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/subprotocol.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function parse(header) {
@@ -5275,7 +5272,7 @@ var require_subprotocol = __commonJS(function(exports, module) {
   module.exports = { parse };
 });
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/lib/websocket-server.js
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var http = __require("http");
@@ -5297,8 +5294,8 @@ var require_websocket_server = __commonJS(function(exports, module) {
       options = {
         allowSynchronousEvents: true,
         autoPong: true,
-        maxBufferedChunks: 1024 * 1024,
-        maxFragments: 128 * 1024,
+        maxBufferedChunks: 256 * 1024,
+        maxFragments: 16 * 1024,
         maxPayload: 100 * 1024 * 1024,
         skipUTF8Validation: false,
         perMessageDeflate: false,
@@ -5589,7 +5586,7 @@ var require_websocket_server = __commonJS(function(exports, module) {
 import http from "node:http";
 import { once } from "node:events";
 import { timingSafeEqual } from "node:crypto";
-import { mkdir, readFile as readFile2, stat } from "node:fs/promises";
+import { mkdir, readFile as readFile3, stat } from "node:fs/promises";
 import path from "node:path";
 
 // ../packages/protocol/dist/core.js
@@ -5622,6 +5619,12 @@ var BotPresenceState_Kind;
   BotPresenceState_Kind2[BotPresenceState_Kind2["RUNNING"] = 8] = "RUNNING";
   BotPresenceState_Kind2[BotPresenceState_Kind2["REVIEW"] = 9] = "REVIEW";
 })(BotPresenceState_Kind || (BotPresenceState_Kind = {}));
+var MessageSubthread_Kind;
+(function(MessageSubthread_Kind2) {
+  MessageSubthread_Kind2[MessageSubthread_Kind2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  MessageSubthread_Kind2[MessageSubthread_Kind2["REPLY"] = 1] = "REPLY";
+  MessageSubthread_Kind2[MessageSubthread_Kind2["SUBTHREAD"] = 2] = "SUBTHREAD";
+})(MessageSubthread_Kind || (MessageSubthread_Kind = {}));
 var BlockList_Kind;
 (function(BlockList_Kind2) {
   BlockList_Kind2[BlockList_Kind2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -5657,6 +5660,10 @@ var MessageEntity_Type;
   MessageEntity_Type2[MessageEntity_Type2["THREAD_TITLE"] = 12] = "THREAD_TITLE";
   MessageEntity_Type2[MessageEntity_Type2["BOT_COMMAND"] = 13] = "BOT_COMMAND";
   MessageEntity_Type2[MessageEntity_Type2["GROUP_MENTION"] = 14] = "GROUP_MENTION";
+  MessageEntity_Type2[MessageEntity_Type2["UNDERLINE"] = 15] = "UNDERLINE";
+  MessageEntity_Type2[MessageEntity_Type2["STRIKETHROUGH"] = 16] = "STRIKETHROUGH";
+  MessageEntity_Type2[MessageEntity_Type2["HIGHLIGHT"] = 17] = "HIGHLIGHT";
+  MessageEntity_Type2[MessageEntity_Type2["MATH"] = 18] = "MATH";
 })(MessageEntity_Type || (MessageEntity_Type = {}));
 var Member_Role;
 (function(Member_Role2) {
@@ -5710,6 +5717,7 @@ var RpcError_Code;
   RpcError_Code2[RpcError_Code2["FIRST_NAME_INVALID"] = 17] = "FIRST_NAME_INVALID";
   RpcError_Code2[RpcError_Code2["URL_PREVIEW_UNAVAILABLE"] = 18] = "URL_PREVIEW_UNAVAILABLE";
   RpcError_Code2[RpcError_Code2["AGENT_SESSION_MESSAGE_IMMUTABLE"] = 19] = "AGENT_SESSION_MESSAGE_IMMUTABLE";
+  RpcError_Code2[RpcError_Code2["SPACE_INVITE_INVALID"] = 20] = "SPACE_INVITE_INVALID";
 })(RpcError_Code || (RpcError_Code = {}));
 var SyncSkippedSequence_Reason;
 (function(SyncSkippedSequence_Reason2) {
@@ -5793,6 +5801,7 @@ var BotCapability_Kind;
 (function(BotCapability_Kind2) {
   BotCapability_Kind2[BotCapability_Kind2["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
   BotCapability_Kind2[BotCapability_Kind2["CHAT_SETTINGS"] = 1] = "CHAT_SETTINGS";
+  BotCapability_Kind2[BotCapability_Kind2["AGENT_CONFIGURATION"] = 2] = "AGENT_CONFIGURATION";
 })(BotCapability_Kind || (BotCapability_Kind = {}));
 var BotChatSettingsInfo_Tone;
 (function(BotChatSettingsInfo_Tone2) {
@@ -6015,6 +6024,14 @@ var Method;
   Method2[Method2["GET_AGENT_SESSION"] = 130] = "GET_AGENT_SESSION";
   Method2[Method2["UPDATE_BOT_AGENT"] = 131] = "UPDATE_BOT_AGENT";
   Method2[Method2["DELETE_BOT_AGENT"] = 132] = "DELETE_BOT_AGENT";
+  Method2[Method2["JOIN_SPACE_BY_INVITE_TOKEN"] = 133] = "JOIN_SPACE_BY_INVITE_TOKEN";
+  Method2[Method2["GET_SPACE_INVITE_LINK"] = 134] = "GET_SPACE_INVITE_LINK";
+  Method2[Method2["SET_SPACE_INVITE_LINK_ENABLED"] = 135] = "SET_SPACE_INVITE_LINK_ENABLED";
+  Method2[Method2["GET_FILE_PART"] = 136] = "GET_FILE_PART";
+  Method2[Method2["ACKNOWLEDGE_MESSAGES"] = 137] = "ACKNOWLEDGE_MESSAGES";
+  Method2[Method2["GET_USERS"] = 138] = "GET_USERS";
+  Method2[Method2["GET_BOT_SKILLS"] = 139] = "GET_BOT_SKILLS";
+  Method2[Method2["GET_BOT_CONFIGURATION_CATALOG"] = 140] = "GET_BOT_CONFIGURATION_CATALOG";
 })(Method || (Method = {}));
 var GridConnectionUnavailableReason;
 (function(GridConnectionUnavailableReason2) {
@@ -7917,6 +7934,115 @@ class ChatPermissions$Type extends import_runtime4.MessageType {
 }
 var ChatPermissions = new ChatPermissions$Type;
 
+class AgentThreadContext$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentThreadContext", [
+      { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "agent_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 3, name: "configuration", kind: "message", T: () => AgentThreadConfiguration }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.agentId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.configuration = AgentThreadConfiguration.internalBinaryRead(reader, reader.uint32(), options, message.configuration);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.botUserId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.botUserId);
+    if (message.agentId !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.agentId);
+    if (message.configuration)
+      AgentThreadConfiguration.internalBinaryWrite(message.configuration, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentThreadContext = new AgentThreadContext$Type;
+
+class AgentThreadConfiguration$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentThreadConfiguration", [
+      { no: 1, name: "project_id", kind: "scalar", opt: true, T: 9 },
+      { no: 2, name: "model_id", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "reasoning_effort_id", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.projectId = reader.string();
+          break;
+        case 2:
+          message.modelId = reader.string();
+          break;
+        case 3:
+          message.reasoningEffortId = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.projectId !== undefined)
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.projectId);
+    if (message.modelId !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.modelId);
+    if (message.reasoningEffortId !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.reasoningEffortId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentThreadConfiguration = new AgentThreadConfiguration$Type;
+
 class Chat$Type extends import_runtime4.MessageType {
   constructor() {
     super("Chat", [
@@ -7935,7 +8061,9 @@ class Chat$Type extends import_runtime4.MessageType {
       { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 },
       { no: 14, name: "number", kind: "scalar", opt: true, T: 5 },
       { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions },
-      { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 }
+      { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 },
+      { no: 17, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements },
+      { no: 18, name: "agent_context", kind: "message", T: () => AgentThreadContext }
     ]);
   }
   create(value) {
@@ -7999,6 +8127,12 @@ class Chat$Type extends import_runtime4.MessageType {
         case 16:
           message.seq = reader.int32();
           break;
+        case 17:
+          message.acknowledgements = ChatAcknowledgements.internalBinaryRead(reader, reader.uint32(), options, message.acknowledgements);
+          break;
+        case 18:
+          message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -8043,6 +8177,10 @@ class Chat$Type extends import_runtime4.MessageType {
       ChatPermissions.internalBinaryWrite(message.permissions, writer.tag(15, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.seq !== undefined)
       writer.tag(16, import_runtime.WireType.Varint).int32(message.seq);
+    if (message.acknowledgements)
+      ChatAcknowledgements.internalBinaryWrite(message.acknowledgements, writer.tag(17, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.agentContext)
+      AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(18, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8122,6 +8260,91 @@ class MessageReplies$Type extends import_runtime4.MessageType {
   }
 }
 var MessageReplies = new MessageReplies$Type;
+
+class MessageSubthread$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageSubthread", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "kind", kind: "enum", T: () => ["MessageSubthread.Kind", MessageSubthread_Kind, "KIND_"] },
+      { no: 3, name: "title", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "message_count", kind: "scalar", T: 5 },
+      { no: 5, name: "has_unread", kind: "scalar", T: 8 },
+      { no: 6, name: "recent_author_user_ids", kind: "scalar", repeat: 1, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    message.kind = 0;
+    message.messageCount = 0;
+    message.hasUnread = false;
+    message.recentAuthorUserIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.kind = reader.int32();
+          break;
+        case 3:
+          message.title = reader.string();
+          break;
+        case 4:
+          message.messageCount = reader.int32();
+          break;
+        case 5:
+          message.hasUnread = reader.bool();
+          break;
+        case 6:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.recentAuthorUserIds.push(reader.int64().toBigInt());
+          else
+            message.recentAuthorUserIds.push(reader.int64().toBigInt());
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.kind !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.kind);
+    if (message.title !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.title);
+    if (message.messageCount !== 0)
+      writer.tag(4, import_runtime.WireType.Varint).int32(message.messageCount);
+    if (message.hasUnread !== false)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.hasUnread);
+    if (message.recentAuthorUserIds.length) {
+      writer.tag(6, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.recentAuthorUserIds.length; i++)
+        writer.int64(message.recentAuthorUserIds[i]);
+      writer.join();
+    }
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageSubthread = new MessageSubthread$Type;
 
 class MessageActions$Type extends import_runtime4.MessageType {
   constructor() {
@@ -8710,7 +8933,8 @@ class Block$Type extends import_runtime4.MessageType {
       { no: 8, name: "disclosure", kind: "message", oneof: "kind", T: () => BlockDisclosure },
       { no: 9, name: "footer", kind: "message", oneof: "kind", T: () => BlockText },
       { no: 10, name: "quote", kind: "message", oneof: "kind", T: () => BlockQuote },
-      { no: 11, name: "table", kind: "message", oneof: "kind", T: () => BlockTable }
+      { no: 11, name: "table", kind: "message", oneof: "kind", T: () => BlockTable },
+      { no: 12, name: "math", kind: "message", oneof: "kind", T: () => BlockText }
     ]);
   }
   create(value) {
@@ -8791,6 +9015,12 @@ class Block$Type extends import_runtime4.MessageType {
             table: BlockTable.internalBinaryRead(reader, reader.uint32(), options, message.kind.table)
           };
           break;
+        case 12:
+          message.kind = {
+            oneofKind: "math",
+            math: BlockText.internalBinaryRead(reader, reader.uint32(), options, message.kind.math)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -8825,6 +9055,8 @@ class Block$Type extends import_runtime4.MessageType {
       BlockQuote.internalBinaryWrite(message.kind.quote, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.kind.oneofKind === "table")
       BlockTable.internalBinaryWrite(message.kind.table, writer.tag(11, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.kind.oneofKind === "math")
+      BlockText.internalBinaryWrite(message.kind.math, writer.tag(12, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9567,7 +9799,8 @@ class Message$Type extends import_runtime4.MessageType {
       { no: 21, name: "rev", kind: "scalar", opt: true, T: 3, L: 0 },
       { no: 22, name: "service_message", kind: "message", T: () => MessageService },
       { no: 23, name: "block_content", kind: "message", T: () => BlockContent },
-      { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo }
+      { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo },
+      { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread }
     ]);
   }
   create(value) {
@@ -9661,6 +9894,9 @@ class Message$Type extends import_runtime4.MessageType {
         case 24:
           message.agentSession = AgentSessionMessageInfo.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
           break;
+        case 25:
+          message.subthread = MessageSubthread.internalBinaryRead(reader, reader.uint32(), options, message.subthread);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -9723,6 +9959,8 @@ class Message$Type extends import_runtime4.MessageType {
       BlockContent.internalBinaryWrite(message.blockContent, writer.tag(23, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.agentSession)
       AgentSessionMessageInfo.internalBinaryWrite(message.agentSession, writer.tag(24, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.subthread)
+      MessageSubthread.internalBinaryWrite(message.subthread, writer.tag(25, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9906,7 +10144,8 @@ class MessageEntity$Type extends import_runtime4.MessageType {
       { no: 7, name: "thread", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThread },
       { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle },
       { no: 9, name: "group_mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityGroupMention },
-      { no: 10, name: "bot_command", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityBotCommand }
+      { no: 10, name: "bot_command", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityBotCommand },
+      { no: 11, name: "math", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityMath }
     ]);
   }
   create(value) {
@@ -9975,6 +10214,12 @@ class MessageEntity$Type extends import_runtime4.MessageType {
             botCommand: MessageEntity_MessageEntityBotCommand.internalBinaryRead(reader, reader.uint32(), options, message.entity.botCommand)
           };
           break;
+        case 11:
+          message.entity = {
+            oneofKind: "math",
+            math: MessageEntity_MessageEntityMath.internalBinaryRead(reader, reader.uint32(), options, message.entity.math)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -10007,6 +10252,8 @@ class MessageEntity$Type extends import_runtime4.MessageType {
       MessageEntity_MessageEntityGroupMention.internalBinaryWrite(message.entity.groupMention, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.entity.oneofKind === "botCommand")
       MessageEntity_MessageEntityBotCommand.internalBinaryWrite(message.entity.botCommand, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.entity.oneofKind === "math")
+      MessageEntity_MessageEntityMath.internalBinaryWrite(message.entity.math, writer.tag(11, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10328,6 +10575,49 @@ class MessageEntity_MessageEntityBotCommand$Type extends import_runtime4.Message
   }
 }
 var MessageEntity_MessageEntityBotCommand = new MessageEntity_MessageEntityBotCommand$Type;
+
+class MessageEntity_MessageEntityMath$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageEntity.MessageEntityMath", [
+      { no: 1, name: "display", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.display = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.display = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.display !== false)
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.display);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageEntity_MessageEntityMath = new MessageEntity_MessageEntityMath$Type;
 
 class MessageReactions$Type extends import_runtime4.MessageType {
   constructor() {
@@ -10706,7 +10996,8 @@ class AgentSession$Type extends import_runtime4.MessageType {
       { no: 2, name: "peer_id", kind: "message", T: () => Peer },
       { no: 3, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
       { no: 4, name: "provider", kind: "enum", T: () => ["AgentSessionProvider", AgentSessionProvider, "AGENT_SESSION_PROVIDER_"] },
-      { no: 5, name: "status_message_id", kind: "scalar", opt: true, T: 3, L: 0 }
+      { no: 5, name: "status_message_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 6, name: "parent_chat_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
@@ -10738,6 +11029,9 @@ class AgentSession$Type extends import_runtime4.MessageType {
         case 5:
           message.statusMessageId = reader.int64().toBigInt();
           break;
+        case 6:
+          message.parentChatId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -10760,6 +11054,8 @@ class AgentSession$Type extends import_runtime4.MessageType {
       writer.tag(4, import_runtime.WireType.Varint).int32(message.provider);
     if (message.statusMessageId !== undefined)
       writer.tag(5, import_runtime.WireType.Varint).int64(message.statusMessageId);
+    if (message.parentChatId !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).int64(message.parentChatId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11508,6 +11804,330 @@ class JoinPublicSpaceResult$Type extends import_runtime4.MessageType {
   }
 }
 var JoinPublicSpaceResult = new JoinPublicSpaceResult$Type;
+
+class SpaceInviteLink$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SpaceInviteLink", [
+      { no: 1, name: "url", kind: "scalar", T: 9 },
+      { no: 2, name: "expires_at", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.url = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.url = reader.string();
+          break;
+        case 2:
+          message.expiresAt = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.url !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.url);
+    if (message.expiresAt !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.expiresAt);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SpaceInviteLink = new SpaceInviteLink$Type;
+
+class JoinSpaceByInviteTokenInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("JoinSpaceByInviteTokenInput", [
+      { no: 1, name: "token", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.token = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.token = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.token !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.token);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var JoinSpaceByInviteTokenInput = new JoinSpaceByInviteTokenInput$Type;
+
+class JoinSpaceByInviteTokenResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("JoinSpaceByInviteTokenResult", [
+      { no: 1, name: "space", kind: "message", T: () => Space },
+      { no: 2, name: "member", kind: "message", T: () => Member },
+      { no: 3, name: "already_member", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.alreadyMember = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+          break;
+        case 2:
+          message.member = Member.internalBinaryRead(reader, reader.uint32(), options, message.member);
+          break;
+        case 3:
+          message.alreadyMember = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.space)
+      Space.internalBinaryWrite(message.space, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.member)
+      Member.internalBinaryWrite(message.member, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.alreadyMember !== false)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.alreadyMember);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var JoinSpaceByInviteTokenResult = new JoinSpaceByInviteTokenResult$Type;
+
+class GetSpaceInviteLinkInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetSpaceInviteLinkInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetSpaceInviteLinkInput = new GetSpaceInviteLinkInput$Type;
+
+class GetSpaceInviteLinkResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetSpaceInviteLinkResult", [
+      { no: 1, name: "link", kind: "message", T: () => SpaceInviteLink }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.link = SpaceInviteLink.internalBinaryRead(reader, reader.uint32(), options, message.link);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.link)
+      SpaceInviteLink.internalBinaryWrite(message.link, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetSpaceInviteLinkResult = new GetSpaceInviteLinkResult$Type;
+
+class SetSpaceInviteLinkEnabledInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetSpaceInviteLinkEnabledInput", [
+      { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "enabled", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaceId = 0n;
+    message.enabled = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.enabled = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.enabled !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.enabled);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetSpaceInviteLinkEnabledInput = new SetSpaceInviteLinkEnabledInput$Type;
+
+class SetSpaceInviteLinkEnabledResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetSpaceInviteLinkEnabledResult", [
+      { no: 1, name: "link", kind: "message", T: () => SpaceInviteLink }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.link = SpaceInviteLink.internalBinaryRead(reader, reader.uint32(), options, message.link);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.link)
+      SpaceInviteLink.internalBinaryWrite(message.link, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetSpaceInviteLinkEnabledResult = new SetSpaceInviteLinkEnabledResult$Type;
 
 class UserGroup$Type extends import_runtime4.MessageType {
   constructor() {
@@ -12687,7 +13307,8 @@ class Video$Type extends import_runtime4.MessageType {
       { no: 7, name: "photo", kind: "message", T: () => Photo },
       { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 },
       { no: 9, name: "is_animated", kind: "scalar", opt: true, T: 8 },
-      { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 }
+      { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 },
+      { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -12737,6 +13358,9 @@ class Video$Type extends import_runtime4.MessageType {
         case 10:
           message.hasAudio = reader.bool();
           break;
+        case 100:
+          message.fileUniqueId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -12769,6 +13393,8 @@ class Video$Type extends import_runtime4.MessageType {
       writer.tag(9, import_runtime.WireType.Varint).bool(message.isAnimated);
     if (message.hasAudio !== undefined)
       writer.tag(10, import_runtime.WireType.Varint).bool(message.hasAudio);
+    if (message.fileUniqueId !== undefined)
+      writer.tag(100, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12786,7 +13412,8 @@ class Document$Type extends import_runtime4.MessageType {
       { no: 4, name: "size", kind: "scalar", T: 5 },
       { no: 5, name: "cdn_url", kind: "scalar", opt: true, T: 9 },
       { no: 6, name: "date", kind: "scalar", T: 3, L: 0 },
-      { no: 7, name: "photo", kind: "message", T: () => Photo }
+      { no: 7, name: "photo", kind: "message", T: () => Photo },
+      { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -12826,6 +13453,9 @@ class Document$Type extends import_runtime4.MessageType {
         case 7:
           message.photo = Photo.internalBinaryRead(reader, reader.uint32(), options, message.photo);
           break;
+        case 100:
+          message.fileUniqueId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -12852,6 +13482,8 @@ class Document$Type extends import_runtime4.MessageType {
       writer.tag(6, import_runtime.WireType.Varint).int64(message.date);
     if (message.photo)
       Photo.internalBinaryWrite(message.photo, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.fileUniqueId !== undefined)
+      writer.tag(100, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12869,7 +13501,8 @@ class Voice$Type extends import_runtime4.MessageType {
       { no: 4, name: "size", kind: "scalar", T: 5 },
       { no: 5, name: "mime_type", kind: "scalar", T: 9 },
       { no: 6, name: "cdn_url", kind: "scalar", opt: true, T: 9 },
-      { no: 7, name: "waveform", kind: "scalar", T: 12 }
+      { no: 7, name: "waveform", kind: "scalar", T: 12 },
+      { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -12910,6 +13543,9 @@ class Voice$Type extends import_runtime4.MessageType {
         case 7:
           message.waveform = reader.bytes();
           break;
+        case 100:
+          message.fileUniqueId = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -12936,6 +13572,8 @@ class Voice$Type extends import_runtime4.MessageType {
       writer.tag(6, import_runtime.WireType.LengthDelimited).string(message.cdnUrl);
     if (message.waveform.length)
       writer.tag(7, import_runtime.WireType.LengthDelimited).bytes(message.waveform);
+    if (message.fileUniqueId !== undefined)
+      writer.tag(100, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13017,6 +13655,7 @@ var Photo = new Photo$Type;
 class PhotoSize$Type extends import_runtime4.MessageType {
   constructor() {
     super("PhotoSize", [
+      { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 },
       { no: 1, name: "type", kind: "scalar", T: 9 },
       { no: 2, name: "w", kind: "scalar", T: 5 },
       { no: 3, name: "h", kind: "scalar", T: 5 },
@@ -13040,6 +13679,9 @@ class PhotoSize$Type extends import_runtime4.MessageType {
     while (reader.pos < end) {
       let [fieldNo, wireType] = reader.tag();
       switch (fieldNo) {
+        case 100:
+          message.fileUniqueId = reader.string();
+          break;
         case 1:
           message.type = reader.string();
           break;
@@ -13070,6 +13712,8 @@ class PhotoSize$Type extends import_runtime4.MessageType {
     return message;
   }
   internalBinaryWrite(message, writer, options) {
+    if (message.fileUniqueId !== undefined)
+      writer.tag(100, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
     if (message.type !== "")
       writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.type);
     if (message.w !== 0)
@@ -13288,7 +13932,15 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "input", T: () => SyncAgentSessionMessagesInput },
       { no: 131, name: "getAgentSession", kind: "message", oneof: "input", T: () => GetAgentSessionInput },
       { no: 132, name: "updateBotAgent", kind: "message", oneof: "input", T: () => UpdateBotAgentInput },
-      { no: 133, name: "deleteBotAgent", kind: "message", oneof: "input", T: () => DeleteBotAgentInput }
+      { no: 133, name: "deleteBotAgent", kind: "message", oneof: "input", T: () => DeleteBotAgentInput },
+      { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "input", T: () => JoinSpaceByInviteTokenInput },
+      { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "input", T: () => GetSpaceInviteLinkInput },
+      { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "input", T: () => SetSpaceInviteLinkEnabledInput },
+      { no: 137, name: "getFilePart", kind: "message", oneof: "input", T: () => GetFilePartInput },
+      { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "input", T: () => AcknowledgeMessagesInput },
+      { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
+      { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
+      { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput }
     ]);
   }
   create(value) {
@@ -14093,6 +14745,54 @@ class RpcCall$Type extends import_runtime4.MessageType {
             deleteBotAgent: DeleteBotAgentInput.internalBinaryRead(reader, reader.uint32(), options, message.input.deleteBotAgent)
           };
           break;
+        case 134:
+          message.input = {
+            oneofKind: "joinSpaceByInviteToken",
+            joinSpaceByInviteToken: JoinSpaceByInviteTokenInput.internalBinaryRead(reader, reader.uint32(), options, message.input.joinSpaceByInviteToken)
+          };
+          break;
+        case 135:
+          message.input = {
+            oneofKind: "getSpaceInviteLink",
+            getSpaceInviteLink: GetSpaceInviteLinkInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getSpaceInviteLink)
+          };
+          break;
+        case 136:
+          message.input = {
+            oneofKind: "setSpaceInviteLinkEnabled",
+            setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setSpaceInviteLinkEnabled)
+          };
+          break;
+        case 137:
+          message.input = {
+            oneofKind: "getFilePart",
+            getFilePart: GetFilePartInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getFilePart)
+          };
+          break;
+        case 138:
+          message.input = {
+            oneofKind: "acknowledgeMessages",
+            acknowledgeMessages: AcknowledgeMessagesInput.internalBinaryRead(reader, reader.uint32(), options, message.input.acknowledgeMessages)
+          };
+          break;
+        case 139:
+          message.input = {
+            oneofKind: "getUsers",
+            getUsers: GetUsersInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getUsers)
+          };
+          break;
+        case 140:
+          message.input = {
+            oneofKind: "getBotSkills",
+            getBotSkills: GetBotSkillsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getBotSkills)
+          };
+          break;
+        case 141:
+          message.input = {
+            oneofKind: "getBotConfigurationCatalog",
+            getBotConfigurationCatalog: GetBotConfigurationCatalogInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getBotConfigurationCatalog)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -14369,6 +15069,22 @@ class RpcCall$Type extends import_runtime4.MessageType {
       UpdateBotAgentInput.internalBinaryWrite(message.input.updateBotAgent, writer.tag(132, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "deleteBotAgent")
       DeleteBotAgentInput.internalBinaryWrite(message.input.deleteBotAgent, writer.tag(133, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "joinSpaceByInviteToken")
+      JoinSpaceByInviteTokenInput.internalBinaryWrite(message.input.joinSpaceByInviteToken, writer.tag(134, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getSpaceInviteLink")
+      GetSpaceInviteLinkInput.internalBinaryWrite(message.input.getSpaceInviteLink, writer.tag(135, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setSpaceInviteLinkEnabled")
+      SetSpaceInviteLinkEnabledInput.internalBinaryWrite(message.input.setSpaceInviteLinkEnabled, writer.tag(136, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getFilePart")
+      GetFilePartInput.internalBinaryWrite(message.input.getFilePart, writer.tag(137, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "acknowledgeMessages")
+      AcknowledgeMessagesInput.internalBinaryWrite(message.input.acknowledgeMessages, writer.tag(138, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getUsers")
+      GetUsersInput.internalBinaryWrite(message.input.getUsers, writer.tag(139, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getBotSkills")
+      GetBotSkillsInput.internalBinaryWrite(message.input.getBotSkills, writer.tag(140, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getBotConfigurationCatalog")
+      GetBotConfigurationCatalogInput.internalBinaryWrite(message.input.getBotConfigurationCatalog, writer.tag(141, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -14511,7 +15227,15 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "result", T: () => SyncAgentSessionMessagesResult },
       { no: 131, name: "getAgentSession", kind: "message", oneof: "result", T: () => GetAgentSessionResult },
       { no: 132, name: "updateBotAgent", kind: "message", oneof: "result", T: () => UpdateBotAgentResult },
-      { no: 133, name: "deleteBotAgent", kind: "message", oneof: "result", T: () => DeleteBotAgentResult }
+      { no: 133, name: "deleteBotAgent", kind: "message", oneof: "result", T: () => DeleteBotAgentResult },
+      { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "result", T: () => JoinSpaceByInviteTokenResult },
+      { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "result", T: () => GetSpaceInviteLinkResult },
+      { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "result", T: () => SetSpaceInviteLinkEnabledResult },
+      { no: 137, name: "getFilePart", kind: "message", oneof: "result", T: () => GetFilePartResult },
+      { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "result", T: () => AcknowledgeMessagesResult },
+      { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
+      { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
+      { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult }
     ]);
   }
   create(value) {
@@ -15316,6 +16040,54 @@ class RpcResult$Type extends import_runtime4.MessageType {
             deleteBotAgent: DeleteBotAgentResult.internalBinaryRead(reader, reader.uint32(), options, message.result.deleteBotAgent)
           };
           break;
+        case 134:
+          message.result = {
+            oneofKind: "joinSpaceByInviteToken",
+            joinSpaceByInviteToken: JoinSpaceByInviteTokenResult.internalBinaryRead(reader, reader.uint32(), options, message.result.joinSpaceByInviteToken)
+          };
+          break;
+        case 135:
+          message.result = {
+            oneofKind: "getSpaceInviteLink",
+            getSpaceInviteLink: GetSpaceInviteLinkResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getSpaceInviteLink)
+          };
+          break;
+        case 136:
+          message.result = {
+            oneofKind: "setSpaceInviteLinkEnabled",
+            setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setSpaceInviteLinkEnabled)
+          };
+          break;
+        case 137:
+          message.result = {
+            oneofKind: "getFilePart",
+            getFilePart: GetFilePartResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getFilePart)
+          };
+          break;
+        case 138:
+          message.result = {
+            oneofKind: "acknowledgeMessages",
+            acknowledgeMessages: AcknowledgeMessagesResult.internalBinaryRead(reader, reader.uint32(), options, message.result.acknowledgeMessages)
+          };
+          break;
+        case 139:
+          message.result = {
+            oneofKind: "getUsers",
+            getUsers: GetUsersResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getUsers)
+          };
+          break;
+        case 140:
+          message.result = {
+            oneofKind: "getBotSkills",
+            getBotSkills: GetBotSkillsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getBotSkills)
+          };
+          break;
+        case 141:
+          message.result = {
+            oneofKind: "getBotConfigurationCatalog",
+            getBotConfigurationCatalog: GetBotConfigurationCatalogResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getBotConfigurationCatalog)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -15592,6 +16364,22 @@ class RpcResult$Type extends import_runtime4.MessageType {
       UpdateBotAgentResult.internalBinaryWrite(message.result.updateBotAgent, writer.tag(132, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "deleteBotAgent")
       DeleteBotAgentResult.internalBinaryWrite(message.result.deleteBotAgent, writer.tag(133, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "joinSpaceByInviteToken")
+      JoinSpaceByInviteTokenResult.internalBinaryWrite(message.result.joinSpaceByInviteToken, writer.tag(134, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getSpaceInviteLink")
+      GetSpaceInviteLinkResult.internalBinaryWrite(message.result.getSpaceInviteLink, writer.tag(135, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setSpaceInviteLinkEnabled")
+      SetSpaceInviteLinkEnabledResult.internalBinaryWrite(message.result.setSpaceInviteLinkEnabled, writer.tag(136, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getFilePart")
+      GetFilePartResult.internalBinaryWrite(message.result.getFilePart, writer.tag(137, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "acknowledgeMessages")
+      AcknowledgeMessagesResult.internalBinaryWrite(message.result.acknowledgeMessages, writer.tag(138, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getUsers")
+      GetUsersResult.internalBinaryWrite(message.result.getUsers, writer.tag(139, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getBotSkills")
+      GetBotSkillsResult.internalBinaryWrite(message.result.getBotSkills, writer.tag(140, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getBotConfigurationCatalog")
+      GetBotConfigurationCatalogResult.internalBinaryWrite(message.result.getBotConfigurationCatalog, writer.tag(141, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -16049,13 +16837,15 @@ class DeleteMemberInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("DeleteMemberInput", [
       { no: 1, name: "space_id", kind: "scalar", T: 3, L: 0 },
-      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 }
+      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "block_join", kind: "scalar", T: 8 }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.spaceId = 0n;
     message.userId = 0n;
+    message.blockJoin = false;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -16070,6 +16860,9 @@ class DeleteMemberInput$Type extends import_runtime4.MessageType {
           break;
         case 2:
           message.userId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.blockJoin = reader.bool();
           break;
         default:
           let u = options.readUnknownField;
@@ -16087,6 +16880,8 @@ class DeleteMemberInput$Type extends import_runtime4.MessageType {
       writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
     if (message.userId !== 0n)
       writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.blockJoin !== false)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.blockJoin);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18544,11 +19339,13 @@ var GetUpdatesStateResult = new GetUpdatesStateResult$Type;
 class GetChatInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetChatInput", [
-      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer }
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 2, name: "include_recent_messages", kind: "scalar", T: 8 }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
+    message.includeRecentMessages = false;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -18560,6 +19357,9 @@ class GetChatInput$Type extends import_runtime4.MessageType {
       switch (fieldNo) {
         case 1:
           message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.includeRecentMessages = reader.bool();
           break;
         default:
           let u = options.readUnknownField;
@@ -18575,6 +19375,8 @@ class GetChatInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.peerId)
       InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.includeRecentMessages !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.includeRecentMessages);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18590,12 +19392,14 @@ class GetChatResult$Type extends import_runtime4.MessageType {
       { no: 2, name: "dialog", kind: "message", T: () => Dialog },
       { no: 3, name: "pinned_message_ids", kind: "scalar", repeat: 1, T: 3, L: 0 },
       { no: 4, name: "anchor_message", kind: "message", T: () => Message },
-      { no: 5, name: "user", kind: "message", T: () => User }
+      { no: 5, name: "user", kind: "message", T: () => User },
+      { no: 6, name: "messages", kind: "message", repeat: 1, T: () => Message }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.pinnedMessageIds = [];
+    message.messages = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -18624,6 +19428,9 @@ class GetChatResult$Type extends import_runtime4.MessageType {
         case 5:
           message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
           break;
+        case 6:
+          message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -18650,6 +19457,8 @@ class GetChatResult$Type extends import_runtime4.MessageType {
       Message.internalBinaryWrite(message.anchorMessage, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.user)
       User.internalBinaryWrite(message.user, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.messages.length; i++)
+      Message.internalBinaryWrite(message.messages[i], writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18753,7 +19562,8 @@ class UpdateDialogOpenInput$Type extends import_runtime4.MessageType {
     super("UpdateDialogOpenInput", [
       { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
       { no: 2, name: "open", kind: "scalar", T: 8 },
-      { no: 3, name: "order", kind: "scalar", opt: true, T: 9 }
+      { no: 3, name: "order", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "folder_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
@@ -18777,6 +19587,9 @@ class UpdateDialogOpenInput$Type extends import_runtime4.MessageType {
         case 3:
           message.order = reader.string();
           break;
+        case 4:
+          message.folderId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -18795,6 +19608,8 @@ class UpdateDialogOpenInput$Type extends import_runtime4.MessageType {
       writer.tag(2, import_runtime.WireType.Varint).bool(message.open);
     if (message.order !== undefined)
       writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.order);
+    if (message.folderId !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.folderId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21353,6 +22168,68 @@ class BotCommand$Type extends import_runtime4.MessageType {
 }
 var BotCommand = new BotCommand$Type;
 
+class BotSkill$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BotSkill", [
+      { no: 1, name: "key", kind: "scalar", T: 9 },
+      { no: 2, name: "name", kind: "scalar", T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "sort_order", kind: "scalar", opt: true, T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.key = "";
+    message.name = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.key = reader.string();
+          break;
+        case 2:
+          message.name = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        case 4:
+          message.sortOrder = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.key !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.key);
+    if (message.name !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.name);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    if (message.sortOrder !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).int32(message.sortOrder);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BotSkill = new BotSkill$Type;
+
 class PeerBotCommands$Type extends import_runtime4.MessageType {
   constructor() {
     super("PeerBotCommands", [
@@ -21580,6 +22457,183 @@ class SetBotCommandsResult$Type extends import_runtime4.MessageType {
   }
 }
 var SetBotCommandsResult = new SetBotCommandsResult$Type;
+
+class GetBotSkillsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetBotSkillsInput", [
+      { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.botUserId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.botUserId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetBotSkillsInput = new GetBotSkillsInput$Type;
+
+class GetBotSkillsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetBotSkillsResult", [
+      { no: 1, name: "skills", kind: "message", repeat: 1, T: () => BotSkill }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.skills = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.skills.push(BotSkill.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.skills.length; i++)
+      BotSkill.internalBinaryWrite(message.skills[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetBotSkillsResult = new GetBotSkillsResult$Type;
+
+class GetBotConfigurationCatalogInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetBotConfigurationCatalogInput", [
+      { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "peer_id", kind: "message", T: () => InputPeer }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.botUserId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.botUserId);
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetBotConfigurationCatalogInput = new GetBotConfigurationCatalogInput$Type;
+
+class GetBotConfigurationCatalogResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetBotConfigurationCatalogResult", [
+      { no: 1, name: "catalog", kind: "message", T: () => AgentConfigurationCatalog }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.catalog = AgentConfigurationCatalog.internalBinaryRead(reader, reader.uint32(), options, message.catalog);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.catalog)
+      AgentConfigurationCatalog.internalBinaryWrite(message.catalog, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetBotConfigurationCatalogResult = new GetBotConfigurationCatalogResult$Type;
 
 class GetPeerBotCommandsInput$Type extends import_runtime4.MessageType {
   constructor() {
@@ -24983,7 +26037,9 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
       { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
       { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 },
       { no: 9, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] },
-      { no: 10, name: "actions", kind: "message", T: () => MessageActions }
+      { no: 10, name: "actions", kind: "message", T: () => MessageActions },
+      { no: 11, name: "initial_agent_context", kind: "message", T: () => AgentThreadContext },
+      { no: 12, name: "source_chat_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
@@ -25033,6 +26089,12 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
         case 10:
           message.actions = MessageActions.internalBinaryRead(reader, reader.uint32(), options, message.actions);
           break;
+        case 11:
+          message.initialAgentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.initialAgentContext);
+          break;
+        case 12:
+          message.sourceChatId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -25069,6 +26131,10 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
       writer.tag(9, import_runtime.WireType.Varint).int32(message.sendMode);
     if (message.actions)
       MessageActions.internalBinaryWrite(message.actions, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.initialAgentContext)
+      AgentThreadContext.internalBinaryWrite(message.initialAgentContext, writer.tag(11, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.sourceChatId !== undefined)
+      writer.tag(12, import_runtime.WireType.Varint).int64(message.sourceChatId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -25501,7 +26567,8 @@ var GetChatHistoryInput = new GetChatHistoryInput$Type;
 class GetChatHistoryResult$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetChatHistoryResult", [
-      { no: 1, name: "messages", kind: "message", repeat: 1, T: () => Message }
+      { no: 1, name: "messages", kind: "message", repeat: 1, T: () => Message },
+      { no: 2, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements }
     ]);
   }
   create(value) {
@@ -25519,6 +26586,9 @@ class GetChatHistoryResult$Type extends import_runtime4.MessageType {
         case 1:
           message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
           break;
+        case 2:
+          message.acknowledgements = ChatAcknowledgements.internalBinaryRead(reader, reader.uint32(), options, message.acknowledgements);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -25533,6 +26603,8 @@ class GetChatHistoryResult$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     for (let i = 0;i < message.messages.length; i++)
       Message.internalBinaryWrite(message.messages[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.acknowledgements)
+      ChatAcknowledgements.internalBinaryWrite(message.acknowledgements, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27593,7 +28665,8 @@ class CreateChatInput$Type extends import_runtime4.MessageType {
       { no: 5, name: "is_public", kind: "scalar", T: 8 },
       { no: 6, name: "participants", kind: "message", repeat: 1, T: () => InputChatParticipant },
       { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3, L: 0 },
-      { no: 8, name: "placeholder_title", kind: "scalar", opt: true, T: 9 }
+      { no: 8, name: "placeholder_title", kind: "scalar", opt: true, T: 9 },
+      { no: 9, name: "agent_context", kind: "message", T: () => AgentThreadContext }
     ]);
   }
   create(value) {
@@ -27633,6 +28706,9 @@ class CreateChatInput$Type extends import_runtime4.MessageType {
         case 8:
           message.placeholderTitle = reader.string();
           break;
+        case 9:
+          message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -27661,6 +28737,8 @@ class CreateChatInput$Type extends import_runtime4.MessageType {
       writer.tag(7, import_runtime.WireType.Varint).int64(message.reservedChatId);
     if (message.placeholderTitle !== undefined)
       writer.tag(8, import_runtime.WireType.LengthDelimited).string(message.placeholderTitle);
+    if (message.agentContext)
+      AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27725,7 +28803,8 @@ class CreateSubthreadInput$Type extends import_runtime4.MessageType {
       { no: 3, name: "title", kind: "scalar", opt: true, T: 9 },
       { no: 4, name: "description", kind: "scalar", opt: true, T: 9 },
       { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 },
-      { no: 6, name: "participants", kind: "message", repeat: 1, T: () => InputChatParticipant }
+      { no: 6, name: "participants", kind: "message", repeat: 1, T: () => InputChatParticipant },
+      { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext }
     ]);
   }
   create(value) {
@@ -27759,6 +28838,9 @@ class CreateSubthreadInput$Type extends import_runtime4.MessageType {
         case 6:
           message.participants.push(InputChatParticipant.internalBinaryRead(reader, reader.uint32(), options));
           break;
+        case 7:
+          message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -27783,6 +28865,8 @@ class CreateSubthreadInput$Type extends import_runtime4.MessageType {
       writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.emoji);
     for (let i = 0;i < message.participants.length; i++)
       InputChatParticipant.internalBinaryWrite(message.participants[i], writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.agentContext)
+      AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -28385,7 +29469,8 @@ class Update$Type extends import_runtime4.MessageType {
       { no: 45, name: "dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => UpdateDialogCollapsedMaxId },
       { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder },
       { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
-      { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat }
+      { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
+      { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement }
     ]);
   }
   create(value) {
@@ -28676,6 +29761,12 @@ class Update$Type extends import_runtime4.MessageType {
             userRemovedFromChat: UpdateUserRemovedFromChat.internalBinaryRead(reader, reader.uint32(), options, message.update.userRemovedFromChat)
           };
           break;
+        case 49:
+          message.update = {
+            oneofKind: "acknowledgement",
+            acknowledgement: ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options, message.update.acknowledgement)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -28782,6 +29873,8 @@ class Update$Type extends import_runtime4.MessageType {
       UpdateUserAddedToChat.internalBinaryWrite(message.update.userAddedToChat, writer.tag(47, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.update.oneofKind === "userRemovedFromChat")
       UpdateUserRemovedFromChat.internalBinaryWrite(message.update.userRemovedFromChat, writer.tag(48, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "acknowledgement")
+      ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(49, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -29057,7 +30150,8 @@ class UpdateChatInfo$Type extends import_runtime4.MessageType {
       { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
       { no: 2, name: "title", kind: "scalar", opt: true, T: 9 },
       { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 },
-      { no: 4, name: "untitled", kind: "scalar", opt: true, T: 8 }
+      { no: 4, name: "untitled", kind: "scalar", opt: true, T: 8 },
+      { no: 5, name: "agent_context", kind: "message", T: () => AgentThreadContext }
     ]);
   }
   create(value) {
@@ -29084,6 +30178,9 @@ class UpdateChatInfo$Type extends import_runtime4.MessageType {
         case 4:
           message.untitled = reader.bool();
           break;
+        case 5:
+          message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -29104,6 +30201,8 @@ class UpdateChatInfo$Type extends import_runtime4.MessageType {
       writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.emoji);
     if (message.untitled !== undefined)
       writer.tag(4, import_runtime.WireType.Varint).bool(message.untitled);
+    if (message.agentContext)
+      AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31762,6 +32861,100 @@ class SearchUsersResult$Type extends import_runtime4.MessageType {
 }
 var SearchUsersResult = new SearchUsersResult$Type;
 
+class GetUsersInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetUsersInput", [
+      { no: 1, name: "user_ids", kind: "scalar", repeat: 1, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.userIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.userIds.push(reader.int64().toBigInt());
+          else
+            message.userIds.push(reader.int64().toBigInt());
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.userIds.length) {
+      writer.tag(1, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.userIds.length; i++)
+        writer.int64(message.userIds[i]);
+      writer.join();
+    }
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetUsersInput = new GetUsersInput$Type;
+
+class GetUsersResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetUsersResult", [
+      { no: 1, name: "users", kind: "message", repeat: 1, T: () => User }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.users = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.users.length; i++)
+      User.internalBinaryWrite(message.users[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetUsersResult = new GetUsersResult$Type;
+
 class InviteToInlineInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("InviteToInlineInput", [
@@ -32284,7 +33477,8 @@ class UpdateChatInfoInput$Type extends import_runtime4.MessageType {
     super("UpdateChatInfoInput", [
       { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
       { no: 2, name: "title", kind: "scalar", opt: true, T: 9 },
-      { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 }
+      { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "agent_context", kind: "message", T: () => AgentThreadContext }
     ]);
   }
   create(value) {
@@ -32308,6 +33502,9 @@ class UpdateChatInfoInput$Type extends import_runtime4.MessageType {
         case 3:
           message.emoji = reader.string();
           break;
+        case 4:
+          message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -32326,6 +33523,8 @@ class UpdateChatInfoInput$Type extends import_runtime4.MessageType {
       writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.title);
     if (message.emoji !== undefined)
       writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.emoji);
+    if (message.agentContext)
+      AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -32615,11 +33814,376 @@ class DraftMessage$Type extends import_runtime4.MessageType {
 }
 var DraftMessage = new DraftMessage$Type;
 
+class AgentProjectOption$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentProjectOption", [
+      { no: 1, name: "id", kind: "scalar", T: 9 },
+      { no: 2, name: "label", kind: "scalar", T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = "";
+    message.label = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.string();
+          break;
+        case 2:
+          message.label = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.id);
+    if (message.label !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.label);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentProjectOption = new AgentProjectOption$Type;
+
+class AgentProjectCatalog$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentProjectCatalog", [
+      { no: 1, name: "options", kind: "message", repeat: 1, T: () => AgentProjectOption },
+      { no: 2, name: "can_select_folder", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.options = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.options.push(AgentProjectOption.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.canSelectFolder = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.options.length; i++)
+      AgentProjectOption.internalBinaryWrite(message.options[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.canSelectFolder !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.canSelectFolder);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentProjectCatalog = new AgentProjectCatalog$Type;
+
+class AgentReasoningEffortOption$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentReasoningEffortOption", [
+      { no: 1, name: "id", kind: "scalar", T: 9 },
+      { no: 2, name: "label", kind: "scalar", T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = "";
+    message.label = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.string();
+          break;
+        case 2:
+          message.label = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.id);
+    if (message.label !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.label);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentReasoningEffortOption = new AgentReasoningEffortOption$Type;
+
+class AgentReasoningCatalog$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentReasoningCatalog", [
+      { no: 1, name: "options", kind: "message", repeat: 1, T: () => AgentReasoningEffortOption }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.options = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.options.push(AgentReasoningEffortOption.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.options.length; i++)
+      AgentReasoningEffortOption.internalBinaryWrite(message.options[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentReasoningCatalog = new AgentReasoningCatalog$Type;
+
+class AgentModelOption$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentModelOption", [
+      { no: 1, name: "id", kind: "scalar", T: 9 },
+      { no: 2, name: "label", kind: "scalar", T: 9 },
+      { no: 3, name: "description", kind: "scalar", opt: true, T: 9 },
+      { no: 4, name: "reasoning_effort_ids", kind: "scalar", repeat: 2, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.id = "";
+    message.label = "";
+    message.reasoningEffortIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.id = reader.string();
+          break;
+        case 2:
+          message.label = reader.string();
+          break;
+        case 3:
+          message.description = reader.string();
+          break;
+        case 4:
+          message.reasoningEffortIds.push(reader.string());
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.id !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.id);
+    if (message.label !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.label);
+    if (message.description !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.description);
+    for (let i = 0;i < message.reasoningEffortIds.length; i++)
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.reasoningEffortIds[i]);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentModelOption = new AgentModelOption$Type;
+
+class AgentModelCatalog$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentModelCatalog", [
+      { no: 1, name: "options", kind: "message", repeat: 1, T: () => AgentModelOption }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.options = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.options.push(AgentModelOption.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.options.length; i++)
+      AgentModelOption.internalBinaryWrite(message.options[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentModelCatalog = new AgentModelCatalog$Type;
+
+class AgentConfigurationCatalog$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentConfigurationCatalog", [
+      { no: 1, name: "projects", kind: "message", T: () => AgentProjectCatalog },
+      { no: 2, name: "models", kind: "message", T: () => AgentModelCatalog },
+      { no: 3, name: "reasoning", kind: "message", T: () => AgentReasoningCatalog }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.projects = AgentProjectCatalog.internalBinaryRead(reader, reader.uint32(), options, message.projects);
+          break;
+        case 2:
+          message.models = AgentModelCatalog.internalBinaryRead(reader, reader.uint32(), options, message.models);
+          break;
+        case 3:
+          message.reasoning = AgentReasoningCatalog.internalBinaryRead(reader, reader.uint32(), options, message.reasoning);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.projects)
+      AgentProjectCatalog.internalBinaryWrite(message.projects, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.models)
+      AgentModelCatalog.internalBinaryWrite(message.models, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.reasoning)
+      AgentReasoningCatalog.internalBinaryWrite(message.reasoning, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentConfigurationCatalog = new AgentConfigurationCatalog$Type;
+
 class BotCapability$Type extends import_runtime4.MessageType {
   constructor() {
     super("BotCapability", [
       { no: 1, name: "kind", kind: "enum", T: () => ["BotCapability.Kind", BotCapability_Kind] },
-      { no: 2, name: "version", kind: "scalar", T: 13 }
+      { no: 2, name: "version", kind: "scalar", T: 13 },
+      { no: 3, name: "agent_configuration", kind: "message", T: () => AgentConfigurationCatalog }
     ]);
   }
   create(value) {
@@ -32641,6 +34205,9 @@ class BotCapability$Type extends import_runtime4.MessageType {
         case 2:
           message.version = reader.uint32();
           break;
+        case 3:
+          message.agentConfiguration = AgentConfigurationCatalog.internalBinaryRead(reader, reader.uint32(), options, message.agentConfiguration);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -32657,6 +34224,8 @@ class BotCapability$Type extends import_runtime4.MessageType {
       writer.tag(1, import_runtime.WireType.Varint).int32(message.kind);
     if (message.version !== 0)
       writer.tag(2, import_runtime.WireType.Varint).uint32(message.version);
+    if (message.agentConfiguration)
+      AgentConfigurationCatalog.internalBinaryWrite(message.agentConfiguration, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -36334,6 +37903,415 @@ class CancelUploadResult$Type extends import_runtime4.MessageType {
 }
 var CancelUploadResult = new CancelUploadResult$Type;
 
+class FileMessageLocation$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("FileMessageLocation", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "message_id", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    message.messageId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.messageId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.messageId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.messageId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var FileMessageLocation = new FileMessageLocation$Type;
+
+class GetFilePartInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetFilePartInput", [
+      { no: 1, name: "file_unique_id", kind: "scalar", T: 9 },
+      { no: 2, name: "offset", kind: "scalar", T: 4, L: 0 },
+      { no: 3, name: "limit", kind: "scalar", T: 13 },
+      { no: 4, name: "message", kind: "message", T: () => FileMessageLocation }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.fileUniqueId = "";
+    message.offset = 0n;
+    message.limit = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.fileUniqueId = reader.string();
+          break;
+        case 2:
+          message.offset = reader.uint64().toBigInt();
+          break;
+        case 3:
+          message.limit = reader.uint32();
+          break;
+        case 4:
+          message.message = FileMessageLocation.internalBinaryRead(reader, reader.uint32(), options, message.message);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.fileUniqueId !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.fileUniqueId);
+    if (message.offset !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).uint64(message.offset);
+    if (message.limit !== 0)
+      writer.tag(3, import_runtime.WireType.Varint).uint32(message.limit);
+    if (message.message)
+      FileMessageLocation.internalBinaryWrite(message.message, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetFilePartInput = new GetFilePartInput$Type;
+
+class GetFilePartResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetFilePartResult", [
+      { no: 1, name: "offset", kind: "scalar", T: 4, L: 0 },
+      { no: 2, name: "total_size", kind: "scalar", T: 4, L: 0 },
+      { no: 3, name: "data", kind: "scalar", T: 12 },
+      { no: 4, name: "sha256", kind: "scalar", T: 12 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.offset = 0n;
+    message.totalSize = 0n;
+    message.data = new Uint8Array(0);
+    message.sha256 = new Uint8Array(0);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.offset = reader.uint64().toBigInt();
+          break;
+        case 2:
+          message.totalSize = reader.uint64().toBigInt();
+          break;
+        case 3:
+          message.data = reader.bytes();
+          break;
+        case 4:
+          message.sha256 = reader.bytes();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.offset !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).uint64(message.offset);
+    if (message.totalSize !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).uint64(message.totalSize);
+    if (message.data.length)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).bytes(message.data);
+    if (message.sha256.length)
+      writer.tag(4, import_runtime.WireType.LengthDelimited).bytes(message.sha256);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetFilePartResult = new GetFilePartResult$Type;
+
+class ChatAcknowledgement$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ChatAcknowledgement", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "max_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "user", kind: "message", T: () => User },
+      { no: 5, name: "peer_id", kind: "message", T: () => Peer },
+      { no: 6, name: "revision", kind: "scalar", T: 3, L: 0 },
+      { no: 7, name: "cleared", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    message.userId = 0n;
+    message.maxId = 0n;
+    message.revision = 0n;
+    message.cleared = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.userId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.maxId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+          break;
+        case 5:
+          message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 6:
+          message.revision = reader.int64().toBigInt();
+          break;
+        case 7:
+          message.cleared = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.userId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.maxId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.maxId);
+    if (message.user)
+      User.internalBinaryWrite(message.user, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.peerId)
+      Peer.internalBinaryWrite(message.peerId, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.revision !== 0n)
+      writer.tag(6, import_runtime.WireType.Varint).int64(message.revision);
+    if (message.cleared !== false)
+      writer.tag(7, import_runtime.WireType.Varint).bool(message.cleared);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ChatAcknowledgement = new ChatAcknowledgement$Type;
+
+class AcknowledgeMessagesInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AcknowledgeMessagesInput", [
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 2, name: "max_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "clear", kind: "scalar", T: 8 },
+      { no: 4, name: "expected_revision", kind: "scalar", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.maxId = 0n;
+    message.clear = false;
+    message.expectedRevision = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.maxId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.clear = reader.bool();
+          break;
+        case 4:
+          message.expectedRevision = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.maxId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.maxId);
+    if (message.clear !== false)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.clear);
+    if (message.expectedRevision !== 0n)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.expectedRevision);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AcknowledgeMessagesInput = new AcknowledgeMessagesInput$Type;
+
+class AcknowledgeMessagesResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AcknowledgeMessagesResult", [
+      { no: 1, name: "updates", kind: "message", repeat: 1, T: () => Update }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.updates = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.updates.length; i++)
+      Update.internalBinaryWrite(message.updates[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AcknowledgeMessagesResult = new AcknowledgeMessagesResult$Type;
+
+class ChatAcknowledgements$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ChatAcknowledgements", [
+      { no: 1, name: "cursors", kind: "message", repeat: 1, T: () => ChatAcknowledgement }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.cursors = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.cursors.push(ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.cursors.length; i++)
+      ChatAcknowledgement.internalBinaryWrite(message.cursors[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ChatAcknowledgements = new ChatAcknowledgements$Type;
+
 // ../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
 /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
 function isBytes(a) {
@@ -36655,23 +38633,37 @@ class SHA256 extends HashMD {
 }
 var sha256 = /* @__PURE__ */ createHasher(() => new SHA256);
 
+// ../packages/protocol/dist/transfers.js
+var INLINE_TRANSFER_PART_SIZE = 512 * 1024;
+var INLINE_UPLOAD_MAX_PARTS = 1000;
+
 // ../packages/protocol/dist/uploads.js
 var HASH_READ_SIZE = 1024 * 1024;
-var MAX_NEGOTIATED_PART_SIZE = 16 * 1024 * 1024;
 var DEFAULT_GLOBAL_CONCURRENCY = 3;
 var DEFAULT_UPLOAD_CONCURRENCY = 2;
 var MAX_PART_ATTEMPTS = 2;
 var MAX_FINISH_RECONCILIATION_ATTEMPTS = 3;
 var FINISH_RECONCILIATION_DELAY_SECONDS = 1;
 var MAX_PROCESSING_RETRY_SECONDS = 30;
+var CANCEL_RPC_TIMEOUT_MS = 5000;
+var MAX_UPLOAD_BYTES_BY_KIND = {
+  [UploadKind.PHOTO]: 40000000,
+  [UploadKind.VIDEO]: 200000000,
+  [UploadKind.DOCUMENT]: 200000000,
+  [UploadKind.VOICE]: 20000000
+};
 var boundedUploadProcessingRetrySeconds = (seconds) => Number.isNaN(seconds) ? 1 : Math.min(MAX_PROCESSING_RETRY_SECONDS, Math.max(1, Math.floor(seconds)));
 var randomUploadId = () => {
   const bytes = new Uint8Array(16);
   globalThis.crypto.getRandomValues(bytes);
   return bytes;
 };
-var exactRead = async (source, offset, length) => {
-  const bytes = await source.read(offset, length);
+var exactRead = async (source, offset, length, signal) => {
+  if (signal?.aborted)
+    throw new NativeUploadError("canceled", "Upload was canceled");
+  const bytes = await source.read(offset, length, signal);
+  if (signal?.aborted)
+    throw new NativeUploadError("canceled", "Upload was canceled");
   if (bytes.length !== length)
     throw new NativeUploadError("source_changed", "Upload source changed while it was being read");
   return bytes;
@@ -36682,7 +38674,7 @@ var sourceHash = async (source, signal) => {
     if (signal?.aborted)
       throw new NativeUploadError("canceled", "Upload was canceled");
     const length = Math.min(HASH_READ_SIZE, source.byteCount - offset);
-    const bytes = await exactRead(source, offset, length);
+    const bytes = await exactRead(source, offset, length, signal);
     if (signal?.aborted)
       throw new NativeUploadError("canceled", "Upload was canceled");
     hash.update(bytes);
@@ -36702,12 +38694,18 @@ var validatePartIndices = (indices, partCount) => {
     throw new NativeUploadError("protocol", "Server returned an invalid upload-part index");
   }
 };
+var reportProgress = (job) => {
+  try {
+    job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount });
+  } catch {}
+};
 var delay = async (seconds, signal) => {
   if (signal?.aborted)
     throw new NativeUploadError("canceled", "Upload was canceled");
   await new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
       reject(new NativeUploadError("canceled", "Upload was canceled"));
     };
     const timeout = setTimeout(() => {
@@ -36715,6 +38713,8 @@ var delay = async (seconds, signal) => {
       resolve();
     }, Math.max(1, seconds) * 1000);
     signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted)
+      onAbort();
   });
 };
 
@@ -36724,6 +38724,7 @@ class NativeUploadClient {
   uploadConcurrency;
   #jobs = [];
   #active = 0;
+  #finishing = 0;
   #cursor = 0;
   constructor(rpc, globalConcurrency = DEFAULT_GLOBAL_CONCURRENCY, uploadConcurrency = DEFAULT_UPLOAD_CONCURRENCY) {
     this.rpc = rpc;
@@ -36737,13 +38738,17 @@ class NativeUploadClient {
     if (!Number.isSafeInteger(input.source.byteCount) || input.source.byteCount <= 0) {
       throw new NativeUploadError("invalid_source", "Upload source must have a positive safe byte count");
     }
+    const maximumByteCount = MAX_UPLOAD_BYTES_BY_KIND[input.kind];
+    if (maximumByteCount === undefined || input.source.byteCount > maximumByteCount) {
+      throw new NativeUploadError("invalid_source", "Upload source exceeds the media size limit");
+    }
     if (input.signal?.aborted)
       throw new NativeUploadError("canceled", "Upload was canceled");
     const clientUploadId = input.clientUploadId?.slice() ?? randomUploadId();
     if (clientUploadId.length !== 16)
       throw new NativeUploadError("invalid_source", "Client upload ID must be 16 bytes");
     const digest = await sourceHash(input.source, input.signal);
-    const created = await this.rpc.create({
+    const createInput = {
       clientUploadId,
       fileName: input.fileName,
       mimeType: input.mimeType,
@@ -36752,8 +38757,24 @@ class NativeUploadClient {
       kind: input.kind,
       thumbnailFileUniqueId: input.thumbnailFileUniqueId,
       metadata: input.metadata?.kind === "video" ? { oneofKind: "video", video: input.metadata.value } : input.metadata?.kind === "voice" ? { oneofKind: "voice", voice: input.metadata.value } : { oneofKind: undefined }
-    });
-    if (created.uploadId.length !== 16 || created.partSize < 1 || created.partSize > MAX_NEGOTIATED_PART_SIZE || created.partCount < 1 || created.partCount !== Math.ceil(input.source.byteCount / created.partSize) || created.acceptedParts.some((index) => !Number.isInteger(index) || index < 0 || index >= created.partCount)) {
+    };
+    let created;
+    try {
+      created = await this.rpc.create(createInput, input.signal);
+    } catch (error) {
+      if (input.signal?.aborted)
+        throw new NativeUploadError("canceled", "Upload was canceled");
+      if (this.rpc.shouldReplayCreate?.(error) === false)
+        throw error;
+      try {
+        created = await this.rpc.create(createInput, input.signal);
+      } catch (replayError) {
+        if (input.signal?.aborted)
+          throw new NativeUploadError("canceled", "Upload was canceled");
+        throw replayError;
+      }
+    }
+    if (created.uploadId.length !== 16 || created.partSize !== INLINE_TRANSFER_PART_SIZE || !Number.isSafeInteger(created.partCount) || created.partCount < 1 || created.partCount > INLINE_UPLOAD_MAX_PARTS || created.partCount !== Math.ceil(input.source.byteCount / created.partSize) || created.acceptedParts.some((index) => !Number.isInteger(index) || index < 0 || index >= created.partCount)) {
       throw new NativeUploadError("protocol", "Server returned invalid upload geometry");
     }
     return await new Promise((resolve, reject) => {
@@ -36778,13 +38799,13 @@ class NativeUploadClient {
         this.#abort(job);
         return;
       }
-      input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: input.source.byteCount });
+      reportProgress(job);
       if (!job.settled)
         this.#pump();
     });
   }
   #pump() {
-    while (this.#active < this.globalConcurrency) {
+    while (this.#active + this.#finishing < this.globalConcurrency) {
       const selected = this.#nextJob();
       if (!selected)
         break;
@@ -36798,6 +38819,10 @@ class NativeUploadClient {
       selected.active += 1;
       this.#active += 1;
       this.#sendPart(selected, partIndex);
+    }
+    for (const job of this.#jobs) {
+      if (!job.settled && job.active === 0 && this.#nextPart(job) === undefined)
+        this.#finish(job);
     }
   }
   #nextJob() {
@@ -36824,14 +38849,14 @@ class NativeUploadClient {
         throw new NativeUploadError("canceled", "Upload was canceled");
       const offset = partIndex * job.upload.partSize;
       const length = Math.min(job.upload.partSize, job.input.source.byteCount - offset);
-      const data = await exactRead(job.input.source, offset, length);
+      const data = await exactRead(job.input.source, offset, length, job.input.signal);
       if (job.settled)
         return;
       await this.#savePart(job, partIndex, data);
       if (job.settled)
         return;
       job.accepted.add(partIndex);
-      job.input.onProgress?.({ acceptedBytes: acceptedBytes(job), totalBytes: job.input.source.byteCount });
+      reportProgress(job);
     } catch (error) {
       if (!job.settled && !job.input.signal?.aborted) {
         this.#reject(job, error);
@@ -36851,7 +38876,7 @@ class NativeUploadClient {
         throw new NativeUploadError("canceled", "Upload was canceled");
       }
       try {
-        await this.rpc.savePart({ uploadId: job.upload.uploadId, partIndex, data });
+        await this.rpc.savePart({ uploadId: job.upload.uploadId, partIndex, data }, job.input.signal);
         return;
       } catch (error) {
         if (job.settled || job.input.signal?.aborted) {
@@ -36859,7 +38884,7 @@ class NativeUploadClient {
         }
         let state;
         try {
-          state = await this.rpc.state({ uploadId: job.upload.uploadId });
+          state = await this.rpc.state({ uploadId: job.upload.uploadId }, job.input.signal);
         } catch {
           throw error;
         }
@@ -36872,8 +38897,9 @@ class NativeUploadClient {
     }
   }
   async#finish(job) {
-    if (job.settled || job.active > 0)
+    if (job.settled || job.active !== 0 || this.#active + this.#finishing >= this.globalConcurrency)
       return;
+    this.#finishing += 1;
     job.active = -1;
     let reconciliationAttempts = 0;
     try {
@@ -36882,7 +38908,7 @@ class NativeUploadClient {
           throw new NativeUploadError("canceled", "Upload was canceled");
         let result;
         try {
-          result = await this.rpc.finish({ uploadId: job.upload.uploadId });
+          result = await this.rpc.finish({ uploadId: job.upload.uploadId }, job.input.signal);
         } catch (error) {
           if (job.input.signal?.aborted)
             throw new NativeUploadError("canceled", "Upload was canceled");
@@ -36890,7 +38916,7 @@ class NativeUploadClient {
             throw error;
           let state;
           try {
-            state = await this.rpc.state({ uploadId: job.upload.uploadId });
+            state = await this.rpc.state({ uploadId: job.upload.uploadId }, job.input.signal);
           } catch {
             throw error;
           }
@@ -36904,8 +38930,8 @@ class NativeUploadClient {
               job.resolve(state.complete);
               return;
             case UploadStatus.PROCESSING:
-              await delay(FINISH_RECONCILIATION_DELAY_SECONDS, job.input.signal);
-              continue;
+              this.#resumeFinishAfter(job, FINISH_RECONCILIATION_DELAY_SECONDS);
+              return;
             case UploadStatus.UPLOADING:
               job.accepted = new Set(state.acceptedParts);
               if (this.#nextPart(job) === undefined)
@@ -36932,6 +38958,9 @@ class NativeUploadClient {
           case "failed":
             throw new NativeUploadError(result.state.failed.retryable ? "retryable" : "rejected", `Upload finalization failed with code ${result.state.failed.code}`);
           case "missing":
+            if (result.state.missing.partIndices.length === 0) {
+              throw new NativeUploadError("protocol", "Server returned an empty missing-parts result");
+            }
             validatePartIndices(result.state.missing.partIndices, job.upload.partCount);
             for (const index of result.state.missing.partIndices)
               job.accepted.delete(index);
@@ -36939,21 +38968,35 @@ class NativeUploadClient {
             this.#pump();
             return;
           case "processing":
-            await delay(boundedUploadProcessingRetrySeconds(result.state.processing.retryAfterSeconds), job.input.signal);
-            break;
+            this.#resumeFinishAfter(job, boundedUploadProcessingRetrySeconds(result.state.processing.retryAfterSeconds));
+            return;
           default:
             throw new NativeUploadError("protocol", "Server returned an empty finish result");
         }
       }
     } catch (error) {
       this.#reject(job, error);
+    } finally {
+      this.#finishing -= 1;
+      this.#pump();
     }
+  }
+  #resumeFinishAfter(job, seconds) {
+    delay(seconds, job.input.signal).then(() => {
+      if (job.settled)
+        return;
+      job.active = 0;
+      this.#finish(job);
+    }, (error) => {
+      if (!job.settled)
+        this.#reject(job, error);
+    });
   }
   #abort(job) {
     if (job.settled)
       return;
     this.#reject(job, new NativeUploadError("canceled", "Upload was canceled"));
-    this.rpc.cancel({ uploadId: job.upload.uploadId }).catch(() => {});
+    this.rpc.cancel({ uploadId: job.upload.uploadId }, AbortSignal.timeout(CANCEL_RPC_TIMEOUT_MS)).catch(() => {});
   }
   #reject(job, error) {
     if (job.settled)
@@ -36984,33 +39027,34 @@ var uploadByteSource = (value) => {
     read: async (offset, length) => bytes.slice(offset, offset + length)
   };
 };
-var rpcUploadTransport = (call) => ({
-  create: async (input) => {
-    const result = await call(Method.CREATE_UPLOAD, { oneofKind: "createUpload", createUpload: input });
+var rpcUploadTransport = (call, shouldReplayCreate) => ({
+  shouldReplayCreate,
+  create: async (input, signal) => {
+    const result = await call(Method.CREATE_UPLOAD, { oneofKind: "createUpload", createUpload: input }, signal);
     if (result.oneofKind !== "createUpload")
       throw new NativeUploadError("protocol", "Unexpected createUpload result");
     return result.createUpload;
   },
-  savePart: async (input) => {
-    const result = await call(Method.SAVE_UPLOAD_PART, { oneofKind: "saveUploadPart", saveUploadPart: input });
+  savePart: async (input, signal) => {
+    const result = await call(Method.SAVE_UPLOAD_PART, { oneofKind: "saveUploadPart", saveUploadPart: input }, signal);
     if (result.oneofKind !== "saveUploadPart")
       throw new NativeUploadError("protocol", "Unexpected saveUploadPart result");
     return result.saveUploadPart;
   },
-  state: async (input) => {
-    const result = await call(Method.GET_UPLOAD_STATE, { oneofKind: "getUploadState", getUploadState: input });
+  state: async (input, signal) => {
+    const result = await call(Method.GET_UPLOAD_STATE, { oneofKind: "getUploadState", getUploadState: input }, signal);
     if (result.oneofKind !== "getUploadState")
       throw new NativeUploadError("protocol", "Unexpected getUploadState result");
     return result.getUploadState;
   },
-  finish: async (input) => {
-    const result = await call(Method.FINISH_UPLOAD, { oneofKind: "finishUpload", finishUpload: input });
+  finish: async (input, signal) => {
+    const result = await call(Method.FINISH_UPLOAD, { oneofKind: "finishUpload", finishUpload: input }, signal);
     if (result.oneofKind !== "finishUpload")
       throw new NativeUploadError("protocol", "Unexpected finishUpload result");
     return result.finishUpload;
   },
-  cancel: async (input) => {
-    const result = await call(Method.CANCEL_UPLOAD, { oneofKind: "cancelUpload", cancelUpload: input });
+  cancel: async (input, signal) => {
+    const result = await call(Method.CANCEL_UPLOAD, { oneofKind: "cancelUpload", cancelUpload: input }, signal);
     if (result.oneofKind !== "cancelUpload")
       throw new NativeUploadError("protocol", "Unexpected cancelUpload result");
     return result.cancelUpload;
@@ -37546,6 +39590,7 @@ class ProtocolClient {
   async callRpc(method, input = emptyRpcInput, options) {
     if (this.terminalAuthenticationError)
       throw this.terminalAuthenticationError;
+    options?.signal?.throwIfAborted();
     assertValidRpcMethod(method);
     if (this.pendingRpcRequests.size >= this.maxPendingRpcRequests) {
       throw new ProtocolClientError("capacity-exceeded", {
@@ -37567,6 +39612,14 @@ class ProtocolClient {
         sending: false
       };
       this.pendingRpcRequests.set(message.id, pending);
+      const onAbort = () => {
+        const reason = options?.signal?.reason;
+        this.failPendingRpcRequest(message.id, reason instanceof Error ? reason : new DOMException("The operation was aborted", "AbortError"));
+      };
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      pending.removeAbortListener = () => options?.signal?.removeEventListener("abort", onAbort);
+      if (options?.signal?.aborted)
+        onAbort();
       if (pending.timeoutMs !== null) {
         pending.timeout = setTimeout(() => {
           this.failPendingRpcRequest(message.id, pending.attempted && pending.reconnectPolicy === "never-replay" ? commitOutcomeUnknownError("RPC timed out after dispatch") : new ProtocolClientError("timeout"));
@@ -37815,6 +39868,7 @@ class ProtocolClient {
       return null;
     if (pending.timeout)
       clearTimeout(pending.timeout);
+    pending.removeAbortListener?.();
     this.pendingRpcRequests.delete(msgId);
     return pending;
   }
@@ -37823,6 +39877,7 @@ class ProtocolClient {
       pending.reject(error);
       if (pending.timeout)
         clearTimeout(pending.timeout);
+      pending.removeAbortListener?.();
     }
     this.pendingRpcRequests.clear();
   }
@@ -37939,7 +39994,7 @@ function describeConnectionError(error) {
   return `server connection error${suffix}: ${message}`;
 }
 
-// ../node_modules/.bun/ws@8.21.0/node_modules/ws/wrapper.mjs
+// ../node_modules/.bun/ws@8.21.3/node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -39918,7 +41973,7 @@ class InlineProtocolV3Connection {
     this.#sessionId = randomInt64(this.#random);
     this.#authorization = options.authorization ? cloneAuthorization(options.authorization) : undefined;
     this.#rsaKeys = options.authorization ? [] : decodePublicKeys(options.rsaPublicKeys);
-    this.#uploads = new NativeUploadClient(rpcUploadTransport((method, input) => this.callRpc({ method, input })));
+    this.#uploads = new NativeUploadClient(rpcUploadTransport((method, input, signal) => this.callRpc({ method, input }, signal), (error) => error instanceof InlineProtocolV3Error && error.code === "commit-outcome-unknown"));
   }
   static async connect(options) {
     const connection = new InlineProtocolV3Connection(options);
@@ -39969,9 +42024,9 @@ class InlineProtocolV3Connection {
   async invoke(request) {
     return await this.#invoke(request);
   }
-  async#invoke(request, onDispatched) {
+  async#invoke(request, onDispatched, signal) {
     const payload = RealtimeV3Request.toBinary(request);
-    const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched);
+    const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched, signal);
     let application2;
     try {
       application2 = decodeInlineApplicationObject(result);
@@ -40008,9 +42063,9 @@ class InlineProtocolV3Connection {
       throw new InlineProtocolV3Error("protocol", "Unexpected auth.complete response");
     return response.body.authComplete;
   }
-  async callRpc(rpc) {
+  async callRpc(rpc, signal) {
     const request = { body: { oneofKind: "rpc", rpc } };
-    const response = readOnlyRpcMethods.has(rpc.method) ? await this.#invoke(request) : await this.#invokeMutation(request);
+    const response = readOnlyRpcMethods.has(rpc.method) ? await this.#invoke(request, undefined, signal) : await this.#invokeMutation(request, signal);
     if (response.body.oneofKind === "rpcError")
       throw new InlineProtocolV3Error("protocol", response.body.rpcError.message);
     if (response.body.oneofKind !== "rpcResult")
@@ -40113,12 +42168,12 @@ class InlineProtocolV3Connection {
       throw new InlineProtocolV3Error("protocol", "Unexpected upload response");
     return response.body.finishHttpUpload;
   }
-  async#invokeMutation(request) {
+  async#invokeMutation(request, signal) {
     let dispatched = false;
     try {
       return await this.#invoke(request, () => {
         dispatched = true;
-      });
+      }, signal);
     } catch (error) {
       if (dispatched && error instanceof InlineProtocolV3Error && ["closed", "protocol", "timeout", "unauthorized"].includes(error.code)) {
         throw new InlineProtocolV3Error("commit-outcome-unknown", "Mutation lost its authoritative result after Inline Protocol dispatch; the outcome is unknown", { cause: error });
@@ -40208,12 +42263,13 @@ class InlineProtocolV3Connection {
       return;
     }
   }
-  async#sendContent(body, onDispatched) {
+  async#sendContent(body, onDispatched, signal) {
     const messageId = this.#nextClientMessageId();
     const sequenceNumber = this.#sequenceNumbers.next(true);
-    return (await this.#sendPreparedContent(messageId, sequenceNumber, body, onDispatched)).result;
+    return (await this.#sendPreparedContent(messageId, sequenceNumber, body, onDispatched, signal)).result;
   }
-  async#sendPreparedContent(initialMessageId, sequenceNumber, body, onDispatched) {
+  async#sendPreparedContent(initialMessageId, sequenceNumber, body, onDispatched, signal) {
+    signal?.throwIfAborted();
     this.#admitPending(body);
     return await new Promise((resolve, reject) => {
       let pending;
@@ -40222,6 +42278,7 @@ class InlineProtocolV3Connection {
           return;
         this.#pendingContent.delete(pending.messageId);
         this.#releasePending(body);
+        pending.removeAbortListener?.();
         reject(new InlineProtocolV3Error("timeout", `Inline Protocol response timed out after ${this.#options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS}ms`));
       }, this.#options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
       pending = {
@@ -40233,6 +42290,22 @@ class InlineProtocolV3Connection {
         timeout
       };
       this.#pendingContent.set(initialMessageId, pending);
+      const onAbort = () => {
+        if (this.#pendingContent.get(pending.messageId) !== pending)
+          return;
+        this.#pendingContent.delete(pending.messageId);
+        this.#releasePending(body);
+        clearTimeout(pending.timeout);
+        pending.removeAbortListener?.();
+        const reason = signal?.reason;
+        reject(reason instanceof Error ? reason : new DOMException("The operation was aborted", "AbortError"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      pending.removeAbortListener = () => signal?.removeEventListener("abort", onAbort);
+      if (signal?.aborted)
+        onAbort();
+      if (this.#pendingContent.get(initialMessageId) !== pending)
+        return;
       try {
         this.#sendEncrypted(initialMessageId, sequenceNumber, body, true);
         onDispatched?.();
@@ -40240,6 +42313,7 @@ class InlineProtocolV3Connection {
         this.#pendingContent.delete(initialMessageId);
         this.#releasePending(body);
         clearTimeout(pending.timeout);
+        pending.removeAbortListener?.();
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
@@ -40284,6 +42358,7 @@ class InlineProtocolV3Connection {
         this.#pendingContent.delete(result.requestMessageId);
         this.#releasePending(pending.body);
         clearTimeout(pending.timeout);
+        pending.removeAbortListener?.();
         pending.resolve({ messageId: result.requestMessageId, result: result.result });
         continue;
       }
@@ -40332,6 +42407,8 @@ class InlineProtocolV3Connection {
       const rejected = pending ?? probeEntry[1];
       this.#releasePending(rejected.body);
       clearTimeout(rejected.timeout);
+      if ("removeAbortListener" in rejected)
+        rejected.removeAbortListener?.();
       rejected.reject(new InlineProtocolV3Error("protocol", `Server rejected the outgoing message (${bad.errorCode})`));
       return;
     }
@@ -40348,6 +42425,7 @@ class InlineProtocolV3Connection {
     this.#pendingContent.clear();
     for (const item of pending) {
       clearTimeout(item.timeout);
+      item.removeAbortListener?.();
       item.reject(error);
     }
     const probes = [...this.#pendingProbes.values()];
@@ -40685,6 +42763,7 @@ class InlineProtocolV3Transport {
       throw new Error("Inline Protocol connection attempt was superseded");
     }
     let connection;
+    let openingCloseError;
     const temporary = this.#credentials.temporary;
     if (temporary?.expiresAt !== undefined) {
       try {
@@ -40699,7 +42778,13 @@ class InlineProtocolV3Transport {
               this.#connectionFailed(generation, error instanceof Error ? error : new Error(String(error)));
             });
           },
-          onClose: (error) => this.#connectionFailed(generation, error),
+          onClose: (error) => {
+            if (cachedSource && this.#connection === cachedSource) {
+              this.#connectionFailed(generation, error);
+            } else {
+              openingCloseError ??= error;
+            }
+          },
           onRotationDue: () => {
             setTimeout(() => {
               if (cachedSource)
@@ -40709,11 +42794,14 @@ class InlineProtocolV3Transport {
         });
         cachedSource = connection;
         await connection.probeTemporaryAuthorization();
+        if (openingCloseError)
+          throw openingCloseError;
         this.#requireCurrent(generation);
         if (connection.temporaryAuthorizationNeedsRotation()) {
           this.#log.info?.("Stored Inline Protocol temporary authorization reached its rotation boundary");
           await connection.close();
           connection = undefined;
+          openingCloseError = undefined;
         }
       } catch (error) {
         await connection?.close();
@@ -40721,6 +42809,7 @@ class InlineProtocolV3Transport {
         if (!isAuthenticationInvalidated(error))
           throw error;
         this.#log.warn?.("Stored Inline Protocol temporary authorization was rejected; regenerating once", error);
+        openingCloseError = undefined;
       }
     }
     if (!connection) {
@@ -40741,7 +42830,13 @@ class InlineProtocolV3Transport {
             this.#connectionFailed(generation, error instanceof Error ? error : new Error(String(error)));
           });
         },
-        onClose: (error) => this.#connectionFailed(generation, error),
+        onClose: (error) => {
+          if (replacementSource && this.#connection === replacementSource) {
+            this.#connectionFailed(generation, error);
+          } else {
+            openingCloseError ??= error;
+          }
+        },
         onRotationDue: () => {
           setTimeout(() => {
             if (replacementSource)
@@ -40753,6 +42848,8 @@ class InlineProtocolV3Transport {
       try {
         await replacement.bindTemporary(this.#credentials.permanent);
         await replacement.ping();
+        if (openingCloseError)
+          throw openingCloseError;
         this.#requireCurrent(generation);
         connection = replacement;
       } catch (error) {
@@ -40764,6 +42861,8 @@ class InlineProtocolV3Transport {
     nextCredentials.temporary = connection.authorization;
     try {
       await this.#options.onCredentials?.(cloneCredentials(nextCredentials));
+      if (openingCloseError)
+        throw openingCloseError;
       this.#requireCurrent(generation);
     } catch (error) {
       await connection.close();
@@ -41067,6 +43166,7 @@ var defaultVideoHeight = 720;
 var defaultVideoDuration = 1;
 var defaultCatchUpPageLimit = 100;
 var defaultCatchUpTotalLimit = 1e4;
+var maxDatabaseUpdateSequence = 2147483647;
 var inboundEventCapacity = 256;
 var inboundEventCapacityBytes = 8 * 1024 * 1024;
 var closeJoinTimeoutMs = 2000;
@@ -41211,6 +43311,7 @@ class InlineSdkClient {
     byteLength: inboundEventByteLength
   });
   started = false;
+  closed = false;
   openPromise = null;
   openResolver = null;
   openRejecter = null;
@@ -41274,12 +43375,16 @@ class InlineSdkClient {
       logger: options.logger,
       defaultRpcTimeoutMs: options.rpcTimeoutMs
     });
-    this.uploads = new NativeUploadClient(rpcUploadTransport((method, input) => this.invokeUncheckedRaw(method, input)));
+    this.uploads = new NativeUploadClient(rpcUploadTransport((method, input, signal) => this.invokeUncheckedRaw(method, input, { signal }), (error) => error instanceof ProtocolClientError && (error.code === "commit-outcome-unknown" || error.code === "timeout")));
     this.startListeners();
   }
   async connect(signal) {
     if (this.authenticationError)
       throw this.authenticationError;
+    if (this.logoutInProgress)
+      throw new Error("logout in progress");
+    if (this.closed)
+      throw new Error("SDK client is closed; create a new InlineSdkClient to reconnect");
     if (signal?.aborted)
       throw new Error("aborted");
     if (this.started) {
@@ -41296,11 +43401,14 @@ class InlineSdkClient {
     openPromise.catch(() => {});
     const abortConnect = () => {
       this.rejectOpen(new Error("aborted"));
-      this.close();
+      this.protocol.stopTransport().catch(() => {});
     };
     signal?.addEventListener("abort", abortConnect, { once: true });
     try {
       await this.loadState();
+      if (this.closed || this.logoutInProgress || signal?.aborted) {
+        throw new Error(this.closed ? "closed" : this.logoutInProgress ? "logout in progress" : "aborted");
+      }
       await this.protocol.startTransport();
       await openPromise;
     } catch (error) {
@@ -41319,6 +43427,7 @@ class InlineSdkClient {
   async close() {
     if (!this.started)
       return;
+    this.closed = true;
     this.started = false;
     this.rejectOpen(new Error("closed"));
     this.eventStream.close();
@@ -41340,6 +43449,7 @@ class InlineSdkClient {
     this.logoutInProgress = true;
     try {
       await owner.beginLogout();
+      this.closed = true;
       let remoteOutcome = "notSent";
       if (this.started) {
         try {
@@ -41357,6 +43467,7 @@ class InlineSdkClient {
         }
       }
       await this.close();
+      this.eventStream.close();
       await owner.clearCredentials();
       await owner.finishLogout();
       return { remoteOutcome };
@@ -41414,6 +43525,9 @@ class InlineSdkClient {
     const chat = result.getChat.chat;
     if (!chat)
       throw new Error("getChat: missing chat");
+    if (chat.peerId != null && this.isReliableChatPeer(chat.peerId)) {
+      this.rememberChatPeer(chat.id, chat.peerId);
+    }
     const dialogFollowMode = result.getChat.dialog?.followMode;
     return {
       chatId: chat.id,
@@ -41726,6 +43840,8 @@ class InlineSdkClient {
     return result;
   }
   async callRpcWithSemanticPolicy(method, input, options) {
+    if (this.closed)
+      throw new Error("SDK client is closed; create a new InlineSdkClient to reconnect");
     if (this.logoutInProgress && method !== Method.LOG_OUT) {
       throw new Error("logout in progress");
     }
@@ -41784,6 +43900,7 @@ class InlineSdkClient {
       const failure = error instanceof Error ? error : new Error("listener-crashed");
       this.log.error?.("SDK listener crashed", failure);
       this.started = false;
+      this.closed = true;
       this.rejectOpen(failure);
       this.eventStream.fail(failure);
       this.protocol.stopTransport().catch((stopError) => {
@@ -42013,6 +44130,9 @@ class InlineSdkClient {
         const message = update.update.newMessage.message;
         if (!message)
           return null;
+        if (message.peerId != null && this.isReliableChatPeer(message.peerId)) {
+          this.rememberChatPeer(message.chatId, message.peerId);
+        }
         return deliver({
           kind: "message.new",
           chatId: message.chatId,
@@ -42025,6 +44145,9 @@ class InlineSdkClient {
         const message = update.update.editMessage.message;
         if (!message)
           return null;
+        if (message.peerId != null && this.isReliableChatPeer(message.peerId)) {
+          this.rememberChatPeer(message.chatId, message.peerId);
+        }
         return deliver({
           kind: "message.edit",
           chatId: message.chatId,
@@ -42035,9 +44158,12 @@ class InlineSdkClient {
       }
       case "deleteMessages": {
         const payload = update.update.deleteMessages;
-        const chatId = payload.peerId?.type.oneofKind === "chat" ? payload.peerId.type.chat.chatId : null;
+        const chatId = this.chatIdForPeerScopedUpdate(payload.peerId, options?.bucket);
         if (!chatId) {
-          this.log.warn?.("Skipping deleteMessages update without chat peer", payload.peerId);
+          this.log.warn?.("Unable to resolve deleteMessages update to one chat bucket", {
+            source: options?.source ?? "live",
+            peerKind: payload.peerId?.type.oneofKind ?? "missing"
+          });
           return null;
         }
         return deliver({
@@ -42069,8 +44195,15 @@ class InlineSdkClient {
           }, () => this.bumpSpaceSeq(spaceId, seq, options?.source));
         }
         const peerId = payload.target.oneofKind === "peerId" ? payload.target.peerId : undefined;
-        if (peerId?.type.oneofKind === "chat") {
-          const chatId = peerId.type.chat.chatId;
+        if (peerId) {
+          const chatId = this.chatIdForPeerScopedUpdate(peerId, options?.bucket);
+          if (!chatId) {
+            this.log.warn?.("Unable to resolve clearChatHistory update to one chat bucket", {
+              source: options?.source ?? "live",
+              peerKind: peerId.type.oneofKind ?? "missing"
+            });
+            return null;
+          }
           return deliver({
             kind: "message.history.clear",
             chatId,
@@ -42082,19 +44215,6 @@ class InlineSdkClient {
             seq,
             date
           }, () => this.bumpChatSeq(chatId, seq, options?.source));
-        }
-        if (peerId?.type.oneofKind === "user") {
-          return deliver({
-            kind: "message.history.clear",
-            userId: peerId.type.user.userId,
-            ...payload.beforeDate != null ? { beforeDate: payload.beforeDate } : {},
-            deleteReplyThreads: payload.deleteReplyThreads,
-            deletedChatIds: payload.deletedChatIds,
-            orphanedChatIds: payload.orphanedChatIds,
-            detachedChatIds: payload.detachedChatIds,
-            seq,
-            date
-          }, () => this.bumpUserSeq(seq, options?.source));
         }
         this.log.warn?.("Skipping clearChatHistory update without peer target", peerId);
         return null;
@@ -42554,6 +44674,16 @@ class InlineSdkClient {
       }
       case "deleteChat":
         return this.chatBucketsForPeer(update.update.deleteChat.peerId);
+      case "deleteMessages":
+        return this.chatBucketsForPeer(update.update.deleteMessages.peerId);
+      case "clearChatHistory": {
+        const target = update.update.clearChatHistory.target;
+        if (target?.oneofKind === "peerId")
+          return this.chatBucketsForPeer(target.peerId);
+        if (target?.oneofKind === "spaceId")
+          return [{ kind: "space", spaceId: target.spaceId }];
+        return [];
+      }
       case "pinnedMessages":
         return this.chatBucketsForPeer(update.update.pinnedMessages.peerId);
       case "chatSkipPts":
@@ -42607,11 +44737,22 @@ class InlineSdkClient {
             matches.push({ kind: "chat", chatId, peer });
           } catch {}
         }
-        return matches;
+        return matches.length === 1 ? matches : [];
       }
       default:
         return [];
     }
+  }
+  chatIdForPeerScopedUpdate(peer, catchUpBucket) {
+    if (catchUpBucket) {
+      if (catchUpBucket.kind !== "chat")
+        return null;
+      return catchUpBucket.chatId;
+    }
+    if (peer?.type.oneofKind === "chat")
+      return peer.type.chat.chatId;
+    const matches = this.chatBucketsForPeer(peer);
+    return matches.length === 1 && matches[0]?.kind === "chat" ? matches[0].chatId : null;
   }
   peerFromEvent(event) {
     switch (event.kind) {
@@ -42698,6 +44839,7 @@ class InlineSdkClient {
   async doCatchUpUser(startSeq) {
     let cursor = startSeq;
     while (true) {
+      const requestEndSeq = this.catchUpRequestEndSeq(cursor);
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -42708,6 +44850,7 @@ class InlineSdkClient {
             }
           }),
           startSeq: BigInt(cursor),
+          ...requestEndSeq != null ? { seqEnd: BigInt(requestEndSeq) } : {},
           totalLimit: defaultCatchUpTotalLimit,
           limit: defaultCatchUpPageLimit
         })
@@ -42720,15 +44863,26 @@ class InlineSdkClient {
         return;
       }
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date);
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq);
+        const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date, !shouldContinue);
+        if (repaired && shouldContinue) {
+          cursor = deliveredSeq;
+          continue;
+        }
         return;
       }
       const requiresSnapshotRepair = this.validateCatchUpPage(payload, cursor, { kind: "user" });
       if (requiresSnapshotRepair == null)
         return;
       if (requiresSnapshotRepair) {
-        await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date);
-        return;
+        if (this.options.repairUpdatesBucket) {
+          await this.repairUpdateBucketAuthoritatively({ kind: "user" }, deliveredSeq, payload.date);
+          return;
+        }
+        this.log.warn?.("GET_UPDATES advanced past a snapshot-repair marker without a host snapshot owner", {
+          bucket: "user",
+          deliveredSeq
+        });
       }
       if (deliveredSeq <= cursor && !payload.final) {
         this.markUpdateBucketDegraded({ kind: "user" });
@@ -42743,6 +44897,10 @@ class InlineSdkClient {
       this.bumpUserSeq(deliveredSeq);
       this.scheduleStateSave();
       if (payload.final) {
+        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq)) {
+          cursor = deliveredSeq;
+          continue;
+        }
         this.satisfyDiscoveryBucket({ kind: "user" }, deliveredSeq);
         this.clearUpdateBucketDegraded({ kind: "user" });
         return;
@@ -42808,8 +44966,8 @@ class InlineSdkClient {
   }
   async doCatchUpChat(chatId, peer, startSeq, endSeq) {
     let cursor = startSeq;
-    let requestEndSeq = endSeq;
-    while (requestEndSeq == null || cursor < requestEndSeq) {
+    while (endSeq == null || cursor < endSeq) {
+      const requestEndSeq = this.catchUpRequestEndSeq(cursor, endSeq);
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -42830,7 +44988,21 @@ class InlineSdkClient {
       const payload = result.getUpdates;
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
         const deliveredSeq2 = Number(payload.seq ?? 0n);
-        await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq2, payload.date);
+        if (endSeq != null && requestEndSeq != null && deliveredSeq2 !== requestEndSeq) {
+          this.markUpdateBucketDegraded({ kind: "chat", chatId, peer });
+          this.log.warn?.("GET_UPDATES TOO_LONG pointer did not cover the requested chat target", {
+            chatId: chatId.toString(),
+            requestedEndSeq: requestEndSeq,
+            deliveredSeq: deliveredSeq2
+          });
+          return true;
+        }
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq2, requestEndSeq, endSeq);
+        const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq2, payload.date, !shouldContinue);
+        if (repaired && shouldContinue) {
+          cursor = deliveredSeq2;
+          continue;
+        }
         return true;
       }
       const deliveredSeq = Number(payload.seq ?? 0n);
@@ -42843,8 +45015,14 @@ class InlineSdkClient {
       if (requiresSnapshotRepair == null)
         return true;
       if (requiresSnapshotRepair) {
-        await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq, payload.date);
-        return true;
+        if (this.options.repairUpdatesBucket) {
+          await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq, payload.date);
+          return true;
+        }
+        this.log.warn?.("GET_UPDATES advanced past a snapshot-repair marker without a host snapshot owner", {
+          bucket: this.updateBucketKey({ kind: "chat", chatId }),
+          deliveredSeq
+        });
       }
       if (deliveredSeq <= cursor && !payload.final) {
         this.markUpdateBucketDegraded({ kind: "chat", chatId, peer });
@@ -42860,6 +45038,19 @@ class InlineSdkClient {
       this.bumpChatSeq(chatId, deliveredSeq);
       this.scheduleStateSave();
       if (payload.final) {
+        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq)) {
+          cursor = deliveredSeq;
+          continue;
+        }
+        if (endSeq != null && deliveredSeq < endSeq) {
+          this.markUpdateBucketDegraded({ kind: "chat", chatId, peer });
+          this.log.warn?.("GET_UPDATES final chat page remained behind the requested target", {
+            chatId: chatId.toString(),
+            requestedEndSeq: endSeq,
+            deliveredSeq
+          });
+          return true;
+        }
         this.satisfyDiscoveryBucket({ kind: "chat", chatId, peer }, deliveredSeq);
         this.clearUpdateBucketDegraded({ kind: "chat", chatId, peer });
         return true;
@@ -42923,8 +45114,8 @@ class InlineSdkClient {
   }
   async doCatchUpSpace(spaceId, startSeq, endSeq) {
     let cursor = startSeq;
-    let requestEndSeq = endSeq;
-    while (requestEndSeq == null || cursor < requestEndSeq) {
+    while (endSeq == null || cursor < endSeq) {
+      const requestEndSeq = this.catchUpRequestEndSeq(cursor, endSeq);
       const result = await this.invoke(Method.GET_UPDATES, {
         oneofKind: "getUpdates",
         getUpdates: GetUpdatesInput.create({
@@ -42945,7 +45136,21 @@ class InlineSdkClient {
       const payload = result.getUpdates;
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
         const deliveredSeq2 = Number(payload.seq ?? 0n);
-        await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq2, payload.date);
+        if (endSeq != null && requestEndSeq != null && deliveredSeq2 !== requestEndSeq) {
+          this.markUpdateBucketDegraded({ kind: "space", spaceId });
+          this.log.warn?.("GET_UPDATES TOO_LONG pointer did not cover the requested space target", {
+            spaceId: spaceId.toString(),
+            requestedEndSeq: requestEndSeq,
+            deliveredSeq: deliveredSeq2
+          });
+          return true;
+        }
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq2, requestEndSeq, endSeq);
+        const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq2, payload.date, !shouldContinue);
+        if (repaired && shouldContinue) {
+          cursor = deliveredSeq2;
+          continue;
+        }
         return true;
       }
       const deliveredSeq = Number(payload.seq ?? 0n);
@@ -42960,8 +45165,14 @@ class InlineSdkClient {
       if (requiresSnapshotRepair == null)
         return true;
       if (requiresSnapshotRepair) {
-        await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq, payload.date);
-        return true;
+        if (this.options.repairUpdatesBucket) {
+          await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq, payload.date);
+          return true;
+        }
+        this.log.warn?.("GET_UPDATES advanced past a snapshot-repair marker without a host snapshot owner", {
+          bucket: this.updateBucketKey({ kind: "space", spaceId }),
+          deliveredSeq
+        });
       }
       if (deliveredSeq <= cursor && !payload.final) {
         this.markUpdateBucketDegraded({ kind: "space", spaceId });
@@ -42977,6 +45188,19 @@ class InlineSdkClient {
       this.bumpSpaceSeq(spaceId, deliveredSeq);
       this.scheduleStateSave();
       if (payload.final) {
+        if (this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq)) {
+          cursor = deliveredSeq;
+          continue;
+        }
+        if (endSeq != null && deliveredSeq < endSeq) {
+          this.markUpdateBucketDegraded({ kind: "space", spaceId });
+          this.log.warn?.("GET_UPDATES final space page remained behind the requested target", {
+            spaceId: spaceId.toString(),
+            requestedEndSeq: endSeq,
+            deliveredSeq
+          });
+          return true;
+        }
         this.satisfyDiscoveryBucket({ kind: "space", spaceId }, deliveredSeq);
         this.clearUpdateBucketDegraded({ kind: "space", spaceId });
         return true;
@@ -43137,19 +45361,54 @@ class InlineSdkClient {
     }
     return requiresSnapshotRepair;
   }
-  async repairUpdateBucketAuthoritatively(bucket, serverSeq, serverDate) {
+  catchUpRequestEndSeq(cursor, requestedEndSeq) {
+    if (this.options.repairUpdatesBucket)
+      return requestedEndSeq;
+    return Math.min(requestedEndSeq ?? maxDatabaseUpdateSequence, cursor + defaultCatchUpTotalLimit);
+  }
+  shouldContinueBoundedCatchUp(previousCursor, deliveredSeq, requestEndSeq, requestedEndSeq) {
+    if (this.options.repairUpdatesBucket || requestEndSeq == null)
+      return false;
+    if (deliveredSeq <= previousCursor || deliveredSeq !== requestEndSeq)
+      return false;
+    return requestedEndSeq == null ? requestEndSeq < maxDatabaseUpdateSequence : deliveredSeq < requestedEndSeq;
+  }
+  async repairUpdateBucketAuthoritatively(bucket, serverSeq, serverDate, finalize = true) {
     if (!Number.isSafeInteger(serverSeq) || serverSeq < 0) {
       this.markUpdateBucketDegraded(bucket);
       return false;
     }
     const repair = this.options.repairUpdatesBucket;
     if (!repair) {
-      this.markUpdateBucketDegraded(bucket);
-      this.log.warn?.("GET_UPDATES requires authoritative bucket repair; bucket remains degraded", {
+      if (serverSeq <= this.bucketCursor(bucket)) {
+        this.markUpdateBucketDegraded(bucket);
+        this.log.warn?.("GET_UPDATES repair did not advance its bucket; bucket remains degraded", {
+          bucket: this.updateBucketKey(bucket),
+          serverSeq
+        });
+        return false;
+      }
+      switch (bucket.kind) {
+        case "user":
+          this.bumpUserSeq(serverSeq);
+          break;
+        case "chat":
+          this.bumpChatSeq(bucket.chatId, serverSeq);
+          break;
+        case "space":
+          this.bumpSpaceSeq(bucket.spaceId, serverSeq);
+          break;
+      }
+      this.scheduleStateSave();
+      if (finalize) {
+        this.satisfyDiscoveryBucket(bucket, serverSeq);
+        this.clearUpdateBucketDegraded(bucket);
+      }
+      this.log.warn?.("GET_UPDATES could not replay a bounded range; advanced to its server-authoritative cursor", {
         bucket: this.updateBucketKey(bucket),
         serverSeq
       });
-      return false;
+      return true;
     }
     try {
       const request = { bucket, serverSeq, serverDate };
@@ -43189,9 +45448,17 @@ class InlineSdkClient {
       if (update.update.oneofKind === undefined) {
         continue;
       }
-      const accepted = await this.handleUpdate(update, { source });
+      const accepted = await this.handleUpdate(update, { source, bucket });
       if (accepted === true)
         continue;
+      if (accepted === false) {
+        this.markUpdateBucketDegraded(bucket);
+        this.log.warn?.("GET_UPDATES event was not acknowledged by the SDK host; cursor remains unchanged", {
+          bucket: this.updateBucketKey(bucket),
+          updateKind: update.update.oneofKind
+        });
+        return false;
+      }
       if (!this.isProjectedUpdateKind(update)) {
         this.log.debug?.("GET_UPDATES advanced past an update this SDK does not project", {
           bucket: this.updateBucketKey(bucket),
@@ -43199,12 +45466,10 @@ class InlineSdkClient {
         });
         continue;
       }
-      this.markUpdateBucketDegraded(bucket);
-      this.log.warn?.("GET_UPDATES returned an update the SDK could not durably accept; cursor remains unchanged", {
+      this.log.warn?.("GET_UPDATES authoritatively advanced past an update the SDK could not project", {
         bucket: this.updateBucketKey(bucket),
         updateKind: update.update.oneofKind
       });
-      return false;
     }
     return true;
   }
@@ -44108,6 +46373,185 @@ function readUsers(result, kind) {
   return Array.isArray(users) ? users : [];
 }
 
+// src/sidecar/telemetry.ts
+import { randomUUID } from "node:crypto";
+import { readFile as readFile2 } from "node:fs/promises";
+var HERMES_SENTRY_DSN = "https://0d0eca8210b21c950e3ca2743725d2a7@o124360.ingest.us.sentry.io/4512015952576513";
+var TELEMETRY_TIMEOUT_MS = 2000;
+var TELEMETRY_DEDUP_MS = 5 * 60000;
+var MAX_ERROR_MESSAGE_LENGTH = 8000;
+var MAX_STACK_FRAMES = 80;
+var SENSITIVE_ENV_NAME = /(?:token|secret|password|api[_-]?key|authorization)/i;
+var lastReports = new Map;
+var releasePromise;
+var HERMES_TELEMETRY_EXIT_TIMEOUT_MS = TELEMETRY_TIMEOUT_MS + 250;
+function telemetryDisabled(env = process.env) {
+  const disabled = (value) => value != null && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  const optedOut = (value) => value != null && ["0", "false", "off"].includes(value.trim().toLowerCase());
+  return disabled(env.DO_NOT_TRACK) || optedOut(env.INLINE_PLUGIN_TELEMETRY);
+}
+function resolveDsn(env = process.env) {
+  if (telemetryDisabled(env))
+    return "";
+  if (env.INLINE_HERMES_SENTRY_DSN !== undefined) {
+    return env.INLINE_HERMES_SENTRY_DSN.trim();
+  }
+  if (env.NODE_ENV === "test" || env.VITEST === "true")
+    return "";
+  return HERMES_SENTRY_DSN;
+}
+function sensitiveValues(env = process.env) {
+  return Object.entries(env).filter(([name, value]) => SENSITIVE_ENV_NAME.test(name) && (value?.length ?? 0) >= 8).map(([, value]) => value);
+}
+function redactHermesTelemetryText(value, env = process.env) {
+  let text = String(value ?? "").replace(/\b(Authorization\s*[:=]\s*)(?:Basic|Bearer)\s+\S+/gi, "$1[REDACTED]").replace(/\b((?:Basic|Bearer)\s+)\S+/gi, "$1[REDACTED]").replace(/(https?:\/\/)[^/\s:@]+:[^@\s/]+@/gi, "$1[REDACTED]@").replace(/([?&](?:access_token|auth|authorization|key|password|secret|token)[^=\s&]*)=([^&\s]+)/gi, "$1=[REDACTED]").replace(/\b([A-Za-z0-9_-]*(?:token|secret|password|api[_-]?key|authorization)[A-Za-z0-9_-]*)\s*([=:])\s*\S+/gi, "$1$2[REDACTED]");
+  for (const secret of sensitiveValues(env)) {
+    text = text.replaceAll(secret, "[REDACTED]");
+  }
+  return text.slice(0, MAX_ERROR_MESSAGE_LENGTH);
+}
+function safeTag(value) {
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 && normalized.length <= 80 && /^[a-z0-9._-]+$/.test(normalized) ? normalized : "unknown";
+}
+function parseStack(error, env) {
+  const frames = [];
+  for (const rawLine of (error.stack ?? "").split(`
+`).slice(1)) {
+    const line = redactHermesTelemetryText(rawLine.trim(), env);
+    const match = /^at\s+(?:(.*?)\s+\()?(.+?):(\d+):(\d+)\)?$/.exec(line);
+    if (!match)
+      continue;
+    const filename = match[2];
+    frames.push({
+      filename,
+      abs_path: filename,
+      function: match[1] || "<anonymous>",
+      lineno: Number(match[3]),
+      colno: Number(match[4]),
+      in_app: filename.includes("@inline-chat/hermes-agent-adapter") || filename.includes("/hermes-agent/") || filename.endsWith("/plugin/inline/sidecar/index.mjs")
+    });
+    if (frames.length >= MAX_STACK_FRAMES)
+      break;
+  }
+  return frames.reverse();
+}
+function buildHermesTelemetryEvent(operation, error, options = {}) {
+  const env = options.env ?? process.env;
+  const exception = error instanceof Error ? error : new Error(String(error ?? "Unknown error"));
+  const frames = parseStack(exception, env);
+  return {
+    event_id: randomUUID().replaceAll("-", ""),
+    timestamp: new Date().toISOString(),
+    platform: "javascript",
+    level: "error",
+    logger: "inline.hermes.sidecar",
+    exception: {
+      values: [{
+        type: redactHermesTelemetryText(exception.name || "Error", env),
+        value: redactHermesTelemetryText(exception.message || String(error), env),
+        mechanism: {
+          type: "inline_plugin_boundary",
+          handled: options.handled ?? true
+        },
+        ...frames.length > 0 ? { stacktrace: { frames } } : {}
+      }]
+    },
+    tags: {
+      operation: safeTag(operation),
+      component: "sidecar",
+      runtime: "node",
+      os: process.platform,
+      arch: process.arch
+    },
+    sdk: { name: "inline.plugin.telemetry", version: "1" }
+  };
+}
+async function resolveRelease() {
+  releasePromise ??= (async () => {
+    for (const candidate of [
+      new URL("../../../package.json", import.meta.url),
+      new URL("../../package.json", import.meta.url)
+    ]) {
+      try {
+        const parsed = JSON.parse(await readFile2(candidate, "utf8"));
+        if (typeof parsed.version === "string" && parsed.version.trim()) {
+          return `inline-hermes-plugin@${parsed.version.trim()}`;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return;
+  })();
+  return releasePromise;
+}
+function parseSentryDsn(dsn) {
+  try {
+    const parsed = new URL(dsn);
+    if (!/^https?:$/.test(parsed.protocol) || !parsed.username)
+      return null;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const projectId = parts.pop();
+    if (!projectId || !/^\d+$/.test(projectId))
+      return null;
+    const prefix = parts.length > 0 ? `/${parts.join("/")}` : "";
+    return {
+      endpoint: `${parsed.origin}${prefix}/api/${projectId}/envelope/`,
+      publicKey: parsed.username
+    };
+  } catch {
+    return null;
+  }
+}
+async function sendHermesPluginError(operation, error, options = {}) {
+  const env = options.env ?? process.env;
+  const dsn = resolveDsn(env);
+  const target = parseSentryDsn(dsn);
+  if (!target)
+    return false;
+  const event = buildHermesTelemetryEvent(operation, error, options);
+  const release = await resolveRelease();
+  if (release)
+    event.release = release;
+  const envelope = [
+    JSON.stringify({ event_id: event.event_id, dsn, sent_at: event.timestamp }),
+    JSON.stringify({ type: "event", content_type: "application/json" }),
+    JSON.stringify(event)
+  ].join(`
+`);
+  const controller = new AbortController;
+  const timeout = setTimeout(() => controller.abort(), TELEMETRY_TIMEOUT_MS);
+  timeout.unref?.();
+  try {
+    const response = await fetch(target.endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-sentry-envelope",
+        "x-sentry-auth": `Sentry sentry_version=7, sentry_key=${target.publicKey}, sentry_client=inline.plugin.telemetry/1`
+      },
+      body: envelope,
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+function reportHermesPluginError(operation, error, options = {}) {
+  try {
+    const exception = error instanceof Error ? error : new Error(String(error ?? "Unknown error"));
+    const key = `${safeTag(operation)}\x00${exception.name}\x00${redactHermesTelemetryText(exception.message)}`;
+    const now = Date.now();
+    if (now - (lastReports.get(key) ?? 0) < TELEMETRY_DEDUP_MS)
+      return;
+    lastReports.set(key, now);
+    sendHermesPluginError(operation, exception, options).catch(() => {});
+  } catch {}
+}
+
 // src/sidecar/index.ts
 var DIALOG_FOLLOW_MODE_UNFOLLOWED = 2;
 var token = process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN || "";
@@ -44140,6 +46584,7 @@ var clientOptions = {
   baseUrl,
   state: new JsonFileStateStore(statePath),
   onAuthenticationError: (error) => {
+    reportHermesPluginError("sdk.authentication", error);
     connected = false;
     connecting = false;
     connectError = redactError(error);
@@ -44177,7 +46622,10 @@ async function connectClientLoop() {
           capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }]
         }),
         isCancelled: () => stopping,
-        onFailure: (error, willRetry) => console.error(`inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`)
+        onFailure: (error, willRetry) => {
+          reportHermesPluginError("sdk.capability_registration", error);
+          console.error(`inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`);
+        }
       });
       connected = true;
       connecting = false;
@@ -44186,6 +46634,7 @@ async function connectClientLoop() {
       console.error(`inline-sidecar: connected as ${meId}`);
       return;
     } catch (error) {
+      reportHermesPluginError("sdk.connect", error);
       connected = false;
       connecting = false;
       connectError = redactError(error);
@@ -44212,6 +46661,7 @@ async function consumeEvents() {
     }
   } catch (error) {
     if (!stopping) {
+      reportHermesPluginError("inbound.loop", error, { handled: false });
       connected = false;
       connecting = false;
       connectError = redactError(error);
@@ -44442,7 +46892,7 @@ async function endpointSendAttachment(res, body) {
   }
   const upload = await client.uploadFile({
     type: kind,
-    file: await readFile2(filePath),
+    file: await readFile3(filePath),
     fileName,
     ...contentType ? { contentType } : {}
   });
@@ -45317,6 +47767,7 @@ function methodName(method) {
 var client = createClient(clientOptions);
 var userDirectory = new InlineUserDirectory(client, {
   onError: (operation, error) => {
+    reportHermesPluginError(`sender_directory.${operation}`, error);
     console.error(`inline-sidecar: ${operation} sender hydration failed: ${redactError(error)}`);
   }
 });
@@ -45325,6 +47776,9 @@ consumeEvents();
 var server = http.createServer((req, res) => {
   handleRequest(req, res).catch((error) => {
     const err = normalizeError(error, redactError);
+    if (err.status >= 500) {
+      reportHermesPluginError("endpoint.request", error);
+    }
     writeJson(res, err.status, {
       ok: false,
       error: err.message,
@@ -45489,7 +47943,7 @@ async function packageVersion() {
   ];
   for (const pkgUrl of candidates) {
     try {
-      const raw = await readFile2(pkgUrl, "utf8");
+      const raw = await readFile3(pkgUrl, "utf8");
       const parsed = JSON.parse(raw);
       if (parsed.version)
         return parsed.version;
@@ -45498,7 +47952,7 @@ async function packageVersion() {
     }
   }
   try {
-    const raw = await readFile2(new URL("../plugin.yaml", import.meta.url), "utf8");
+    const raw = await readFile3(new URL("../plugin.yaml", import.meta.url), "utf8");
     const match = /^version:\s*['"]?([^'"\n#]+)['"]?/m.exec(raw);
     return match?.[1]?.trim() || "0.0.0";
   } catch {
@@ -45527,6 +47981,7 @@ async function shutdown(code) {
     server.close();
     await client.close();
   } catch (error) {
+    reportHermesPluginError("sidecar.shutdown", error);
     console.error(`inline-sidecar: shutdown error: ${redactError(error)}`);
   } finally {
     process.exitCode = code;
@@ -45535,8 +47990,13 @@ async function shutdown(code) {
 }
 process.on("uncaughtException", (error) => {
   console.error(`inline-sidecar: uncaught exception: ${redactError(error)}`);
-  process.exit(1);
+  const forcedExit = setTimeout(() => process.exit(1), HERMES_TELEMETRY_EXIT_TIMEOUT_MS);
+  sendHermesPluginError("process.uncaught_exception", error, { handled: false }).catch(() => false).finally(() => {
+    clearTimeout(forcedExit);
+    process.exit(1);
+  });
 });
 process.on("unhandledRejection", (error) => {
+  reportHermesPluginError("process.unhandled_rejection", error, { handled: false });
   console.error(`inline-sidecar: unhandled rejection: ${redactError(error)}`);
 });

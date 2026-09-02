@@ -55,6 +55,7 @@ from .message_actions import (
     parse_inline_agent_action_reply_target,
     resolve_inline_message_action_ownership,
 )
+from .telemetry import capture_plugin_error
 
 logger = logging.getLogger(__name__)
 
@@ -1001,6 +1002,18 @@ class InlineAdapter(BasePlatformAdapter):
         self._context_backfill_seen: "OrderedDict[str, float]" = OrderedDict()
         self._reply_thread_overrides = self._load_reply_thread_overrides()
 
+    def _report_error(self, operation: str, error: BaseException, *, handled: bool = True) -> None:
+        try:
+            capture_plugin_error(
+                operation,
+                error,
+                handled=handled,
+                secrets=(self._token, self._sidecar_token),
+            )
+        except Exception:
+            # Observability must never alter adapter behavior.
+            pass
+
     @staticmethod
     def _parse_id_set(raw: Any) -> set[str]:
         if raw is None:
@@ -1044,6 +1057,7 @@ class InlineAdapter(BasePlatformAdapter):
         except FileNotFoundError:
             return {}
         except Exception as exc:
+            self._report_error("settings.load", exc)
             logger.warning("[inline] failed to load Inline adapter settings: %s", exc)
             return {}
         raw = data.get("reply_threads") if isinstance(data, dict) else None
@@ -1075,6 +1089,7 @@ class InlineAdapter(BasePlatformAdapter):
             tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             tmp_path.replace(self._settings_path)
         except Exception as exc:
+            self._report_error("settings.save", exc)
             logger.warning("[inline] failed to save Inline adapter settings: %s", exc)
 
     def _reply_thread_mode_for_chat(self, chat_id: str, parent_chat_id: Optional[str] = None) -> str:
@@ -1423,6 +1438,7 @@ class InlineAdapter(BasePlatformAdapter):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            self._report_error("settings.answer", exc)
             logger.warning("[inline] agent settings answer expired: %s", exc)
             return False
 
@@ -1446,6 +1462,7 @@ class InlineAdapter(BasePlatformAdapter):
                 context = await self._bot_settings_context(event)
                 response = {"result": {"oneofKind": "document", "document": self._bot_settings_document(context)}}
         except Exception as exc:
+            self._report_error("settings.load", exc)
             logger.warning("[inline] failed to load Hermes agent settings: %s", exc)
             response = self._bot_settings_problem(_INLINE_BOT_SETTINGS_FAILED, "Hermes could not load settings.")
         answered = await self._answer_bot_settings(request_id, response)
@@ -1560,6 +1577,7 @@ class InlineAdapter(BasePlatformAdapter):
         except ValueError as exc:
             response = self._bot_settings_problem(_INLINE_BOT_SETTINGS_INVALID_VALUE, str(exc).capitalize())
         except Exception as exc:
+            self._report_error("settings.update", exc)
             logger.warning("[inline] failed to update Hermes agent settings: %s", exc)
             response = self._bot_settings_problem(_INLINE_BOT_SETTINGS_FAILED, "Hermes could not update this setting.")
         answered = await self._answer_bot_settings(request_id, response)
@@ -1806,6 +1824,7 @@ class InlineAdapter(BasePlatformAdapter):
         try:
             await self._sidecar_call("/follow-mode", {"target": target, "mode": mode})
         except Exception as exc:
+            self._report_error("follow_mode.update", exc)
             logger.warning("[inline] /%s failed for chat %s: %s", command, chat_id, exc)
             await self.send(
                 chat_id,
@@ -1844,6 +1863,7 @@ class InlineAdapter(BasePlatformAdapter):
             try:
                 await self._start_sidecar()
             except Exception as exc:
+                self._report_error("sidecar.start", exc, handled=False)
                 self._set_fatal_error("SIDECAR_FAILED", f"failed to start Inline sidecar: {exc}", retryable=True)
                 await self._stop_sidecar()
                 await self._http_client.aclose()
@@ -2006,6 +2026,7 @@ class InlineAdapter(BasePlatformAdapter):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            self._report_error("commands_and_skills.sync", exc)
             logger.warning("[inline] bot command sync failed: %s", exc)
         finally:
             if asyncio.current_task() is self._command_sync_task:
@@ -2025,6 +2046,7 @@ class InlineAdapter(BasePlatformAdapter):
             hidden_suffix = f", {hidden_count} hidden" if hidden_count else ""
             logger.info("[inline] bot commands synced (%d command%s%s)", len(synced), "" if len(synced) == 1 else "s", hidden_suffix)
         except Exception as exc:
+            self._report_error("commands.sync", exc)
             logger.warning("[inline] bot command sync failed: %s", exc)
 
     async def _sync_bot_skills(self) -> None:
@@ -2035,6 +2057,7 @@ class InlineAdapter(BasePlatformAdapter):
             await self._call_bot_api("setMySkills", {"skills": skills})
             logger.info("[inline] bot skills synced (%d skill%s)", len(skills), "" if len(skills) == 1 else "s")
         except Exception as exc:
+            self._report_error("skills.sync", exc)
             logger.warning("[inline] bot skill sync failed: %s", exc)
 
     async def _set_bot_commands_with_retry(self, commands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2126,6 +2149,7 @@ class InlineAdapter(BasePlatformAdapter):
             try:
                 completed.result()
             except Exception as exc:
+                self._report_error("settings.task", exc)
                 logger.warning("[inline] agent settings task failed: %s", exc)
 
         task.add_done_callback(finished)
@@ -2153,6 +2177,7 @@ class InlineAdapter(BasePlatformAdapter):
             except Exception as exc:
                 if not self._inbound_running:
                     break
+                self._report_error("inbound.stream", exc)
                 logger.warning("[inline] inbound stream dropped (%s); reconnecting in %.1fs", exc, backoff)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
@@ -3793,7 +3818,8 @@ class InlineAdapter(BasePlatformAdapter):
                     return True
                 await self._finish_action(event, "Type your answer", "Type your answer:")
                 return True
-            except Exception:
+            except Exception as exc:
+                self._report_error("action.clarify_other", exc)
                 logger.exception("[inline] clarify other failed")
                 return True
         try:
@@ -3811,7 +3837,8 @@ class InlineAdapter(BasePlatformAdapter):
                 self._clarify_choices.pop(clarify_id, None)
                 await self._finish_action(event, "Prompt expired", "Clarification expired.")
             return True
-        except Exception:
+        except Exception as exc:
+            self._report_error("action.clarify", exc)
             logger.exception("[inline] clarify action failed")
             return True
 
@@ -3844,7 +3871,8 @@ class InlineAdapter(BasePlatformAdapter):
             toast, text = labels[choice]
             await self._finish_action(event, toast, text)
             return True
-        except Exception:
+        except Exception as exc:
+            self._report_error("action.approval", exc)
             logger.exception("[inline] approval action failed")
             return True
 
@@ -3867,7 +3895,8 @@ class InlineAdapter(BasePlatformAdapter):
             text = str(result or ("Cancelled." if choice == "cancel" else "Recorded."))
             await self._finish_action(event, "Recorded", text)
             return True
-        except Exception:
+        except Exception as exc:
+            self._report_error("action.slash_confirm", exc)
             logger.exception("[inline] slash confirm action failed")
             return True
 
@@ -3911,7 +3940,8 @@ class InlineAdapter(BasePlatformAdapter):
             self._thread_action_sessions.pop(session_id, None)
             await self._answer_action(interaction_id, f"Reply threads: {mode}")
             return True
-        except Exception:
+        except Exception as exc:
+            self._report_error("action.thread", exc)
             logger.exception("[inline] thread action failed")
             await self._answer_action(interaction_id, "Thread setting failed")
             return True
@@ -4001,6 +4031,7 @@ class InlineAdapter(BasePlatformAdapter):
                 result_text = await result_text
             result_text = str(result_text or "Selection applied.")
         except Exception as exc:
+            self._report_error("action.choice_picker", exc)
             logger.error("[inline] choice picker selection failed (%s)", type(exc).__name__)
             result_text = "Selection failed; try again."
             failed = True
@@ -4039,7 +4070,8 @@ class InlineAdapter(BasePlatformAdapter):
             tmp_path = response_path.with_suffix(".tmp")
             tmp_path.write_text(answer, encoding="utf-8")
             tmp_path.replace(response_path)
-        except Exception:
+        except Exception as exc:
+            self._report_error("action.update_prompt", exc)
             logger.exception("[inline] failed to write Hermes update response")
             await self._answer_action(interaction_id, "Response failed; try again")
             return True
@@ -4215,6 +4247,7 @@ class InlineAdapter(BasePlatformAdapter):
                 result_text = await result_text
             result_text = str(result_text or "Model switched.")
         except Exception as exc:
+            self._report_error("action.model_picker", exc)
             logger.error("[inline] model picker switch failed (%s)", type(exc).__name__)
             result_text = "Model switch failed; try again."
             failed = True
@@ -4644,6 +4677,7 @@ class InlineAdapter(BasePlatformAdapter):
             result = data.get("result") or {}
             return str(result.get("chatId") or "") or None
         except Exception as exc:
+            self._report_error("thread.create", exc)
             logger.debug("[inline] create handoff thread failed: %s", exc)
             return None
 
@@ -4823,7 +4857,7 @@ class InlineAdapter(BasePlatformAdapter):
             ]}]},
         })
         if not result.success:
-            # Hermes 0.20.6 treats any non-raising hook call as delivered and
+            # Hermes treats any non-raising hook call as delivered and
             # otherwise suppresses its plaintext /approve and /deny fallback.
             raise RuntimeError(result.error or "failed to send Inline update prompt")
         self._remember(self._update_prompt_sessions, prompt_id, {
@@ -5055,6 +5089,8 @@ class InlineAdapter(BasePlatformAdapter):
                 raw_response=result,
             )
         except InlineSidecarError as exc:
+            if exc.error_kind == "unknown":
+                self._report_error("sidecar.send", exc)
             return _send_result(
                 success=False,
                 error=str(exc),
@@ -5063,6 +5099,7 @@ class InlineAdapter(BasePlatformAdapter):
                 error_kind=exc.error_kind,
             )
         except Exception as exc:
+            self._report_error("sidecar.send", exc)
             return _send_result(success=False, error=str(exc), retryable=self._is_retryable_error(str(exc)))
 
     async def _sidecar_call(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:

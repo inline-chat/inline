@@ -147,7 +147,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.13   inline-platform
+enabled      user     0.0.14   inline-platform
 ```
 
 ## Update Or Reinstall
@@ -170,10 +170,11 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 - Hermes Agent: requires the external user plugin registry and native platform
   plugin loader available in Hermes Agent `0.17.x`. This package was validated
-  against Hermes Agent `0.20.6` from source commit `31e41eed`.
+  against Hermes Agent `0.21.0` from source commit `29112bef` (tag
+  `v2026.8.31`).
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
-- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.16` and is
+- Inline transport: the sidecar uses `@inline-chat/realtime-sdk@0.0.17` and is
   bundled into the npm package, so Hermes startup does not run `npm install`.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
@@ -313,6 +314,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_CONNECT_RETRY_MAX_MS` | Maximum sidecar retry delay after repeated realtime startup failures. Defaults to `15000`. |
 | `INLINE_SIDECAR_PORT` | Fixed loopback port for the sidecar. Must be `1` through `65535`. Defaults to `8794`; `test-send` uses a random free port. |
 | `INLINE_SIDECAR_BIND` | Sidecar bind host. Must be loopback: `127.0.0.1`, `localhost`, or `::1`. Defaults to `127.0.0.1`. |
+| `INLINE_PLUGIN_TELEMETRY` | Set to `off`, `0`, or `false` to disable Inline plugin error reporting. `DO_NOT_TRACK=1` is also honored. |
 | `platforms.inline.typing_indicator` | Hermes-native toggle for Inline typing/presence while a turn is running. Defaults to `true`; set to `false` to keep busy threads visually quiet. |
 | `platforms.inline.gateway_restart_notification` | Hermes-native toggle for gateway online/restarted notices. Defaults to `true`. |
 
@@ -398,6 +400,27 @@ the normal reply.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.
+
+## Error Reporting And Privacy
+
+The Inline adapter and its supervised sidecar report unexpected plugin failures
+to Inline's Sentry project by default. Reports include the raw exception type
+and message, traceback paths, line/function locations, plugin release,
+operation name, runtime, OS, and architecture so maintainers can diagnose
+failures in subsequent releases.
+
+Reports do not attach Inline or Hermes message events, request bodies,
+user/chat/account identifiers, breadcrumbs, source context, or stack locals.
+Known token, password, authorization, sidecar credential, and secret-shaped
+values are redacted before upload. Inline's Sentry project also enables default
+server-side data scrubbing and IP-address scrubbing. Because dependency
+exception messages are preserved for diagnosis, they can still contain values
+the dependency itself chose to place in an error.
+
+Set `INLINE_PLUGIN_TELEMETRY=off` or `DO_NOT_TRACK=1` in the Hermes environment
+to disable both adapter and sidecar reporting. Reporting is best-effort, has a
+two-second network deadline, and never changes plugin success or failure
+behavior.
 
 ## Troubleshooting
 

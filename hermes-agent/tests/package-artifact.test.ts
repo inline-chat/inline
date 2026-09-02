@@ -72,8 +72,8 @@ describe("packed artifact", () => {
       install: { npmSpec: "@inline-chat/hermes-agent-adapter" },
       machineSetupProtocol: 1,
       minHermesVersion: "0.17.0",
-      testedHermesVersion: "0.20.6",
-      testedHermesCommit: "31e41eed",
+      testedHermesVersion: "0.21.0",
+      testedHermesCommit: "29112bef",
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")
@@ -93,6 +93,7 @@ describe("packed artifact", () => {
     expect(readme).toContain("inline-hermes test-send --to chat:123 --text \"Inline Hermes test\"")
     expect(readme).not.toContain("INLINE_TOKEN=<token> inline-hermes test-send")
     expect(readme).toContain("inline-hermes install --force")
+    expect(readme).toContain("INLINE_PLUGIN_TELEMETRY=off")
     expect(readme).toContain("hermes-agent/RELEASE.md")
 
     const release = await readFile(path.join(packageRoot, "RELEASE.md"), "utf8")
@@ -155,7 +156,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.13")
+      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.14")
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,
@@ -217,6 +218,7 @@ const expectedFiles = [
   "plugin/inline/message_actions.py",
   "plugin/inline/plugin.yaml",
   "plugin/inline/sidecar/index.mjs",
+  "plugin/inline/telemetry.py",
   "plugin/inline/tools.py",
 ]
 

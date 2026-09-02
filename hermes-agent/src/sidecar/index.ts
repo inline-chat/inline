@@ -62,6 +62,11 @@ import {
   type Target,
 } from "./contract.js"
 import { InlineUserDirectory } from "./user-directory.js"
+import {
+  HERMES_TELEMETRY_EXIT_TIMEOUT_MS,
+  reportHermesPluginError,
+  sendHermesPluginError,
+} from "./telemetry.js"
 
 const token = process.env.INLINE_TOKEN || process.env.INLINE_BOT_TOKEN || ""
 const baseUrl = process.env.INLINE_BASE_URL || "https://api.inline.chat"
@@ -122,6 +127,7 @@ const clientOptions: InlineSdkClientOptions = {
   baseUrl,
   state: new JsonFileStateStore(statePath),
   onAuthenticationError: (error) => {
+    reportHermesPluginError("sdk.authentication", error)
     connected = false
     connecting = false
     connectError = redactError(error)
@@ -160,9 +166,12 @@ async function connectClientLoop() {
           capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }],
         }),
         isCancelled: () => stopping,
-        onFailure: (error, willRetry) => console.error(
-          `inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`,
-        ),
+        onFailure: (error, willRetry) => {
+          reportHermesPluginError("sdk.capability_registration", error)
+          console.error(
+            `inline-sidecar: capability registration failed: ${redactError(error)}${willRetry ? "; retrying" : ""}`,
+          )
+        },
       })
       connected = true
       connecting = false
@@ -171,6 +180,7 @@ async function connectClientLoop() {
       console.error(`inline-sidecar: connected as ${meId}`)
       return
     } catch (error) {
+      reportHermesPluginError("sdk.connect", error)
       connected = false
       connecting = false
       connectError = redactError(error)
@@ -201,6 +211,7 @@ async function consumeEvents() {
     }
   } catch (error) {
     if (!stopping) {
+      reportHermesPluginError("inbound.loop", error, { handled: false })
       connected = false
       connecting = false
       connectError = redactError(error)
@@ -1477,6 +1488,7 @@ function methodName(method: Method): string {
 const client: SidecarClient = createClient(clientOptions)
 const userDirectory = new InlineUserDirectory(client, {
   onError: (operation, error) => {
+    reportHermesPluginError(`sender_directory.${operation}`, error)
     console.error(`inline-sidecar: ${operation} sender hydration failed: ${redactError(error)}`)
   },
 })
@@ -1487,6 +1499,9 @@ void consumeEvents()
 const server = http.createServer((req, res) => {
   void handleRequest(req, res).catch((error) => {
     const err = normalizeError(error, redactError)
+    if (err.status >= 500) {
+      reportHermesPluginError("endpoint.request", error)
+    }
     writeJson(res, err.status, {
       ok: false,
       error: err.message,
@@ -1694,6 +1709,7 @@ async function shutdown(code: number) {
     server.close()
     await client.close()
   } catch (error) {
+    reportHermesPluginError("sidecar.shutdown", error)
     console.error(`inline-sidecar: shutdown error: ${redactError(error)}`)
   } finally {
     process.exitCode = code
@@ -1703,9 +1719,16 @@ async function shutdown(code: number) {
 
 process.on("uncaughtException", (error) => {
   console.error(`inline-sidecar: uncaught exception: ${redactError(error)}`)
-  process.exit(1)
+  const forcedExit = setTimeout(() => process.exit(1), HERMES_TELEMETRY_EXIT_TIMEOUT_MS)
+  void sendHermesPluginError("process.uncaught_exception", error, { handled: false })
+    .catch(() => false)
+    .finally(() => {
+      clearTimeout(forcedExit)
+      process.exit(1)
+    })
 })
 
 process.on("unhandledRejection", (error) => {
+  reportHermesPluginError("process.unhandled_rejection", error, { handled: false })
   console.error(`inline-sidecar: unhandled rejection: ${redactError(error)}`)
 })

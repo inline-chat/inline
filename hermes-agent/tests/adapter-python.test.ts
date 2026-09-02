@@ -333,6 +333,10 @@ assert "Supported Markdown is emphasis" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert "unsupported or ambiguous incomplete syntax remains visible text" in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert '<summary>Title</summary>' in inline_tools.INLINE_PLATFORM_GUIDANCE
 assert '<footer>Attribution or brief metadata</footer>' in inline_tools.INLINE_PLATFORM_GUIDANCE
+assert "normal response replaces the source card while clearing omitted buttons" in inline_tools.INLINE_TOOL_SCHEMA["description"]
+assert inline_tools.INLINE_TOOL_SCHEMA["parameters"]["properties"]["buttons"]["description"] == (
+    "Button rows. Omit to preserve buttons on edit; pass [] to clear them."
+)
 first_name_guidance = inline_tools.inline_sender_guidance(
     sender_user_id="1600",
     sender_name="Mo Jorjani",
@@ -1266,7 +1270,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.13",
+    "pluginVersion": "0.0.14",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1316,7 +1320,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.13"
+assert probe_payload["pluginVersion"] == "0.0.14"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1331,7 +1335,7 @@ credential_request = probe_requests[0]
 assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
 assert credential_request.get_method() == "GET"
 assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
-assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.13"
+assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.14"
 assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
 
 setup_saved_env.clear()
@@ -1364,7 +1368,7 @@ assert config_probe_payload["probe"]["ok"] is True
 assert len(config_probe_requests) == 1
 assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
 assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
-assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.13"
+assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.14"
 assert "yaml-config-secret" not in config_probe_stdout.getvalue()
 
 setup_saved_env.clear()
@@ -4777,6 +4781,34 @@ async def assert_inline_media_normalization():
     assert msg_type == MessageType.VOICE
 
 asyncio.run(assert_inline_media_normalization())
+
+async def assert_send_voice_accepts_hermes_voice_marker():
+    adapter = InlineAdapter(PlatformConfig(token="voice-token", extra=base_extra))
+    calls = []
+
+    async def fake_send_attachment(chat_id, file_path, kind, caption, reply_to, file_name=None, metadata=None):
+        calls.append((chat_id, file_path, kind, caption, reply_to, file_name, metadata))
+        return SendResult(success=True, message_id="voice-1")
+
+    adapter._send_attachment = fake_send_attachment
+    result = await adapter.send_voice(
+        "chat:10",
+        "/tmp/voice.ogg",
+        metadata={"thread_id": "chat:99"},
+        is_voice=True,
+    )
+    assert result.success is True
+    assert calls == [(
+        "chat:10",
+        "/tmp/voice.ogg",
+        "voice",
+        None,
+        None,
+        None,
+        {"thread_id": "chat:99"},
+    )]
+
+asyncio.run(assert_send_voice_accepts_hermes_voice_marker())
 
 async def assert_standalone_sender():
     calls = []
