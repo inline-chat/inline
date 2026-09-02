@@ -3,7 +3,7 @@ title: "Bot API"
 description: "HTTP methods for Inline bots."
 ---
 
-Inline has a easier to use HTTP API for creating bots. We recommend using this for most integration usages, unless you need advanced features and maximum control where you should use our full realtime API which is used in our own official clients.
+Inline has an easier to use HTTP API for creating bots. We recommend using this for most integration usages, unless you need advanced features and maximum control where you should use our full realtime API which is used in our own official clients.
 
 ## Bot API
 

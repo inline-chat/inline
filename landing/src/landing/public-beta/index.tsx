@@ -43,7 +43,6 @@ const footerSections = [
   {
     title: "Inline",
     links: [
-      { label: "About", href: "/docs/whats-inline" },
       { label: "Roadmap", href: "/docs/roadmap" },
       { label: "GitHub", href: "https://github.com/inline-chat" },
       { label: "X", href: "https://x.com/inline_chat" },

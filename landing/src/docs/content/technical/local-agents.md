@@ -1,29 +1,27 @@
 ---
 title: "Local Agents"
-description: "Process, workspace, ownership, and security boundaries for local coding agents."
+description: "Local bridge ownership and security."
 ---
-
-[Agents](/docs/agents) covers setup and recovery. This page defines the local process boundary.
 
 ## Ownership
 
-- Inline creates or reuses one bot identity for the selected harness.
-- The local bridge owns the provider process and forwards messages between that bot and the harness.
-- Existing chat bindings remain authoritative. A default workspace applies only to unbound chats.
-- An explicit `--folder` selects a narrower workspace when needed.
+- One Inline bot identity per selected harness.
+- The bridge owns the provider process.
+- Existing chat bindings override the default workspace.
+- `--folder` selects a narrower workspace.
+- Codex is the primary local-bridge beta path.
+- Claude, OpenCode, and Amp are experimental.
+- OpenClaw and Hermes use gateways.
 
 ## Security
 
-The bridge authorizes the sender by stable user ID before routing work to a provider or workspace. Owner-only routing is the default; allowing another operator is an explicit policy decision. A mention or membership in a shared chat does not grant permission to run local commands.
+- Authorize senders by stable user ID.
+- Owner-only routing is the default.
+- Chat membership or a mention does not grant command permission.
+- Do not expose the bridge as a public listener.
+- Provider credentials stay with the provider.
+- Tokens and local control credentials must not appear in logs.
+- Shared or public chats do not expand filesystem or command authority.
+- Preserve the provider's exact approval scope.
 
-- The bridge is local and should not expose a public listener.
-- Provider credentials remain owned by the provider installation.
-- Inline tokens and local control credentials must not appear in status output or logs.
-- Shared and public chats do not expand local filesystem or command authority.
-- A provider can request approval, but the bridge preserves the provider's exact approval or rejection scope.
-
-[Bridge ownership and authorization reference](https://github.com/inline-chat/inline/blob/main/docs/local-agent-bridge.md)
-
-## Compatibility
-
-Codex is the primary local-bridge beta path. Claude, OpenCode, and Amp are experimental. OpenClaw and Hermes use gateway integrations.
+[Setup](/docs/agents) · [Bridge reference](https://github.com/inline-chat/inline/blob/main/docs/local-agent-bridge.md)

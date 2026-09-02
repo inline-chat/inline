@@ -5,14 +5,9 @@
       "title": "Getting Started",
       "pages": [
         { "slug": "index", "label": "Get Started" },
-        "using-inline",
-        "chats-and-threads",
         { "slug": "changelog", "label": "What's New" },
         "downloads",
-        "cli",
-        "applescript",
-        "troubleshooting",
-        "whats-inline"
+        "cli"
       ]
     },
     {
@@ -29,6 +24,7 @@
       "title": "Developers",
       "pages": [
         { "slug": "developers", "label": "Overview" },
+        "applescript",
         "realtime-api",
         "rust-sdk",
         "bot-api",

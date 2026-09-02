@@ -3,13 +3,15 @@ title: "Downloads"
 description: "Current app download links."
 ---
 
-## Apps
+## Inline Beta Apps
 
-- [Download Inline for macOS](/download/mac/beta) (`.dmg`)
-- [Join Inline for iOS on TestFlight](https://testflight.apple.com/join/FkC3f7fz)
+- [Download for macOS](/download/mac/beta) (`.dmg`)
+- [TestFlight for iOS](https://testflight.apple.com/join/FkC3f7fz)
 
-Already using an older macOS build? [View previous versions](/docs/downloads/previous).
+More platforms coming soon, with web coming first, followed by Windows, Android and Linux.
 
-After installing, [sign in and start a conversation](/docs/using-inline). These are the native app download paths; the [CLI](/docs/cli) is installed separately.
+## More
 
-For release-specific features and build numbers, see [What's New](/docs/changelog). If installation or sign-in fails, see [Troubleshooting](/docs/troubleshooting).
+- [Install the CLI](/docs/cli#install)
+- [Changelog](/docs/changelog)
+- [View previous macOS versions](/docs/downloads/previous).
