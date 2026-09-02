@@ -13,6 +13,41 @@ describe("server configuration persistence", () => {
   setupTestLifecycle()
   afterEach(resetServerConfigCacheForTests)
 
+  it("keeps a deployment open unless signup admission is explicitly configured", async () => {
+    const priorMode = process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
+    const priorLegacyMode = process.env["INVITE_CODES_REQUIRED"]
+    try {
+      delete process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
+      delete process.env["INVITE_CODES_REQUIRED"]
+      resetServerConfigCacheForTests()
+      expect(await getServerConfig("auth.signup_mode")).toMatchObject({
+        value: "open",
+        source: "default",
+        databaseValue: null,
+      })
+
+      process.env["INVITE_CODES_REQUIRED"] = "typo"
+      resetServerConfigCacheForTests()
+      expect(await getServerConfig("auth.signup_mode")).toMatchObject({
+        value: "open",
+        source: "default",
+      })
+
+      process.env["INVITE_CODES_REQUIRED"] = "true"
+      resetServerConfigCacheForTests()
+      expect(await getServerConfig("auth.signup_mode")).toMatchObject({
+        value: "invite_only",
+        source: "legacy_environment",
+      })
+    } finally {
+      if (priorMode === undefined) delete process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
+      else process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = priorMode
+      if (priorLegacyMode === undefined) delete process.env["INVITE_CODES_REQUIRED"]
+      else process.env["INVITE_CODES_REQUIRED"] = priorLegacyMode
+      resetServerConfigCacheForTests()
+    }
+  })
+
   it("uses optimistic versions so stale Admin writes cannot overwrite a newer choice", async () => {
     const admin = await testUtils.createUser("server-config-admin@example.com")
     resetServerConfigCacheForTests()

@@ -11,9 +11,10 @@ export const API_BASE_URL = isProd ? "https://api.inline.chat" : `http://localho
 
 export const EMAIL_PROVIDER: "SES" | "RESEND" = process.env["EMAIL_PROVIDER"] === "SES" ? "SES" : "RESEND"
 export const SEND_EMAIL = process.env["SEND_EMAIL"]
+/** @deprecated Signup admission belongs to the async serverConfig resolver. */
 export const isInviteCodesRequired = () => {
   const value = process.env["INVITE_CODES_REQUIRED"]?.trim().toLowerCase()
-  return value !== "false" && value !== "0"
+  return value === "true" || value === "1"
 }
 
 const rawDatabaseUrl = process.env["DATABASE_URL"]

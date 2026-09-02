@@ -65,7 +65,9 @@ const emailProviders: readonly EmailProvider[] = ["ses", "resend"]
 const legacySignupMode = (): SignupMode | null => {
   const value = process.env["INVITE_CODES_REQUIRED"]?.trim().toLowerCase()
   if (value === undefined) return null
-  return value === "false" || value === "0" ? "open" : "invite_only"
+  if (value === "true" || value === "1") return "invite_only"
+  if (value === "false" || value === "0") return "open"
+  return null
 }
 
 const legacyEmailProvider = (): EmailProvider | null => {
@@ -80,7 +82,7 @@ const definitions: { readonly [K in ServerConfigKey]: ServerConfigDefinition<K> 
     description: "Open sign-up, require an access invite, or stop creating new accounts while preserving login.",
     environmentName: "INLINE_CONFIG_AUTH_SIGNUP_MODE",
     allowedValues: signupModes,
-    defaultValue: "invite_only",
+    defaultValue: "open",
     legacyEnvironmentValue: legacySignupMode,
   },
   "email.default_provider": {
