@@ -16,6 +16,7 @@ const files: Array<{ source: string; destination: string }> = [
   { source: "packages/protocol/src/vectors.ts", destination: "packages/protocol/src/vectors.ts" },
   { source: "packages/protocol/src/uploads.ts", destination: "packages/protocol/src/uploads.ts" },
   { source: "packages/protocol/src/downloads.ts", destination: "packages/protocol/src/downloads.ts" },
+  { source: "packages/protocol/src/transfers.ts", destination: "packages/protocol/src/transfers.ts" },
   { source: "packages/protocol/src/secure/application.ts", destination: "packages/protocol/src/secure/application.ts" },
   { source: "packages/protocol/src/secure/binding.ts", destination: "packages/protocol/src/secure/binding.ts" },
   { source: "packages/protocol/src/secure/bytes.ts", destination: "packages/protocol/src/secure/bytes.ts" },
