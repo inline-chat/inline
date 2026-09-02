@@ -1999,6 +1999,13 @@ rpc_requests!(
         DeleteBotAgentResult,
         DeleteBotAgent
     ),
+    (
+        GetBotConfigurationCatalogInput,
+        GetBotConfigurationCatalog,
+        GetBotConfigurationCatalog,
+        GetBotConfigurationCatalogResult,
+        GetBotConfigurationCatalog
+    ),
 );
 
 fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::ConnectionInit {

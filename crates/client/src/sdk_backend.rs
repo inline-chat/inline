@@ -33,26 +33,26 @@ use crate::backend::{
 };
 use crate::sync::{SyncBucketRepair, SyncHost, SyncManager};
 use crate::{
-    AccountStateSnapshot, AddChatParticipantRequest, AnswerBotChatSettingsRequest,
-    AnswerMessageActionRequest, AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult,
-    AuthToken, AuthVerifyRequest, AuthVerifyResult, BackendError, BackendResult, BotCapability,
-    BotChatSettingsResponse, BotInteractionEvent, BotSettingsValue, ChatCreateParticipant,
-    ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot,
-    ClientBackend, ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientStatusSnapshot,
-    ClientStore, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest,
-    CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogFollowMode, DialogNotificationMode,
-    DialogRecord, DialogsOrder, DialogsPage, DialogsRequest, EditInteractiveMessageRequest,
-    EditMessageRequest, HistoryPage, HistoryRequest, InMemoryStore, InitialEventPolicy, InlineId,
-    InvokeBotChatSettingsItemRequest, MediaKind, MessageActionKind, MessageActions, MessageContent,
-    MessageMutation, MessageRecord, NotificationMode, OperationOutcome, PeerRef, PinMessageRequest,
-    RandomId, ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnector,
-    RemoveChatParticipantRequest, RequestBotChatSettingsRequest, SendInteractiveTextRequest,
-    SendNotificationMode, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
-    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, StoreError, StoredReaction, StoredReadState,
-    StoredSession, StoredTransaction, SyncConfig, TransactionId, TransactionIdentity,
-    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
-    UpdateDialogNotificationsRequest, UploadRequest, UploadThumbnail, UserRecord,
-    UserSettingsRecord, VERSION,
+    AccountStateSnapshot, AddChatParticipantRequest, AgentThreadConfiguration, AgentThreadContext,
+    AnswerBotChatSettingsRequest, AnswerMessageActionRequest, AuthContactKind, AuthCredential,
+    AuthStartRequest, AuthStartResult, AuthToken, AuthVerifyRequest, AuthVerifyResult,
+    BackendError, BackendResult, BotCapability, BotChatSettingsResponse, BotInteractionEvent,
+    BotSettingsValue, ChatCreateParticipant, ChatParticipantRecord, ChatParticipantsPage,
+    ChatParticipantsRequest, ChatStateSnapshot, ClientBackend, ClientErrorCategory, ClientEvent,
+    ClientEventDelivery, ClientStatusSnapshot, ClientStore, ConnectRequest, CreateDmRequest,
+    CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
+    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
+    DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage,
+    HistoryRequest, InMemoryStore, InitialEventPolicy, InlineId, InvokeBotChatSettingsItemRequest,
+    MediaKind, MessageActionKind, MessageActions, MessageContent, MessageMutation, MessageRecord,
+    NotificationMode, OperationOutcome, PeerRef, PinMessageRequest, RandomId, ReactRequest,
+    ReadRequest, RealtimeConnectRequest, RealtimeConnector, RemoveChatParticipantRequest,
+    RequestBotChatSettingsRequest, SendInteractiveTextRequest, SendNotificationMode,
+    SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole,
+    SpaceRecord, StoreError, StoredReaction, StoredReadState, StoredSession, StoredTransaction,
+    SyncConfig, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
+    UpdateChatInfoRequest, UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest,
+    UploadRequest, UploadThumbnail, UserRecord, UserSettingsRecord, VERSION,
 };
 
 use self::bot_settings::{
@@ -425,6 +425,8 @@ impl SdkBackend {
             parse_markdown: Some(request.parse_markdown),
             send_mode: proto_send_mode(request.notification_mode),
             actions: actions.map(message_actions_to_proto),
+            initial_agent_context: None,
+            source_chat_id: None,
         };
         let send_result = match self.call_realtime(&session, input).await {
             Ok(result) => result,
@@ -1581,6 +1583,7 @@ impl ClientBackend for SdkBackend {
                         chat_id: request.chat_id.get(),
                         title,
                         emoji,
+                        agent_context: None,
                     },
                 )
                 .await?;
@@ -1658,6 +1661,7 @@ impl ClientBackend for SdkBackend {
                         }],
                         reserved_chat_id: None,
                         placeholder_title: None,
+                        agent_context: None,
                     },
                 )
                 .await?;
@@ -1698,6 +1702,7 @@ impl ClientBackend for SdkBackend {
                             .collect(),
                         reserved_chat_id: None,
                         placeholder_title: None,
+                        agent_context: None,
                     },
                 )
                 .await?;
@@ -1724,6 +1729,7 @@ impl ClientBackend for SdkBackend {
                 ));
             }
             validate_create_participants(&request.participants)?;
+            let requested_agent_context = request.agent_context.clone();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -1742,9 +1748,23 @@ impl ClientBackend for SdkBackend {
                                 group_id: None,
                             })
                             .collect(),
+                        agent_context: requested_agent_context
+                            .as_ref()
+                            .map(agent_thread_context_to_proto),
                     },
                 )
                 .await?;
+            let returned_agent_context = result
+                .chat
+                .as_ref()
+                .and_then(|chat| chat.agent_context.as_ref())
+                .map(agent_thread_context_from_proto);
+            if returned_agent_context != requested_agent_context {
+                return Err(BackendError::new(
+                    ClientErrorCategory::ProtocolMismatch,
+                    "created reply thread did not preserve its requested Agent context",
+                ));
+            }
             let created = created_chat_from_proto(
                 result.chat,
                 result.dialog,
@@ -1752,9 +1772,11 @@ impl ClientBackend for SdkBackend {
                 Some(request.parent_chat_id),
                 request.parent_message_id,
             )?;
+            let mut dialog = created_dialog_record(&created, None);
+            dialog.agent_context = returned_agent_context;
             backend
                 .store
-                .record_dialog(created_dialog_record(&created, None))
+                .record_dialog(dialog)
                 .await
                 .map_err(store_error_to_backend)?;
             Ok(created)
@@ -1896,6 +1918,8 @@ impl ClientBackend for SdkBackend {
                 parse_markdown: Some(false),
                 send_mode: None,
                 actions: None,
+                initial_agent_context: None,
+                source_chat_id: None,
             };
             let send_result = match backend.call_realtime(&session, input).await {
                 Ok(result) => result,
@@ -3107,6 +3131,15 @@ impl SdkBackend {
                         .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
                     parent_chat_id: chat.parent_chat_id.map(InlineId::new),
                     parent_message_id: chat.parent_message_id.map(InlineId::new),
+                    agent_context: chat
+                        .agent_context
+                        .as_ref()
+                        .map(agent_thread_context_from_proto)
+                        .or_else(|| {
+                            existing
+                                .as_ref()
+                                .and_then(|dialog| dialog.agent_context.clone())
+                        }),
                     is_public: chat
                         .is_public
                         .or_else(|| existing.as_ref().and_then(|dialog| dialog.is_public)),
@@ -3232,6 +3265,15 @@ impl SdkBackend {
                 .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
             parent_chat_id: chat.parent_chat_id.map(InlineId::new),
             parent_message_id: chat.parent_message_id.map(InlineId::new),
+            agent_context: chat
+                .agent_context
+                .as_ref()
+                .map(agent_thread_context_from_proto)
+                .or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|dialog| dialog.agent_context.clone())
+                }),
             is_public: chat
                 .is_public
                 .or_else(|| existing.as_ref().and_then(|dialog| dialog.is_public)),
@@ -3595,6 +3637,9 @@ impl SdkBackend {
                     }
                     if let Some(emoji) = update.emoji {
                         dialog.emoji = non_empty_option(Some(&emoji));
+                    }
+                    if let Some(agent_context) = update.agent_context.as_ref() {
+                        dialog.agent_context = Some(agent_thread_context_from_proto(agent_context));
                     }
                     self.store
                         .record_dialog(dialog)
@@ -4254,6 +4299,10 @@ fn dialog_records_from_get_chats(result: &proto::GetChatsResult) -> Vec<DialogRe
                     .map(InlineId::new),
                 parent_chat_id: chat.parent_chat_id.map(InlineId::new),
                 parent_message_id: chat.parent_message_id.map(InlineId::new),
+                agent_context: chat
+                    .agent_context
+                    .as_ref()
+                    .map(agent_thread_context_from_proto),
                 is_public: chat.is_public,
                 archived: dialog.and_then(|dialog| dialog.archived),
                 pinned: dialog.and_then(|dialog| dialog.pinned),
@@ -4424,6 +4473,34 @@ fn chat_title_from_proto(chat: &proto::Chat, users_by_id: &HashMap<i64, &proto::
 
 fn chat_emoji_from_proto(chat: &proto::Chat) -> Option<String> {
     non_empty_option(chat.emoji.as_deref())
+}
+
+fn agent_thread_context_from_proto(context: &proto::AgentThreadContext) -> AgentThreadContext {
+    AgentThreadContext {
+        bot_user_id: InlineId::new(context.bot_user_id),
+        agent_id: context.agent_id.map(InlineId::new),
+        configuration: context.configuration.as_ref().map(|configuration| {
+            AgentThreadConfiguration {
+                project_id: configuration.project_id.clone(),
+                model_id: configuration.model_id.clone(),
+                reasoning_effort_id: configuration.reasoning_effort_id.clone(),
+            }
+        }),
+    }
+}
+
+fn agent_thread_context_to_proto(context: &AgentThreadContext) -> proto::AgentThreadContext {
+    proto::AgentThreadContext {
+        bot_user_id: context.bot_user_id.get(),
+        agent_id: context.agent_id.map(InlineId::get),
+        configuration: context.configuration.as_ref().map(|configuration| {
+            proto::AgentThreadConfiguration {
+                project_id: configuration.project_id.clone(),
+                model_id: configuration.model_id.clone(),
+                reasoning_effort_id: configuration.reasoning_effort_id.clone(),
+            }
+        }),
+    }
 }
 
 fn user_record_from_proto(user: &proto::User) -> UserRecord {
@@ -8639,6 +8716,24 @@ mod tests {
         assert_eq!(dialog.parent_message_id, Some(InlineId::new(6)));
     }
 
+    #[test]
+    fn reply_thread_agent_context_conversion_preserves_the_typed_preset() {
+        let context = AgentThreadContext {
+            bot_user_id: InlineId::new(42),
+            agent_id: Some(InlineId::new(9)),
+            configuration: Some(AgentThreadConfiguration {
+                project_id: Some("project".to_string()),
+                model_id: Some("model".to_string()),
+                reasoning_effort_id: Some("high".to_string()),
+            }),
+        };
+
+        assert_eq!(
+            agent_thread_context_from_proto(&agent_thread_context_to_proto(&context)),
+            context,
+        );
+    }
+
     #[tokio::test]
     async fn realtime_chat_projections_preserve_and_clear_parent_relationships() {
         let store = InMemoryStore::new();
@@ -9564,6 +9659,15 @@ mod tests {
                     title: Some("General".to_owned()),
                     emoji: None,
                     untitled: None,
+                    agent_context: Some(proto::AgentThreadContext {
+                        bot_user_id: 12,
+                        agent_id: Some(13),
+                        configuration: Some(proto::AgentThreadConfiguration {
+                            project_id: Some("/workspace/inline".to_owned()),
+                            model_id: Some("gpt-5.6-sol".to_owned()),
+                            reasoning_effort_id: Some("high".to_owned()),
+                        }),
+                    }),
                 })),
                 ..Default::default()
             },
@@ -9573,6 +9677,7 @@ mod tests {
                     title: None,
                     emoji: Some("✨".to_owned()),
                     untitled: None,
+                    agent_context: None,
                 })),
                 ..Default::default()
             },
@@ -9640,6 +9745,18 @@ mod tests {
         let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
         assert_eq!(dialog.title.as_deref(), Some("General"));
         assert_eq!(dialog.emoji.as_deref(), Some("✨"));
+        assert_eq!(
+            dialog.agent_context,
+            Some(AgentThreadContext {
+                bot_user_id: InlineId::new(12),
+                agent_id: Some(InlineId::new(13)),
+                configuration: Some(AgentThreadConfiguration {
+                    project_id: Some("/workspace/inline".to_owned()),
+                    model_id: Some("gpt-5.6-sol".to_owned()),
+                    reasoning_effort_id: Some("high".to_owned()),
+                }),
+            })
+        );
         assert_eq!(dialog.is_public, Some(true));
         assert_eq!(dialog.archived, Some(true));
         assert_eq!(

@@ -805,6 +805,45 @@ export interface ChatPermissions {
     canUpdateInfo: boolean;
 }
 /**
+ * The single Agent execution target selected for an Inline Chat. This is a
+ * reusable preset only: every Chat still owns an independent provider session.
+ *
+ * @generated from protobuf message AgentThreadContext
+ */
+export interface AgentThreadContext {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 agent_id = 2;
+     */
+    agentId?: bigint;
+    /**
+     * @generated from protobuf field: optional AgentThreadConfiguration configuration = 3;
+     */
+    configuration?: AgentThreadConfiguration;
+}
+/**
+ * @generated from protobuf message AgentThreadConfiguration
+ */
+export interface AgentThreadConfiguration {
+    /**
+     * Opaque IDs published by the target harness. Absence means harness default.
+     *
+     * @generated from protobuf field: optional string project_id = 1;
+     */
+    projectId?: string;
+    /**
+     * @generated from protobuf field: optional string model_id = 2;
+     */
+    modelId?: string;
+    /**
+     * @generated from protobuf field: optional string reasoning_effort_id = 3;
+     */
+    reasoningEffortId?: string;
+}
+/**
  * A thread
  *
  * @generated from protobuf message Chat
@@ -904,6 +943,12 @@ export interface Chat {
      * @generated from protobuf field: optional int32 seq = 16;
      */
     seq?: number;
+    /**
+     * Optional Agent target and provider-native execution preset for this Chat.
+     *
+     * @generated from protobuf field: optional AgentThreadContext agent_context = 18;
+     */
+    agentContext?: AgentThreadContext;
 }
 /**
  * @generated from protobuf message MessageReplies
@@ -4148,6 +4193,12 @@ export interface RpcCall {
          */
         getBotSkills: GetBotSkillsInput;
     } | {
+        oneofKind: "getBotConfigurationCatalog";
+        /**
+         * @generated from protobuf field: GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141;
+         */
+        getBotConfigurationCatalog: GetBotConfigurationCatalogInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -4954,6 +5005,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetBotSkillsResult getBotSkills = 140;
          */
         getBotSkills: GetBotSkillsResult;
+    } | {
+        oneofKind: "getBotConfigurationCatalog";
+        /**
+         * @generated from protobuf field: GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
+         */
+        getBotConfigurationCatalog: GetBotConfigurationCatalogResult;
     } | {
         oneofKind: undefined;
     };
@@ -6910,6 +6967,31 @@ export interface GetBotSkillsResult {
     skills: BotSkill[];
 }
 /**
+ * @generated from protobuf message GetBotConfigurationCatalogInput
+ */
+export interface GetBotConfigurationCatalogInput {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * Required for non-owners so the server can prove that the bot is visible in
+     * an accessible conversation. Owners may omit it.
+     *
+     * @generated from protobuf field: optional InputPeer peer_id = 2;
+     */
+    peerId?: InputPeer;
+}
+/**
+ * @generated from protobuf message GetBotConfigurationCatalogResult
+ */
+export interface GetBotConfigurationCatalogResult {
+    /**
+     * @generated from protobuf field: optional AgentConfigurationCatalog catalog = 1;
+     */
+    catalog?: AgentConfigurationCatalog;
+}
+/**
  * @generated from protobuf message GetPeerBotCommandsInput
  */
 export interface GetPeerBotCommandsInput {
@@ -8126,6 +8208,20 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional MessageActions actions = 10;
      */
     actions?: MessageActions;
+    /**
+     * Set-once Agent binding used only when sending the first activating message
+     * to an existing, currently unbound Chat.
+     *
+     * @generated from protobuf field: optional AgentThreadContext initial_agent_context = 11;
+     */
+    initialAgentContext?: AgentThreadContext;
+    /**
+     * Ephemeral provenance for a bot-authored cross-Chat Agent handoff. The
+     * server validates it and never persists it with the message.
+     *
+     * @generated from protobuf field: optional int64 source_chat_id = 12;
+     */
+    sourceChatId?: bigint;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -9049,6 +9145,13 @@ export interface CreateChatInput {
      * @generated from protobuf field: optional string placeholder_title = 8;
      */
     placeholderTitle?: string;
+    /**
+     * Optional Agent target and execution preset. This never carries a provider
+     * session identifier.
+     *
+     * @generated from protobuf field: optional AgentThreadContext agent_context = 9;
+     */
+    agentContext?: AgentThreadContext;
 }
 /**
  * @generated from protobuf message CreateChatResult
@@ -9103,6 +9206,13 @@ export interface CreateSubthreadInput {
      * @generated from protobuf field: repeated InputChatParticipant participants = 6;
      */
     participants: InputChatParticipant[];
+    /**
+     * Explicit copied or newly selected Agent preset for this independent child.
+     * Parent lineage alone never inherits it.
+     *
+     * @generated from protobuf field: optional AgentThreadContext agent_context = 7;
+     */
+    agentContext?: AgentThreadContext;
 }
 /**
  * @generated from protobuf message CreateSubthreadResult
@@ -9656,6 +9766,10 @@ export interface UpdateChatInfo {
      * @generated from protobuf field: optional bool untitled = 4;
      */
     untitled?: boolean;
+    /**
+     * @generated from protobuf field: optional AgentThreadContext agent_context = 5;
+     */
+    agentContext?: AgentThreadContext;
 }
 /**
  * Update when effective permissions for the current user change.
@@ -10792,6 +10906,10 @@ export interface UpdateChatInfoInput {
      * @generated from protobuf field: optional string emoji = 3;
      */
     emoji?: string;
+    /**
+     * @generated from protobuf field: optional AgentThreadContext agent_context = 4;
+     */
+    agentContext?: AgentThreadContext;
 }
 /**
  * @generated from protobuf message UpdateChatInfoResult
@@ -10873,6 +10991,117 @@ export interface DraftMessage {
     entities?: MessageEntities;
 }
 /**
+ * @generated from protobuf message AgentProjectOption
+ */
+export interface AgentProjectOption {
+    /**
+     * @generated from protobuf field: string id = 1;
+     */
+    id: string;
+    /**
+     * @generated from protobuf field: string label = 2;
+     */
+    label: string;
+    /**
+     * @generated from protobuf field: optional string description = 3;
+     */
+    description?: string;
+}
+/**
+ * @generated from protobuf message AgentProjectCatalog
+ */
+export interface AgentProjectCatalog {
+    /**
+     * @generated from protobuf field: repeated AgentProjectOption options = 1;
+     */
+    options: AgentProjectOption[];
+    /**
+     * The harness can accept a folder selected through an existing local picker.
+     *
+     * @generated from protobuf field: optional bool can_select_folder = 2;
+     */
+    canSelectFolder?: boolean;
+}
+/**
+ * @generated from protobuf message AgentReasoningEffortOption
+ */
+export interface AgentReasoningEffortOption {
+    /**
+     * @generated from protobuf field: string id = 1;
+     */
+    id: string;
+    /**
+     * @generated from protobuf field: string label = 2;
+     */
+    label: string;
+    /**
+     * @generated from protobuf field: optional string description = 3;
+     */
+    description?: string;
+}
+/**
+ * @generated from protobuf message AgentReasoningCatalog
+ */
+export interface AgentReasoningCatalog {
+    /**
+     * @generated from protobuf field: repeated AgentReasoningEffortOption options = 1;
+     */
+    options: AgentReasoningEffortOption[];
+}
+/**
+ * @generated from protobuf message AgentModelOption
+ */
+export interface AgentModelOption {
+    /**
+     * @generated from protobuf field: string id = 1;
+     */
+    id: string;
+    /**
+     * @generated from protobuf field: string label = 2;
+     */
+    label: string;
+    /**
+     * @generated from protobuf field: optional string description = 3;
+     */
+    description?: string;
+    /**
+     * Empty means that the catalog does not constrain reasoning for this model.
+     *
+     * @generated from protobuf field: repeated string reasoning_effort_ids = 4;
+     */
+    reasoningEffortIds: string[];
+}
+/**
+ * @generated from protobuf message AgentModelCatalog
+ */
+export interface AgentModelCatalog {
+    /**
+     * @generated from protobuf field: repeated AgentModelOption options = 1;
+     */
+    options: AgentModelOption[];
+}
+/**
+ * Typed, independently optional sections published and cached by a harness.
+ * Omitted selections always mean "use the harness default"; defaults are not
+ * represented as synthetic options.
+ *
+ * @generated from protobuf message AgentConfigurationCatalog
+ */
+export interface AgentConfigurationCatalog {
+    /**
+     * @generated from protobuf field: optional AgentProjectCatalog projects = 1;
+     */
+    projects?: AgentProjectCatalog;
+    /**
+     * @generated from protobuf field: optional AgentModelCatalog models = 2;
+     */
+    models?: AgentModelCatalog;
+    /**
+     * @generated from protobuf field: optional AgentReasoningCatalog reasoning = 3;
+     */
+    reasoning?: AgentReasoningCatalog;
+}
+/**
  * @generated from protobuf message BotCapability
  */
 export interface BotCapability {
@@ -10884,6 +11113,10 @@ export interface BotCapability {
      * @generated from protobuf field: uint32 version = 2;
      */
     version: number;
+    /**
+     * @generated from protobuf field: optional AgentConfigurationCatalog agent_configuration = 3;
+     */
+    agentConfiguration?: AgentConfigurationCatalog;
 }
 /**
  * @generated from protobuf enum BotCapability.Kind
@@ -10896,7 +11129,11 @@ export enum BotCapability_Kind {
     /**
      * @generated from protobuf enum value: CHAT_SETTINGS = 1;
      */
-    CHAT_SETTINGS = 1
+    CHAT_SETTINGS = 1,
+    /**
+     * @generated from protobuf enum value: AGENT_CONFIGURATION = 2;
+     */
+    AGENT_CONFIGURATION = 2
 }
 /**
  * @generated from protobuf message PeerBot
@@ -12967,7 +13204,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_BOT_SKILLS = 139;
      */
-    GET_BOT_SKILLS = 139
+    GET_BOT_SKILLS = 139,
+    /**
+     * @generated from protobuf enum value: GET_BOT_CONFIGURATION_CATALOG = 140;
+     */
+    GET_BOT_CONFIGURATION_CATALOG = 140
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -15299,6 +15540,127 @@ class ChatPermissions$Type extends MessageType<ChatPermissions> {
  */
 export const ChatPermissions = new ChatPermissions$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class AgentThreadContext$Type extends MessageType<AgentThreadContext> {
+    constructor() {
+        super("AgentThreadContext", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "agent_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "configuration", kind: "message", T: () => AgentThreadConfiguration }
+        ]);
+    }
+    create(value?: PartialMessage<AgentThreadContext>): AgentThreadContext {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AgentThreadContext>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentThreadContext): AgentThreadContext {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 agent_id */ 2:
+                    message.agentId = reader.int64().toBigInt();
+                    break;
+                case /* optional AgentThreadConfiguration configuration */ 3:
+                    message.configuration = AgentThreadConfiguration.internalBinaryRead(reader, reader.uint32(), options, message.configuration);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentThreadContext, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* optional int64 agent_id = 2; */
+        if (message.agentId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.agentId);
+        /* optional AgentThreadConfiguration configuration = 3; */
+        if (message.configuration)
+            AgentThreadConfiguration.internalBinaryWrite(message.configuration, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentThreadContext
+ */
+export const AgentThreadContext = new AgentThreadContext$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentThreadConfiguration$Type extends MessageType<AgentThreadConfiguration> {
+    constructor() {
+        super("AgentThreadConfiguration", [
+            { no: 1, name: "project_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "model_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "reasoning_effort_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentThreadConfiguration>): AgentThreadConfiguration {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AgentThreadConfiguration>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentThreadConfiguration): AgentThreadConfiguration {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string project_id */ 1:
+                    message.projectId = reader.string();
+                    break;
+                case /* optional string model_id */ 2:
+                    message.modelId = reader.string();
+                    break;
+                case /* optional string reasoning_effort_id */ 3:
+                    message.reasoningEffortId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentThreadConfiguration, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string project_id = 1; */
+        if (message.projectId !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.projectId);
+        /* optional string model_id = 2; */
+        if (message.modelId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.modelId);
+        /* optional string reasoning_effort_id = 3; */
+        if (message.reasoningEffortId !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.reasoningEffortId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentThreadConfiguration
+ */
+export const AgentThreadConfiguration = new AgentThreadConfiguration$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class Chat$Type extends MessageType<Chat> {
     constructor() {
         super("Chat", [
@@ -15317,7 +15679,8 @@ class Chat$Type extends MessageType<Chat> {
             { no: 13, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions },
-            { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 18, name: "agent_context", kind: "message", T: () => AgentThreadContext }
         ]);
     }
     create(value?: PartialMessage<Chat>): Chat {
@@ -15381,6 +15744,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* optional int32 seq */ 16:
                     message.seq = reader.int32();
                     break;
+                case /* optional AgentThreadContext agent_context */ 18:
+                    message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15441,6 +15807,9 @@ class Chat$Type extends MessageType<Chat> {
         /* optional int32 seq = 16; */
         if (message.seq !== undefined)
             writer.tag(16, WireType.Varint).int32(message.seq);
+        /* optional AgentThreadContext agent_context = 18; */
+        if (message.agentContext)
+            AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21247,7 +21616,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 131, name: "getAgentSession", kind: "message", oneof: "input", T: () => GetAgentSessionInput },
             { no: 132, name: "updateBotAgent", kind: "message", oneof: "input", T: () => UpdateBotAgentInput },
             { no: 133, name: "deleteBotAgent", kind: "message", oneof: "input", T: () => DeleteBotAgentInput },
-            { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput }
+            { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
+            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -22058,6 +22428,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getBotSkills: GetBotSkillsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBotSkills)
                     };
                     break;
+                case /* GetBotConfigurationCatalogInput getBotConfigurationCatalog */ 141:
+                    message.input = {
+                        oneofKind: "getBotConfigurationCatalog",
+                        getBotConfigurationCatalog: GetBotConfigurationCatalogInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBotConfigurationCatalog)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22469,6 +22845,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetBotSkillsInput getBotSkills = 140; */
         if (message.input.oneofKind === "getBotSkills")
             GetBotSkillsInput.internalBinaryWrite(message.input.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
+        /* GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141; */
+        if (message.input.oneofKind === "getBotConfigurationCatalog")
+            GetBotConfigurationCatalogInput.internalBinaryWrite(message.input.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22615,7 +22994,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 131, name: "getAgentSession", kind: "message", oneof: "result", T: () => GetAgentSessionResult },
             { no: 132, name: "updateBotAgent", kind: "message", oneof: "result", T: () => UpdateBotAgentResult },
             { no: 133, name: "deleteBotAgent", kind: "message", oneof: "result", T: () => DeleteBotAgentResult },
-            { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult }
+            { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
+            { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -23426,6 +23806,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getBotSkills: GetBotSkillsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBotSkills)
                     };
                     break;
+                case /* GetBotConfigurationCatalogResult getBotConfigurationCatalog */ 141:
+                    message.result = {
+                        oneofKind: "getBotConfigurationCatalog",
+                        getBotConfigurationCatalog: GetBotConfigurationCatalogResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBotConfigurationCatalog)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23837,6 +24223,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetBotSkillsResult getBotSkills = 140; */
         if (message.result.oneofKind === "getBotSkills")
             GetBotSkillsResult.internalBinaryWrite(message.result.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
+        /* GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141; */
+        if (message.result.oneofKind === "getBotConfigurationCatalog")
+            GetBotConfigurationCatalogResult.internalBinaryWrite(message.result.getBotConfigurationCatalog, writer.tag(141, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30631,6 +31020,106 @@ class GetBotSkillsResult$Type extends MessageType<GetBotSkillsResult> {
  */
 export const GetBotSkillsResult = new GetBotSkillsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class GetBotConfigurationCatalogInput$Type extends MessageType<GetBotConfigurationCatalogInput> {
+    constructor() {
+        super("GetBotConfigurationCatalogInput", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => InputPeer }
+        ]);
+    }
+    create(value?: PartialMessage<GetBotConfigurationCatalogInput>): GetBotConfigurationCatalogInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetBotConfigurationCatalogInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBotConfigurationCatalogInput): GetBotConfigurationCatalogInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional InputPeer peer_id */ 2:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetBotConfigurationCatalogInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* optional InputPeer peer_id = 2; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBotConfigurationCatalogInput
+ */
+export const GetBotConfigurationCatalogInput = new GetBotConfigurationCatalogInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetBotConfigurationCatalogResult$Type extends MessageType<GetBotConfigurationCatalogResult> {
+    constructor() {
+        super("GetBotConfigurationCatalogResult", [
+            { no: 1, name: "catalog", kind: "message", T: () => AgentConfigurationCatalog }
+        ]);
+    }
+    create(value?: PartialMessage<GetBotConfigurationCatalogResult>): GetBotConfigurationCatalogResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetBotConfigurationCatalogResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBotConfigurationCatalogResult): GetBotConfigurationCatalogResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional AgentConfigurationCatalog catalog */ 1:
+                    message.catalog = AgentConfigurationCatalog.internalBinaryRead(reader, reader.uint32(), options, message.catalog);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetBotConfigurationCatalogResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional AgentConfigurationCatalog catalog = 1; */
+        if (message.catalog)
+            AgentConfigurationCatalog.internalBinaryWrite(message.catalog, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBotConfigurationCatalogResult
+ */
+export const GetBotConfigurationCatalogResult = new GetBotConfigurationCatalogResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class GetPeerBotCommandsInput$Type extends MessageType<GetPeerBotCommandsInput> {
     constructor() {
         super("GetPeerBotCommandsInput", [
@@ -34384,7 +34873,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
             { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 9, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] },
-            { no: 10, name: "actions", kind: "message", T: () => MessageActions }
+            { no: 10, name: "actions", kind: "message", T: () => MessageActions },
+            { no: 11, name: "initial_agent_context", kind: "message", T: () => AgentThreadContext },
+            { no: 12, name: "source_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -34434,6 +34925,12 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional MessageActions actions */ 10:
                     message.actions = MessageActions.internalBinaryRead(reader, reader.uint32(), options, message.actions);
                     break;
+                case /* optional AgentThreadContext initial_agent_context */ 11:
+                    message.initialAgentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.initialAgentContext);
+                    break;
+                case /* optional int64 source_chat_id */ 12:
+                    message.sourceChatId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -34482,6 +34979,12 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional MessageActions actions = 10; */
         if (message.actions)
             MessageActions.internalBinaryWrite(message.actions, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* optional AgentThreadContext initial_agent_context = 11; */
+        if (message.initialAgentContext)
+            AgentThreadContext.internalBinaryWrite(message.initialAgentContext, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 source_chat_id = 12; */
+        if (message.sourceChatId !== undefined)
+            writer.tag(12, WireType.Varint).int64(message.sourceChatId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37280,7 +37783,8 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
             { no: 5, name: "is_public", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 6, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant },
             { no: 7, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 8, name: "placeholder_title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 8, name: "placeholder_title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "agent_context", kind: "message", T: () => AgentThreadContext }
         ]);
     }
     create(value?: PartialMessage<CreateChatInput>): CreateChatInput {
@@ -37320,6 +37824,9 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
                 case /* optional string placeholder_title */ 8:
                     message.placeholderTitle = reader.string();
                     break;
+                case /* optional AgentThreadContext agent_context */ 9:
+                    message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -37356,6 +37863,9 @@ class CreateChatInput$Type extends MessageType<CreateChatInput> {
         /* optional string placeholder_title = 8; */
         if (message.placeholderTitle !== undefined)
             writer.tag(8, WireType.LengthDelimited).string(message.placeholderTitle);
+        /* optional AgentThreadContext agent_context = 9; */
+        if (message.agentContext)
+            AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37428,7 +37938,8 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
             { no: 3, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 6, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant }
+            { no: 6, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant },
+            { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext }
         ]);
     }
     create(value?: PartialMessage<CreateSubthreadInput>): CreateSubthreadInput {
@@ -37462,6 +37973,9 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
                 case /* repeated InputChatParticipant participants */ 6:
                     message.participants.push(InputChatParticipant.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional AgentThreadContext agent_context */ 7:
+                    message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -37492,6 +38006,9 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
         /* repeated InputChatParticipant participants = 6; */
         for (let i = 0; i < message.participants.length; i++)
             InputChatParticipant.internalBinaryWrite(message.participants[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional AgentThreadContext agent_context = 7; */
+        if (message.agentContext)
+            AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -38900,7 +39417,8 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 4, name: "untitled", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "agent_context", kind: "message", T: () => AgentThreadContext }
         ]);
     }
     create(value?: PartialMessage<UpdateChatInfo>): UpdateChatInfo {
@@ -38927,6 +39445,9 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
                 case /* optional bool untitled */ 4:
                     message.untitled = reader.bool();
                     break;
+                case /* optional AgentThreadContext agent_context */ 5:
+                    message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -38951,6 +39472,9 @@ class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
         /* optional bool untitled = 4; */
         if (message.untitled !== undefined)
             writer.tag(4, WireType.Varint).bool(message.untitled);
+        /* optional AgentThreadContext agent_context = 5; */
+        if (message.agentContext)
+            AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -42460,7 +42984,8 @@ class UpdateChatInfoInput$Type extends MessageType<UpdateChatInfoInput> {
         super("UpdateChatInfoInput", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "agent_context", kind: "message", T: () => AgentThreadContext }
         ]);
     }
     create(value?: PartialMessage<UpdateChatInfoInput>): UpdateChatInfoInput {
@@ -42484,6 +43009,9 @@ class UpdateChatInfoInput$Type extends MessageType<UpdateChatInfoInput> {
                 case /* optional string emoji */ 3:
                     message.emoji = reader.string();
                     break;
+                case /* optional AgentThreadContext agent_context */ 4:
+                    message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -42505,6 +43033,9 @@ class UpdateChatInfoInput$Type extends MessageType<UpdateChatInfoInput> {
         /* optional string emoji = 3; */
         if (message.emoji !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.emoji);
+        /* optional AgentThreadContext agent_context = 4; */
+        if (message.agentContext)
+            AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -42825,11 +43356,414 @@ class DraftMessage$Type extends MessageType<DraftMessage> {
  */
 export const DraftMessage = new DraftMessage$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class AgentProjectOption$Type extends MessageType<AgentProjectOption> {
+    constructor() {
+        super("AgentProjectOption", [
+            { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "label", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentProjectOption>): AgentProjectOption {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = "";
+        message.label = "";
+        if (value !== undefined)
+            reflectionMergePartial<AgentProjectOption>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentProjectOption): AgentProjectOption {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string id */ 1:
+                    message.id = reader.string();
+                    break;
+                case /* string label */ 2:
+                    message.label = reader.string();
+                    break;
+                case /* optional string description */ 3:
+                    message.description = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentProjectOption, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string id = 1; */
+        if (message.id !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.id);
+        /* string label = 2; */
+        if (message.label !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.label);
+        /* optional string description = 3; */
+        if (message.description !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.description);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentProjectOption
+ */
+export const AgentProjectOption = new AgentProjectOption$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentProjectCatalog$Type extends MessageType<AgentProjectCatalog> {
+    constructor() {
+        super("AgentProjectCatalog", [
+            { no: 1, name: "options", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentProjectOption },
+            { no: 2, name: "can_select_folder", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentProjectCatalog>): AgentProjectCatalog {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.options = [];
+        if (value !== undefined)
+            reflectionMergePartial<AgentProjectCatalog>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentProjectCatalog): AgentProjectCatalog {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated AgentProjectOption options */ 1:
+                    message.options.push(AgentProjectOption.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool can_select_folder */ 2:
+                    message.canSelectFolder = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentProjectCatalog, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated AgentProjectOption options = 1; */
+        for (let i = 0; i < message.options.length; i++)
+            AgentProjectOption.internalBinaryWrite(message.options[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool can_select_folder = 2; */
+        if (message.canSelectFolder !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.canSelectFolder);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentProjectCatalog
+ */
+export const AgentProjectCatalog = new AgentProjectCatalog$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentReasoningEffortOption$Type extends MessageType<AgentReasoningEffortOption> {
+    constructor() {
+        super("AgentReasoningEffortOption", [
+            { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "label", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentReasoningEffortOption>): AgentReasoningEffortOption {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = "";
+        message.label = "";
+        if (value !== undefined)
+            reflectionMergePartial<AgentReasoningEffortOption>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentReasoningEffortOption): AgentReasoningEffortOption {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string id */ 1:
+                    message.id = reader.string();
+                    break;
+                case /* string label */ 2:
+                    message.label = reader.string();
+                    break;
+                case /* optional string description */ 3:
+                    message.description = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentReasoningEffortOption, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string id = 1; */
+        if (message.id !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.id);
+        /* string label = 2; */
+        if (message.label !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.label);
+        /* optional string description = 3; */
+        if (message.description !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.description);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentReasoningEffortOption
+ */
+export const AgentReasoningEffortOption = new AgentReasoningEffortOption$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentReasoningCatalog$Type extends MessageType<AgentReasoningCatalog> {
+    constructor() {
+        super("AgentReasoningCatalog", [
+            { no: 1, name: "options", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentReasoningEffortOption }
+        ]);
+    }
+    create(value?: PartialMessage<AgentReasoningCatalog>): AgentReasoningCatalog {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.options = [];
+        if (value !== undefined)
+            reflectionMergePartial<AgentReasoningCatalog>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentReasoningCatalog): AgentReasoningCatalog {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated AgentReasoningEffortOption options */ 1:
+                    message.options.push(AgentReasoningEffortOption.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentReasoningCatalog, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated AgentReasoningEffortOption options = 1; */
+        for (let i = 0; i < message.options.length; i++)
+            AgentReasoningEffortOption.internalBinaryWrite(message.options[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentReasoningCatalog
+ */
+export const AgentReasoningCatalog = new AgentReasoningCatalog$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentModelOption$Type extends MessageType<AgentModelOption> {
+    constructor() {
+        super("AgentModelOption", [
+            { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "label", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "reasoning_effort_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentModelOption>): AgentModelOption {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = "";
+        message.label = "";
+        message.reasoningEffortIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<AgentModelOption>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentModelOption): AgentModelOption {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string id */ 1:
+                    message.id = reader.string();
+                    break;
+                case /* string label */ 2:
+                    message.label = reader.string();
+                    break;
+                case /* optional string description */ 3:
+                    message.description = reader.string();
+                    break;
+                case /* repeated string reasoning_effort_ids */ 4:
+                    message.reasoningEffortIds.push(reader.string());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentModelOption, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string id = 1; */
+        if (message.id !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.id);
+        /* string label = 2; */
+        if (message.label !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.label);
+        /* optional string description = 3; */
+        if (message.description !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.description);
+        /* repeated string reasoning_effort_ids = 4; */
+        for (let i = 0; i < message.reasoningEffortIds.length; i++)
+            writer.tag(4, WireType.LengthDelimited).string(message.reasoningEffortIds[i]);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentModelOption
+ */
+export const AgentModelOption = new AgentModelOption$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentModelCatalog$Type extends MessageType<AgentModelCatalog> {
+    constructor() {
+        super("AgentModelCatalog", [
+            { no: 1, name: "options", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentModelOption }
+        ]);
+    }
+    create(value?: PartialMessage<AgentModelCatalog>): AgentModelCatalog {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.options = [];
+        if (value !== undefined)
+            reflectionMergePartial<AgentModelCatalog>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentModelCatalog): AgentModelCatalog {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated AgentModelOption options */ 1:
+                    message.options.push(AgentModelOption.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentModelCatalog, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated AgentModelOption options = 1; */
+        for (let i = 0; i < message.options.length; i++)
+            AgentModelOption.internalBinaryWrite(message.options[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentModelCatalog
+ */
+export const AgentModelCatalog = new AgentModelCatalog$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentConfigurationCatalog$Type extends MessageType<AgentConfigurationCatalog> {
+    constructor() {
+        super("AgentConfigurationCatalog", [
+            { no: 1, name: "projects", kind: "message", T: () => AgentProjectCatalog },
+            { no: 2, name: "models", kind: "message", T: () => AgentModelCatalog },
+            { no: 3, name: "reasoning", kind: "message", T: () => AgentReasoningCatalog }
+        ]);
+    }
+    create(value?: PartialMessage<AgentConfigurationCatalog>): AgentConfigurationCatalog {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<AgentConfigurationCatalog>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentConfigurationCatalog): AgentConfigurationCatalog {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional AgentProjectCatalog projects */ 1:
+                    message.projects = AgentProjectCatalog.internalBinaryRead(reader, reader.uint32(), options, message.projects);
+                    break;
+                case /* optional AgentModelCatalog models */ 2:
+                    message.models = AgentModelCatalog.internalBinaryRead(reader, reader.uint32(), options, message.models);
+                    break;
+                case /* optional AgentReasoningCatalog reasoning */ 3:
+                    message.reasoning = AgentReasoningCatalog.internalBinaryRead(reader, reader.uint32(), options, message.reasoning);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentConfigurationCatalog, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional AgentProjectCatalog projects = 1; */
+        if (message.projects)
+            AgentProjectCatalog.internalBinaryWrite(message.projects, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional AgentModelCatalog models = 2; */
+        if (message.models)
+            AgentModelCatalog.internalBinaryWrite(message.models, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional AgentReasoningCatalog reasoning = 3; */
+        if (message.reasoning)
+            AgentReasoningCatalog.internalBinaryWrite(message.reasoning, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentConfigurationCatalog
+ */
+export const AgentConfigurationCatalog = new AgentConfigurationCatalog$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class BotCapability$Type extends MessageType<BotCapability> {
     constructor() {
         super("BotCapability", [
             { no: 1, name: "kind", kind: "enum", T: () => ["BotCapability.Kind", BotCapability_Kind] },
-            { no: 2, name: "version", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+            { no: 2, name: "version", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 3, name: "agent_configuration", kind: "message", T: () => AgentConfigurationCatalog }
         ]);
     }
     create(value?: PartialMessage<BotCapability>): BotCapability {
@@ -42851,6 +43785,9 @@ class BotCapability$Type extends MessageType<BotCapability> {
                 case /* uint32 version */ 2:
                     message.version = reader.uint32();
                     break;
+                case /* optional AgentConfigurationCatalog agent_configuration */ 3:
+                    message.agentConfiguration = AgentConfigurationCatalog.internalBinaryRead(reader, reader.uint32(), options, message.agentConfiguration);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -42869,6 +43806,9 @@ class BotCapability$Type extends MessageType<BotCapability> {
         /* uint32 version = 2; */
         if (message.version !== 0)
             writer.tag(2, WireType.Varint).uint32(message.version);
+        /* optional AgentConfigurationCatalog agent_configuration = 3; */
+        if (message.agentConfiguration)
+            AgentConfigurationCatalog.internalBinaryWrite(message.agentConfiguration, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

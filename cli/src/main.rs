@@ -1032,6 +1032,7 @@ impl ChatsCreateSubthreadArgs {
                     group_id: None,
                 })
                 .collect(),
+            agent_context: None,
         })
     }
 }
@@ -3122,6 +3123,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         participants,
                         reserved_chat_id: None,
                         placeholder_title: None,
+                        agent_context: None,
                     };
                     let payload = realtime.call(input).await?;
                     if cli.json {
@@ -3166,6 +3168,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             }],
                             reserved_chat_id: None,
                             placeholder_title: None,
+                            agent_context: None,
                         })
                         .await?;
                     if cli.json {
@@ -3262,6 +3265,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         chat_id,
                         title: Some(title.to_string()),
                         emoji,
+                        agent_context: None,
                     };
                     let payload = realtime.call(input).await?;
                     if cli.json {
@@ -4497,6 +4501,8 @@ async fn send_message(
         parse_markdown: Some(parse_markdown),
         send_mode: None,
         actions: None,
+        initial_agent_context: None,
+        source_chat_id: None,
     };
 
     realtime.call(input).await

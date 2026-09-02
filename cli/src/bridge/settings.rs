@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use super::*;
 
 const SETTINGS_VERSION: u32 = 1;
+const AGENT_CONFIGURATION_VERSION: u32 = 1;
 const DEFAULT_VALUE: &str = "__inline_provider_default__";
 pub(super) const SETTINGS_DEADLINE: Duration = Duration::from_secs(4);
 const COMMAND_CHOICE_TTL_SECONDS: i64 = 10 * 60;
@@ -200,22 +201,97 @@ pub(super) struct SettingsIdentity {
     pub reply_thread_default: ReplyThreadDefault,
 }
 
-pub(super) async fn advertise_settings(
+pub(super) async fn advertise_settings_with_catalog(
     bot: &InlineClient,
+    catalog: AgentConfigurationCatalog,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let capabilities = vec![BotCapability {
-        kind: BotCapabilityKind::ChatSettings,
-        version: SETTINGS_VERSION,
-    }];
+    let capabilities = vec![
+        BotCapability {
+            kind: BotCapabilityKind::ChatSettings,
+            version: SETTINGS_VERSION,
+            agent_configuration: None,
+        },
+        BotCapability {
+            kind: BotCapabilityKind::AgentConfiguration,
+            version: AGENT_CONFIGURATION_VERSION,
+            agent_configuration: Some(catalog),
+        },
+    ];
     let accepted = bot.set_bot_capabilities(capabilities.clone()).await?;
     if accepted != capabilities {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "Inline did not preserve the bridge bot-settings capability",
+            "Inline did not preserve the bridge Agent configuration catalog",
         )
         .into());
     }
     Ok(())
+}
+
+pub(super) async fn published_agent_configuration_catalog(
+    bot: &InlineClient,
+) -> Result<Option<AgentConfigurationCatalog>, Box<dyn std::error::Error>> {
+    Ok(bot
+        .get_bot_capabilities()
+        .await?
+        .into_iter()
+        .find(|capability| capability.kind == BotCapabilityKind::AgentConfiguration)
+        .and_then(|capability| capability.agent_configuration))
+}
+
+pub(super) fn agent_configuration_catalog(
+    projects: Vec<WorkspaceChoice>,
+    provider: &DriverSettingsCatalog,
+    host_label: &str,
+) -> AgentConfigurationCatalog {
+    let projects = (!projects.is_empty()).then(|| AgentProjectCatalog {
+        options: projects
+            .into_iter()
+            .map(|project| AgentProjectOption {
+                id: project.workspace_id.to_string(),
+                label: project.display_name,
+                description: Some(format!("Local project · {host_label}")),
+            })
+            .collect(),
+        // Registering arbitrary paths remains in the existing owner-only Agent
+        // Settings folder flow. This cached catalog exposes stable choices only.
+        can_select_folder: None,
+    });
+
+    let mut reasoning = Vec::<AgentReasoningEffortOption>::new();
+    let models = provider
+        .models
+        .iter()
+        .map(|model| {
+            let reasoning_effort_ids = model
+                .reasoning
+                .iter()
+                .filter(|option| !option.disabled)
+                .map(|option| {
+                    if !reasoning.iter().any(|existing| existing.id == option.value) {
+                        reasoning.push(AgentReasoningEffortOption {
+                            id: option.value.clone(),
+                            label: option.label.clone(),
+                            description: option.description.clone(),
+                        });
+                    }
+                    option.value.clone()
+                })
+                .collect();
+            AgentModelOption {
+                id: model.value.clone(),
+                label: model.label.clone(),
+                description: model.description.clone(),
+                reasoning_effort_ids,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    AgentConfigurationCatalog {
+        projects,
+        models: (!models.is_empty()).then_some(AgentModelCatalog { options: models }),
+        reasoning: (!reasoning.is_empty()).then_some(AgentReasoningCatalog { options: reasoning }),
+    }
 }
 
 pub(super) async fn send_settings_command_choices(
@@ -285,6 +361,7 @@ pub(super) async fn handle_settings_command_action<D: AgentDriver + 'static>(
     event: &ClientEvent,
     runtime: &SettingsRuntime<'_, D>,
     operator_policy: &OperatorPolicy,
+    agent_context_owned: bool,
 ) -> Result<SettingsCommandActionOutcome, Box<dyn std::error::Error>> {
     let ClientEvent::MessageActionInvoked {
         interaction_id,
@@ -338,6 +415,16 @@ pub(super) async fn handle_settings_command_action<D: AgentDriver + 'static>(
         bot.answer_message_action(inline_client::AnswerMessageActionRequest {
             interaction_id: *interaction_id,
             toast: Some(toast.to_string()),
+        })
+        .await?;
+        return Ok(SettingsCommandActionOutcome::Handled {
+            provider_epoch_ended: false,
+        });
+    }
+    if agent_context_owned && agent_context_setting_item(&request.item_id) {
+        bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+            interaction_id: *interaction_id,
+            toast: Some("Use this thread's Agent controls instead.".to_string()),
         })
         .await?;
         return Ok(SettingsCommandActionOutcome::Handled {
@@ -1202,6 +1289,7 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
     bot: &InlineClient,
     event: &ClientEvent,
     runtime: &SettingsRuntime<'_, D>,
+    agent_context_owned: bool,
 ) -> Result<SettingsEventOutcome, Box<dyn std::error::Error>> {
     let ClientEvent::BotInteraction(interaction) = event else {
         return Ok(SettingsEventOutcome::NotHandled);
@@ -1223,7 +1311,7 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
         _ => return Ok(SettingsEventOutcome::NotHandled),
     };
     let snapshot = runtime.active.snapshot();
-    let resolution = if actor_user_id != runtime.identity.owner_user_id {
+    let mut resolution = if actor_user_id != runtime.identity.owner_user_id {
         SettingsInteractionResolution::normal(problem(
             BotChatSettingsProblemCode::Unavailable,
             "Only the bot owner can view or change these settings.",
@@ -1241,9 +1329,24 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
             "This settings version is not supported. Update Inline and try again.",
             None,
         ))
+    } else if agent_context_owned
+        && matches!(
+            interaction,
+            BotInteractionEvent::ChatSettingsItemInvoked { item_id, .. }
+                if agent_context_setting_item(item_id)
+        )
+    {
+        SettingsInteractionResolution::normal(problem(
+            BotChatSettingsProblemCode::Unavailable,
+            "Project, Model, and Reasoning are owned by this thread's Agent controls.",
+            None,
+        ))
     } else {
         resolve_settings_interaction(interaction, runtime, snapshot.clone()).await
     };
+    if agent_context_owned {
+        omit_agent_context_settings(&mut resolution.response);
+    }
     let next_snapshot = runtime.active.snapshot();
     let successful_document = matches!(&resolution.response, BotChatSettingsResponse::Document(_));
     let working_directory_announcement = match interaction {
@@ -1296,6 +1399,32 @@ pub(super) async fn handle_settings_event<D: AgentDriver + 'static>(
     Ok(SettingsEventOutcome::Handled {
         provider_epoch_ended: resolution.provider_epoch_ended,
     })
+}
+
+fn agent_context_setting_item(item_id: &str) -> bool {
+    matches!(
+        item_id,
+        ITEM_MODEL
+            | ITEM_REASONING
+            | ITEM_FOLDER
+            | ITEM_PROJECT
+            | ITEM_PROJECTS
+            | ITEM_PROJECTS_BACK
+    ) || item_id.starts_with(PROJECT_PAGE_PREFIX)
+}
+
+fn omit_agent_context_settings(response: &mut BotChatSettingsResponse) {
+    let BotChatSettingsResponse::Document(document) = response else {
+        return;
+    };
+    for section in &mut document.sections {
+        section
+            .items
+            .retain(|item| !agent_context_setting_item(&item.id));
+    }
+    document
+        .sections
+        .retain(|section| !section.items.is_empty());
 }
 
 pub(super) async fn handle_unavailable_settings_event(

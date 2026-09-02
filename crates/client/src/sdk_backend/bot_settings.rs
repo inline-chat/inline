@@ -3,7 +3,9 @@
 use inline_sdk::proto;
 
 use crate::{
-    BackendError, BackendResult, BotCapability, BotCapabilityKind, BotChatSettingsControl,
+    AgentConfigurationCatalog, AgentModelCatalog, AgentModelOption, AgentProjectCatalog,
+    AgentProjectOption, AgentReasoningCatalog, AgentReasoningEffortOption, BackendError,
+    BackendResult, BotCapability, BotCapabilityKind, BotChatSettingsControl,
     BotChatSettingsDocument, BotChatSettingsFolder, BotChatSettingsFolderOption,
     BotChatSettingsInfoTone, BotChatSettingsItem, BotChatSettingsProblem,
     BotChatSettingsProblemCode, BotChatSettingsResponse, BotChatSettingsSection,
@@ -14,8 +16,12 @@ pub(super) fn capability_to_proto(capability: BotCapability) -> proto::BotCapabi
     proto::BotCapability {
         kind: match capability.kind {
             BotCapabilityKind::ChatSettings => proto::bot_capability::Kind::ChatSettings as i32,
+            BotCapabilityKind::AgentConfiguration => {
+                proto::bot_capability::Kind::AgentConfiguration as i32
+            }
         },
         version: capability.version,
+        agent_configuration: capability.agent_configuration.map(catalog_to_proto),
     }
 }
 
@@ -24,6 +30,9 @@ pub(super) fn capability_from_proto(
 ) -> BackendResult<BotCapability> {
     let kind = match proto::bot_capability::Kind::try_from(capability.kind) {
         Ok(proto::bot_capability::Kind::ChatSettings) => BotCapabilityKind::ChatSettings,
+        Ok(proto::bot_capability::Kind::AgentConfiguration) => {
+            BotCapabilityKind::AgentConfiguration
+        }
         _ => {
             return Err(protocol_mismatch(
                 "server returned an unknown bot capability",
@@ -38,7 +47,90 @@ pub(super) fn capability_from_proto(
     Ok(BotCapability {
         kind,
         version: capability.version,
+        agent_configuration: capability.agent_configuration.map(catalog_from_proto),
     })
+}
+
+fn catalog_to_proto(catalog: AgentConfigurationCatalog) -> proto::AgentConfigurationCatalog {
+    proto::AgentConfigurationCatalog {
+        projects: catalog.projects.map(|projects| proto::AgentProjectCatalog {
+            options: projects
+                .options
+                .into_iter()
+                .map(|option| proto::AgentProjectOption {
+                    id: option.id,
+                    label: option.label,
+                    description: option.description,
+                })
+                .collect(),
+            can_select_folder: projects.can_select_folder,
+        }),
+        models: catalog.models.map(|models| proto::AgentModelCatalog {
+            options: models
+                .options
+                .into_iter()
+                .map(|option| proto::AgentModelOption {
+                    id: option.id,
+                    label: option.label,
+                    description: option.description,
+                    reasoning_effort_ids: option.reasoning_effort_ids,
+                })
+                .collect(),
+        }),
+        reasoning: catalog
+            .reasoning
+            .map(|reasoning| proto::AgentReasoningCatalog {
+                options: reasoning
+                    .options
+                    .into_iter()
+                    .map(|option| proto::AgentReasoningEffortOption {
+                        id: option.id,
+                        label: option.label,
+                        description: option.description,
+                    })
+                    .collect(),
+            }),
+    }
+}
+
+fn catalog_from_proto(catalog: proto::AgentConfigurationCatalog) -> AgentConfigurationCatalog {
+    AgentConfigurationCatalog {
+        projects: catalog.projects.map(|projects| AgentProjectCatalog {
+            options: projects
+                .options
+                .into_iter()
+                .map(|option| AgentProjectOption {
+                    id: option.id,
+                    label: option.label,
+                    description: option.description,
+                })
+                .collect(),
+            can_select_folder: projects.can_select_folder,
+        }),
+        models: catalog.models.map(|models| AgentModelCatalog {
+            options: models
+                .options
+                .into_iter()
+                .map(|option| AgentModelOption {
+                    id: option.id,
+                    label: option.label,
+                    description: option.description,
+                    reasoning_effort_ids: option.reasoning_effort_ids,
+                })
+                .collect(),
+        }),
+        reasoning: catalog.reasoning.map(|reasoning| AgentReasoningCatalog {
+            options: reasoning
+                .options
+                .into_iter()
+                .map(|option| AgentReasoningEffortOption {
+                    id: option.id,
+                    label: option.label,
+                    description: option.description,
+                })
+                .collect(),
+        }),
+    }
 }
 
 pub(super) fn value_to_proto(value: BotSettingsValue) -> proto::BotChatSettingsValue {

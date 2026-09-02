@@ -18,21 +18,21 @@ use inline_sdk::proto;
 
 use crate::store::select_history_window;
 use crate::{
-    AccountStateSnapshot, AddChatParticipantRequest, AnswerBotChatSettingsRequest,
-    AnswerMessageActionRequest, AuthStartRequest, AuthStartResult, AuthVerifyRequest,
-    AuthVerifyResult, BotCapability, BotChatSettingsProblem, BotChatSettingsProblemCode,
-    BotChatSettingsResponse, ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest,
-    ChatStateSnapshot, ClientErrorCategory, ClientEvent, ClientEventDelivery, ClientFailure,
-    ClientStatus, ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
-    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogRecord,
-    DialogsOrder, DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest,
-    HistoryPage, HistoryRequest, InlineId, InvokeBotChatSettingsItemRequest, MessageActionKind,
-    MessageActions, MessageContent, MessageMutation, MessageRecord, PinMessageRequest, RandomId,
-    ReactRequest, ReadRequest, RemoveChatParticipantRequest, RequestBotChatSettingsRequest,
-    SendInteractiveTextRequest, SendTextRequest, SetMarkedUnreadRequest, TransactionEvent,
-    TransactionId, TransactionIdentity, TransactionState, TypingRequest, UpdateChatInfoRequest,
-    UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadRequest,
-    UploadThumbnail,
+    AccountStateSnapshot, AddChatParticipantRequest, AgentThreadContext,
+    AnswerBotChatSettingsRequest, AnswerMessageActionRequest, AuthStartRequest, AuthStartResult,
+    AuthVerifyRequest, AuthVerifyResult, BotCapability, BotChatSettingsProblem,
+    BotChatSettingsProblemCode, BotChatSettingsResponse, ChatParticipantRecord,
+    ChatParticipantsPage, ChatParticipantsRequest, ChatStateSnapshot, ClientErrorCategory,
+    ClientEvent, ClientEventDelivery, ClientFailure, ClientStatus, ClientStatusSnapshot,
+    ConnectRequest, CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat,
+    DeleteChatRequest, DeleteMessageRequest, DialogRecord, DialogsOrder, DialogsPage,
+    DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
+    InlineId, InvokeBotChatSettingsItemRequest, MessageActionKind, MessageActions, MessageContent,
+    MessageMutation, MessageRecord, PinMessageRequest, RandomId, ReactRequest, ReadRequest,
+    RemoveChatParticipantRequest, RequestBotChatSettingsRequest, SendInteractiveTextRequest,
+    SendTextRequest, SetMarkedUnreadRequest, TransactionEvent, TransactionId, TransactionIdentity,
+    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
+    UpdateDialogNotificationsRequest, UploadRequest, UploadThumbnail,
 };
 
 /// Result type returned by client backends.
@@ -775,6 +775,7 @@ impl InMemoryBackend {
         parent_chat_id: Option<InlineId>,
         parent_message_id: Option<InlineId>,
         participants: Vec<ChatParticipantRecord>,
+        agent_context: Option<AgentThreadContext>,
     ) -> BackendResult<CreatedChat> {
         self.require_connected()?;
         let title = title
@@ -790,6 +791,7 @@ impl InMemoryBackend {
             last_message_id: None,
             synced_through_message_id: None,
             unread_count: Some(0),
+            agent_context,
             ..DialogRecord::new(chat_id)
         });
         if !participants.is_empty() {
@@ -1154,6 +1156,7 @@ impl ClientBackend for InMemoryBackend {
                         date: None,
                     },
                 ],
+                None,
             )
         })
     }
@@ -1172,7 +1175,7 @@ impl ClientBackend for InMemoryBackend {
                     date: None,
                 })
                 .collect();
-            backend.create_chat_now(request.title, None, None, participants)
+            backend.create_chat_now(request.title, None, None, participants, None)
         })
     }
 
@@ -1201,6 +1204,7 @@ impl ClientBackend for InMemoryBackend {
                 Some(request.parent_chat_id),
                 request.parent_message_id,
                 participants,
+                request.agent_context,
             )
         })
     }

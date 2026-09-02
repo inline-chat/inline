@@ -205,6 +205,7 @@ pub(super) async fn prepare_turn_delivery(
             description: None,
             emoji: None,
             participants: Vec::new(),
+            agent_context: delivery_reply_agent_context(source_dialog.as_ref()),
         })
         .await?
         .chat_id
@@ -241,6 +242,12 @@ pub(super) async fn prepare_turn_delivery(
         .into());
     }
     Ok(target)
+}
+
+fn delivery_reply_agent_context(
+    source_dialog: Option<&DialogRecord>,
+) -> Option<AgentThreadContext> {
+    source_dialog.and_then(|dialog| dialog.agent_context.clone())
 }
 
 #[cfg(test)]
@@ -316,6 +323,26 @@ mod tests {
             Some(2),
             "Reply in an Inline reply thread",
         ));
+    }
+
+    #[test]
+    fn bridge_created_delivery_reply_copies_only_the_source_agent_preset() {
+        let context = AgentThreadContext {
+            bot_user_id: InlineId::new(42),
+            agent_id: Some(InlineId::new(9)),
+            configuration: Some(AgentThreadConfiguration {
+                project_id: Some("project".to_string()),
+                model_id: Some("model".to_string()),
+                reasoning_effort_id: Some("high".to_string()),
+            }),
+        };
+        let source = DialogRecord {
+            agent_context: Some(context.clone()),
+            ..DialogRecord::new(InlineId::new(10))
+        };
+
+        assert_eq!(delivery_reply_agent_context(Some(&source)), Some(context));
+        assert_eq!(delivery_reply_agent_context(None), None);
     }
 
     #[tokio::test]

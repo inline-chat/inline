@@ -439,6 +439,9 @@ pub struct CreateReplyThreadRequest {
     /// Direct child participants.
     #[serde(default)]
     pub participants: Vec<ChatCreateParticipant>,
+    /// Optional Agent target and execution preset for this new, independent Chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_context: Option<AgentThreadContext>,
 }
 
 /// Notification behavior for one outgoing message.
@@ -805,6 +808,9 @@ pub struct DialogRecord {
     /// Parent message anchor when this dialog is a reply thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_message_id: Option<InlineId>,
+    /// Optional Agent target and execution preset owned by this Chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_context: Option<AgentThreadContext>,
     /// Whether the chat is visible to all eligible members of its parent space.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_public: Option<bool>,
@@ -851,6 +857,7 @@ impl DialogRecord {
             space_id: None,
             parent_chat_id: None,
             parent_message_id: None,
+            agent_context: None,
             is_public: None,
             archived: None,
             pinned: None,
@@ -863,6 +870,33 @@ impl DialogRecord {
             pinned_message_ids: Vec::new(),
         }
     }
+}
+
+/// One Chat's fixed Agent target and optional provider-native execution preset.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentThreadContext {
+    /// Backing Inline bot account.
+    pub bot_user_id: InlineId,
+    /// Optional Skilled Agent profile owned by the backing bot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<InlineId>,
+    /// Optional Project, Model, and Reasoning selections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<AgentThreadConfiguration>,
+}
+
+/// Provider-owned selections applied natively before a Chat turn starts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentThreadConfiguration {
+    /// Opaque project/workspace identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Opaque provider model identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    /// Opaque provider reasoning-effort identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort_id: Option<String>,
 }
 
 /// Per-dialog notification override.

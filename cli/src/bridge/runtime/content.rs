@@ -71,14 +71,10 @@ pub(super) fn normalize_inbound_content(content: &MessageContent) -> Option<Inbo
                 attachments: attachment.into_iter().collect(),
             }
         }
-        MessageContent::Unsupported { .. } | _ => InboundContent {
-            text: "attachment".to_string(),
-            unsupported_notice: Some(
-                "I can’t pass this message content to the local agent yet. Send the direction as text."
-                    .to_string(),
-            ),
-            attachments: Vec::new(),
-        },
+        // Structural message cards and unknown empty payloads must not become
+        // synthetic Agent turns. Supported text/media paths above are the only
+        // consumable input boundary.
+        MessageContent::Unsupported { .. } | _ => return None,
     };
 
     (!normalized.text.is_empty()).then_some(normalized)
@@ -319,20 +315,13 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_content_has_provider_neutral_recovery_copy() {
-        let normalized = normalize_inbound_content(&MessageContent::Unsupported {
-            reason: "redacted".to_string(),
-        })
-        .expect("unsupported content");
-
-        assert_eq!(normalized.text, "attachment");
-        assert_eq!(
-            normalized.unsupported_notice.as_deref(),
-            Some(
-                "I can’t pass this message content to the local agent yet. Send the direction as text."
-            )
+    fn unsupported_or_structural_content_does_not_start_an_agent_turn() {
+        assert!(
+            normalize_inbound_content(&MessageContent::Unsupported {
+                reason: "redacted".to_string(),
+            })
+            .is_none()
         );
-        assert!(normalized.attachments.is_empty());
     }
 
     #[test]

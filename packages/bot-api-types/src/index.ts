@@ -226,6 +226,18 @@ export type BotChatLastMessage = {
   rich_message?: BotRichMessage
 }
 
+export type BotAgentThreadConfiguration = {
+  project_id?: string
+  model_id?: string
+  reasoning_effort_id?: string
+}
+
+export type BotAgentThreadContext = {
+  bot_user_id: number
+  agent_id?: number
+  configuration?: BotAgentThreadConfiguration
+}
+
 export type BotChat = {
   chat_id: number
   type: BotChatType
@@ -241,6 +253,8 @@ export type BotChat = {
   last_message_id?: number
   last_message?: BotChatLastMessage
   emoji?: string
+  /** Visible selected Agent preset. It never contains provider session state. */
+  agent_context?: BotAgentThreadContext
 }
 
 export type BotEventChat = BotChat
@@ -494,6 +508,8 @@ export type SendMessageParams = BotTargetInput & {
     | { type: "nudge" }
   actions?: BotMessageAction[][]
   silent?: boolean
+  /** Trusted cross-thread provenance for explicit same-bot Agent handoffs. */
+  source_chat_id?: BotInputId
   // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
   // Remove after confirming no production use in the previous month.
   parseMarkdown?: boolean

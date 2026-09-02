@@ -180,10 +180,27 @@ pub(super) struct BotAgentResolver {
     realtime_url: String,
     bot_token: String,
     cache: Arc<RwLock<BotAgentCache>>,
+    configuration_catalog: Arc<RwLock<Option<AgentConfigurationCatalog>>>,
     resolution_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 type BotAgentCache = HashMap<i64, (Instant, Option<proto::BotAgent>)>;
+
+fn agent_thread_context_to_proto(
+    context: inline_client::AgentThreadContext,
+) -> proto::AgentThreadContext {
+    proto::AgentThreadContext {
+        bot_user_id: context.bot_user_id.get(),
+        agent_id: context.agent_id.map(InlineId::get),
+        configuration: context
+            .configuration
+            .map(|configuration| proto::AgentThreadConfiguration {
+                project_id: configuration.project_id,
+                model_id: configuration.model_id,
+                reasoning_effort_id: configuration.reasoning_effort_id,
+            }),
+    }
+}
 
 impl BotAgentResolver {
     pub fn new(realtime_url: String, bot_token: String) -> Self {
@@ -191,6 +208,7 @@ impl BotAgentResolver {
             realtime_url,
             bot_token,
             cache: Arc::new(RwLock::new(HashMap::new())),
+            configuration_catalog: Arc::new(RwLock::new(None)),
             resolution_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -228,6 +246,70 @@ impl BotAgentResolver {
         agent
     }
 
+    pub(super) fn store_configuration_catalog(&self, catalog: AgentConfigurationCatalog) {
+        *self
+            .configuration_catalog
+            .write()
+            .expect("Agent configuration catalog poisoned") = Some(catalog);
+    }
+
+    pub(super) fn validate_configuration(
+        &self,
+        context: &proto::AgentThreadContext,
+    ) -> Result<(), String> {
+        let Some(configuration) = context.configuration.as_ref() else {
+            return Ok(());
+        };
+        let catalog = self
+            .configuration_catalog
+            .read()
+            .expect("Agent configuration catalog poisoned");
+        let catalog = catalog.as_ref().ok_or_else(|| {
+            "This thread's Agent configuration is unavailable on this provider.".to_string()
+        })?;
+        if let Some(project_id) = configuration.project_id.as_deref()
+            && !catalog.projects.as_ref().is_some_and(|projects| {
+                projects
+                    .options
+                    .iter()
+                    .any(|project| project.id == project_id)
+            })
+        {
+            return Err("This thread's project selection is no longer available.".to_string());
+        }
+        let selected_model = configuration.model_id.as_deref().and_then(|model_id| {
+            catalog
+                .models
+                .as_ref()
+                .and_then(|models| models.options.iter().find(|model| model.id == model_id))
+        });
+        if configuration.model_id.is_some() && selected_model.is_none() {
+            return Err("This thread's model selection is no longer available.".to_string());
+        }
+        if let Some(reasoning_id) = configuration.reasoning_effort_id.as_deref() {
+            if catalog.models.is_some() && selected_model.is_none() {
+                return Err("Choose a model before selecting its reasoning effort.".to_string());
+            }
+            let reasoning_available = catalog.reasoning.as_ref().is_some_and(|reasoning| {
+                reasoning
+                    .options
+                    .iter()
+                    .any(|option| option.id == reasoning_id)
+            });
+            let model_supports_reasoning = selected_model.is_none_or(|model| {
+                model.reasoning_effort_ids.is_empty()
+                    || model
+                        .reasoning_effort_ids
+                        .iter()
+                        .any(|id| id == reasoning_id)
+            });
+            if !reasoning_available || !model_supports_reasoning {
+                return Err("This thread's reasoning selection is no longer available.".to_string());
+            }
+        }
+        Ok(())
+    }
+
     fn cached(&self, agent_id: i64) -> Option<Option<proto::BotAgent>> {
         let cache = self.cache.read().expect("bot Agent cache poisoned");
         let (loaded_at, agent) = cache.get(&agent_id)?;
@@ -255,6 +337,20 @@ impl BotAgentResolver {
 }
 
 impl InboundRoute {
+    pub(super) async fn chat_agent_context(
+        &self,
+        chat_id: i64,
+    ) -> Result<Option<proto::AgentThreadContext>, String> {
+        let dialog = self
+            .bot_store
+            .dialog(InlineId::new(chat_id))
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(dialog
+            .and_then(|dialog| dialog.agent_context)
+            .map(agent_thread_context_to_proto))
+    }
+
     pub fn policy_snapshot(&self) -> OperatorPolicy {
         self.policy
             .read()
@@ -344,6 +440,56 @@ pub(super) fn active_turn_event_chat_id(event: &ClientEvent, bot_user_id: i64) -
     actionable_event_chat_id(event)
 }
 
+async fn event_chat_uses_agent_context_settings(
+    event: &ClientEvent,
+    route: &InboundRoute,
+) -> Result<bool, String> {
+    let chat_id = match event {
+        ClientEvent::BotInteraction(
+            BotInteractionEvent::ChatSettingsRequested { chat_id, .. }
+            | BotInteractionEvent::ChatSettingsItemInvoked { chat_id, .. },
+        )
+        | ClientEvent::MessageActionInvoked { chat_id, .. } => chat_id.get(),
+        _ => return Ok(false),
+    };
+    Ok(route.chat_agent_context(chat_id).await?.is_some())
+}
+
+async fn reject_agent_context_settings_command(
+    bot: &InlineClient,
+    record: &InboundRecord,
+    route: &InboundRoute,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let Ok(Some(command)) = parse_command(&record.direction.text, &route.bot_username) else {
+        return Ok(false);
+    };
+    if !matches!(
+        command.name.as_str(),
+        "model" | "reasoning" | "folder" | "projects"
+    ) || (command.explicit_target && !command.targets_this_bot)
+    {
+        return Ok(false);
+    }
+    let context = route
+        .chat_agent_context(record.delivery_chat_id)
+        .await
+        .map_err(io::Error::other)?;
+    if context.is_none() {
+        return Ok(false);
+    }
+    send_inbound_response(
+        bot,
+        route,
+        record,
+        record.binding.chat_id,
+        "Use this thread's Agent controls for Project, Model, and Reasoning.",
+        &format!("{}-agent-context-settings", record.event_id),
+        BridgeNotificationClass::RoutineStatus,
+    )
+    .await?;
+    Ok(true)
+}
+
 pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource + 'static>(
     bot: &InlineClient,
     delivery: LosslessEventDelivery,
@@ -371,7 +517,10 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
         delivery.ack().await?;
         return Ok(());
     }
-    match handle_settings_event(bot, delivery.event(), settings).await? {
+    let agent_context_owned = event_chat_uses_agent_context_settings(delivery.event(), route)
+        .await
+        .map_err(io::Error::other)?;
+    match handle_settings_event(bot, delivery.event(), settings, agent_context_owned).await? {
         SettingsEventOutcome::NotHandled => {}
         SettingsEventOutcome::Handled {
             provider_epoch_ended,
@@ -388,7 +537,15 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
         }
     }
     let operator_policy = route.policy_snapshot();
-    match handle_settings_command_action(bot, delivery.event(), settings, &operator_policy).await? {
+    match handle_settings_command_action(
+        bot,
+        delivery.event(),
+        settings,
+        &operator_policy,
+        agent_context_owned,
+    )
+    .await?
+    {
         SettingsCommandActionOutcome::NotHandled => {}
         SettingsCommandActionOutcome::Handled {
             provider_epoch_ended,
@@ -478,9 +635,14 @@ pub(super) async fn inbound_from_delivery(
     if message.timestamp < route.accept_messages_after {
         return Ok(None);
     }
-    // This boundary applies equally to humans and bots. Unknown senders must
-    // not trigger even a denial reply, routing lookup, or response delay.
-    if !route.allows(message.sender_id.get()) {
+    // Human access is provider-wide and owner-controlled. Bot deliveries have
+    // already passed the server's exact structured-mention gate, so admitting
+    // them here preserves the universal bot-to-bot mention-only rule without
+    // forcing bots into the human operator allowlist.
+    let sender_is_bot = message.is_outgoing
+        || message.sender_id.get() == route.bot_user_id
+        || message_sender_is_bot(&route.bot_store, message).await?;
+    if !sender_is_bot && !route.allows(message.sender_id.get()) {
         return Ok(None);
     }
     tokio::time::sleep_until(response_not_before).await;
@@ -541,15 +703,22 @@ pub(super) async fn inbound_from_delivery(
         route.owner_control.as_deref(),
     )
     .await?;
+    let chat_agent_context = route
+        .chat_agent_context(message.chat_id.get())
+        .await
+        .map_err(io::Error::other)?;
     if message_route.addressing == Addressing::None
         && !starts_with_other_user_mention(message, route.bot_user_id)
     {
         message_route = with_agent_session_thread_addressing(
             message_route,
-            route
-                .store
-                .session_thread_binding_for_chat(&route.installation_id, message.chat_id.get())?
-                .is_some(),
+            chat_agent_context
+                .as_ref()
+                .is_some_and(|context| context.bot_user_id == route.bot_user_id)
+                || route
+                    .store
+                    .session_thread_binding_for_chat(&route.installation_id, message.chat_id.get())?
+                    .is_some(),
         );
     }
     let event_id = format!("inline-message-{}-{}", message.chat_id, message.message_id);
@@ -619,9 +788,35 @@ pub(super) async fn inbound_from_delivery(
         _ => return Ok(None),
     };
     if !is_command
-        && let Some(agent_id) = mentioned_agent_id(message, route.bot_user_id)
-        && let Some(agent) = route.bot_agent_resolver.resolve(agent_id).await
+        && let Some(agent_id) = chat_agent_context
+            .as_ref()
+            .and_then(|context| context.agent_id)
+            .or_else(|| mentioned_agent_id(message, route.bot_user_id))
     {
+        let Some(agent) = route.bot_agent_resolver.resolve(agent_id).await else {
+            send_text_reply(
+                bot,
+                message.chat_id.get(),
+                message.message_id.get(),
+                "The Agent selected for this thread is no longer available. The provider owner must choose another Agent.",
+                &format!("{event_id}-agent-unavailable-{agent_id}"),
+                BridgeNotificationClass::ImportantFailure,
+            )
+            .await?;
+            return Ok(None);
+        };
+        if agent.bot_user_id != route.bot_user_id {
+            send_text_reply(
+                bot,
+                message.chat_id.get(),
+                message.message_id.get(),
+                "The Agent selected for this thread does not belong to its provider. The provider owner must choose another Agent.",
+                &format!("{event_id}-agent-provider-mismatch-{agent_id}"),
+                BridgeNotificationClass::ImportantFailure,
+            )
+            .await?;
+            return Ok(None);
+        }
         let original = direction.text.clone();
         replace_direction_text(
             &mut direction,
@@ -649,7 +844,11 @@ pub(super) async fn inbound_from_delivery(
     {
         conversation_for_workspace_selection_inheriting_parent(route, message.chat_id.get()).await
     } else {
-        conversation_for_chat_inheriting_parent(route, message.chat_id.get()).await
+        conversation_for_chat_with_agent_context(
+            route,
+            message.chat_id.get(),
+            chat_agent_context.as_ref(),
+        )
     };
     let conversation = match resolved {
         Ok(conversation) => conversation.snapshot(),
@@ -1010,6 +1209,9 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
         || handle_claude_history_command(bot, &record, route).await?
         || handle_allowlist_command(bot, &record, route).await?
     {
+        return Ok(());
+    }
+    if reject_agent_context_settings_command(bot, &record, route).await? {
         return Ok(());
     }
     let (instruction, command_acknowledgement) = match resolve_idle_command(
@@ -2314,6 +2516,9 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
         delivery.ack().await?;
         return Ok(());
     }
+    let agent_context_owned = event_chat_uses_agent_context_settings(delivery.event(), route)
+        .await
+        .map_err(io::Error::other)?;
     match handle_settings_event(
         bot,
         delivery.event(),
@@ -2324,6 +2529,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
             identity: settings_identity,
             turn_active: true,
         },
+        agent_context_owned,
     )
     .await?
     {
@@ -2354,6 +2560,7 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
             turn_active: true,
         },
         &operator_policy,
+        agent_context_owned,
     )
     .await?
     {
@@ -2964,6 +3171,10 @@ pub(super) async fn handle_active_delivery<D: AgentDriver + SessionCatalogSource
                     return Ok(());
                 }
                 if command.as_ref().is_err() || matches!(command.as_ref(), Ok(Some(_))) {
+                    if reject_agent_context_settings_command(bot, &record, route).await? {
+                        delivery.ack().await?;
+                        return Ok(());
+                    }
                     let snapshot = active.snapshot();
                     match resolve_idle_command(
                         sessions,

@@ -2394,6 +2394,7 @@ mod tests {
         let capabilities = vec![BotCapability {
             kind: BotCapabilityKind::ChatSettings,
             version: 1,
+            agent_configuration: None,
         }];
 
         assert_eq!(

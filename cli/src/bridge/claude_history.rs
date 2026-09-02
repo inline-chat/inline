@@ -1432,6 +1432,7 @@ async fn import_claude_history(
                     ),
                     emoji: None,
                     participants: Vec::new(),
+                    agent_context: None,
                 })
                 .await?
                 .chat_id

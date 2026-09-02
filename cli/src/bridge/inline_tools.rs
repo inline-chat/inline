@@ -175,8 +175,11 @@ impl InlineToolHost {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         let record = record?;
-        if record.binding.installation_id != self.route.installation_id
-            || !self.route.allows(record.sender_user_id)
+        if record.binding.installation_id != self.route.installation_id {
+            return None;
+        }
+        if !self.route.allows(record.sender_user_id)
+            && !self.explicit_bot_turn_may_use_tools(&record).await
         {
             return None;
         }
@@ -190,10 +193,40 @@ impl InlineToolHost {
         (provider_id == self.route.provider_id && session_id == call.session_id).then_some(record)
     }
 
+    async fn explicit_bot_turn_may_use_tools(&self, record: &InboundRecord) -> bool {
+        let Ok(Some(message)) = self
+            .route
+            .bot_store
+            .message(
+                InlineId::new(record.binding.chat_id),
+                InlineId::new(record.message_id),
+            )
+            .await
+        else {
+            return false;
+        };
+        let Ok(message_route) = resolve_message_route(
+            &message,
+            self.route.owner_dm_chat_id,
+            self.route.bot_user_id,
+            &self.route.bot_store,
+            self.route.owner_control.as_deref(),
+        )
+        .await
+        else {
+            return false;
+        };
+        is_explicit_bot_tool_turn(record.sender_user_id, &message, message_route)
+    }
+
     async fn execute_claimed(&self, call: &HostToolCall, record: &InboundRecord) -> HostToolResult {
         let current_chat_id = record.delivery_chat_id;
         match call.tool_name.as_str() {
             "get_current_context" => self.current_context(record).await,
+            "get_agent_configuration_catalog" => {
+                self.get_agent_configuration_catalog(&call.arguments, current_chat_id)
+                    .await
+            }
             "get_chat" => {
                 let Some(chat_id) = self
                     .authorized_chat_id(&call.arguments, current_chat_id)
@@ -242,7 +275,12 @@ impl InlineToolHost {
                     _ => HostToolResult::failure("Inline chat is unavailable to this bot."),
                 }
             }
-            "create_chat" => self.create_chat(&call.arguments).await,
+            "create_chat" => self.create_chat(&call.arguments, record, call).await,
+            "create_subthread" => self.create_subthread(&call.arguments, record, call).await,
+            "send_message" => {
+                self.send_message(&call.arguments, current_chat_id, call)
+                    .await
+            }
             "add_reaction" => {
                 self.react(&call.arguments, current_chat_id, false, call)
                     .await
@@ -265,16 +303,32 @@ impl InlineToolHost {
     }
 
     async fn current_context(&self, record: &InboundRecord) -> HostToolResult {
-        let dialog = self
+        let dialog = match self
             .route
             .bot_store
             .dialog(InlineId::new(record.delivery_chat_id))
             .await
-            .ok()
-            .flatten();
+        {
+            Ok(dialog) => dialog,
+            Err(_) => {
+                return HostToolResult::failure(
+                    "The current Inline thread context is temporarily unavailable.",
+                );
+            }
+        };
         let title = dialog.as_ref().and_then(|dialog| dialog.title.clone());
         let parent_chat_id = dialog.as_ref().and_then(|dialog| dialog.parent_chat_id);
         let parent_message_id = dialog.as_ref().and_then(|dialog| dialog.parent_message_id);
+        let agent_context = match self.route.chat_agent_context(record.delivery_chat_id).await {
+            Ok(context) => context,
+            Err(_) => {
+                return HostToolResult::failure(
+                    "The current Inline Agent context is temporarily unavailable.",
+                );
+            }
+        }
+        .as_ref()
+        .map(project_agent_context);
         HostToolResult::success(
             serde_json::json!({
                 "chat_id": record.delivery_chat_id,
@@ -286,6 +340,7 @@ impl InlineToolHost {
                 "title": title,
                 "parent_chat_id": parent_chat_id,
                 "parent_message_id": parent_message_id,
+                "agent_context": agent_context,
             })
             .to_string(),
         )
@@ -398,7 +453,41 @@ impl InlineToolHost {
         }
     }
 
-    async fn create_chat(&self, arguments: &serde_json::Value) -> HostToolResult {
+    async fn get_agent_configuration_catalog(
+        &self,
+        arguments: &serde_json::Value,
+        current_chat_id: i64,
+    ) -> HostToolResult {
+        let bot_user_id = positive_i64(arguments, "bot_user_id").unwrap_or(self.route.bot_user_id);
+        let peer_id = (bot_user_id != self.route.bot_user_id).then(|| chat_peer(current_chat_id));
+        let mut realtime = match connect_realtime(&self.realtime_url, &self.bot_token).await {
+            Ok(client) => client,
+            Err(_) => return HostToolResult::failure("Inline Agent choices are unavailable."),
+        };
+        match realtime
+            .call(proto::GetBotConfigurationCatalogInput {
+                bot_user_id,
+                peer_id,
+            })
+            .await
+        {
+            Ok(result) => HostToolResult::success(
+                serde_json::json!({
+                    "bot_user_id": bot_user_id,
+                    "catalog": result.catalog.as_ref().map(project_agent_catalog),
+                })
+                .to_string(),
+            ),
+            Err(_) => HostToolResult::failure("Inline Agent choices are unavailable."),
+        }
+    }
+
+    async fn create_chat(
+        &self,
+        arguments: &serde_json::Value,
+        record: &InboundRecord,
+        call: &HostToolCall,
+    ) -> HostToolResult {
         if !bool_arg(arguments, "confirmed_intent") {
             return HostToolResult::failure("Creating a chat requires explicit user intent.");
         }
@@ -412,18 +501,324 @@ impl InlineToolHost {
                 "A public chat requires a space_id and explicit public-chat intent.",
             );
         }
-        json_result(
-            self.bot
-                .create_thread(CreateThreadRequest {
-                    title: Some(title),
-                    space_id,
-                    description: string_arg(arguments, "description", 500),
-                    emoji: string_arg(arguments, "emoji", 32),
-                    is_public,
-                    participants: Vec::new(),
+        let Some(initial_message) = string_arg(arguments, "initial_message", 8_000) else {
+            return HostToolResult::failure("initial_message is required.");
+        };
+        let agent_context = match agent_context_argument(arguments, "agent_context") {
+            Ok(context) => context,
+            Err(message) => return HostToolResult::failure(message),
+        };
+        if agent_context.is_some() {
+            let source_context = match self.route.chat_agent_context(record.delivery_chat_id).await
+            {
+                Ok(context) => context,
+                Err(_) => {
+                    return HostToolResult::failure(
+                        "The current Inline Agent context is temporarily unavailable.",
+                    );
+                }
+            };
+            if source_context
+                .as_ref()
+                .is_none_or(|context| context.bot_user_id != self.route.bot_user_id)
+            {
+                return HostToolResult::failure(
+                    "A target-bound chat can only be created from a thread bound to this Agent provider.",
+                );
+            }
+        }
+        let mut participant_ids = vec![record.sender_user_id, self.route.bot_user_id];
+        if let Some(context) = agent_context.as_ref()
+            && !participant_ids.contains(&context.bot_user_id)
+        {
+            participant_ids.push(context.bot_user_id);
+        }
+        let mut realtime = match connect_realtime(&self.realtime_url, &self.bot_token).await {
+            Ok(client) => client,
+            Err(_) => return HostToolResult::failure("Inline chat creation is unavailable."),
+        };
+        let created = realtime
+            .call(proto::CreateChatInput {
+                title: Some(title),
+                space_id: space_id.map(InlineId::get),
+                description: string_arg(arguments, "description", 500),
+                emoji: string_arg(arguments, "emoji", 32),
+                is_public,
+                participants: if is_public {
+                    Vec::new()
+                } else {
+                    participant_ids
+                        .into_iter()
+                        .map(|user_id| proto::InputChatParticipant {
+                            user_id: Some(user_id),
+                            group_id: None,
+                        })
+                        .collect()
+                },
+                reserved_chat_id: None,
+                placeholder_title: None,
+                agent_context: agent_context.clone(),
+            })
+            .await;
+        let Ok(created) = created else {
+            return HostToolResult::failure("Inline could not create the chat.");
+        };
+        let Some(chat) = created.chat.as_ref() else {
+            return HostToolResult::failure(
+                "Inline created a chat without returning its identity.",
+            );
+        };
+        let chat_id = chat.id;
+        if self
+            .cache_created_chat(chat, agent_context.as_ref())
+            .await
+            .is_err()
+        {
+            return HostToolResult::failure(format!(
+                "Inline created chat {chat_id}, but could not cache its Agent context. Reuse that chat instead of creating another."
+            ));
+        }
+        match self
+            .send_tool_message(
+                &mut realtime,
+                chat_id,
+                &initial_message,
+                agent_context.as_ref(),
+                record.delivery_chat_id,
+                "create-chat-message",
+                &call.call_id,
+            )
+            .await
+        {
+            Ok(()) => HostToolResult::success(
+                serde_json::json!({"chat_id": chat_id, "parent_chat_id": null}).to_string(),
+            ),
+            Err(()) => HostToolResult::failure(format!(
+                "Inline created chat {chat_id}, but its initial message failed. Reuse that chat instead of creating another."
+            )),
+        }
+    }
+
+    async fn create_subthread(
+        &self,
+        arguments: &serde_json::Value,
+        record: &InboundRecord,
+        call: &HostToolCall,
+    ) -> HostToolResult {
+        let Some(title) = string_arg(arguments, "title", 200) else {
+            return HostToolResult::failure("title is required.");
+        };
+        let Some(initial_message) = string_arg(arguments, "initial_message", 8_000) else {
+            return HostToolResult::failure("initial_message is required.");
+        };
+        let parent_chat_id = record.delivery_chat_id;
+        let parent_context = match self.route.chat_agent_context(parent_chat_id).await {
+            Ok(Some(context)) if context.bot_user_id == self.route.bot_user_id => context,
+            _ => {
+                return HostToolResult::failure(
+                    "The current thread is not bound to this Agent, so a delegated child could not reliably report back.",
+                );
+            }
+        };
+        let explicit_context = match agent_context_argument(arguments, "agent_context") {
+            Ok(context) => context,
+            Err(message) => return HostToolResult::failure(message),
+        };
+        let agent_context = explicit_context.unwrap_or(parent_context);
+        let mut realtime = match connect_realtime(&self.realtime_url, &self.bot_token).await {
+            Ok(client) => client,
+            Err(_) => return HostToolResult::failure("Inline subthread creation is unavailable."),
+        };
+        let mut participant_ids = vec![
+            record.sender_user_id,
+            self.route.bot_user_id,
+            agent_context.bot_user_id,
+        ];
+        participant_ids.sort_unstable();
+        participant_ids.dedup();
+        let created = realtime
+            .call(proto::CreateSubthreadInput {
+                parent_chat_id,
+                parent_message_id: positive_i64(arguments, "parent_message_id"),
+                title: Some(title),
+                description: string_arg(arguments, "description", 500),
+                emoji: string_arg(arguments, "emoji", 32),
+                participants: participant_ids
+                    .into_iter()
+                    .map(|user_id| proto::InputChatParticipant {
+                        user_id: Some(user_id),
+                        group_id: None,
+                    })
+                    .collect(),
+                agent_context: Some(agent_context.clone()),
+            })
+            .await;
+        let Ok(created) = created else {
+            return HostToolResult::failure("Inline could not create the subthread.");
+        };
+        let Some(chat) = created.chat.as_ref() else {
+            return HostToolResult::failure(
+                "Inline created a subthread without returning its identity.",
+            );
+        };
+        let chat_id = chat.id;
+        if self
+            .cache_created_chat(chat, Some(&agent_context))
+            .await
+            .is_err()
+        {
+            return HostToolResult::failure(format!(
+                "Inline created subthread {chat_id}, but could not cache its Agent context. Reuse that subthread instead of creating another."
+            ));
+        }
+        let child_instruction = format!(
+            "{initial_message}\n\nInline handoff: this is an independent child thread of Inline chat {parent_chat_id}. When the task is complete, call send_message with chat_id {parent_chat_id} and activate_bound_agent true to send one concise result back to the parent. Do not start reciprocal bot loops."
+        );
+        match self
+            .send_tool_message(
+                &mut realtime,
+                chat_id,
+                &child_instruction,
+                Some(&agent_context),
+                record.delivery_chat_id,
+                "create-subthread-message",
+                &call.call_id,
+            )
+            .await
+        {
+            Ok(()) => HostToolResult::success(
+                serde_json::json!({
+                    "chat_id": chat_id,
+                    "parent_chat_id": parent_chat_id,
+                    "independent_session": true,
+                    "report_to_parent": true,
                 })
-                .await,
-        )
+                .to_string(),
+            ),
+            Err(()) => HostToolResult::failure(format!(
+                "Inline created subthread {chat_id}, but its initial message failed. Reuse that subthread instead of creating another."
+            )),
+        }
+    }
+
+    async fn send_message(
+        &self,
+        arguments: &serde_json::Value,
+        current_chat_id: i64,
+        call: &HostToolCall,
+    ) -> HostToolResult {
+        if positive_i64(arguments, "chat_id").is_none() {
+            return HostToolResult::failure("chat_id is required.");
+        }
+        let Some(chat_id) = self.authorized_chat_id(arguments, current_chat_id).await else {
+            return HostToolResult::failure("Inline chat is unavailable to this bot.");
+        };
+        let Some(text) = string_arg(arguments, "text", 8_000) else {
+            return HostToolResult::failure("text is required.");
+        };
+        let target = if bool_arg(arguments, "activate_bound_agent") {
+            match self.route.chat_agent_context(chat_id).await {
+                Ok(Some(context)) => Some(context),
+                _ => {
+                    return HostToolResult::failure(
+                        "The destination is not an accessible Agent-bound thread.",
+                    );
+                }
+            }
+        } else {
+            None
+        };
+        let mut realtime = match connect_realtime(&self.realtime_url, &self.bot_token).await {
+            Ok(client) => client,
+            Err(_) => return HostToolResult::failure("Inline messaging is unavailable."),
+        };
+        match self
+            .send_tool_message(
+                &mut realtime,
+                chat_id,
+                &text,
+                target.as_ref(),
+                current_chat_id,
+                "send-message",
+                &call.call_id,
+            )
+            .await
+        {
+            Ok(()) => HostToolResult::success(
+                serde_json::json!({
+                    "chat_id": chat_id,
+                    "activated_bound_agent": target.is_some(),
+                })
+                .to_string(),
+            ),
+            Err(()) => HostToolResult::failure("Inline could not send the message."),
+        }
+    }
+
+    async fn send_tool_message(
+        &self,
+        realtime: &mut RealtimeClient,
+        chat_id: i64,
+        text: &str,
+        target: Option<&proto::AgentThreadContext>,
+        source_chat_id: i64,
+        random_kind: &str,
+        call_id: &str,
+    ) -> Result<(), ()> {
+        let (message, entities) = message_with_agent_mention(text, target);
+        realtime
+            .call(proto::SendMessageInput {
+                peer_id: Some(chat_peer(chat_id)),
+                message: Some(message),
+                reply_to_msg_id: None,
+                random_id: Some(interaction_random_id(random_kind, call_id).get()),
+                media: None,
+                is_sticker: None,
+                entities,
+                parse_markdown: Some(false),
+                send_mode: None,
+                actions: None,
+                initial_agent_context: None,
+                source_chat_id: target.map(|_| source_chat_id),
+                temporary_send_date: Some(now_seconds()),
+                has_link: None,
+            })
+            .await
+            .map(|_| ())
+            .map_err(|_| ())
+    }
+
+    async fn cache_created_chat(
+        &self,
+        chat: &proto::Chat,
+        expected_context: Option<&proto::AgentThreadContext>,
+    ) -> Result<(), ()> {
+        if let Some(expected_context) = expected_context
+            && chat.agent_context.as_ref() != Some(expected_context)
+        {
+            return Err(());
+        }
+        let chat_id = InlineId::new(chat.id);
+        let existing = self.route.bot_store.dialog(chat_id).await.map_err(|_| ())?;
+        let mut dialog = existing.unwrap_or_else(|| DialogRecord::new(chat_id));
+        let title = chat.title.trim();
+        dialog.title = (!title.is_empty()).then(|| title.to_string());
+        dialog.emoji = chat
+            .emoji
+            .as_deref()
+            .map(str::trim)
+            .filter(|emoji| !emoji.is_empty())
+            .map(ToOwned::to_owned);
+        dialog.space_id = chat.space_id.map(InlineId::new);
+        dialog.parent_chat_id = chat.parent_chat_id.map(InlineId::new);
+        dialog.parent_message_id = chat.parent_message_id.map(InlineId::new);
+        dialog.agent_context = chat.agent_context.as_ref().map(client_agent_thread_context);
+        dialog.is_public = chat.is_public;
+        self.route
+            .bot_store
+            .record_dialog(dialog)
+            .await
+            .map_err(|_| ())
     }
 
     async fn react(
@@ -735,6 +1130,16 @@ impl InlineToolHost {
     }
 }
 
+fn is_explicit_bot_tool_turn(
+    sender_user_id: i64,
+    message: &MessageRecord,
+    message_route: MessageRoute,
+) -> bool {
+    message.sender_id.get() == sender_user_id
+        && message_route.bot_authored
+        && message_route.addressing == Addressing::Mention
+}
+
 impl HostToolHandler for InlineToolHost {
     fn call<'a>(&'a self, call: HostToolCall) -> inline_agent_bridge::HostToolFuture<'a> {
         Box::pin(async move { self.execute(call).await })
@@ -790,7 +1195,11 @@ pub(super) fn inline_tool_specs() -> Vec<HostToolSpec> {
     let read = [
         (
             "get_current_context",
-            "Get the originating Inline chat, message, operator, and bot context.",
+            "Get the originating Inline chat, parent lineage, bound Agent preset, message, operator, and bot context.",
+        ),
+        (
+            "get_agent_configuration_catalog",
+            "Get cached Project, Model, and Reasoning choices for this or another visible Agent provider. Omitted selections mean provider defaults.",
         ),
         ("get_chat", "Get one bot-accessible Inline chat."),
         (
@@ -815,7 +1224,15 @@ pub(super) fn inline_tool_specs() -> Vec<HostToolSpec> {
     let writes = [
         (
             "create_chat",
-            "Create a private Inline chat, or an explicitly requested public space chat.",
+            "Create an explicit top-level Inline chat and send its required initial message. Use create_subthread for delegated work from the current thread.",
+        ),
+        (
+            "create_subthread",
+            "From a thread bound to this Agent, create an independent Agent session as a child, copy the current Agent preset unless another is supplied, and send the required initial task. The child must report once to its bound parent with send_message when finished.",
+        ),
+        (
+            "send_message",
+            "Send one visible message to an accessible Inline thread. Set activate_bound_agent only for a deliberate cross-thread handoff; it creates the exact mention required to wake that thread's bound Agent. Never create reciprocal bot loops.",
         ),
         ("add_reaction", "Add a reaction to an Inline message."),
         (
@@ -868,8 +1285,31 @@ fn tool_input_schema(name: &str) -> serde_json::Value {
     let message_id = serde_json::json!({"type": "integer", "minimum": 1});
     let limit = serde_json::json!({"type": "integer", "minimum": 1, "maximum": 100});
     let confirmed_intent = serde_json::json!({"type": "boolean", "const": true});
+    let agent_configuration = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "project_id": {"type": "string", "minLength": 1, "maxLength": 256},
+            "model_id": {"type": "string", "minLength": 1, "maxLength": 256},
+            "reasoning_effort_id": {"type": "string", "minLength": 1, "maxLength": 256}
+        },
+        "required": []
+    });
+    let agent_context = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "bot_user_id": {"type": "integer", "minimum": 1},
+            "agent_id": {"type": "integer", "minimum": 1},
+            "configuration": agent_configuration
+        },
+        "required": ["bot_user_id"]
+    });
     let (properties, required) = match name {
         "get_current_context" => (serde_json::json!({}), Vec::new()),
+        "get_agent_configuration_catalog" => {
+            (serde_json::json!({"bot_user_id": chat_id}), Vec::new())
+        }
         "get_chat" | "list_pins" => (serde_json::json!({"chat_id": chat_id}), Vec::new()),
         "get_messages" | "get_history" => (
             serde_json::json!({
@@ -901,15 +1341,46 @@ fn tool_input_schema(name: &str) -> serde_json::Value {
         ),
         "create_chat" => (
             serde_json::json!({
-                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Concise user-visible title that makes the responsible Agent or provider clear."
+                },
                 "space_id": {"type": "integer", "minimum": 1},
                 "description": {"type": "string", "maxLength": 500},
                 "emoji": {"type": "string", "maxLength": 32},
                 "is_public": {"type": "boolean"},
+                "initial_message": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "agent_context": agent_context,
                 "confirmed_intent": confirmed_intent,
                 "confirmed_public_intent": {"type": "boolean", "const": true}
             }),
-            vec!["title", "confirmed_intent"],
+            vec!["title", "initial_message", "confirmed_intent"],
+        ),
+        "create_subthread" => (
+            serde_json::json!({
+                "parent_message_id": message_id,
+                "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Concise user-visible title that makes the responsible Agent or provider clear."
+                },
+                "description": {"type": "string", "maxLength": 500},
+                "emoji": {"type": "string", "maxLength": 32},
+                "initial_message": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "agent_context": agent_context
+            }),
+            vec!["title", "initial_message"],
+        ),
+        "send_message" => (
+            serde_json::json!({
+                "chat_id": chat_id,
+                "text": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "activate_bound_agent": {"type": "boolean"}
+            }),
+            vec!["chat_id", "text"],
         ),
         "add_reaction" | "remove_reaction" => (
             serde_json::json!({
@@ -1304,6 +1775,7 @@ fn validate_schema_value(value: &serde_json::Value, schema: &serde_json::Value) 
             }
         }
         Some("boolean") => {}
+        Some("object") => validate_tool_arguments(value, schema)?,
         _ => return Err(()),
     }
     if schema
@@ -1336,6 +1808,133 @@ fn chat_peer(chat_id: i64) -> proto::InputPeer {
             chat_id,
         })),
     }
+}
+
+fn agent_context_argument(
+    arguments: &serde_json::Value,
+    key: &str,
+) -> Result<Option<proto::AgentThreadContext>, &'static str> {
+    let Some(value) = arguments.get(key) else {
+        return Ok(None);
+    };
+    let object = value.as_object().ok_or("agent_context is invalid.")?;
+    let bot_user_id = object
+        .get("bot_user_id")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|value| *value > 0)
+        .ok_or("agent_context.bot_user_id is required.")?;
+    let agent_id = object
+        .get("agent_id")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|value| *value > 0);
+    let configuration = object
+        .get("configuration")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|configuration| {
+            let configuration = proto::AgentThreadConfiguration {
+                project_id: nested_string(configuration, "project_id"),
+                model_id: nested_string(configuration, "model_id"),
+                reasoning_effort_id: nested_string(configuration, "reasoning_effort_id"),
+            };
+            (configuration.project_id.is_some()
+                || configuration.model_id.is_some()
+                || configuration.reasoning_effort_id.is_some())
+            .then_some(configuration)
+        });
+    Ok(Some(proto::AgentThreadContext {
+        bot_user_id,
+        agent_id,
+        configuration,
+    }))
+}
+
+fn client_agent_thread_context(context: &proto::AgentThreadContext) -> AgentThreadContext {
+    AgentThreadContext {
+        bot_user_id: InlineId::new(context.bot_user_id),
+        agent_id: context.agent_id.map(InlineId::new),
+        configuration: context.configuration.as_ref().map(|configuration| {
+            AgentThreadConfiguration {
+                project_id: configuration.project_id.clone(),
+                model_id: configuration.model_id.clone(),
+                reasoning_effort_id: configuration.reasoning_effort_id.clone(),
+            }
+        }),
+    }
+}
+
+fn nested_string(object: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
+    object
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn message_with_agent_mention(
+    text: &str,
+    target: Option<&proto::AgentThreadContext>,
+) -> (String, Option<proto::MessageEntities>) {
+    let Some(target) = target else {
+        return (text.to_string(), None);
+    };
+    let mention = "@Agent";
+    (
+        format!("{mention} {text}"),
+        Some(proto::MessageEntities {
+            entities: vec![proto::MessageEntity {
+                r#type: proto::message_entity::Type::Mention as i32,
+                offset: 0,
+                length: mention.encode_utf16().count() as i64,
+                entity: Some(proto::message_entity::Entity::Mention(
+                    proto::message_entity::MessageEntityMention {
+                        user_id: target.bot_user_id,
+                        agent_id: target.agent_id,
+                    },
+                )),
+            }],
+        }),
+    )
+}
+
+fn project_agent_context(context: &proto::AgentThreadContext) -> serde_json::Value {
+    serde_json::json!({
+        "bot_user_id": context.bot_user_id,
+        "agent_id": context.agent_id,
+        "configuration": context.configuration.as_ref().map(|configuration| serde_json::json!({
+            "project_id": configuration.project_id,
+            "model_id": configuration.model_id,
+            "reasoning_effort_id": configuration.reasoning_effort_id,
+        })),
+    })
+}
+
+fn project_agent_catalog(catalog: &proto::AgentConfigurationCatalog) -> serde_json::Value {
+    serde_json::json!({
+        "projects": catalog.projects.as_ref().map(|projects| serde_json::json!({
+            "can_select_folder": projects.can_select_folder,
+            "options": projects.options.iter().map(|option| serde_json::json!({
+                "id": option.id,
+                "label": option.label,
+                "description": option.description,
+            })).collect::<Vec<_>>(),
+        })),
+        "models": catalog.models.as_ref().map(|models| serde_json::json!({
+            "options": models.options.iter().map(|option| serde_json::json!({
+                "id": option.id,
+                "label": option.label,
+                "description": option.description,
+                "reasoning_effort_ids": option.reasoning_effort_ids,
+            })).collect::<Vec<_>>(),
+        })),
+        "reasoning": catalog.reasoning.as_ref().map(|reasoning| serde_json::json!({
+            "options": reasoning.options.iter().map(|option| serde_json::json!({
+                "id": option.id,
+                "label": option.label,
+                "description": option.description,
+            })).collect::<Vec<_>>(),
+        })),
+    })
 }
 
 fn project_proto_messages(messages: Vec<proto::Message>) -> Vec<serde_json::Value> {
@@ -1454,7 +2053,7 @@ mod tests {
     #[test]
     fn catalog_is_distinct_bounded_and_strict() {
         let specs = inline_tool_specs();
-        assert_eq!(specs.len(), 17);
+        assert_eq!(specs.len(), 20);
         let names = specs.iter().map(|spec| &spec.name).collect::<HashSet<_>>();
         assert_eq!(names.len(), specs.len());
         assert!(
@@ -1532,6 +2131,124 @@ mod tests {
             )
             .is_err()
         );
+
+        let child_schema = tool_input_schema("create_subthread");
+        assert!(
+            validate_tool_arguments(
+                &serde_json::json!({"title": "Research", "initial_message": "Investigate this"}),
+                &child_schema,
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_tool_arguments(
+                &serde_json::json!({
+                    "parent_chat_id": 99,
+                    "title": "Research",
+                    "initial_message": "Investigate this"
+                }),
+                &child_schema,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_tool_arguments(
+                &serde_json::json!({
+                    "title": "Research",
+                    "initial_message": "Investigate this",
+                    "agent_context": {
+                        "bot_user_id": 42,
+                        "configuration": {
+                            "project_id": "project",
+                            "model_id": "model",
+                            "reasoning_effort_id": "high"
+                        }
+                    }
+                }),
+                &child_schema,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn handoff_message_uses_one_exact_structured_agent_mention() {
+        let context = proto::AgentThreadContext {
+            bot_user_id: 42,
+            agent_id: Some(9),
+            configuration: None,
+        };
+        let (text, entities) = message_with_agent_mention("Finished", Some(&context));
+        assert_eq!(text, "@Agent Finished");
+        let entities = entities.expect("mention entities");
+        assert_eq!(entities.entities.len(), 1);
+        let Some(proto::message_entity::Entity::Mention(mention)) =
+            entities.entities[0].entity.as_ref()
+        else {
+            panic!("expected mention");
+        };
+        assert_eq!(mention.user_id, 42);
+        assert_eq!(mention.agent_id, Some(9));
+    }
+
+    #[test]
+    fn bot_turn_tools_require_the_server_admitted_explicit_mention_path() {
+        let message = MessageRecord {
+            chat_id: InlineId::new(10),
+            message_id: InlineId::new(11),
+            sender_id: InlineId::new(42),
+            timestamp: 1,
+            is_outgoing: false,
+            content: MessageContent::Text {
+                text: "handoff".to_string(),
+            },
+            reply_to_message_id: None,
+            metadata: Default::default(),
+            transaction: None,
+        };
+        assert!(is_explicit_bot_tool_turn(
+            42,
+            &message,
+            MessageRoute {
+                addressing: Addressing::Mention,
+                bot_authored: true,
+                command_target_bot_user_id: None,
+            },
+        ));
+        assert!(!is_explicit_bot_tool_turn(
+            42,
+            &message,
+            MessageRoute {
+                addressing: Addressing::None,
+                bot_authored: true,
+                command_target_bot_user_id: None,
+            },
+        ));
+        assert!(!is_explicit_bot_tool_turn(
+            41,
+            &message,
+            MessageRoute {
+                addressing: Addressing::Mention,
+                bot_authored: true,
+                command_target_bot_user_id: None,
+            },
+        ));
+    }
+
+    #[test]
+    fn empty_agent_configuration_uses_provider_defaults() {
+        let context = agent_context_argument(
+            &serde_json::json!({
+                "agent_context": {
+                    "bot_user_id": 42,
+                    "configuration": {}
+                }
+            }),
+            "agent_context",
+        )
+        .expect("valid context")
+        .expect("context");
+        assert_eq!(context.configuration, None);
     }
 
     #[test]

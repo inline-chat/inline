@@ -5,6 +5,7 @@ use super::*;
 #[derive(Debug)]
 pub(in crate::bridge) enum ConversationResolutionError {
     MissingWorkspace,
+    InvalidAgentContext(String),
     ClientStore(inline_client::StoreError),
     Store(inline_agent_bridge::StoreError),
 }
@@ -20,6 +21,7 @@ impl std::fmt::Display for ConversationResolutionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingWorkspace => formatter.write_str(BridgeNotice::MissingWorkspace.message()),
+            Self::InvalidAgentContext(message) => formatter.write_str(message),
             Self::ClientStore(error) => std::fmt::Display::fmt(error, formatter),
             Self::Store(error) => std::fmt::Display::fmt(error, formatter),
         }
@@ -29,7 +31,7 @@ impl std::fmt::Display for ConversationResolutionError {
 impl std::error::Error for ConversationResolutionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::MissingWorkspace => None,
+            Self::MissingWorkspace | Self::InvalidAgentContext(_) => None,
             Self::ClientStore(error) => Some(error),
             Self::Store(error) => Some(error),
         }
@@ -55,6 +57,72 @@ pub(in crate::bridge) fn conversation_for_chat(
     conversation_for_chat_with_fallback(route, chat_id, None)
 }
 
+/// Resolves one independent Inline Chat from its explicit Agent preset. Parent
+/// lineage is intentionally irrelevant here: only an explicit project ID or
+/// this Chat's own existing/default workspace can select the provider cwd.
+pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
+    route: &InboundRoute,
+    chat_id: i64,
+    context: Option<&proto::AgentThreadContext>,
+) -> Result<ActiveConversation, ConversationResolutionError> {
+    let context = match context {
+        Some(context) if context.bot_user_id != route.bot_user_id => {
+            return Err(ConversationResolutionError::InvalidAgentContext(
+                "This thread is bound to a different Agent provider.".to_string(),
+            ));
+        }
+        context => context,
+    };
+    if let Some(context) = context {
+        route
+            .bot_agent_resolver
+            .validate_configuration(context)
+            .map_err(ConversationResolutionError::InvalidAgentContext)?;
+    }
+    let requested_workspace = context
+        .and_then(|context| context.configuration.as_ref())
+        .and_then(|configuration| configuration.project_id.as_deref())
+        .map(|project_id| {
+            WorkspaceId::new(project_id.to_string()).map_err(|_| {
+                ConversationResolutionError::InvalidAgentContext(
+                    "This thread's project selection is no longer valid.".to_string(),
+                )
+            })
+        })
+        .transpose()?;
+
+    let conversation = match requested_workspace {
+        Some(workspace_id) => {
+            let workspace = route
+                .store
+                .workspace(&route.installation_id, &workspace_id)?
+                .ok_or(ConversationResolutionError::MissingWorkspace)
+                .and_then(|workspace| bind_chat_workspace(route, chat_id, workspace))?;
+            ActiveConversation::new(
+                BindingKey {
+                    installation_id: route.installation_id.clone(),
+                    chat_id,
+                    workspace_id: workspace.workspace_id,
+                },
+                workspace.path,
+            )
+        }
+        None => conversation_for_chat(route, chat_id)?,
+    };
+    let binding = conversation.snapshot().binding;
+    if let Some(context) = context {
+        let configuration = context.configuration.as_ref();
+        route.store.apply_agent_thread_configuration(
+            &binding,
+            configuration.and_then(|value| value.model_id.as_deref()),
+            configuration.and_then(|value| value.reasoning_effort_id.as_deref()),
+            now_seconds(),
+        )?;
+    }
+    Ok(conversation)
+}
+
+#[cfg(test)]
 pub(in crate::bridge) async fn conversation_for_chat_inheriting_parent(
     route: &InboundRoute,
     chat_id: i64,

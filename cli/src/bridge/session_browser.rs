@@ -895,6 +895,7 @@ where
                             )),
                             emoji: None,
                             participants: Vec::new(),
+                            agent_context: None,
                         })
                         .await?
                         .chat_id

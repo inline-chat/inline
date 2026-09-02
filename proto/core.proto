@@ -280,6 +280,21 @@ message ChatPermissions {
   bool can_update_info = 1;
 }
 
+// The single Agent execution target selected for an Inline Chat. This is a
+// reusable preset only: every Chat still owns an independent provider session.
+message AgentThreadContext {
+  int64 bot_user_id = 1;
+  optional int64 agent_id = 2;
+  optional AgentThreadConfiguration configuration = 3;
+}
+
+message AgentThreadConfiguration {
+  // Opaque IDs published by the target harness. Absence means harness default.
+  optional string project_id = 1;
+  optional string model_id = 2;
+  optional string reasoning_effort_id = 3;
+}
+
 // A thread
 message Chat {
   int64 id = 1;
@@ -328,6 +343,8 @@ message Chat {
 
   // Current sequence of this chat's update bucket.
   optional int32 seq = 16;
+  // Optional Agent target and provider-native execution preset for this Chat.
+  optional AgentThreadContext agent_context = 18;
 }
 
 message MessageReplies {
@@ -1471,6 +1488,7 @@ enum Method {
   UPDATE_BOT_AGENT = 131;
   DELETE_BOT_AGENT = 132;
   GET_BOT_SKILLS = 139;
+  GET_BOT_CONFIGURATION_CATALOG = 140;
 }
 
 message RpcCall {
@@ -1609,6 +1627,7 @@ message RpcCall {
     UpdateBotAgentInput updateBotAgent = 132;
     DeleteBotAgentInput deleteBotAgent = 133;
     GetBotSkillsInput getBotSkills = 140;
+    GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141;
   }
 }
 
@@ -1749,6 +1768,7 @@ message RpcResult {
     UpdateBotAgentResult updateBotAgent = 132;
     DeleteBotAgentResult deleteBotAgent = 133;
     GetBotSkillsResult getBotSkills = 140;
+    GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
   }
 }
 
@@ -2488,6 +2508,17 @@ message GetBotSkillsInput { int64 bot_user_id = 1; }
 
 message GetBotSkillsResult { repeated BotSkill skills = 1; }
 
+message GetBotConfigurationCatalogInput {
+  int64 bot_user_id = 1;
+  // Required for non-owners so the server can prove that the bot is visible in
+  // an accessible conversation. Owners may omit it.
+  optional InputPeer peer_id = 2;
+}
+
+message GetBotConfigurationCatalogResult {
+  optional AgentConfigurationCatalog catalog = 1;
+}
+
 message GetPeerBotCommandsInput { InputPeer peer_id = 1; }
 
 message GetPeerBotCommandsResult { repeated PeerBotCommands bots = 1; }
@@ -2956,6 +2987,14 @@ message SendMessageInput {
 
   // Optional interactive actions (bot messages only).
   optional MessageActions actions = 10;
+
+  // Set-once Agent binding used only when sending the first activating message
+  // to an existing, currently unbound Chat.
+  optional AgentThreadContext initial_agent_context = 11;
+
+  // Ephemeral provenance for a bot-authored cross-Chat Agent handoff. The
+  // server validates it and never persists it with the message.
+  optional int64 source_chat_id = 12;
 }
 
 message SendMessageResult { repeated Update updates = 2; }
@@ -3353,6 +3392,10 @@ message CreateChatInput {
   // Optional temporary title derived from the first message. Unlike `title`,
   // this remains server-owned and may be replaced by automatic title generation.
   optional string placeholder_title = 8;
+
+  // Optional Agent target and execution preset. This never carries a provider
+  // session identifier.
+  optional AgentThreadContext agent_context = 9;
 }
 
 message CreateChatResult {
@@ -3378,6 +3421,10 @@ message CreateSubthreadInput {
 
   // Optional direct child participants.
   repeated InputChatParticipant participants = 6;
+
+  // Explicit copied or newly selected Agent preset for this independent child.
+  // Parent lineage alone never inherits it.
+  optional AgentThreadContext agent_context = 7;
 }
 
 message CreateSubthreadResult {
@@ -3528,6 +3575,7 @@ message UpdateChatInfo {
   optional string title = 2;
   optional string emoji = 3;
   optional bool untitled = 4;
+  optional AgentThreadContext agent_context = 5;
 }
 
 // Update when effective permissions for the current user change.
@@ -3974,6 +4022,7 @@ message UpdateChatInfoInput {
   int64 chat_id = 1;
   optional string title = 2;
   optional string emoji = 3;
+  optional AgentThreadContext agent_context = 4;
 }
 
 message UpdateChatInfoResult { Chat chat = 1; }
@@ -4004,14 +4053,55 @@ message DraftMessage {
   optional MessageEntities entities = 2;
 }
 
+message AgentProjectOption {
+  string id = 1;
+  string label = 2;
+  optional string description = 3;
+}
+
+message AgentProjectCatalog {
+  repeated AgentProjectOption options = 1;
+  // The harness can accept a folder selected through an existing local picker.
+  optional bool can_select_folder = 2;
+}
+
+message AgentReasoningEffortOption {
+  string id = 1;
+  string label = 2;
+  optional string description = 3;
+}
+
+message AgentReasoningCatalog { repeated AgentReasoningEffortOption options = 1; }
+
+message AgentModelOption {
+  string id = 1;
+  string label = 2;
+  optional string description = 3;
+  // Empty means that the catalog does not constrain reasoning for this model.
+  repeated string reasoning_effort_ids = 4;
+}
+
+message AgentModelCatalog { repeated AgentModelOption options = 1; }
+
+// Typed, independently optional sections published and cached by a harness.
+// Omitted selections always mean "use the harness default"; defaults are not
+// represented as synthetic options.
+message AgentConfigurationCatalog {
+  optional AgentProjectCatalog projects = 1;
+  optional AgentModelCatalog models = 2;
+  optional AgentReasoningCatalog reasoning = 3;
+}
+
 message BotCapability {
   enum Kind {
     KIND_UNSPECIFIED = 0;
     CHAT_SETTINGS = 1;
+    AGENT_CONFIGURATION = 2;
   }
 
   Kind kind = 1;
   uint32 version = 2;
+  optional AgentConfigurationCatalog agent_configuration = 3;
 }
 
 message PeerBot {

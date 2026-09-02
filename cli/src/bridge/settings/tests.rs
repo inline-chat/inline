@@ -9,6 +9,27 @@ use inline_agent_bridge::{
 
 use super::*;
 
+#[test]
+fn bound_agent_context_owns_project_model_and_reasoning_settings() {
+    for item in [
+        ITEM_MODEL,
+        ITEM_REASONING,
+        ITEM_FOLDER,
+        ITEM_PROJECT,
+        ITEM_PROJECTS,
+        ITEM_PROJECTS_BACK,
+        "workspace.projects.page:2",
+    ] {
+        assert!(
+            agent_context_setting_item(item),
+            "expected {item} to be owned"
+        );
+    }
+    assert!(!agent_context_setting_item(ITEM_PERMISSIONS));
+    assert!(!agent_context_setting_item(ITEM_REPLY_THREADS));
+    assert!(!agent_context_setting_item(ITEM_NEW));
+}
+
 #[derive(Clone, Copy, Debug)]
 enum CatalogBehavior {
     Ready,

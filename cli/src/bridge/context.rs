@@ -178,7 +178,7 @@ fn inline_delivery_guidance(
         })
         .filter(|label| !label.is_empty());
     let sender_guidance = if sender_is_bot {
-        "This request was authored by another bot and explicitly addressed to you. Treat the sender as a bot; answer without mentioning it back."
+        "This request was authored by another bot and explicitly addressed to you. Treat the sender as a bot. Do not mention it in an ordinary reply; for a delegated child thread, finish the work and use inline.send_message once with activate_bound_agent true to report the result to the parent named by inline.get_current_context."
             .to_string()
     } else {
         sender_label.map_or_else(

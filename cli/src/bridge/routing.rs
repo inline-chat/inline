@@ -50,8 +50,26 @@ pub(super) async fn resolve_message_route(
 ) -> Result<MessageRoute, Box<dyn std::error::Error>> {
     let self_authored = message.is_outgoing || message.sender_id.get() == bot_user_id;
     if self_authored {
+        let bound_context = bot_store
+            .dialog(message.chat_id)
+            .await?
+            .and_then(|dialog| dialog.agent_context)
+            .filter(|context| context.bot_user_id.get() == bot_user_id);
+        let exact_bound_mention = bound_context.as_ref().is_some_and(|context| {
+            message.metadata.entities.iter().any(|entity| {
+                entity.kind == "TYPE_MENTION"
+                    && entity
+                        .user_id
+                        .is_some_and(|user_id| user_id.get() == bot_user_id)
+                    && entity.agent_id == context.agent_id
+            })
+        });
         return Ok(MessageRoute {
-            addressing: Addressing::None,
+            addressing: if exact_bound_mention {
+                Addressing::Mention
+            } else {
+                Addressing::None
+            },
             bot_authored: true,
             command_target_bot_user_id: None,
         });
@@ -200,6 +218,45 @@ mod tests {
             .await
             .expect("route");
         assert!(route.bot_authored);
+        assert_eq!(route.addressing, Addressing::None);
+    }
+
+    #[tokio::test]
+    async fn server_validated_same_bot_handoff_requires_the_exact_bound_agent_mention() {
+        let store = SqliteStore::open_in_memory().expect("store");
+        store
+            .record_dialog(DialogRecord {
+                agent_context: Some(inline_client::AgentThreadContext {
+                    bot_user_id: InlineId::new(99),
+                    agent_id: Some(InlineId::new(73)),
+                    configuration: None,
+                }),
+                ..DialogRecord::new(InlineId::new(12))
+            })
+            .await
+            .expect("bound dialog");
+        let mut authored = message(12, 99);
+        authored.metadata.entities = vec![MessageEntityRecord {
+            kind: "TYPE_MENTION".to_string(),
+            offset: 0,
+            length: 4,
+            user_id: Some(InlineId::new(99)),
+            agent_id: Some(InlineId::new(73)),
+            group_id: None,
+            chat_id: None,
+            value: None,
+        }];
+
+        let route = resolve_message_route(&authored, 11, 99, &store, None)
+            .await
+            .expect("route");
+        assert!(route.bot_authored);
+        assert_eq!(route.addressing, Addressing::Mention);
+
+        authored.metadata.entities[0].agent_id = Some(InlineId::new(74));
+        let route = resolve_message_route(&authored, 11, 99, &store, None)
+            .await
+            .expect("route");
         assert_eq!(route.addressing, Addressing::None);
     }
 

@@ -2359,7 +2359,7 @@ impl SqliteStore {
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                             d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                            d.parent_chat_id, d.parent_message_id
+                            d.parent_chat_id, d.parent_message_id, d.agent_context_json
                      FROM dialogs d
                      ORDER BY COALESCE(last_message_id, 0) DESC, chat_id ASC
                      LIMIT ?1 OFFSET ?2",
@@ -2380,7 +2380,7 @@ impl SqliteStore {
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                             d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                            d.parent_chat_id, d.parent_message_id
+                            d.parent_chat_id, d.parent_message_id, d.agent_context_json
                      FROM dialogs d
                      WHERE d.chat_id > ?1
                      ORDER BY d.chat_id ASC
@@ -2425,7 +2425,7 @@ impl SqliteStore {
                         d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                         d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                         d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                        d.parent_chat_id, d.parent_message_id
+                        d.parent_chat_id, d.parent_message_id, d.agent_context_json
                  FROM dialogs d WHERE d.chat_id = ?1",
                 params![chat_id.get()],
                 sqlite_dialog_from_row,
@@ -3932,6 +3932,7 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
                 pinned_message_ids_json TEXT NOT NULL DEFAULT '[]',
                 parent_chat_id INTEGER,
                 parent_message_id INTEGER,
+                agent_context_json TEXT,
                 updated_at INTEGER NOT NULL
             );
 
@@ -4079,6 +4080,7 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
     ensure_sqlite_column(connection, "dialogs", "follow_mode", "TEXT")?;
     ensure_sqlite_column(connection, "dialogs", "parent_chat_id", "INTEGER")?;
     ensure_sqlite_column(connection, "dialogs", "parent_message_id", "INTEGER")?;
+    ensure_sqlite_column(connection, "dialogs", "agent_context_json", "TEXT")?;
     ensure_sqlite_column(
         connection,
         "dialogs",
@@ -4246,6 +4248,14 @@ fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
     let pinned_message_ids = serde_json::from_str(&pinned_json).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(17, Type::Text, Box::new(error))
     })?;
+    let agent_context = row
+        .get::<_, Option<String>>(20)?
+        .map(|json| {
+            serde_json::from_str(&json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(20, Type::Text, Box::new(error))
+            })
+        })
+        .transpose()?;
     Ok(DialogRecord {
         chat_id: InlineId::new(row.get(0)?),
         peer_user_id: row.get::<_, Option<i64>>(1)?.map(InlineId::new),
@@ -4259,6 +4269,7 @@ fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
         space_id: row.get::<_, Option<i64>>(7)?.map(InlineId::new),
         parent_chat_id: row.get::<_, Option<i64>>(18)?.map(InlineId::new),
         parent_message_id: row.get::<_, Option<i64>>(19)?.map(InlineId::new),
+        agent_context,
         is_public: row.get::<_, Option<bool>>(8)?,
         archived: row.get::<_, Option<bool>>(9)?,
         pinned: row.get::<_, Option<bool>>(10)?,
@@ -4282,16 +4293,23 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
     let chat_id = dialog.chat_id;
     let pinned_message_ids_json = serde_json::to_string(&dialog.pinned_message_ids)
         .map_err(|error| StoreError::internal(format!("encode pinned message IDs: {error}")))?;
+    let agent_context_json = dialog
+        .agent_context
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| StoreError::internal(format!("encode Agent thread context: {error}")))?;
     connection
         .execute(
             "INSERT INTO dialogs (
                chat_id, peer_user_id, title, emoji, last_message_id, unread_count,
                space_id, is_public, archived, pinned, open, chat_list_hidden,
                list_order, pinned_order, notification_mode, follow_mode,
-               pinned_message_ids_json, parent_chat_id, parent_message_id, updated_at
+               pinned_message_ids_json, parent_chat_id, parent_message_id,
+               agent_context_json, updated_at
              ) VALUES (
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-               ?14, ?15, ?16, ?17, ?18, ?19, ?20
+               ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21
              )
              ON CONFLICT(chat_id) DO UPDATE SET
                peer_user_id = excluded.peer_user_id,
@@ -4312,6 +4330,7 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                pinned_message_ids_json = excluded.pinned_message_ids_json,
                parent_chat_id = excluded.parent_chat_id,
                parent_message_id = excluded.parent_message_id,
+               agent_context_json = excluded.agent_context_json,
                updated_at = excluded.updated_at",
             params![
                 dialog.chat_id.get(),
@@ -4335,6 +4354,7 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                 pinned_message_ids_json,
                 dialog.parent_chat_id.map(InlineId::get),
                 dialog.parent_message_id.map(InlineId::get),
+                agent_context_json,
                 now_seconds(),
             ],
         )
@@ -4685,7 +4705,7 @@ pub(crate) fn upsert_dialog_last_message(
 
 #[cfg(test)]
 mod tests {
-    use crate::{AuthToken, ExternalId, RandomId};
+    use crate::{AgentThreadConfiguration, AgentThreadContext, AuthToken, ExternalId, RandomId};
 
     use super::*;
 
@@ -5114,6 +5134,15 @@ mod tests {
                 space_id: Some(InlineId::new(5)),
                 parent_chat_id: Some(InlineId::new(4)),
                 parent_message_id: Some(InlineId::new(6)),
+                agent_context: Some(AgentThreadContext {
+                    bot_user_id: InlineId::new(12),
+                    agent_id: Some(InlineId::new(13)),
+                    configuration: Some(AgentThreadConfiguration {
+                        project_id: Some("/workspace/inline".to_owned()),
+                        model_id: Some("gpt-5.6-sol".to_owned()),
+                        reasoning_effort_id: Some("high".to_owned()),
+                    }),
+                }),
                 is_public: Some(true),
                 archived: Some(false),
                 pinned: Some(true),
@@ -5171,6 +5200,18 @@ mod tests {
         assert_eq!(dialogs.dialogs[0].space_id, Some(InlineId::new(5)));
         assert_eq!(dialogs.dialogs[0].parent_chat_id, Some(InlineId::new(4)));
         assert_eq!(dialogs.dialogs[0].parent_message_id, Some(InlineId::new(6)));
+        assert_eq!(
+            dialogs.dialogs[0].agent_context,
+            Some(AgentThreadContext {
+                bot_user_id: InlineId::new(12),
+                agent_id: Some(InlineId::new(13)),
+                configuration: Some(AgentThreadConfiguration {
+                    project_id: Some("/workspace/inline".to_owned()),
+                    model_id: Some("gpt-5.6-sol".to_owned()),
+                    reasoning_effort_id: Some("high".to_owned()),
+                }),
+            })
+        );
         assert_eq!(dialogs.dialogs[0].is_public, Some(true));
         assert_eq!(dialogs.dialogs[0].archived, Some(false));
         assert_eq!(dialogs.dialogs[0].pinned, Some(true));

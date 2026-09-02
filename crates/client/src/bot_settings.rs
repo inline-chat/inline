@@ -11,6 +11,9 @@ pub struct BotCapability {
     pub kind: BotCapabilityKind,
     /// Contract version supported by the bot.
     pub version: u32,
+    /// Optional typed catalog for Agent execution configuration.
+    #[serde(default)]
+    pub agent_configuration: Option<AgentConfigurationCatalog>,
 }
 
 /// Supported bot capability families.
@@ -19,6 +22,77 @@ pub struct BotCapability {
 pub enum BotCapabilityKind {
     /// Per-chat bot settings exposed by Inline clients.
     ChatSettings,
+    /// Cached Project, Model, and Reasoning choices.
+    AgentConfiguration,
+}
+
+/// Provider-native options cached by Inline for Agent thread creation.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfigurationCatalog {
+    /// Projects or workspaces that the harness can materialize.
+    pub projects: Option<AgentProjectCatalog>,
+    /// Provider model choices.
+    pub models: Option<AgentModelCatalog>,
+    /// Provider reasoning-effort choices.
+    pub reasoning: Option<AgentReasoningCatalog>,
+}
+
+/// Project choices published by an Agent harness.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentProjectCatalog {
+    /// Opaque provider-owned project choices.
+    pub options: Vec<AgentProjectOption>,
+    /// Whether the provider has a compatible local-folder registration flow.
+    pub can_select_folder: Option<bool>,
+}
+
+/// One provider-owned project choice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentProjectOption {
+    /// Opaque stable provider identifier.
+    pub id: String,
+    /// User-facing project name.
+    pub label: String,
+    /// Optional safe origin or host description.
+    pub description: Option<String>,
+}
+
+/// Model choices published by an Agent harness.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentModelCatalog {
+    /// Available provider models.
+    pub options: Vec<AgentModelOption>,
+}
+
+/// One provider model choice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentModelOption {
+    /// Opaque stable provider identifier.
+    pub id: String,
+    /// User-facing model name.
+    pub label: String,
+    /// Optional safe model description.
+    pub description: Option<String>,
+    /// Reasoning-effort IDs supported by this model, or empty if unconstrained.
+    pub reasoning_effort_ids: Vec<String>,
+}
+
+/// Reasoning-effort choices published by an Agent harness.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentReasoningCatalog {
+    /// Available provider reasoning efforts.
+    pub options: Vec<AgentReasoningEffortOption>,
+}
+
+/// One provider reasoning-effort choice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentReasoningEffortOption {
+    /// Opaque stable provider identifier.
+    pub id: String,
+    /// User-facing effort name.
+    pub label: String,
+    /// Optional safe effort description.
+    pub description: Option<String>,
 }
 
 /// Request to fetch one bot's settings document for a chat.

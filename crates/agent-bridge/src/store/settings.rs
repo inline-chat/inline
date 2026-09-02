@@ -56,6 +56,69 @@ impl BridgeStore {
         Ok(record)
     }
 
+    /// Materializes the typed Agent context stored on an Inline Chat without
+    /// changing this installation's defaults. Missing selections intentionally
+    /// reset model and reasoning to provider defaults for this Chat only.
+    pub fn apply_agent_thread_configuration(
+        &self,
+        binding: &BindingKey,
+        model: Option<&str>,
+        reasoning: Option<&str>,
+        now: i64,
+    ) -> StoreResult<ChatSettingsRecord> {
+        validate_setting("model", model)?;
+        validate_setting("reasoning", reasoning)?;
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let transaction = connection.unchecked_transaction()?;
+        ensure_defaults(&transaction, &binding.installation_id, now)?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO chat_settings (
+                installation_id, chat_id, workspace_id, model, reasoning,
+                permissions, verbose, revision, updated_at
+             )
+             SELECT ?1, ?2, ?3, model, reasoning, permissions, verbose, 1, ?4
+             FROM installation_settings_defaults
+             WHERE installation_id = ?1",
+            params![
+                binding.installation_id.as_str(),
+                binding.chat_id,
+                binding.workspace_id.as_str(),
+                now,
+            ],
+        )?;
+        let current =
+            load_settings(&transaction, binding)?.ok_or_else(|| StoreError::MissingSettings {
+                installation_id: binding.installation_id.to_string(),
+                chat_id: binding.chat_id,
+                workspace_id: binding.workspace_id.to_string(),
+            })?;
+        if current.model.as_deref() == model && current.reasoning.as_deref() == reasoning {
+            transaction.commit()?;
+            return Ok(current);
+        }
+        transaction.execute(
+            "UPDATE chat_settings SET model = ?4, reasoning = ?5,
+                revision = revision + 1, updated_at = ?6
+             WHERE installation_id = ?1 AND chat_id = ?2 AND workspace_id = ?3",
+            params![
+                binding.installation_id.as_str(),
+                binding.chat_id,
+                binding.workspace_id.as_str(),
+                model,
+                reasoning,
+                now,
+            ],
+        )?;
+        let updated =
+            load_settings(&transaction, binding)?.ok_or_else(|| StoreError::MissingSettings {
+                installation_id: binding.installation_id.to_string(),
+                chat_id: binding.chat_id,
+                workspace_id: binding.workspace_id.to_string(),
+            })?;
+        transaction.commit()?;
+        Ok(updated)
+    }
+
     /// Seeds a newly created delivery conversation from the source chat's
     /// effective settings without changing installation defaults or replacing
     /// settings that the child already owns.
@@ -366,6 +429,30 @@ mod tests {
         assert_eq!(seeded.permissions.as_deref(), Some(":workspace"));
         assert!(seeded.verbose);
         assert_eq!(seeded.revision, 1);
+    }
+
+    #[test]
+    fn bound_agent_defaults_clear_model_and_reasoning_only() {
+        let (store, binding) = fixture();
+        let mut current = store.chat_settings(&binding, 1).expect("settings");
+        current.model = Some("installation-model".to_string());
+        current.reasoning = Some("high".to_string());
+        current.permissions = Some(":workspace".to_string());
+        current.verbose = true;
+        store
+            .update_chat_settings(current.revision, &current, 2)
+            .expect("update defaults");
+
+        let mut bound_chat = binding.clone();
+        bound_chat.chat_id = 99;
+        let applied = store
+            .apply_agent_thread_configuration(&bound_chat, None, None, 3)
+            .expect("apply Agent defaults");
+
+        assert_eq!(applied.model, None);
+        assert_eq!(applied.reasoning, None);
+        assert_eq!(applied.permissions.as_deref(), Some(":workspace"));
+        assert!(applied.verbose);
     }
 
     #[test]

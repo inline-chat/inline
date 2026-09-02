@@ -35,6 +35,8 @@ pub use backend::{
     BackendError, BackendResult, ClientBackend, InMemoryBackend, OperationOutcome, SendTextOutcome,
 };
 pub use bot_settings::{
+    AgentConfigurationCatalog, AgentModelCatalog, AgentModelOption, AgentProjectCatalog,
+    AgentProjectOption, AgentReasoningCatalog, AgentReasoningEffortOption,
     AnswerBotChatSettingsRequest, BotCapability, BotCapabilityKind, BotChatSettingsControl,
     BotChatSettingsDocument, BotChatSettingsFolder, BotChatSettingsFolderOption,
     BotChatSettingsInfoTone, BotChatSettingsItem, BotChatSettingsProblem,
@@ -60,19 +62,20 @@ pub use store::{
 };
 pub use sync::SyncConfig;
 pub use types::{
-    AddChatParticipantRequest, AgentSessionMessageMetadata, AnswerMessageActionRequest,
-    AuthContactKind, AuthCredential, AuthStartRequest, AuthStartResult, AuthToken,
-    AuthVerifyRequest, AuthVerifyResult, ChatCreateParticipant, ChatParticipantRecord,
-    ChatParticipantsPage, ChatParticipantsRequest, ClientStatusSnapshot, ConnectRequest,
-    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
-    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
-    DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage,
-    HistoryRequest, InitialEventPolicy, MediaKind, MessageActionButton, MessageActionKind,
-    MessageActionRecord, MessageActionRow, MessageActions, MessageAttachmentRecord, MessageContent,
-    MessageEntityRecord, MessageMetadata, MessageMutation, MessageRecord, NotificationMode,
-    PeerRef, PinMessageRequest, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
-    SendInteractiveTextRequest, SendNotificationMode, SendTextRequest, SetMarkedUnreadRequest,
-    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
+    AddChatParticipantRequest, AgentSessionMessageMetadata, AgentThreadConfiguration,
+    AgentThreadContext, AnswerMessageActionRequest, AuthContactKind, AuthCredential,
+    AuthStartRequest, AuthStartResult, AuthToken, AuthVerifyRequest, AuthVerifyResult,
+    ChatCreateParticipant, ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest,
+    ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
+    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogFollowMode,
+    DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage, DialogsRequest,
+    EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
+    InitialEventPolicy, MediaKind, MessageActionButton, MessageActionKind, MessageActionRecord,
+    MessageActionRow, MessageActions, MessageAttachmentRecord, MessageContent, MessageEntityRecord,
+    MessageMetadata, MessageMutation, MessageRecord, NotificationMode, PeerRef, PinMessageRequest,
+    ReactRequest, ReadRequest, RemoveChatParticipantRequest, SendInteractiveTextRequest,
+    SendNotificationMode, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord,
+    SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
     UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadHandle, UploadRequest,
     UploadThumbnail, UserRecord, UserSettingsRecord,
 };

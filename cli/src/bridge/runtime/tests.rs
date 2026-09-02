@@ -7,6 +7,80 @@ use std::sync::{
 
 use inline_client::{MessageMutation, RandomId, TransactionId, TransactionIdentity};
 
+#[test]
+fn bound_configuration_must_match_the_published_catalog() {
+    let resolver = BotAgentResolver::disabled();
+    resolver.store_configuration_catalog(AgentConfigurationCatalog {
+        projects: Some(AgentProjectCatalog {
+            options: vec![AgentProjectOption {
+                id: "inline".to_string(),
+                label: "Inline".to_string(),
+                description: None,
+            }],
+            can_select_folder: None,
+        }),
+        models: Some(AgentModelCatalog {
+            options: vec![AgentModelOption {
+                id: "gpt-test".to_string(),
+                label: "GPT Test".to_string(),
+                description: None,
+                reasoning_effort_ids: vec!["high".to_string()],
+            }],
+        }),
+        reasoning: Some(AgentReasoningCatalog {
+            options: vec![AgentReasoningEffortOption {
+                id: "high".to_string(),
+                label: "High".to_string(),
+                description: None,
+            }],
+        }),
+    });
+
+    let context = |project: &str, model: &str, reasoning: &str| proto::AgentThreadContext {
+        bot_user_id: 17,
+        agent_id: None,
+        configuration: Some(proto::AgentThreadConfiguration {
+            project_id: Some(project.to_string()),
+            model_id: Some(model.to_string()),
+            reasoning_effort_id: Some(reasoning.to_string()),
+        }),
+    };
+
+    assert!(
+        resolver
+            .validate_configuration(&context("inline", "gpt-test", "high"))
+            .is_ok()
+    );
+    assert!(
+        resolver
+            .validate_configuration(&context("missing", "gpt-test", "high"))
+            .is_err()
+    );
+    assert!(
+        resolver
+            .validate_configuration(&context("inline", "missing", "high"))
+            .is_err()
+    );
+    assert!(
+        resolver
+            .validate_configuration(&context("inline", "gpt-test", "low"))
+            .is_err()
+    );
+    assert!(
+        resolver
+            .validate_configuration(&proto::AgentThreadContext {
+                bot_user_id: 17,
+                agent_id: None,
+                configuration: Some(proto::AgentThreadConfiguration {
+                    project_id: Some("inline".to_string()),
+                    model_id: None,
+                    reasoning_effort_id: Some("high".to_string()),
+                }),
+            })
+            .is_err()
+    );
+}
+
 fn voice_message(
     caption: Option<&str>,
     edit_timestamp: Option<i64>,

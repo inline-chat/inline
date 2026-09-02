@@ -35,20 +35,24 @@ use inline_agent_bridge::{
     reap_stale_process_host, sanitize_visible_command, sanitize_visible_transcript,
 };
 use inline_client::{
-    AnswerBotChatSettingsRequest, AuthCredential, AuthToken, BotCapability, BotCapabilityKind,
-    BotChatSettingsControl, BotChatSettingsDocument, BotChatSettingsFolder,
-    BotChatSettingsFolderOption, BotChatSettingsInfoTone, BotChatSettingsItem,
-    BotChatSettingsProblem, BotChatSettingsProblemCode, BotChatSettingsResponse,
-    BotChatSettingsSection, BotChatSettingsSelectOption, BotInteractionEvent, BotSettingsValue,
-    ClientErrorCategory, ClientEvent, ClientIdentity, ClientRequestError, ClientStore,
-    ConnectRequest, CreateReplyThreadRequest, CreateThreadRequest, DialogFollowMode, DialogsOrder,
-    DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, ExternalId, HistoryRequest,
-    InlineClient, InlineId, LosslessEventDelivery, MediaKind, MessageActionButton,
-    MessageActionKind, MessageActionRow, MessageActions, MessageContent, MessageRecord, PeerRef,
-    RandomId, ReactRequest, SdkBackend, SendInteractiveTextRequest, SendNotificationMode,
-    SendTextRequest, SqliteStore, TypingRequest, UploadRequest, UploadThumbnail,
+    AgentConfigurationCatalog, AgentModelCatalog, AgentModelOption, AgentProjectCatalog,
+    AgentProjectOption, AgentReasoningCatalog, AgentReasoningEffortOption,
+    AgentThreadConfiguration, AgentThreadContext, AnswerBotChatSettingsRequest, AuthCredential,
+    AuthToken, BotCapability, BotCapabilityKind, BotChatSettingsControl, BotChatSettingsDocument,
+    BotChatSettingsFolder, BotChatSettingsFolderOption, BotChatSettingsInfoTone,
+    BotChatSettingsItem, BotChatSettingsProblem, BotChatSettingsProblemCode,
+    BotChatSettingsResponse, BotChatSettingsSection, BotChatSettingsSelectOption,
+    BotInteractionEvent, BotSettingsValue, ClientErrorCategory, ClientEvent, ClientIdentity,
+    ClientRequestError, ClientStore, ConnectRequest, CreateReplyThreadRequest, DialogFollowMode,
+    DialogRecord, DialogsOrder, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest,
+    ExternalId, HistoryRequest, InlineClient, InlineId, LosslessEventDelivery, MediaKind,
+    MessageActionButton, MessageActionKind, MessageActionRow, MessageActions, MessageContent,
+    MessageRecord, PeerRef, RandomId, ReactRequest, SdkBackend, SendInteractiveTextRequest,
+    SendNotificationMode, SendTextRequest, SqliteStore, TypingRequest, UploadRequest,
+    UploadThumbnail,
 };
 use inline_protocol::proto;
+use inline_sdk::RealtimeClient;
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1151,12 +1155,6 @@ async fn run_provider_installation(
         shared_provider_readiness.as_ref(),
         &installation.installation_id,
     );
-    if let Err(error) = advertise_settings(&bot).await {
-        eprintln!(
-            "Agent Settings are unavailable on this Inline server; messages and commands remain active: {}",
-            safe_diagnostic(&error.to_string())
-        );
-    }
     if !installation.initial_cursor_seeded {
         installation.initial_cursor_seeded = true;
         replace_provider(&mut account, installation.clone())?;
@@ -1390,6 +1388,78 @@ async fn run_provider_installation(
         ProviderSessionManager::new(driver.clone(), bridge_store.clone(), provider_id.clone())
             .with_session_configuration_fingerprint(session_configuration_fingerprint.clone()),
     );
+
+    let catalog_projects = projects::project_choices(
+        &bridge_store,
+        &binding.installation_id,
+        Some(&binding.workspace_id),
+        settings_identity.codex_projects_path.as_deref(),
+    );
+    // Codex exposes a stable account-wide model catalog. ACP catalogs are tied
+    // to a started workspace/session, so v0.1 intentionally publishes only
+    // their stable project choices rather than presenting stale model options.
+    let provider_catalog = if provider_id.as_str() == PROVIDER_ID {
+        sessions.settings_catalog(&binding, now_seconds()).await
+    } else {
+        Ok(DriverSettingsCatalog::default())
+    };
+    let candidate = match (catalog_projects, provider_catalog) {
+        (Ok(projects), Ok(provider_catalog)) => Some(agent_configuration_catalog(
+            projects,
+            &provider_catalog,
+            &settings_identity.host_label,
+        )),
+        (projects, provider_catalog) => {
+            if let Err(error) = projects {
+                eprintln!(
+                    "Agent project choices are unavailable; keeping Inline's last cached catalog: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+            }
+            if let Err(error) = provider_catalog {
+                eprintln!(
+                    "Agent model choices are unavailable; keeping Inline's last cached catalog: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+            }
+            None
+        }
+    };
+    let catalog = if let Some(candidate) = candidate {
+        match advertise_settings_with_catalog(&bot, candidate.clone()).await {
+            Ok(()) => Some(candidate),
+            Err(error) => {
+                eprintln!(
+                    "Agent configuration choices could not be cached in Inline; keeping its last cached catalog: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+                published_agent_configuration_catalog(&bot)
+                    .await
+                    .unwrap_or_else(|error| {
+                        eprintln!(
+                            "Inline's cached Agent configuration could not be read: {}",
+                            safe_diagnostic(&error.to_string())
+                        );
+                        None
+                    })
+            }
+        }
+    } else {
+        published_agent_configuration_catalog(&bot)
+            .await
+            .unwrap_or_else(|error| {
+                eprintln!(
+                    "Inline's cached Agent configuration could not be read: {}",
+                    safe_diagnostic(&error.to_string())
+                );
+                None
+            })
+    };
+    if let Some(catalog) = catalog {
+        inbound_route
+            .bot_agent_resolver
+            .store_configuration_catalog(catalog);
+    }
 
     recover_provider_inbox(
         &bot,
