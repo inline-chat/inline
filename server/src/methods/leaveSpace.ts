@@ -6,6 +6,9 @@ import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { normalizeId, TInputId } from "@in/server/types/methods"
 import { Authorize } from "@in/server/utils/authorize"
+import { publishGridMemberAccessRevoked } from "@in/server/modules/grid/accessLifecycle"
+import { notifyGridChanged } from "@in/server/modules/grid/realtime"
+import { removeGridMemberPresenceInTransaction } from "@in/server/modules/grid/roomLifecycle"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
@@ -48,10 +51,14 @@ export const handler = async (
 
 /// HELPER FUNCTIONS ///
 const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMember> => {
-  const { member, persisted, remainingMemberUserIds } = await db.transaction(async (tx) => {
+  const { member, gridRemovalState, persisted, remainingMemberUserIds } = await db.transaction(async (tx) => {
+    // Use the same authority lock/order as room joins and member removal.
+    // A failed membership delete must roll back provider cleanup as well.
+    const gridRemovalState = await removeGridMemberPresenceInTransaction(tx, spaceId, currentUserId)
+
     // User-bucket allocation serializes on the user row. Keep the established
-    // user -> space -> membership order, then revalidate preflight authority
-    // while all mutation owners are locked.
+    // Grid advisory -> user -> space -> membership order, then revalidate the
+    // preflight authorization while all mutation owners are locked.
     await tx.select({ id: users.id }).from(users).where(eq(users.id, currentUserId)).for("update").limit(1)
 
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
@@ -79,7 +86,7 @@ const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMem
       .from(members)
       .where(eq(members.spaceId, spaceId))
     const remainingMemberUserIds = remainingMemberRows.map((row) => row.userId)
-    return { member, persisted, remainingMemberUserIds }
+    return { member, gridRemovalState, persisted, remainingMemberUserIds }
   })
 
   await deactivateCommittedSpaceMembership({
@@ -87,8 +94,9 @@ const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMem
     userId: currentUserId,
     memberId: member.id,
   }, () => {
-    // Queue the socket event synchronously. The generation lock must still
-    // be held at the unsequenced send point, not just at an earlier check.
+    // Both helpers queue socket events synchronously. The generation lock must
+    // still be held at the unsequenced send point, not just at an earlier check.
+    void publishGridMemberAccessRevoked(spaceId, currentUserId)
     void RealtimeUpdates.pushToUser(currentUserId, [{
       update: {
         oneofKind: "spaceMemberDelete",
@@ -104,6 +112,8 @@ const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMem
     log.warn("Failed to verify committed Space leave side effects", { spaceId, userId: currentUserId, error })
     return false
   })
+  // Space-wide fanout stays outside the affected-user publication lock.
+  await notifyGridChanged(gridRemovalState)
   pushLeaveUpdates({ spaceId, currentUserId, persisted, remainingMemberUserIds })
   return member
 }

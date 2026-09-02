@@ -36,9 +36,14 @@ import { encodeUser } from "@in/server/realtime/encoders/encodeUser"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { sendMessageToRealtimeSession, sendMessageToRealtimeSpace } from "@in/server/realtime/message"
-import { createGridConnectionCredentials, gridParticipantIdentity } from "@in/server/modules/grid/livekit"
+import {
+  createGridConnectionCredentials,
+  gridParticipantIdentity,
+  liveKitRequiresGenerationRotation,
+} from "@in/server/modules/grid/livekit"
 import { setGridAvatarMicrophoneState } from "@in/server/modules/grid/avatarState"
 import { notifyGridChanged } from "@in/server/modules/grid/realtime"
+import { enqueueGridParticipantRevocation } from "@in/server/modules/grid/providerEffects"
 import {
   activeGridConnection,
   lockGridMutations,
@@ -74,6 +79,7 @@ export async function getGridHome(
   const membershipRows = await db
     .select({ spaceId: members.spaceId })
     .from(members)
+    .innerJoin(spaces, and(eq(spaces.id, members.spaceId), isNull(spaces.deleted)))
     .where(eq(members.userId, context.currentUserId))
 
   const enabledSpaceIds = (await SpaceSettingsModel.getStoredMany(membershipRows.map(({ spaceId }) => spaceId)))
@@ -154,6 +160,8 @@ export async function createGridRoom(
     await lockGridMutations(tx)
     await ensureCurrentSession(tx, context)
     await lockUser(tx, context.currentUserId)
+    // The preflight can race a Space leave or deletion before this lock.
+    await ensureGridAvailable(spaceId, context.currentUserId, tx)
 
     const state: GridMutationState = {
       affectedSpaceIds: new Set([spaceId]),
@@ -167,7 +175,7 @@ export async function createGridRoom(
         .where(and(eq(gridPresence.roomId, existing.room.id), gt(gridPresence.leaseExpiresAt, new Date())))
 
       if (Number(occupancy?.value ?? 0) === 1) {
-        await claimPresence(tx, context, existing.room.id, input.microphoneEnabled)
+        await movePresence(tx, context, existing.room, existing, state, input.microphoneEnabled)
         state.changedRoomId = existing.room.id
         return state
       }
@@ -232,7 +240,7 @@ export async function joinGridRoom(
     }
     const existing = await getActivePresenceWithRoom(tx, context.currentUserId, state)
     if (existing?.room.id === room.id) {
-      await claimPresence(tx, context, room.id, input.microphoneEnabled)
+      await movePresence(tx, context, room, existing, state, input.microphoneEnabled)
       return state
     }
 
@@ -402,6 +410,21 @@ export async function deleteGridRoom(
       .where(and(eq(gridPresence.roomId, room.id), gt(gridPresence.leaseExpiresAt, new Date())))
     if (Number(occupancy?.value ?? 0) !== 0) throw RealtimeRpcError.BadRequest()
 
+    // Expired leases can leave an active provider generation behind. Retire it
+    // through the normal durable lifecycle before cascading away its room.
+    const connection = activeGridConnection(room)
+    if (connection) {
+      const participants = await tx.select().from(gridPresence).where(eq(gridPresence.roomId, room.id))
+      for (const participant of participants) {
+        await enqueueGridParticipantRevocation(
+          tx,
+          connection,
+          participant.userId,
+          gridParticipantIdentity(participant.userId, participant.mediaMembershipId),
+        )
+      }
+    }
+    await reconcileGridRoom(tx, room.id)
     await tx.delete(gridRooms).where(eq(gridRooms.id, room.id))
     return room.spaceId
   })
@@ -527,6 +550,7 @@ async function gridCredentialAuthorityIsActive(input: {
     const [active] = await tx
       .select({ roomId: gridRooms.id })
       .from(gridRooms)
+      .innerJoin(spaces, and(eq(spaces.id, gridRooms.spaceId), isNull(spaces.deleted)))
       .innerJoin(
         gridPresence,
         and(
@@ -635,7 +659,9 @@ async function movePresence(
     state.affectedSpaceIds.add(existing.room.spaceId)
   }
 
-  if (existing && existing.room.id !== targetRoom.id) {
+  const ownerChanged = existing !== undefined && existing.presence.ownerSessionId !== context.currentSessionId
+  const rotateForAccessRevocation = ownerChanged && liveKitRequiresGenerationRotation()
+  if (existing && (existing.room.id !== targetRoom.id || ownerChanged)) {
     const connection = activeGridConnection(existing.room)
     if (connection) {
       await recordGridParticipantRevocation(
@@ -651,10 +677,12 @@ async function movePresence(
   await claimPresence(tx, context, targetRoom.id, microphoneEnabled)
 
   if (existing && existing.room.id !== targetRoom.id) {
-    const endedConnection = await reconcileGridRoom(tx, existing.room.id)
+    const endedConnection = await reconcileGridRoom(tx, existing.room.id, { rotateForAccessRevocation })
     if (endedConnection) state.endedConnections.push(endedConnection)
   }
-  const endedConnection = await reconcileGridRoom(tx, targetRoom.id)
+  const endedConnection = await reconcileGridRoom(tx, targetRoom.id, {
+    rotateForAccessRevocation: existing?.room.id === targetRoom.id && rotateForAccessRevocation,
+  })
   if (endedConnection) state.endedConnections.push(endedConnection)
 }
 
@@ -782,7 +810,7 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
     const [space] = await tx
       .select({ revision: spaces.gridRevision })
       .from(spaces)
-      .where(eq(spaces.id, spaceId))
+      .where(and(eq(spaces.id, spaceId), isNull(spaces.deleted)))
       .limit(1)
     if (!space) throw RealtimeRpcError.SpaceIdInvalid()
 
@@ -913,15 +941,13 @@ async function getLockedRoom(tx: Transaction, roomId: number): Promise<DbGridRoo
 }
 
 async function ensureGridAvailable(spaceId: number, userId: number, tx?: Transaction) {
-  if (!tx) await AccessGuards.ensureSpaceMember(spaceId, userId)
-  else {
-    const [member] = await tx
-      .select({ id: members.id })
-      .from(members)
-      .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
-      .limit(1)
-    if (!member) throw RealtimeRpcError.SpaceIdInvalid()
-  }
+  const [member] = await (tx ?? db)
+    .select({ id: members.id })
+    .from(members)
+    .innerJoin(spaces, and(eq(spaces.id, members.spaceId), isNull(spaces.deleted)))
+    .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
+    .limit(1)
+  if (!member) throw RealtimeRpcError.SpaceIdInvalid()
   const settings = await SpaceSettingsModel.getStored(spaceId, tx)
   if (!settings.gridEnabled) throw RealtimeRpcError.BadRequest()
 }

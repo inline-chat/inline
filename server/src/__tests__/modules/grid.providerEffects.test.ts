@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { executeGridProviderEffect, GridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
 
 const effect = {
@@ -104,5 +104,24 @@ describe("Grid provider effect worker", () => {
         },
       ),
     ).rejects.toThrow("Grid provider target mismatch")
+  })
+
+  test("never sends a legacy effect with missing ownership to the current provider", async () => {
+    const fetch = spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected provider request"))
+    try {
+      await expect(
+        executeGridProviderEffect(
+          { ...effect, providerTarget: null },
+          {
+            serverUrl: "wss://livekit.example.invalid",
+            apiKey: "test-key",
+            apiSecret: "test-secret-that-is-long-enough-for-hmac",
+          },
+        ),
+      ).rejects.toThrow("Grid provider target mismatch")
+      expect(fetch).not.toHaveBeenCalled()
+    } finally {
+      fetch.mockRestore()
+    }
   })
 })

@@ -260,7 +260,10 @@ export async function executeGridProviderEffect(
 ): Promise<void> {
   if (!config) throw new Error("Grid media provider is not configured")
   const currentProviderTarget = liveKitProviderTarget(config)
-  if (effect.providerTarget !== null && effect.providerTarget !== currentProviderTarget) {
+  // Legacy rows without an origin cannot safely inherit today's provider.
+  // Retain them for an explicit ownership repair instead of mutating a room
+  // with the same name on a different deployment.
+  if (effect.providerTarget === null || effect.providerTarget !== currentProviderTarget) {
     throw new Error(
       `Grid provider target mismatch: effect=${effect.providerTarget} current=${currentProviderTarget ?? "unconfigured"}`,
     )

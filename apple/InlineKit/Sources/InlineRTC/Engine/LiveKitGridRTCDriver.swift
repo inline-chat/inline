@@ -8,20 +8,15 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
   nonisolated let lifecycleEvents: AsyncStream<GridRTCLifecycleEventEnvelope>
   nonisolated let participantSnapshots: AsyncStream<GridRTCParticipantSnapshotEnvelope>
 
-  private nonisolated let lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation
+  private nonisolated let lifecycleContinuation: GridRTCLifecycleEventBuffer
   private nonisolated let participantContinuation: AsyncStream<GridRTCParticipantSnapshotEnvelope>.Continuation
   private var rooms: [GridRTCRoomHandle: RoomContext] = [:]
   private let log = Log.scoped("LiveKitGridRTCDriver")
 
   init() {
-    let lifecycleStream = AsyncStream.makeStream(
-      of: GridRTCLifecycleEventEnvelope.self,
-      // Speaking levels use their own replaceable stream. Lifecycle edges are
-      // sparse, but must still have a hard lifetime bound under suspension.
-      bufferingPolicy: .bufferingNewest(128)
-    )
-    lifecycleEvents = lifecycleStream.stream
-    lifecycleContinuation = lifecycleStream.continuation
+    let lifecycleBuffer = GridRTCLifecycleEventBuffer()
+    lifecycleEvents = lifecycleBuffer.makeStream()
+    lifecycleContinuation = lifecycleBuffer
     let participantStream = AsyncStream.makeStream(
       of: GridRTCParticipantSnapshotEnvelope.self,
       // Speaking levels are complete replaceable snapshots. Bound them so a
@@ -690,13 +685,13 @@ private final class LiveKitGridScreenCaptureObserver: NSObject, VideoCapturerDel
   private let handle: GridRTCRoomHandle
   private weak var room: Room?
   private weak var track: LocalVideoTrack?
-  private let lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation
+  private let lifecycleContinuation: GridRTCLifecycleEventBuffer
 
   init(
     handle: GridRTCRoomHandle,
     room: Room,
     track: LocalVideoTrack,
-    lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation
+    lifecycleContinuation: GridRTCLifecycleEventBuffer
   ) {
     self.handle = handle
     self.room = room
@@ -730,7 +725,7 @@ private final class LiveKitGridScreenCaptureObserver: NSObject, VideoCapturerDel
 
 private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked Sendable {
   private let handle: GridRTCRoomHandle
-  private let lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation
+  private let lifecycleContinuation: GridRTCLifecycleEventBuffer
   private let participantContinuation: AsyncStream<GridRTCParticipantSnapshotEnvelope>.Continuation
   private let remoteFlowCheckInterval: TimeInterval
   private let remoteFlowMissThreshold: Int
@@ -744,7 +739,7 @@ private final class LiveKitGridRoomDelegate: NSObject, RoomDelegate, @unchecked 
 
   init(
     handle: GridRTCRoomHandle,
-    lifecycleContinuation: AsyncStream<GridRTCLifecycleEventEnvelope>.Continuation,
+    lifecycleContinuation: GridRTCLifecycleEventBuffer,
     participantContinuation: AsyncStream<GridRTCParticipantSnapshotEnvelope>.Continuation,
     remoteFlowCheckInterval: TimeInterval,
     remoteFlowMissThreshold: Int

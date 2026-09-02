@@ -6,6 +6,8 @@ import type { HandlerContext } from "@in/server/controllers/helpers"
 import { normalizeId, TInputId } from "@in/server/types/methods"
 import { Authorize } from "@in/server/utils/authorize"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { clearGridPresenceForSpace } from "@in/server/modules/grid/roomLifecycle"
+import { notifyGridSpaceChanged } from "@in/server/modules/grid/realtime"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { Update } from "@inline-chat/protocol/core"
@@ -58,6 +60,10 @@ const deleteSpace = async (spaceId: number, currentUserId: number) => {
   for (let attempt = 0; attempt < MAX_MEMBER_SET_ATTEMPTS; attempt += 1) {
     try {
       removedMembers = await db.transaction(async (tx) => {
+        // Retire media in the same transaction as the Space's authority. The
+        // helper takes Grid's mutation lock before touching rooms or the Space.
+        await clearGridPresenceForSpace(tx, spaceId)
+
         // All member User buckets are mutation owners. Lock their rows in a
         // stable order before the Space and membership rows so overlapping
         // membership operations cannot allocate User sequences out of order.
@@ -118,6 +124,7 @@ const deleteSpace = async (spaceId: number, currentUserId: number) => {
 
   if (!removedMembers) throw new Error("Space deletion completed without a stable member set")
   AccessGuardsCache.resetSpaceMember(spaceId)
+  await notifyGridSpaceChanged(spaceId)
   for (const removedMember of removedMembers) {
     await deactivateCommittedSpaceMembership({
       spaceId,

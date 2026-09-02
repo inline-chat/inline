@@ -45,7 +45,7 @@ export async function toggleSpaceGrid(
   const { settings, update } = await db.transaction(async (tx) => {
     await lockGridMutations(tx)
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
-    if (!space) {
+    if (!space || space.deleted !== null) {
       throw RealtimeRpcError.SpaceIdInvalid()
     }
 
