@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/protocol",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "private": false,
   "license": "Apache-2.0",
   "repository": {
@@ -24,6 +24,8 @@
     "dist/vectors.js",
     "dist/uploads.d.ts",
     "dist/uploads.js",
+    "dist/downloads.d.ts",
+    "dist/downloads.js",
     "dist/transfers.d.ts",
     "dist/transfers.js",
     "dist/index.d.ts",
@@ -72,6 +74,10 @@
     "./uploads": {
       "types": "./dist/uploads.d.ts",
       "default": "./dist/uploads.js"
+    },
+    "./downloads": {
+      "types": "./dist/downloads.d.ts",
+      "default": "./dist/downloads.js"
     },
     "./transfers": {
       "types": "./dist/transfers.d.ts",

@@ -92,6 +92,78 @@ Permanent media publication is deterministic and schema-free. The first finaliza
 
 Staging-object lifecycle expiry remains a deployment/configuration gate. Database cleanup conditionally removes known incomplete deterministic publications and staging parts, while the object store must independently expire abandoned `inline-upload-parts/v1/` objects so database loss cannot retain staged bytes forever. Completed and incomplete deterministic publication objects share a permanent prefix and must not receive a blanket TTL; absolute cross-store orphan accounting would require a separately approved durable publication/outbox owner and is deferred.
 
+## Opt-in encrypted range downloads
+
+`GET_FILE_PART` is V3-only and repeat-safe. It is additive: media encoders retain
+all CDN URLs and also provide optional `file_unique_id` on video, document, voice,
+and each stored photo size. Stripped embedded photo bytes need no file request.
+
+```text
+getFilePart({file_unique_id, offset, limit, message?: {chat_id, message_id}})
+  -> {offset, total_size, data, sha256}
+```
+
+`limit` is 1..524288 bytes; `offset` is a byte offset, at most the file size.
+The last part is short; exact EOF returns empty bytes and its SHA-256. Every
+request checks file ownership or current access to the exact message and its
+file reference, including media thumbnails, URL previews, and current rich-image
+references. Unknown and inaccessible IDs share a bad-request result. An arbitrary
+file ID, chat ID, or media ID is not an authorization capability.
+
+The server reads only the requested R2 range using `S3File.slice`, with an exact
+length check and a cancellable stream. Admission is bounded to eight active reads
+per account session and 64 per process, held until work settles. No signed URL,
+storage path, provider credential, or download session is returned or created.
+
+`NativeDownloadClient` / `rpcDownloadTransport` from `@inline-chat/protocol/downloads`
+provide an opt-in ordered async iterator, three buffered/in-flight parts by
+default (configurable 1..8), chunk geometry/digest validation, and explicit resume
+offsets. The transport must honor AbortSignal and bound individual RPC duration;
+early iterator return aborts and drains outstanding work. Source/RPC upload
+adapters likewise receive optional AbortSignals. Adapters must forward them into
+their existing request owner, not detach an unresolved request to free a slot.
+
+```ts
+// call(method, input, signal) is the host's cancellable, deadline-bounded
+// V3 RPC adapter; classify GET_FILE_PART as a replay-safe query there.
+const transport = rpcDownloadTransport(call)
+for await (const part of new NativeDownloadClient(transport).download({
+  fileUniqueId, message: { chatId, messageId }, offset: durableOffset, signal,
+})) {
+  await sink.write(part.data)
+  durableOffset = part.offset + BigInt(part.data.length)
+}
+```
+
+Use the adapter's existing read-only reconnect/deadline policy for transient
+transport failures; the helper does not blindly retry permission errors or switch
+to a CDN. Persist the checkpoint only after the sink commits bytes. The file ID
+identifies an immutable representation; per-part hashes protect range assembly,
+not independent end-to-end verification against a trusted whole-file digest.
+Avatars without message/owner provenance and legacy records without an object
+path or trustworthy positive size are outside this first slice. Retain the CDN
+path for those and for old servers/clients. Existing download behavior remains the default.
+
+Apple also exposes an opt-in `NativeFileDownloader` backed by
+`NativeFilePartFetching`. It writes validated ranges to a new caller-selected
+file with at most two pending/buffered parts; failure/cancellation removes its
+partial file, and exclusive creation prevents overwriting existing files.
+The default size ceiling is 500 MiB. Progress runs off the main actor. Use an
+already-connected `RealtimeV2` or a request-scoped `RealtimeDirectSession` configured
+with an authenticated V3 transport (a legacy transport cannot use this RPC).
+The Apple Settings > Experimental > Native File Downloads preference defaults off.
+When enabled, only message document downloads use native ranges, resolving the
+exact file identity with one `getMessages` request first. Other media and downloads
+without message context remain on CDN. Cancellation, progress and logout share the
+existing FileDownloader owner. Errors remain visible; turning the preference off
+restores CDN for the next attempt. Cached local files bypass either network path.
+
+```swift
+let fileURL = try await NativeFileDownloader().download(
+  fileUniqueID: id, message: locator, to: destination
+)
+```
+
 ## Storage boundary and future encryption
 
 PostgreSQL stores upload manifests/state/leases/results; an `UploadPartStore` stores durable staging objects; a `MediaFinalizer` consumes verified ordered plaintext and creates existing media records. Provider keys and object locations never enter schema or app code.
@@ -114,17 +186,11 @@ The update collector is installed before startup/reconnect discovery. `GET_UPDAT
 
 Discovery ordering is semantic, not timer-based. The server queues every hint caused by one `GET_UPDATES_STATE` call before that call's RPC result on the same authenticated stream. Before completing the RPC to its sync owner, a client collector hands all preceding update batches to that existing owner so it can register the round's targets. The result closes target collection for that round; later live hints belong to later work and cannot satisfy or enlarge the old checkpoint. This handoff is distinct from downstream UI acknowledgement: each targeted bucket still owns application, durable cursor commit, and only then release of the shared checkpoint. Implementations must not substitute an event-loop delay, queue snapshot taken outside the receive owner, or unrelated future hint for this boundary.
 
-Incremental pages contain at most 100 logical updates. The server owns a 10,000-logical-update replay ceiling. A storage-owning client uses its existing snapshot owner when a larger gap returns `TOO_LONG`: user first captures the current user checkpoint through `GET_UPDATES_STATE` with no date, then fetches `GET_CHATS`, `GET_ME`, and settings; space uses the small `GET_SPACE` result (`Space.seq`, the authenticated user's `membership`, and settings); chat uses `GET_CHAT` plus a bounded latest history read. A repair validates identity and checkpoint coverage, preserves useful cached message rows, applies the replacement projection, and commits projection plus cursor together. Failure preserves the prior cursor and degrades only that bucket.
+Incremental pages contain at most 100 logical updates. The server owns a 10,000-logical-update replay ceiling. A gap through 10,000 is pagination; a larger gap returns `TOO_LONG`, whose `seq` is the authoritative replacement target and never a cursor. Every bucket then uses its existing snapshot owner: user first captures the current user checkpoint through `GET_UPDATES_STATE` with no date, then fetches `GET_CHATS`, `GET_ME`, and settings; space uses the small `GET_SPACE` result (`Space.seq`, the authenticated user's `membership`, and settings); chat uses `GET_CHAT` plus a bounded latest history read. A repair validates identity and checkpoint coverage, preserves useful cached message rows, applies the replacement projection, and commits projection plus cursor together. Failure preserves the prior cursor and degrades only that bucket. There is no cold-50 path, local 1,000-update slicing, or 5/14-day lookback.
 
-The TypeScript SDK also supports that stronger host repair owner, but does not require plugins to opt into liveness. Without a host-owned materialized snapshot, it requests rolling `seq_end` windows no larger than the server's 10,000-update ceiling and therefore replays a retained backlog before considering a leap. If even that bounded range returns `TOO_LONG` because its journal is unavailable, the returned `seq` is an authenticated retirement target: the SDK logs the data gap, advances that bucket, and immediately continues any remaining catch-up. It never retries the same irrecoverable range indefinitely, and it never reports `live` when a final response or `TOO_LONG` pointer remains behind an explicit hint target. There is no cold-50 path, local 1,000-update slicing, or 5/14-day lookback.
-
-Sequenced user/space/chat bucket records are durable and recoverable through `getUpdates`. A client that does not project a known or future update kind treats it as an application no-op only inside a page whose complete `updates + skipped_sequences` coverage has been authenticated; it then advances the page cursor so older clients cannot be stranded by schema growth. The event-oriented TypeScript SDK applies the same rule when a generated handler cannot project one structurally incomplete record: it logs the defect and retires only that accounted sequence, so later records remain reachable. A projected event that reached the SDK host but was not acknowledged is different: its cursor remains unchanged and the bucket degrades rather than silently losing host work. Server updates emitted by the explicitly transient presence/compose owner, direct `GridEvent`, and `BotEvent` are ephemeral/lossy; Grid snapshots repair current media state, while bot interactions have no history contract.
+Sequenced user/space/chat bucket records are durable and recoverable through `getUpdates`. A client that does not project a known or future update kind treats it as an application no-op only inside a page whose complete `updates + skipped_sequences` coverage has been authenticated; it then advances the page cursor so older clients cannot be stranded by schema growth. A malformed update kind that the client claims to project remains an apply failure and cannot silently advance. Server updates emitted by the explicitly transient presence/compose owner, direct `GridEvent`, and `BotEvent` are ephemeral/lossy; Grid snapshots repair current media state, while bot interactions have no history contract.
 
 Unknown-page accounting is a forward-progress guarantee, not a capability guarantee. A new durable constructor may be emitted only after the minimum compatible client versions can account for unknown page entries. The canonical access and history-clear constructors are part of the current Sync V3 contract; future constructors still require explicit client-compatibility review. An older client may safely advance over content it cannot project, but it cannot materialize that content until an authoritative snapshot or a compatible client version supplies the projection.
-
-### Deferred Layer contract
-
-`ConnectionInit.layer` is already a client capability marker, but this release does not branch update production or repair behavior on it. Layer becomes an enforcement input only after the catch-up and retirement rules above are deployed by default across maintained clients. A future update constructor must then declare its minimum reader layer and one older-client outcome: an equivalent legacy projection, an authenticated page no-op, or `SNAPSHOT_REPAIR_REQUIRED`. The server selects that outcome at page construction; clients never infer compatibility from retry counts or detach their cursor from authenticated sequence accounting. Layer rollout is additive and observed before enforcement, and does not replace targeted repair or the rare explicit account-reset escape hatch.
 
 ### Content-derived bucket catalog
 

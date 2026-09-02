@@ -944,6 +944,12 @@ export interface Chat {
      */
     seq?: number;
     /**
+     * Explicit per-person acknowledged-through cursors, independent of read state.
+     *
+     * @generated from protobuf field: optional ChatAcknowledgements acknowledgements = 17;
+     */
+    acknowledgements?: ChatAcknowledgements;
+    /**
      * Optional Agent target and provider-native execution preset for this Chat.
      *
      * @generated from protobuf field: optional AgentThreadContext agent_context = 18;
@@ -978,6 +984,64 @@ export interface MessageReplies {
      * @generated from protobuf field: repeated int64 recent_replier_user_ids = 4;
      */
     recentReplierUserIds: bigint[];
+}
+/**
+ * @generated from protobuf message MessageSubthread
+ */
+export interface MessageSubthread {
+    /**
+     * Child chat ID for the reply or subthread.
+     *
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * Whether this card represents an anchored reply thread or a subthread.
+     *
+     * @generated from protobuf field: MessageSubthread.Kind kind = 2;
+     */
+    kind: MessageSubthread_Kind;
+    /**
+     * Current card title. Always present for KIND_SUBTHREAD.
+     *
+     * @generated from protobuf field: optional string title = 3;
+     */
+    title?: string;
+    /**
+     * Number of messages currently in the child chat.
+     *
+     * @generated from protobuf field: int32 message_count = 4;
+     */
+    messageCount: number;
+    /**
+     * True when the viewer has durable unread state in the child chat.
+     *
+     * @generated from protobuf field: bool has_unread = 5;
+     */
+    hasUnread: boolean;
+    /**
+     * Recent distinct authors in newest-first order. Limited server-side.
+     *
+     * @generated from protobuf field: repeated int64 recent_author_user_ids = 6;
+     */
+    recentAuthorUserIds: bigint[];
+}
+/**
+ * @generated from protobuf enum MessageSubthread.Kind
+ */
+export enum MessageSubthread_Kind {
+    /**
+     * @generated from protobuf enum value: KIND_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: KIND_REPLY = 1;
+     */
+    REPLY = 1,
+    /**
+     * @generated from protobuf enum value: KIND_SUBTHREAD = 2;
+     */
+    SUBTHREAD = 2
 }
 /**
  * @generated from protobuf message MessageActions
@@ -1236,6 +1300,15 @@ export interface Block {
          * @generated from protobuf field: BlockTable table = 11;
          */
         table: BlockTable;
+    } | {
+        oneofKind: "math";
+        /**
+         * Display math points to the same canonical TeX source as MATH entities.
+         * Clients that cannot render math retain the readable source text.
+         *
+         * @generated from protobuf field: BlockText math = 12;
+         */
+        math: BlockText;
     } | {
         oneofKind: undefined;
     };
@@ -1666,6 +1739,12 @@ export interface Message {
      * @generated from protobuf field: optional AgentSessionMessageInfo agent_session = 24;
      */
     agentSession?: AgentSessionMessageInfo;
+    /**
+     * Canonical card projection for anchored replies and materialized subthreads.
+     *
+     * @generated from protobuf field: optional MessageSubthread subthread = 25;
+     */
+    subthread?: MessageSubthread;
 }
 /**
  * @generated from protobuf message AgentSessionMessageInfo
@@ -1784,6 +1863,15 @@ export interface MessageEntity {
          */
         botCommand: MessageEntity_MessageEntityBotCommand;
     } | {
+        oneofKind: "math";
+        /**
+         * Present only when a MATH range is a block-aligned display formula
+         * derived from `$$...$$`. Range-only MATH remains the inline form.
+         *
+         * @generated from protobuf field: MessageEntity.MessageEntityMath math = 11;
+         */
+        math: MessageEntity_MessageEntityMath;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1859,6 +1947,15 @@ export interface MessageEntity_MessageEntityBotCommand {
     botUserId: bigint;
 }
 /**
+ * @generated from protobuf message MessageEntity.MessageEntityMath
+ */
+export interface MessageEntity_MessageEntityMath {
+    /**
+     * @generated from protobuf field: bool display = 1;
+     */
+    display: boolean;
+}
+/**
  * @generated from protobuf enum MessageEntity.Type
  */
 export enum MessageEntity_Type {
@@ -1921,7 +2018,27 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_GROUP_MENTION = 14;
      */
-    GROUP_MENTION = 14
+    GROUP_MENTION = 14,
+    /**
+     * Range-only styles. Unknown values preserve visible text on older clients.
+     *
+     * @generated from protobuf enum value: TYPE_UNDERLINE = 15;
+     */
+    UNDERLINE = 15,
+    /**
+     * @generated from protobuf enum value: TYPE_STRIKETHROUGH = 16;
+     */
+    STRIKETHROUGH = 16,
+    /**
+     * @generated from protobuf enum value: TYPE_HIGHLIGHT = 17;
+     */
+    HIGHLIGHT = 17,
+    /**
+     * Opaque TeX source range; Markdown must not be parsed inside the formula.
+     *
+     * @generated from protobuf enum value: TYPE_MATH = 18;
+     */
+    MATH = 18
 }
 /**
  * @generated from protobuf message MessageReactions
@@ -2425,6 +2542,85 @@ export interface JoinPublicSpaceResult {
      * @generated from protobuf field: bool already_member = 3;
      */
     alreadyMember: boolean;
+}
+/**
+ * @generated from protobuf message SpaceInviteLink
+ */
+export interface SpaceInviteLink {
+    /**
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: optional int64 expires_at = 2;
+     */
+    expiresAt?: bigint;
+}
+/**
+ * @generated from protobuf message JoinSpaceByInviteTokenInput
+ */
+export interface JoinSpaceByInviteTokenInput {
+    /**
+     * @generated from protobuf field: string token = 1;
+     */
+    token: string;
+}
+/**
+ * @generated from protobuf message JoinSpaceByInviteTokenResult
+ */
+export interface JoinSpaceByInviteTokenResult {
+    /**
+     * @generated from protobuf field: Space space = 1;
+     */
+    space?: Space;
+    /**
+     * @generated from protobuf field: Member member = 2;
+     */
+    member?: Member;
+    /**
+     * @generated from protobuf field: bool already_member = 3;
+     */
+    alreadyMember: boolean;
+}
+/**
+ * @generated from protobuf message GetSpaceInviteLinkInput
+ */
+export interface GetSpaceInviteLinkInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+}
+/**
+ * @generated from protobuf message GetSpaceInviteLinkResult
+ */
+export interface GetSpaceInviteLinkResult {
+    /**
+     * @generated from protobuf field: optional SpaceInviteLink link = 1;
+     */
+    link?: SpaceInviteLink;
+}
+/**
+ * @generated from protobuf message SetSpaceInviteLinkEnabledInput
+ */
+export interface SetSpaceInviteLinkEnabledInput {
+    /**
+     * @generated from protobuf field: int64 space_id = 1;
+     */
+    spaceId: bigint;
+    /**
+     * @generated from protobuf field: bool enabled = 2;
+     */
+    enabled: boolean;
+}
+/**
+ * @generated from protobuf message SetSpaceInviteLinkEnabledResult
+ */
+export interface SetSpaceInviteLinkEnabledResult {
+    /**
+     * @generated from protobuf field: optional SpaceInviteLink link = 1;
+     */
+    link?: SpaceInviteLink;
 }
 /**
  * @generated from protobuf message UserGroup
@@ -3085,6 +3281,12 @@ export interface Video {
      * @generated from protobuf field: optional bool has_audio = 10;
      */
     hasAudio?: boolean;
+    /**
+     * Immutable original file identity for opt-in getFilePart downloads.
+     *
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
 }
 /**
  * @generated from protobuf message Document
@@ -3130,6 +3332,10 @@ export interface Document {
      * @generated from protobuf field: optional Photo photo = 7;
      */
     photo?: Photo;
+    /**
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
 }
 /**
  * @generated from protobuf message Voice
@@ -3175,6 +3381,10 @@ export interface Voice {
      * @generated from protobuf field: bytes waveform = 7;
      */
     waveform: Uint8Array;
+    /**
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
 }
 /**
  * Photo for message media, profile photo, space photo, or chat photo
@@ -3232,6 +3442,12 @@ export enum Photo_Format {
  * @generated from protobuf message PhotoSize
  */
 export interface PhotoSize {
+    /**
+     * Identity of this exact stored size. Absent for embedded stripped bytes.
+     *
+     * @generated from protobuf field: optional string file_unique_id = 100;
+     */
+    fileUniqueId?: string;
     /**
      * * Thumbnail type.
      * Currently supported:
@@ -3387,7 +3603,11 @@ export enum RpcError_Code {
     /**
      * @generated from protobuf enum value: AGENT_SESSION_MESSAGE_IMMUTABLE = 19;
      */
-    AGENT_SESSION_MESSAGE_IMMUTABLE = 19
+    AGENT_SESSION_MESSAGE_IMMUTABLE = 19,
+    /**
+     * @generated from protobuf enum value: SPACE_INVITE_INVALID = 20;
+     */
+    SPACE_INVITE_INVALID = 20
 }
 /**
  * @generated from protobuf message RpcCall
@@ -4186,6 +4406,42 @@ export interface RpcCall {
          * @generated from protobuf field: DeleteBotAgentInput deleteBotAgent = 133;
          */
         deleteBotAgent: DeleteBotAgentInput;
+    } | {
+        oneofKind: "joinSpaceByInviteToken";
+        /**
+         * @generated from protobuf field: JoinSpaceByInviteTokenInput joinSpaceByInviteToken = 134;
+         */
+        joinSpaceByInviteToken: JoinSpaceByInviteTokenInput;
+    } | {
+        oneofKind: "getSpaceInviteLink";
+        /**
+         * @generated from protobuf field: GetSpaceInviteLinkInput getSpaceInviteLink = 135;
+         */
+        getSpaceInviteLink: GetSpaceInviteLinkInput;
+    } | {
+        oneofKind: "setSpaceInviteLinkEnabled";
+        /**
+         * @generated from protobuf field: SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136;
+         */
+        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledInput;
+    } | {
+        oneofKind: "getFilePart";
+        /**
+         * @generated from protobuf field: GetFilePartInput getFilePart = 137;
+         */
+        getFilePart: GetFilePartInput;
+    } | {
+        oneofKind: "acknowledgeMessages";
+        /**
+         * @generated from protobuf field: AcknowledgeMessagesInput acknowledgeMessages = 138;
+         */
+        acknowledgeMessages: AcknowledgeMessagesInput;
+    } | {
+        oneofKind: "getUsers";
+        /**
+         * @generated from protobuf field: GetUsersInput getUsers = 139;
+         */
+        getUsers: GetUsersInput;
     } | {
         oneofKind: "getBotSkills";
         /**
@@ -5000,6 +5256,42 @@ export interface RpcResult {
          */
         deleteBotAgent: DeleteBotAgentResult;
     } | {
+        oneofKind: "joinSpaceByInviteToken";
+        /**
+         * @generated from protobuf field: JoinSpaceByInviteTokenResult joinSpaceByInviteToken = 134;
+         */
+        joinSpaceByInviteToken: JoinSpaceByInviteTokenResult;
+    } | {
+        oneofKind: "getSpaceInviteLink";
+        /**
+         * @generated from protobuf field: GetSpaceInviteLinkResult getSpaceInviteLink = 135;
+         */
+        getSpaceInviteLink: GetSpaceInviteLinkResult;
+    } | {
+        oneofKind: "setSpaceInviteLinkEnabled";
+        /**
+         * @generated from protobuf field: SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
+         */
+        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledResult;
+    } | {
+        oneofKind: "getFilePart";
+        /**
+         * @generated from protobuf field: GetFilePartResult getFilePart = 137;
+         */
+        getFilePart: GetFilePartResult;
+    } | {
+        oneofKind: "acknowledgeMessages";
+        /**
+         * @generated from protobuf field: AcknowledgeMessagesResult acknowledgeMessages = 138;
+         */
+        acknowledgeMessages: AcknowledgeMessagesResult;
+    } | {
+        oneofKind: "getUsers";
+        /**
+         * @generated from protobuf field: GetUsersResult getUsers = 139;
+         */
+        getUsers: GetUsersResult;
+    } | {
         oneofKind: "getBotSkills";
         /**
          * @generated from protobuf field: GetBotSkillsResult getBotSkills = 140;
@@ -5241,6 +5533,12 @@ export interface DeleteMemberInput {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+    /**
+     * Also prevent this member from returning through a public or private link.
+     *
+     * @generated from protobuf field: bool block_join = 3;
+     */
+    blockJoin: boolean;
 }
 /**
  * Remove member from space result
@@ -6065,11 +6363,17 @@ export interface UpdateDialogOpenInput {
      */
     open: boolean;
     /**
-     * Client-generated fractional order for local-first open transitions.
+     * Client-supplied fractional order. The server allocates one when absent.
      *
      * @generated from protobuf field: optional string order = 3;
      */
     order?: string;
+    /**
+     * Personal folder to restore when opening a previously closed dialog.
+     *
+     * @generated from protobuf field: optional int64 folder_id = 4;
+     */
+    folderId?: bigint;
 }
 /**
  * @generated from protobuf message UpdateDialogOpenResult
@@ -7357,6 +7661,8 @@ export interface UpdateUserSettingsResult {
  */
 export interface ResolveUrlPreviewInput {
     /**
+     * Omit for personal Notion lookup before chat creation; no space connection is used.
+     *
      * @generated from protobuf field: InputPeer peer_id = 1;
      */
     peerId?: InputPeer;
@@ -8389,6 +8695,10 @@ export interface GetChatHistoryResult {
      * @generated from protobuf field: repeated Message messages = 1;
      */
     messages: Message[];
+    /**
+     * @generated from protobuf field: optional ChatAcknowledgements acknowledgements = 2;
+     */
+    acknowledgements?: ChatAcknowledgements;
 }
 /**
  * @generated from protobuf message GetChatTranscriptInput
@@ -8741,6 +9051,8 @@ export interface ExternalResource {
  */
 export interface SearchExternalResourcesInput {
     /**
+     * Omit for personal Notion search before chat creation; no space connection is used.
+     *
      * @generated from protobuf field: InputPeer peer_id = 1;
      */
     peerId?: InputPeer;
@@ -9645,6 +9957,12 @@ export interface Update {
          * @generated from protobuf field: UpdateUserRemovedFromChat user_removed_from_chat = 48;
          */
         userRemovedFromChat: UpdateUserRemovedFromChat;
+    } | {
+        oneofKind: "acknowledgement";
+        /**
+         * @generated from protobuf field: ChatAcknowledgement acknowledgement = 49;
+         */
+        acknowledgement: ChatAcknowledgement;
     } | {
         oneofKind: undefined;
     };
@@ -10723,6 +11041,27 @@ export interface SearchUsersInput {
  * @generated from protobuf message SearchUsersResult
  */
 export interface SearchUsersResult {
+    /**
+     * @generated from protobuf field: repeated User users = 1;
+     */
+    users: User[];
+}
+/**
+ * Read-only public profile lookup by stable ID, without creating a DM or dialog.
+ * Up to 50 IDs. Missing, deleted, and pending-setup users are omitted.
+ *
+ * @generated from protobuf message GetUsersInput
+ */
+export interface GetUsersInput {
+    /**
+     * @generated from protobuf field: repeated int64 user_ids = 1;
+     */
+    userIds: bigint[];
+}
+/**
+ * @generated from protobuf message GetUsersResult
+ */
+export interface GetUsersResult {
     /**
      * @generated from protobuf field: repeated User users = 1;
      */
@@ -12484,6 +12823,157 @@ export interface CancelUploadResult {
     alreadyTerminal: boolean;
 }
 /**
+ * Provenance for a file received in a message. Authorization is checked on
+ * every range request; neither the file ID nor this locator grants access.
+ *
+ * @generated from protobuf message FileMessageLocation
+ */
+export interface FileMessageLocation {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 message_id = 2;
+     */
+    messageId: bigint;
+}
+/**
+ * @generated from protobuf message GetFilePartInput
+ */
+export interface GetFilePartInput {
+    /**
+     * @generated from protobuf field: string file_unique_id = 1;
+     */
+    fileUniqueId: string;
+    /**
+     * @generated from protobuf field: uint64 offset = 2;
+     */
+    offset: bigint;
+    /**
+     * 1..524288 bytes. The final range may be shorter; offset == size is EOF.
+     *
+     * @generated from protobuf field: uint32 limit = 3;
+     */
+    limit: number;
+    /**
+     * Required for files the authenticated user does not own.
+     *
+     * @generated from protobuf field: optional FileMessageLocation message = 4;
+     */
+    message?: FileMessageLocation;
+}
+/**
+ * @generated from protobuf message GetFilePartResult
+ */
+export interface GetFilePartResult {
+    /**
+     * @generated from protobuf field: uint64 offset = 1;
+     */
+    offset: bigint;
+    /**
+     * @generated from protobuf field: uint64 total_size = 2;
+     */
+    totalSize: bigint;
+    /**
+     * @generated from protobuf field: bytes data = 3;
+     */
+    data: Uint8Array;
+    /**
+     * SHA-256 of data (including the empty range at EOF).
+     *
+     * @generated from protobuf field: bytes sha256 = 4;
+     */
+    sha256: Uint8Array;
+}
+/**
+ * One explicit cursor state per chat and actor. max_id remains a monotonic
+ * high-water mark; cleared hides its marker without rewinding that boundary.
+ *
+ * @generated from protobuf message ChatAcknowledgement
+ */
+export interface ChatAcknowledgement {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+    /**
+     * @generated from protobuf field: int64 max_id = 3;
+     */
+    maxId: bigint;
+    /**
+     * Optional minimal actor sidecar for first-frame avatar hydration.
+     *
+     * @generated from protobuf field: optional User user = 4;
+     */
+    user?: User;
+    /**
+     * Viewer-specific routing metadata; not another durable cursor field.
+     *
+     * @generated from protobuf field: optional Peer peer_id = 5;
+     */
+    peerId?: Peer;
+    /**
+     * Chat update sequence that orders snapshots, live updates and replay.
+     *
+     * @generated from protobuf field: int64 revision = 6;
+     */
+    revision: bigint;
+    /**
+     * A durable tombstone. The high-water max_id remains available for fencing.
+     *
+     * @generated from protobuf field: bool cleared = 7;
+     */
+    cleared: boolean;
+}
+/**
+ * @generated from protobuf message AcknowledgeMessagesInput
+ */
+export interface AcknowledgeMessagesInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Set target, or expected current target when clear is true.
+     *
+     * @generated from protobuf field: int64 max_id = 2;
+     */
+    maxId: bigint;
+    /**
+     * @generated from protobuf field: bool clear = 3;
+     */
+    clear: boolean;
+    /**
+     * State observed by the actor; fences delayed clear and same-target replay.
+     *
+     * @generated from protobuf field: int64 expected_revision = 4;
+     */
+    expectedRevision: bigint;
+}
+/**
+ * @generated from protobuf message AcknowledgeMessagesResult
+ */
+export interface AcknowledgeMessagesResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message ChatAcknowledgements
+ */
+export interface ChatAcknowledgements {
+    /**
+     * @generated from protobuf field: repeated ChatAcknowledgement cursors = 1;
+     */
+    cursors: ChatAcknowledgement[];
+}
+/**
  * @generated from protobuf enum DialogFollowMode
  */
 export enum DialogFollowMode {
@@ -13201,6 +13691,30 @@ export enum Method {
      * @generated from protobuf enum value: DELETE_BOT_AGENT = 132;
      */
     DELETE_BOT_AGENT = 132,
+    /**
+     * @generated from protobuf enum value: JOIN_SPACE_BY_INVITE_TOKEN = 133;
+     */
+    JOIN_SPACE_BY_INVITE_TOKEN = 133,
+    /**
+     * @generated from protobuf enum value: GET_SPACE_INVITE_LINK = 134;
+     */
+    GET_SPACE_INVITE_LINK = 134,
+    /**
+     * @generated from protobuf enum value: SET_SPACE_INVITE_LINK_ENABLED = 135;
+     */
+    SET_SPACE_INVITE_LINK_ENABLED = 135,
+    /**
+     * @generated from protobuf enum value: GET_FILE_PART = 136;
+     */
+    GET_FILE_PART = 136,
+    /**
+     * @generated from protobuf enum value: ACKNOWLEDGE_MESSAGES = 137;
+     */
+    ACKNOWLEDGE_MESSAGES = 137,
+    /**
+     * @generated from protobuf enum value: GET_USERS = 138;
+     */
+    GET_USERS = 138,
     /**
      * @generated from protobuf enum value: GET_BOT_SKILLS = 139;
      */
@@ -15680,6 +16194,7 @@ class Chat$Type extends MessageType<Chat> {
             { no: 14, name: "number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 15, name: "permissions", kind: "message", T: () => ChatPermissions },
             { no: 16, name: "seq", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 17, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements },
             { no: 18, name: "agent_context", kind: "message", T: () => AgentThreadContext }
         ]);
     }
@@ -15744,6 +16259,9 @@ class Chat$Type extends MessageType<Chat> {
                 case /* optional int32 seq */ 16:
                     message.seq = reader.int32();
                     break;
+                case /* optional ChatAcknowledgements acknowledgements */ 17:
+                    message.acknowledgements = ChatAcknowledgements.internalBinaryRead(reader, reader.uint32(), options, message.acknowledgements);
+                    break;
                 case /* optional AgentThreadContext agent_context */ 18:
                     message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
                     break;
@@ -15807,6 +16325,9 @@ class Chat$Type extends MessageType<Chat> {
         /* optional int32 seq = 16; */
         if (message.seq !== undefined)
             writer.tag(16, WireType.Varint).int32(message.seq);
+        /* optional ChatAcknowledgements acknowledgements = 17; */
+        if (message.acknowledgements)
+            ChatAcknowledgements.internalBinaryWrite(message.acknowledgements, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
         /* optional AgentThreadContext agent_context = 18; */
         if (message.agentContext)
             AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
@@ -15899,6 +16420,100 @@ class MessageReplies$Type extends MessageType<MessageReplies> {
  * @generated MessageType for protobuf message MessageReplies
  */
 export const MessageReplies = new MessageReplies$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageSubthread$Type extends MessageType<MessageSubthread> {
+    constructor() {
+        super("MessageSubthread", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "kind", kind: "enum", T: () => ["MessageSubthread.Kind", MessageSubthread_Kind, "KIND_"] },
+            { no: 3, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "message_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "has_unread", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "recent_author_user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageSubthread>): MessageSubthread {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.kind = 0;
+        message.messageCount = 0;
+        message.hasUnread = false;
+        message.recentAuthorUserIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<MessageSubthread>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageSubthread): MessageSubthread {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* MessageSubthread.Kind kind */ 2:
+                    message.kind = reader.int32();
+                    break;
+                case /* optional string title */ 3:
+                    message.title = reader.string();
+                    break;
+                case /* int32 message_count */ 4:
+                    message.messageCount = reader.int32();
+                    break;
+                case /* bool has_unread */ 5:
+                    message.hasUnread = reader.bool();
+                    break;
+                case /* repeated int64 recent_author_user_ids */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.recentAuthorUserIds.push(reader.int64().toBigInt());
+                    else
+                        message.recentAuthorUserIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageSubthread, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* MessageSubthread.Kind kind = 2; */
+        if (message.kind !== 0)
+            writer.tag(2, WireType.Varint).int32(message.kind);
+        /* optional string title = 3; */
+        if (message.title !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.title);
+        /* int32 message_count = 4; */
+        if (message.messageCount !== 0)
+            writer.tag(4, WireType.Varint).int32(message.messageCount);
+        /* bool has_unread = 5; */
+        if (message.hasUnread !== false)
+            writer.tag(5, WireType.Varint).bool(message.hasUnread);
+        /* repeated int64 recent_author_user_ids = 6; */
+        if (message.recentAuthorUserIds.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.recentAuthorUserIds.length; i++)
+                writer.int64(message.recentAuthorUserIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageSubthread
+ */
+export const MessageSubthread = new MessageSubthread$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageActions$Type extends MessageType<MessageActions> {
     constructor() {
@@ -16542,7 +17157,8 @@ class Block$Type extends MessageType<Block> {
             { no: 8, name: "disclosure", kind: "message", oneof: "kind", T: () => BlockDisclosure },
             { no: 9, name: "footer", kind: "message", oneof: "kind", T: () => BlockText },
             { no: 10, name: "quote", kind: "message", oneof: "kind", T: () => BlockQuote },
-            { no: 11, name: "table", kind: "message", oneof: "kind", T: () => BlockTable }
+            { no: 11, name: "table", kind: "message", oneof: "kind", T: () => BlockTable },
+            { no: 12, name: "math", kind: "message", oneof: "kind", T: () => BlockText }
         ]);
     }
     create(value?: PartialMessage<Block>): Block {
@@ -16623,6 +17239,12 @@ class Block$Type extends MessageType<Block> {
                         table: BlockTable.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).table)
                     };
                     break;
+                case /* BlockText math */ 12:
+                    message.kind = {
+                        oneofKind: "math",
+                        math: BlockText.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).math)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16668,6 +17290,9 @@ class Block$Type extends MessageType<Block> {
         /* BlockTable table = 11; */
         if (message.kind.oneofKind === "table")
             BlockTable.internalBinaryWrite(message.kind.table, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* BlockText math = 12; */
+        if (message.kind.oneofKind === "math")
+            BlockText.internalBinaryWrite(message.kind.math, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -17486,7 +18111,8 @@ class Message$Type extends MessageType<Message> {
             { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 22, name: "service_message", kind: "message", T: () => MessageService },
             { no: 23, name: "block_content", kind: "message", T: () => BlockContent },
-            { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo }
+            { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo },
+            { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -17580,6 +18206,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional AgentSessionMessageInfo agent_session */ 24:
                     message.agentSession = AgentSessionMessageInfo.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
                     break;
+                case /* optional MessageSubthread subthread */ 25:
+                    message.subthread = MessageSubthread.internalBinaryRead(reader, reader.uint32(), options, message.subthread);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -17667,6 +18296,9 @@ class Message$Type extends MessageType<Message> {
         /* optional AgentSessionMessageInfo agent_session = 24; */
         if (message.agentSession)
             AgentSessionMessageInfo.internalBinaryWrite(message.agentSession, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageSubthread subthread = 25; */
+        if (message.subthread)
+            MessageSubthread.internalBinaryWrite(message.subthread, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -17870,7 +18502,8 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
             { no: 7, name: "thread", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThread },
             { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle },
             { no: 9, name: "group_mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityGroupMention },
-            { no: 10, name: "bot_command", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityBotCommand }
+            { no: 10, name: "bot_command", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityBotCommand },
+            { no: 11, name: "math", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityMath }
         ]);
     }
     create(value?: PartialMessage<MessageEntity>): MessageEntity {
@@ -17939,6 +18572,12 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
                         botCommand: MessageEntity_MessageEntityBotCommand.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).botCommand)
                     };
                     break;
+                case /* MessageEntity.MessageEntityMath math */ 11:
+                    message.entity = {
+                        oneofKind: "math",
+                        math: MessageEntity_MessageEntityMath.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).math)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -17981,6 +18620,9 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
         /* MessageEntity.MessageEntityBotCommand bot_command = 10; */
         if (message.entity.oneofKind === "botCommand")
             MessageEntity_MessageEntityBotCommand.internalBinaryWrite(message.entity.botCommand, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* MessageEntity.MessageEntityMath math = 11; */
+        if (message.entity.oneofKind === "math")
+            MessageEntity_MessageEntityMath.internalBinaryWrite(message.entity.math, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18335,6 +18977,53 @@ class MessageEntity_MessageEntityBotCommand$Type extends MessageType<MessageEnti
  * @generated MessageType for protobuf message MessageEntity.MessageEntityBotCommand
  */
 export const MessageEntity_MessageEntityBotCommand = new MessageEntity_MessageEntityBotCommand$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityMath$Type extends MessageType<MessageEntity_MessageEntityMath> {
+    constructor() {
+        super("MessageEntity.MessageEntityMath", [
+            { no: 1, name: "display", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityMath>): MessageEntity_MessageEntityMath {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.display = false;
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityMath>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityMath): MessageEntity_MessageEntityMath {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool display */ 1:
+                    message.display = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityMath, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool display = 1; */
+        if (message.display !== false)
+            writer.tag(1, WireType.Varint).bool(message.display);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityMath
+ */
+export const MessageEntity_MessageEntityMath = new MessageEntity_MessageEntityMath$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageReactions$Type extends MessageType<MessageReactions> {
     constructor() {
@@ -19652,6 +20341,362 @@ class JoinPublicSpaceResult$Type extends MessageType<JoinPublicSpaceResult> {
  */
 export const JoinPublicSpaceResult = new JoinPublicSpaceResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class SpaceInviteLink$Type extends MessageType<SpaceInviteLink> {
+    constructor() {
+        super("SpaceInviteLink", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "expires_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SpaceInviteLink>): SpaceInviteLink {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<SpaceInviteLink>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SpaceInviteLink): SpaceInviteLink {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                case /* optional int64 expires_at */ 2:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SpaceInviteLink, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        /* optional int64 expires_at = 2; */
+        if (message.expiresAt !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.expiresAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SpaceInviteLink
+ */
+export const SpaceInviteLink = new SpaceInviteLink$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinSpaceByInviteTokenInput$Type extends MessageType<JoinSpaceByInviteTokenInput> {
+    constructor() {
+        super("JoinSpaceByInviteTokenInput", [
+            { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JoinSpaceByInviteTokenInput>): JoinSpaceByInviteTokenInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.token = "";
+        if (value !== undefined)
+            reflectionMergePartial<JoinSpaceByInviteTokenInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinSpaceByInviteTokenInput): JoinSpaceByInviteTokenInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string token */ 1:
+                    message.token = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinSpaceByInviteTokenInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string token = 1; */
+        if (message.token !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.token);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinSpaceByInviteTokenInput
+ */
+export const JoinSpaceByInviteTokenInput = new JoinSpaceByInviteTokenInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class JoinSpaceByInviteTokenResult$Type extends MessageType<JoinSpaceByInviteTokenResult> {
+    constructor() {
+        super("JoinSpaceByInviteTokenResult", [
+            { no: 1, name: "space", kind: "message", T: () => Space },
+            { no: 2, name: "member", kind: "message", T: () => Member },
+            { no: 3, name: "already_member", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<JoinSpaceByInviteTokenResult>): JoinSpaceByInviteTokenResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.alreadyMember = false;
+        if (value !== undefined)
+            reflectionMergePartial<JoinSpaceByInviteTokenResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: JoinSpaceByInviteTokenResult): JoinSpaceByInviteTokenResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Space space */ 1:
+                    message.space = Space.internalBinaryRead(reader, reader.uint32(), options, message.space);
+                    break;
+                case /* Member member */ 2:
+                    message.member = Member.internalBinaryRead(reader, reader.uint32(), options, message.member);
+                    break;
+                case /* bool already_member */ 3:
+                    message.alreadyMember = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: JoinSpaceByInviteTokenResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Space space = 1; */
+        if (message.space)
+            Space.internalBinaryWrite(message.space, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Member member = 2; */
+        if (message.member)
+            Member.internalBinaryWrite(message.member, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* bool already_member = 3; */
+        if (message.alreadyMember !== false)
+            writer.tag(3, WireType.Varint).bool(message.alreadyMember);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message JoinSpaceByInviteTokenResult
+ */
+export const JoinSpaceByInviteTokenResult = new JoinSpaceByInviteTokenResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceInviteLinkInput$Type extends MessageType<GetSpaceInviteLinkInput> {
+    constructor() {
+        super("GetSpaceInviteLinkInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceInviteLinkInput>): GetSpaceInviteLinkInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceInviteLinkInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceInviteLinkInput): GetSpaceInviteLinkInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceInviteLinkInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceInviteLinkInput
+ */
+export const GetSpaceInviteLinkInput = new GetSpaceInviteLinkInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpaceInviteLinkResult$Type extends MessageType<GetSpaceInviteLinkResult> {
+    constructor() {
+        super("GetSpaceInviteLinkResult", [
+            { no: 1, name: "link", kind: "message", T: () => SpaceInviteLink }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpaceInviteLinkResult>): GetSpaceInviteLinkResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetSpaceInviteLinkResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpaceInviteLinkResult): GetSpaceInviteLinkResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional SpaceInviteLink link */ 1:
+                    message.link = SpaceInviteLink.internalBinaryRead(reader, reader.uint32(), options, message.link);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpaceInviteLinkResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional SpaceInviteLink link = 1; */
+        if (message.link)
+            SpaceInviteLink.internalBinaryWrite(message.link, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpaceInviteLinkResult
+ */
+export const GetSpaceInviteLinkResult = new GetSpaceInviteLinkResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetSpaceInviteLinkEnabledInput$Type extends MessageType<SetSpaceInviteLinkEnabledInput> {
+    constructor() {
+        super("SetSpaceInviteLinkEnabledInput", [
+            { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "enabled", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetSpaceInviteLinkEnabledInput>): SetSpaceInviteLinkEnabledInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaceId = 0n;
+        message.enabled = false;
+        if (value !== undefined)
+            reflectionMergePartial<SetSpaceInviteLinkEnabledInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetSpaceInviteLinkEnabledInput): SetSpaceInviteLinkEnabledInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* bool enabled */ 2:
+                    message.enabled = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetSpaceInviteLinkEnabledInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 space_id = 1; */
+        if (message.spaceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* bool enabled = 2; */
+        if (message.enabled !== false)
+            writer.tag(2, WireType.Varint).bool(message.enabled);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetSpaceInviteLinkEnabledInput
+ */
+export const SetSpaceInviteLinkEnabledInput = new SetSpaceInviteLinkEnabledInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetSpaceInviteLinkEnabledResult$Type extends MessageType<SetSpaceInviteLinkEnabledResult> {
+    constructor() {
+        super("SetSpaceInviteLinkEnabledResult", [
+            { no: 1, name: "link", kind: "message", T: () => SpaceInviteLink }
+        ]);
+    }
+    create(value?: PartialMessage<SetSpaceInviteLinkEnabledResult>): SetSpaceInviteLinkEnabledResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SetSpaceInviteLinkEnabledResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetSpaceInviteLinkEnabledResult): SetSpaceInviteLinkEnabledResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional SpaceInviteLink link */ 1:
+                    message.link = SpaceInviteLink.internalBinaryRead(reader, reader.uint32(), options, message.link);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetSpaceInviteLinkEnabledResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional SpaceInviteLink link = 1; */
+        if (message.link)
+            SpaceInviteLink.internalBinaryWrite(message.link, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetSpaceInviteLinkEnabledResult
+ */
+export const SetSpaceInviteLinkEnabledResult = new SetSpaceInviteLinkEnabledResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class UserGroup$Type extends MessageType<UserGroup> {
     constructor() {
         super("UserGroup", [
@@ -20957,7 +22002,8 @@ class Video$Type extends MessageType<Video> {
             { no: 7, name: "photo", kind: "message", T: () => Photo },
             { no: 8, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "is_animated", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 10, name: "has_audio", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Video>): Video {
@@ -21007,6 +22053,9 @@ class Video$Type extends MessageType<Video> {
                 case /* optional bool has_audio */ 10:
                     message.hasAudio = reader.bool();
                     break;
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21049,6 +22098,9 @@ class Video$Type extends MessageType<Video> {
         /* optional bool has_audio = 10; */
         if (message.hasAudio !== undefined)
             writer.tag(10, WireType.Varint).bool(message.hasAudio);
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21069,7 +22121,8 @@ class Document$Type extends MessageType<Document> {
             { no: 4, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 7, name: "photo", kind: "message", T: () => Photo }
+            { no: 7, name: "photo", kind: "message", T: () => Photo },
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Document>): Document {
@@ -21109,6 +22162,9 @@ class Document$Type extends MessageType<Document> {
                 case /* optional Photo photo */ 7:
                     message.photo = Photo.internalBinaryRead(reader, reader.uint32(), options, message.photo);
                     break;
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21142,6 +22198,9 @@ class Document$Type extends MessageType<Document> {
         /* optional Photo photo = 7; */
         if (message.photo)
             Photo.internalBinaryWrite(message.photo, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21162,7 +22221,8 @@ class Voice$Type extends MessageType<Voice> {
             { no: 4, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 7, name: "waveform", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+            { no: 7, name: "waveform", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Voice>): Voice {
@@ -21203,6 +22263,9 @@ class Voice$Type extends MessageType<Voice> {
                 case /* bytes waveform */ 7:
                     message.waveform = reader.bytes();
                     break;
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21236,6 +22299,9 @@ class Voice$Type extends MessageType<Voice> {
         /* bytes waveform = 7; */
         if (message.waveform.length)
             writer.tag(7, WireType.LengthDelimited).bytes(message.waveform);
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21328,6 +22394,7 @@ export const Photo = new Photo$Type();
 class PhotoSize$Type extends MessageType<PhotoSize> {
     constructor() {
         super("PhotoSize", [
+            { no: 100, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 1, name: "type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "w", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "h", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
@@ -21351,6 +22418,9 @@ class PhotoSize$Type extends MessageType<PhotoSize> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
+                case /* optional string file_unique_id */ 100:
+                    message.fileUniqueId = reader.string();
+                    break;
                 case /* string type */ 1:
                     message.type = reader.string();
                     break;
@@ -21381,6 +22451,9 @@ class PhotoSize$Type extends MessageType<PhotoSize> {
         return message;
     }
     internalBinaryWrite(message: PhotoSize, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string file_unique_id = 100; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(100, WireType.LengthDelimited).string(message.fileUniqueId);
         /* string type = 1; */
         if (message.type !== "")
             writer.tag(1, WireType.LengthDelimited).string(message.type);
@@ -21616,6 +22689,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 131, name: "getAgentSession", kind: "message", oneof: "input", T: () => GetAgentSessionInput },
             { no: 132, name: "updateBotAgent", kind: "message", oneof: "input", T: () => UpdateBotAgentInput },
             { no: 133, name: "deleteBotAgent", kind: "message", oneof: "input", T: () => DeleteBotAgentInput },
+            { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "input", T: () => JoinSpaceByInviteTokenInput },
+            { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "input", T: () => GetSpaceInviteLinkInput },
+            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "input", T: () => SetSpaceInviteLinkEnabledInput },
+            { no: 137, name: "getFilePart", kind: "message", oneof: "input", T: () => GetFilePartInput },
+            { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "input", T: () => AcknowledgeMessagesInput },
+            { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput },
             { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "input", T: () => GetBotConfigurationCatalogInput }
         ]);
@@ -22422,6 +23501,42 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteBotAgent: DeleteBotAgentInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteBotAgent)
                     };
                     break;
+                case /* JoinSpaceByInviteTokenInput joinSpaceByInviteToken */ 134:
+                    message.input = {
+                        oneofKind: "joinSpaceByInviteToken",
+                        joinSpaceByInviteToken: JoinSpaceByInviteTokenInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).joinSpaceByInviteToken)
+                    };
+                    break;
+                case /* GetSpaceInviteLinkInput getSpaceInviteLink */ 135:
+                    message.input = {
+                        oneofKind: "getSpaceInviteLink",
+                        getSpaceInviteLink: GetSpaceInviteLinkInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaceInviteLink)
+                    };
+                    break;
+                case /* SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled */ 136:
+                    message.input = {
+                        oneofKind: "setSpaceInviteLinkEnabled",
+                        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setSpaceInviteLinkEnabled)
+                    };
+                    break;
+                case /* GetFilePartInput getFilePart */ 137:
+                    message.input = {
+                        oneofKind: "getFilePart",
+                        getFilePart: GetFilePartInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getFilePart)
+                    };
+                    break;
+                case /* AcknowledgeMessagesInput acknowledgeMessages */ 138:
+                    message.input = {
+                        oneofKind: "acknowledgeMessages",
+                        acknowledgeMessages: AcknowledgeMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).acknowledgeMessages)
+                    };
+                    break;
+                case /* GetUsersInput getUsers */ 139:
+                    message.input = {
+                        oneofKind: "getUsers",
+                        getUsers: GetUsersInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getUsers)
+                    };
+                    break;
                 case /* GetBotSkillsInput getBotSkills */ 140:
                     message.input = {
                         oneofKind: "getBotSkills",
@@ -22842,6 +23957,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteBotAgentInput deleteBotAgent = 133; */
         if (message.input.oneofKind === "deleteBotAgent")
             DeleteBotAgentInput.internalBinaryWrite(message.input.deleteBotAgent, writer.tag(133, WireType.LengthDelimited).fork(), options).join();
+        /* JoinSpaceByInviteTokenInput joinSpaceByInviteToken = 134; */
+        if (message.input.oneofKind === "joinSpaceByInviteToken")
+            JoinSpaceByInviteTokenInput.internalBinaryWrite(message.input.joinSpaceByInviteToken, writer.tag(134, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceInviteLinkInput getSpaceInviteLink = 135; */
+        if (message.input.oneofKind === "getSpaceInviteLink")
+            GetSpaceInviteLinkInput.internalBinaryWrite(message.input.getSpaceInviteLink, writer.tag(135, WireType.LengthDelimited).fork(), options).join();
+        /* SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136; */
+        if (message.input.oneofKind === "setSpaceInviteLinkEnabled")
+            SetSpaceInviteLinkEnabledInput.internalBinaryWrite(message.input.setSpaceInviteLinkEnabled, writer.tag(136, WireType.LengthDelimited).fork(), options).join();
+        /* GetFilePartInput getFilePart = 137; */
+        if (message.input.oneofKind === "getFilePart")
+            GetFilePartInput.internalBinaryWrite(message.input.getFilePart, writer.tag(137, WireType.LengthDelimited).fork(), options).join();
+        /* AcknowledgeMessagesInput acknowledgeMessages = 138; */
+        if (message.input.oneofKind === "acknowledgeMessages")
+            AcknowledgeMessagesInput.internalBinaryWrite(message.input.acknowledgeMessages, writer.tag(138, WireType.LengthDelimited).fork(), options).join();
+        /* GetUsersInput getUsers = 139; */
+        if (message.input.oneofKind === "getUsers")
+            GetUsersInput.internalBinaryWrite(message.input.getUsers, writer.tag(139, WireType.LengthDelimited).fork(), options).join();
         /* GetBotSkillsInput getBotSkills = 140; */
         if (message.input.oneofKind === "getBotSkills")
             GetBotSkillsInput.internalBinaryWrite(message.input.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
@@ -22994,6 +24127,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 131, name: "getAgentSession", kind: "message", oneof: "result", T: () => GetAgentSessionResult },
             { no: 132, name: "updateBotAgent", kind: "message", oneof: "result", T: () => UpdateBotAgentResult },
             { no: 133, name: "deleteBotAgent", kind: "message", oneof: "result", T: () => DeleteBotAgentResult },
+            { no: 134, name: "joinSpaceByInviteToken", kind: "message", oneof: "result", T: () => JoinSpaceByInviteTokenResult },
+            { no: 135, name: "getSpaceInviteLink", kind: "message", oneof: "result", T: () => GetSpaceInviteLinkResult },
+            { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "result", T: () => SetSpaceInviteLinkEnabledResult },
+            { no: 137, name: "getFilePart", kind: "message", oneof: "result", T: () => GetFilePartResult },
+            { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "result", T: () => AcknowledgeMessagesResult },
+            { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult },
             { no: 141, name: "getBotConfigurationCatalog", kind: "message", oneof: "result", T: () => GetBotConfigurationCatalogResult }
         ]);
@@ -23800,6 +24939,42 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteBotAgent: DeleteBotAgentResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteBotAgent)
                     };
                     break;
+                case /* JoinSpaceByInviteTokenResult joinSpaceByInviteToken */ 134:
+                    message.result = {
+                        oneofKind: "joinSpaceByInviteToken",
+                        joinSpaceByInviteToken: JoinSpaceByInviteTokenResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).joinSpaceByInviteToken)
+                    };
+                    break;
+                case /* GetSpaceInviteLinkResult getSpaceInviteLink */ 135:
+                    message.result = {
+                        oneofKind: "getSpaceInviteLink",
+                        getSpaceInviteLink: GetSpaceInviteLinkResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaceInviteLink)
+                    };
+                    break;
+                case /* SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled */ 136:
+                    message.result = {
+                        oneofKind: "setSpaceInviteLinkEnabled",
+                        setSpaceInviteLinkEnabled: SetSpaceInviteLinkEnabledResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setSpaceInviteLinkEnabled)
+                    };
+                    break;
+                case /* GetFilePartResult getFilePart */ 137:
+                    message.result = {
+                        oneofKind: "getFilePart",
+                        getFilePart: GetFilePartResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getFilePart)
+                    };
+                    break;
+                case /* AcknowledgeMessagesResult acknowledgeMessages */ 138:
+                    message.result = {
+                        oneofKind: "acknowledgeMessages",
+                        acknowledgeMessages: AcknowledgeMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).acknowledgeMessages)
+                    };
+                    break;
+                case /* GetUsersResult getUsers */ 139:
+                    message.result = {
+                        oneofKind: "getUsers",
+                        getUsers: GetUsersResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getUsers)
+                    };
+                    break;
                 case /* GetBotSkillsResult getBotSkills */ 140:
                     message.result = {
                         oneofKind: "getBotSkills",
@@ -24220,6 +25395,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteBotAgentResult deleteBotAgent = 133; */
         if (message.result.oneofKind === "deleteBotAgent")
             DeleteBotAgentResult.internalBinaryWrite(message.result.deleteBotAgent, writer.tag(133, WireType.LengthDelimited).fork(), options).join();
+        /* JoinSpaceByInviteTokenResult joinSpaceByInviteToken = 134; */
+        if (message.result.oneofKind === "joinSpaceByInviteToken")
+            JoinSpaceByInviteTokenResult.internalBinaryWrite(message.result.joinSpaceByInviteToken, writer.tag(134, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpaceInviteLinkResult getSpaceInviteLink = 135; */
+        if (message.result.oneofKind === "getSpaceInviteLink")
+            GetSpaceInviteLinkResult.internalBinaryWrite(message.result.getSpaceInviteLink, writer.tag(135, WireType.LengthDelimited).fork(), options).join();
+        /* SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136; */
+        if (message.result.oneofKind === "setSpaceInviteLinkEnabled")
+            SetSpaceInviteLinkEnabledResult.internalBinaryWrite(message.result.setSpaceInviteLinkEnabled, writer.tag(136, WireType.LengthDelimited).fork(), options).join();
+        /* GetFilePartResult getFilePart = 137; */
+        if (message.result.oneofKind === "getFilePart")
+            GetFilePartResult.internalBinaryWrite(message.result.getFilePart, writer.tag(137, WireType.LengthDelimited).fork(), options).join();
+        /* AcknowledgeMessagesResult acknowledgeMessages = 138; */
+        if (message.result.oneofKind === "acknowledgeMessages")
+            AcknowledgeMessagesResult.internalBinaryWrite(message.result.acknowledgeMessages, writer.tag(138, WireType.LengthDelimited).fork(), options).join();
+        /* GetUsersResult getUsers = 139; */
+        if (message.result.oneofKind === "getUsers")
+            GetUsersResult.internalBinaryWrite(message.result.getUsers, writer.tag(139, WireType.LengthDelimited).fork(), options).join();
         /* GetBotSkillsResult getBotSkills = 140; */
         if (message.result.oneofKind === "getBotSkills")
             GetBotSkillsResult.internalBinaryWrite(message.result.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
@@ -24734,13 +25927,15 @@ class DeleteMemberInput$Type extends MessageType<DeleteMemberInput> {
     constructor() {
         super("DeleteMemberInput", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "block_join", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<DeleteMemberInput>): DeleteMemberInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.spaceId = 0n;
         message.userId = 0n;
+        message.blockJoin = false;
         if (value !== undefined)
             reflectionMergePartial<DeleteMemberInput>(this, message, value);
         return message;
@@ -24755,6 +25950,9 @@ class DeleteMemberInput$Type extends MessageType<DeleteMemberInput> {
                     break;
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
+                    break;
+                case /* bool block_join */ 3:
+                    message.blockJoin = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -24774,6 +25972,9 @@ class DeleteMemberInput$Type extends MessageType<DeleteMemberInput> {
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* bool block_join = 3; */
+        if (message.blockJoin !== false)
+            writer.tag(3, WireType.Varint).bool(message.blockJoin);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27732,7 +28933,8 @@ class UpdateDialogOpenInput$Type extends MessageType<UpdateDialogOpenInput> {
         super("UpdateDialogOpenInput", [
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "open", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "order", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateDialogOpenInput>): UpdateDialogOpenInput {
@@ -27756,6 +28958,9 @@ class UpdateDialogOpenInput$Type extends MessageType<UpdateDialogOpenInput> {
                 case /* optional string order */ 3:
                     message.order = reader.string();
                     break;
+                case /* optional int64 folder_id */ 4:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -27777,6 +28982,9 @@ class UpdateDialogOpenInput$Type extends MessageType<UpdateDialogOpenInput> {
         /* optional string order = 3; */
         if (message.order !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.order);
+        /* optional int64 folder_id = 4; */
+        if (message.folderId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.folderId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35466,7 +36674,8 @@ export const GetChatHistoryInput = new GetChatHistoryInput$Type();
 class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
     constructor() {
         super("GetChatHistoryResult", [
-            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
+            { no: 2, name: "acknowledgements", kind: "message", T: () => ChatAcknowledgements }
         ]);
     }
     create(value?: PartialMessage<GetChatHistoryResult>): GetChatHistoryResult {
@@ -35484,6 +36693,9 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
                 case /* repeated Message messages */ 1:
                     message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional ChatAcknowledgements acknowledgements */ 2:
+                    message.acknowledgements = ChatAcknowledgements.internalBinaryRead(reader, reader.uint32(), options, message.acknowledgements);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -35499,6 +36711,9 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
         /* repeated Message messages = 1; */
         for (let i = 0; i < message.messages.length; i++)
             Message.internalBinaryWrite(message.messages[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatAcknowledgements acknowledgements = 2; */
+        if (message.acknowledgements)
+            ChatAcknowledgements.internalBinaryWrite(message.acknowledgements, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -38669,7 +39884,8 @@ class Update$Type extends MessageType<Update> {
             { no: 45, name: "dialog_collapsed_max_id", kind: "message", oneof: "update", T: () => UpdateDialogCollapsedMaxId },
             { no: 46, name: "dialog_folder", kind: "message", oneof: "update", T: () => UpdateDialogFolder },
             { no: 47, name: "user_added_to_chat", kind: "message", oneof: "update", T: () => UpdateUserAddedToChat },
-            { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat }
+            { no: 48, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => UpdateUserRemovedFromChat },
+            { no: 49, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -38960,6 +40176,12 @@ class Update$Type extends MessageType<Update> {
                         userRemovedFromChat: UpdateUserRemovedFromChat.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userRemovedFromChat)
                     };
                     break;
+                case /* ChatAcknowledgement acknowledgement */ 49:
+                    message.update = {
+                        oneofKind: "acknowledgement",
+                        acknowledgement: ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).acknowledgement)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -39113,6 +40335,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateUserRemovedFromChat user_removed_from_chat = 48; */
         if (message.update.oneofKind === "userRemovedFromChat")
             UpdateUserRemovedFromChat.internalBinaryWrite(message.update.userRemovedFromChat, writer.tag(48, WireType.LengthDelimited).fork(), options).join();
+        /* ChatAcknowledgement acknowledgement = 49; */
+        if (message.update.oneofKind === "acknowledgement")
+            ChatAcknowledgement.internalBinaryWrite(message.update.acknowledgement, writer.tag(49, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -42406,6 +43631,108 @@ class SearchUsersResult$Type extends MessageType<SearchUsersResult> {
  * @generated MessageType for protobuf message SearchUsersResult
  */
 export const SearchUsersResult = new SearchUsersResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetUsersInput$Type extends MessageType<GetUsersInput> {
+    constructor() {
+        super("GetUsersInput", [
+            { no: 1, name: "user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetUsersInput>): GetUsersInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetUsersInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetUsersInput): GetUsersInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated int64 user_ids */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.userIds.push(reader.int64().toBigInt());
+                    else
+                        message.userIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetUsersInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated int64 user_ids = 1; */
+        if (message.userIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.userIds.length; i++)
+                writer.int64(message.userIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetUsersInput
+ */
+export const GetUsersInput = new GetUsersInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetUsersResult$Type extends MessageType<GetUsersResult> {
+    constructor() {
+        super("GetUsersResult", [
+            { no: 1, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<GetUsersResult>): GetUsersResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.users = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetUsersResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetUsersResult): GetUsersResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated User users */ 1:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetUsersResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated User users = 1; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetUsersResult
+ */
+export const GetUsersResult = new GetUsersResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class InviteToInlineInput$Type extends MessageType<InviteToInlineInput> {
     constructor() {
@@ -47870,3 +49197,456 @@ class CancelUploadResult$Type extends MessageType<CancelUploadResult> {
  * @generated MessageType for protobuf message CancelUploadResult
  */
 export const CancelUploadResult = new CancelUploadResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FileMessageLocation$Type extends MessageType<FileMessageLocation> {
+    constructor() {
+        super("FileMessageLocation", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FileMessageLocation>): FileMessageLocation {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.messageId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<FileMessageLocation>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FileMessageLocation): FileMessageLocation {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 message_id */ 2:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FileMessageLocation, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 message_id = 2; */
+        if (message.messageId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.messageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message FileMessageLocation
+ */
+export const FileMessageLocation = new FileMessageLocation$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetFilePartInput$Type extends MessageType<GetFilePartInput> {
+    constructor() {
+        super("GetFilePartInput", [
+            { no: 1, name: "file_unique_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "offset", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "limit", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "message", kind: "message", T: () => FileMessageLocation }
+        ]);
+    }
+    create(value?: PartialMessage<GetFilePartInput>): GetFilePartInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.fileUniqueId = "";
+        message.offset = 0n;
+        message.limit = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GetFilePartInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetFilePartInput): GetFilePartInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string file_unique_id */ 1:
+                    message.fileUniqueId = reader.string();
+                    break;
+                case /* uint64 offset */ 2:
+                    message.offset = reader.uint64().toBigInt();
+                    break;
+                case /* uint32 limit */ 3:
+                    message.limit = reader.uint32();
+                    break;
+                case /* optional FileMessageLocation message */ 4:
+                    message.message = FileMessageLocation.internalBinaryRead(reader, reader.uint32(), options, message.message);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetFilePartInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string file_unique_id = 1; */
+        if (message.fileUniqueId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.fileUniqueId);
+        /* uint64 offset = 2; */
+        if (message.offset !== 0n)
+            writer.tag(2, WireType.Varint).uint64(message.offset);
+        /* uint32 limit = 3; */
+        if (message.limit !== 0)
+            writer.tag(3, WireType.Varint).uint32(message.limit);
+        /* optional FileMessageLocation message = 4; */
+        if (message.message)
+            FileMessageLocation.internalBinaryWrite(message.message, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetFilePartInput
+ */
+export const GetFilePartInput = new GetFilePartInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetFilePartResult$Type extends MessageType<GetFilePartResult> {
+    constructor() {
+        super("GetFilePartResult", [
+            { no: 1, name: "offset", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "total_size", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 4, name: "sha256", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetFilePartResult>): GetFilePartResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.offset = 0n;
+        message.totalSize = 0n;
+        message.data = new Uint8Array(0);
+        message.sha256 = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<GetFilePartResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetFilePartResult): GetFilePartResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint64 offset */ 1:
+                    message.offset = reader.uint64().toBigInt();
+                    break;
+                case /* uint64 total_size */ 2:
+                    message.totalSize = reader.uint64().toBigInt();
+                    break;
+                case /* bytes data */ 3:
+                    message.data = reader.bytes();
+                    break;
+                case /* bytes sha256 */ 4:
+                    message.sha256 = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetFilePartResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint64 offset = 1; */
+        if (message.offset !== 0n)
+            writer.tag(1, WireType.Varint).uint64(message.offset);
+        /* uint64 total_size = 2; */
+        if (message.totalSize !== 0n)
+            writer.tag(2, WireType.Varint).uint64(message.totalSize);
+        /* bytes data = 3; */
+        if (message.data.length)
+            writer.tag(3, WireType.LengthDelimited).bytes(message.data);
+        /* bytes sha256 = 4; */
+        if (message.sha256.length)
+            writer.tag(4, WireType.LengthDelimited).bytes(message.sha256);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetFilePartResult
+ */
+export const GetFilePartResult = new GetFilePartResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChatAcknowledgement$Type extends MessageType<ChatAcknowledgement> {
+    constructor() {
+        super("ChatAcknowledgement", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "max_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "user", kind: "message", T: () => User },
+            { no: 5, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 6, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "cleared", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatAcknowledgement>): ChatAcknowledgement {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.userId = 0n;
+        message.maxId = 0n;
+        message.revision = 0n;
+        message.cleared = false;
+        if (value !== undefined)
+            reflectionMergePartial<ChatAcknowledgement>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatAcknowledgement): ChatAcknowledgement {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* int64 max_id */ 3:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                case /* optional User user */ 4:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* optional Peer peer_id */ 5:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 revision */ 6:
+                    message.revision = reader.int64().toBigInt();
+                    break;
+                case /* bool cleared */ 7:
+                    message.cleared = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatAcknowledgement, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        /* int64 max_id = 3; */
+        if (message.maxId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.maxId);
+        /* optional User user = 4; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional Peer peer_id = 5; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* int64 revision = 6; */
+        if (message.revision !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.revision);
+        /* bool cleared = 7; */
+        if (message.cleared !== false)
+            writer.tag(7, WireType.Varint).bool(message.cleared);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatAcknowledgement
+ */
+export const ChatAcknowledgement = new ChatAcknowledgement$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AcknowledgeMessagesInput$Type extends MessageType<AcknowledgeMessagesInput> {
+    constructor() {
+        super("AcknowledgeMessagesInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "max_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "clear", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "expected_revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AcknowledgeMessagesInput>): AcknowledgeMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.maxId = 0n;
+        message.clear = false;
+        message.expectedRevision = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<AcknowledgeMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AcknowledgeMessagesInput): AcknowledgeMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 max_id */ 2:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                case /* bool clear */ 3:
+                    message.clear = reader.bool();
+                    break;
+                case /* int64 expected_revision */ 4:
+                    message.expectedRevision = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AcknowledgeMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 max_id = 2; */
+        if (message.maxId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.maxId);
+        /* bool clear = 3; */
+        if (message.clear !== false)
+            writer.tag(3, WireType.Varint).bool(message.clear);
+        /* int64 expected_revision = 4; */
+        if (message.expectedRevision !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.expectedRevision);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AcknowledgeMessagesInput
+ */
+export const AcknowledgeMessagesInput = new AcknowledgeMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AcknowledgeMessagesResult$Type extends MessageType<AcknowledgeMessagesResult> {
+    constructor() {
+        super("AcknowledgeMessagesResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<AcknowledgeMessagesResult>): AcknowledgeMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<AcknowledgeMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AcknowledgeMessagesResult): AcknowledgeMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AcknowledgeMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AcknowledgeMessagesResult
+ */
+export const AcknowledgeMessagesResult = new AcknowledgeMessagesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChatAcknowledgements$Type extends MessageType<ChatAcknowledgements> {
+    constructor() {
+        super("ChatAcknowledgements", [
+            { no: 1, name: "cursors", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => ChatAcknowledgement }
+        ]);
+    }
+    create(value?: PartialMessage<ChatAcknowledgements>): ChatAcknowledgements {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.cursors = [];
+        if (value !== undefined)
+            reflectionMergePartial<ChatAcknowledgements>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatAcknowledgements): ChatAcknowledgements {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ChatAcknowledgement cursors */ 1:
+                    message.cursors.push(ChatAcknowledgement.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatAcknowledgements, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ChatAcknowledgement cursors = 1; */
+        for (let i = 0; i < message.cursors.length; i++)
+            ChatAcknowledgement.internalBinaryWrite(message.cursors[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatAcknowledgements
+ */
+export const ChatAcknowledgements = new ChatAcknowledgements$Type();

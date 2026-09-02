@@ -343,6 +343,10 @@ message Chat {
 
   // Current sequence of this chat's update bucket.
   optional int32 seq = 16;
+
+  // Explicit per-person acknowledged-through cursors, independent of read state.
+  optional ChatAcknowledgements acknowledgements = 17;
+
   // Optional Agent target and provider-native execution preset for this Chat.
   optional AgentThreadContext agent_context = 18;
 }
@@ -359,6 +363,32 @@ message MessageReplies {
 
   // Recent distinct repliers in newest-first order. Limited server-side.
   repeated int64 recent_replier_user_ids = 4;
+}
+
+message MessageSubthread {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_REPLY = 1;
+    KIND_SUBTHREAD = 2;
+  }
+
+  // Child chat ID for the reply or subthread.
+  int64 chat_id = 1;
+
+  // Whether this card represents an anchored reply thread or a subthread.
+  Kind kind = 2;
+
+  // Current card title. Always present for KIND_SUBTHREAD.
+  optional string title = 3;
+
+  // Number of messages currently in the child chat.
+  int32 message_count = 4;
+
+  // True when the viewer has durable unread state in the child chat.
+  bool has_unread = 5;
+
+  // Recent distinct authors in newest-first order. Limited server-side.
+  repeated int64 recent_author_user_ids = 6;
 }
 
 message MessageActions { repeated MessageActionRow rows = 1; }
@@ -443,6 +473,9 @@ message Block {
     BlockText footer = 9;
     BlockQuote quote = 10;
     BlockTable table = 11;
+    // Display math points to the same canonical TeX source as MATH entities.
+    // Clients that cannot render math retain the readable source text.
+    BlockText math = 12;
   }
 }
 
@@ -619,6 +652,9 @@ message Message {
   // Present only when this row is durably associated with an external agent
   // session. Raw provider identifiers remain server-private.
   optional AgentSessionMessageInfo agent_session = 24;
+
+  // Canonical card projection for anchored replies and materialized subthreads.
+  optional MessageSubthread subthread = 25;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -689,6 +725,12 @@ message MessageEntity {
     TYPE_THREAD_TITLE = 12;
     TYPE_BOT_COMMAND = 13;
     TYPE_GROUP_MENTION = 14;
+    // Range-only styles. Unknown values preserve visible text on older clients.
+    TYPE_UNDERLINE = 15;
+    TYPE_STRIKETHROUGH = 16;
+    TYPE_HIGHLIGHT = 17;
+    // Opaque TeX source range; Markdown must not be parsed inside the formula.
+    TYPE_MATH = 18;
   }
 
   Type type = 1;
@@ -708,6 +750,7 @@ message MessageEntity {
     string title = 2;
   }
   message MessageEntityBotCommand { int64 bot_user_id = 1; }
+  message MessageEntityMath { bool display = 1; }
 
   oneof entity {
     MessageEntityMention mention = 4;
@@ -717,6 +760,9 @@ message MessageEntity {
     MessageEntityThreadTitle thread_title = 8;
     MessageEntityGroupMention group_mention = 9;
     MessageEntityBotCommand bot_command = 10;
+    // Present only when a MATH range is a block-aligned display formula
+    // derived from `$$...$$`. Range-only MATH remains the inline form.
+    MessageEntityMath math = 11;
   }
 }
 
@@ -945,6 +991,30 @@ message JoinPublicSpaceResult {
   Member member = 2;
   bool already_member = 3;
 }
+
+message SpaceInviteLink {
+  string url = 1;
+  optional int64 expires_at = 2;
+}
+
+message JoinSpaceByInviteTokenInput { string token = 1; }
+
+message JoinSpaceByInviteTokenResult {
+  Space space = 1;
+  Member member = 2;
+  bool already_member = 3;
+}
+
+message GetSpaceInviteLinkInput { int64 space_id = 1; }
+
+message GetSpaceInviteLinkResult { optional SpaceInviteLink link = 1; }
+
+message SetSpaceInviteLinkEnabledInput {
+  int64 space_id = 1;
+  bool enabled = 2;
+}
+
+message SetSpaceInviteLinkEnabledResult { optional SpaceInviteLink link = 1; }
 
 message UserGroup {
   int64 id = 1;
@@ -1220,6 +1290,8 @@ message Video {
 
   // True when the encoded video has an audio track.
   optional bool has_audio = 10;
+  // Immutable original file identity for opt-in getFilePart downloads.
+  optional string file_unique_id = 100;
 }
 
 message Document {
@@ -1242,6 +1314,7 @@ message Document {
 
   // Thumbnail of the document
   optional Photo photo = 7;
+  optional string file_unique_id = 100;
 }
 
 message Voice {
@@ -1264,6 +1337,7 @@ message Voice {
 
   // Waveform bytes for rendering
   bytes waveform = 7;
+  optional string file_unique_id = 100;
 }
 
 // Photo for message media, profile photo, space photo, or chat photo
@@ -1290,6 +1364,8 @@ message Photo {
 }
 
 message PhotoSize {
+  // Identity of this exact stored size. Absent for embedded stripped bytes.
+  optional string file_unique_id = 100;
   /** Thumbnail type.
   Currently supported:
   - "b" - small box 140x140
@@ -1350,6 +1426,7 @@ message RpcError {
     FIRST_NAME_INVALID = 17;
     URL_PREVIEW_UNAVAILABLE = 18;
     AGENT_SESSION_MESSAGE_IMMUTABLE = 19;
+    SPACE_INVITE_INVALID = 20;
   }
 }
 
@@ -1487,6 +1564,13 @@ enum Method {
   GET_AGENT_SESSION = 130;
   UPDATE_BOT_AGENT = 131;
   DELETE_BOT_AGENT = 132;
+  JOIN_SPACE_BY_INVITE_TOKEN = 133;
+  GET_SPACE_INVITE_LINK = 134;
+  SET_SPACE_INVITE_LINK_ENABLED = 135;
+  GET_FILE_PART = 136;
+  ACKNOWLEDGE_MESSAGES = 137;
+  GET_USERS = 138;
+  GET_BOT_SKILLS = 139;
   GET_BOT_CONFIGURATION_CATALOG = 140;
 }
 
@@ -1625,6 +1709,13 @@ message RpcCall {
     GetAgentSessionInput getAgentSession = 131;
     UpdateBotAgentInput updateBotAgent = 132;
     DeleteBotAgentInput deleteBotAgent = 133;
+    JoinSpaceByInviteTokenInput joinSpaceByInviteToken = 134;
+    GetSpaceInviteLinkInput getSpaceInviteLink = 135;
+    SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136;
+    GetFilePartInput getFilePart = 137;
+    AcknowledgeMessagesInput acknowledgeMessages = 138;
+    GetUsersInput getUsers = 139;
+    GetBotSkillsInput getBotSkills = 140;
     GetBotConfigurationCatalogInput getBotConfigurationCatalog = 141;
   }
 }
@@ -1765,6 +1856,13 @@ message RpcResult {
     GetAgentSessionResult getAgentSession = 131;
     UpdateBotAgentResult updateBotAgent = 132;
     DeleteBotAgentResult deleteBotAgent = 133;
+    JoinSpaceByInviteTokenResult joinSpaceByInviteToken = 134;
+    GetSpaceInviteLinkResult getSpaceInviteLink = 135;
+    SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
+    GetFilePartResult getFilePart = 137;
+    AcknowledgeMessagesResult acknowledgeMessages = 138;
+    GetUsersResult getUsers = 139;
+    GetBotSkillsResult getBotSkills = 140;
     GetBotConfigurationCatalogResult getBotConfigurationCatalog = 141;
   }
 }
@@ -1864,6 +1962,9 @@ message DeleteMemberInput {
 
   // Member ID
   int64 user_id = 2;
+
+  // Also prevent this member from returning through a public or private link.
+  bool block_join = 3;
 }
 
 // Remove member from space result
@@ -2174,8 +2275,11 @@ message UpdateDialogOpenInput {
   // Whether this dialog should appear in the sidebar inbox.
   bool open = 2;
 
-  // Client-generated fractional order for local-first open transitions.
+  // Client-supplied fractional order. The server allocates one when absent.
   optional string order = 3;
+
+  // Personal folder to restore when opening a previously closed dialog.
+  optional int64 folder_id = 4;
 }
 
 message UpdateDialogOpenResult {
@@ -2476,6 +2580,15 @@ message BotCommand {
   optional int32 sort_order = 3;
 }
 
+message BotSkill {
+  // Stable harness activation key, for example the installed skill name.
+  string key = 1;
+  // Human-facing name shown in Agent creation.
+  string name = 2;
+  optional string description = 3;
+  optional int32 sort_order = 4;
+}
+
 message PeerBotCommands {
   User bot = 1;
   repeated BotCommand commands = 2;
@@ -2491,6 +2604,10 @@ message SetBotCommandsInput {
 }
 
 message SetBotCommandsResult { repeated BotCommand commands = 1; }
+
+message GetBotSkillsInput { int64 bot_user_id = 1; }
+
+message GetBotSkillsResult { repeated BotSkill skills = 1; }
 
 message GetBotConfigurationCatalogInput {
   int64 bot_user_id = 1;
@@ -2627,6 +2744,7 @@ message UpdateUserSettingsInput { UserSettings user_settings = 1; }
 message UpdateUserSettingsResult { repeated Update updates = 1; }
 
 message ResolveUrlPreviewInput {
+  // Omit for personal Notion lookup before chat creation; no space connection is used.
   InputPeer peer_id = 1;
   string url = 2;
 }
@@ -3058,7 +3176,10 @@ message GetChatHistoryInput {
   optional bool include_anchor = 10;
 }
 
-message GetChatHistoryResult { repeated Message messages = 1; }
+message GetChatHistoryResult {
+  repeated Message messages = 1;
+  optional ChatAcknowledgements acknowledgements = 2;
+}
 
 message GetChatTranscriptInput {
   enum Mode {
@@ -3226,6 +3347,7 @@ message ExternalResource {
 }
 
 message SearchExternalResourcesInput {
+  // Omit for personal Notion search before chat creation; no space connection is used.
   InputPeer peer_id = 1;
   string query = 2;
   optional int32 limit = 3;
@@ -3513,6 +3635,7 @@ message Update {
     UpdateDialogFolder dialog_folder = 46;
     UpdateUserAddedToChat user_added_to_chat = 47;
     UpdateUserRemovedFromChat user_removed_from_chat = 48;
+    ChatAcknowledgement acknowledgement = 49;
   }
 }
 
@@ -3949,6 +4072,11 @@ message SearchUsersInput {
 }
 
 message SearchUsersResult { repeated User users = 1; }
+
+// Read-only public profile lookup by stable ID, without creating a DM or dialog.
+// Up to 50 IDs. Missing, deleted, and pending-setup users are omitted.
+message GetUsersInput { repeated int64 user_ids = 1; }
+message GetUsersResult { repeated User users = 1; }
 
 message InviteToInlineInput {
   oneof via {
@@ -4527,3 +4655,55 @@ message CancelUploadResult {
   bool canceled = 1;
   bool already_terminal = 2;
 }
+
+// Provenance for a file received in a message. Authorization is checked on
+// every range request; neither the file ID nor this locator grants access.
+message FileMessageLocation {
+  int64 chat_id = 1;
+  int64 message_id = 2;
+}
+
+message GetFilePartInput {
+  string file_unique_id = 1;
+  uint64 offset = 2;
+  // 1..524288 bytes. The final range may be shorter; offset == size is EOF.
+  uint32 limit = 3;
+  // Required for files the authenticated user does not own.
+  optional FileMessageLocation message = 4;
+}
+
+message GetFilePartResult {
+  uint64 offset = 1;
+  uint64 total_size = 2;
+  bytes data = 3;
+  // SHA-256 of data (including the empty range at EOF).
+  bytes sha256 = 4;
+}
+
+// One explicit cursor state per chat and actor. max_id remains a monotonic
+// high-water mark; cleared hides its marker without rewinding that boundary.
+message ChatAcknowledgement {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+  int64 max_id = 3;
+  // Optional minimal actor sidecar for first-frame avatar hydration.
+  optional User user = 4;
+  // Viewer-specific routing metadata; not another durable cursor field.
+  optional Peer peer_id = 5;
+  // Chat update sequence that orders snapshots, live updates and replay.
+  int64 revision = 6;
+  // A durable tombstone. The high-water max_id remains available for fencing.
+  bool cleared = 7;
+}
+
+message AcknowledgeMessagesInput {
+  InputPeer peer_id = 1;
+  // Set target, or expected current target when clear is true.
+  int64 max_id = 2;
+  bool clear = 3;
+  // State observed by the actor; fences delayed clear and same-target replay.
+  int64 expected_revision = 4;
+}
+message AcknowledgeMessagesResult { repeated Update updates = 1; }
+
+message ChatAcknowledgements { repeated ChatAcknowledgement cursors = 1; }

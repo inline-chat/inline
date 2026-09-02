@@ -183,20 +183,37 @@ export type PendingMessage = {
 
 export class PendingMessageCache {
   readonly #messages = new Map<bigint, PendingMessage>()
+  #retainedBytes = 0
 
-  constructor(private readonly capacity = 8192) {
+  constructor(
+    private readonly capacity = 8192,
+    private readonly byteCapacity = 32 * 1024 * 1024,
+  ) {
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 8192) throw new RangeError("Invalid pending-message capacity")
+    if (!Number.isSafeInteger(byteCapacity) || byteCapacity < 1) throw new RangeError("Invalid pending-message byte capacity")
   }
+
+  get retainedBytes(): number { return this.#retainedBytes }
 
   retain(message: PendingMessage): void {
     if (this.#messages.size >= this.capacity && !this.#messages.has(message.messageId)) {
       throw new RangeError("Pending-message cache is full")
     }
-    this.#messages.set(message.messageId, { ...message, body: message.body.slice() })
+    const previous = this.#messages.get(message.messageId)
+    const nextBytes = this.#retainedBytes - (previous?.body.length ?? 0) + message.body.length
+    if (nextBytes > this.byteCapacity) throw new RangeError("Pending-message byte capacity exceeded")
+    const body = message.body.slice()
+    this.#messages.set(message.messageId, { ...message, body })
+    this.#retainedBytes = nextBytes
   }
 
   acknowledge(messageIds: readonly bigint[]): void {
-    for (const messageId of messageIds) this.#messages.delete(messageId)
+    for (const messageId of messageIds) {
+      const message = this.#messages.get(messageId)
+      if (!message) continue
+      this.#messages.delete(messageId)
+      this.#retainedBytes -= message.body.length
+    }
   }
 
   resend(messageIds: readonly bigint[]): PendingMessage[] {
@@ -216,6 +233,7 @@ export class PendingMessageCache {
       const view = new DataView(message.body.buffer, message.body.byteOffset, message.body.byteLength)
       if (view.getUint32(0, true) !== 0xf35c6d01 || view.getBigInt64(4, true) !== requestMessageId) continue
       this.#messages.delete(messageId)
+      this.#retainedBytes -= message.body.length
       return { ...message, body: message.body.slice() }
     }
     return undefined

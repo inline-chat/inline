@@ -674,6 +674,78 @@ describe("carrier-independent Inline Protocol server session", () => {
     )).toBeTrue()
   })
 
+  test("delivers a large first result but retains only its compact replay tombstone", async () => {
+    const rsa = rsaFixture()
+    const authorizationKeys = new MemoryAuthorizationKeys()
+    const replay = new MemoryReplay()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x1020_3040_5060_7080n
+    const sessionId = 0x7788_9900n
+    authorizationKeys.values.set(bytesToHex(keyId), {
+      key, keyId, temporary: true,
+      expiresAt: Math.floor(nowMilliseconds / 1_000) + 600,
+      currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)), temporarySessionId: sessionId,
+        nonce: 1n, expiresAt: Math.floor(nowMilliseconds / 1_000) + 600,
+        userId: 42, accountSessionId: 84,
+      },
+    })
+    const sentinel = new Uint8Array(512 * 1024).fill(0xa5)
+    const tombstone = Uint8Array.of(0x72, 0x65, 0x74, 0x72, 0x79)
+    let dispatches = 0
+    const server = new InlineProtocolServerSession({
+      rsaKeys: [rsa.server], authorizationKeys, replay,
+      application: { dispatch: async () => {
+        dispatches += 1
+        return { kind: "result", payload: sentinel, replayPayload: tombstone }
+      } },
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+      nowMilliseconds: () => nowMilliseconds,
+      gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    })
+    const ids = new MessageIdGenerator()
+    const firstMessageId = ids.next(nowMilliseconds, 1, 0)
+    const invoke = encodeInlineInvoke(Uint8Array.of(1))
+    const record = (messageId: bigint, sequenceNumber: number, body = invoke) =>
+      encryptRecord(key, "client-to-server", {
+        serverSalt, sessionId, messageId, sequenceNumber, body,
+      }, randomBytes(paddingFor(body.length)))
+    const resultPayload = (records: readonly Uint8Array[]) => {
+      const body = records.map((value) => decryptRecord(value, key, {
+        direction: "server-to-client", sessionId,
+        validServerSalts: new Set([serverSalt]), nowSeconds: nowMilliseconds / 1_000,
+      }).body).find((value) => serviceConstructor(value) === ServiceConstructor.rpcResult)
+      expect(body).toBeDefined()
+      const decoded = decodeInlineApplicationObject(decodeRpcResult(body!).result)
+      expect(decoded.kind).toBe("result")
+      return decoded.kind === "result" ? decoded.payload : new Uint8Array()
+    }
+
+    const first = await server.receiveConcurrent(record(firstMessageId, 1))
+    const finalized = await (await first.applicationTasks[0]!.dispatch()).finalize()
+    expect(resultPayload(finalized.responses)).toEqual(sentinel)
+    const persisted = [...replay.values.values()][0]!.result!
+    expect(persisted.length).toBeLessThan(128)
+    expect(Buffer.from(persisted).includes(Buffer.from(sentinel.slice(0, 64)))).toBeFalse()
+
+    const sameId = await server.receiveConcurrent(record(firstMessageId, 1))
+    expect(sameId.applicationTasks).toHaveLength(0)
+    expect(resultPayload(sameId.responses)).toEqual(tombstone)
+    expect(dispatches).toBe(1)
+
+    const freshId = ids.next(nowMilliseconds, 2, 0)
+    const fresh = await server.receiveConcurrent(record(freshId, 3))
+    expect(fresh.applicationTasks).toHaveLength(1)
+    expect(resultPayload((await (await fresh.applicationTasks[0]!.dispatch()).finalize()).responses)).toEqual(sentinel)
+    expect(dispatches).toBe(2)
+
+    await expect(server.receiveConcurrent(record(
+      firstMessageId, 1, encodeInlineInvoke(Uint8Array.of(2)),
+    ))).rejects.toThrow("Replay digest mismatch")
+  })
+
   test("deadline reports commit-unknown but retains replay, ordering, and execution ownership", async () => {
     const rsa = rsaFixture()
     const authorizationKeys = new MemoryAuthorizationKeys()
