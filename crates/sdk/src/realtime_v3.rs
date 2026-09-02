@@ -361,6 +361,7 @@ type WebSocket =
 
 /// Stateful, serialized Realtime V3 connection.
 pub struct InlineProtocolV3Connection {
+    url: String,
     socket: WebSocket,
     carrier: ObfuscatedClientHeader,
     authorization: InlineProtocolAuthorization,
@@ -387,9 +388,10 @@ impl InlineProtocolV3Connection {
         {
             return Err(InlineProtocolV3Error::InvalidKey);
         }
+        let url = options.url.clone();
         let (mut socket, _) = tokio::time::timeout(
             options.request_timeout,
-            tokio_tungstenite::connect_async(&options.url),
+            tokio_tungstenite::connect_async(&url),
         )
         .await
         .map_err(|_| InlineProtocolV3Error::Timeout)??;
@@ -418,6 +420,7 @@ impl InlineProtocolV3Connection {
             expires_at: None,
         };
         let mut connection = Self {
+            url,
             socket,
             carrier,
             authorization: options.authorization.clone().unwrap_or(placeholder),
@@ -466,6 +469,16 @@ impl InlineProtocolV3Connection {
     /// Returns a clone suitable for secure host-owned persistence.
     pub fn authorization(&self) -> InlineProtocolAuthorization {
         self.authorization.clone()
+    }
+
+    /// Opens a replacement carrier with the same endpoint, authorization, and
+    /// timeout. Higher-level durable operations can then replay an idempotent
+    /// request identity without owning protocol key material themselves.
+    pub async fn reconnect(&self) -> Result<Self, InlineProtocolV3Error> {
+        let mut options =
+            InlineProtocolV3Options::reconnect(self.url.clone(), self.authorization());
+        options.request_timeout = self.request_timeout;
+        Self::connect(options).await
     }
 
     /// Returns whether an authenticated temporary key has reached its exact

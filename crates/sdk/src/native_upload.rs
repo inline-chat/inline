@@ -10,11 +10,26 @@ use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 const HASH_READ_SIZE: usize = 1024 * 1024;
-const MAX_NEGOTIATED_PART_SIZE: u32 = 16 * 1024 * 1024;
+const NEGOTIATED_PART_SIZE: u32 = 512 * 1024;
+const MAX_NEGOTIATED_PARTS: u32 = 1_000;
 const MAX_PROCESSING_RETRY_SECONDS: u64 = 30;
+const MAX_V3_RESUME_ATTEMPTS: u32 = 3;
+const MAX_PART_SAVE_ATTEMPTS: u32 = 3;
 
 fn bounded_processing_retry_seconds(seconds: u32) -> u64 {
     u64::from(seconds.max(1)).min(MAX_PROCESSING_RETRY_SECONDS)
+}
+
+fn valid_upload_geometry(created: &proto::CreateUploadResult, byte_count: u64) -> bool {
+    if created.upload_id.len() != 16
+        || created.part_size == 0
+        || created.part_size != NEGOTIATED_PART_SIZE
+        || created.part_count == 0
+        || created.part_count > MAX_NEGOTIATED_PARTS
+    {
+        return false;
+    }
+    u64::from(created.part_count) == byte_count.div_ceil(u64::from(created.part_size))
 }
 
 /// High-level file input for a native Inline upload.
@@ -194,10 +209,58 @@ pub async fn upload_file_session(
 /// Uploads a file through the secure Realtime V3 RPC carrier.
 pub async fn upload_file_v3(
     client: &mut InlineProtocolV3Connection,
-    input: NativeUploadInput,
+    mut input: NativeUploadInput,
     mut progress: impl FnMut(NativeUploadProgress),
 ) -> Result<proto::UploadComplete, NativeUploadError> {
-    upload(Transport::V3(client), input, &mut progress).await
+    // The retry identity must outlive the carrier. Reusing it makes create,
+    // part saves, and finish reconciliation safe after an abrupt disconnect.
+    input
+        .client_upload_id
+        .get_or_insert_with(|| *uuid::Uuid::new_v4().as_bytes());
+    let mut resume_attempts = 0;
+    loop {
+        match upload(Transport::V3(client), input.clone(), &mut progress).await {
+            Ok(complete) => return Ok(complete),
+            Err(error)
+                if resumable_v3_upload_error(&error)
+                    && resume_attempts < MAX_V3_RESUME_ATTEMPTS =>
+            {
+                loop {
+                    resume_attempts += 1;
+                    tokio::time::sleep(v3_resume_delay(resume_attempts)).await;
+                    match client.reconnect().await {
+                        Ok(reconnected) => {
+                            *client = reconnected;
+                            break;
+                        }
+                        Err(error)
+                            if resumable_v3_transport_error(&error)
+                                && resume_attempts < MAX_V3_RESUME_ATTEMPTS => {}
+                        Err(error) => return Err(NativeUploadError::V3(error)),
+                    }
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn resumable_v3_upload_error(error: &NativeUploadError) -> bool {
+    matches!(error, NativeUploadError::V3(error) if resumable_v3_transport_error(error))
+}
+
+fn resumable_v3_transport_error(error: &InlineProtocolV3Error) -> bool {
+    matches!(
+        error,
+        InlineProtocolV3Error::CommitOutcomeUnknown
+            | InlineProtocolV3Error::Closed
+            | InlineProtocolV3Error::Timeout
+            | InlineProtocolV3Error::WebSocket(_)
+    )
+}
+
+fn v3_resume_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_millis(250 * u64::from(1_u32 << attempt.saturating_sub(1).min(3)))
 }
 
 async fn upload(
@@ -248,13 +311,7 @@ async fn upload_with_transport(
             metadata,
         })
         .await?;
-    let expected_parts = byte_count.div_ceil(u64::from(created.part_size));
-    if created.upload_id.len() != 16
-        || created.part_size == 0
-        || created.part_size > MAX_NEGOTIATED_PART_SIZE
-        || created.part_count == 0
-        || u64::from(created.part_count) != expected_parts
-    {
+    if !valid_upload_geometry(&created, byte_count) {
         return Err(NativeUploadError::Protocol);
     }
 
@@ -277,19 +334,52 @@ async fn upload_with_transport(
             let mut part = vec![0_u8; length];
             file.seek(std::io::SeekFrom::Start(offset)).await?;
             file.read_exact(&mut part).await?;
-            let save = transport
-                .save(proto::SaveUploadPartInput {
-                    upload_id: created.upload_id.clone(),
-                    part_index: index,
-                    data: part,
-                })
-                .await;
-            if let Err(error) = save {
-                let state = transport.state(created.upload_id.clone()).await;
-                match state {
-                    Ok(state) if state.accepted_parts.contains(&index) => {}
-                    _ => return Err(error),
+            let mut save_attempts = 0;
+            loop {
+                let save = transport
+                    .save(proto::SaveUploadPartInput {
+                        upload_id: created.upload_id.clone(),
+                        part_index: index,
+                        data: part.clone(),
+                    })
+                    .await;
+                let Err(error) = save else {
+                    break;
+                };
+                let state = match transport.state(created.upload_id.clone()).await {
+                    Ok(state) => state,
+                    Err(_) => return Err(error),
+                };
+                match proto::UploadStatus::try_from(state.status) {
+                    Ok(proto::UploadStatus::Complete) => {
+                        return state.complete.ok_or(NativeUploadError::Protocol);
+                    }
+                    Ok(proto::UploadStatus::Failed) => {
+                        let failure = state.failure.ok_or(NativeUploadError::Protocol)?;
+                        return Err(NativeUploadError::Rejected {
+                            code: failure.code,
+                            retryable: failure.retryable,
+                        });
+                    }
+                    Ok(proto::UploadStatus::Canceled) => return Err(NativeUploadError::Canceled),
+                    Ok(proto::UploadStatus::Expired) => return Err(NativeUploadError::Expired),
+                    Ok(proto::UploadStatus::Uploading | proto::UploadStatus::Processing)
+                        if state.accepted_parts.contains(&index) =>
+                    {
+                        break;
+                    }
+                    Ok(proto::UploadStatus::Uploading) => {}
+                    Ok(proto::UploadStatus::Processing | proto::UploadStatus::Unspecified)
+                    | Err(_) => return Err(NativeUploadError::Protocol),
                 }
+                save_attempts += 1;
+                if save_attempts >= MAX_PART_SAVE_ATTEMPTS {
+                    return Err(error);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    100 * u64::from(1_u32 << save_attempts.saturating_sub(1)),
+                ))
+                .await;
             }
             accepted[index as usize] = true;
             report_progress(&accepted, created.part_size, byte_count, progress);
@@ -342,6 +432,9 @@ async fn upload_with_transport(
         match finish.state.ok_or(NativeUploadError::Protocol)? {
             proto::finish_upload_result::State::Complete(complete) => return Ok(complete),
             proto::finish_upload_result::State::Missing(missing) => {
+                if missing.part_indices.is_empty() {
+                    return Err(NativeUploadError::Protocol);
+                }
                 for index in missing.part_indices {
                     let Some(slot) = accepted.get_mut(index as usize) else {
                         return Err(NativeUploadError::Protocol);
@@ -386,6 +479,41 @@ mod tests {
         assert_eq!(bounded_processing_retry_seconds(0), 1);
         assert_eq!(bounded_processing_retry_seconds(2), 2);
         assert_eq!(bounded_processing_retry_seconds(u32::MAX), 30);
+    }
+
+    #[test]
+    fn rejects_invalid_geometry_before_division_or_allocation() {
+        let mut created = proto::CreateUploadResult {
+            upload_id: vec![7; 16],
+            part_size: 0,
+            part_count: 1,
+            expires_at: 1_900_000_000,
+            accepted_parts: vec![],
+        };
+        assert!(!valid_upload_geometry(&created, 1));
+
+        created.part_size = NEGOTIATED_PART_SIZE;
+        created.part_count = MAX_NEGOTIATED_PARTS + 1;
+        assert!(!valid_upload_geometry(
+            &created,
+            u64::from(NEGOTIATED_PART_SIZE) * u64::from(created.part_count),
+        ));
+
+        created.part_count = 1;
+        assert!(valid_upload_geometry(&created, 3));
+    }
+
+    #[test]
+    fn classifies_only_transient_v3_carrier_failures_for_resume() {
+        assert!(resumable_v3_transport_error(&InlineProtocolV3Error::Closed));
+        assert!(resumable_v3_transport_error(
+            &InlineProtocolV3Error::Timeout
+        ));
+        assert!(!resumable_v3_transport_error(
+            &InlineProtocolV3Error::AuthorizationInvalidated,
+        ));
+        assert_eq!(v3_resume_delay(1), std::time::Duration::from_millis(250));
+        assert_eq!(v3_resume_delay(3), std::time::Duration::from_secs(1));
     }
 
     struct LostResponseTransport {

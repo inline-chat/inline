@@ -9,6 +9,7 @@ use inline_sdk::{
     InlineProtocolV3Error, NativeUploadError, NativeUploadInput, RealtimeClient, RealtimeSession,
     RpcRequest, upload_file_v2, upload_file_v3,
 };
+use rand::{RngCore, rngs::OsRng};
 
 use crate::auth::{
     AuthStore, temporary_authorization_needs_regeneration, validate_inline_protocol_authorizations,
@@ -28,6 +29,7 @@ pub(crate) struct OwnerSession {
     access_token: Option<AuthToken>,
     permanent: Option<InlineProtocolAuthorization>,
     public_keys: Vec<InlineProtocolPublicKey>,
+    v3_url: Option<String>,
 }
 
 impl OwnerSession {
@@ -43,6 +45,7 @@ impl OwnerSession {
                 access_token: Some(token),
                 permanent: None,
                 public_keys: Vec::new(),
+                v3_url: None,
             }),
             AuthCredential::InlineProtocolV3 {
                 permanent,
@@ -63,6 +66,7 @@ impl OwnerSession {
                                     access_token: None,
                                     permanent: Some(permanent),
                                     public_keys,
+                                    v3_url: Some(url),
                                 });
                             }
                             Ok(_) => {
@@ -100,6 +104,7 @@ impl OwnerSession {
                     access_token: None,
                     permanent: Some(permanent),
                     public_keys,
+                    v3_url: Some(url),
                 })
             }
         }
@@ -120,13 +125,46 @@ impl OwnerSession {
 
     pub(crate) async fn upload(
         &mut self,
-        input: NativeUploadInput,
+        mut input: NativeUploadInput,
     ) -> Result<proto::UploadComplete, Box<dyn std::error::Error>> {
+        if input.client_upload_id.is_none() {
+            let mut client_upload_id = [0; 16];
+            OsRng.fill_bytes(&mut client_upload_id);
+            input.client_upload_id = Some(client_upload_id);
+        }
         match &mut self.connection {
             OwnerConnection::V2(connection) => Ok(upload_file_v2(connection, input, |_| {}).await?),
             OwnerConnection::V3(connection) => {
-                match upload_file_v3(connection, input, |_| {}).await {
+                match upload_file_v3(connection, input.clone(), |_| {}).await {
                     Ok(upload) => Ok(upload),
+                    Err(NativeUploadError::V3(error))
+                        if temporary_reconnect_can_regenerate(&error) =>
+                    {
+                        let permanent = self.permanent.as_ref().ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "V3 owner has no permanent key",
+                            )
+                        })?;
+                        let url = self.v3_url.as_deref().ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "V3 owner has no realtime endpoint",
+                            )
+                        })?;
+                        let keys = self
+                            .public_keys
+                            .iter()
+                            .cloned()
+                            .map(TryInto::try_into)
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let mut regenerated =
+                            identity::connect_inline_protocol_fresh(url, keys, true).await?;
+                        regenerated.bind_temporary(permanent).await?;
+                        regenerated.call(proto::GetMeInput {}).await?;
+                        *connection = regenerated;
+                        Ok(upload_file_v3(connection, input, |_| {}).await?)
+                    }
                     Err(NativeUploadError::V3(error)) => Err(error.into()),
                     Err(error) => Err(error.into()),
                 }

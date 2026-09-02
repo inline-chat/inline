@@ -108,6 +108,7 @@ enum AuthenticatedRealtime {
     V3 {
         connection: InlineProtocolV3Connection,
         auth_store: AuthStore,
+        url: String,
     },
 }
 
@@ -133,6 +134,7 @@ impl AuthenticatedRealtime {
             Self::V3 {
                 connection,
                 auth_store,
+                ..
             } => match connection.call(request).await {
                 Ok(response) => Ok(response),
                 Err(error) => {
@@ -171,20 +173,58 @@ impl AuthenticatedRealtime {
             Self::V3 {
                 connection,
                 auth_store,
-            } => match upload_file_v3(connection, input, |_| {}).await {
-                Ok(upload) => Ok(upload),
-                Err(error) => {
-                    if matches!(
-                        &error,
-                        NativeUploadError::V3(error) if error.is_authorization_invalidated()
-                    ) {
-                        auth_store.clear_account_authority()?;
-                    }
-                    Err(error.into())
+                url,
+            } => {
+                let mut input = input;
+                if input.client_upload_id.is_none() {
+                    let mut client_upload_id = [0; 16];
+                    OsRng.fill_bytes(&mut client_upload_id);
+                    input.client_upload_id = Some(client_upload_id);
                 }
-            },
+                match upload_file_v3(connection, input.clone(), |_| {}).await {
+                    Ok(upload) => Ok(upload),
+                    Err(NativeUploadError::V3(error))
+                        if owner_session::temporary_reconnect_can_regenerate(&error) =>
+                    {
+                        let Some((permanent, _)) =
+                            auth_store.load_inline_protocol_authorizations()?
+                        else {
+                            auth_store.clear_account_authority()?;
+                            return Err(error.into());
+                        };
+                        *connection =
+                            regenerate_inline_protocol_temporary(url, &permanent, auth_store)
+                                .await?;
+                        Ok(upload_file_v3(connection, input, |_| {}).await?)
+                    }
+                    Err(error) => Err(error.into()),
+                }
+            }
         }
     }
+}
+
+async fn regenerate_inline_protocol_temporary(
+    url: &str,
+    permanent: &inline_sdk::InlineProtocolAuthorization,
+    auth_store: &AuthStore,
+) -> Result<InlineProtocolV3Connection, Box<dyn std::error::Error>> {
+    let keys = identity::resolve_inline_protocol_public_ring()?;
+    let mut regenerated = identity::connect_inline_protocol_fresh(url, keys, true).await?;
+    if let Err(error) = regenerated.bind_temporary(permanent).await {
+        if error.is_authorization_invalidated() {
+            auth_store.clear_account_authority()?;
+        }
+        return Err(error.into());
+    }
+    if let Err(error) = regenerated.call(proto::GetMeInput {}).await {
+        if error.is_authorization_invalidated() {
+            auth_store.clear_account_authority()?;
+        }
+        return Err(error.into());
+    }
+    auth_store.store_inline_protocol_authorizations(permanent, &regenerated.authorization())?;
+    Ok(regenerated)
 }
 
 fn clear_owned_authority_if_invalidated(
@@ -5095,6 +5135,7 @@ async fn connect_authenticated_realtime(
                         return Ok(AuthenticatedRealtime::V3 {
                             connection: cached,
                             auth_store: auth_store.clone(),
+                            url,
                         });
                     }
                     Ok(_) => {
@@ -5122,25 +5163,12 @@ async fn connect_authenticated_realtime(
             }
         }
 
-        let keys = identity::resolve_inline_protocol_public_ring()?;
-        let mut regenerated = identity::connect_inline_protocol_fresh(&url, keys, true).await?;
-        if let Err(error) = regenerated.bind_temporary(&permanent).await {
-            if error.is_authorization_invalidated() {
-                auth_store.clear_account_authority()?;
-            }
-            return Err(error.into());
-        }
-        if let Err(error) = regenerated.call(proto::GetMeInput {}).await {
-            if error.is_authorization_invalidated() {
-                auth_store.clear_account_authority()?;
-            }
-            return Err(error.into());
-        }
-        auth_store
-            .store_inline_protocol_authorizations(&permanent, &regenerated.authorization())?;
+        let regenerated =
+            regenerate_inline_protocol_temporary(&url, &permanent, auth_store).await?;
         return Ok(AuthenticatedRealtime::V3 {
             connection: regenerated,
             auth_store: auth_store.clone(),
+            url,
         });
     }
 
