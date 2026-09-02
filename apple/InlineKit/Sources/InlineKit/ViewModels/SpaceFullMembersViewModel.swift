@@ -2,6 +2,7 @@ import Combine
 import GRDB
 import Logger
 
+@MainActor
 public final class SpaceFullMembersViewModel: ObservableObject {
   /// The space information.
   @Published public private(set) var space: Space?
