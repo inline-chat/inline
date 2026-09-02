@@ -29,6 +29,7 @@ import type {
   SendChatActionParams,
   SearchMessagesParams,
   SetMyCommandsParams,
+  SetMySkillsParams,
   SetThreadTitleParams,
   SetWebhookParams,
   UnpinMessageParams,
@@ -96,6 +97,7 @@ import {
   BotGetSpaceSuccess,
   BotCreateThreadSuccess,
   BotGetMyCommandsSuccess,
+  BotGetMySkillsSuccess,
   BotCreateAgentSuccess,
   BotDeleteAgentSuccess,
   BotGetAgentSuccess,
@@ -135,6 +137,7 @@ import {
   SendChatActionInput,
   SetWebhookInput,
   SetMyCommandsInput,
+  SetMySkillsInput,
   ForwardMessageInput,
   ForwardMessagesInput,
   GetSpaceInput,
@@ -334,6 +337,21 @@ const BotMethodDocumentation = {
     summary: "Delete bot commands",
     description:
       "Deletes every command published by the authenticated bot. Returns an empty result when the command list is cleared.",
+  },
+  getMySkills: {
+    summary: "Get bot skills",
+    description:
+      "Returns the installed skill catalog currently published by the authenticated bot harness.",
+  },
+  setMySkills: {
+    summary: "Replace bot skills",
+    description:
+      "Replaces the authenticated bot's complete installed-skill catalog. Send an empty array to clear it.",
+  },
+  deleteMySkills: {
+    summary: "Delete bot skills",
+    description:
+      "Deletes every installed skill published by the authenticated bot harness.",
   },
   forwardMessage: { summary: "Forward a message", description: "Forwards one accessible message into another accessible chat." },
   forwardMessages: { summary: "Forward messages", description: "Forwards up to 100 accessible messages and returns their new IDs. Missing source IDs are skipped." },
@@ -652,6 +670,24 @@ const HeaderBotEndpoints = {
     BotMethodDocumentation.deleteMyCommands,
     { success: BotEmptySuccess },
   ),
+  getMySkills: headerGet(
+    "headerGetMySkills",
+    "/bot/getMySkills",
+    BotMethodDocumentation.getMySkills,
+    { query: {}, success: BotGetMySkillsSuccess },
+  ),
+  setMySkills: headerPost(
+    "headerSetMySkills",
+    "/bot/setMySkills",
+    BotMethodDocumentation.setMySkills,
+    { payload: SetMySkillsInput, success: BotEmptySuccess },
+  ),
+  deleteMySkills: headerPost(
+    "headerDeleteMySkills",
+    "/bot/deleteMySkills",
+    BotMethodDocumentation.deleteMySkills,
+    { success: BotEmptySuccess },
+  ),
   forwardMessage: headerPost("headerForwardMessage", "/bot/forwardMessage", BotMethodDocumentation.forwardMessage, { payload: ForwardMessageInput, success: BotMessageSuccess }),
   forwardMessages: headerPost("headerForwardMessages", "/bot/forwardMessages", BotMethodDocumentation.forwardMessages, { payload: ForwardMessagesInput, success: BotForwardMessagesSuccess }),
   pinMessage: headerPost("headerPinMessage", "/bot/pinMessage", BotMethodDocumentation.pinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
@@ -833,6 +869,24 @@ const PathBotEndpoints = {
     "pathDeleteMyCommands",
     "/bot:token/deleteMyCommands",
     BotMethodDocumentation.deleteMyCommands,
+    { success: BotEmptySuccess },
+  ),
+  getMySkills: pathGet(
+    "pathGetMySkills",
+    "/bot:token/getMySkills",
+    BotMethodDocumentation.getMySkills,
+    { query: {}, success: BotGetMySkillsSuccess },
+  ),
+  setMySkills: pathPost(
+    "pathSetMySkills",
+    "/bot:token/setMySkills",
+    BotMethodDocumentation.setMySkills,
+    { payload: SetMySkillsInput, success: BotEmptySuccess },
+  ),
+  deleteMySkills: pathPost(
+    "pathDeleteMySkills",
+    "/bot:token/deleteMySkills",
+    BotMethodDocumentation.deleteMySkills,
     { success: BotEmptySuccess },
   ),
   forwardMessage: pathPost("pathForwardMessage", "/bot:token/forwardMessage", BotMethodDocumentation.forwardMessage, { payload: ForwardMessageInput, success: BotMessageSuccess }),
@@ -1038,6 +1092,9 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.deleteAgent,
     HeaderBotEndpoints.setMyCommands,
     HeaderBotEndpoints.deleteMyCommands,
+    HeaderBotEndpoints.getMySkills,
+    HeaderBotEndpoints.setMySkills,
+    HeaderBotEndpoints.deleteMySkills,
     HeaderBotEndpoints.forwardMessage,
     HeaderBotEndpoints.forwardMessages,
     HeaderBotEndpoints.pinMessage,
@@ -1078,6 +1135,9 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     PathBotEndpoints.deleteAgent,
     PathBotEndpoints.setMyCommands,
     PathBotEndpoints.deleteMyCommands,
+    PathBotEndpoints.getMySkills,
+    PathBotEndpoints.setMySkills,
+    PathBotEndpoints.deleteMySkills,
     PathBotEndpoints.forwardMessage,
     PathBotEndpoints.forwardMessages,
     PathBotEndpoints.pinMessage,
@@ -1274,6 +1334,19 @@ const normalizeBotCommandForSchema = (
   return normalized
 }
 
+const normalizeBotSkillForSchema = (
+  value: unknown,
+): unknown => {
+  if (!isRecord(value)) return value
+  const normalized = normalizeIntegerFields(value, ["sort_order"])
+  for (const field of ["key", "name", "description"] as const) {
+    if (typeof normalized[field] === "string") {
+      normalized[field] = normalized[field].trim()
+    }
+  }
+  return normalized
+}
+
 const booleanForValidation = (
   value: unknown,
 ): unknown => {
@@ -1376,6 +1449,12 @@ const normalizeInputForSchema = (
       ? commands.map(normalizeBotCommandForSchema)
       : commands
   }
+  if (operation === "setMySkills") {
+    const skills = parseCompatibilityJson(normalized["skills"])
+    normalized["skills"] = Array.isArray(skills)
+      ? skills.map(normalizeBotSkillForSchema)
+      : skills
+  }
   if (operation === "getUpdates" || operation === "setWebhook") {
     if ("allowed_updates" in normalized) {
       normalized["allowed_updates"] = parseCompatibilityJson(normalized["allowed_updates"])
@@ -1413,8 +1492,10 @@ const validateInput = (
     switch (operation) {
       case "getMe":
       case "getMyCommands":
+      case "getMySkills":
       case "getMyAgents":
       case "deleteMyCommands":
+      case "deleteMySkills":
       case "getWebhookInfo":
         return Effect.succeed(value)
       case "getSpace":
@@ -1466,6 +1547,8 @@ const validateInput = (
         return Schema.decodeUnknownEffect(
           SetMyCommandsInput,
         )(value)
+      case "setMySkills":
+        return Schema.decodeUnknownEffect(SetMySkillsInput)(value)
       case "forwardMessage": return Schema.decodeUnknownEffect(ForwardMessageInput)(value)
       case "forwardMessages": return Schema.decodeUnknownEffect(ForwardMessagesInput)(value)
       case "pinMessage":
@@ -1500,8 +1583,10 @@ const prepareInput = (
   if (
     operation === "getMe" ||
     operation === "getMyCommands" ||
+    operation === "getMySkills" ||
     operation === "getMyAgents" ||
     operation === "deleteMyCommands"
+    || operation === "deleteMySkills"
     || operation === "getWebhookInfo"
   ) {
     return Effect.succeed({})
@@ -1603,6 +1688,12 @@ const runOperation = (
         )
       case "deleteMyCommands":
         return operations.deleteMyCommands(context)
+      case "getMySkills":
+        return operations.getMySkills(context)
+      case "setMySkills":
+        return operations.setMySkills(input as SetMySkillsParams, context)
+      case "deleteMySkills":
+        return operations.deleteMySkills(context)
       case "forwardMessage": return operations.forwardMessage(input as ForwardMessageParams, context)
       case "forwardMessages": return operations.forwardMessages(input as ForwardMessagesParams, context)
       case "pinMessage": return operations.pinMessage(input as PinMessageParams, context)
@@ -1670,6 +1761,8 @@ const validateSuccessEnvelope = (
         return Schema.decodeUnknownEffect(
           BotGetMyCommandsSuccess,
         )(envelope)
+      case "getMySkills":
+        return Schema.decodeUnknownEffect(BotGetMySkillsSuccess)(envelope)
       case "getChatParticipant": return Schema.decodeUnknownEffect(BotGetChatParticipantSuccess)(envelope)
       case "getChatParticipantCount": return Schema.decodeUnknownEffect(BotGetChatParticipantCountSuccess)(envelope)
       case "deleteMessage":
@@ -1680,6 +1773,8 @@ const validateSuccessEnvelope = (
       case "sendChatAction":
       case "setMyCommands":
       case "deleteMyCommands":
+      case "setMySkills":
+      case "deleteMySkills":
       case "pinMessage":
       case "unpinMessage":
       case "addThreadParticipant":
@@ -2086,6 +2181,12 @@ export const makeBotRouteGroup = () => {
                 undefined,
               ),
           )
+          .handleRaw("headerGetMySkills", ({ request }) =>
+            execute("getMySkills", request, undefined))
+          .handleRaw("headerSetMySkills", ({ request }) =>
+            execute("setMySkills", request, undefined))
+          .handleRaw("headerDeleteMySkills", ({ request }) =>
+            execute("deleteMySkills", request, undefined))
           .handleRaw("headerForwardMessage", ({ request }) => execute("forwardMessage", request, undefined))
           .handleRaw("headerForwardMessages", ({ request }) => execute("forwardMessages", request, undefined))
           .handleRaw("headerPinMessage", ({ request }) => execute("pinMessage", request, undefined))
@@ -2205,6 +2306,12 @@ export const makeBotRouteGroup = () => {
                 params.token,
               ),
           )
+          .handleRaw("pathGetMySkills", ({ params, request }) =>
+            execute("getMySkills", request, params.token))
+          .handleRaw("pathSetMySkills", ({ params, request }) =>
+            execute("setMySkills", request, params.token))
+          .handleRaw("pathDeleteMySkills", ({ params, request }) =>
+            execute("deleteMySkills", request, params.token))
           .handleRaw("pathForwardMessage", ({ params, request }) => execute("forwardMessage", request, params.token))
           .handleRaw("pathForwardMessages", ({ params, request }) => execute("forwardMessages", request, params.token))
           .handleRaw("pathPinMessage", ({ params, request }) => execute("pinMessage", request, params.token))

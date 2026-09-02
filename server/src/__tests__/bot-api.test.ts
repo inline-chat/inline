@@ -1048,6 +1048,85 @@ describe("Bot HTTP API", () => {
     })
   })
 
+  it("publishes and removes the authenticated harness skill catalog", async () => {
+    const [bot] = await db
+      .insert(users)
+      .values({
+        firstName: "SkillsBot",
+        username: "skillsbot",
+        bot: true,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    const { token } = await generateToken(bot!.id)
+    await SessionsModel.create({
+      userId: bot!.id,
+      tokenHash: hashToken(token),
+      personalData: {},
+      clientType: "api",
+    })
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    }
+
+    const setRes = await app.handle(
+      new Request("http://localhost/bot/setMySkills", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          skills: [
+            { key: "data-analysis", name: "Data Analysis", sort_order: 20 },
+            { key: "research", name: "Research", description: "Research with sources", sort_order: 10 },
+          ],
+        }),
+      }),
+    )
+    expect(setRes.status).toBe(200)
+
+    const getRes = await app.handle(
+      new Request("http://localhost/bot/getMySkills", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    )
+    expect(getRes.status).toBe(200)
+    expect(await getRes.json()).toEqual({
+      ok: true,
+      result: {
+        skills: [
+          { key: "research", name: "Research", description: "Research with sources", sort_order: 10 },
+          { key: "data-analysis", name: "Data Analysis", sort_order: 20 },
+        ],
+      },
+    })
+
+    const duplicateRes = await app.handle(
+      new Request("http://localhost/bot/setMySkills", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          skills: [
+            { key: "research", name: "Research" },
+            { key: "research", name: "Duplicate" },
+          ],
+        }),
+      }),
+    )
+    expect(duplicateRes.status).toBe(400)
+
+    const deleteRes = await app.handle(
+      new Request("http://localhost/bot/deleteMySkills", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    )
+    expect(deleteRes.status).toBe(200)
+    expect(await deleteRes.json()).toEqual({ ok: true, result: {} })
+  })
+
   it("rejects invalid command payloads for setMyCommands", async () => {
     const [bot] = await db
       .insert(users)

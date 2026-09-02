@@ -64,6 +64,13 @@ export const TBotCommand = t.Object({
   sort_order: t.Optional(t.Number()),
 })
 
+export const TBotSkill = t.Object({
+  key: t.String({ minLength: 1, maxLength: 256 }),
+  name: t.String({ minLength: 1, maxLength: 256 }),
+  description: t.Optional(t.String({ maxLength: 4_000 })),
+  sort_order: t.Optional(t.Integer()),
+})
+
 export const TBotFile = t.Object({
   file_id: t.String(),
   file_name: t.Optional(t.String()),
@@ -295,6 +302,10 @@ export const TDeleteWebhookInput = t.Object({ drop_pending_updates: t.Optional(t
 
 export const TSetMyCommandsInput = t.Object({
   commands: t.Array(TBotCommand),
+})
+
+export const TSetMySkillsInput = t.Object({
+  skills: t.Array(TBotSkill, { maxItems: 250 }),
 })
 
 export const TForwardMessageInput = t.Object({

@@ -73,6 +73,34 @@ describe("bot Agents", () => {
     expect((await listBotAgents({ botUserId }, botContext)).agents).toEqual([])
   })
 
+  test("keeps skill and instructions independently optional", async () => {
+    const createdBot = await createBot(
+      { name: "Flexible Agent Host", username: "flexibleagenthostbot" },
+      creatorContext,
+    )
+    const botUserId = createdBot.bot?.id
+    if (!botUserId) throw new Error("Expected bot")
+
+    const variants = [
+      { name: "Name Only" },
+      { name: "Instructions Only", instructions: "Prefer compact tables." },
+      { name: "Skill Only", skillKey: "data-analysis" },
+      {
+        name: "Skill And Instructions",
+        skillKey: "research",
+        instructions: "Cite primary sources.",
+      },
+    ]
+
+    for (const variant of variants) {
+      const created = await createBotAgent({ botUserId, ...variant }, creatorContext)
+      expect(created.agent).toMatchObject(variant)
+    }
+
+    const listed = await listBotAgents({ botUserId }, creatorContext)
+    expect(listed.agents).toHaveLength(4)
+  })
+
   test("rejects a user who does not manage the backing bot", async () => {
     const createdBot = await createBot(
       { name: "Private Agent Host", username: "privateagenthostbot" },

@@ -32,6 +32,7 @@ export const relations = defineRelations(
     spaceSettings: schema.spaceSettings,
     updates: schema.updates,
     botCommands: schema.botCommands,
+    botSkills: schema.botSkills,
     botUpdateStreams: schema.botUpdateStreams,
     botUpdates: schema.botUpdates,
     botMessageRoutes: schema.botMessageRoutes,
@@ -54,6 +55,7 @@ export const relations = defineRelations(
         optional: true,
       }),
       botCommands: r.many.botCommands(),
+      botSkills: r.many.botSkills(),
       botUpdateStream: r.one.botUpdateStreams({
         from: r.users.id,
         to: r.botUpdateStreams.botUserId,
@@ -76,6 +78,13 @@ export const relations = defineRelations(
     botCommands: {
       botUser: r.one.users({
         from: r.botCommands.botUserId,
+        to: r.users.id,
+      }),
+    },
+
+    botSkills: {
+      botUser: r.one.users({
+        from: r.botSkills.botUserId,
         to: r.users.id,
       }),
     },

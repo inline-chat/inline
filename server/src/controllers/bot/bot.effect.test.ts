@@ -20,6 +20,7 @@ import type {
   SendMessageParams,
   SendReactionParams,
   SetMyCommandsParams,
+  SetMySkillsParams,
 } from "@inline-chat/bot-api-types"
 import {
   ErrorReporter,
@@ -132,6 +133,9 @@ const makeOperations = (
   getMyCommands: () => unused("getMyCommands"),
   setMyCommands: () => unused("setMyCommands"),
   deleteMyCommands: () => unused("deleteMyCommands"),
+  getMySkills: () => unused("getMySkills"),
+  setMySkills: () => unused("setMySkills"),
+  deleteMySkills: () => unused("deleteMySkills"),
   forwardMessage: () => unused("forwardMessage"),
   forwardMessages: () => unused("forwardMessages"),
   pinMessage: () => unused("pinMessage"),
@@ -326,6 +330,14 @@ describe("Effect Bot routes", () => {
         invoked("setMyCommands", {}),
       deleteMyCommands: () =>
         invoked("deleteMyCommands", {}),
+      getMySkills: () =>
+        invoked("getMySkills", {
+          skills: [{ key: "analysis", name: "Analysis" }],
+        }),
+      setMySkills: () =>
+        invoked("setMySkills", {}),
+      deleteMySkills: () =>
+        invoked("deleteMySkills", {}),
       forwardMessage: () => invoked("forwardMessage", { message: botMessage }),
       forwardMessages: () => invoked("forwardMessages", { message_ids: [102] }),
       pinMessage: () => invoked("pinMessage", {}),
@@ -443,6 +455,23 @@ describe("Effect Bot routes", () => {
         method: "POST",
         input: {},
       },
+      {
+        name: "getMySkills",
+        method: "GET",
+        input: undefined,
+      },
+      {
+        name: "setMySkills",
+        method: "POST",
+        input: {
+          skills: [{ key: "analysis", name: "Analysis" }],
+        },
+      },
+      {
+        name: "deleteMySkills",
+        method: "POST",
+        input: {},
+      },
       { name: "forwardMessage", method: "POST", input: { chat_id: 99, from_chat_id: 98, message_id: 101 } },
       { name: "forwardMessages", method: "POST", input: { chat_id: 99, from_chat_id: 98, message_ids: [101] } },
       { name: "pinMessage", method: "POST", input: { chat_id: 99, message_id: 101 } },
@@ -505,7 +534,7 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(62)
+      expect(calls).toHaveLength(68)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
@@ -601,6 +630,7 @@ describe("Effect Bot routes", () => {
     let sendInput: SendMessageParams | undefined
     let reactionInput: SendReactionParams | undefined
     let commandsInput: SetMyCommandsParams | undefined
+    let skillsInput: SetMySkillsParams | undefined
     const operations = makeOperations({
       sendMessage: (input) => {
         sendInput = input
@@ -617,6 +647,10 @@ describe("Effect Bot routes", () => {
       },
       setMyCommands: (input) => {
         commandsInput = input
+        return Effect.succeed({})
+      },
+      setMySkills: (input) => {
+        skillsInput = input
         return Effect.succeed({})
       },
     })
@@ -655,6 +689,18 @@ describe("Effect Bot routes", () => {
           ],
         }),
       )
+      const skillsResponse = await kernel.handler(
+        jsonRequest("/bot/setMySkills", {
+          skills: [
+            {
+              key: " data-analysis ",
+              name: " Data Analysis ",
+              description: " Analyze a dataset ",
+              sort_order: "20",
+            },
+          ],
+        }),
+      )
 
       expect(sendResponse.status).toBe(200)
       expect(await sendResponse.json()).toMatchObject({
@@ -682,6 +728,17 @@ describe("Effect Bot routes", () => {
             command: "deploy",
             description: "Deploy the latest build",
             sort_order: 10,
+          },
+        ],
+      })
+      expect(skillsResponse.status).toBe(200)
+      expect(skillsInput).toEqual({
+        skills: [
+          {
+            key: "data-analysis",
+            name: "Data Analysis",
+            description: "Analyze a dataset",
+            sort_order: 20,
           },
         ],
       })
@@ -1135,7 +1192,7 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(80)
+    expect(Object.keys(spec.paths)).toHaveLength(86)
 
     const expectedMethods = [
       "getMe",
@@ -1149,6 +1206,7 @@ describe("Effect Bot routes", () => {
       "deleteMessages",
       "sendReaction",
       "getMyCommands",
+      "getMySkills",
       "createAgent",
       "getAgent",
       "getMyAgents",
@@ -1156,6 +1214,8 @@ describe("Effect Bot routes", () => {
       "deleteAgent",
       "setMyCommands",
       "deleteMyCommands",
+      "setMySkills",
+      "deleteMySkills",
       "forwardMessage",
       "forwardMessages",
       "pinMessage",

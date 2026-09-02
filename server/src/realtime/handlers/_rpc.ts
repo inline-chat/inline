@@ -38,6 +38,7 @@ import { createBotHandler } from "./createBot"
 import { listBotsHandler } from "./listBots"
 import { deleteBotHandler } from "./deleteBot"
 import { getBotCommandsHandler } from "./getBotCommands"
+import { getBotSkillsHandler } from "./getBotSkills"
 import { setBotCommandsHandler } from "./setBotCommands"
 import { getPeerBotCommandsHandler } from "./getPeerBotCommands"
 import { getPeerBotsHandler } from "./getPeerBots"
@@ -331,6 +332,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await getPeerBotCommandsHandler(call.input.getPeerBotCommands, handlerContext)
       return { oneofKind: "getPeerBotCommands", getPeerBotCommands: result }
+    }
+
+    case Method.GET_BOT_SKILLS: {
+      if (call.input.oneofKind !== "getBotSkills") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getBotSkillsHandler(call.input.getBotSkills, handlerContext)
+      return { oneofKind: "getBotSkills", getBotSkills: result }
     }
 
     case Method.GET_PEER_BOTS: {

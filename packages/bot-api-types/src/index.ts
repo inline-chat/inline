@@ -447,6 +447,15 @@ export type BotCommand = {
   sort_order?: number
 }
 
+export type BotSkill = {
+  /** Stable key passed back in `activated_agent.skill_key`. */
+  key: string
+  /** Human-facing skill name shown when creating an Agent. */
+  name: string
+  description?: string
+  sort_order?: number
+}
+
 export type GetMeResult = { user: BotUser }
 export type BotSpace = {
   id: number
@@ -471,6 +480,7 @@ export type ForwardMessagesResult = { message_ids: number[] }
 export type GetChatParticipantResult = { participant: BotChatParticipant }
 export type GetChatParticipantCountResult = { count: number }
 export type GetMyCommandsResult = { commands: BotCommand[] }
+export type GetMySkillsResult = { skills: BotSkill[] }
 export type EditMessageTextResult = { message: BotMessage }
 export type EditMessageActionsResult = { message: BotMessage }
 export type EmptyResult = Record<string, never>
@@ -665,6 +675,10 @@ export type SetMyCommandsParams = {
   commands: BotCommand[]
 }
 
+export type SetMySkillsParams = {
+  skills: BotSkill[]
+}
+
 export type BotMethodName =
   | "getMe"
   | "getSpace"
@@ -675,6 +689,7 @@ export type BotMethodName =
   | "createThread"
   | "createReplyThread"
   | "getMyCommands"
+  | "getMySkills"
   | "createAgent"
   | "getAgent"
   | "getMyAgents"
@@ -682,6 +697,8 @@ export type BotMethodName =
   | "deleteAgent"
   | "setMyCommands"
   | "deleteMyCommands"
+  | "setMySkills"
+  | "deleteMySkills"
   | "sendMessage"
   | "editMessageText"
   | "editMessageActions"
@@ -717,6 +734,7 @@ export type BotMethodParamsByName = {
   createThread: CreateThreadParams
   createReplyThread: CreateReplyThreadParams
   getMyCommands: undefined
+  getMySkills: undefined
   createAgent: CreateAgentParams
   getAgent: GetAgentParams
   getMyAgents: undefined
@@ -724,6 +742,8 @@ export type BotMethodParamsByName = {
   deleteAgent: DeleteAgentParams
   setMyCommands: SetMyCommandsParams
   deleteMyCommands: undefined
+  setMySkills: SetMySkillsParams
+  deleteMySkills: undefined
   sendMessage: SendMessageParams
   editMessageText: EditMessageTextParams
   editMessageActions: EditMessageActionsParams
@@ -760,6 +780,7 @@ export type BotMethodResultByName = {
   createThread: CreateThreadResult
   createReplyThread: CreateReplyThreadResult
   getMyCommands: GetMyCommandsResult
+  getMySkills: GetMySkillsResult
   createAgent: CreateAgentResult
   getAgent: GetAgentResult
   getMyAgents: GetMyAgentsResult
@@ -767,6 +788,8 @@ export type BotMethodResultByName = {
   deleteAgent: DeleteAgentResult
   setMyCommands: EmptyResult
   deleteMyCommands: EmptyResult
+  setMySkills: EmptyResult
+  deleteMySkills: EmptyResult
   sendMessage: SendMessageResult
   editMessageText: EditMessageTextResult
   editMessageActions: EditMessageActionsResult

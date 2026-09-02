@@ -3,6 +3,7 @@ import type {
   BotChat,
   BotChatLastMessage,
   BotCommand,
+  BotSkill,
   BotMessage,
   BotPeer,
   BotPeerId,
@@ -40,6 +41,7 @@ import type {
   SearchMessagesParams,
   SetWebhookParams,
   SetMyCommandsParams,
+  SetMySkillsParams,
   UnpinMessageParams,
   UploadFileResult,
   UpdateAgentParams,
@@ -63,6 +65,7 @@ import {
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
+import { BotSkillsModel } from "@in/server/db/models/botSkills"
 import { MembersModel } from "@in/server/db/models/members"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { FileModel } from "@in/server/db/models/files"
@@ -172,6 +175,7 @@ const toBotUser = (
 
 const BOT_COMMAND_RE = /^[a-z0-9_]+$/
 const BOT_COMMAND_LIMIT = 100
+const BOT_SKILL_LIMIT = 250
 
 const toBotCommand = (row: {
   readonly command: string
@@ -180,6 +184,18 @@ const toBotCommand = (row: {
 }): BotCommand => ({
   command: row.command,
   description: row.description,
+  sort_order: row.sortOrder ?? undefined,
+})
+
+const toBotSkill = (row: {
+  readonly key: string
+  readonly name: string
+  readonly description?: string | null | undefined
+  readonly sortOrder?: number | null | undefined
+}): BotSkill => ({
+  key: row.key,
+  name: row.name,
+  description: row.description ?? undefined,
   sort_order: row.sortOrder ?? undefined,
 })
 
@@ -351,6 +367,72 @@ const normalizeBotCommandsInput = (
     }
 
     return { command, description, sortOrder }
+  })
+}
+
+const normalizeBotSkillsInput = (
+  value: unknown,
+): Array<{
+  key: string
+  name: string
+  description?: string
+  sortOrder: number
+}> => {
+  const parsed = parseMaybeJsonValue(value)
+  if (!Array.isArray(parsed) || parsed.length > BOT_SKILL_LIMIT) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const seenKeys = new Set<string>()
+  return parsed.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+
+    const rawKey = item["key"]
+    const rawName = item["name"]
+    const rawDescription = item["description"]
+    const rawSortOrder = item["sort_order"]
+    if (
+      typeof rawKey !== "string" ||
+      typeof rawName !== "string" ||
+      (rawDescription !== undefined && typeof rawDescription !== "string")
+    ) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+
+    const key = rawKey.trim()
+    const name = rawName.trim()
+    const description = rawDescription?.trim() || undefined
+    let sortOrder = index
+    if (rawSortOrder !== undefined) {
+      const parsedSortOrder = typeof rawSortOrder === "string"
+        ? Number(rawSortOrder)
+        : typeof rawSortOrder === "number"
+          ? rawSortOrder
+          : Number.NaN
+      if (
+        !Number.isInteger(parsedSortOrder) ||
+        parsedSortOrder < -2_147_483_648 ||
+        parsedSortOrder > 2_147_483_647
+      ) {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+      sortOrder = parsedSortOrder
+    }
+
+    if (
+      key.length < 1 ||
+      key.length > 256 ||
+      name.length < 1 ||
+      name.length > 256 ||
+      (description?.length ?? 0) > 4_000 ||
+      seenKeys.has(key)
+    ) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+    seenKeys.add(key)
+    return { key, name, description, sortOrder }
   })
 }
 
@@ -991,7 +1073,8 @@ const inputRecord = (
     | SendMessageParams
     | EditMessageTextParams
     | EditMessageActionsParams
-    | SetMyCommandsParams,
+    | SetMyCommandsParams
+    | SetMySkillsParams,
 ): Record<string, unknown> =>
   input as Record<string, unknown>
 
@@ -1827,6 +1910,29 @@ const deleteMyCommands = async (
   return {}
 }
 
+const getMySkills = async (
+  context: BotOperationContext,
+) => ({
+  skills: (await BotSkillsModel.getForBotUserId(context.currentUserId)).map(toBotSkill),
+})
+
+const setMySkills = async (
+  input: SetMySkillsParams,
+  context: BotOperationContext,
+) => {
+  const raw = inputRecord(input)
+  const skills = normalizeBotSkillsInput(raw["skills"])
+  await BotSkillsModel.replaceForBotUserId(context.currentUserId, skills)
+  return {}
+}
+
+const deleteMySkills = async (
+  context: BotOperationContext,
+) => {
+  await BotSkillsModel.deleteForBotUserId(context.currentUserId)
+  return {}
+}
+
 export const botOperationHandlers: BotOperationHandlers = {
   getMe,
   createAgent,
@@ -1868,4 +1974,7 @@ export const botOperationHandlers: BotOperationHandlers = {
   getMyCommands,
   setMyCommands,
   deleteMyCommands,
+  getMySkills,
+  setMySkills,
+  deleteMySkills,
 }

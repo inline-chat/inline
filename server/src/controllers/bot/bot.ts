@@ -6,6 +6,7 @@ import { TApiEnvelope, normalizeInputId } from "./helpers"
 import {
   TBotChat,
   TBotCommand,
+  TBotSkill,
   TBotChatParticipant,
   TBotFile,
   TBotMessage,
@@ -24,6 +25,7 @@ import {
   TCreateThreadInput,
   TCreateReplyThreadInput,
   TSetMyCommandsInput,
+  TSetMySkillsInput,
   TForwardMessageInput,
   TPinMessageInput,
   TGetChatParticipantInput,
@@ -1050,6 +1052,41 @@ const botMethods = (authPlugin: any): any => {
     {
       response: TApiEnvelope(t.Object({})),
     },
+  )
+
+  app.get(
+    "/getMySkills",
+    async ({ store }: any) => ({
+      ok: true,
+      result: await botOperationHandlers.getMySkills(ctxFromStore(store)),
+    }),
+    {
+      response: TApiEnvelope(t.Object({ skills: t.Array(TBotSkill) })),
+    },
+  )
+
+  app.post(
+    "/setMySkills",
+    async ({ body, query, store }: any) => ({
+      ok: true,
+      result: await botOperationHandlers.setMySkills(
+        mergePostInput(body, query) as any,
+        ctxFromStore(store),
+      ),
+    }),
+    {
+      detail: jsonBodyDoc(TSetMySkillsInput),
+      response: TApiEnvelope(t.Object({})),
+    },
+  )
+
+  app.post(
+    "/deleteMySkills",
+    async ({ store }: any) => ({
+      ok: true,
+      result: await botOperationHandlers.deleteMySkills(ctxFromStore(store)),
+    }),
+    { response: TApiEnvelope(t.Object({})) },
   )
 
   app.post("/forwardMessage", async ({ body, query, store }: any) => ({

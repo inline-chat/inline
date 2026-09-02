@@ -3,6 +3,7 @@ import type {
   BotAttachment as NeutralBotAttachment,
   BotChat as NeutralBotChat,
   BotCommand as NeutralBotCommand,
+  BotSkill as NeutralBotSkill,
   BotFile as NeutralBotFile,
   BotMedia as NeutralBotMedia,
   BotMessage as NeutralBotMessage,
@@ -239,6 +240,24 @@ export const BotCommand = Schema.Struct({
 }).annotate({
   identifier: "BotCommand",
   description: "A command advertised by the bot.",
+})
+
+export const BotSkill = Schema.Struct({
+  key: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(256),
+  ).annotateKey({ description: "Stable harness activation key." }),
+  name: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(256),
+  ).annotateKey({ description: "Human-facing installed skill name." }),
+  description: Schema.optionalKey(
+    Schema.String.check(Schema.isMaxLength(4_000)),
+  ),
+  sort_order: OptionalWireInteger,
+}).annotate({
+  identifier: "BotSkill",
+  description: "An installed skill published by the authenticated bot harness.",
 })
 
 export const BotAgent = Schema.Struct({
@@ -1052,6 +1071,18 @@ export const SetMyCommandsInput = Schema.Struct({
   description: "Commands to publish for the authenticated bot.",
 })
 
+export const SetMySkillsInput = Schema.Struct({
+  skills: Schema.Array(BotSkill).check(
+    Schema.isMaxLength(250),
+  ).annotateKey({
+    description:
+      "Complete replacement catalog of up to 250 installed skills. Send an empty array to clear it.",
+  }),
+}).annotate({
+  identifier: "SetMySkillsInput",
+  description: "Installed skills to publish for the authenticated bot harness.",
+})
+
 export const ForwardMessageInput = Schema.Struct({
   chat_id: ChatId,
   from_chat_id: ChatId,
@@ -1236,6 +1267,13 @@ export const BotGetMyCommandsResult = Schema.Struct({
 }).annotate({
   identifier: "BotGetMyCommandsResult",
   description: "The authenticated bot's command list.",
+})
+
+export const BotGetMySkillsResult = Schema.Struct({
+  skills: Schema.mutable(Schema.Array(BotSkill)),
+}).annotate({
+  identifier: "BotGetMySkillsResult",
+  description: "The authenticated bot's published skill catalog.",
 })
 
 export const BotGetChatParticipantResult = Schema.Struct({ participant: BotChatParticipant }).annotate({ identifier: "BotGetChatParticipantResult" })
@@ -1440,6 +1478,12 @@ export const BotGetMyCommandsSuccess = botApiSuccess(
     },
   ],
 })
+export const BotGetMySkillsSuccess = botApiSuccess(
+  BotGetMySkillsResult,
+).annotate({
+  identifier: "BotGetMySkillsSuccess",
+  description: "Successful getMySkills response.",
+})
 export const BotGetChatParticipantSuccess = botApiSuccess(BotGetChatParticipantResult).annotate({ identifier: "BotGetChatParticipantSuccess" })
 export const BotGetChatParticipantCountSuccess = botApiSuccess(BotGetChatParticipantCountResult).annotate({ identifier: "BotGetChatParticipantCountSuccess" })
 export const BotEmptySuccess = botApiSuccess(
@@ -1578,6 +1622,9 @@ type _BotRichMessageMatchesNeutral = Assert<
 >
 type _BotCommandMatchesNeutral = Assert<
   Extends<typeof BotCommand.Type, NeutralBotCommand>
+>
+type _BotSkillMatchesNeutral = Assert<
+  Extends<typeof BotSkill.Type, NeutralBotSkill>
 >
 type _BotAgentMatchesNeutral = Assert<
   Extends<typeof BotAgent.Type, NeutralBotAgent>

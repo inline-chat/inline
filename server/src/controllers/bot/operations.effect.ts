@@ -39,6 +39,7 @@ import type {
   GetUpdatesResult,
   GetWebhookInfoResult,
   GetMyCommandsResult,
+  GetMySkillsResult,
   GetChatParticipantParams,
   GetChatParticipantResult,
   GetChatParticipantCountParams,
@@ -53,6 +54,7 @@ import type {
   SearchMessagesParams,
   SearchMessagesResult,
   SetMyCommandsParams,
+  SetMySkillsParams,
   SetThreadTitleParams,
   SetWebhookParams,
   SetWebhookResult,
@@ -103,6 +105,9 @@ export type BotOperation =
   | "getMyCommands"
   | "setMyCommands"
   | "deleteMyCommands"
+  | "getMySkills"
+  | "setMySkills"
+  | "deleteMySkills"
   | "forwardMessage"
   | "forwardMessages"
   | "pinMessage"
@@ -235,6 +240,16 @@ export interface BotOperationsShape {
   readonly deleteMyCommands: (
     context: BotOperationContext,
   ) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly getMySkills: (
+    context: BotOperationContext,
+  ) => Effect.Effect<GetMySkillsResult, BotOperationError>
+  readonly setMySkills: (
+    input: SetMySkillsParams,
+    context: BotOperationContext,
+  ) => Effect.Effect<EmptyResult, BotOperationError>
+  readonly deleteMySkills: (
+    context: BotOperationContext,
+  ) => Effect.Effect<EmptyResult, BotOperationError>
   readonly forwardMessage: (input: ForwardMessageParams, context: BotOperationContext) => Effect.Effect<ForwardMessageResult, BotOperationError>
   readonly forwardMessages: (input: ForwardMessagesParams, context: BotOperationContext) => Effect.Effect<ForwardMessagesResult, BotOperationError>
   readonly pinMessage: (input: PinMessageParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
@@ -343,6 +358,16 @@ export interface BotOperationHandlers {
     context: BotOperationContext,
   ) => Promise<EmptyResult>
   readonly deleteMyCommands: (
+    context: BotOperationContext,
+  ) => Promise<EmptyResult>
+  readonly getMySkills: (
+    context: BotOperationContext,
+  ) => Promise<GetMySkillsResult>
+  readonly setMySkills: (
+    input: SetMySkillsParams,
+    context: BotOperationContext,
+  ) => Promise<EmptyResult>
+  readonly deleteMySkills: (
     context: BotOperationContext,
   ) => Promise<EmptyResult>
   readonly forwardMessage: (input: ForwardMessageParams, context: BotOperationContext) => Promise<ForwardMessageResult>
@@ -518,6 +543,12 @@ export const makeBotOperations = (
     adapt("deleteMyCommands", () =>
       handlers.deleteMyCommands(context),
     ),
+  getMySkills: (context) =>
+    adapt("getMySkills", () => handlers.getMySkills(context)),
+  setMySkills: (input, context) =>
+    adapt("setMySkills", () => handlers.setMySkills(input, context)),
+  deleteMySkills: (context) =>
+    adapt("deleteMySkills", () => handlers.deleteMySkills(context)),
   forwardMessage: (input, context) => adapt("forwardMessage", () => handlers.forwardMessage(input, context)),
   forwardMessages: (input, context) => adapt("forwardMessages", () => handlers.forwardMessages(input, context)),
   pinMessage: (input, context) => adapt("pinMessage", () => handlers.pinMessage(input, context)),
