@@ -429,6 +429,9 @@ message Block {
     BlockText footer = 9;
     BlockQuote quote = 10;
     BlockTable table = 11;
+    // Display math points to the same canonical TeX source as MATH entities.
+    // Clients that cannot render math retain the readable source text.
+    BlockText math = 12;
   }
 }
 
@@ -675,6 +678,12 @@ message MessageEntity {
     TYPE_THREAD_TITLE = 12;
     TYPE_BOT_COMMAND = 13;
     TYPE_GROUP_MENTION = 14;
+    // Range-only styles. Unknown values preserve visible text on older clients.
+    TYPE_UNDERLINE = 15;
+    TYPE_STRIKETHROUGH = 16;
+    TYPE_HIGHLIGHT = 17;
+    // Opaque TeX source range; Markdown must not be parsed inside the formula.
+    TYPE_MATH = 18;
   }
 
   Type type = 1;
@@ -694,6 +703,7 @@ message MessageEntity {
     string title = 2;
   }
   message MessageEntityBotCommand { int64 bot_user_id = 1; }
+  message MessageEntityMath { bool display = 1; }
 
   oneof entity {
     MessageEntityMention mention = 4;
@@ -703,6 +713,9 @@ message MessageEntity {
     MessageEntityThreadTitle thread_title = 8;
     MessageEntityGroupMention group_mention = 9;
     MessageEntityBotCommand bot_command = 10;
+    // Present only when a MATH range is a block-aligned display formula
+    // derived from `$$...$$`. Range-only MATH remains the inline form.
+    MessageEntityMath math = 11;
   }
 }
 

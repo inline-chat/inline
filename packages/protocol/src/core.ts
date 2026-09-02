@@ -1198,6 +1198,15 @@ export interface Block {
          */
         table: BlockTable;
     } | {
+        oneofKind: "math";
+        /**
+         * Display math points to the same canonical TeX source as MATH entities.
+         * Clients that cannot render math retain the readable source text.
+         *
+         * @generated from protobuf field: BlockText math = 12;
+         */
+        math: BlockText;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1745,6 +1754,15 @@ export interface MessageEntity {
          */
         botCommand: MessageEntity_MessageEntityBotCommand;
     } | {
+        oneofKind: "math";
+        /**
+         * Present only when a MATH range is a block-aligned display formula
+         * derived from `$$...$$`. Range-only MATH remains the inline form.
+         *
+         * @generated from protobuf field: MessageEntity.MessageEntityMath math = 11;
+         */
+        math: MessageEntity_MessageEntityMath;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1820,6 +1838,15 @@ export interface MessageEntity_MessageEntityBotCommand {
     botUserId: bigint;
 }
 /**
+ * @generated from protobuf message MessageEntity.MessageEntityMath
+ */
+export interface MessageEntity_MessageEntityMath {
+    /**
+     * @generated from protobuf field: bool display = 1;
+     */
+    display: boolean;
+}
+/**
  * @generated from protobuf enum MessageEntity.Type
  */
 export enum MessageEntity_Type {
@@ -1882,7 +1909,27 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_GROUP_MENTION = 14;
      */
-    GROUP_MENTION = 14
+    GROUP_MENTION = 14,
+    /**
+     * Range-only styles. Unknown values preserve visible text on older clients.
+     *
+     * @generated from protobuf enum value: TYPE_UNDERLINE = 15;
+     */
+    UNDERLINE = 15,
+    /**
+     * @generated from protobuf enum value: TYPE_STRIKETHROUGH = 16;
+     */
+    STRIKETHROUGH = 16,
+    /**
+     * @generated from protobuf enum value: TYPE_HIGHLIGHT = 17;
+     */
+    HIGHLIGHT = 17,
+    /**
+     * Opaque TeX source range; Markdown must not be parsed inside the formula.
+     *
+     * @generated from protobuf enum value: TYPE_MATH = 18;
+     */
+    MATH = 18
 }
 /**
  * @generated from protobuf message MessageReactions
@@ -16487,7 +16534,8 @@ class Block$Type extends MessageType<Block> {
             { no: 8, name: "disclosure", kind: "message", oneof: "kind", T: () => BlockDisclosure },
             { no: 9, name: "footer", kind: "message", oneof: "kind", T: () => BlockText },
             { no: 10, name: "quote", kind: "message", oneof: "kind", T: () => BlockQuote },
-            { no: 11, name: "table", kind: "message", oneof: "kind", T: () => BlockTable }
+            { no: 11, name: "table", kind: "message", oneof: "kind", T: () => BlockTable },
+            { no: 12, name: "math", kind: "message", oneof: "kind", T: () => BlockText }
         ]);
     }
     create(value?: PartialMessage<Block>): Block {
@@ -16568,6 +16616,12 @@ class Block$Type extends MessageType<Block> {
                         table: BlockTable.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).table)
                     };
                     break;
+                case /* BlockText math */ 12:
+                    message.kind = {
+                        oneofKind: "math",
+                        math: BlockText.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).math)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -16613,6 +16667,9 @@ class Block$Type extends MessageType<Block> {
         /* BlockTable table = 11; */
         if (message.kind.oneofKind === "table")
             BlockTable.internalBinaryWrite(message.kind.table, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* BlockText math = 12; */
+        if (message.kind.oneofKind === "math")
+            BlockText.internalBinaryWrite(message.kind.math, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -17815,7 +17872,8 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
             { no: 7, name: "thread", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThread },
             { no: 8, name: "thread_title", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityThreadTitle },
             { no: 9, name: "group_mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityGroupMention },
-            { no: 10, name: "bot_command", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityBotCommand }
+            { no: 10, name: "bot_command", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityBotCommand },
+            { no: 11, name: "math", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityMath }
         ]);
     }
     create(value?: PartialMessage<MessageEntity>): MessageEntity {
@@ -17884,6 +17942,12 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
                         botCommand: MessageEntity_MessageEntityBotCommand.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).botCommand)
                     };
                     break;
+                case /* MessageEntity.MessageEntityMath math */ 11:
+                    message.entity = {
+                        oneofKind: "math",
+                        math: MessageEntity_MessageEntityMath.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).math)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -17926,6 +17990,9 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
         /* MessageEntity.MessageEntityBotCommand bot_command = 10; */
         if (message.entity.oneofKind === "botCommand")
             MessageEntity_MessageEntityBotCommand.internalBinaryWrite(message.entity.botCommand, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* MessageEntity.MessageEntityMath math = 11; */
+        if (message.entity.oneofKind === "math")
+            MessageEntity_MessageEntityMath.internalBinaryWrite(message.entity.math, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -18280,6 +18347,53 @@ class MessageEntity_MessageEntityBotCommand$Type extends MessageType<MessageEnti
  * @generated MessageType for protobuf message MessageEntity.MessageEntityBotCommand
  */
 export const MessageEntity_MessageEntityBotCommand = new MessageEntity_MessageEntityBotCommand$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityMath$Type extends MessageType<MessageEntity_MessageEntityMath> {
+    constructor() {
+        super("MessageEntity.MessageEntityMath", [
+            { no: 1, name: "display", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityMath>): MessageEntity_MessageEntityMath {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.display = false;
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityMath>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityMath): MessageEntity_MessageEntityMath {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool display */ 1:
+                    message.display = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityMath, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool display = 1; */
+        if (message.display !== false)
+            writer.tag(1, WireType.Varint).bool(message.display);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityMath
+ */
+export const MessageEntity_MessageEntityMath = new MessageEntity_MessageEntityMath$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageReactions$Type extends MessageType<MessageReactions> {
     constructor() {

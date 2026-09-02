@@ -3472,6 +3472,16 @@ public nonisolated struct Block: Sendable {
     set {kind = .table(newValue)}
   }
 
+  /// Display math points to the same canonical TeX source as MATH entities.
+  /// Clients that cannot render math retain the readable source text.
+  public var math: BlockText {
+    get {
+      if case .math(let v)? = kind {return v}
+      return BlockText()
+    }
+    set {kind = .math(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Kind: Equatable, Sendable {
@@ -3486,6 +3496,9 @@ public nonisolated struct Block: Sendable {
     case footer(BlockText)
     case quote(BlockQuote)
     case table(BlockTable)
+    /// Display math points to the same canonical TeX source as MATH entities.
+    /// Clients that cannot render math retain the readable source text.
+    case math(BlockText)
 
   }
 
@@ -4347,6 +4360,16 @@ public nonisolated struct MessageEntity: Sendable {
     set {entity = .botCommand(newValue)}
   }
 
+  /// Present only when a MATH range is a block-aligned display formula
+  /// derived from `$$...$$`. Range-only MATH remains the inline form.
+  public var math: MessageEntity.MessageEntityMath {
+    get {
+      if case .math(let v)? = entity {return v}
+      return MessageEntity.MessageEntityMath()
+    }
+    set {entity = .math(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Entity: Equatable, Sendable {
@@ -4357,6 +4380,9 @@ public nonisolated struct MessageEntity: Sendable {
     case threadTitle(MessageEntity.MessageEntityThreadTitle)
     case groupMention(MessageEntity.MessageEntityGroupMention)
     case botCommand(MessageEntity.MessageEntityBotCommand)
+    /// Present only when a MATH range is a block-aligned display formula
+    /// derived from `$$...$$`. Range-only MATH remains the inline form.
+    case math(MessageEntity.MessageEntityMath)
 
   }
 
@@ -4377,6 +4403,14 @@ public nonisolated struct MessageEntity: Sendable {
     case threadTitle // = 12
     case botCommand // = 13
     case groupMention // = 14
+
+    /// Range-only styles. Unknown values preserve visible text on older clients.
+    case underline // = 15
+    case strikethrough // = 16
+    case highlight // = 17
+
+    /// Opaque TeX source range; Markdown must not be parsed inside the formula.
+    case math // = 18
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -4400,6 +4434,10 @@ public nonisolated struct MessageEntity: Sendable {
       case 12: self = .threadTitle
       case 13: self = .botCommand
       case 14: self = .groupMention
+      case 15: self = .underline
+      case 16: self = .strikethrough
+      case 17: self = .highlight
+      case 18: self = .math
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -4421,6 +4459,10 @@ public nonisolated struct MessageEntity: Sendable {
       case .threadTitle: return 12
       case .botCommand: return 13
       case .groupMention: return 14
+      case .underline: return 15
+      case .strikethrough: return 16
+      case .highlight: return 17
+      case .math: return 18
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -4442,6 +4484,10 @@ public nonisolated struct MessageEntity: Sendable {
       .threadTitle,
       .botCommand,
       .groupMention,
+      .underline,
+      .strikethrough,
+      .highlight,
+      .math,
     ]
 
   }
@@ -4537,6 +4583,18 @@ public nonisolated struct MessageEntity: Sendable {
     // methods supported on all messages.
 
     public var botUserID: Int64 = 0
+
+    public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+    public init() {}
+  }
+
+  public nonisolated struct MessageEntityMath: Sendable {
+    // SwiftProtobuf.Message conformance is added in an extension below. See the
+    // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+    // methods supported on all messages.
+
+    public var display: Bool = false
 
     public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -23120,7 +23178,7 @@ nonisolated extension BlockText: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Block"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}paragraph\0\u{1}heading\0\u{1}code\0\u{1}list\0\u{1}separator\0\u{1}image\0\u{1}album\0\u{1}disclosure\0\u{1}footer\0\u{1}quote\0\u{1}table\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}paragraph\0\u{1}heading\0\u{1}code\0\u{1}list\0\u{1}separator\0\u{1}image\0\u{1}album\0\u{1}disclosure\0\u{1}footer\0\u{1}quote\0\u{1}table\0\u{1}math\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23271,6 +23329,19 @@ nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
           self.kind = .table(v)
         }
       }()
+      case 12: try {
+        var v: BlockText?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .math(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .math(v)
+        }
+      }()
       default: break
       }
     }
@@ -23325,6 +23396,10 @@ nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     case .table?: try {
       guard case .table(let v)? = self.kind else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+    }()
+    case .math?: try {
+      guard case .math(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
     }()
     case nil: break
     }
@@ -24288,7 +24363,7 @@ nonisolated extension MessageEntities: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageEntity"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}offset\0\u{1}length\0\u{1}mention\0\u{3}text_url\0\u{1}pre\0\u{1}thread\0\u{3}thread_title\0\u{3}group_mention\0\u{3}bot_command\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}offset\0\u{1}length\0\u{1}mention\0\u{3}text_url\0\u{1}pre\0\u{1}thread\0\u{3}thread_title\0\u{3}group_mention\0\u{3}bot_command\0\u{1}math\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24390,6 +24465,19 @@ nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._Messa
           self.entity = .botCommand(v)
         }
       }()
+      case 11: try {
+        var v: MessageEntity.MessageEntityMath?
+        var hadOneofValue = false
+        if let current = self.entity {
+          hadOneofValue = true
+          if case .math(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.entity = .math(v)
+        }
+      }()
       default: break
       }
     }
@@ -24438,6 +24526,10 @@ nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._Messa
       guard case .botCommand(let v)? = self.entity else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
+    case .math?: try {
+      guard case .math(let v)? = self.entity else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 11)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -24454,7 +24546,7 @@ nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._Messa
 }
 
 nonisolated extension MessageEntity.TypeEnum: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TYPE_UNSPECIFIED\0\u{1}TYPE_MENTION\0\u{1}TYPE_URL\0\u{1}TYPE_TEXT_URL\0\u{1}TYPE_EMAIL\0\u{1}TYPE_BOLD\0\u{1}TYPE_ITALIC\0\u{1}TYPE_USERNAME_MENTION\0\u{1}TYPE_CODE\0\u{1}TYPE_PRE\0\u{1}TYPE_PHONE_NUMBER\0\u{1}TYPE_THREAD\0\u{1}TYPE_THREAD_TITLE\0\u{1}TYPE_BOT_COMMAND\0\u{1}TYPE_GROUP_MENTION\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TYPE_UNSPECIFIED\0\u{1}TYPE_MENTION\0\u{1}TYPE_URL\0\u{1}TYPE_TEXT_URL\0\u{1}TYPE_EMAIL\0\u{1}TYPE_BOLD\0\u{1}TYPE_ITALIC\0\u{1}TYPE_USERNAME_MENTION\0\u{1}TYPE_CODE\0\u{1}TYPE_PRE\0\u{1}TYPE_PHONE_NUMBER\0\u{1}TYPE_THREAD\0\u{1}TYPE_THREAD_TITLE\0\u{1}TYPE_BOT_COMMAND\0\u{1}TYPE_GROUP_MENTION\0\u{1}TYPE_UNDERLINE\0\u{1}TYPE_STRIKETHROUGH\0\u{1}TYPE_HIGHLIGHT\0\u{1}TYPE_MATH\0")
 }
 
 nonisolated extension MessageEntity.MessageEntityMention: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -24676,6 +24768,36 @@ nonisolated extension MessageEntity.MessageEntityBotCommand: SwiftProtobuf.Messa
 
   public static func ==(lhs: MessageEntity.MessageEntityBotCommand, rhs: MessageEntity.MessageEntityBotCommand) -> Bool {
     if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageEntity.MessageEntityMath: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = MessageEntity.protoMessageName + ".MessageEntityMath"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}display\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.display) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.display != false {
+      try visitor.visitSingularBoolField(value: self.display, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageEntity.MessageEntityMath, rhs: MessageEntity.MessageEntityMath) -> Bool {
+    if lhs.display != rhs.display {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
