@@ -3694,7 +3694,10 @@ extension MessageListAppKit: NSTableViewDelegate {
         let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? UnreadSeparatorTableCell
           ?? UnreadSeparatorTableCell()
         cell.identifier = identifier
-        cell.configure(text: NSLocalizedString("Replies", comment: "Reply thread separator label"))
+        cell.configure(
+          text: NSLocalizedString("Replies", comment: "Reply thread separator label"),
+          showsBackground: false
+        )
         return cell
 
       case .collapsedHistory:

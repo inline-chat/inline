@@ -8,6 +8,7 @@ final class UnreadSeparatorTableCell: NSView {
   private let contentView = NSView()
   private let label = NSTextField(labelWithString: "")
   private var currentText: String?
+  private var showsBackground = true
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -56,6 +57,11 @@ final class UnreadSeparatorTableCell: NSView {
 
   private func updateBackgroundColor() {
     guard let layer = contentView.layer else { return }
+    guard showsBackground else {
+      layer.backgroundColor = NSColor.clear.cgColor
+      return
+    }
+
     let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     let color = isDark
       ? NSColor.white.withAlphaComponent(0.05)
@@ -63,7 +69,12 @@ final class UnreadSeparatorTableCell: NSView {
     layer.backgroundColor = color.cgColor
   }
 
-  func configure(text: String) {
+  func configure(text: String, showsBackground: Bool = true) {
+    if self.showsBackground != showsBackground {
+      self.showsBackground = showsBackground
+      updateBackgroundColor()
+    }
+
     guard currentText != text else { return }
     currentText = text
     label.stringValue = text
