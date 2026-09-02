@@ -370,6 +370,51 @@ struct SidecarProjectionOwnershipTests {
     }
   }
 
+  @Test("a malformed User chatOpen is accounted atomically and cannot pin later updates")
+  func malformedChatOpenAdvancesPastEnvelope() async throws {
+    let (queue, engine) = try makeEngine()
+    var malformedChat = makeChat()
+    malformedChat.peerID = .with { $0.chat.chatID = chatID + 1 }
+    malformedChat.acknowledgements.cursors = [.with {
+      $0.chatID = chatID
+      $0.userID = 42
+      $0.maxID = 5
+      $0.revision = 1
+    }]
+    var malformed = InlineProtocol.Update()
+    malformed.seq = 1
+    malformed.date = 1
+    malformed.update = .chatOpen(.with {
+      $0.chat = malformedChat
+      $0.dialog = makeDialog()
+    })
+    var removal = InlineProtocol.Update()
+    removal.seq = 2
+    removal.date = 2
+    removal.update = .userRemovedFromChat(.with { $0.chatID = chatID })
+
+    let result = await engine.applyBatch(
+      updates: [malformed, removal],
+      source: .syncCatchup,
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 2, seq: 2),
+        expectedStartState: .init(date: 0, seq: 0)
+      )
+    )
+
+    #expect(result.succeeded)
+    #expect(result.appliedCount == 2)
+    try await queue.read { (db: Database) throws in
+      #expect(try Chat.fetchOne(db, id: chatID) == nil)
+      #expect(try Dialog.get(peerId: .thread(id: chatID)).fetchOne(db) == nil)
+      #expect(try Acknowledgement
+        .filter(Acknowledgement.Columns.chatId == chatID)
+        .fetchCount(db) == 0)
+      #expect(try cursor(.user, db: db)?.seq == 2)
+    }
+  }
+
   @Test("a sequenced User dialog update restores its exact missing projection")
   func dialogUpdateRestoresCursorOnlyProjection() async throws {
     let (queue, engine) = try makeEngine()

@@ -229,7 +229,13 @@ public actor UpdatesEngine: Sendable {
           try dialogFolder.apply(db)
 
         case let .chatOpen(chatOpen):
-          try chatOpen.apply(db)
+          let didApply = try chatOpen.apply(db)
+          if !didApply {
+            log.error(
+              "Accounting malformed chatOpen envelope without applying its projection",
+              error: DurableUpdateFailure(phase: "chatOpen_envelope", cause: .invalidData)
+            )
+          }
 
         case let .messageActionAnswered(messageActionAnswered):
           if source != .syncCatchup {
@@ -1507,13 +1513,34 @@ private func userAuthorizedChatOpenSnapshots(
   var chats: [Int64: InlineProtocol.Chat] = [:]
   for update in updates {
     guard case let .chatOpen(chatOpen) = update.update,
-          chatOpen.chat.id > 0,
-          let peer = validatedPeer(chatOpen.chat.peerID)
+          isValidChatOpenEnvelope(chatOpen)
     else { continue }
-    if case let .thread(id) = peer, id != chatOpen.chat.id { continue }
     chats[chatOpen.chat.id] = chatOpen.chat
   }
   return chats
+}
+
+private func isValidChatOpenEnvelope(_ chatOpen: InlineProtocol.UpdateChatOpen) -> Bool {
+  guard chatOpen.hasChat,
+        chatOpen.hasDialog,
+        chatOpen.chat.id > 0,
+        chatOpen.chat.hasPeerID,
+        let chatPeer = validatedPeer(chatOpen.chat.peerID),
+        chatOpen.dialog.hasPeer,
+        validatedPeer(chatOpen.dialog.peer) == chatPeer,
+        chatOpen.dialog.hasChatID,
+        chatOpen.dialog.chatID == chatOpen.chat.id,
+        chatOpen.chat.hasSpaceID == chatOpen.dialog.hasSpaceID,
+        !chatOpen.chat.hasSpaceID || chatOpen.chat.spaceID == chatOpen.dialog.spaceID
+  else { return false }
+
+  if case let .thread(id) = chatPeer, id != chatOpen.chat.id {
+    return false
+  }
+  if chatOpen.hasUser {
+    guard case let .user(id) = chatPeer, chatOpen.user.id == id else { return false }
+  }
+  return true
 }
 
 private func userAuthorizedDirectChatIDs(
@@ -2908,7 +2935,9 @@ extension InlineProtocol.UpdateDialogCollapsedMaxId {
 }
 
 extension InlineProtocol.UpdateChatOpen {
-  func apply(_ db: Database) throws {
+  @discardableResult
+  func apply(_ db: Database) throws -> Bool {
+    guard isValidChatOpenEnvelope(self) else { return false }
     Log.shared.debug("update chat open for chat \(chat.id)")
 
     if hasUser {
@@ -2929,6 +2958,7 @@ extension InlineProtocol.UpdateChatOpen {
       dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
       in: db
     )
+    return true
   }
 }
 
