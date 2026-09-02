@@ -58,7 +58,6 @@ public final class BotAgentDirectory {
 
   private let fetcher: Fetcher
   private let userInfoResolver: UserInfoResolver
-  private let isEnabled: @MainActor () -> Bool
   private let now: @MainActor () -> Date
   private let cacheTTL: TimeInterval
   private let maxCachedPeers: Int
@@ -73,7 +72,6 @@ public final class BotAgentDirectory {
     self.init(
       fetcher: Self.fetchPeerBots,
       userInfoResolver: Self.resolveUserInfo,
-      isEnabled: { ExperimentalFeatureFlags.mentionableAgentsEnabled },
       now: Date.init
     )
   }
@@ -81,28 +79,25 @@ public final class BotAgentDirectory {
   public init(
     fetcher: @escaping Fetcher,
     userInfoResolver: @escaping UserInfoResolver,
-    isEnabled: @escaping @MainActor () -> Bool = { true },
     now: @escaping @MainActor () -> Date = Date.init,
     cacheTTL: TimeInterval = 60,
     maxCachedPeers: Int = 32
   ) {
     self.fetcher = fetcher
     self.userInfoResolver = userInfoResolver
-    self.isEnabled = isEnabled
     self.now = now
     self.cacheTTL = cacheTTL
     self.maxCachedPeers = max(1, maxCachedPeers)
   }
 
   public func agents(for peer: Peer, forceRefresh: Bool = false) async throws -> [MentionableBotAgent] {
-    guard isEnabled() else { return [] }
     if !forceRefresh, let cached = freshCachedAgents(for: peer) {
       return cached
     }
     let requestGeneration = generation
     if let task = inFlight[peer] {
       let result = try await task.value
-      guard requestGeneration == generation, isEnabled() else { return [] }
+      guard requestGeneration == generation else { return [] }
       return store(result, for: peer)
     }
 
@@ -115,12 +110,11 @@ public final class BotAgentDirectory {
       }
     }
     let result = try await task.value
-    guard requestGeneration == generation, isEnabled() else { return [] }
+    guard requestGeneration == generation else { return [] }
     return store(result, for: peer)
   }
 
   public func cached(agentId: Int64, botUserId: Int64, for peer: Peer) -> MentionableBotAgent? {
-    guard isEnabled() else { return nil }
     return freshCachedAgents(for: peer)?.first { $0.id == agentId && $0.botUserId == botUserId }
   }
 

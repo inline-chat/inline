@@ -378,9 +378,6 @@ private struct IOSManagedBotSummary: View {
 }
 
 private struct IOSManagedBotSettingsView: View {
-  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
-  private var mentionableAgentsEnabled = false
-
   let bot: InlineProtocol.User
   let token: String?
   let isBusy: Bool
@@ -402,9 +399,7 @@ private struct IOSManagedBotSettingsView: View {
         copyToken: copyToken,
         requestRotation: { isConfirmingRotation = true }
       )
-      if mentionableAgentsEnabled {
-        IOSBotAgentsSection(botUserId: bot.id)
-      }
+      IOSBotAgentsSection(botUserId: bot.id)
     }
     .listStyle(.insetGrouped)
     .navigationTitle(User(from: bot).displayName)

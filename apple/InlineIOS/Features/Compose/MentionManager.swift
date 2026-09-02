@@ -54,8 +54,8 @@ class MentionManager: NSObject {
     self.peerId = peerId
     super.init()
     setupParticipantsViewModel()
-    observeMentionableAgentsExperiment()
-    refreshMentionAgentsForExperiment()
+    observeBotAgentChanges()
+    loadMentionAgents()
   }
 
   deinit {
@@ -128,15 +128,7 @@ class MentionManager: NSObject {
     }
   }
 
-  private func observeMentionableAgentsExperiment() {
-    NotificationCenter.default.publisher(for: .mentionableAgentsExperimentChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.refreshMentionAgentsForExperiment()
-        }
-      }
-      .store(in: &cancellables)
-
+  private func observeBotAgentChanges() {
     NotificationCenter.default.publisher(for: .botAgentsChanged)
       .sink { [weak self] _ in
         Task { @MainActor [weak self] in
@@ -146,19 +138,9 @@ class MentionManager: NSObject {
       .store(in: &cancellables)
   }
 
-  private func refreshMentionAgentsForExperiment() {
-    agentLoadTask?.cancel()
-    mentionAgents = []
-    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else {
-      applyMentionCandidates()
-      return
-    }
-    loadMentionAgents()
-  }
-
   private func applyMentionCandidates() {
     var candidates = mentionCandidates
-    candidates.agents = ExperimentalFeatureFlags.mentionableAgentsEnabled ? mentionAgents : []
+    candidates.agents = mentionAgents
     mentionCompletionView?.updateCandidates(candidates)
   }
 

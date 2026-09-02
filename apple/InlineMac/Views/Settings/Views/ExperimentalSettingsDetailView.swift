@@ -3,8 +3,6 @@ import SwiftUI
 
 struct ExperimentalSettingsDetailView: View {
   @StateObject private var settings = AppSettings.shared
-  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
-  private var mentionableAgentsEnabled = false
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
@@ -45,25 +43,8 @@ struct ExperimentalSettingsDetailView: View {
       } header: {
         SettingsSectionHeader("Messages")
       }
-
-      Section {
-        Toggle(isOn: $mentionableAgentsEnabled) {
-          SettingsRowLabel(
-            "Skilled Agents",
-            description: "Show Skilled Agent creation, profiles, and @mention autocomplete in the app."
-          )
-        }
-      } header: {
-        SettingsSectionHeader("Skilled Agents")
-      } footer: {
-        Text("Server and Bot API support remain available when this is off.")
-      }
     }
     .settingsFormStyle()
-    .onChange(of: mentionableAgentsEnabled) { _, _ in
-      BotAgentDirectory.shared.clear()
-      NotificationCenter.default.post(name: .mentionableAgentsExperimentChanged, object: nil)
-    }
   }
 }
 

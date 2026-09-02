@@ -290,8 +290,8 @@ struct PeerBotCommandsViewModelTests {
     #expect(suggestion.botUserInfo.user.profileLocalPath == cachedPath)
   }
 
-  @Test("Agent directory caches access-filtered profiles per peer")
-  func agentDirectoryCachesPerPeer() async throws {
+  @Test("Skilled Agent directory is available and caches access-filtered profiles per peer")
+  func skilledAgentDirectoryIsAvailableAndCachesPerPeer() async throws {
     let counter = FetchCounter()
     let peer = Peer.thread(id: 100)
     let directory = BotAgentDirectory(
@@ -326,23 +326,6 @@ struct PeerBotCommandsViewModelTests {
     #expect(directory.cached(agentId: 7, botUserId: 200, for: peer)?.name == "Data Analyst")
     #expect(directory.cached(agentId: 7, botUserId: 201, for: peer) == nil)
     #expect(directory.cached(agentId: 7, botUserId: 200, for: .thread(id: 101)) == nil)
-  }
-
-  @Test("Agent directory skips discovery when the client experiment is off")
-  func agentDirectoryHonorsClientExperiment() async throws {
-    let counter = FetchCounter()
-    let directory = BotAgentDirectory(
-      fetcher: { _ in
-        await counter.increment()
-        return GetPeerBotsResult()
-      },
-      userInfoResolver: { UserInfo(user: User(from: $0)) },
-      isEnabled: { false }
-    )
-
-    #expect(try await directory.agents(for: .thread(id: 100)).isEmpty)
-    #expect(await counter.value == 0)
-    #expect(directory.cached(agentId: 7, botUserId: 200, for: .thread(id: 100)) == nil)
   }
 
   @Test("Agent directory expires and bounds peer-scoped profiles")

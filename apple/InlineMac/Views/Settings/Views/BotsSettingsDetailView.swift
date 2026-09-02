@@ -10,8 +10,6 @@ struct BotsSettingsDetailView: View {
   @Environment(\.auth) private var auth
   @Environment(\.dependencies) private var dependencies
   @Environment(\.realtimeV2) private var realtimeV2
-  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
-  private var mentionableAgentsEnabled = false
 
   @StateObject private var viewModel = BotsSettingsViewModel()
   @State private var name = ""
@@ -178,9 +176,7 @@ struct BotsSettingsDetailView: View {
         )
       }
 
-      if mentionableAgentsEnabled {
-        MacBotAgentsSection(bots: viewModel.bots)
-      }
+      MacBotAgentsSection(bots: viewModel.bots)
     }
     .settingsFormStyle()
     .toolbar {

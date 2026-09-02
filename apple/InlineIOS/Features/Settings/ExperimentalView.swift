@@ -3,9 +3,6 @@ import InlineIOSUI
 import SwiftUI
 
 struct ExperimentalView: View {
-  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
-  private var mentionableAgentsEnabled = false
-
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
@@ -28,19 +25,6 @@ struct ExperimentalView: View {
         }
       } footer: {
         Text("New Home is now the standard experience for everyone.")
-      }
-
-      Section {
-        SettingsItem(
-          icon: "at",
-          iconColor: .purple,
-          title: "Skilled Agents"
-        ) {
-          Toggle("Skilled Agents", isOn: $mentionableAgentsEnabled)
-            .labelsHidden()
-        }
-      } footer: {
-        Text("Show Skilled Agent creation, profiles, and @mention autocomplete. Server and Bot API support remain available when this is off.")
       }
 
       Section {
@@ -70,10 +54,6 @@ struct ExperimentalView: View {
     .listStyle(.insetGrouped)
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
-    .onChange(of: mentionableAgentsEnabled) { _, _ in
-      BotAgentDirectory.shared.clear()
-      NotificationCenter.default.post(name: .mentionableAgentsExperimentChanged, object: nil)
-    }
   }
 }
 

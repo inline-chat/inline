@@ -1359,14 +1359,6 @@ class GlassComposeAppKit: NSView {
       }
       .store(in: &cancellables)
 
-    NotificationCenter.default.publisher(for: .mentionableAgentsExperimentChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.refreshMentionAgentsForExperiment()
-        }
-      }
-      .store(in: &cancellables)
-
     NotificationCenter.default.publisher(for: .botAgentsChanged)
       .sink { [weak self] _ in
         Task { @MainActor [weak self] in
@@ -1375,25 +1367,11 @@ class GlassComposeAppKit: NSView {
       }
       .store(in: &cancellables)
 
-    refreshMentionAgentsForExperiment()
-  }
-
-  private func refreshMentionAgentsForExperiment() {
-    mentionAgentsTask?.cancel()
-    mentionAgents = []
-    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else {
-      applyMentionCandidates()
-      return
-    }
-    guard chatPeerID != nil else {
-      applyMentionCandidates()
-      return
-    }
     loadMentionAgents()
   }
 
   private func loadMentionAgents(forceRefresh: Bool = false) {
-    guard ExperimentalFeatureFlags.mentionableAgentsEnabled, let chatPeerID else { return }
+    guard let chatPeerID else { return }
     mentionAgentsTask?.cancel()
     mentionAgentsTask = Task { @MainActor [weak self, peerId = chatPeerID] in
       guard let self else { return }
@@ -1410,10 +1388,8 @@ class GlassComposeAppKit: NSView {
 
   private func applyMentionCandidates() {
     var candidates = mentionCandidates
-    if ExperimentalFeatureFlags.mentionableAgentsEnabled {
-      if case .chat = usage {
-        candidates.agents = mentionAgents
-      }
+    if case .chat = usage {
+      candidates.agents = mentionAgents
     } else {
       candidates.agents = []
     }

@@ -98,8 +98,8 @@ final class ComposeAutocompleteManager: NSObject {
     super.init()
     bindViewModel()
     bindParticipants()
-    observeMentionableAgentsExperiment()
-    refreshMentionAgentsForExperiment()
+    observeBotAgentChanges()
+    loadMentionAgents()
   }
 
   func configure(spaceId: Int64?) {
@@ -242,15 +242,7 @@ final class ComposeAutocompleteManager: NSObject {
     }
   }
 
-  private func observeMentionableAgentsExperiment() {
-    NotificationCenter.default.publisher(for: .mentionableAgentsExperimentChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.refreshMentionAgentsForExperiment()
-        }
-      }
-      .store(in: &cancellables)
-
+  private func observeBotAgentChanges() {
     NotificationCenter.default.publisher(for: .botAgentsChanged)
       .sink { [weak self] _ in
         Task { @MainActor [weak self] in
@@ -260,19 +252,9 @@ final class ComposeAutocompleteManager: NSObject {
       .store(in: &cancellables)
   }
 
-  private func refreshMentionAgentsForExperiment() {
-    agentLoadTask?.cancel()
-    mentionAgents = []
-    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else {
-      applyMentionCandidates()
-      return
-    }
-    loadMentionAgents()
-  }
-
   private func applyMentionCandidates() {
     var candidates = mentionCandidates
-    candidates.agents = ExperimentalFeatureFlags.mentionableAgentsEnabled ? mentionAgents : []
+    candidates.agents = mentionAgents
     mentionViewModel.updateCandidates(candidates)
     if viewModel.match?.kind == .mention {
       viewModel.reloadCurrentMatch()

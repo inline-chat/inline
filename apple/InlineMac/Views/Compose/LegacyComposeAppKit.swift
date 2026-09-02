@@ -854,14 +854,6 @@ class LegacyComposeAppKit: NSView {
       }
       .store(in: &cancellables)
 
-    NotificationCenter.default.publisher(for: .mentionableAgentsExperimentChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.refreshMentionAgentsForExperiment()
-        }
-      }
-      .store(in: &cancellables)
-
     NotificationCenter.default.publisher(for: .botAgentsChanged)
       .sink { [weak self] _ in
         Task { @MainActor [weak self] in
@@ -870,21 +862,10 @@ class LegacyComposeAppKit: NSView {
       }
       .store(in: &cancellables)
 
-    refreshMentionAgentsForExperiment()
-  }
-
-  private func refreshMentionAgentsForExperiment() {
-    mentionAgentsTask?.cancel()
-    mentionAgents = []
-    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else {
-      applyMentionCandidates()
-      return
-    }
     loadMentionAgents()
   }
 
   private func loadMentionAgents(forceRefresh: Bool = false) {
-    guard ExperimentalFeatureFlags.mentionableAgentsEnabled else { return }
     mentionAgentsTask?.cancel()
     mentionAgentsTask = Task { @MainActor [weak self, peerId = peerId] in
       guard let self else { return }
@@ -901,7 +882,7 @@ class LegacyComposeAppKit: NSView {
 
   private func applyMentionCandidates() {
     var candidates = mentionCandidates
-    candidates.agents = ExperimentalFeatureFlags.mentionableAgentsEnabled ? mentionAgents : []
+    candidates.agents = mentionAgents
     mentionCompletionMenu?.updateCandidates(candidates)
   }
 
