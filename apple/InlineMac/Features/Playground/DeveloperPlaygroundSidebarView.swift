@@ -497,6 +497,7 @@ final class DeveloperSidebarPlaygroundModel {
       rename: { [weak self] in self?.record("Selected Rename Thread.") },
       togglePin: { [weak self] in self?.record("Selected Pin/Unpin.") },
       toggleReadUnread: { [weak self] in self?.record("Selected Read/Unread.") },
+      toggleArchive: { [weak self] in self?.record("Selected Archive/Unarchive.") },
       folderMenu: { nil }
     )
     let compactHeight = SidebarItemSize.compact.rowHeight

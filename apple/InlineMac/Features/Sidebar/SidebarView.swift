@@ -806,6 +806,15 @@ struct SidebarView: View {
             dependencies: dependencies
           )
         },
+        toggleArchive: {
+          guard let dependencies else { return }
+          ChatMenuActions.toggleArchive(
+            peer: item.peerId,
+            isArchived: item.archived,
+            spaceID: item.spaceId,
+            dependencies: dependencies
+          )
+        },
         folderMenu: { sidebarFolderMenu(for: item) }
       )
     )

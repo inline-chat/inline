@@ -113,6 +113,7 @@ struct SidebarNativeRowConfiguration {
     let rename: () -> Void
     let togglePin: () -> Void
     let toggleReadUnread: () -> Void
+    let toggleArchive: () -> Void
     let folderMenu: () -> SidebarChatFolderMenu?
   }
 
@@ -130,6 +131,7 @@ struct SidebarNativeRowConfiguration {
     let unreadMark: Bool
     let prominentUnreadDot: Bool
     let pinned: Bool
+    let archived: Bool
     let identity: ChatListIdentityDescriptor?
 
     init(_ item: SidebarViewModel.Item) {
@@ -143,6 +145,7 @@ struct SidebarNativeRowConfiguration {
       unreadMark = item.unreadMark
       prominentUnreadDot = item.prominentUnreadDot
       pinned = item.pinned
+      archived = item.archived
       identity = item.identity
     }
 
@@ -157,6 +160,7 @@ struct SidebarNativeRowConfiguration {
       unreadMark: Bool = false,
       prominentUnreadDot: Bool = false,
       pinned: Bool = false,
+      archived: Bool = false,
       identity: ChatListIdentityDescriptor? = nil
     ) {
       self.peerID = peerID
@@ -169,6 +173,7 @@ struct SidebarNativeRowConfiguration {
       self.unreadMark = unreadMark
       self.prominentUnreadDot = prominentUnreadDot
       self.pinned = pinned
+      self.archived = archived
       self.identity = identity
     }
   }
@@ -2496,6 +2501,11 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         title: presentation.unread ? "Mark Read" : "Mark Unread",
         systemImage: presentation.unread ? "checkmark.message.fill" : "envelope.badge.fill",
         action: actions.toggleReadUnread
+      ))
+      menu.addItem(SidebarNativeMenuItem(
+        title: presentation.archived ? "Unarchive" : "Archive",
+        systemImage: "archivebox",
+        action: actions.toggleArchive
       ))
       if let folderMenu = actions.folderMenu() {
         menu.addItem(.separator())
