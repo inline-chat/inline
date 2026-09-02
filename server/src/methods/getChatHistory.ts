@@ -55,7 +55,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     .from(messages)
     .where(eq(messages.chatId, chatId))
     .leftJoin(files, eq(files.id, messages.fileId))
-    .orderBy(desc(messages.date))
+    .orderBy(desc(messages.date), desc(messages.messageId))
     .limit(input.limit ?? 70)
 
   const messages_ = result.map((m) =>
