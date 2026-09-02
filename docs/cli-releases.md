@@ -1,4 +1,49 @@
-# CLI release authentication
+# CLI releases
+
+The public repository owns `scripts/release-cli.ts` and
+`.github/workflows/cli-release.yml`. The root Cargo workspace version, internal
+path-dependency requirements, and lockfile must agree before release. Prepare
+only the intended source changes; unrelated uncommitted work is not a release
+candidate. Do not reuse an already published version.
+
+Run the CLI checks, release-script tests, Homebrew validation, and external
+agent-package contract check before committing the candidate:
+
+```sh
+bun run --cwd cli ci
+bun test scripts/release-cli.test.ts
+INLINE_HOMEBREW_TAP_PATH=/path/to/homebrew-inline bun run scripts/release-cli.ts validate-homebrew
+node scripts/check-agent-release-group.mjs
+```
+
+Push the reviewed candidate, then pass its exact commit SHA as `ref` below.
+The workflow definition comes from `main`. An empty `targets` input builds all
+five supported targets in CI, including signed and notarized Apple-silicon
+macOS. Do not skip notarization for a normal stable release.
+
+```sh
+# Credentials only; no build or publication.
+gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
+  -f ref=PUBLIC_CANDIDATE_SHA -f preflight_only=true
+
+# After the candidate is approved for publication:
+gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
+  -f ref=PUBLIC_CANDIDATE_SHA
+```
+
+The full workflow validates the CLI and integration packages before building,
+then publishes GitHub/R2 artifacts and the stable manifest/install script and
+Homebrew cask. Prereleases leave stable/Homebrew unchanged. Verify the tag's
+commit, manifest version and checksums, five assets, macOS signature/notarization,
+Homebrew version, and installed binary separately. Build-only runs retain CI
+artifacts without publishing. Local release builds are not required.
+
+Keep human release notes in a reviewed file; the script creates generic notes.
+After publication, attach the reviewed text with `gh release edit cli-vVERSION
+--repo inline-chat/inline --notes-file PATH`. The 0.7.7 draft is in
+[cli-v0.7.7.md](cli-v0.7.7.md).
+
+## Release authentication
 
 The CLI Release workflow publishes GitHub/R2 artifacts and updates the separate
 `inline-chat/homebrew-inline` repository. Homebrew publishing uses the dedicated
