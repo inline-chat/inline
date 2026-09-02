@@ -114,21 +114,18 @@ public class DataManager: ObservableObject {
     log.trace("createPrivateChat")
     let mutationToken = try beginAccountMutation()
     do {
-      let result = try await InlineRPCClient.shared.createPrivateChat(userID: userId)
-      let chatState = try await InlineRPCClient.shared.getChat(peerID: .user(id: userId))
-      guard chatState.hasUser else { throw InlineRPCClientError.unexpectedResponse }
+      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
 
       try await writeAccountProjection(token: mutationToken) { db in
-        _ = try User.save(db, user: chatState.user)
+        try result.user.saveFull(db)
 
         var chat = Chat(from: result.chat)
         try chat.saveWithValidLastMsg(db)
-        try Acknowledgement.save(db, cursors: chatState.chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
 
-        try Dialog(from: result.dialog).save(db, onConflict: .replace)
+        try result.dialog.saveFull(db)
       }
 
-      return Peer.user(id: userId)
+      return Peer.user(id: result.user.id)
     } catch {
       log.error("Failed to create private chat", error: error)
       throw error
@@ -154,14 +151,14 @@ public class DataManager: ObservableObject {
     // Task { @MainActor in
     do {
       // Remote call
-      let result = try await InlineRPCClient.shared.createPrivateChat(userID: userId)
+      let result = try await ApiClient.shared.createPrivateChat(userId: userId)
       try await writeAccountProjection(token: mutationToken) { db in
+        try result.user.saveFull(db)
+
         var chat = Chat(from: result.chat)
         try chat.saveWithValidLastMsg(db)
-        try Acknowledgement.save(db, cursors: result.chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
 
-        let dialog = Dialog(from: result.dialog)
-        try dialog.save(db, onConflict: .replace)
+        try result.dialog.saveFull(db)
       }
       log.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
     } catch {

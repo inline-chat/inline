@@ -198,7 +198,7 @@ export const handler = async (
     }),
 
     // Deprecated
-    user: encodeMinUserInfo(user),
+    user: encodeMinUserInfo(user, { photoFile: user.photoFile ?? undefined }),
   }
 }
 

@@ -67,11 +67,7 @@ public actor InlineRPCClient {
     spaceID: Int64,
     emoji: String?
   ) async throws -> InlineProtocol.CreateChatResult {
-    try await createChat(title: title, spaceID: spaceID, emoji: emoji, participantUserID: nil)
-  }
-
-  public func createPrivateChat(userID: Int64) async throws -> InlineProtocol.CreateChatResult {
-    try await createChat(title: nil, spaceID: nil, emoji: nil, participantUserID: userID)
+    try await createChat(title: title, spaceID: spaceID, emoji: emoji)
   }
 
   public func searchUsers(query: String, limit: Int32 = 20) async throws -> [InlineProtocol.User] {
@@ -379,8 +375,7 @@ public actor InlineRPCClient {
   private func createChat(
     title: String?,
     spaceID: Int64?,
-    emoji: String?,
-    participantUserID: Int64?
+    emoji: String?
   ) async throws -> InlineProtocol.CreateChatResult {
     let response = try await Api.realtime.callRpcDirect(
       method: .createChat,
@@ -388,10 +383,7 @@ public actor InlineRPCClient {
         if let title { $0.title = title }
         if let spaceID { $0.spaceID = spaceID }
         if let emoji { $0.emoji = emoji }
-        $0.isPublic = participantUserID == nil
-        if let participantUserID {
-          $0.participants = [.with { $0.userID = participantUserID }]
-        }
+        $0.isPublic = true
       })
     )
     guard case let .createChat(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
