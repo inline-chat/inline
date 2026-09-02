@@ -5916,6 +5916,13 @@ export interface GetChatInput {
      * @generated from protobuf field: InputPeer peer_id = 1;
      */
     peerId?: InputPeer;
+    /**
+     * Include the newest bounded message window. Used by typed chat repair;
+     * ordinary metadata reads keep the lightweight default.
+     *
+     * @generated from protobuf field: bool include_recent_messages = 2;
+     */
+    includeRecentMessages: boolean;
 }
 /**
  * @generated from protobuf message GetChatResult
@@ -5941,6 +5948,12 @@ export interface GetChatResult {
      * @generated from protobuf field: optional User user = 5;
      */
     user?: User;
+    /**
+     * Newest-first ordinary messages, capped by the server at 100.
+     *
+     * @generated from protobuf field: repeated Message messages = 6;
+     */
+    messages: Message[];
 }
 /**
  * @generated from protobuf message ShowInChatListInput
@@ -27005,11 +27018,13 @@ export const GetUpdatesStateResult = new GetUpdatesStateResult$Type();
 class GetChatInput$Type extends MessageType<GetChatInput> {
     constructor() {
         super("GetChatInput", [
-            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer }
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "include_recent_messages", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<GetChatInput>): GetChatInput {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.includeRecentMessages = false;
         if (value !== undefined)
             reflectionMergePartial<GetChatInput>(this, message, value);
         return message;
@@ -27021,6 +27036,9 @@ class GetChatInput$Type extends MessageType<GetChatInput> {
             switch (fieldNo) {
                 case /* InputPeer peer_id */ 1:
                     message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool include_recent_messages */ 2:
+                    message.includeRecentMessages = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -27037,6 +27055,9 @@ class GetChatInput$Type extends MessageType<GetChatInput> {
         /* InputPeer peer_id = 1; */
         if (message.peerId)
             InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool include_recent_messages = 2; */
+        if (message.includeRecentMessages !== false)
+            writer.tag(2, WireType.Varint).bool(message.includeRecentMessages);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27055,12 +27076,14 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
             { no: 2, name: "dialog", kind: "message", T: () => Dialog },
             { no: 3, name: "pinned_message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "anchor_message", kind: "message", T: () => Message },
-            { no: 5, name: "user", kind: "message", T: () => User }
+            { no: 5, name: "user", kind: "message", T: () => User },
+            { no: 6, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
         ]);
     }
     create(value?: PartialMessage<GetChatResult>): GetChatResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.pinnedMessageIds = [];
+        message.messages = [];
         if (value !== undefined)
             reflectionMergePartial<GetChatResult>(this, message, value);
         return message;
@@ -27088,6 +27111,9 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
                     break;
                 case /* optional User user */ 5:
                     message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                case /* repeated Message messages */ 6:
+                    message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -27120,6 +27146,9 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
         /* optional User user = 5; */
         if (message.user)
             User.internalBinaryWrite(message.user, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Message messages = 6; */
+        for (let i = 0; i < message.messages.length; i++)
+            Message.internalBinaryWrite(message.messages[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

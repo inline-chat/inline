@@ -318,6 +318,7 @@ impl SdkBackend {
                 session,
                 proto::GetChatInput {
                     peer_id: Some(input_peer_for_chat(InlineId::new(chat_id))),
+                    include_recent_messages: false,
                 },
             )
             .await?;
@@ -2807,6 +2808,7 @@ impl SdkBackend {
                 &session,
                 proto::GetChatInput {
                     peer_id: Some(peer_id.clone()),
+                    include_recent_messages: true,
                 },
             )
             .await
@@ -8083,6 +8085,7 @@ mod tests {
                         pinned_message_ids: vec![11],
                         anchor_message: None,
                         user: None,
+                        ..Default::default()
                     }),
                 ),
             )
@@ -8110,6 +8113,7 @@ mod tests {
                             date: 101,
                             ..Default::default()
                         }],
+                        ..Default::default()
                     }),
                 ),
             )
@@ -9261,6 +9265,86 @@ mod tests {
                 date: Some(13),
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn apply_updates_resolves_peer_user_mutations_to_the_stored_dm_chat() {
+        let store = InMemoryStore::new();
+        let chat_id = InlineId::new(7);
+        store
+            .record_dialog(DialogRecord {
+                peer_user_id: Some(InlineId::new(42)),
+                ..DialogRecord::new(chat_id)
+            })
+            .await
+            .unwrap();
+        store
+            .record_message(MessageRecord {
+                chat_id,
+                message_id: InlineId::new(11),
+                sender_id: InlineId::new(42),
+                timestamp: 100,
+                is_outgoing: false,
+                content: MessageContent::Text {
+                    text: "hello".to_owned(),
+                },
+                reply_to_message_id: None,
+                metadata: crate::MessageMetadata::default(),
+                transaction: None,
+            })
+            .await
+            .unwrap();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let peer = proto::Peer {
+            r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
+        };
+
+        let events = backend
+            .apply_updates(
+                vec![
+                    proto::Update {
+                        seq: Some(1),
+                        date: Some(101),
+                        update: Some(proto::update::Update::DeleteMessages(
+                            proto::UpdateDeleteMessages {
+                                message_ids: vec![11],
+                                peer_id: Some(peer.clone()),
+                            },
+                        )),
+                    },
+                    proto::Update {
+                        seq: Some(2),
+                        date: Some(102),
+                        update: Some(proto::update::Update::ClearChatHistory(
+                            proto::UpdateClearChatHistory {
+                                target: Some(proto::update_clear_chat_history::Target::PeerId(
+                                    peer,
+                                )),
+                                ..Default::default()
+                            },
+                        )),
+                    },
+                ],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::MessageDeleted {
+                chat_id: event_chat_id,
+                message_id,
+            } if *event_chat_id == chat_id && *message_id == InlineId::new(11)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ClientEvent::ChatHistoryCleared {
+                chat_id: event_chat_id,
+                before_date: None,
+            } if *event_chat_id == chat_id
+        )));
     }
 
     #[tokio::test]

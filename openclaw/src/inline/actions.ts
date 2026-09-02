@@ -2519,7 +2519,7 @@ async function resolveSpaceIdFromParams(params: {
   const chatId = BigInt(normalizeChatId(chatTarget))
   const chatResult = await params.client.invokeRaw(Method.GET_CHAT, {
     oneofKind: "getChat",
-    getChat: { peerId: buildChatPeer(chatId) },
+    getChat: { peerId: buildChatPeer(chatId), includeRecentMessages: false },
   })
   if (chatResult.oneofKind !== "getChat") {
     throw new Error(`inline action: expected getChat result, got ${String(chatResult.oneofKind)}`)
@@ -4671,7 +4671,7 @@ export const inlineMessageActions = {
           const chatId = resolveChatIdFromParams(params)
           const result = await client.invokeRaw(Method.GET_CHAT, {
             oneofKind: "getChat",
-            getChat: { peerId: buildChatPeer(chatId) },
+            getChat: { peerId: buildChatPeer(chatId), includeRecentMessages: false },
           })
           if (result.oneofKind !== "getChat") {
             throw new Error(`inline action: expected getChat result, got ${String(result.oneofKind)}`)
@@ -5517,7 +5517,7 @@ export const inlineMessageActions = {
           })
           const result = await client.invokeRaw(Method.GET_CHAT, {
             oneofKind: "getChat",
-            getChat: { peerId: buildChatPeer(target.chatId) },
+            getChat: { peerId: buildChatPeer(target.chatId), includeRecentMessages: false },
           })
           if (result.oneofKind !== "getChat") {
             throw new Error(`inline action: expected getChat result, got ${String(result.oneofKind)}`)

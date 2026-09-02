@@ -2121,6 +2121,10 @@ message GetUpdatesStateResult {
 message GetChatInput {
   // Peer ID to get chat for
   InputPeer peer_id = 1;
+
+  // Include the newest bounded message window. Used by typed chat repair;
+  // ordinary metadata reads keep the lightweight default.
+  bool include_recent_messages = 2;
 }
 
 message GetChatResult {
@@ -2129,6 +2133,8 @@ message GetChatResult {
   repeated int64 pinned_message_ids = 3;
   Message anchor_message = 4;
   optional User user = 5;
+  // Newest-first ordinary messages, capped by the server at 100.
+  repeated Message messages = 6;
 }
 
 message ShowInChatListInput {

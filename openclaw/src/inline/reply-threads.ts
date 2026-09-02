@@ -135,7 +135,7 @@ export async function loadInlineReplyThreadMetadata(params: {
   const result = await params.client
     .invokeRaw(GET_CHAT_METHOD, {
       oneofKind: "getChat",
-      getChat: { peerId: buildChatPeer(params.chatId) },
+      getChat: { peerId: buildChatPeer(params.chatId), includeRecentMessages: false },
     })
     .catch(() => null)
 

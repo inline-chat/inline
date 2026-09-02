@@ -154,6 +154,7 @@ async function loadChatSpaceId(params: {
     oneofKind: "getChat",
     getChat: {
       peerId: buildChatPeer(params.chatId),
+      includeRecentMessages: false,
     },
   })
   if (result.oneofKind !== "getChat") {
