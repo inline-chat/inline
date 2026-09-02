@@ -39,9 +39,10 @@ type InlineSdkClientCommonOptions = {
   /** Durable authority owner used by logout. close() never invokes these callbacks. */
   credentialOwner?: InlineSdkCredentialOwner
   /**
-   * Replaces one bucket with authoritative state when bounded incremental
-   * catch-up cannot converge. The callback must durably apply a complete
-   * bucket snapshot before returning its cursor; partial overlays must fail.
+   * Optional stronger replacement owner for hosts with materialized state.
+   * The callback must durably apply a complete bucket snapshot before returning
+   * its cursor; partial overlays must fail. Event-only hosts may omit it: the
+   * SDK replays bounded ranges and retains a server-authoritative liveness leap.
    */
   repairUpdatesBucket?: (
     request: InlineSdkAuthoritativeRepairRequest,

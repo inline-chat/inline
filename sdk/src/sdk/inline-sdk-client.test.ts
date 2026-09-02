@@ -2578,9 +2578,12 @@ describe("InlineSdkClient", () => {
       if (call.body.oneofKind !== "rpcCall" || call.body.rpcCall.input.oneofKind !== "getUpdates") {
         throw new Error("missing GET_UPDATES input")
       }
-      // The generated scalar defaults to zero; zero is the wire sentinel for
-      // an omitted upper bound and the server fetches through its latest cursor.
-      expect(call.body.rpcCall.input.getUpdates.seqEnd).toBe(0n)
+      // Zero still means fetch through latest. Event-only hosts express that as
+      // rolling server-sized windows so a large retained backlog remains replayable.
+      const bucketKind = call.body.rpcCall.input.getUpdates.bucket?.type.oneofKind
+      expect(call.body.rpcCall.input.getUpdates.seqEnd).toBe(
+        bucketKind === "chat" ? 10_004n : 10_007n,
+      )
     }
     await client.close()
   })
@@ -2600,6 +2603,45 @@ describe("InlineSdkClient", () => {
     ], "chat", { kind: "chat", chatId: 10n })
 
     expect(accepted).toBe(true)
+  })
+
+  it("does not retire a projected catch-up event that the SDK host did not acknowledge", async () => {
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport: new MockTransport(),
+    })
+    const iter = client.events()[Symbol.asyncIterator]()
+    const accepted = (client as any).acceptCatchUpUpdates([
+      Update.create({
+        seq: 2,
+        date: 100n,
+        update: {
+          oneofKind: "newMessage",
+          newMessage: {
+            message: {
+              id: 1n,
+              chatId: 10n,
+              fromId: 2n,
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+              out: false,
+              date: 100n,
+            },
+          },
+        },
+      }),
+    ], "chat", { kind: "chat", chatId: 10n })
+
+    const delivered = await iter.next()
+    expect(delivered.value.kind).toBe("message.new")
+    await iter.return?.()
+
+    await expect(accepted).resolves.toBe(false)
+    expect(client.getSyncStatus()).toEqual({
+      state: "degraded",
+      degradedBuckets: [{ kind: "chat", chatId: 10n }],
+    })
+    await client.close()
   })
 
   it("keeps user-owned dialog updates from fencing an unrelated DM chat bucket", async () => {
@@ -2842,7 +2884,7 @@ describe("InlineSdkClient", () => {
                     date: 101n,
                     update: {
                       oneofKind: "chatHasNewUpdates",
-                      chatHasNewUpdates: { chatId: 10n, updateSeq: 5, peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } } },
+                      chatHasNewUpdates: { chatId: 10n, updateSeq: 5, peerId: { type: { oneofKind: "user", user: { userId: 42n } } } },
                     },
                   }),
                 ],
@@ -2879,7 +2921,7 @@ describe("InlineSdkClient", () => {
                       oneofKind: "deleteMessages",
                       deleteMessages: {
                         messageIds: [1n],
-                        peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+                        peerId: { type: { oneofKind: "user", user: { userId: 42n } } },
                       },
                     },
                   }),
@@ -2901,6 +2943,7 @@ describe("InlineSdkClient", () => {
     const ev3 = await iter.next()
     expect(ev3.value.kind).toBe("message.delete")
     if (ev3.value.kind === "message.delete") {
+      expect(ev3.value.chatId).toBe(10n)
       expect(ev3.value.seq).toBe(4)
     }
 
@@ -3559,7 +3602,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  it("supports sendTyping, updates dateCursor when GET_UPDATES_STATE is empty, and skips deleteMessages without chat peer", async () => {
+  it("supports sendTyping and updates dateCursor when GET_UPDATES_STATE is empty", async () => {
     const transport = new MockTransport()
     const store = new MemoryStateStore({ version: 2 as any })
     const client = new InlineSdkClient({
@@ -3621,7 +3664,18 @@ describe("InlineSdkClient", () => {
     // method/input mismatch for UNSPECIFIED expects no input.
     await expect(client.invokeRaw(Method.UNSPECIFIED, { oneofKind: "getMe", getMe: {} })).rejects.toThrow(/expects no input/)
 
-    // deleteMessages without chat peer should be skipped (no message.delete event).
+    await client.close()
+  })
+
+  it("resolves a direct DM deletion from the remembered chat peer", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
     const iter = client.events()[Symbol.asyncIterator]()
     await transport.emitMessage(
       ServerProtocolMessage.create({
@@ -3637,6 +3691,23 @@ describe("InlineSdkClient", () => {
                     seq: 1,
                     date: 1n,
                     update: {
+                      oneofKind: "newMessage",
+                      newMessage: {
+                        message: {
+                          id: 1n,
+                          chatId: 10n,
+                          fromId: 1n,
+                          peerId: { type: { oneofKind: "user", user: { userId: 1n } } },
+                          out: false,
+                          date: 1n,
+                        },
+                      },
+                    },
+                  }),
+                  Update.create({
+                    seq: 2,
+                    date: 2n,
+                    update: {
                       oneofKind: "deleteMessages",
                       deleteMessages: { messageIds: [1n], peerId: { type: { oneofKind: "user", user: { userId: 1n } } } },
                     },
@@ -3649,16 +3720,44 @@ describe("InlineSdkClient", () => {
       }),
     )
 
-    const pending = iter.next()
-    const raced = await Promise.race([
-      pending,
-      new Promise<{ timeout: true }>((resolve) => setTimeout(() => resolve({ timeout: true }), 25)),
-    ])
+    const message = await iter.next()
+    expect(message.value.kind).toBe("message.new")
+    const deletion = await iter.next()
+    expect(deletion.done).toBe(false)
+    expect(deletion.value.kind).toBe("message.delete")
+    if (deletion.value.kind === "message.delete") {
+      expect(deletion.value.chatId).toBe(10n)
+      expect(deletion.value.messageIds).toEqual([1n])
+    }
+    const next = iter.next()
+    await waitFor(() => client.exportState().lastSeqByChatId?.["10"] === 2)
+    expect(client.getSyncStatus()).toEqual({ state: "live", degradedBuckets: [] })
+    await client.close()
+    await next
+  })
 
-    expect("timeout" in raced).toBe(true)
+  it("does not guess an ambiguous live DM while keeping catch-up bucket identity authoritative", async () => {
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport: new MockTransport(),
+      state: new MemoryStateStore({
+        version: 1,
+        chatPeerByChatId: {
+          "10": { kind: "user", id: "42" },
+          "20": { kind: "user", id: "42" },
+        },
+      }),
+    })
+    const peer42 = { type: { oneofKind: "user" as const, user: { userId: 42n } } }
+    const peer43 = { type: { oneofKind: "user" as const, user: { userId: 43n } } }
+    const resolve = (client as any).chatIdForPeerScopedUpdate.bind(client)
+
+    expect(resolve(peer42)).toBeNull()
+    expect(resolve(peer42, { kind: "chat", chatId: 10n, peer: peer42 })).toBe(10n)
+    expect(resolve(peer42, { kind: "chat", chatId: 10n, peer: peer43 })).toBe(10n)
 
     await client.close()
-    await pending
   })
 
   it("covers state save scheduling and replays a retained backlog in bounded slices", async () => {
@@ -3855,7 +3954,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  it("degrades without retrying when TOO_LONG has no authoritative repair owner", async () => {
+  it("replays a large retained backlog in server-sized windows by default", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
@@ -3866,13 +3965,13 @@ describe("InlineSdkClient", () => {
 
     await connectAndOpen(client, transport)
     await transport.emitMessage(ServerProtocolMessage.create({
-      id: 19n,
+      id: 18n,
       body: {
         oneofKind: "message",
         message: { payload: { oneofKind: "update", update: { updates: [Update.create({
           update: {
             oneofKind: "spaceHasNewUpdates",
-            spaceHasNewUpdates: { spaceId: 20n, updateSeq: 1002 },
+            spaceHasNewUpdates: { spaceId: 20n, updateSeq: 20_002 },
           },
         })] } } },
       },
@@ -3883,9 +3982,15 @@ describe("InlineSdkClient", () => {
     const first = transport.sent.find((message) =>
       message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
     )
-    if (!first || first.body.oneofKind !== "rpcCall") throw new Error("missing first getUpdates request")
+    if (!first || first.body.oneofKind !== "rpcCall" ||
+        first.body.rpcCall.input.oneofKind !== "getUpdates") {
+      throw new Error("missing first bounded getUpdates request")
+    }
+    expect(first.body.rpcCall.input.getUpdates.startSeq).toBe(1n)
+    expect(first.body.rpcCall.input.getUpdates.seqEnd).toBe(10_001n)
+
     await transport.emitMessage(ServerProtocolMessage.create({
-      id: 20n,
+      id: 19n,
       body: {
         oneofKind: "rpcResult",
         rpcResult: {
@@ -3893,22 +3998,174 @@ describe("InlineSdkClient", () => {
           result: {
             oneofKind: "getUpdates",
             getUpdates: {
-              updates: [],
-              seq: 1002n,
+              updates: [Update.create({
+                seq: 2,
+                date: 302n,
+                update: { oneofKind: "updateUserStatus", updateUserStatus: {} } as any,
+              })],
+              seq: 101n,
               date: 302n,
-              resultType: GetUpdatesResult_ResultType.TOO_LONG,
+              resultType: GetUpdatesResult_ResultType.SLICE,
               final: false,
+              skippedSequences: irrelevantSkippedSequences(1, 101, [2]),
             },
           },
         },
       },
     }))
-    await waitFor(() => client.getSyncStatus().state === "degraded")
-    await new Promise((resolve) => setTimeout(resolve, 25))
-    expect(transport.sent.filter((message) =>
+
+    await waitFor(() => transport.sent.filter((message) =>
       message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
-    )).toHaveLength(1)
-    expect(client.exportState().lastSeqBySpaceId?.["20"]).toBe(1)
+    ).length === 2)
+    const second = transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    )[1]
+    if (!second || second.body.oneofKind !== "rpcCall" ||
+        second.body.rpcCall.input.oneofKind !== "getUpdates") {
+      throw new Error("missing second bounded getUpdates request")
+    }
+    expect(second.body.rpcCall.input.getUpdates.startSeq).toBe(101n)
+    expect(second.body.rpcCall.input.getUpdates.seqEnd).toBe(10_101n)
+    expect(client.exportState().lastSeqBySpaceId?.["20"]).toBe(101)
+    await client.close()
+  })
+
+  it("advances to the server cursor when a bounded range cannot be replayed without a repair owner", async () => {
+    const transport = new MockTransport()
+    let warned = 0
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastSeqBySpaceId: { "20": 1 } }),
+      logger: { warn: () => warned++ } as any,
+    })
+
+    await connectAndOpen(client, transport)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 19n,
+      body: {
+        oneofKind: "message",
+        message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+          update: {
+            oneofKind: "spaceHasNewUpdates",
+            spaceHasNewUpdates: { spaceId: 20n, updateSeq: 20_002 },
+          },
+        })] } } },
+      },
+    }))
+    const calls = () => transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    )
+    const advanceUnavailableRange = async (
+      index: number,
+      startSeq: bigint,
+      endSeq: bigint,
+      responseId: bigint,
+    ) => {
+      await waitFor(() => calls().length > index)
+      const request = calls()[index]
+      if (!request || request.body.oneofKind !== "rpcCall" ||
+          request.body.rpcCall.input.oneofKind !== "getUpdates") {
+        throw new Error(`missing bounded getUpdates request ${index}`)
+      }
+      expect(request.body.rpcCall.input.getUpdates.startSeq).toBe(startSeq)
+      expect(request.body.rpcCall.input.getUpdates.seqEnd).toBe(endSeq)
+      await transport.emitMessage(ServerProtocolMessage.create({
+        id: responseId,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: request.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [],
+                seq: endSeq,
+                date: 302n,
+                resultType: GetUpdatesResult_ResultType.TOO_LONG,
+                final: false,
+              },
+            },
+          },
+        },
+      }))
+    }
+
+    await advanceUnavailableRange(0, 1n, 10_001n, 20n)
+    await advanceUnavailableRange(1, 10_001n, 20_001n, 21n)
+    expect(client.getSyncStatus().state).toBe("syncing")
+    await advanceUnavailableRange(2, 20_001n, 20_002n, 22n)
+
+    await waitFor(() => client.exportState().lastSeqBySpaceId?.["20"] === 20_002)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(calls()).toHaveLength(3)
+    expect(client.getSyncStatus()).toEqual({ state: "live", degradedBuckets: [] })
+    expect(warned).toBe(3)
+    await client.close()
+  })
+
+  it("does not report live when a final catch-up page remains behind its chat hint", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({
+        version: 1,
+        lastSeqByChatId: { "10": 1 },
+        chatPeerByChatId: { "10": { kind: "chat", id: "10" } },
+      }),
+    })
+
+    await connectAndOpen(client, transport)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 23n,
+      body: {
+        oneofKind: "message",
+        message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+          update: {
+            oneofKind: "chatHasNewUpdates",
+            chatHasNewUpdates: {
+              chatId: 10n,
+              updateSeq: 3,
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+            },
+          },
+        })] } } },
+      },
+    }))
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    ))
+    const rpc = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates request")
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 24n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: rpc.id,
+          result: {
+            oneofKind: "getUpdates",
+            getUpdates: {
+              updates: [],
+              seq: 1n,
+              date: 302n,
+              resultType: GetUpdatesResult_ResultType.EMPTY,
+              final: true,
+            },
+          },
+        },
+      },
+    }))
+
+    await waitFor(() => client.getSyncStatus().state === "degraded")
+    expect(client.exportState().lastSeqByChatId?.["10"]).toBe(1)
+    expect(client.getSyncStatus().degradedBuckets).toMatchObject([{ kind: "chat", chatId: 10n }])
     await client.close()
   })
 
@@ -4126,6 +4383,68 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it("retires an explicit snapshot-repair marker by default for an event-only host", async () => {
+    const transport = new MockTransport()
+    let warned = 0
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastSeqBySpaceId: { "20": 1 } }),
+      logger: { warn: () => warned++ } as any,
+    })
+
+    await connectAndOpen(client, transport)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 171n,
+      body: {
+        oneofKind: "message",
+        message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+          update: {
+            oneofKind: "spaceHasNewUpdates",
+            spaceHasNewUpdates: { spaceId: 20n, updateSeq: 2 },
+          },
+        })] } } },
+      },
+    }))
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    ))
+    const rpc = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates request")
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 172n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: rpc.id,
+          result: {
+            oneofKind: "getUpdates",
+            getUpdates: {
+              updates: [],
+              seq: 2n,
+              date: 301n,
+              resultType: GetUpdatesResult_ResultType.EMPTY,
+              final: true,
+              skippedSequences: [{
+                seq: 2n,
+                reason: SyncSkippedSequence_Reason.SNAPSHOT_REPAIR_REQUIRED,
+              }],
+            },
+          },
+        },
+      },
+    }))
+
+    await waitFor(() => client.exportState().lastSeqBySpaceId?.["20"] === 2)
+    expect(client.getSyncStatus()).toEqual({ state: "live", degradedBuckets: [] })
+    expect(warned).toBe(1)
+    await client.close()
+  })
+
   it("repairs a retained chat bucket authoritatively before advancing its cursor", async () => {
     const transport = new MockTransport()
     const repairs: Array<{ serverSeq: number; kind: string }> = []
@@ -4290,6 +4609,106 @@ describe("InlineSdkClient", () => {
     expect(client.exportState().dateCursor).toBeUndefined()
     expect(client.getSyncStatus()).toEqual({ state: "live", degradedBuckets: [] })
     await client.close()
+  })
+
+  it("does not let one malformed projected update poison later events in an authoritative page", async () => {
+    const transport = new MockTransport()
+    let warned = 0
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({
+        version: 1,
+        lastSeqByChatId: { "10": 1 },
+        chatPeerByChatId: { "10": { kind: "chat", id: "10" } },
+      }),
+      logger: { warn: () => warned++ } as any,
+    })
+
+    await connectAndOpen(client, transport)
+    const iter = client.events()[Symbol.asyncIterator]()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 141n,
+      body: {
+        oneofKind: "message",
+        message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+          update: {
+            oneofKind: "chatHasNewUpdates",
+            chatHasNewUpdates: {
+              chatId: 10n,
+              updateSeq: 3,
+              peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+            },
+          },
+        })] } } },
+      },
+    }))
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    ))
+    const rpc = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing targeted catch-up request")
+
+    const hint = await iter.next()
+    expect(hint.value.kind).toBe("chat.hasUpdates")
+    const pendingEvent = iter.next()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 142n,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId: rpc.id,
+          result: {
+            oneofKind: "getUpdates",
+            getUpdates: {
+              updates: [
+                Update.create({
+                  seq: 2,
+                  date: 334n,
+                  update: { oneofKind: "newMessage", newMessage: {} },
+                }),
+                Update.create({
+                  seq: 3,
+                  date: 335n,
+                  update: {
+                    oneofKind: "newMessage",
+                    newMessage: {
+                      message: {
+                        id: 33n,
+                        chatId: 10n,
+                        fromId: 2n,
+                        peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+                        out: false,
+                        date: 335n,
+                      },
+                    },
+                  },
+                }),
+              ],
+              seq: 3n,
+              date: 335n,
+              resultType: GetUpdatesResult_ResultType.SLICE,
+              final: true,
+            },
+          },
+        },
+      },
+    }))
+
+    const recovered = await pendingEvent
+    expect(recovered.value.kind).toBe("message.new")
+    if (recovered.value.kind === "message.new") expect(recovered.value.message.id).toBe(33n)
+    expect(client.exportState().lastSeqByChatId?.["10"]).toBe(1)
+
+    const next = iter.next()
+    await waitFor(() => client.exportState().lastSeqByChatId?.["10"] === 3)
+    expect(client.getSyncStatus()).toEqual({ state: "live", degradedBuckets: [] })
+    expect(warned).toBe(1)
+    await client.close()
+    await next
   })
 
   it("advances a catch-up cursor past an unknown future update kind", async () => {
@@ -5979,7 +6398,7 @@ describe("InlineSdkClient", () => {
     await next
   })
 
-  it("emits clear history events for chat, user, and space targets", async () => {
+  it("emits clear history events for chat, DM, and space targets", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
@@ -6063,8 +6482,25 @@ describe("InlineSdkClient", () => {
               update: {
                 updates: [
                   Update.create({
-                    seq: 3,
+                    seq: 1,
                     date: 12n,
+                    update: {
+                      oneofKind: "newMessage",
+                      newMessage: {
+                        message: {
+                          id: 1n,
+                          chatId: 30n,
+                          fromId: 1n,
+                          peerId: { type: { oneofKind: "user", user: { userId: 1n } } },
+                          out: false,
+                          date: 12n,
+                        },
+                      },
+                    },
+                  }),
+                  Update.create({
+                    seq: 2,
+                    date: 13n,
                     update: {
                       oneofKind: "clearChatHistory",
                       clearChatHistory: {
@@ -6085,14 +6521,19 @@ describe("InlineSdkClient", () => {
     )
 
     const ev3 = await iter.next()
-    expect(ev3.value.kind).toBe("message.history.clear")
-    if (ev3.value.kind === "message.history.clear") {
-      expect(ev3.value.userId).toBe(1n)
-      expect(ev3.value.chatId).toBeUndefined()
-      expect(ev3.value.deleteReplyThreads).toBe(false)
-      expect(ev3.value.seq).toBe(3)
+    expect(ev3.value.kind).toBe("message.new")
+    const ev4 = await iter.next()
+    expect(ev4.value.kind).toBe("message.history.clear")
+    if (ev4.value.kind === "message.history.clear") {
+      expect(ev4.value.chatId).toBe(30n)
+      expect(ev4.value.userId).toBeUndefined()
+      expect(ev4.value.deleteReplyThreads).toBe(false)
+      expect(ev4.value.seq).toBe(2)
     }
 
+    const next = iter.next()
+    await waitFor(() => client.exportState().lastSeqByChatId?.["30"] === 2)
     await client.close()
+    await next
   })
 })
