@@ -150,39 +150,61 @@ fn plugin_dry_run_is_local_and_shows_fixed_install_commands() {
 #[test]
 fn plugin_install_uses_supported_argv_without_forwarding_inline_credentials() {
     use std::os::unix::fs::PermissionsExt;
-    let directory = tempfile::tempdir().unwrap();
-    let codex = directory.path().join("codex");
-    std::fs::write(&codex, r#"#!/bin/sh
+    for json_output in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let codex = directory.path().join("codex");
+        std::fs::write(&codex, r#"#!/bin/sh
 test -z "${INLINE_TOKEN+x}" || exit 91
 test -z "${INLINE_CODEX_BIN+x}" || exit 92
 case "$*" in
   'plugin add --help') printf 'Plugin help';;
-  'plugin marketplace add inline-chat/inline --json') printf '{"alreadyAdded":true}';;
-  'plugin add inline@inline --json') printf '{"version":"0.1.0","authPolicy":"ON_INSTALL","installedPath":"/private/fixture"}';;
+  'plugin marketplace add inline-chat/inline')
+    if [ "$CODEX_FIXTURE_FORMAT" = json ]; then
+      printf '{"alreadyAdded":true}'
+    else
+      printf 'Marketplace `inline` is already added.'
+    fi;;
+  'plugin add inline@inline')
+    if [ "$CODEX_FIXTURE_FORMAT" = json ]; then
+      printf '{"version":"0.1.0","authPolicy":"ON_INSTALL","installedPath":"/private/fixture"}'
+    else
+      printf 'Added plugin `inline` from marketplace `inline`.\nInstalled plugin root: /private/fixture\n'
+    fi;;
   *) exit 93;;
 esac
 "#).unwrap();
-    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_inline"))
-        .args(["plugin", "install", "--json", "--compact"])
-        .env("INLINE_CODEX_BIN", &codex)
-        .env("INLINE_TOKEN", "fixture-token-never-forwarded")
-        .env("INLINE_CLI_TELEMETRY", "off")
-        .env("INLINE_API_BASE_URL", "invalid and unused")
-        .env(
-            "INLINE_SECRETS_PATH",
-            directory.path().join("unused-secrets"),
-        )
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{:?}", output.stderr);
-    assert!(output.stderr.is_empty());
-    let installed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(installed["status"], "installed");
-    assert_eq!(installed["version"], "0.1.0");
-    assert_eq!(installed["marketplaceAlreadyAdded"], true);
-    assert!(installed.get("installedPath").is_none());
-    assert!(!directory.path().join("unused-secrets").exists());
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_inline"))
+            .args(["plugin", "install", "--json", "--compact"])
+            .env("INLINE_CODEX_BIN", &codex)
+            .env(
+                "CODEX_FIXTURE_FORMAT",
+                if json_output { "json" } else { "text" },
+            )
+            .env("INLINE_TOKEN", "fixture-token-never-forwarded")
+            .env("INLINE_CLI_TELEMETRY", "off")
+            .env("INLINE_API_BASE_URL", "invalid and unused")
+            .env(
+                "INLINE_SECRETS_PATH",
+                directory.path().join("unused-secrets"),
+            )
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        assert!(output.stderr.is_empty());
+        let installed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(installed["status"], "installed");
+        if json_output {
+            assert_eq!(installed["version"], "0.1.0");
+            assert_eq!(installed["marketplaceAlreadyAdded"], true);
+        } else {
+            assert!(installed.get("version").is_none());
+            assert!(installed.get("marketplaceAlreadyAdded").is_none());
+        }
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("/private/fixture"));
+        assert!(installed.get("installedPath").is_none());
+        assert!(!directory.path().join("unused-secrets").exists());
+    }
 }
 
 #[test]

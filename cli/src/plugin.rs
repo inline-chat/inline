@@ -53,15 +53,15 @@ pub(crate) async fn install_for_codex(
     }
 
     let codex = find_codex_with_plugins().await?;
-    let marketplace = run_codex_json(
+    let marketplace = run_codex_install(
         &codex,
-        &["plugin", "marketplace", "add", MARKETPLACE_SOURCE, "--json"],
+        &["plugin", "marketplace", "add", MARKETPLACE_SOURCE],
         "add the Inline plugin marketplace",
     )
     .await?;
-    let installed = run_codex_json(
+    let installed = run_codex_install(
         &codex,
-        &["plugin", "add", PLUGIN_ID, "--json"],
+        &["plugin", "add", PLUGIN_ID],
         "install the Inline plugin",
     )
     .await?;
@@ -174,7 +174,7 @@ async fn codex_supports_plugins(candidate: &Path) -> bool {
     .is_ok_and(|output| output.status.success())
 }
 
-async fn run_codex_json(
+async fn run_codex_install(
     candidate: &Path,
     args: &[&str],
     operation: &str,
@@ -193,15 +193,10 @@ async fn run_codex_json(
         }
         .into());
     }
-    serde_json::from_slice(&output.stdout).map_err(|error| {
-        CliError {
-            code: "codex_plugin_invalid_output",
-            message: format!("Codex returned invalid JSON while trying to {operation}: {error}"),
-            hint: Some("Update Codex and retry the installation.".to_string()),
-            examples: vec!["codex --version".to_string()],
-        }
-        .into()
-    })
+    // Plugin-capable Codex builds do not all support --json. Exit status is
+    // authoritative; retain optional metadata only when output is JSON, without
+    // parsing display text or exposing installed paths in Inline's result.
+    Ok(serde_json::from_slice(&output.stdout).unwrap_or(Value::Null))
 }
 
 async fn run_codex(
