@@ -18,9 +18,9 @@ class NotificationsManager: NSObject {
     log.debug("Notifications manager setup completed.")
   }
 
-  var onNotificationReceivedAction: ((_ response: UNNotificationResponse) -> Void)?
+  var onNotificationReceivedAction: (@MainActor (_ response: UNNotificationResponse) -> Void)?
 
-  func onNotificationReceived(action: @escaping (_ response: UNNotificationResponse) -> Void) {
+  func onNotificationReceived(action: @escaping @MainActor (_ response: UNNotificationResponse) -> Void) {
     if onNotificationReceivedAction != nil {
       log.error("onNotificationReceived action already attached. It must only be called once.")
     }
@@ -37,7 +37,7 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
     withCompletionHandler completionHandler:
     @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    log.debug("willPresent called for \(notification)")
+    log.debug("Received foreground notification")
 
 #if DEBUG || DEBUG_BUILD
     if notification.request.content.userInfo["playgroundNotification"] as? Bool == true {
@@ -52,14 +52,30 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
       return
     }
 
+    guard let account = MessageNotificationAccount.capture(userInfo: notification.request.content.userInfo) else {
+      completionHandler([])
+      return
+    }
     let urgentOptions = UrgentNotificationPresentation.foregroundOptions(for: notification.request.content)
     if !urgentOptions.isEmpty {
       completionHandler(urgentOptions)
       return
     }
 
-    // Don't alert the user for other types.
-    completionHandler([])
+    let content = notification.request.content
+    let target = MessageNotificationTarget(userInfo: content.userInfo, threadIdentifier: content.threadIdentifier)
+    Task { @MainActor in
+      let peer = await target?.resolvePeer()
+      guard MessageNotificationAccount.isCurrent(account) else {
+        completionHandler([])
+        return
+      }
+      let isViewingChat = peer.map { MainWindowOpenCoordinator.shared.isViewingChat($0) } ?? false
+      completionHandler(MessageNotificationPresentation.foregroundOptions(
+        for: content,
+        isViewingConversation: isViewingChat
+      ))
+    }
   }
 
   func userNotificationCenter(
@@ -67,8 +83,11 @@ extension NotificationsManager: UNUserNotificationCenterDelegate {
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
-    log.debug("Received notification: \(response.notification.request.content.userInfo)")
-    onNotificationReceivedAction.map { $0(response) }
-    completionHandler() // Is this correct?
+    log.debug("Received notification action")
+    let action = onNotificationReceivedAction
+    Task { @MainActor in
+      action?(response)
+      completionHandler()
+    }
   }
 }

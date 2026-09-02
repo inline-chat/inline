@@ -2,6 +2,7 @@ import { DbObjectKind, useRealtimeClient, type User } from "@inline/client"
 import { useNavigate } from "@tanstack/react-router"
 import * as stylex from "@stylexjs/stylex"
 import { useState } from "react"
+import { inlineAuthApi } from "~/inline/auth/auth-api"
 import { authSession, useAuthSession } from "~/inline/auth/auth-session"
 import { useInlineObject } from "~/inline/data/react"
 import { colors } from "../styles/tokens.stylex"
@@ -26,7 +27,12 @@ export function SettingsAccountView() {
     setLoggingOut(true)
     setError(undefined)
     try {
-      await realtime.stop()
+      // A rejected transport teardown or offline revocation must not retain
+      // browser credentials. Keep the server request bounded during logout.
+      await Promise.allSettled([
+        realtime.stop(),
+        auth.token ? inlineAuthApi.logout(auth.token) : Promise.resolve(),
+      ])
       await authSession.logout()
       await navigate({ to: "/login", replace: true })
     } catch (cause) {

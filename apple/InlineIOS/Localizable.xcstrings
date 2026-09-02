@@ -956,6 +956,9 @@
     "Open links in app" : {
 
     },
+    "Opens photo" : {
+
+    },
     "Options" : {
 
     },
@@ -990,6 +993,18 @@
           }
         }
       }
+    },
+    "Photo" : {
+
+    },
+    "Photo, %1$d of %2$d" : {
+
+    },
+    "Photo preview" : {
+
+    },
+    "Photo unavailable" : {
+
     },
     "Pick a preferred device" : {
 

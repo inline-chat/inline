@@ -5,7 +5,8 @@ export type PreviewAuthProvider = "notion" | (string & {})
 export type PreviewAuthInput = {
   provider: PreviewAuthProvider
   currentUserId: number
-  chatId: number
+  /** Omit before chat creation to use only the requesting user's personal connection. */
+  chatId?: number | undefined
 }
 
 export type PreviewAuthPolicy = {

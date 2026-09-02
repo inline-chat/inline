@@ -109,6 +109,7 @@ function buildDatabasePreview(
     providerResourceType: "notion.database",
     title,
     description,
+    iconEmoji: pageIconEmoji(database),
     mediaType: "article",
     options,
   })
@@ -130,6 +131,7 @@ function buildDataSourcePreview(
     providerResourceType: "notion.data_source",
     title,
     description,
+    iconEmoji: pageIconEmoji(dataSource),
     mediaType: "article",
     options,
   })
@@ -170,6 +172,7 @@ function basePreview(
     options: AuthPreviewOptions
   },
 ): AuthenticatedPreviewResult<NotionParsedUrl> {
+  const iconEmoji = input.iconEmoji?.trim()
   return {
     parsedUrl,
     providerResourceType: input.providerResourceType,
@@ -179,7 +182,8 @@ function basePreview(
     siteName: cleanField("Notion", input.options.maxSiteNameLength ?? DEFAULT_SITE_NAME_LENGTH) ?? "Notion",
     title: cleanField(input.title, input.options.maxTitleLength ?? DEFAULT_TITLE_LENGTH) ?? undefined,
     description: cleanField(input.description, input.options.maxDescriptionLength ?? DEFAULT_DESCRIPTION_LENGTH) ?? undefined,
-    iconEmoji: cleanField(input.iconEmoji, 16) ?? undefined,
+    // A joined emoji can exceed 16 UTF-16 units; never cut a glyph in half.
+    iconEmoji: iconEmoji && iconEmoji.length <= 64 ? iconEmoji : undefined,
     mediaType: input.mediaType,
     provider: "notion",
   }

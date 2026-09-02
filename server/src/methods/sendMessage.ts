@@ -30,6 +30,11 @@ import { MessageEntities, Update, type BlockContent } from "@inline-chat/protoco
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
+import {
+  maxNotificationNameBytes,
+  notificationBodyText,
+  notificationText,
+} from "@in/server/modules/notifications/messagePreview"
 import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 import { ChatModel } from "@in/server/db/models/chats"
 import {
@@ -243,12 +248,15 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     // Don't send push notifications to self
     input.peerUserId !== context.currentUserId
   ) {
-    const title: string = currentUser.firstName ?? currentUser.username ?? "New Message"
+    const title = notificationText(
+      currentUser.firstName ?? currentUser.username,
+      maxNotificationNameBytes,
+    ) || "New Message"
     sendPushNotificationToUser({
       userId: Number(input.peerUserId),
       title,
       chatId,
-      message: text ?? "🖼️ Photo", // if no text, it's image for now!!!
+      message: notificationBodyText(text) || (file ? "🖼️ Photo" : "New message"),
       currentUserId: context.currentUserId,
       currentUser,
     })
@@ -441,6 +449,11 @@ const sendPushNotificationToUser = async ({
       return
     }
 
+    const projectedTitle = notificationText(title, maxNotificationNameBytes) || "New Message"
+    const projectedBody = notificationBodyText(message) || "New message"
+    const projectedFirstName = notificationText(currentUser.firstName, maxNotificationNameBytes) || undefined
+    const projectedLastName = notificationText(currentUser.lastName, maxNotificationNameBytes) || undefined
+
     for (const session of userSessions) {
       if (!session.applePushToken) continue
 
@@ -459,8 +472,8 @@ const sendPushNotificationToUser = async ({
         userId: currentUserId,
 
         from: {
-          firstName: currentUser.firstName,
-          lastName: currentUser.lastName,
+          firstName: projectedFirstName,
+          lastName: projectedLastName,
         },
       }
       notification.contentAvailable = true
@@ -469,8 +482,14 @@ const sendPushNotificationToUser = async ({
       notification.threadId = `chat_${chatId}`
       notification.sound = "default"
       notification.alert = {
-        title,
-        body: message,
+        title: projectedTitle,
+        body: projectedBody,
+      }
+
+      const payloadBytes = Buffer.byteLength(JSON.stringify(notification), "utf8")
+      if (payloadBytes > 4_096) {
+        Log.shared.warn("Legacy notification payload exceeded APNs byte budget", { payloadBytes, userId })
+        continue
       }
 
       let apnProvider = getApnProvider()

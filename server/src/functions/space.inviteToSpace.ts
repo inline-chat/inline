@@ -1,35 +1,21 @@
-import { type DbMember, type DbMemberRole, type DbSpace, type DbUser } from "@in/server/db/schema"
+import type { DbSpace, DbUser } from "@in/server/db/schema"
 import { UsersModel } from "@in/server/db/models/users"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
 
-import { Update, type InviteToSpaceInput, type InviteToSpaceResult } from "@inline-chat/protocol/core"
+import type { InviteToSpaceInput, InviteToSpaceResult } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { isValidEmail, isValidSpaceId } from "@in/server/utils/validate"
-import { MembersModel } from "@in/server/db/models/members"
 import { sendEmail } from "@in/server/utils/email"
-import { SpaceModel } from "@in/server/db/models/spaces"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { Log } from "@in/server/utils/log"
-import { getUpdateGroupForSpace } from "@in/server/modules/updates"
-import { RealtimeUpdates } from "@in/server/realtime/message"
-import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
-import { UpdateBucket } from "@in/server/db/schema/updates"
-import type { ServerUpdate } from "@in/server/protocol/server"
-import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
-import { db } from "@in/server/db"
-import { spaces } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
-import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
-import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
-import { openPrimarySpaceChatForUser } from "@in/server/modules/dialogOpen"
-import { emitChatListOpenUpdates } from "@in/server/modules/subthreads"
 import {
-  getEffectiveChatAccessUserIds,
-  getSpaceRootChatIdsForAccessEvents,
-} from "@in/server/modules/authorization/chatAccessProjection"
+  addSpaceMember,
+  SpaceMemberAdmissionError,
+  type SpaceMemberTarget,
+} from "@in/server/functions/space.addMember.shared"
 
 const log = new Log("space.inviteToSpace")
 
@@ -41,234 +27,85 @@ export const inviteToSpace = async (
   if (!isValidSpaceId(spaceId)) {
     throw RealtimeRpcError.BadRequest()
   }
+  const requestedRole = getRequestedRole(input)
+  const inviteTarget = getInviteTarget(input)
 
-  // Get space
-  const space = await SpaceModel.getSpaceById(spaceId)
-
-  if (!space) {
-    throw RealtimeRpcError.SpaceIdInvalid()
-  }
-
-  await ensureCanInvite(space, input, context)
-
-  let inviteInfo: InviteInfo
-
-  // Determine method
-  switch (input.via.oneofKind) {
-    case "userId":
-      inviteInfo = await inviteViaUserId(spaceId, Number(input.via.userId), input, context)
-      break
-
-    case "email":
-      inviteInfo = await inviteViaEmail(spaceId, input.via.email, input, context)
-      break
-
-    case "phoneNumber":
-      inviteInfo = await inviteViaPhoneNumber(spaceId, input.via.phoneNumber, input, context)
-      break
-
-    default:
-      throw RealtimeRpcError.BadRequest()
-  }
-
-  // Create member (no chat/dialog auto-creation)
-  let member = await createMember(spaceId, inviteInfo.user.id, input, context)
-  // NOTE: We intentionally do not auto-create a DM chat/dialog during space invite.
+  const outcome = await addSpaceMember({
+    spaceId,
+    actorUserId: context.currentUserId,
+    target: inviteTarget,
+    admission: "invite",
+    role: requestedRole,
+    canAccessPublicChats:
+      input.role?.role.oneofKind === "member" ? input.role.role.member.canAccessPublicChats : true,
+  }).catch((error: unknown) => {
+    if (error instanceof SpaceMemberAdmissionError) {
+      throw RealtimeRpcError.SpaceAdminRequired()
+    }
+    throw error
+  })
 
   // Best-effort internal alert (should never affect the user action).
-  BotAlerts.spaceInvite({
+  void BotAlerts.spaceInvite({
     inviterUserId: context.currentUserId,
-    invitedUserId: inviteInfo.user.id,
-    spaceId: space.id,
-    spaceName: space.name,
+    invitedUserId: outcome.user.id,
+    spaceId: outcome.space.id,
+    spaceName: outcome.space.name,
+  }).catch((error: unknown) => {
+    log.error(error, "Failed to send internal space-invite alert", { spaceId, userId: outcome.user.id })
   })
 
   // Send invite
-  sendInvite(inviteInfo.user, space, input, context)
+  void sendInvite(outcome.user, outcome.space, context)
     .then(() => {
-      log.info("Invite sent", { spaceId, userId: inviteInfo.user.id })
+      log.info("Invite sent", { spaceId, userId: outcome.user.id })
     })
     .catch((error) => {
-      log.error(error, "Failed to send invite", { spaceId, userId: inviteInfo.user.id })
+      log.error(error, "Failed to send invite", { spaceId, userId: outcome.user.id })
     })
-
-  const persistedSpaceUpdate = await persistSpaceMemberAddUpdate({
-    spaceId,
-    member,
-    user: inviteInfo.user,
-  })
-
-  const joinUpdates = await persistJoinSpaceUpdate({
-    inviteUserId: inviteInfo.user.id,
-    space,
-    member,
-  })
-
-  // Send updates
-  pushUpdateForInvitedUser({
-    space,
-    member,
-    inviteUserId: inviteInfo.user.id,
-    persisted: joinUpdates.joinUpdate,
-  })
-  pushInvitedUserAccessUpdates(inviteInfo.user.id, joinUpdates.accessUpdates)
-  pushUpdatesForSpace({
-    spaceId,
-    space,
-    member,
-    user: inviteInfo.user,
-    currentUserId: context.currentUserId,
-    persisted: persistedSpaceUpdate,
-  })
-
-  const primaryChatOpen = await openPrimarySpaceChatForUser({
-    spaceId,
-    userId: inviteInfo.user.id,
-    canAccessPublicChats: member.canAccessPublicChats !== false,
-  })
-  if (primaryChatOpen?.changed) {
-    await emitChatListOpenUpdates({
-      chat: primaryChatOpen.chat,
-      dialogs: [primaryChatOpen.dialog],
-    }).catch((error: unknown) => {
-      // The open dialog remains authoritative and will be returned by the next chat sync.
-      log.error("Failed to fan out invited member primary chat", { spaceId, userId: inviteInfo.user.id, error })
-    })
-  }
 
   return {
-    user: Encoders.user({ user: inviteInfo.user, min: false }),
-    member: Encoders.member(member),
+    user: Encoders.user({ user: outcome.user, min: false }),
+    member: Encoders.member(outcome.member),
   }
-}
-
-type InviteInfo = {
-  user: DbUser
 }
 
 // ------------------------------------------------------------
 
-async function ensureCanInvite(space: DbSpace, input: InviteToSpaceInput, context: FunctionContext): Promise<void> {
+type RequestedInviteRole = "member" | "admin" | undefined
+
+function getRequestedRole(input: InviteToSpaceInput): RequestedInviteRole {
   const roleKind = input.role?.role.oneofKind
   if (roleKind && roleKind !== "member" && roleKind !== "admin") {
     throw RealtimeRpcError.BadRequest()
   }
-
-  const member = await MembersModel.getMemberByUserId(space.id, context.currentUserId)
-  if (!member) {
-    throw RealtimeRpcError.SpaceAdminRequired()
-  }
-
-  if (member.role === "admin" || member.role === "owner") {
-    return
-  }
-
-  if (space.isPublic && roleKind !== "admin") {
-    return
-  }
-
-  throw RealtimeRpcError.SpaceAdminRequired()
+  return roleKind
 }
 
-// ------------------------------------------------------------
-
-async function inviteViaUserId(
-  _spaceId: number,
-  userId: number,
-  _input: InviteToSpaceInput,
-  _context: FunctionContext,
-): Promise<InviteInfo> {
-  // Validate user
-  const user = await UsersModel.getUserById(userId)
-  if (!user || UsersModel.isDeleted(user)) {
-    throw RealtimeRpcError.UserIdInvalid()
+function getInviteTarget(input: InviteToSpaceInput): SpaceMemberTarget {
+  switch (input.via.oneofKind) {
+    case "userId": {
+      const userId = Number(input.via.userId)
+      if (!Number.isSafeInteger(userId) || userId <= 0) {
+        throw RealtimeRpcError.UserIdInvalid()
+      }
+      return { kind: "userId", userId }
+    }
+    case "email": {
+      const email = input.via.email.toLowerCase().trim()
+      if (!isValidEmail(email)) {
+        throw RealtimeRpcError.EmailInvalid()
+      }
+      return { kind: "email", email }
+    }
+    case "phoneNumber":
+      return { kind: "phoneNumber", phoneNumber: UsersModel.normalizePhoneNumber(input.via.phoneNumber) }
+    default:
+      throw RealtimeRpcError.BadRequest()
   }
-  return { user }
 }
 
-async function inviteViaEmail(
-  _spaceId: number,
-  email: string,
-  _input: InviteToSpaceInput,
-  _context: FunctionContext,
-): Promise<InviteInfo> {
-  // Validate email
-  if (!isValidEmail(email)) {
-    throw RealtimeRpcError.EmailInvalid()
-  }
-
-  let normalizedEmail = email.toLowerCase().trim()
-
-  // Check if already a user
-  let user = await UsersModel.getUserByEmail(normalizedEmail)
-
-  if (UsersModel.isDeleted(user)) {
-    throw RealtimeRpcError.UserIdInvalid()
-  }
-
-  if (!user) {
-    // If no user, create one
-    user = await UsersModel.createUserWhenInvited({ email: normalizedEmail })
-  }
-
-  return { user }
-}
-
-async function inviteViaPhoneNumber(
-  _spaceId: number,
-  phoneNumber: string,
-  _input: InviteToSpaceInput,
-  _context: FunctionContext,
-): Promise<InviteInfo> {
-  // Check if already a user
-  let user = await UsersModel.getUserByPhoneNumber(phoneNumber)
-
-  if (UsersModel.isDeleted(user)) {
-    throw RealtimeRpcError.UserIdInvalid()
-  }
-
-  if (!user) {
-    // If no user, create one
-    user = await UsersModel.createUserWhenInvited({ phoneNumber })
-  }
-
-  return { user }
-}
-
-// ------------------------------------------------------------
-
-async function createMember(
-  spaceId: number,
-  userId: number,
-  input: InviteToSpaceInput,
-  context: FunctionContext,
-): Promise<DbMember> {
-  // Check if already a member
-  const member = await MembersModel.getMemberByUserId(spaceId, userId)
-
-  if (member) {
-    throw RealtimeRpcError.UserAlreadyMember()
-  }
-
-  // Db member role
-
-  let dbMemberRole: DbMemberRole = "member"
-  if (input.role?.role.oneofKind === "member") {
-    dbMemberRole = "member"
-  } else if (input.role?.role.oneofKind === "admin") {
-    dbMemberRole = "admin"
-  }
-
-  // Create member
-  const newMember = await MembersModel.createMember(spaceId, userId, dbMemberRole, {
-    invitedBy: context.currentUserId,
-    canAccessPublicChats: input.role?.role.oneofKind === "member" ? input.role?.role.member.canAccessPublicChats : true,
-  })
-
-  return newMember
-}
-
-async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInput, context: FunctionContext) {
+async function sendInvite(user: DbUser, space: DbSpace, context: FunctionContext) {
   const invitedByUserName = await getCachedUserName(context.currentUserId)
 
   // Send invite to email or via push notification
@@ -304,175 +141,5 @@ async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInpu
         body: `Open the app, tap on the space name to start chatting.`,
       },
     })
-  }
-}
-
-// ------------------------------------------------------------
-// Updates
-
-const pushUpdateForInvitedUser = async ({
-  space,
-  member,
-  inviteUserId,
-  persisted,
-}: {
-  inviteUserId: number
-  space: DbSpace
-  member: DbMember
-  persisted: UpdateSeqAndDate
-}) => {
-  // Update for the person who was invited
-  const update: Update = {
-    seq: persisted.seq,
-    date: encodeDateStrict(persisted.date),
-    update: {
-      oneofKind: "joinSpace",
-      joinSpace: {
-        space: Encoders.space(space, { encodingForUserId: inviteUserId }),
-        member: Encoders.member(member),
-      },
-    },
-  }
-
-  RealtimeUpdates.pushToUser(inviteUserId, [update])
-}
-
-const pushUpdatesForSpace = async ({
-  spaceId,
-  space,
-  member,
-  user,
-  currentUserId,
-  persisted,
-}: {
-  spaceId: number
-  space: DbSpace
-  member: DbMember
-  user: DbUser
-  currentUserId: number
-  persisted: UpdateSeqAndDate
-}) => {
-  const update: Update = {
-    seq: persisted.seq,
-    date: encodeDateStrict(persisted.date),
-    update: {
-      oneofKind: "spaceMemberAdd",
-      spaceMemberAdd: {
-        member: Encoders.member(member),
-        user: space.isPublic ? encodePublicUser({ user }) : Encoders.user({ user, min: false }),
-      },
-    },
-  }
-
-  // Update for the space
-  const updateGroup = await getUpdateGroupForSpace(spaceId, { currentUserId })
-
-  updateGroup.userIds.forEach((userId) => {
-    RealtimeUpdates.pushToUser(userId, [update])
-  })
-}
-
-const persistSpaceMemberAddUpdate = async ({
-  spaceId,
-  member,
-  user,
-}: {
-  spaceId: number
-  member: DbMember
-  user: DbUser
-}): Promise<UpdateSeqAndDate> => {
-  const persisted = await db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
-    const [lockedSpace] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
-
-    if (!lockedSpace) {
-      throw RealtimeRpcError.SpaceIdInvalid()
-    }
-
-    const spaceServerUpdatePayload: ServerUpdate["update"] = {
-      oneofKind: "spaceMemberAdd",
-      spaceMemberAdd: {
-        member: Encoders.member(member),
-        user: lockedSpace.isPublic ? encodePublicUser({ user }) : Encoders.user({ user, min: false }),
-      },
-    }
-
-    const update = await UpdatesModel.insertUpdate(tx, {
-      update: spaceServerUpdatePayload,
-      bucket: UpdateBucket.Space,
-      entity: lockedSpace,
-    })
-
-    await tx
-      .update(spaces)
-      .set({
-        updateSeq: update.seq,
-        lastUpdateDate: update.date,
-      })
-      .where(eq(spaces.id, spaceId))
-
-    return update
-  })
-
-  return persisted
-}
-
-const persistJoinSpaceUpdate = async ({
-  inviteUserId,
-  space,
-  member,
-}: {
-  inviteUserId: number
-  space: DbSpace
-  member: DbMember
-}): Promise<{
-  joinUpdate: UpdateSeqAndDate
-  accessUpdates: Array<{ chatId: number; update: UpdateSeqAndDate }>
-}> => {
-  const userServerUpdatePayload: ServerUpdate["update"] = {
-    oneofKind: "userJoinSpace",
-    userJoinSpace: {
-      space: Encoders.space(space, { encodingForUserId: inviteUserId }),
-      member: Encoders.member(member),
-    },
-  }
-
-  return db.transaction(async (tx) => {
-    const joinUpdate = await UserBucketUpdates.enqueue(
-      { userId: inviteUserId, update: userServerUpdatePayload },
-      { tx },
-    )
-    const affectedChatIds = await getSpaceRootChatIdsForAccessEvents(tx, space.id)
-    const accessAfter = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
-    const gainedChatIds = affectedChatIds.filter((chatId) => accessAfter.get(chatId)?.has(inviteUserId))
-    const persisted = await UserBucketUpdates.enqueueMany(
-      gainedChatIds.map((chatId) => ({
-        userId: inviteUserId,
-        update: {
-          oneofKind: "userAddedToChat" as const,
-          userAddedToChat: { chatId: BigInt(chatId) },
-        },
-      })),
-      { tx },
-    )
-    return {
-      joinUpdate,
-      accessUpdates: gainedChatIds.map((chatId, index) => ({ chatId, update: persisted[index]! })),
-    }
-  })
-}
-
-function pushInvitedUserAccessUpdates(
-  userId: number,
-  accessUpdates: Array<{ chatId: number; update: UpdateSeqAndDate }>,
-): void {
-  for (const accessUpdate of accessUpdates) {
-    RealtimeUpdates.pushToUser(userId, [{
-      seq: accessUpdate.update.seq,
-      date: encodeDateStrict(accessUpdate.update.date),
-      update: {
-        oneofKind: "userAddedToChat",
-        userAddedToChat: { chatId: BigInt(accessUpdate.chatId) },
-      },
-    }])
   }
 }

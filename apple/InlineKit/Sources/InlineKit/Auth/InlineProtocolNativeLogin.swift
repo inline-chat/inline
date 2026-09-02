@@ -427,6 +427,10 @@ public actor InlineProtocolNativeLogin {
     if completionTask?.generation == generation { completionTask = nil }
   }
 
+  public static func userFacingMessage(for error: any Error) -> String {
+    presentationError(error).localizedDescription
+  }
+
   static func presentationError(_ error: any Error) -> any Error {
     if error is CancellationError ||
       error is InlineProtocolNativeLoginError ||

@@ -3,6 +3,7 @@ import Foundation
 import InlineKit
 import Sentry
 import SwiftUI
+import UIKit
 
 @main
 struct InlineApp: App {
@@ -40,6 +41,9 @@ private struct InlineSceneRoot: View {
 
   var body: some View {
     InlineRootView()
+      .background(SceneNotificationWindowProbe { window in
+        appDelegate.sceneRouterRegistry.attachWindow(window, sceneID: sceneID)
+      })
       .environment(\.auth, Auth.shared)
       .environment(\.realtime, Realtime.shared)
       .environment(\.transactions, Transactions.shared)
@@ -122,6 +126,31 @@ private struct InlineSceneRoot: View {
 
     Task {
       await INUserSettings.current.refresh(reason: .authenticatedScene)
+    }
+  }
+}
+
+/// Reads the actual scene's presentation tree, including chat-owned sheets.
+private struct SceneNotificationWindowProbe: UIViewRepresentable {
+  let onWindowChange: (UIWindow?) -> Void
+
+  func makeUIView(context: Context) -> ProbeView {
+    let view = ProbeView()
+    view.isUserInteractionEnabled = false
+    view.onWindowChange = onWindowChange
+    return view
+  }
+
+  func updateUIView(_ view: ProbeView, context: Context) {
+    view.onWindowChange = onWindowChange
+    onWindowChange(view.window)
+  }
+
+  final class ProbeView: UIView {
+    var onWindowChange: ((UIWindow?) -> Void)?
+    override func didMoveToWindow() {
+      super.didMoveToWindow()
+      onWindowChange?(window)
     }
   }
 }

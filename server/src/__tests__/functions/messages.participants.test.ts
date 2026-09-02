@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { addChatParticipant } from "@in/server/functions/messages.addChatParticipant"
 import { removeChatParticipant } from "@in/server/functions/messages.removeChatParticipant"
 import { getChatParticipants } from "@in/server/functions/messages.getChatParticipants"
@@ -10,6 +10,7 @@ import { eq, and } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 const makeFunctionContext = (userId: number): any => ({
   currentUserId: userId,
@@ -152,6 +153,163 @@ describe("space thread participant management", () => {
 
     const added = await addChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(admin.id))
     expect(Number(added.participant?.userId)).toBe(target.id)
+  })
+
+  test("uses exact catch-up hints for direct additions without synthesizing inbox-opening actions", async () => {
+    const space = await testUtils.createSpace("participant-live-dependency-space")
+    const owner = await testUtils.createUser("participant-live-owner@example.com")
+    const viewer = await testUtils.createUser("participant-live-viewer@example.com")
+    const target = await testUtils.createUser("participant-live-target@example.com")
+    if (!space || !owner || !viewer || !target) throw new Error("Failed to create live participant fixtures")
+    await addSpaceMembers(space.id, [
+      { userId: owner.id, role: "owner" },
+      { userId: viewer.id },
+      { userId: target.id },
+    ])
+    const chat = await testUtils.createChat(space.id, "Live Dependency Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Failed to create live dependency chat")
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, viewer.id)
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {})
+    try {
+      await addChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(owner.id))
+
+      const participantCalls = push.mock.calls.filter(([, updates]) =>
+        updates.some((update) => update.update.oneofKind === "chatHasNewUpdates"),
+      )
+      expect(participantCalls.map(([userId]) => userId).sort((a, b) => a - b)).toEqual(
+        [owner.id, viewer.id, target.id].sort((a, b) => a - b),
+      )
+      expect(push.mock.calls.flatMap(([, updates]) => updates).some((update) =>
+        update.update.oneofKind === "newChat" || update.update.oneofKind === "participantAdd",
+      )).toBe(false)
+      for (const [, updates] of participantCalls) {
+        expect(updates).toHaveLength(1)
+        const hint = updates[0]?.update
+        if (hint?.oneofKind !== "chatHasNewUpdates") throw new Error("Expected targeted catch-up hint")
+        expect(hint.chatHasNewUpdates.chatId).toBe(BigInt(chat.id))
+        expect(hint.chatHasNewUpdates.updateSeq).toBeGreaterThan(0)
+      }
+    } finally {
+      push.mockRestore()
+    }
+  })
+
+  test.each(["chatHasNewUpdates", "userAddedToChat", "chatPermissions"])("keeps a committed add successful when %s delivery rejects", async (failedKind) => {
+    const owner = await testUtils.createUser(`participant-failure-owner-${failedKind}@example.com`)
+    const target = await testUtils.createUser(`participant-failure-target-${failedKind}@example.com`)
+    const chat = await testUtils.createChat(null, "Participant Failure", "thread", false, owner.id)
+    if (!chat) throw new Error("Failed to create participant failure chat")
+    await testUtils.addParticipant(chat.id, owner.id)
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async (_userId, updates) => {
+      if (updates.some((update) => update.update.oneofKind === failedKind)) throw new Error("live delivery rejected")
+    })
+    try {
+      const result = await addChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(owner.id))
+      expect(result.participant?.userId).toBe(BigInt(target.id))
+      const [participant] = await db.select().from(schema.chatParticipants).where(and(
+        eq(schema.chatParticipants.chatId, chat.id), eq(schema.chatParticipants.userId, target.id),
+      ))
+      expect(participant).toBeDefined()
+      const [tail] = await db.select().from(schema.chats).where(eq(schema.chats.id, chat.id))
+      const hints = push.mock.calls.flatMap(([, updates]) => updates).filter((update) => update.update.oneofKind === "chatHasNewUpdates")
+      expect(hints.length).toBeGreaterThan(0)
+      for (const hint of hints) {
+        if (hint.update.oneofKind !== "chatHasNewUpdates") throw new Error("Expected hint")
+        expect(hint.update.chatHasNewUpdates.updateSeq).toBe(tail?.updateSeq ?? 0)
+      }
+      if (failedKind === "chatPermissions") {
+        expect(push.mock.calls.filter(([, updates]) => updates.some((update) => update.update.oneofKind === "chatPermissions"))).toHaveLength(2)
+      }
+    } finally {
+      push.mockRestore()
+    }
+  })
+
+  test.each(["participantDelete", "userRemovedFromChat"])("keeps a committed removal successful when %s delivery rejects", async (failedKind) => {
+    const owner = await testUtils.createUser(`remove-failure-owner-${failedKind}@example.com`)
+    const target = await testUtils.createUser(`remove-failure-target-${failedKind}@example.com`)
+    const chat = await testUtils.createChat(null, "Removal Failure", "thread", false, owner.id)
+    if (!chat) throw new Error("Failed to create removal failure chat")
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, target.id)
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async (_userId, updates) => {
+      if (updates.some((update) => update.update.oneofKind === failedKind)) throw new Error("live removal rejected")
+    })
+    try {
+      await removeChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(owner.id))
+      const retained = await db.select().from(schema.chatParticipants).where(and(
+        eq(schema.chatParticipants.chatId, chat.id), eq(schema.chatParticipants.userId, target.id),
+      ))
+      expect(retained).toEqual([])
+      const userRemovalCalls = push.mock.calls.filter(([userId, updates]) => userId === target.id && updates.some((update) => update.update.oneofKind === "userRemovedFromChat"))
+      expect(userRemovalCalls).toHaveLength(failedKind === "userRemovedFromChat" ? 2 : 1)
+      if (failedKind === "participantDelete") {
+        expect(push.mock.calls.flatMap(([, updates]) => updates).some((update) => update.update.oneofKind === "chatHasNewUpdates")).toBe(true)
+      }
+    } finally {
+      push.mockRestore()
+    }
+  })
+
+  test("uses a targeted catch-up hint instead of a dependency-incomplete live group addition", async () => {
+    const space = await testUtils.createSpace("participant-group-live-dependency-space")
+    const owner = await testUtils.createUser("participant-group-live-owner@example.com")
+    const viewer = await testUtils.createUser("participant-group-live-viewer@example.com")
+    const member = await testUtils.createUser("participant-group-live-member@example.com")
+    const otherMember = await testUtils.createUser("participant-group-live-other-member@example.com")
+    if (!space || !owner || !viewer || !member || !otherMember) throw new Error("Failed to create live group fixtures")
+    await addSpaceMembers(space.id, [
+      { userId: owner.id, role: "owner" },
+      { userId: viewer.id },
+      { userId: member.id },
+      { userId: otherMember.id },
+    ])
+    const createdGroup = await createUserGroup(
+      { spaceId: space.id, name: "Live Group", userIds: [member.id, otherMember.id] },
+      makeFunctionContext(owner.id),
+    )
+    const chat = await testUtils.createChat(space.id, "Live Group Dependency Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Failed to create live group dependency chat")
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, viewer.id)
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async (userId, updates) => {
+      if (userId === member.id && updates.some((update) => update.update.oneofKind === "userAddedToChat")) {
+        throw new Error("One recipient is disconnected")
+      }
+    })
+    try {
+      await addChatParticipant(
+        { chatId: chat.id, groupId: Number(createdGroup.group.id) },
+        makeFunctionContext(owner.id),
+      )
+
+      const pushedUpdates = push.mock.calls.flatMap(([, updates]) => updates)
+      expect(pushedUpdates.some((update) => update.update.oneofKind === "participantGroupAdd")).toBe(false)
+      const hintCalls = push.mock.calls.filter(([, updates]) =>
+        updates.some((update) => update.update.oneofKind === "chatHasNewUpdates"),
+      )
+      expect(hintCalls.map(([userId]) => userId).sort((a, b) => a - b)).toEqual(
+        [owner.id, viewer.id, member.id, otherMember.id].sort((a, b) => a - b),
+      )
+      for (const [, updates] of hintCalls) {
+        expect(updates).toHaveLength(1)
+        const hint = updates[0]?.update
+        if (hint?.oneofKind !== "chatHasNewUpdates") throw new Error("Expected chat catch-up hint")
+        expect(Number(hint.chatHasNewUpdates.chatId)).toBe(chat.id)
+        expect(Number(hint.chatHasNewUpdates.peerId?.type.oneofKind === "chat"
+          ? hint.chatHasNewUpdates.peerId.type.chat.chatId
+          : 0n)).toBe(chat.id)
+        expect(hint.chatHasNewUpdates.updateSeq).toBeGreaterThan(0)
+      }
+      const accessCalls = push.mock.calls.filter(([, updates]) => updates.some((update) => update.update.oneofKind === "userAddedToChat"))
+      expect(accessCalls.filter(([userId]) => userId === member.id)).toHaveLength(2)
+      expect(accessCalls.filter(([userId]) => userId === otherMember.id)).toHaveLength(1)
+    } finally {
+      push.mockRestore()
+    }
   })
 
   test("rejects adding users who are not members of the space", async () => {

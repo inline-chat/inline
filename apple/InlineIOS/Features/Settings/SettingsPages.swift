@@ -21,6 +21,7 @@ struct SettingsNavigationRow<Destination: View>: View {
 struct GeneralSettingsView: View {
   @AppStorage(InAppLinkPreferences.openLinksInAppKey)
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
+  @ObservedObject private var composeSettings = INUserSettings.current.compose
 
   var body: some View {
     List {
@@ -31,6 +32,15 @@ struct GeneralSettingsView: View {
         }
       } footer: {
         Text("When off, links open in your default browser or the matching app.")
+      }
+
+      Section {
+        SettingsItem(icon: "link", iconColor: .blue, title: String(localized: "Shorten Supported Links")) {
+          Toggle("Shorten Supported Links", isOn: $composeSettings.replacePastedLinksWithTitles)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Turn supported pasted links into compact text links. Use Undo or Backspace to restore the URL.")
       }
 
       Section("Language & Translation") {

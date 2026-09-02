@@ -1,8 +1,76 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
 import Logger
 import RealtimeV2
+
+/// A request-time User cursor is the authority for a join response's
+/// membership projection. Child sequence alone cannot fence a later removal,
+/// because removal is deliberately carried by the User bucket.
+public struct SpaceJoinSnapshotAdmission: Sendable, Codable {
+  let userID: Int64
+  let userState: GetChatsTransaction.ExpectedUserBucketState
+  var mutationToken: AuthAccountMutationToken? = nil
+
+  enum CodingKeys: String, CodingKey {
+    case userID, userState
+  }
+
+  static func capture() async throws -> SpaceJoinSnapshotAdmission {
+    let token = try Auth.shared.handle.beginAccountMutation()
+    return try await AppDatabase.shared.reader.read { db in
+      try Auth.shared.handle.validateAccountMutation(token)
+      return SpaceJoinSnapshotAdmission(
+        userID: token.userID, userState: try currentUserState(db), mutationToken: token
+      )
+    }
+  }
+
+  private static func currentUserState(_ db: Database) throws -> GetChatsTransaction.ExpectedUserBucketState {
+    let cursor = try DbBucketState
+      .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
+      .filter(DbBucketState.Columns.entityId == BucketKey.user.getEntityId())
+      .fetchOne(db)
+    return GetChatsTransaction.ExpectedUserBucketState(BucketState(date: cursor?.date ?? 0, seq: cursor?.seq ?? 0))
+  }
+
+  @discardableResult
+  static func apply(
+    space: InlineProtocol.Space,
+    member: InlineProtocol.Member,
+    admission: SpaceJoinSnapshotAdmission?,
+    currentUserID: Int64,
+    in db: Database
+  ) throws -> Bool {
+    guard space.id > 0, member.spaceID == space.id, member.userID == currentUserID else {
+      throw TransactionExecutionError.invalid
+    }
+    // Older persisted transactions have no preflight snapshot. They remain
+    // decodable, but durable User replay owns their projection safely.
+    guard let admission, admission.userID == currentUserID,
+          admission.userState == (try currentUserState(db)) else { return false }
+    let key = BucketKey.space(id: space.id)
+    let cursor = try DbBucketState
+      .filter(DbBucketState.Columns.bucketType == key.getBucket())
+      .filter(DbBucketState.Columns.entityId == key.getEntityId())
+      .fetchOne(db)
+    let existingSpace = try Space.fetchOne(db, id: space.id)
+    let mayReplaceSpace = cursor.map { space.hasSeq && Int64(space.seq) >= $0.seq } ?? true
+    if mayReplaceSpace {
+      var model = Space(from: space)
+      model.memberRosterComplete = cursor.map { space.hasSeq && Int64(space.seq) == $0.seq } == true
+        && existingSpace?.memberRosterComplete == true
+      try model.save(db)
+    } else {
+      // Role changes belong to the Space bucket too. Keeping newer Space
+      // metadata while replacing its Member would still regress that bucket.
+      return false
+    }
+    try Member(from: member).save(db)
+    return true
+  }
+}
 
 public struct JoinSpaceByInviteTokenTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .joinSpaceByInviteToken
@@ -13,6 +81,7 @@ public struct JoinSpaceByInviteTokenTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     public let token: String
+    public let snapshotAdmission: SpaceJoinSnapshotAdmission?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -21,8 +90,8 @@ public struct JoinSpaceByInviteTokenTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/JoinSpaceByInviteToken")
 
-  public init(token: String) {
-    context = Context(token: token)
+  public init(token: String, snapshotAdmission: SpaceJoinSnapshotAdmission? = nil) {
+    context = Context(token: token, snapshotAdmission: snapshotAdmission)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -35,9 +104,13 @@ public struct JoinSpaceByInviteTokenTransaction: Transaction2 {
     }
 
     do {
+      let token = try context.snapshotAdmission?.mutationToken ?? Auth.shared.handle.beginAccountMutation()
       try await AppDatabase.shared.dbWriter.write { db in
-        try Space(from: response.space).save(db)
-        try Member(from: response.member).save(db)
+        try Auth.shared.handle.validateAccountMutation(token)
+        try SpaceJoinSnapshotAdmission.apply(
+          space: response.space, member: response.member,
+          admission: context.snapshotAdmission, currentUserID: token.userID, in: db
+        )
       }
     } catch {
       log.error("Failed to save joined space", error: error)
@@ -99,8 +172,8 @@ public struct SetSpaceInviteLinkEnabledTransaction: Transaction2 {
 }
 
 public extension Transaction2 where Self == JoinSpaceByInviteTokenTransaction {
-  static func joinSpaceByInviteToken(token: String) -> JoinSpaceByInviteTokenTransaction {
-    JoinSpaceByInviteTokenTransaction(token: token)
+  static func joinSpaceByInviteToken(token: String) async throws -> JoinSpaceByInviteTokenTransaction {
+    JoinSpaceByInviteTokenTransaction(token: token, snapshotAdmission: try await .capture())
   }
 }
 

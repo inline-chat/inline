@@ -249,6 +249,7 @@ describe("realtime connection flow", () => {
           result: {
             oneofKind: "getChats",
             getChats: {
+              folders: [],
               dialogs: [
                 {
                   chatId: 10n,

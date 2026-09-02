@@ -20,6 +20,7 @@ import {
   InlineProtocolApplicationOutputOverloaded,
   type ServerApplicationAuthorization,
   type ServerApplicationDispatcher,
+  type ServerAuthorizationKeyRepository,
 } from "@inline-chat/protocol/server"
 /*
  * The output-capacity error crosses the application adapter unchanged so the
@@ -29,6 +30,7 @@ import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
 import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import { Log } from "@in/server/utils/log"
+import { InlineError } from "@in/server/types/errors"
 
 const log = new Log("InlineProtocol.V3.Application")
 
@@ -74,6 +76,18 @@ const errorResponse = (error: unknown): Uint8Array => {
     },
   })
 }
+
+const freshRequestIdRequiredResponse = (): Uint8Array => RealtimeV3Response.toBinary({
+  body: {
+    oneofKind: "rpcError",
+    rpcError: {
+      reqMsgId: 0n,
+      errorCode: RpcError_Code.RATE_LIMIT,
+      message: "Retry getFilePart with a fresh request ID",
+      code: 429,
+    },
+  },
+})
 
 const sendV3Update = (
   message: ServerProtocolMessage,
@@ -178,6 +192,7 @@ const waitForLane = async (previous: Promise<void>, signal: AbortSignal): Promis
 
 export const makeInlineProtocolApplicationDispatcher = (input: {
   operations: InlineProtocolApplicationOperations
+  authorizationKeys: Pick<ServerAuthorizationKeyRepository, "load">
   connectionId: string
   metadata?: RealtimeRequestMetadata
   onAuthorized?: (authorization: ServerApplicationAuthorization) => void
@@ -246,11 +261,20 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
             authorization.accountSessionId === undefined) {
           return { kind: "result", payload: unauthorizedResponse() }
         }
-        input.onAuthorized?.(authorization)
-
         if (request.body.oneofKind === "rpc") {
           const rpc = request.body.rpc
           const result = await lanes.run(inlineProtocolRpcExecutionLane(rpc), signal, async () => {
+            // Admission may precede a long resource-lane wait. Revalidate the
+            // same binding before entering application-owned execution.
+            const current = await input.authorizationKeys.load(authorization.authKeyId)
+            if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError")
+            if (!current?.temporary || !current.binding || !authorization.permanentAuthKeyId ||
+                current.binding.userId !== authorization.userId ||
+                current.binding.accountSessionId !== authorization.accountSessionId ||
+                !Buffer.from(current.binding.permanentAuthKeyId).equals(authorization.permanentAuthKeyId)) {
+              throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+            }
+            input.onAuthorized?.(authorization)
             markExecutionStarted()
             return await handleRpcCall(rpc, {
               userId: authorization.userId!,
@@ -267,6 +291,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
           return {
             kind: "result",
             terminateAuthorization: rpc.method === Method.LOG_OUT,
+            replayPayload: rpc.method === Method.GET_FILE_PART
+              ? freshRequestIdRequiredResponse()
+              : undefined,
             payload: RealtimeV3Response.toBinary({
               body: {
                 oneofKind: "rpcResult",

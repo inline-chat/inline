@@ -25,15 +25,21 @@ export async function verifyEmailAccountProof(input: {
   await new Promise((resolve) => setTimeout(resolve, Math.random() * 1_000))
   const demo = (email === DEMO_EMAIL && input.code === DEMO_CODE) ||
     (email === DEMO_EMAIL2 && input.code === DEMO_CODE2)
-  if (!demo && !await verifyEmailLoginChallenge({
-    email,
-    code: input.code,
-    challengeToken: input.challengeToken,
-  })) {
-    throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
+  let account: Awaited<ReturnType<typeof getOrCreateUserByEmailForSignup>> | undefined
+  if (demo) {
+    account = await getOrCreateUserByEmailForSignup(email, input.inviteCode)
+  } else {
+    const verified = await verifyEmailLoginChallenge({
+      email,
+      code: input.code,
+      challengeToken: input.challengeToken,
+    }, async (tx) => {
+      account = await getOrCreateUserByEmailForSignup(email, input.inviteCode, tx)
+    })
+    if (!verified) throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
   }
-  const { user, created } = await getOrCreateUserByEmailForSignup(email, input.inviteCode)
-  if (!user) throw new InlineError(InlineError.ApiError.INTERNAL)
+  if (!account?.user) throw new InlineError(InlineError.ApiError.INTERNAL)
+  const { user, created } = account
   return { user, created, identifier: email, method: "email" as const }
 }
 

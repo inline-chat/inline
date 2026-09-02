@@ -43,6 +43,10 @@ public class MessagesSectionedViewModel {
   public var messagesByID: [Int64: FullMessage] { progressiveViewModel.messagesByID }
   public var oldestLoadedMessageId: Int64? { progressiveViewModel.oldestLoadedMessageId }
   public var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
+  public var newestLoadedMessageId: Int64? { progressiveViewModel.newestLoadedMessageId }
+  public var canLoadNewerFromLocal: Bool { progressiveViewModel.canLoadNewerFromLocal }
+  public var needsNewerHistoryRepair: Bool { progressiveViewModel.needsNewerHistoryRepair }
+  public var historyCoverage: MessageHistoryCoverageProjection { progressiveViewModel.historyCoverage }
   public var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
   public private(set) var collapsedMaxId: Int64?
   public var highestPositiveMessageId: Int64? {
@@ -127,8 +131,8 @@ public class MessagesSectionedViewModel {
   }
 
   /// Replaces the current progressive window with the existing local window
-  /// centered on an exact message, then publishes one coherent snapshot reload.
-  /// Callers can fetch a missing target first and retry this same path.
+  /// centered on a numeric coordinate, then publishes one coherent snapshot
+  /// reload. A deleted exact row is accepted only through certified neighbors.
   @discardableResult
   public func loadLocalWindowAroundMessage(messageId: Int64) -> Bool {
     guard progressiveViewModel.loadLocalWindowAroundMessage(
@@ -143,6 +147,16 @@ public class MessagesSectionedViewModel {
 
   public func setAtBottom(_ atBottom: Bool) {
     progressiveViewModel.setAtBottom(atBottom)
+  }
+
+  public func isCertifiedHistoryContinuation(
+    between firstMessageID: Int64,
+    and secondMessageID: Int64
+  ) -> Bool {
+    historyCoverage.isCertifiedContinuation(
+      between: firstMessageID,
+      and: secondMessageID
+    )
   }
 
   public func setCollapsedMaxId(_ collapsedMaxId: Int64?) {

@@ -9,7 +9,13 @@ import sharp from "sharp"
 const log = new Log("modules/files/metadata")
 const validPhotoMimeTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"]
 const validPhotoExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
-const maxFileSize = 40_000_000 // 40MB
+export const MEDIA_UPLOAD_MAX_BYTES = {
+  photo: 40_000_000,
+  video: 200_000_000,
+  document: 200_000_000,
+  voice: 20_000_000,
+} as const
+const maxFileSize = MEDIA_UPLOAD_MAX_BYTES.photo
 const maxPhotoDimensionSum = 15_000
 const maxPhotoAspectRatio = 20
 
@@ -108,7 +114,7 @@ export const getPhotoMetadataAndValidate = async (
 
 const validVideoMimeTypes = ["video/mp4"]
 const validVideoExtensions = ["mp4"]
-const maxVideoFileSize = 200_000_000 // 200MB
+const maxVideoFileSize = MEDIA_UPLOAD_MAX_BYTES.video
 
 export const getVideoMetadataAndValidate = async (
   file: File,
@@ -174,7 +180,7 @@ export const getVideoMetadataAndValidate = async (
   return { width, height, duration, mimeType, fileName, extension }
 }
 
-const maxDocumentFileSize = 200_000_000 // 200MB
+const maxDocumentFileSize = MEDIA_UPLOAD_MAX_BYTES.document
 
 export const getDocumentMetadataAndValidate = async (
   file: File,
@@ -201,7 +207,7 @@ export const getDocumentMetadataAndValidate = async (
   return { mimeType, fileName, extension }
 }
 
-const maxVoiceFileSize = 20_000_000 // 20MB
+const maxVoiceFileSize = MEDIA_UPLOAD_MAX_BYTES.voice
 const maxVoiceWaveformBytes = 2048
 const documentMimeTypesByExtension: Record<string, string> = {
   csv: "text/csv",

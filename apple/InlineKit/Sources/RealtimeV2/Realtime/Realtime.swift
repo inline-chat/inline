@@ -235,13 +235,20 @@ public actor RealtimeV2 {
 
   /// Start core components, register listeners and start run loops.
   private func start() async {
+    guard !isPreparingForTermination else { return }
     if auth.hasPendingAccountTransition() == false {
       _ = await ensureTransactionOwnerIfNeeded()
     }
+    guard !isPreparingForTermination else { return }
     await sync.setSyncActivityListener { [weak self] isActive in
       await self?.syncActivityChanged(isActive)
     }
-    stateObject.start(realtime: self)
+    guard !isPreparingForTermination else { return }
+    await stateObject.start(realtime: self)
+    guard !isPreparingForTermination else {
+      await stateObject.stop()
+      return
+    }
     await startListeners()
 
     await session.start()
@@ -317,6 +324,7 @@ public actor RealtimeV2 {
     log.info("Quiescing realtime for application termination")
     isPreparingForTermination = true
     acceptsTransactions = false
+    await stateObject.stop()
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
     transactionRetryTask?.cancel()
@@ -378,26 +386,44 @@ public actor RealtimeV2 {
       for await snapshot in await self.connectionManager.snapshots() {
         guard !Task.isCancelled else { return }
 
-        let mapped = self.mapConnectionState(snapshot.state)
-        await self.updateTransportConnectionState(mapped)
-
         let lifecycleEdge = RealtimeConnectionLifecycleEdge(
           previousState: self.lastSnapshotState,
           previousSessionID: self.lastSnapshotSessionID,
           snapshot: snapshot
         )
+        // The accepted protocol session, not the coalesced UI label, owns the
+        // wake edge. Publish its identity before any cross-actor suspension.
+        self.lastSnapshotState = snapshot.state
+        self.lastSnapshotSessionID = snapshot.sessionID
+        let mapped = self.mapConnectionState(snapshot.state)
+        if !lifecycleEdge.connectionOpened {
+          await self.updateTransportConnectionState(mapped)
+        }
+
         if lifecycleEdge.connectionLost {
           let expired = await self.transactions.connectionLost()
           await self.expireEphemeralTransactions(expired)
         }
 
         if lifecycleEdge.connectionOpened {
+          guard let mutationToken = try? self.auth.beginAccountMutation(),
+                await self.isCurrentOpenSession(snapshot.sessionID, mutationToken: mutationToken)
+          else { continue }
+          await self.sync.acceptedSessionOpened(
+            sessionID: snapshot.sessionID,
+            mutationToken: mutationToken
+          )
+          // Sync admission suspends. Logout, termination, or a replacement
+          // session must not let this old edge publish readiness afterward.
+          guard await self.isCurrentOpenSession(snapshot.sessionID, mutationToken: mutationToken)
+          else { continue }
           self.didNotifyConnectionInitFailure = false
           self.didNotifyAuthInvalidated = false
+          // Register catch-up activity before showing the transport as ready,
+          // so an accepted open cannot flash Connected before Updating.
+          await self.updateTransportConnectionState(mapped)
           await self.restartTransactions()
         }
-        self.lastSnapshotState = snapshot.state
-        self.lastSnapshotSessionID = snapshot.sessionID
       }
     }.store(in: &tasks)
 
@@ -1028,10 +1054,19 @@ public actor RealtimeV2 {
     }
   }
 
-  private func ensureTransactionOwnerIfNeeded() async -> TransactionOwner? {
-    guard acceptsTransactions,
+  private func ensureTransactionOwnerIfNeeded(
+    expectedAccount: AuthAccountMutationToken? = nil
+  ) async -> TransactionOwner? {
+    // System work holds the owner drain. Reject a stale nested send before joining an
+    // owner replacement that must wait for that same system operation to finish.
+    if let expectedAccount {
+      do { try auth.validateAccountMutation(expectedAccount) }
+      catch { return nil }
+    }
+    guard !isPreparingForTermination, acceptsTransactions,
           auth.hasPendingAccountTransition() == false,
-          let accountID = auth.userId()
+          let accountID = auth.userId(),
+          expectedAccount == nil || expectedAccount?.userID == accountID
     else { return nil }
 
     if let transactionOwner, transactionOwner.accountID == accountID {
@@ -1115,9 +1150,11 @@ public actor RealtimeV2 {
     }
   }
 
-  private func beginTransactionSubmission() async -> TransactionOwner? {
+  private func beginTransactionSubmission(
+    expectedAccount: AuthAccountMutationToken? = nil
+  ) async -> TransactionOwner? {
     guard auth.hasPendingAccountTransition() == false,
-          let owner = await ensureTransactionOwnerIfNeeded(),
+          let owner = await ensureTransactionOwnerIfNeeded(expectedAccount: expectedAccount),
           auth.hasPendingAccountTransition() == false,
           isCurrentTransactionOwner(owner)
     else {
@@ -1214,18 +1251,41 @@ public actor RealtimeV2 {
 
   // MARK: - Public API
 
+  private func validateExpectedAccount(_ expected: AuthAccountMutationToken, owner: TransactionOwner) throws {
+    try auth.validateAccountMutation(expected)
+    guard owner.accountID == expected.userID, isCurrentTransactionOwner(owner) else {
+      throw RealtimeDirectRpcError.notAuthorized
+    }
+  }
+
   /// Send a transaction and wait for the result
   /// Uses nonisolated func to allow use from MainActor for faster optimistic updates
   @discardableResult
-  public nonisolated func send(_ transaction: any Transaction2) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+  public nonisolated func send(
+    _ transaction: any Transaction2,
+    expectedAccount: AuthAccountMutationToken? = nil
+  ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     let transactionId = TransactionId.generate()
     let cancellationState = TransactionSendCancellationState()
 
     return try await withTaskCancellationHandler {
-      guard let owner = await beginTransactionSubmission() else {
+      guard let owner = await beginTransactionSubmission(expectedAccount: expectedAccount) else {
         cancellationState.finish()
         await transaction.cancelled()
         throw CancellationError()
+      }
+
+      // Callers that resolve a target before presenting system UI must retain that account lease.
+      // Once admitted, the existing transaction owner fences all later dispatch and projection.
+      if let expectedAccount {
+        do {
+          try await validateExpectedAccount(expectedAccount, owner: owner)
+        } catch {
+          cancellationState.finish()
+          await transaction.cancelled()
+          await endTransactionOperation()
+          throw error
+        }
       }
 
       guard await admitEphemeralTransactionWhileConnected(transaction) else {
@@ -1417,13 +1477,25 @@ public actor RealtimeV2 {
     await transactions.satisfy(blockers: blockers)
   }
 
+  /// Applies an external command's response only to the account generation that sent it.
+  public func applyUpdatesAndWait(
+    _ updates: [InlineProtocol.Update], accountToken: AuthAccountMutationToken
+  ) async throws {
+    try auth.validateAccountMutation(accountToken)
+    await sync.process(updates: updates, mutationToken: accountToken)
+  }
+
   /// Low-level RPC call that bypasses the transaction system.
   /// Used by short-lived contexts (e.g. share extension) that must send media before full transaction support.
   public func callRpcDirect(
     method: InlineProtocol.Method,
     input: RpcCall.OneOf_Input?,
-    timeout: Duration? = .seconds(15)
+    timeout: Duration? = .seconds(15),
+    accountToken: AuthAccountMutationToken? = nil
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    // External integrations may have resolved their destination before hopping to this actor.
+    // Validate at admission so an old request cannot be sent using a replacement account.
+    if let accountToken { try auth.validateAccountMutation(accountToken) }
     try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
     beginDirectRPCOperation()
     defer { endDirectRPCOperation() }
@@ -1652,6 +1724,26 @@ public actor RealtimeV2 {
     await sync.installSnapshotBucketStates(states)
   }
 
+  /// Reconciles a committed snapshot under the account lease that admitted it.
+  /// Only explicit child targets are woken; cached bucket inventory is never scanned.
+  @discardableResult
+  public func installSnapshotOutcome(
+    seededStates: [BucketKey: BucketState],
+    catchUpTargets: [BucketKey: Int64],
+    expectedAccount: AuthAccountMutationToken
+  ) async throws -> [BucketKey: UserRepairTargetResolution] {
+    guard !isPreparingForTermination else { throw RealtimeDirectRpcError.notConnected }
+    try auth.validateAccountMutation(expectedAccount)
+    let resolutions = try await sync.installSnapshotOutcome(
+      seededStates: seededStates,
+      catchUpTargets: catchUpTargets,
+      expectedAccount: expectedAccount
+    )
+    guard !isPreparingForTermination else { throw RealtimeDirectRpcError.notConnected }
+    try auth.validateAccountMutation(expectedAccount)
+    return resolutions
+  }
+
 #if DEBUG || DEBUG_BUILD
   public func runSyncDebugScenario(_ scenario: SyncDebugScenario) async -> SyncDebugScenarioResult {
     await sync.runDebugScenario(scenario)
@@ -1707,6 +1799,18 @@ public actor RealtimeV2 {
 
   // MARK: - Helpers
 
+  private func isCurrentOpenSession(
+    _ sessionID: UInt64,
+    mutationToken: AuthAccountMutationToken
+  ) async -> Bool {
+    let current = await connectionManager.currentSnapshot()
+    return !Task.isCancelled
+      && !isPreparingForTermination
+      && current.state == .open
+      && current.sessionID == sessionID
+      && (try? auth.validateAccountMutation(mutationToken)) != nil
+  }
+
   private func mapConnectionState(_ state: ConnectionState) -> RealtimeConnectionState {
     switch state {
     case .open:
@@ -1719,7 +1823,6 @@ public actor RealtimeV2 {
   private func updateTransportConnectionState(_ newState: RealtimeConnectionState) async {
     guard newState != transportConnectionState else { return }
     transportConnectionState = newState
-    Task { await sync.connectionStateChanged(state: newState) }
     await publishConnectionStateIfNeeded()
   }
 

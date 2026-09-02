@@ -24,30 +24,28 @@ export async function finishGridMemberAccess(
 ) {
   await Promise.all([
     notifyGridChanged(state),
-    sendMessageToRealtimeUser(userId, {
-      oneofKind: "grid",
-      grid: {
-        event: {
-          oneofKind: "accessRevoked",
-          accessRevoked: { spaceId: BigInt(spaceId) },
-        },
-      },
-    }).catch((error) => {
-      // Membership and media authority are already committed. The snapshot is
-      // authoritative, so a broken socket must not make deletion appear to
-      // have failed after the durable state transition succeeded.
-      log.warn("Failed to send committed Grid access-revoked notification", {
-        spaceId,
-        userId,
-        error,
-      })
-    }),
+    publishGridMemberAccessRevoked(spaceId, userId),
   ])
   log.info("GRID_TRACE phase=member_access_revoked", {
     spaceId,
     roomId: state.changedRoomId,
     userId,
     hadActiveConnection: state.activeConnection !== undefined,
+  })
+}
+
+/** Queues only the affected user's socket event synchronously; performs no I/O await. */
+export function publishGridMemberAccessRevoked(spaceId: number, userId: number): Promise<void> {
+  return sendMessageToRealtimeUser(userId, {
+    oneofKind: "grid",
+    grid: {
+      event: {
+        oneofKind: "accessRevoked",
+        accessRevoked: { spaceId: BigInt(spaceId) },
+      },
+    },
+  }).catch((error: unknown) => {
+    log.warn("Failed to send committed Grid access-revoked notification", { spaceId, userId, error })
   })
 }
 

@@ -231,7 +231,12 @@ class ConnectionManager {
         }
 
         if (userConnections && userConnections.size === 0) {
+          for (const spaceId of this.userSpaceIds.get(connection.userId) ?? []) {
+            this.unsubscribeUserFromSpace(connection.userId, spaceId)
+          }
           this.authenticatedUsers.delete(connection.userId)
+          this.userSpaceIds.delete(connection.userId)
+          this.userSpaceMembershipRevision.delete(connection.userId)
         }
       }
     }
@@ -291,7 +296,6 @@ class ConnectionManager {
 
   subscribeToSpace(userId: number, spaceId: number): void {
     log.debug(`Subscribing to space ${spaceId} for user ${userId}`)
-    // TODO: Implement
 
     // Cache the user in the space
     let spaceConnections = this.usersBySpaceId.get(spaceId)
@@ -300,8 +304,8 @@ class ConnectionManager {
       this.usersBySpaceId.set(spaceId, spaceConnections)
     }
     spaceConnections.add(userId)
-    const cachedSpaceIds = this.userSpaceIds.get(userId)
-    if (cachedSpaceIds && !cachedSpaceIds.includes(spaceId)) {
+    const cachedSpaceIds = this.userSpaceIds.get(userId) ?? []
+    if (!cachedSpaceIds.includes(spaceId)) {
       this.userSpaceIds.set(userId, [...cachedSpaceIds, spaceId])
     }
 
@@ -317,10 +321,22 @@ class ConnectionManager {
     }
   }
 
+  /**
+   * Projects DB-locked membership into active process-local fanout. Offline
+   * accounts hydrate from the DB when they connect; do not retain every add.
+   */
+  activateSpaceMembership(userId: number, spaceId: number): void {
+    if (!this.authenticatedUsers.has(userId)) return
+    this.userSpaceMembershipRevision.set(userId, (this.userSpaceMembershipRevision.get(userId) ?? 0) + 1)
+    this.subscribeToSpace(userId, spaceId)
+  }
+
   /** Immediately removes a former member from process-local Space fanout. */
   unsubscribeUserFromSpace(userId: number, spaceId: number): void {
     log.debug(`Unsubscribing from space ${spaceId} for user ${userId}`)
-    this.userSpaceMembershipRevision.set(userId, (this.userSpaceMembershipRevision.get(userId) ?? 0) + 1)
+    if (this.authenticatedUsers.has(userId)) {
+      this.userSpaceMembershipRevision.set(userId, (this.userSpaceMembershipRevision.get(userId) ?? 0) + 1)
+    }
 
     const spaceUsers = this.usersBySpaceId.get(spaceId)
     spaceUsers?.delete(userId)
@@ -348,12 +364,17 @@ class ConnectionManager {
   }
 
   private async subscribeUserToSpaceIds(userId: number): Promise<void> {
+    const userConnections = this.authenticatedUsers.get(userId)
+    if (!userConnections) return
     // A membership removal can race the initial database read. Retry from the
     // authoritative database whenever the revision changes so stale results
     // cannot resubscribe a removed user after unsubscribeUserFromSpace.
     while (true) {
       const revision = this.userSpaceMembershipRevision.get(userId) ?? 0
       const spaceIds = await this.getUserSpaceIds(userId)
+      // The Set is the existing authenticated lifetime identity. A disconnect
+      // followed by reconnect must not let the old in-flight read repopulate it.
+      if (this.authenticatedUsers.get(userId) !== userConnections) return
       if ((this.userSpaceMembershipRevision.get(userId) ?? 0) !== revision) continue
 
       this.userSpaceIds.set(userId, spaceIds)

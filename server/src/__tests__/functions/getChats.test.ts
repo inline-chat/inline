@@ -78,6 +78,42 @@ describe("getChats", () => {
     expect(returnedChat?.spaceId).toBeUndefined()
   })
 
+  test("includes private space threads granted through a user group", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Group-granted chats", [
+      "group-chat-owner@example.com",
+      "group-chat-member@example.com",
+      "group-chat-bystander@example.com",
+    ])
+    const [owner, groupMember, bystander] = users
+    if (!owner || !groupMember || !bystander) throw new Error("Users not created")
+
+    const chat = await testUtils.createChat(space.id, "Group-only thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, owner.id)
+
+    const [group] = await db
+      .insert(schema.userGroups)
+      .values({ spaceId: space.id, name: "Group Chat Readers", createdBy: owner.id })
+      .returning()
+    if (!group) throw new Error("Group not created")
+    await db.insert(schema.userGroupMembers).values({ groupId: group.id, userId: groupMember.id })
+    await db.insert(schema.chatParticipantGroups).values({ chatId: chat.id, groupId: group.id })
+
+    const memberResult = await getChats({}, makeHandlerContext(groupMember.id))
+    expect(memberResult.chats.map((item) => Number(item.id))).toContain(chat.id)
+    expect(memberResult.dialogs.map((dialog) => Number(dialog.chatId))).toContain(chat.id)
+    expect(memberResult.dialogs.find((dialog) => Number(dialog.chatId) === chat.id)?.open).toBeUndefined()
+
+    const bystanderResult = await getChats({}, makeHandlerContext(bystander.id))
+    expect(bystanderResult.chats.map((item) => Number(item.id))).not.toContain(chat.id)
+
+    await db
+      .delete(schema.members)
+      .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, groupMember.id)))
+    const formerMemberResult = await getChats({}, makeHandlerContext(groupMember.id))
+    expect(formerMemberResult.chats.map((item) => Number(item.id))).not.toContain(chat.id)
+  })
+
   test("includes time zones only for sharing DM peers", async () => {
     const currentUser = await testUtils.createUser("get-chats-timezone-current@example.com")
     const sharingPeer = await testUtils.createUser("get-chats-timezone-sharing@example.com")
@@ -212,6 +248,44 @@ describe("getChats", () => {
 
     expect(result.chats.find((item) => Number(item.id) === chat.id)?.seq).toBe(23)
     expect(result.spaces.find((item) => Number(item.id) === space.id)?.seq).toBe(11)
+  })
+
+  test("closed linked chats remain accessible, but stale dialogs cannot expose revoked space access", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Linked discovery", [
+      "linked-discovery-owner@example.com", "linked-discovery-member@example.com",
+    ])
+    const [owner, member] = users
+    if (!owner || !member) throw new Error("Users not created")
+    const parent = await testUtils.createChat(space.id, "Private parent", "thread", false, owner.id)
+    if (!parent) throw new Error("Parent not created")
+    await testUtils.addParticipant(parent.id, owner.id)
+    await testUtils.addParticipant(parent.id, member.id)
+    await db.insert(schema.messages).values({ chatId: parent.id, messageId: 1, fromId: owner.id, text: "anchor" })
+    const [child] = await db.insert(schema.chats).values({
+      type: "thread", title: "Linked child", spaceId: space.id, publicThread: false,
+      parentChatId: parent.id, parentMessageId: 1,
+    }).returning()
+    if (!child) throw new Error("Child not created")
+    await testUtils.addParticipant(child.id, member.id)
+    await db.insert(schema.dialogs).values({
+      chatId: child.id, userId: member.id, spaceId: space.id, open: false, chatListHidden: false,
+    })
+    const [message] = await db.insert(schema.messages).values({
+      chatId: child.id, messageId: 1, fromId: owner.id, text: "private preview",
+    }).returning()
+    if (!message) throw new Error("Message not created")
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, child.id))
+    const visible = await getChats({}, makeHandlerContext(member.id))
+    expect(visible.chats.some((c) => Number(c.id) === child.id)).toBe(true)
+    expect(visible.messages.some((m) => Number(m.chatId) === child.id)).toBe(true)
+
+    // Retain both grants and the closed dialog to reproduce delayed projection cleanup.
+    await db.delete(schema.members).where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, member.id)))
+    const revoked = await getChats({}, makeHandlerContext(member.id))
+    expect(revoked.chats.some((c) => Number(c.id) === child.id)).toBe(false)
+    expect(revoked.dialogs.some((d) => Number(d.chatId) === child.id)).toBe(false)
+    expect(revoked.messages.some((m) => Number(m.chatId) === child.id)).toBe(false)
+    expect(revoked.users.some((u) => Number(u.id) === owner.id)).toBe(false)
   })
 
   test("excludes linked subthreads whose dialog is hidden from chat list", async () => {

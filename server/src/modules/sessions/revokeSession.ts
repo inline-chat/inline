@@ -98,12 +98,12 @@ export async function finishSessionRevocation(
   outcome: RevokeSessionTransactionOutcome,
   input: RevokeSessionInput,
 ): Promise<void> {
-  if (outcome.gridState) {
-    await finishGridSessionAccess(outcome.gridState, input.targetUserId, input.sessionId)
-  }
   if (outcome.result.session) {
     connectionManager.closeConnectionForSession(input.targetUserId, input.sessionId, {
       authenticationInvalidated: true,
     }, input.preserveConnectionId)
+  }
+  if (outcome.gridState) {
+    await finishGridSessionAccess(outcome.gridState, input.targetUserId, input.sessionId)
   }
 }

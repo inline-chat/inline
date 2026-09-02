@@ -4,6 +4,7 @@ import {
   members,
   spaces,
   spaceJoinBlocks,
+  userNotDeleted,
   users,
   type DbMember,
   type DbSpace,
@@ -11,17 +12,19 @@ import {
 } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { Transaction } from "@in/server/db/types"
-import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import {
   addedAccessUserIds,
   getEffectiveChatAccessUserIds,
   getSpaceRootChatIdsForAccessEvents,
 } from "@in/server/modules/authorization/chatAccessProjection"
-import { openPrimarySpaceChatForUser } from "@in/server/modules/dialogOpen"
+import { activateCommittedSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
 import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
-import { emitChatListOpenUpdates } from "@in/server/modules/subthreads"
-import { getUpdateGroupForSpace } from "@in/server/modules/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import {
+  persistPrimarySpaceChatOpenProjectionInTransaction,
+  liveUpdateForPersistedUserChatOpenProjection,
+  type PersistedUserChatOpenProjection,
+} from "@in/server/modules/updates/userChatOpenProjection"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -41,6 +44,8 @@ type JoinOutcome = {
   userUpdate?: UpdateSeqAndDate
   spaceUpdate?: UpdateSeqAndDate
   accessUpdates?: Array<{ chatId: number; update: UpdateSeqAndDate }>
+  chatOpen?: PersistedUserChatOpenProjection
+  spaceRecipientUserIds?: number[]
 }
 
 export type SpaceLinkJoinResult = {
@@ -78,7 +83,12 @@ export const joinSpaceByResolvedLink = async ({
       .where(and(eq(members.spaceId, space.id), eq(members.userId, currentUserId)))
       .limit(1)
     if (existingMember) {
-      return { space, member: existingMember, alreadyMember: true }
+      const chatOpen = await persistPrimarySpaceChatOpenProjectionInTransaction(tx, {
+        spaceId: space.id,
+        userId: currentUserId,
+        canAccessPublicChats: existingMember.canAccessPublicChats !== false,
+      })
+      return { space, member: existingMember, alreadyMember: true, chatOpen: chatOpen ?? undefined }
     }
 
     const [joinBlock] = await tx
@@ -91,7 +101,7 @@ export const joinSpaceByResolvedLink = async ({
     }
 
     const affectedChatIds = await getSpaceRootChatIdsForAccessEvents(tx, space.id)
-    const accessBefore = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+    const accessBefore = await getEffectiveChatAccessUserIds(tx, affectedChatIds, { userIds: [currentUserId] })
 
     const [member] = await tx
       .insert(members)
@@ -125,11 +135,12 @@ export const joinSpaceByResolvedLink = async ({
       .update(spaces)
       .set({ updateSeq: spaceUpdate.seq, lastUpdateDate: spaceUpdate.date })
       .where(eq(spaces.id, space.id))
+    const updatedSpace = { ...space, updateSeq: spaceUpdate.seq, lastUpdateDate: spaceUpdate.date }
 
     const userUpdatePayload: ServerUpdate["update"] = {
       oneofKind: "userJoinSpace",
       userJoinSpace: {
-        space: Encoders.space(space, { encodingForUserId: currentUserId }),
+        space: Encoders.space(updatedSpace, { encodingForUserId: currentUserId }),
         member: Encoders.member(member),
       },
     }
@@ -138,7 +149,7 @@ export const joinSpaceByResolvedLink = async ({
       { tx },
     )
 
-    const accessAfter = await getEffectiveChatAccessUserIds(tx, affectedChatIds)
+    const accessAfter = await getEffectiveChatAccessUserIds(tx, affectedChatIds, { userIds: [currentUserId] })
     const gainedChatIds = affectedChatIds.filter((chatId) =>
       addedAccessUserIds(chatId, accessBefore, accessAfter).includes(currentUserId),
     )
@@ -157,29 +168,64 @@ export const joinSpaceByResolvedLink = async ({
       update: persistedAccessUpdates[index]!,
     }))
 
-    return { space, member, alreadyMember: false, user, userUpdate, spaceUpdate, accessUpdates }
+    const chatOpen = await persistPrimarySpaceChatOpenProjectionInTransaction(tx, {
+      spaceId: space.id,
+      userId: currentUserId,
+      canAccessPublicChats: member.canAccessPublicChats !== false,
+      persistWhenUnchanged: true,
+    })
+
+    const recipients = await tx
+      .select({ userId: members.userId })
+      .from(members)
+      .innerJoin(users, eq(users.id, members.userId))
+      .where(and(eq(members.spaceId, space.id), userNotDeleted()))
+      .orderBy(members.userId)
+
+    return {
+      space: updatedSpace,
+      member,
+      alreadyMember: false,
+      user,
+      userUpdate,
+      spaceUpdate,
+      accessUpdates,
+      chatOpen: chatOpen ?? undefined,
+      spaceRecipientUserIds: recipients.map((recipient) => recipient.userId),
+    }
   })
 
-  if (!outcome.alreadyMember && outcome.user && outcome.userUpdate && outcome.spaceUpdate) {
-    AccessGuardsCache.resetSpaceMember(outcome.space.id, currentUserId)
-    AccessGuardsCache.setSpaceMember(outcome.space.id, currentUserId)
-    pushJoinUpdate(outcome, currentUserId)
-    pushAccessUpdates(outcome, currentUserId)
-    await pushSpaceMemberUpdate(outcome, currentUserId).catch((error: unknown) => {
-      log.error("Failed to fan out space-link join", { spaceId: outcome.space.id, error })
+  let activated = false
+  try {
+    activated = await activateCommittedSpaceMembership({
+      spaceId: outcome.space.id,
+      userId: currentUserId,
+      memberId: outcome.member.id,
+    }, () => {
+      if (!outcome.alreadyMember && outcome.user && outcome.userUpdate && outcome.spaceUpdate) {
+        pushJoinUpdate(outcome, currentUserId)
+        pushAccessUpdates(outcome, currentUserId)
+        pushSpaceMemberUpdate(outcome, [currentUserId])
+      }
+      if (outcome.chatOpen) {
+        void RealtimeUpdates.pushToUser(
+          currentUserId,
+          [liveUpdateForPersistedUserChatOpenProjection(outcome.chatOpen)],
+        ).catch(logFanoutFailure)
+      }
+      return undefined
+    })
+  } catch (error: unknown) {
+    log.error("Failed to activate committed space-link membership", {
+      spaceId: outcome.space.id,
+      userId: currentUserId,
+      memberId: outcome.member.id,
+      error,
     })
   }
 
-  const primaryChatOpen = await openPrimarySpaceChatForUser({
-    spaceId: outcome.space.id,
-    userId: currentUserId,
-    canAccessPublicChats: outcome.member.canAccessPublicChats !== false,
-  })
-  if (primaryChatOpen?.changed) {
-    await emitChatListOpenUpdates({
-      chat: primaryChatOpen.chat,
-      dialogs: [primaryChatOpen.dialog],
-    })
+  if (activated && !outcome.alreadyMember) {
+    pushSpaceMemberUpdate(outcome, (outcome.spaceRecipientUserIds ?? []).filter((userId) => userId !== currentUserId))
   }
 
   return {
@@ -191,14 +237,14 @@ export const joinSpaceByResolvedLink = async ({
 
 function pushAccessUpdates(outcome: JoinOutcome, userId: number): void {
   for (const accessUpdate of outcome.accessUpdates ?? []) {
-    RealtimeUpdates.pushToUser(userId, [{
+    void RealtimeUpdates.pushToUser(userId, [{
       seq: accessUpdate.update.seq,
       date: encodeDateStrict(accessUpdate.update.date),
       update: {
         oneofKind: "userAddedToChat",
         userAddedToChat: { chatId: BigInt(accessUpdate.chatId) },
       },
-    }])
+    }]).catch(logFanoutFailure)
   }
 }
 
@@ -215,10 +261,10 @@ function pushJoinUpdate(outcome: JoinOutcome, userId: number): void {
       },
     },
   }
-  RealtimeUpdates.pushToUser(userId, [update])
+  void RealtimeUpdates.pushToUser(userId, [update]).catch(logFanoutFailure)
 }
 
-async function pushSpaceMemberUpdate(outcome: JoinOutcome, currentUserId: number): Promise<void> {
+function pushSpaceMemberUpdate(outcome: JoinOutcome, recipientUserIds: number[]): void {
   if (!outcome.user || !outcome.spaceUpdate) return
   const user = outcome.space.isPublic
     ? encodePublicUser({ user: outcome.user })
@@ -234,8 +280,11 @@ async function pushSpaceMemberUpdate(outcome: JoinOutcome, currentUserId: number
       },
     },
   }
-  const group = await getUpdateGroupForSpace(outcome.space.id, { currentUserId })
-  for (const userId of group.userIds) {
-    RealtimeUpdates.pushToUser(userId, [update])
+  for (const userId of recipientUserIds) {
+    void RealtimeUpdates.pushToUser(userId, [update]).catch(logFanoutFailure)
   }
+}
+
+function logFanoutFailure(error: unknown): void {
+  log.warn("Failed to publish committed space-link update", { error })
 }

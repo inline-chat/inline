@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { acquireUpdateDiscoveryWriterFence } from "@in/server/modules/updates/updateDiscoveryBarrier"
 
 type EnqueueUserUpdateInput = {
   userId: number
@@ -44,6 +45,9 @@ export const UserBucketUpdates = {
 }
 
 const allocateNextSeq = async (tx: Transaction, userId: number): Promise<UpdateSeqAndDate> => {
+  // Acquire the shared fence before allocating either the sequence or its
+  // database-clock timestamp. It remains held until the outer tx commits.
+  const databaseDate = await acquireUpdateDiscoveryWriterFence(tx)
   // Use the query builder so Postgres doesn't see a qualified SET target like `"users"."update_seq"`,
   // which is invalid syntax in UPDATE SET lists.
   // BAND-AID: We defensively reconcile against the latest persisted user-bucket seq in `updates`.
@@ -66,13 +70,12 @@ const allocateNextSeq = async (tx: Transaction, userId: number): Promise<UpdateS
     ) + 1
   `
   // The application clock used to be sampled before this UPDATE acquired the
-  // user-row lock. A waiter could therefore receive the later seq with an
-  // earlier date. Derive and fence the date from the row being updated so seq,
-  // stored update date, and users.last_update_date stay monotonic together.
+  // user-row lock. The fenced database sample establishes commit discovery;
+  // GREATEST with the persisted row keeps dates monotonic across allocators.
   const nextDateExpr = sql<Date>`
     GREATEST(
       COALESCE(${users.lastUpdateDate}, '-infinity'::timestamp),
-      clock_timestamp()
+      ${databaseDate.toISOString()}::timestamp
     )
   `
   const [result] = await tx

@@ -158,6 +158,18 @@ private enum CredentialStoragePreparationTestError: Error {
 
 @Suite("Inline Protocol native login")
 struct InlineProtocolNativeLoginTests {
+  @Test("login failure messages preserve recovery instructions without exposing unknown error details")
+  func loginFailureMessagesAreActionableAndSafe() {
+    #expect(InlineProtocolNativeLogin.userFacingMessage(for: AuthStorageError.logoutInProgress)
+      == AuthStorageError.logoutInProgress.localizedDescription)
+    #expect(InlineProtocolNativeLogin.userFacingMessage(for: InlineProtocolNativeLoginError.noPendingChallenge)
+      == InlineProtocolNativeLoginError.noPendingChallenge.localizedDescription)
+    #expect(InlineProtocolNativeLogin.userFacingMessage(for: RealtimeDirectRpcError.notConnected)
+      == RealtimeDirectRpcError.notConnected.localizedDescription)
+    let unexpected = NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "private-debug-detail"])
+    #expect(!InlineProtocolNativeLogin.userFacingMessage(for: unexpected).contains("private-debug-detail"))
+  }
+
   @Test("native login preserves actionable RPC errors")
   func nativeLoginPreservesRPCError() {
     var rpcError = InlineProtocol.RpcError()

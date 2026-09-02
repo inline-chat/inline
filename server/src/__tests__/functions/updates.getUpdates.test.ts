@@ -8,6 +8,7 @@ import { updates, UpdateBucket } from "../../db/schema/updates"
 import {
   DialogNotificationSettings_Mode,
   GetUpdatesResult_ResultType,
+  type GetUpdatesInput,
   InputPeer,
   Member_Role,
   SyncSkippedSequence_Reason,
@@ -18,7 +19,7 @@ import { UpdatesModel } from "@in/server/db/models/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
-import { chats, dialogs, members, messages, spaces } from "@in/server/db/schema"
+import { chats, chatParticipantGroups, dialogs, members, messages, spaces, userGroupMembers, userGroups, users as usersTable } from "@in/server/db/schema"
 import { handler as readMessages } from "@in/server/methods/readMessages"
 import { and, desc, eq } from "drizzle-orm"
 
@@ -281,6 +282,64 @@ describe("getUpdates", () => {
     expect(result.date).toBe(0n)
   })
 
+  test("requests repair for fully pruned user, space, and chat journals using their durable tails", async () => {
+    const { users: fixtureUsers, space } = await testUtils.createSpaceWithMembers("Pruned Buckets", ["pruned-buckets@example.com"])
+    const user = fixtureUsers[0]
+    const chat = await testUtils.createChat(space.id, "Pruned Chat", "thread", true)
+    if (!user || !chat) throw new Error("Failed to create pruned bucket fixtures")
+    const date = new Date("2026-08-31T00:00:00Z")
+    await db.update(usersTable).set({ updateSeq: 3, lastUpdateDate: date }).where(eq(usersTable.id, user.id))
+    await db.update(spaces).set({ updateSeq: 3, lastUpdateDate: date }).where(eq(spaces.id, space.id))
+    await db.update(chats).set({ updateSeq: 3, lastUpdateDate: date }).where(eq(chats.id, chat.id))
+    const buckets: GetUpdatesInput["bucket"][] = [
+      { type: { oneofKind: "user", user: {} } },
+      { type: { oneofKind: "space", space: { spaceId: BigInt(space.id) } } },
+      { type: { oneofKind: "chat", chat: { peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } } } } },
+    ]
+    for (const bucket of buckets) {
+      const result = await getUpdates({ bucket, startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100 }, { currentUserId: user.id } as any)
+      expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
+      expect(result.seq).toBe(3n)
+      expect(result.date).toBe(encodeDateStrict(date))
+      expect(result.final).toBe(false)
+      expect(result.updates).toEqual([])
+    }
+  })
+
+  test.each([1, 2])("requests repair for a pruned journal around retained sequence %s", async (retainedSeq) => {
+    const user = await testUtils.createUser(`pruned-retained-${retainedSeq}@example.com`)
+    await db.update(usersTable).set({ updateSeq: 3 }).where(eq(usersTable.id, user.id))
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: retainedSeq,
+      payload: { oneofKind: "userChatParticipantDelete", userChatParticipantDelete: { chatId: 1n } },
+    })
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } }, startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }, { currentUserId: user.id } as any)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
+    expect(result.seq).toBe(3n)
+    expect(result.updates).toEqual([])
+  })
+
+  test("does not extend a fixed replay target to the current entity tail", async () => {
+    const user = await testUtils.createUser("bounded-entity-tail@example.com")
+    await db.update(usersTable).set({ updateSeq: 3 }).where(eq(usersTable.id, user.id))
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: { oneofKind: "userChatParticipantDelete", userChatParticipantDelete: { chatId: 1n } },
+    })
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } }, startSeq: 0n, seqEnd: 1n, totalLimit: 0, limit: 100,
+    }, { currentUserId: user.id } as any)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.seq).toBe(1n)
+    expect(result.final).toBe(true)
+  })
+
   test("accounts for a filtered record before advancing past later updates", async () => {
     const { users } = await testUtils.createSpaceWithMembers("Filtered Cursor", ["filtered-cursor@example.com"])
     const user = users[0]
@@ -451,7 +510,7 @@ describe("getUpdates", () => {
     expect(sidecarUserIds.has(newMember.id)).toBe(true)
   })
 
-  test("serves participant deletion with the chat dependency sidecars", async () => {
+  test("serves participant deletion without enriching a now-inaccessible chat", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Participant Delete Sidecars", [
       "participant-delete@example.com",
     ])
@@ -483,8 +542,152 @@ describe("getUpdates", () => {
     )
 
     expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantDelete"])
+    expect(result.sidecars).toBeUndefined()
+  })
+
+  test("serves participant additions with the chat and added-user dependency sidecars", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Participant Add Sidecars", [
+      "participant-add-viewer@example.com",
+      "participant-add-new@example.com",
+    ])
+    const viewer = users[0]
+    const addedUser = users[1]
+    if (!space || !viewer || !addedUser) throw new Error("Failed to create participant add fixtures")
+
+    const chat = await testUtils.createChat(space.id, "Private Participant Add", "thread", false)
+    if (!chat) throw new Error("Failed to create participant add chat")
+    await testUtils.addParticipant(chat.id, viewer.id)
+    await testUtils.addParticipant(chat.id, addedUser.id)
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "participantAdd",
+        participantAdd: {
+          chatId: BigInt(chat.id),
+          participant: {
+            userId: BigInt(addedUser.id),
+            date: 1n,
+          },
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: {
+          type: {
+            oneofKind: "chat",
+            chat: {
+              peerId: {
+                type: {
+                  oneofKind: "chat",
+                  chat: { chatId: BigInt(chat.id) },
+                },
+              },
+            },
+          },
+        },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 10,
+      },
+      { currentUserId: viewer.id } as any,
+    )
+
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantAdd"])
     expect(result.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(chat.id)
     expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).toContain(space.id)
+    expect(result.sidecars?.users.map((sidecar) => Number(sidecar.id))).toContain(addedUser.id)
+  })
+
+  test("does not disclose payload-selected chat or user sidecars for malformed participant additions", async () => {
+    const { space: sourceSpace, users: sourceUsers } = await testUtils.createSpaceWithMembers(
+      "Malformed Participant Source",
+      ["malformed-participant-viewer@example.com"],
+    )
+    const { space: foreignSpace, users: foreignUsers } = await testUtils.createSpaceWithMembers(
+      "Malformed Participant Foreign",
+      ["malformed-participant-foreign@example.com"],
+    )
+    const viewer = sourceUsers[0]
+    const foreignUser = foreignUsers[0]
+    if (!sourceSpace || !foreignSpace || !viewer || !foreignUser) {
+      throw new Error("Failed to create malformed participant privacy fixtures")
+    }
+
+    const sourceChat = await testUtils.createChat(sourceSpace.id, "Source Private Thread", "thread", false)
+    const foreignChat = await testUtils.createChat(foreignSpace.id, "Foreign Private Thread", "thread", false)
+    if (!sourceChat || !foreignChat) throw new Error("Failed to create malformed participant privacy chats")
+    await testUtils.addParticipant(sourceChat.id, viewer.id)
+    await testUtils.addParticipant(foreignChat.id, foreignUser.id)
+    // Even a retained, corrupt direct grant does not confer space membership.
+    await testUtils.addParticipant(sourceChat.id, foreignUser.id)
+    const [foreignGroup] = await db.insert(userGroups).values({
+      spaceId: foreignSpace.id, name: "Private Foreign Group", createdBy: foreignUser.id,
+    }).returning()
+    if (!foreignGroup) throw new Error("Failed to create foreign group")
+    await db.insert(chatParticipantGroups).values({ chatId: sourceChat.id, groupId: foreignGroup.id })
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: sourceChat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "participantAdd",
+        participantAdd: {
+          chatId: BigInt(foreignChat.id),
+          participant: { userId: BigInt(foreignUser.id), date: 1n },
+        },
+      },
+    })
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: sourceChat.id,
+      seq: 2,
+      payload: { oneofKind: "participantAdd", participantAdd: {
+        chatId: BigInt(sourceChat.id), participant: { userId: BigInt(foreignUser.id), date: 1n },
+      } },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: sourceChat.id,
+      seq: 3,
+      payload: { oneofKind: "participantGroupAdd", participantGroupAdd: {
+        chatId: BigInt(sourceChat.id), groupParticipant: { groupId: BigInt(foreignGroup.id), date: 1n },
+      } },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: {
+          type: {
+            oneofKind: "chat",
+            chat: {
+              peerId: {
+                type: { oneofKind: "chat", chat: { chatId: BigInt(sourceChat.id) } },
+              },
+            },
+          },
+        },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+        limit: 10,
+      },
+      { currentUserId: viewer.id } as any,
+    )
+
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["chatSkipPts", "chatSkipPts", "chatSkipPts"])
+    expect(result.sidecars?.chats.map((sidecar) => Number(sidecar.id))).toContain(sourceChat.id)
+    expect(result.sidecars?.chats.map((sidecar) => Number(sidecar.id))).not.toContain(foreignChat.id)
+    expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).not.toContain(foreignSpace.id)
+    expect(result.sidecars?.users.map((sidecar) => Number(sidecar.id))).not.toContain(foreignUser.id)
+    expect(result.sidecars?.userGroups).toEqual([])
   })
 
   test("serves join-space updates with the current-user dependency", async () => {
@@ -539,6 +742,76 @@ describe("getUpdates", () => {
 
     expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["joinSpace"])
     expect(result.sidecars?.users.map((sidecar) => Number(sidecar.id))).toContain(user.id)
+  })
+
+  test("accounts obsolete user access-adds without enriching revoked private chat or group metadata", async () => {
+    const { space, users: fixtureUsers } = await testUtils.createSpaceWithMembers("Revoked Replay", [
+      "revoked-replay-owner@example.com", "revoked-replay-viewer@example.com", "revoked-replay-secret@example.com",
+    ])
+    const [owner, viewer, secretUser] = fixtureUsers
+    if (!owner || !viewer || !secretUser) throw new Error("Missing revoked replay users")
+    const chat = await testUtils.createChat(space.id, "Previously Visible Thread", "thread", false)
+    if (!chat) throw new Error("Missing revoked replay chat")
+    await testUtils.addParticipant(chat.id, viewer.id)
+    const [group] = await db.insert(userGroups).values({ spaceId: space.id, name: "Old Group", createdBy: owner.id }).returning()
+    if (!group) throw new Error("Missing revoked replay group")
+    await db.insert(chatParticipantGroups).values({ chatId: chat.id, groupId: group.id })
+    await db.insert(userGroupMembers).values({ groupId: group.id, userId: viewer.id })
+    await db.insert(dialogs).values({ chatId: chat.id, userId: viewer.id, spaceId: space.id })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 1,
+      payload: { oneofKind: "userAddedToChat", userAddedToChat: {
+        chatId: BigInt(chat.id), group: { groupId: BigInt(group.id), date: 1n },
+      } },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 2,
+      payload: { oneofKind: "userSpaceMemberDelete", userSpaceMemberDelete: { spaceId: BigInt(space.id) } },
+    })
+    // Retained dialog/participant/group rows deliberately survive membership exit.
+    await db.delete(members).where(and(eq(members.spaceId, space.id), eq(members.userId, viewer.id)))
+    await db.update(chats).set({ title: "Private New Title" }).where(eq(chats.id, chat.id))
+    await db.update(userGroups).set({ name: "Private New Group Name" }).where(eq(userGroups.id, group.id))
+    await db.insert(userGroupMembers).values({ groupId: group.id, userId: secretUser.id })
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } }, startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }, { currentUserId: viewer.id } as any)
+    expect(result.seq).toBe(2n)
+    expect(result.final).toBe(true)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["spaceMemberDelete"])
+    expect(result.skippedSequences).toEqual([{ seq: 1n, reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET }])
+    expect(result.sidecars).toBeUndefined()
+  })
+
+  test("preserves current chat discovery while stripping an obsolete optional group grant", async () => {
+    const { space, users: fixtureUsers } = await testUtils.createSpaceWithMembers("Retired Group Replay", ["retired-group-viewer@example.com"])
+    const viewer = fixtureUsers[0]
+    if (!viewer) throw new Error("Missing retired group viewer")
+    const chat = await testUtils.createChat(space.id, "Still Accessible Thread", "thread", false)
+    if (!chat) throw new Error("Missing retired group chat")
+    await testUtils.addParticipant(chat.id, viewer.id)
+    const group = { groupId: 9_999_999n, date: 1n }
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 1,
+      payload: { oneofKind: "userAddedToChat", userAddedToChat: { chatId: BigInt(chat.id), group } },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 2,
+      payload: { oneofKind: "userChatParticipantGroupAdd", userChatParticipantGroupAdd: { chatId: BigInt(chat.id), groupParticipant: group } },
+    })
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } }, startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }, { currentUserId: viewer.id } as any)
+    expect(result.seq).toBe(2n)
+    expect(result.updates).toHaveLength(1)
+    const delivered = result.updates[0]?.update
+    if (delivered?.oneofKind !== "userAddedToChat") throw new Error("Expected current discovery event")
+    expect(delivered.userAddedToChat.chatId).toBe(BigInt(chat.id))
+    expect(delivered.userAddedToChat.group).toBeUndefined()
+    expect(result.sidecars?.chats.map((row) => Number(row.id))).toContain(chat.id)
+    expect(result.sidecars?.userGroups).toEqual([])
+    expect(result.skippedSequences).toEqual([{ seq: 2n, reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET }])
   })
 
   test("serves member updates with their space and user dependencies", async () => {
@@ -1204,6 +1477,47 @@ describe("getUpdates", () => {
     if (first.update.oneofKind !== "updateReadMaxId") throw new Error("Unexpected update type")
     expect(first.update.updateReadMaxId.readMaxId).toBe(42n)
     expect(first.update.updateReadMaxId.unreadCount).toBe(3)
+  })
+
+  test("includes Chat and Dialog sidecars only for the delivered user-read page's referenced DM pairs", async () => {
+    const lowerPeer = await testUtils.createUser("dm-read-lower@example.com")
+    const viewer = await testUtils.createUser("dm-read-viewer@example.com")
+    const higherPeer = await testUtils.createUser("dm-read-higher@example.com")
+    const withheldPeer = await testUtils.createUser("dm-read-withheld@example.com")
+    const lowerChat = await testUtils.createPrivateChat(viewer, lowerPeer)
+    const higherChat = await testUtils.createPrivateChat(viewer, higherPeer)
+    const withheldChat = await testUtils.createPrivateChat(viewer, withheldPeer)
+    const foreignChat = await testUtils.createPrivateChat(lowerPeer, higherPeer)
+    if (!lowerChat || !higherChat || !withheldChat || !foreignChat) throw new Error("Missing DM read fixtures")
+    await db.insert(dialogs).values([
+      { chatId: lowerChat.id, userId: viewer.id, peerUserId: lowerPeer.id, readInboxMaxId: 7 },
+      { chatId: higherChat.id, userId: viewer.id, peerUserId: higherPeer.id, readInboxMaxId: 9 },
+      { chatId: withheldChat.id, userId: viewer.id, peerUserId: withheldPeer.id, readInboxMaxId: 11 },
+    ])
+    const peers = [lowerPeer, higherPeer, lowerPeer, withheldPeer]
+    for (const [index, peer] of peers.entries()) {
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: viewer.id,
+        seq: index + 1,
+        payload: { oneofKind: "userReadMaxId", userReadMaxId: {
+          peerId: { type: { oneofKind: "user", user: { userId: BigInt(peer.id) } } },
+          readMaxId: 7n,
+          unreadCount: 0,
+        } },
+      })
+    }
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 3,
+    }, { currentUserId: viewer.id } as any)
+    expect(result.seq).toBe(3n)
+    expect(result.final).toBe(false)
+    expect(result.sidecars?.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual([lowerChat.id, higherChat.id].sort((a, b) => a - b))
+    expect(result.sidecars?.dialogs.map((dialog) => Number(dialog.chatId)).sort((a, b) => a - b)).toEqual([lowerChat.id, higherChat.id].sort((a, b) => a - b))
+    expect(result.sidecars?.dialogs.find((dialog) => dialog.chatId === BigInt(lowerChat.id))?.readMaxId).toBe(7n)
+    expect(result.sidecars?.dialogs.find((dialog) => dialog.chatId === BigInt(higherChat.id))?.readMaxId).toBe(9n)
+    expect(result.sidecars?.chats.some((chat) => chat.id === BigInt(foreignChat.id) || chat.id === BigInt(withheldChat.id))).toBe(false)
   })
 
   test("inflates userMarkAsUnread to markAsUnread in user bucket", async () => {

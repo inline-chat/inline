@@ -6,6 +6,20 @@ import Testing
 @Suite("User settings refresh", .serialized)
 @MainActor
 struct INUserSettingsRefreshTests {
+  @Test("link shortening stays opt-in for new and older settings, preserving saved choices")
+  func linkShorteningRemainsOptIn() throws {
+    #expect(!ComposeSettingsManager().replacePastedLinksWithTitles)
+    #expect(!ComposeSettingsManager(from: InlineProtocol.ComposeSettings()).replacePastedLinksWithTitles)
+    let missing = try JSONDecoder().decode(ComposeSettingsManager.self, from: Data("{}".utf8))
+    #expect(!missing.replacePastedLinksWithTitles)
+    for enabled in [false, true] {
+      let settings = ComposeSettingsManager(replacePastedLinksWithTitles: enabled)
+      let saved = try JSONEncoder().encode(settings)
+      #expect(try JSONDecoder().decode(ComposeSettingsManager.self, from: saved).replacePastedLinksWithTitles == enabled)
+      #expect(ComposeSettingsManager(from: settings.toProtocol()).replacePastedLinksWithTitles == enabled)
+    }
+  }
+
   @Test("global settings mutations share a durable account-local execution lane")
   func globalSettingsMutationsAreDurableAndOrdered() throws {
     let all = NotificationSettingsManager()

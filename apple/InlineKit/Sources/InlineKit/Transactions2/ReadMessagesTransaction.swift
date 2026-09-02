@@ -21,7 +21,16 @@ public struct ReadMessagesTransaction: Transaction2 {
   private var log = Log.scoped("Transactions/ReadMessages")
 
   public init(peerId: Peer, maxId: Int64?) {
-    context = Context(peerId: peerId, maxId: maxId, intentId: UUID().uuidString)
+    context = Context(
+      peerId: peerId,
+      maxId: maxId,
+      intentId: maxId == nil ? UUID().uuidString : nil
+    )
+  }
+
+  public var executionKey: TransactionExecutionKey? { .peerMutation(context.peerId) }
+  public var reconnectReplayPolicy: TransactionReconnectPolicy? {
+    context.maxId == nil ? .neverReplay : .replaySafe
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -34,6 +43,10 @@ public struct ReadMessagesTransaction: Transaction2 {
   }
 
   public func optimistic() async {
+    // A bounded automatic read must wait for the server's authoritative
+    // UpdateReadMaxId. Only the explicit nil marker means "mark all" and keeps
+    // the existing optimistic interaction contract.
+    guard context.maxId == nil, context.intentId != nil else { return }
     do {
       let original = try await AppDatabase.shared.reader.read { db in
         try Dialog.get(peerId: context.peerId).fetchOne(db)
@@ -66,7 +79,7 @@ public struct ReadMessagesTransaction: Transaction2 {
     }
 
     log.trace("result: \(result)")
-    await Api.realtime.applyUpdates(result.updates)
+    await Api.realtime.applyUpdatesAndWait(result.updates)
     await DialogMutationRollbackTracker.shared.complete(
       intentID: context.intentId,
       peer: context.peerId,

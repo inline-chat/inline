@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, View } from "react-native"
 
 import { clearSession, type AuthSession } from "@/auth/session"
+import { logoutSession } from "@/api/auth"
 import { NativeButton } from "@/components/NativeButton"
 import { Row, Section } from "@/components/Section"
 import { registerForInlinePush, type PushRegistrationState } from "@/notifications/register"
@@ -16,6 +17,7 @@ type HomeScreenProps = {
 export function HomeScreen({ session, onSessionChanged }: HomeScreenProps) {
   const [pushState, setPushState] = useState<PushRegistrationState | null>(null)
   const [autoRegister, setAutoRegister] = useState(true)
+  const [signingOut, setSigningOut] = useState(false)
 
   const displayName = useMemo(() => {
     const user = session.user
@@ -35,8 +37,21 @@ export function HomeScreen({ session, onSessionChanged }: HomeScreenProps) {
   }, [autoRegister, session.token])
 
   async function signOut() {
-    await clearSession()
-    onSessionChanged()
+    if (signingOut) return
+    setSigningOut(true)
+    try {
+      // Remove local authority first; process death during the bounded remote
+      // request must not sign this account back in. Still try to revoke even if
+      // a local storage delete failed. Offline push cleanup remains best effort.
+      const cleanup = await clearSession().then(() => ({ ok: true }), () => ({ ok: false }))
+      await logoutSession(session.token).catch(() => undefined)
+      if (!cleanup.ok) throw new Error("Local cleanup failed")
+      onSessionChanged()
+    } catch {
+      Alert.alert("Could not sign out", "Your saved session could not be cleared. Please try again.")
+    } finally {
+      setSigningOut(false)
+    }
   }
 
   async function retryPush() {
@@ -91,10 +106,11 @@ export function HomeScreen({ session, onSessionChanged }: HomeScreenProps) {
       </Section>
 
       <NativeButton
-        title="Sign out"
+        title={signingOut ? "Signing out…" : "Sign out"}
         tone="danger"
+        disabled={signingOut}
         onPress={() => {
-          Alert.alert("Sign out?", "This removes the local session from this Android device.", [
+          Alert.alert("Sign out?", "This signs out your account on this Android device.", [
             { text: "Cancel", style: "cancel" },
             { text: "Sign out", style: "destructive", onPress: signOut },
           ])

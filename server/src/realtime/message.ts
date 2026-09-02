@@ -383,7 +383,7 @@ export const sendMessageToRealtimeSpace = async (spaceId: number, payload: Serve
 
 export class RealtimeUpdates {
   static pushToUser(userId: number, updates: UpdatesPayload["updates"], options?: { skipSessionId?: number }) {
-    sendMessageToRealtimeUser(
+    return sendMessageToRealtimeUser(
       userId,
       {
         oneofKind: "update",

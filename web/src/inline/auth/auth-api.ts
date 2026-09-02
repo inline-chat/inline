@@ -137,6 +137,7 @@ const request = async <T>(
     body?: Record<string, unknown>
     query?: Record<string, string | number | undefined>
     token?: string
+    signal?: AbortSignal
   },
 ): Promise<T> => {
   const url = new URL(`${getApiBaseUrl()}/${path}`)
@@ -152,6 +153,7 @@ const request = async <T>(
   try {
     response = await fetch(url, {
       method: options.method,
+      signal: options.signal,
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     })
@@ -178,6 +180,18 @@ const request = async <T>(
 }
 
 export const inlineAuthApi = {
+  logout: async (token: string) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2_000)
+    try {
+      return await request<{ success: boolean }>("logout", {
+        method: "POST", body: {}, token, signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timeout)
+    }
+  },
+
   sendEmailCode: async (email: string) => {
     const info = clientInfo()
     return await request<SendEmailCodeResult>("sendEmailCode", {

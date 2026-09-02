@@ -352,15 +352,25 @@ extension AppDependencies {
 @MainActor
 @Observable
 final class MainWindowSessionRefresher {
+  private enum InitialRetryPhase {
+    case currentUser
+    case catalog
+  }
+
   private static let chatsRetryDelays: [Duration] = [.milliseconds(250), .seconds(1)]
+  private static let initialSelfRetryDelay: Duration = .seconds(5)
 
   private(set) var isFetchingSidebarChats = false
   private(set) var hasFetchedSidebarChats = false
 
   @ObservationIgnored private var sidebarFetchCount = 0
   @ObservationIgnored private var didFetchInitialData = false
+  @ObservationIgnored private var didFetchCurrentUser = false
   @ObservationIgnored private var initialTask: Task<Void, Never>?
   @ObservationIgnored private var chatsTask: Task<Void, Never>?
+  @ObservationIgnored private var initialRetryTask: Task<Void, Never>?
+  @ObservationIgnored private var didUseCurrentUserSelfRetry = false
+  @ObservationIgnored private var didUseCatalogSelfRetry = false
   @ObservationIgnored private var generation: UInt64 = 0
 
   private func canContinue(generation: UInt64, accountID: Int64) -> Bool {
@@ -374,59 +384,61 @@ final class MainWindowSessionRefresher {
     isFetchingSidebarChats = true
   }
 
-  private func endSidebarFetch() {
+  private func endSidebarFetch(generation taskGeneration: UInt64) {
+    guard generation == taskGeneration else { return }
     sidebarFetchCount = max(0, sidebarFetchCount - 1)
     isFetchingSidebarChats = sidebarFetchCount > 0
   }
 
   func fetchInitialDataIfNeeded(dependencies: AppDependencies) {
     guard didFetchInitialData == false else { return }
+    guard initialTask == nil, chatsTask == nil, initialRetryTask == nil else { return }
     guard Auth.shared.getIsLoggedIn(), Auth.shared.getHasPendingAccountTransition() == false,
           let accountID = Auth.shared.getCurrentUserId()
     else { return }
 
-    didFetchInitialData = true
-    initialTask?.cancel()
-
     let realtime = dependencies.realtimeV2
-    let data = dependencies.data
     let taskGeneration = generation
 
     beginSidebarFetch()
     initialTask = Task { @MainActor [weak self] in
       defer {
-        self?.endSidebarFetch()
-        self?.initialTask = nil
-      }
-
-      do {
-        try await realtime.send(.getMe())
-        guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
-          return
+        self?.endSidebarFetch(generation: taskGeneration)
+        if self?.generation == taskGeneration {
+          self?.initialTask = nil
         }
-        AppSettings.shared.resolveSidebarModeForCurrentAccount()
-      } catch is CancellationError {
-        return
-      } catch {
-        Log.shared.error("Error fetching getMe info", error: error)
-      }
-
-      do {
-        try Task.checkCancellation()
-        guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
-          return
-        }
-        try await data.getSpaces()
-        guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
-          return
-        }
-      } catch is CancellationError {
-        return
-      } catch {
-        Log.shared.error("Error fetching spaces", error: error)
       }
 
       guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+        return
+      }
+      if self?.didFetchCurrentUser == false {
+        do {
+          try await realtime.send(.getMe())
+          guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+            return
+          }
+          AppSettings.shared.resolveSidebarModeForCurrentAccount()
+          self?.didFetchCurrentUser = true
+        } catch is CancellationError {
+          return
+        } catch {
+          Log.shared.error("Error fetching getMe info", error: error)
+          self?.scheduleInitialRetry(
+            dependencies: dependencies,
+            generation: taskGeneration,
+            accountID: accountID,
+            phase: .currentUser
+          )
+          return
+        }
+      }
+
+      guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
+        return
+      }
+      if self?.didFetchCurrentUser == true, self?.hasFetchedSidebarChats == true {
+        self?.didFetchInitialData = true
         return
       }
       self?.refetchChats(dependencies: dependencies)
@@ -444,8 +456,10 @@ final class MainWindowSessionRefresher {
     beginSidebarFetch()
     chatsTask = Task { @MainActor [weak self] in
       defer {
-        self?.endSidebarFetch()
-        self?.chatsTask = nil
+        self?.endSidebarFetch(generation: taskGeneration)
+        if self?.generation == taskGeneration {
+          self?.chatsTask = nil
+        }
       }
 
       let maxAttempts = Self.chatsRetryDelays.count + 1
@@ -455,9 +469,16 @@ final class MainWindowSessionRefresher {
         }
         do {
           try Task.checkCancellation()
-          try await realtime.send(.getChats())
+          let expectedUserState = try await GRDBSyncStorage(db: dependencies.database)
+            .getBucketState(for: .user)
+          try await realtime.send(
+            GetChatsTransaction(expectedUserBucketState: expectedUserState)
+          )
           guard self?.canContinue(generation: taskGeneration, accountID: accountID) == true else {
             return
+          }
+          if self?.didFetchCurrentUser == true {
+            self?.didFetchInitialData = true
           }
           self?.hasFetchedSidebarChats = true
           return
@@ -465,7 +486,15 @@ final class MainWindowSessionRefresher {
           return
         } catch {
           Log.shared.error("Error refetching getChats (attempt \(attempt)/\(maxAttempts))", error: error)
-          guard attempt < maxAttempts else { return }
+          guard attempt < maxAttempts else {
+            self?.scheduleInitialRetry(
+              dependencies: dependencies,
+              generation: taskGeneration,
+              accountID: accountID,
+              phase: .catalog
+            )
+            return
+          }
           do {
             try await Task.sleep(for: Self.chatsRetryDelays[attempt - 1])
           } catch {
@@ -476,13 +505,59 @@ final class MainWindowSessionRefresher {
     }
   }
 
+  private func scheduleInitialRetry(
+    dependencies: AppDependencies,
+    generation taskGeneration: UInt64,
+    accountID: Int64,
+    phase: InitialRetryPhase
+  ) {
+    guard initialRetryTask == nil,
+          canContinue(generation: taskGeneration, accountID: accountID)
+    else { return }
+
+    switch phase {
+    case .currentUser:
+      guard didUseCurrentUserSelfRetry == false else { return }
+      didUseCurrentUserSelfRetry = true
+    case .catalog:
+      guard didUseCatalogSelfRetry == false else { return }
+      didUseCatalogSelfRetry = true
+    }
+
+    beginSidebarFetch()
+    initialRetryTask = Task { @MainActor [weak self] in
+      do {
+        try await Task.sleep(for: Self.initialSelfRetryDelay)
+      } catch {
+        self?.finishInitialRetryWait(generation: taskGeneration)
+        return
+      }
+
+      guard let self else { return }
+      self.finishInitialRetryWait(generation: taskGeneration)
+      guard self.canContinue(generation: taskGeneration, accountID: accountID) else { return }
+      self.fetchInitialDataIfNeeded(dependencies: dependencies)
+    }
+  }
+
+  private func finishInitialRetryWait(generation taskGeneration: UInt64) {
+    guard generation == taskGeneration else { return }
+    initialRetryTask = nil
+    endSidebarFetch(generation: taskGeneration)
+  }
+
   func reset() {
     generation &+= 1
     didFetchInitialData = false
+    didFetchCurrentUser = false
+    didUseCurrentUserSelfRetry = false
+    didUseCatalogSelfRetry = false
     initialTask?.cancel()
     chatsTask?.cancel()
+    initialRetryTask?.cancel()
     initialTask = nil
     chatsTask = nil
+    initialRetryTask = nil
     sidebarFetchCount = 0
     isFetchingSidebarChats = false
     hasFetchedSidebarChats = false
@@ -491,9 +566,11 @@ final class MainWindowSessionRefresher {
   func resetAndWait() async {
     let pendingInitialTask = initialTask
     let pendingChatsTask = chatsTask
+    let pendingRetryTask = initialRetryTask
     reset()
     await pendingInitialTask?.value
     await pendingChatsTask?.value
+    await pendingRetryTask?.value
   }
 }
 
@@ -612,7 +689,7 @@ final class Nav3ChatOpenPreloadBridge {
           "cancelled"
         )
       } catch {
-        guard self.requestID == id else {
+        guard self.requestID == id, !Task.isCancelled, Auth.shared.getHasPendingAccountTransition() == false else {
           os_signpost(
             .end,
             log: self.signpostLog,
@@ -640,6 +717,9 @@ final class Nav3ChatOpenPreloadBridge {
           "error"
         )
         nav.open(.chat(peer: peer), tracksChatNavigation: false)
+        if targetMessageId != nil {
+          ToastCenter.shared.showError("Could not load that message")
+        }
       }
     }
   }

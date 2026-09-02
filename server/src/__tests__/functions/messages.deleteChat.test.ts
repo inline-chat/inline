@@ -173,7 +173,7 @@ describe("messages.deleteChat", () => {
       .returning()
     if (!child) throw new Error("Delete child not created")
 
-    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(() => {})
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async () => {})
     try {
       await deleteChat(
         { peer: inputPeerForChat(child.id) },

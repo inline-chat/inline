@@ -1,4 +1,6 @@
 import { getR2 } from "@in/server/libs/r2"
+import { readFileBytes, FileByteLengthError } from "@in/server/modules/files/readFileBytes"
+import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 
 const STAGING_PREFIX = "inline-upload-parts/v1"
 
@@ -9,7 +11,7 @@ export interface UploadPartStore {
     sha256: Uint8Array
     data: Uint8Array
   }): Promise<string>
-  read(objectKey: string): Promise<Uint8Array>
+  read(objectKey: string, byteCount: number, signal?: AbortSignal): Promise<Uint8Array>
   remove(objectKey: string): Promise<void>
 }
 
@@ -34,6 +36,15 @@ const objectKey = ({
 }
 
 export class R2UploadPartStore implements UploadPartStore {
+  constructor(
+    private readonly writePart: (
+      key: string,
+      data: Uint8Array,
+    ) => Promise<number> = async (key, data) => requireR2().file(key).write(data, {
+      type: "application/octet-stream",
+    }),
+  ) {}
+
   async put(input: {
     uploadId: Uint8Array
     partIndex: number
@@ -41,14 +52,27 @@ export class R2UploadPartStore implements UploadPartStore {
     data: Uint8Array
   }): Promise<string> {
     const key = objectKey(input)
-    await requireR2().file(key).write(input.data, { type: "application/octet-stream" })
+    try {
+      const written = await this.writePart(key, input.data)
+      if (written !== input.data.byteLength) {
+        throw new Error(`Upload part storage wrote ${written} of ${input.data.byteLength} bytes`)
+      }
+    } catch (cause) {
+      throw new UploadPartStorageUnavailableError({ cause })
+    }
     return key
   }
 
-  async read(key: string): Promise<Uint8Array> {
+  async read(key: string, byteCount: number, signal?: AbortSignal): Promise<Uint8Array> {
+    signal?.throwIfAborted()
+    if (!Number.isInteger(byteCount) || byteCount < 1 || byteCount > INLINE_TRANSFER_PART_SIZE) {
+      throw new UploadPartStorageUnavailableError()
+    }
     try {
-      return new Uint8Array(await requireR2().file(key).arrayBuffer())
+      return await readFileBytes(requireR2().file(key).stream(), byteCount, signal)
     } catch (cause) {
+      signal?.throwIfAborted()
+      if (cause instanceof FileByteLengthError) throw cause
       throw new UploadPartStorageUnavailableError({ cause })
     }
   }

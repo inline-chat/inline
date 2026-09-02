@@ -11,6 +11,7 @@ import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
 import { configureAlertNotification, configureBackgroundNotification, iOSTopic } from "./utils"
+import { maxNotificationNameBytes, notificationBodyText, notificationText } from "./messagePreview"
 import {
   encryptSendMessagePushContent,
   PUSH_CONTENT_ALGORITHM,
@@ -42,6 +43,7 @@ type SendMessagePushPayload = {
   isUrgentNudge?: boolean
   senderDisplayName?: string
   senderProfilePhotoUrl?: string
+  senderHasProfilePhoto?: boolean
   threadEmoji?: string
 }
 
@@ -117,6 +119,7 @@ const configurePlaintextSendMessageNotification = ({
 
   if (payload.senderDisplayName) senderPayload["displayName"] = payload.senderDisplayName
   if (payload.senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = payload.senderProfilePhotoUrl
+  if (payload.senderHasProfilePhoto != null) senderPayload["hasProfilePhoto"] = payload.senderHasProfilePhoto
 
   const apsPayload: Record<string, unknown> = {
     userId: payload.senderUserId,
@@ -147,6 +150,34 @@ const configurePlaintextSendMessageNotification = ({
 const genericEncryptedAlertTitle = "New message"
 const genericEncryptedAlertBody = "Open Inline to read it."
 
+const optionalNotificationText = (value: string | undefined, maxBytes: number): string | undefined => {
+  const projected = value ? notificationText(value, maxBytes) : ""
+  return projected || undefined
+}
+
+const normalizeNotificationPayload = (payload: PushToUserPayload): PushToUserPayload => {
+  if (payload.kind === "send_message") {
+    return {
+      ...payload,
+      title: notificationText(payload.title, maxNotificationNameBytes) || genericEncryptedAlertTitle,
+      body: notificationBodyText(payload.body),
+      subtitle: optionalNotificationText(payload.subtitle, maxNotificationNameBytes),
+      threadEmoji: optionalNotificationText(payload.threadEmoji, 64),
+      senderDisplayName: optionalNotificationText(payload.senderDisplayName, maxNotificationNameBytes),
+    }
+  }
+  if (payload.kind === "alert") {
+    return {
+      ...payload,
+      title: notificationText(payload.title, maxNotificationNameBytes) || "Inline",
+      body: notificationBodyText(payload.body),
+      subtitle: optionalNotificationText(payload.subtitle, maxNotificationNameBytes),
+      threadEmoji: optionalNotificationText(payload.threadEmoji, 64),
+    }
+  }
+  return payload
+}
+
 type PushContentSession = Pick<
   PushSession,
   | "pushContentKeyPublic"
@@ -169,24 +200,48 @@ const sessionSupportsEncryptedPushContent = (
 
 export const buildApnNotification = ({
   session,
+  recipientUserId,
   payload,
   silent,
   topic,
   nowSeconds,
   encrypt = encryptSendMessagePushContent,
   onEncryptionError,
+  onPayloadTooLarge,
 }: {
   session: PushContentSession
+  recipientUserId: number
   payload: PushToUserPayload
   silent: boolean
   topic: string
   nowSeconds: number
   encrypt?: typeof encryptSendMessagePushContent
   onEncryptionError?: (error: unknown) => void
+  onPayloadTooLarge?: (bytes: number) => void
 }): Notification | undefined => {
+  payload = normalizeNotificationPayload(payload)
   const notification = new Notification()
   notification.topic = topic
   notification.threadId = payload.threadId
+
+  const finalize = (): Notification | undefined => {
+    notification.payload = { ...notification.payload, recipientUserId: String(recipientUserId) }
+    // apn.length() caches compilation permanently; measure before any fallback mutation.
+    const bytes = Buffer.byteLength(JSON.stringify(notification), "utf8")
+    if (bytes <= 4_096) return notification
+    onPayloadTooLarge?.(bytes)
+    if (payload.kind !== "send_message") return undefined
+    // Never send an oversized envelope or expose encrypted content as plaintext.
+    // Existing chat/message identity still lets the app open the original message.
+    notification.payload = {
+      kind: "send_message_encrypted",
+      recipientUserId: String(recipientUserId),
+      threadId: payload.threadId,
+      messageId: payload.messageId,
+    }
+    notification.alert = { title: genericEncryptedAlertTitle, body: genericEncryptedAlertBody }
+    return Buffer.byteLength(JSON.stringify(notification), "utf8") <= 4_096 ? notification : undefined
+  }
 
   if (payload.kind === "send_message") {
     let encryptedContent: ReturnType<typeof encryptSendMessagePushContent> | undefined
@@ -201,6 +256,7 @@ export const buildApnNotification = ({
               id: payload.senderUserId,
               displayName: payload.senderDisplayName,
               profilePhotoUrl: payload.senderProfilePhotoUrl,
+              hasProfilePhoto: payload.senderHasProfilePhoto,
             },
             title: payload.title,
             body: payload.body,
@@ -217,12 +273,12 @@ export const buildApnNotification = ({
       }
     }
 
-    if (encryptedContent) {
+    if (sessionSupportsEncryptedPushContent(session)) {
       notification.payload = {
         kind: "send_message_encrypted",
         threadId: payload.threadId,
         messageId: payload.messageId,
-        encryptedContent,
+        ...(encryptedContent ? { encryptedContent } : {}),
       }
       notification.contentAvailable = true
       notification.mutableContent = true
@@ -238,7 +294,7 @@ export const buildApnNotification = ({
     } else {
       configurePlaintextSendMessageNotification({ notification, payload, silent })
     }
-    return notification
+    return finalize()
   }
 
   if (payload.kind === "alert") {
@@ -259,7 +315,7 @@ export const buildApnNotification = ({
       body: payload.body,
       subtitle: payload.subtitle,
     }
-    return notification
+    return finalize()
   }
 
   if (payload.kind === "message_deleted") {
@@ -273,7 +329,7 @@ export const buildApnNotification = ({
       threadId: payload.threadId,
       messageIds: payload.messageIds,
     }
-    return notification
+    return finalize()
   }
 
   if (!payload.readUpToMessageId) return undefined
@@ -287,7 +343,7 @@ export const buildApnNotification = ({
     threadId: payload.threadId,
     readUpToMessageId: payload.readUpToMessageId,
   }
-  return notification
+  return finalize()
 }
 
 export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
@@ -328,6 +384,7 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
 
       const notification = buildApnNotification({
         session,
+        recipientUserId: userId,
         payload,
         silent,
         topic,
@@ -339,6 +396,9 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
             sessionId: session.id,
             threadId: payload.threadId,
           })
+        },
+        onPayloadTooLarge: (bytes) => {
+          log.warn("Notification payload exceeded APNs byte budget", { bytes, userId, sessionId: session.id })
         },
       })
       if (!notification) continue
@@ -454,6 +514,7 @@ export function buildExpoPushMessage({
   payload: PushToUserPayload
   silent: boolean
 }): ExpoPushMessage | undefined {
+  payload = normalizeNotificationPayload(payload)
   const baseData = expoDataForPayload(payload)
   const shouldSound =
     payload.kind === "send_message"

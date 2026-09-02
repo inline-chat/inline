@@ -4,6 +4,18 @@ import Testing
 
 @Suite("Inline CLI installer models")
 struct CLIInstallerModelsTests {
+  @Test("does not treat a dangling symlink as an empty install destination")
+  func danglingSymlinkIsOccupied() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let link = root.appendingPathComponent("inline")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root.appendingPathComponent("missing"))
+    #expect(!FileManager.default.fileExists(atPath: link.path))
+    #expect(CLIInstallerService.pathIsOccupied(link))
+    #expect(!CLIInstallerService.pathIsOccupied(root.appendingPathComponent("unused")))
+  }
+
   @Test("recognizes release checksums")
   func recognizesChecksums() {
     #expect(CLIInstallerService.isSHA256(String(repeating: "a", count: 64)))

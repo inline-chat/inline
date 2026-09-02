@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdtemp, open, rmdir, unlink } from "node:fs/promises"
+import { mkdtemp, open, rmdir, unlink, type FileHandle } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { UploadComplete } from "@inline-chat/protocol/core"
@@ -23,6 +23,7 @@ import {
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
 import { FileTypes } from "@in/server/modules/files/types"
+import { FileByteLengthError } from "@in/server/modules/files/readFileBytes"
 import { normalizePhotoUpload } from "@in/server/modules/files/uploadPhoto"
 import { encodeDocument } from "@in/server/realtime/encoders/encodeDocument"
 import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
@@ -33,6 +34,44 @@ import type { UploadPartStore } from "./partStore"
 
 const log = new Log("modules/uploads/finalizer")
 const PART_READ_CONCURRENCY = 4
+
+// Keep a rolling, ordered window instead of waiting for an entire batch's
+// slowest read before scheduling more work. All failures are observed and
+// outstanding storage reads remain owned until they settle.
+async function* readParts(
+  store: UploadPartStore,
+  parts: InlineUploadPartRecord[],
+  signal?: AbortSignal,
+) {
+  type ReadResult = { bytes: Uint8Array; error?: never } | { error: unknown; bytes?: never }
+  const pending: Promise<ReadResult>[] = []
+  let next = 0
+  const fill = () => {
+    while (pending.length < PART_READ_CONCURRENCY && next < parts.length) {
+      throwIfAborted(signal)
+      const part = parts[next++]!
+      pending.push(store.read(part.objectKey, part.byteCount, signal).then(
+        (bytes) => ({ bytes }), (error: unknown) => ({ error }),
+      ))
+    }
+  }
+  try {
+    fill()
+    for (const part of parts) {
+      throwIfAborted(signal)
+      const result = await pending.shift()!
+      throwIfAborted(signal)
+      if ("error" in result) {
+        if (result.error instanceof FileByteLengthError) throw new UploadIntegrityError()
+        throw result.error
+      }
+      yield { part, bytes: result.bytes }
+      fill()
+    }
+  } finally {
+    await Promise.all(pending)
+  }
+}
 
 export interface MediaUploadFinalizer {
   preparePublication(input: {
@@ -67,7 +106,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     const startedAt = Date.now()
     const directory = await mkdtemp(join(tmpdir(), "inline-native-upload-"))
     const path = join(directory, "body")
-    const handle = await open(path, "wx")
+    let handle: FileHandle | undefined
     const digest = createHash("sha256")
     let byteCount = 0n
     let assemblyMs = 0
@@ -76,27 +115,28 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     let outcome = "failed"
     const assemblyStartedAt = Date.now()
     try {
+      handle = await open(path, "wx")
       await input.assertOwnership()
-      for (let start = 0; start < input.parts.length; start += PART_READ_CONCURRENCY) {
-        const prefetched = await Promise.all(
-          input.parts.slice(start, start + PART_READ_CONCURRENCY).map(async (part) => ({
-            part,
-            bytes: await this.partStore.read(part.objectKey),
-          })),
-        )
-        for (const { part, bytes } of prefetched) {
-          const partDigest = createHash("sha256").update(bytes).digest()
-          if (bytes.length !== part.byteCount || !sameBytes(partDigest, part.sha256)) {
-            throw new UploadIntegrityError()
-          }
-          await handle.write(bytes)
-          digest.update(bytes)
-          byteCount += BigInt(bytes.length)
+      for await (const { part, bytes } of readParts(this.partStore, input.parts, input.signal)) {
+        const partDigest = createHash("sha256").update(bytes).digest()
+        if (bytes.length !== part.byteCount || !sameBytes(partDigest, part.sha256)) {
+          throw new UploadIntegrityError()
         }
+        let written = 0
+        while (written < bytes.length) {
+          throwIfAborted(input.signal)
+          const result = await handle.write(bytes, written, bytes.length - written)
+          if (result.bytesWritten <= 0) throw new Error("Upload assembly write made no progress")
+          written += result.bytesWritten
+        }
+        digest.update(bytes)
+        byteCount += BigInt(bytes.length)
       }
+      throwIfAborted(input.signal)
       assemblyMs = Date.now() - assemblyStartedAt
       const syncStartedAt = Date.now()
       await handle.sync()
+      if (BigInt((await handle.stat()).size) !== input.upload.byteCount) throw new UploadIntegrityError()
       await handle.close()
       syncMs = Date.now() - syncStartedAt
       if (byteCount !== input.upload.byteCount ||
@@ -117,7 +157,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     } finally {
       if (assemblyMs === 0) assemblyMs = Date.now() - assemblyStartedAt
       const cleanupStartedAt = Date.now()
-      await handle.close().catch(() => {})
+      await handle?.close().catch(() => {})
       await unlink(path).catch(() => {})
       await rmdir(directory).catch(() => {})
       log.debug("UPLOAD_TRACE phase=finalizer_done", {

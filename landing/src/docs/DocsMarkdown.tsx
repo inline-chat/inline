@@ -2,6 +2,7 @@ import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Link } from "@tanstack/react-router"
 import hljs from "highlight.js/lib/core"
+import applescript from "highlight.js/lib/languages/applescript"
 import bash from "highlight.js/lib/languages/bash"
 import javascript from "highlight.js/lib/languages/javascript"
 import json from "highlight.js/lib/languages/json"
@@ -16,6 +17,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { CheckIcon, CopyIcon } from "~/docs/lucide"
 import { emailFallback, emailParts } from "~/lib/email"
 
+hljs.registerLanguage("applescript", applescript)
 hljs.registerLanguage("bash", bash)
 hljs.registerLanguage("javascript", javascript)
 hljs.registerLanguage("json", json)
@@ -71,6 +73,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
+  applescript: "AppleScript",
   bash: "Terminal",
   javascript: "JavaScript",
   json: "JSON",

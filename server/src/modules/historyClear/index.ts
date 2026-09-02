@@ -3,7 +3,7 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
-import { chats, members, spaces, type DbChat } from "@in/server/db/schema"
+import { chats, members, spaces, users, type DbChat } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { Transaction } from "@in/server/db/types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
@@ -22,13 +22,15 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import {
   clearChatHistoryData,
   clearSpaceHistoryData,
+  planClearSpaceHistoryData,
   type ClearHistoryAccessLoss,
   type ClearHistoryDeletedChat,
   type ClearHistorySideEffects,
+  type ClearSpaceHistoryPlan,
 } from "./data"
 
 type ClearHistoryOptions = {
@@ -81,8 +83,15 @@ type RemovedChatAccessUpdate = {
 
 const MAX_KEEP_LAST_DAYS = 36_500
 const DAY_SECONDS = 24 * 60 * 60
+const MAX_SPACE_CLEAR_PLAN_ATTEMPTS = 3
 
 const log = new Log("modules.historyClear")
+
+class ClearSpaceHistoryPlanChanged extends Error {
+  constructor() {
+    super("Space history clear plan changed while locking mutation owners")
+  }
+}
 
 export const clearChatHistory = async (
   input: ClearHistoryInput,
@@ -204,38 +213,110 @@ async function clearSpaceHistory(input: {
     spaceId,
     beforeDate: input.cutoff?.date,
   })
+  const planInput = {
+    spaceId,
+    beforeDate: input.cutoff?.date,
+    deleteReplyThreads: input.deleteReplyThreads,
+  }
+  let expectedPlan = await db.transaction((tx) => planClearSpaceHistoryData(tx, planInput))
+  let committed:
+    | Awaited<ReturnType<typeof clearLockedSpaceHistory>> & { clearHistoryUpdates: ClearHistoryUpdate[] }
+    | undefined
 
-  const { clearHistoryUpdates, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } = await db.transaction(
-    async (tx) => {
-      const [lockedSpace] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
-      if (!lockedSpace) {
-        throw RealtimeRpcError.SpaceIdInvalid()
-      }
+  for (let attempt = 0; attempt < MAX_SPACE_CLEAR_PLAN_ATTEMPTS; attempt += 1) {
+    try {
+      committed = await db.transaction(async (tx) => {
+        const lockedUserIds = uniqueSortedUserIds([
+          ...expectedPlan.recipientUserIds,
+          input.context.currentUserId,
+        ])
+        if (lockedUserIds.length > 0) {
+          const lockedUsers = await tx
+            .select({ id: users.id, deleted: users.deleted })
+            .from(users)
+            .where(inArray(users.id, lockedUserIds))
+            .orderBy(users.id)
+            .for("update")
+          const actor = lockedUsers.find((user) => user.id === input.context.currentUserId)
+          if (!actor || actor.deleted === true) {
+            throw RealtimeRpcError.Unauthenticated()
+          }
+        }
 
-      const result = await clearLockedSpaceHistory({
-        tx,
-        spaceId,
-        cutoff: input.cutoff,
-        deleteReplyThreads: input.deleteReplyThreads,
-      })
+        // Existing chat/space-first writers can later allocate user sequences.
+        // Never wait on their resources while holding the planned user owners:
+        // yield this entire transaction and retry instead of creating a cycle.
+        const [lockedSpace] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update", { noWait: true }).limit(1)
+        if (!lockedSpace || lockedSpace.deleted !== null) {
+          throw RealtimeRpcError.SpaceIdInvalid()
+        }
 
-      return {
-        ...result,
-        clearHistoryUpdates: result.clearUpdates.map((clearUpdate) => ({
-          inputPeer: {
-            type: {
-              oneofKind: "chat" as const,
-              chat: { chatId: BigInt(clearUpdate.chat.id) },
-            },
-          },
-          update: clearUpdate.update,
-          beforeDate: input.cutoff?.seconds,
+        const [actorMembership] = await tx
+          .select({ role: members.role })
+          .from(members)
+          .where(and(eq(members.spaceId, spaceId), eq(members.userId, input.context.currentUserId)))
+          .for("update")
+          .limit(1)
+        if (actorMembership?.role !== "admin" && actorMembership?.role !== "owner") {
+          throw RealtimeRpcError.SpaceAdminRequired()
+        }
+
+        if (expectedPlan.affectedChatIds.length > 0) {
+          await tx
+            .select({ id: chats.id })
+            .from(chats)
+            .where(inArray(chats.id, expectedPlan.affectedChatIds))
+            .orderBy(chats.id)
+            .for("update", { noWait: true })
+        }
+
+        const lockedPlan = await planClearSpaceHistoryData(tx, planInput)
+        if (!sameClearSpaceHistoryPlan(expectedPlan, lockedPlan)) {
+          throw new ClearSpaceHistoryPlanChanged()
+        }
+
+        const result = await clearLockedSpaceHistory({
+          tx,
+          spaceId,
+          cutoff: input.cutoff,
           deleteReplyThreads: input.deleteReplyThreads,
-          sideEffects: emptyClearHistorySideEffects(),
-        })),
+          lockedUserIds: new Set(lockedUserIds),
+        })
+
+        return {
+          ...result,
+          clearHistoryUpdates: result.clearUpdates.map((clearUpdate) => ({
+            inputPeer: {
+              type: {
+                oneofKind: "chat" as const,
+                chat: { chatId: BigInt(clearUpdate.chat.id) },
+              },
+            },
+            update: clearUpdate.update,
+            beforeDate: input.cutoff?.seconds,
+            deleteReplyThreads: input.deleteReplyThreads,
+            sideEffects: emptyClearHistorySideEffects(),
+          })),
+        }
+      })
+      break
+    } catch (error) {
+      const resourceBusy = isResourceLockUnavailable(error)
+      if (!(error instanceof ClearSpaceHistoryPlanChanged) && !resourceBusy) throw error
+      if (attempt + 1 === MAX_SPACE_CLEAR_PLAN_ATTEMPTS) {
+        throw RealtimeRpcError.InternalError()
       }
-    },
-  )
+      if (resourceBusy) {
+        await Bun.sleep(50 * (attempt + 1) + Math.floor(Math.random() * 50))
+      }
+      // A late recipient can be discovered after a detach/delete has started.
+      // Replan only after rollback, never from that partially mutated snapshot.
+      expectedPlan = await db.transaction((tx) => planClearSpaceHistoryData(tx, planInput))
+    }
+  }
+
+  if (!committed) throw RealtimeRpcError.InternalError()
+  const { clearHistoryUpdates, metadataChatUpdates, deletedChatUpdates, removedAccessUpdates } = committed
 
   const { selfUpdates } = await pushClearHistoryUpdates({
     currentUserId: input.context.currentUserId,
@@ -349,6 +430,7 @@ async function clearLockedSpaceHistory(input: {
   spaceId: number
   cutoff: Cutoff | undefined
   deleteReplyThreads: boolean
+  lockedUserIds: ReadonlySet<number>
 }): Promise<{
   clearUpdates: { chat: DbChat; update: UpdateSeqAndDate }[]
   sideEffects: ClearHistorySideEffects
@@ -356,8 +438,6 @@ async function clearLockedSpaceHistory(input: {
   deletedChatUpdates: DeletedChatUpdate[]
   removedAccessUpdates: RemovedChatAccessUpdate[]
 }> {
-  await input.tx.select({ id: chats.id }).from(chats).where(eq(chats.spaceId, input.spaceId)).for("update")
-
   let deletedChatUpdates: DeletedChatUpdate[] = []
 
   const result = await clearSpaceHistoryData(
@@ -369,6 +449,7 @@ async function clearLockedSpaceHistory(input: {
     },
     {
       beforeDeleteChats: async (deletedChats) => {
+        ensurePlannedUsers(deletedChats.flatMap((chat) => chat.userIds), input.lockedUserIds)
         deletedChatUpdates = await persistDeletedChatUpdates(input.tx, deletedChats)
       },
     },
@@ -380,7 +461,10 @@ async function clearLockedSpaceHistory(input: {
   ])
   const removedAccessUpdates = await persistRemovedChatAccessUpdates(
     input.tx,
-    result.detachedAccessLosses,
+    result.detachedAccessLosses.map((loss) => {
+      ensurePlannedUsers(loss.userIds, input.lockedUserIds)
+      return loss
+    }),
   )
 
   const clearUpdates: { chat: DbChat; update: UpdateSeqAndDate }[] = []
@@ -527,8 +611,8 @@ async function ensureCanClearHistory(chat: DbChat, currentUserId: number): Promi
 }
 
 async function ensureCanClearSpaceHistory(spaceId: number, currentUserId: number): Promise<void> {
-  const [space] = await db.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).limit(1)
-  if (!space) {
+  const [space] = await db.select({ id: spaces.id, deleted: spaces.deleted }).from(spaces).where(eq(spaces.id, spaceId)).limit(1)
+  if (!space || space.deleted !== null) {
     throw RealtimeRpcError.SpaceIdInvalid()
   }
 
@@ -738,6 +822,33 @@ function buildDeleteChatUpdate(input: { chat: DbChat; update: UpdateSeqAndDate; 
 
 function uniqueUserIds(userIds: number[]): number[] {
   return Array.from(new Set(userIds))
+}
+
+function uniqueSortedUserIds(userIds: number[]): number[] {
+  return uniqueUserIds(userIds).sort((left, right) => left - right)
+}
+
+function sameClearSpaceHistoryPlan(left: ClearSpaceHistoryPlan, right: ClearSpaceHistoryPlan): boolean {
+  return sameIds(left.affectedChatIds, right.affectedChatIds) && sameIds(left.recipientUserIds, right.recipientUserIds)
+}
+
+function sameIds(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
+}
+
+function ensurePlannedUsers(userIds: number[], lockedUserIds: ReadonlySet<number>): void {
+  if (userIds.some((userId) => !lockedUserIds.has(userId))) {
+    throw new ClearSpaceHistoryPlanChanged()
+  }
+}
+
+function isResourceLockUnavailable(error: unknown): boolean {
+  let current = error
+  for (let depth = 0; depth < 4 && typeof current === "object" && current !== null; depth += 1) {
+    if ("code" in current && current.code === "55P03") return true
+    current = "cause" in current ? current.cause : undefined
+  }
+  return false
 }
 
 function emptyClearHistorySideEffects(): ClearHistorySideEffects {

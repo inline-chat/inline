@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import InlineProtocol
@@ -11,6 +12,7 @@ public struct JoinPublicSpaceTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     public let handle: String
+    public let snapshotAdmission: SpaceJoinSnapshotAdmission?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -19,8 +21,8 @@ public struct JoinPublicSpaceTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/JoinPublicSpace")
 
-  public init(handle: String) {
-    context = Context(handle: handle)
+  public init(handle: String, snapshotAdmission: SpaceJoinSnapshotAdmission? = nil) {
+    context = Context(handle: handle, snapshotAdmission: snapshotAdmission)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -33,9 +35,13 @@ public struct JoinPublicSpaceTransaction: Transaction2 {
     }
 
     do {
+      let token = try context.snapshotAdmission?.mutationToken ?? Auth.shared.handle.beginAccountMutation()
       try await AppDatabase.shared.dbWriter.write { db in
-        try Space(from: response.space).save(db)
-        try Member(from: response.member).save(db)
+        try Auth.shared.handle.validateAccountMutation(token)
+        try SpaceJoinSnapshotAdmission.apply(
+          space: response.space, member: response.member,
+          admission: context.snapshotAdmission, currentUserID: token.userID, in: db
+        )
       }
     } catch {
       log.error("Failed to save joined public space", error: error)
@@ -45,7 +51,7 @@ public struct JoinPublicSpaceTransaction: Transaction2 {
 }
 
 public extension Transaction2 where Self == JoinPublicSpaceTransaction {
-  static func joinPublicSpace(handle: String) -> JoinPublicSpaceTransaction {
-    JoinPublicSpaceTransaction(handle: handle)
+  static func joinPublicSpace(handle: String) async throws -> JoinPublicSpaceTransaction {
+    JoinPublicSpaceTransaction(handle: handle, snapshotAdmission: try await .capture())
   }
 }

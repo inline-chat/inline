@@ -6,6 +6,9 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
   private var mentionableAgentsEnabled = false
 
+  @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
+  private var nativeFileDownloadsEnabled = false
+
   @AppStorage(MessageView2Feature.preferenceKey)
   private var messageView2Enabled = false
 
@@ -38,6 +41,15 @@ struct ExperimentalView: View {
         }
       } footer: {
         Text("Show Agent creation, profiles, and @mention autocomplete. Server and Bot API support remain available when this is off.")
+      }
+
+      Section {
+        SettingsItem(icon: "arrow.down.document", iconColor: .blue, title: "Native File Downloads") {
+          Toggle("Native File Downloads", isOn: $nativeFileDownloadsEnabled)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Download message documents over encrypted realtime. Requires a V3 session and server support. Other media still use CDN. Turn off to retry failed downloads using CDN.")
       }
 
       if SettingsBuildAudience.showsDebugTools {

@@ -18,7 +18,8 @@ import {
   Layer,
 } from "effect"
 import { ExternalResourceCache } from "./cache"
-import { searchNotionResources } from "./notion"
+import { searchNotionResources, type NotionSearchObject } from "./notion"
+import { rankExternalResources } from "./ranking"
 
 const log = new Log("modules.externalResources")
 
@@ -39,10 +40,12 @@ export interface ExternalResourceRecord {
   readonly url: string
   readonly subtitle?: string | undefined
   readonly emoji?: string | undefined
+  readonly parentKind?: "workspace" | "page" | "database" | undefined
+  readonly lastEditedTime?: string | undefined
 }
 
 export interface ExternalResourceSearchInput {
-  readonly peerId: InputPeer
+  readonly peerId?: InputPeer | undefined
   readonly currentUserId: number
   readonly query: string
   readonly limit?: number | undefined
@@ -101,6 +104,7 @@ export interface ExternalResourceSearchDependencies {
     connection: IntegrationAuthToken,
     query: string,
     limit: number,
+    object?: NotionSearchObject,
   ) => Promise<readonly ExternalResourceRecord[]>
 }
 
@@ -158,11 +162,10 @@ export const makeExternalResourceSearch = (
           )
         }
 
-        const spaceId = yield* Effect.tryPromise({
-          try: () => dependencies.resolveSpaceId(
-            input.peerId,
-            input.currentUserId,
-          ),
+        const peerId = input.peerId
+        // Before a chat exists, only the requesting user's personal connector is eligible.
+        const spaceId = peerId === undefined ? null : yield* Effect.tryPromise({
+          try: () => dependencies.resolveSpaceId(peerId, input.currentUserId),
           catch: (cause) => new ExternalResourceAccessFailure({ cause }),
         })
 
@@ -196,8 +199,11 @@ export const makeExternalResourceSearch = (
 
         return yield* Effect.tryPromise({
           try: async () => {
-            const settled = await Promise.allSettled(connections.map(async (connection) => {
-              const key = resultCacheKey(connection, spaceId, query, limit)
+            const plan: { object?: NotionSearchObject; limit: number }[] = query
+              ? [{ object: "data_source", limit: 12 }, { object: "page", limit: 24 }]
+              : [{ limit }]
+            const settled = await Promise.allSettled(connections.flatMap((connection) => plan.map(async (request) => {
+              const key = `${resultCacheKey(connection, spaceId, query, request.limit)}:${request.object ?? "recent"}`
               return resultCache.getOrLoad(key, async () => {
                 if (!providerRequestAllowed(
                   providerRequestLimiter,
@@ -211,21 +217,27 @@ export const makeExternalResourceSearch = (
                     reason: "rate_limit",
                     ownerType: connection.owner.type,
                   })
-                  return []
+                  // Reject the load so a temporary throttle is never cached as an empty search.
+                  throw new ExternalResourceProviderFailure({
+                    provider: "notion",
+                    cause: new Error("External resource provider request limited"),
+                  })
                 }
-                return dependencies.searchNotion(connection, query, limit)
+                return dependencies.searchNotion(connection, query, request.limit, request.object)
               })
-            }))
+            })))
             const successes = settled.flatMap((result) =>
               result.status === "fulfilled" ? [result.value] : [],
             )
-            if (successes.length === 0) {
+            const resources = successes.flat()
+            // An incomplete empty search is unknown, not a cacheable "no matches" result.
+            if (successes.length === 0 || (resources.length === 0 && successes.length < settled.length)) {
               const firstFailure = settled.find(
                 (result): result is PromiseRejectedResult => result.status === "rejected",
               )
               throw firstFailure?.reason ?? new Error("All connector searches failed")
             }
-            return deduplicateResources(successes.flat(), limit)
+            return rankExternalResources(resources, query, limit)
           },
           catch: (cause) => new ExternalResourceProviderFailure({
             provider: "notion",
@@ -270,18 +282,20 @@ const liveDependencies: ExternalResourceSearchDependencies = {
     })
     return connections
   },
-  searchNotion: async (connection, query, limit) => {
+  searchNotion: async (connection, query, limit, object) => {
     log.debug("External resource provider request started", {
       provider: "notion",
       ownerType: connection.owner.type,
       queryLength: query.length,
       recent: query.length === 0,
       limit,
+      object: object ?? "recent",
     })
-    const resources = await searchNotionResources(connection, query, limit)
+    const resources = await searchNotionResources(connection, query, limit, object)
     log.debug("External resource provider request completed", {
       provider: "notion",
       resultCount: resources.length,
+      object: object ?? "recent",
     })
     return resources
   },
@@ -296,22 +310,6 @@ export const ExternalResourceSearchLive = Layer.succeed(
 
 function normalizeQuery(value: string): string {
   return value.trim().replace(/\s+/g, " ")
-}
-
-function deduplicateResources(
-  resources: readonly ExternalResourceRecord[],
-  limit: number,
-): ExternalResourceRecord[] {
-  const seen = new Set<string>()
-  const result: ExternalResourceRecord[] = []
-  for (const resource of resources) {
-    const key = `${resource.provider}:${resource.url}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    result.push(resource)
-    if (result.length === limit) break
-  }
-  return result
 }
 
 function connectionLookupKey(
@@ -356,7 +354,7 @@ function providerRequestAllowed(
     : `space:${connection.owner.spaceId}`
   const connectionKey = `${connection.provider}:${connection.integrationId}:${owner}`
   const userLimit = limiter.consume({
-    key: `external-resource:${connectionKey}:user:${currentUserId}`,
+    key: `external-resource:${connection.provider}:user:${currentUserId}`,
     nowMs,
     rule: limits.perUser,
   })

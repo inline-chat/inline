@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from "bun:test"
+import { describe, expect, test, beforeEach, spyOn } from "bun:test"
 import { deleteMemberHandler } from "../../realtime/handlers/space.deleteMember"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { db, schema } from "../../db"
@@ -11,6 +11,11 @@ import { toggleSpaceGrid } from "@in/server/functions/space.settings"
 import { joinPublicSpace } from "@in/server/functions/space.joinPublicSpace"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { addSpaceMember } from "@in/server/functions/space.addMember.shared"
+import * as membershipLifecycle from "@in/server/modules/authorization/spaceMembershipLifecycle"
+import * as realtimeMessages from "@in/server/realtime/message"
 
 describe("deleteMemberHandler", () => {
   setupTestLifecycle()
@@ -126,6 +131,191 @@ describe("deleteMemberHandler", () => {
     )
 
     expect(connectionManager.getSpaceUserIds(space.id)).not.toContain(memberUser.id)
+  })
+
+  test("a re-add before delayed removal publication suppresses the old eviction and Grid revoke", async () => {
+    const session = await testUtils.createSessionForUser(memberUser.id)
+    const connectionId = `delayed-removal-${memberUser.id}`
+    connectionManager.addConnection({
+      id: connectionId,
+      close: () => {},
+      subscribe: () => {},
+      raw: { sendBinary: () => {} },
+    } as unknown as Parameters<typeof connectionManager.addConnection>[0], ConnVersion.REALTIME_V1)
+    connectionManager.authenticateConnection(connectionId, memberUser.id, session.session.id)
+    const originalDeactivate = membershipLifecycle.deactivateCommittedSpaceMembership
+    let readdedMemberId: number | undefined
+    const deactivate = spyOn(membershipLifecycle, "deactivateCommittedSpaceMembership").mockImplementation(
+      async (input, publishRemoval) => {
+        if (input.userId === memberUser.id && readdedMemberId === undefined) {
+          // The original removal has committed, but its post-commit callback
+          // has not checked authority or touched the connection projection yet.
+          const readded = await addSpaceMember({
+            spaceId: space.id,
+            actorUserId: adminUser.id,
+            target: { kind: "userId", userId: memberUser.id },
+            admission: "manageMembers",
+          })
+          readdedMemberId = readded.member.id
+        }
+        return originalDeactivate(input, publishRemoval)
+      },
+    )
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+    const send = spyOn(realtimeMessages, "sendMessageToRealtimeUser").mockResolvedValue(undefined)
+    try {
+      await deleteMemberHandler(
+        { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
+        handlerContext,
+      )
+
+      expect(readdedMemberId).toBeDefined()
+      expect(connectionManager.getSpaceUserIds(space.id)).toContain(memberUser.id)
+      const targetUpdates = push.mock.calls
+        .filter(([userId]) => userId === memberUser.id)
+        .flatMap(([, updates]) => updates)
+      expect(targetUpdates.some((update) => update.update.oneofKind === "joinSpace")).toBe(true)
+      expect(targetUpdates.some((update) =>
+        update.update.oneofKind === "spaceMemberDelete" && update.seq === undefined,
+      )).toBe(false)
+      expect(send.mock.calls.some(([userId, payload]) =>
+        userId === memberUser.id
+        && payload.oneofKind === "grid"
+        && payload.grid.event.oneofKind === "accessRevoked",
+      )).toBe(false)
+    } finally {
+      deactivate.mockRestore()
+      push.mockRestore()
+      send.mockRestore()
+      connectionManager.removeConnection(connectionId)
+    }
+  })
+
+  test("persists removal independently in the Space and removed-user buckets", async () => {
+    const priorUserUpdate = await UserBucketUpdates.enqueue({
+      userId: memberUser.id,
+      update: {
+        oneofKind: "userSpaceMemberDelete",
+        userSpaceMemberDelete: { spaceId: BigInt(space.id + 1) },
+      },
+    })
+
+    const result = await deleteMemberHandler(
+      { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
+      handlerContext,
+    )
+    const returnedRemoval = result.updates.find((update) => update.update.oneofKind === "spaceMemberDelete")
+    if (!returnedRemoval?.seq) throw new Error("Expected sequenced Space removal")
+
+    const durableRows = await db
+      .select()
+      .from(schema.updates)
+      .where(
+        and(
+          eq(schema.updates.entityId, memberUser.id),
+          eq(schema.updates.bucket, schema.UpdateBucket.User),
+        ),
+      )
+      .orderBy(schema.updates.seq)
+    const durableUserRemoval = durableRows
+      .map(UpdatesModel.decrypt)
+      .find((row) =>
+        row.payload.update.oneofKind === "userSpaceMemberDelete"
+        && row.payload.update.userSpaceMemberDelete.spaceId === BigInt(space.id)
+      )
+    if (!durableUserRemoval) throw new Error("Expected durable removed-user update")
+
+    const [durableSpaceRemovalRow] = await db
+      .select()
+      .from(schema.updates)
+      .where(
+        and(
+          eq(schema.updates.entityId, space.id),
+          eq(schema.updates.bucket, schema.UpdateBucket.Space),
+          eq(schema.updates.seq, returnedRemoval.seq),
+        ),
+      )
+      .limit(1)
+    if (!durableSpaceRemovalRow) throw new Error("Expected durable Space removal")
+    const durableSpaceRemoval = UpdatesModel.decrypt(durableSpaceRemovalRow)
+
+    expect(durableSpaceRemoval.payload.update.oneofKind).toBe("spaceRemoveMember")
+    expect(durableUserRemoval.seq).toBe(priorUserUpdate.seq + 1)
+    expect(durableUserRemoval.seq).not.toBe(durableSpaceRemoval.seq)
+  })
+
+  test("fans out the Space sequence only to members who retain Space access", async () => {
+    const remainingMember = await testUtils.createUser(`remaining-member-${space.id}@example.com`)
+    const outsider = await testUtils.createUser(`delete-member-outsider-${space.id}@example.com`)
+    if (!remainingMember || !outsider) throw new Error("Fanout users not created")
+    await db.insert(schema.members).values({
+      userId: remainingMember.id,
+      spaceId: space.id,
+      role: "member",
+    })
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+    try {
+      const result = await deleteMemberHandler(
+        { spaceId: BigInt(space.id), userId: BigInt(memberUser.id), blockJoin: false },
+        handlerContext,
+      )
+      const returnedRemoval = result.updates.find((update) => update.update.oneofKind === "spaceMemberDelete")
+      if (!returnedRemoval?.seq) throw new Error("Expected sequenced Space removal")
+
+      const removalPushes = push.mock.calls.flatMap(([recipientUserId, updates]) =>
+        updates
+          .filter((update) => update.update.oneofKind === "spaceMemberDelete")
+          .map((update) => ({ recipientUserId, seq: update.seq })),
+      )
+
+      expect(
+        removalPushes
+          .map(({ recipientUserId, seq }) => `${recipientUserId}:${seq ?? "unsequenced"}`)
+          .sort(),
+      ).toEqual([
+        `${adminUser.id}:${returnedRemoval.seq}`,
+        `${memberUser.id}:unsequenced`,
+        `${remainingMember.id}:${returnedRemoval.seq}`,
+      ].sort())
+      expect(removalPushes.some(({ recipientUserId }) => recipientUserId === outsider.id)).toBe(false)
+    } finally {
+      push.mockRestore()
+    }
+  })
+
+  test("queues self-removal eviction but does not repeat it in a potentially delayed RPC reply", async () => {
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+    try {
+      const result = await deleteMemberHandler(
+        { spaceId: BigInt(space.id), userId: BigInt(adminUser.id), blockJoin: false },
+        handlerContext,
+      )
+
+      expect(result.updates).toEqual([])
+      const selfEvictions = push.mock.calls
+        .filter(([userId]) => userId === adminUser.id)
+        .flatMap(([, updates]) => updates)
+        .filter((update) => update.update.oneofKind === "spaceMemberDelete")
+      expect(selfEvictions).toHaveLength(1)
+      expect(selfEvictions[0]?.seq).toBeUndefined()
+    } finally {
+      push.mockRestore()
+    }
+
+    const durableSpaceRows = await db
+      .select()
+      .from(schema.updates)
+      .where(
+        and(
+          eq(schema.updates.bucket, schema.UpdateBucket.Space),
+          eq(schema.updates.entityId, space.id),
+        ),
+      )
+    const durableRemoval = durableSpaceRows
+      .map(UpdatesModel.decrypt)
+      .find((row) => row.payload.update.oneofKind === "spaceRemoveMember")
+    expect(durableRemoval?.seq).toBeGreaterThan(0)
   })
 
   test("does not report failure when the post-commit access-revoked push fails", async () => {

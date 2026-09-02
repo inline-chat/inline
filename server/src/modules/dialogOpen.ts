@@ -16,6 +16,15 @@ type ChatForDialogOpen = Pick<
 >
 type DialogForOpenDefault = Pick<DbDialog, "open">
 type DialogForOpenFields = Pick<DbDialog, "open" | "order">
+type SetDialogOpenForUsersInput = {
+  chat: ChatForDialogOpen
+  userIds: number[]
+  open: boolean
+  order?: string | null
+  folderId?: number
+  openPlacementByUserId?: ReadonlyMap<number, DialogOpenPlacement>
+  showInChatList?: boolean
+}
 
 // Sidebar inbox state is tri-state by design:
 // - true: explicitly shown in the sidebar inbox
@@ -174,15 +183,61 @@ export async function openPrimarySpaceChatForUser(input: {
   }
 }
 
-export async function setDialogOpenForUsers(input: {
-  chat: ChatForDialogOpen
-  userIds: number[]
-  open: boolean
-  order?: string | null
-  folderId?: number
-  openPlacementByUserId?: ReadonlyMap<number, DialogOpenPlacement>
-  showInChatList?: boolean
-}): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
+/**
+ * Transactional primary-chat projection for membership mutations that already
+ * own and have validated the target user row. Keeping the dialog in the same
+ * transaction prevents a post-commit opener from racing membership removal.
+ */
+export async function openPrimarySpaceChatForUserInTransaction(
+  tx: Transaction,
+  input: {
+    spaceId: number
+    userId: number
+    canAccessPublicChats: boolean
+  },
+): Promise<{ chat: DbChat; dialog: DbDialog; changed: boolean } | null> {
+  if (!input.canAccessPublicChats) {
+    return null
+  }
+
+  const [chat] = await tx
+    .select()
+    .from(chats)
+    .where(
+      and(
+        eq(chats.spaceId, input.spaceId),
+        eq(chats.type, "thread"),
+        eq(chats.publicThread, true),
+        eq(chats.threadNumber, 1),
+        isNull(chats.parentChatId),
+      ),
+    )
+    .limit(1)
+  if (!chat) {
+    return null
+  }
+
+  const { dialogs: userDialogs, changedDialogs } = await setDialogOpenForUsersInTransaction(tx, {
+    chat,
+    userIds: [input.userId],
+    open: true,
+    showInChatList: true,
+  })
+  const dialog = userDialogs.find((candidate) => candidate.userId === input.userId)
+  if (!dialog) {
+    return null
+  }
+
+  return {
+    chat,
+    dialog,
+    changed: changedDialogs.some((candidate) => candidate.userId === input.userId),
+  }
+}
+
+export async function setDialogOpenForUsers(
+  input: SetDialogOpenForUsersInput,
+): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
   // Every derived allocation below takes the owning user's row lock. Keep
   // multi-user batches in one order so overlapping batches cannot deadlock.
   const userIds = (await UsersModel.getActiveUserIds(uniqueUserIds(input.userIds))).sort((a, b) => a - b)
@@ -190,7 +245,18 @@ export async function setDialogOpenForUsers(input: {
     return { dialogs: [], changedDialogs: [] }
   }
 
-  return db.transaction(async (tx) => {
+  return db.transaction((tx) => setDialogOpenForUsersInTransaction(tx, { ...input, userIds }))
+}
+
+async function setDialogOpenForUsersInTransaction(
+  tx: Transaction,
+  input: SetDialogOpenForUsersInput,
+): Promise<{ dialogs: DbDialog[]; changedDialogs: DbDialog[] }> {
+  const userIds = uniqueUserIds(input.userIds).sort((a, b) => a - b)
+  if (userIds.length === 0) {
+    return { dialogs: [], changedDialogs: [] }
+  }
+
     // Acquire all user owners before touching any dialog rows. Projection
     // writers use the same users -> dialogs order, so overlapping batches do
     // not deadlock or derive a stale fractional order.
@@ -319,7 +385,6 @@ export async function setDialogOpenForUsers(input: {
       dialogs: finalDialogs,
       changedDialogs: finalDialogs.filter((dialog) => changedUserIds.has(dialog.userId)),
     }
-  })
 }
 
 async function orderForUser(

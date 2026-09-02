@@ -4,6 +4,7 @@ import Combine
 import Darwin
 import InlineConfig
 import InlineKit
+import InlineMacScripting
 import InlineMacUI
 import Logger
 import MacDevtools
@@ -50,6 +51,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }()
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
+  @MainActor private lazy var scriptingAdapter = MacScriptingAdapter(delegate: self)
+  @MainActor var scriptingAccountIsReady: Bool {
+    !isLoggingOut && !isResettingLocalData && terminationTask == nil
+      && dependencies.viewModel.topLevelRoute == .main
+  }
   @MainActor private var terminationTask: Task<Void, Never>?
   @MainActor var isLoggingOut = false
   @MainActor private var isResettingLocalData = false
@@ -69,6 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellables = Set<AnyCancellable>()
   // Session-scoped guard: show the realtime connection failure alert at most once per app run.
   private var didShowRealtimeConnectionFailureAlert = false
+  private var notificationNavigationTask: Task<Void, Never>?
 
   func applicationWillFinishLaunching(_: Notification) {
     NSWindow.allowsAutomaticWindowTabbing = true
@@ -83,6 +90,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupNotifications()
 
     _ = dependencies
+    InlineScripting.install { [weak self] request in
+      guard let self else { throw ScriptingError.unavailable }
+      return try await self.scriptingAdapter.execute(request)
+    }
   }
 
   func applicationDidFinishLaunching(_: Notification) {
@@ -933,8 +944,12 @@ extension AppDelegate {
     UNUserNotificationCenter.current().delegate = notifications
   }
 
-  func handleNotification(_ response: UNNotificationResponse) {
-    log.debug("Received notification: \(response)")
+  @MainActor func handleNotification(_ response: UNNotificationResponse) {
+    guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+    // Reserve tap order before any chat lookup, including encrypted fallbacks.
+    notificationNavigationTask?.cancel()
+    notificationNavigationTask = nil
+    log.debug("Opening notification target")
 
     guard let userInfo = response.notification.request.content.userInfo as? [String: Any] else {
       return
@@ -944,9 +959,17 @@ extension AppDelegate {
 
     if handleGridScreenShareNotification(userInfo) {
       return
-    } else if let peerId = resolvePeerFromNotification(userInfo, threadIdentifier: threadIdentifier) {
-      Task(priority: .userInitiated) { @MainActor in
-        self.openChat(peer: peerId)
+    } else if let target = MessageNotificationTarget(userInfo: userInfo, threadIdentifier: threadIdentifier) {
+      guard let account = MessageNotificationAccount.capture(userInfo: userInfo) else { return }
+      notificationNavigationTask = Task(priority: .userInitiated) { @MainActor in
+        let peerId = await target.resolvePeer(fetchIfMissingFor: account)
+        guard !Task.isCancelled else { return }
+        guard let peerId, MessageNotificationAccount.isCurrent(account) else {
+          log.warning("Failed to resolve notification conversation")
+          return
+        }
+        self.openChat(peer: peerId, targetMessageId: target.messageID)
+        guard !Task.isCancelled, MessageNotificationAccount.isCurrent(account) else { return }
         await self.unarchiveIfNeeded(peer: peerId)
       }
     } else {
@@ -978,47 +1001,11 @@ extension AppDelegate {
     return true
   }
 
-  func resolvePeerFromNotification(_ userInfo: [String: Any], threadIdentifier: String) -> Peer? {
-    let coercedThreadId = coerceThreadId(userInfo["threadId"]) ?? coerceThreadId(threadIdentifier)
-    if let isThread = userInfo["isThread"] as? Bool,
-       isThread {
-      if let threadId = coercedThreadId {
-        return .thread(id: threadId)
-      }
-    }
-
-    if let peerUserId = coerceInt64(userInfo["userId"]) {
-      return .user(id: peerUserId)
-    }
-
-    if let threadId = coercedThreadId {
-      if let chat = try? AppDatabase.shared.reader.read({ db in
-        try Chat.fetchOne(db, id: threadId)
-      }) {
-        if let peerUserId = chat.peerUserId {
-          return .user(id: peerUserId)
-        }
-      }
-      return .thread(id: threadId)
-    }
-
-    return nil
-  }
-
   private func coerceInt64(_ value: Any?) -> Int64? {
     if let int64 = value as? Int64 { return int64 }
     if let int = value as? Int { return Int64(int) }
     if let number = value as? NSNumber { return number.int64Value }
     if let string = value as? String { return Int64(string) }
-    return nil
-  }
-
-  private func coerceThreadId(_ value: Any?) -> Int64? {
-    if let threadId = coerceInt64(value) { return threadId }
-    if let string = value as? String {
-      let normalized = string.replacingOccurrences(of: "chat_", with: "")
-      return Int64(normalized)
-    }
     return nil
   }
 

@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
-import { RealtimeV3Request, RpcCall } from "@inline-chat/protocol/core"
-import { InlineProtocolApplicationOutputOverloaded } from "@inline-chat/protocol/server"
+import { describe, expect, spyOn, test } from "bun:test"
+import { Method, RealtimeV3Request, RealtimeV3Response, RpcCall, RpcError_Code } from "@inline-chat/protocol/core"
+import { InlineProtocolApplicationOutputOverloaded, type LoadedServerAuthorizationKey } from "@inline-chat/protocol/server"
+import * as rpcHandlers from "@in/server/realtime/handlers/_rpc"
 import {
   InlineProtocolApplicationLanes,
   inlineProtocolRpcExecutionLane,
@@ -14,9 +15,173 @@ const deferred = () => {
 }
 
 describe("Inline Protocol application ordering", () => {
+  test("returns full file bytes once and a compact fresh-request replay response", async () => {
+    const authorization = {
+      authKeyId: new Uint8Array(8).fill(1),
+      permanentAuthKeyId: new Uint8Array(8).fill(2),
+      permanent: false, temporaryBound: true, userId: 1, accountSessionId: 2,
+    }
+    const active: LoadedServerAuthorizationKey = {
+      key: new Uint8Array(256),
+      keyId: authorization.authKeyId,
+      temporary: true,
+      currentServerSalt: 1n,
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      binding: {
+        permanentAuthKeyId: authorization.permanentAuthKeyId,
+        temporarySessionId: 3n,
+        nonce: 4n,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        userId: 1,
+        accountSessionId: 2,
+      },
+    }
+    const handler = spyOn(rpcHandlers, "handleRpcCall").mockImplementation(async () => ({
+      oneofKind: "getFilePart",
+      getFilePart: {
+        offset: 0n,
+        totalSize: 3n,
+        data: Uint8Array.of(1, 2, 3),
+        sha256: new Uint8Array(32),
+      },
+    }))
+    try {
+      const dispatcher = makeInlineProtocolApplicationDispatcher({
+        connectionId: "file-part-replay-test",
+        authorizationKeys: { load: async () => active },
+        operations: {
+          authBegin: async () => { throw new Error("unexpected auth") },
+          authComplete: async () => { throw new Error("unexpected auth") },
+          authBeginBrowser: async () => { throw new Error("unexpected auth") },
+          authBrowserStatus: async () => { throw new Error("unexpected auth") },
+        },
+      })
+      const dispatched = await dispatcher.dispatch({
+        payload: RealtimeV3Request.toBinary({
+          body: { oneofKind: "rpc", rpc: RpcCall.create({
+            method: Method.GET_FILE_PART,
+            input: { oneofKind: "getFilePart", getFilePart: {
+              fileUniqueId: "IND_replay",
+              offset: 0n,
+              limit: 524_288,
+            } },
+          }) },
+        }),
+        authorization,
+        messageId: 11n,
+        sessionId: 3n,
+        signal: new AbortController().signal,
+        markExecutionStarted: () => {},
+        sendUpdate: () => {},
+      })
+      expect(dispatched.kind).toBe("result")
+      if (dispatched.kind !== "result") throw new Error("expected application result")
+      expect(RealtimeV3Response.fromBinary(dispatched.payload).body.oneofKind).toBe("rpcResult")
+      expect(dispatched.replayPayload).toBeDefined()
+      const replay = RealtimeV3Response.fromBinary(dispatched.replayPayload!)
+      expect(replay.body.oneofKind).toBe("rpcError")
+      if (replay.body.oneofKind === "rpcError") {
+        expect(replay.body.rpcError.reqMsgId).toBe(0n)
+        expect(replay.body.rpcError.errorCode).toBe(RpcError_Code.RATE_LIMIT)
+        expect(replay.body.rpcError.code).toBe(429)
+        expect(replay.body.rpcError.message).toBe("Retry getFilePart with a fresh request ID")
+      }
+    } finally {
+      handler.mockRestore()
+    }
+  })
+
+  test.each(["revoked", "user", "session", "permanent"] as const)(
+    "does not execute queued RPCs after authority is %s",
+    async (change) => {
+      const entered = deferred()
+      const release = deferred()
+      const authorization = {
+        authKeyId: new Uint8Array(8).fill(1),
+        permanentAuthKeyId: new Uint8Array(8).fill(2),
+        permanent: false, temporaryBound: true, userId: 1, accountSessionId: 2,
+      }
+      const binding = {
+        permanentAuthKeyId: authorization.permanentAuthKeyId,
+        temporarySessionId: 3n, nonce: 4n, expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        userId: 1, accountSessionId: 2,
+      }
+      const active: LoadedServerAuthorizationKey = {
+        key: new Uint8Array(256), keyId: authorization.authKeyId,
+        temporary: true, currentServerSalt: 1n, expiresAt: binding.expiresAt, binding,
+      }
+      let current: LoadedServerAuthorizationKey | undefined = active
+      let executions = 0
+      let registrations = 0
+      const handler = spyOn(rpcHandlers, "handleRpcCall").mockImplementation(async () => {
+        executions++
+        entered.resolve()
+        await release.promise
+        return { oneofKind: "updateUserSettings", updateUserSettings: { updates: [] } }
+      })
+      const dispatcher = makeInlineProtocolApplicationDispatcher({
+        connectionId: "queued-auth-test",
+        authorizationKeys: { load: async () => current },
+        onAuthorized: () => { registrations++ },
+        operations: {
+          authBegin: async () => { throw new Error("unexpected auth") },
+          authComplete: async () => { throw new Error("unexpected auth") },
+          authBeginBrowser: async () => { throw new Error("unexpected auth") },
+          authBrowserStatus: async () => { throw new Error("unexpected auth") },
+        },
+      })
+      const marked: bigint[] = []
+      const dispatch = (messageId: bigint) => dispatcher.dispatch({
+        payload: RealtimeV3Request.toBinary({ body: { oneofKind: "rpc", rpc: RpcCall.create({
+          method: Method.UPDATE_USER_SETTINGS,
+          input: { oneofKind: "updateUserSettings", updateUserSettings: {} },
+        }) } }),
+        authorization, messageId, sessionId: 3n, signal: new AbortController().signal,
+        markExecutionStarted: () => { marked.push(messageId) }, sendUpdate: () => {},
+      })
+      const inFlight: Promise<unknown>[] = []
+      try {
+        const first = dispatch(1n)
+        inFlight.push(first)
+        await entered.promise
+        const second = dispatch(2n)
+        inFlight.push(second)
+        current = change === "revoked" ? undefined : {
+          ...active,
+          binding: {
+            ...binding,
+            ...(change === "user" ? { userId: 9 } : {}),
+            ...(change === "session" ? { accountSessionId: 9 } : {}),
+            ...(change === "permanent" ? { permanentAuthKeyId: new Uint8Array(8).fill(9) } : {}),
+          },
+        }
+        release.resolve()
+        await first
+        const denied = await second
+        expect(denied.kind).toBe("result")
+        if (denied.kind !== "result") throw new Error("expected settled RPC error")
+        const response = RealtimeV3Response.fromBinary(denied.payload)
+        expect(response.body.oneofKind).toBe("rpcError")
+        if (response.body.oneofKind === "rpcError") expect(response.body.rpcError.code).toBe(401)
+        expect(executions).toBe(1)
+        expect(registrations).toBe(1)
+        expect(marked).toEqual([1n])
+        current = active
+        await dispatch(3n)
+        expect(executions).toBe(2)
+        expect(marked).toEqual([1n, 3n])
+      } finally {
+        release.resolve()
+        await Promise.allSettled(inFlight)
+        handler.mockRestore()
+      }
+    },
+  )
+
   test("marks execution at the application boundary and preserves output overload", async () => {
     const dispatcher = makeInlineProtocolApplicationDispatcher({
       connectionId: "test",
+      authorizationKeys: { load: async () => undefined },
       operations: {
         authBegin: async () => { throw new InlineProtocolApplicationOutputOverloaded() },
         authComplete: async () => ({ state: { oneofKind: undefined } }),
@@ -53,6 +218,7 @@ describe("Inline Protocol application ordering", () => {
     const reason = new DOMException("Application deadline exceeded", "AbortError")
     const dispatcher = makeInlineProtocolApplicationDispatcher({
       connectionId: "test",
+      authorizationKeys: { load: async () => undefined },
       operations: {
         authBegin: async () => {
           controller.abort(reason)

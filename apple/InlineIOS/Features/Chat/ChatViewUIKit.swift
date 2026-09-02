@@ -11,7 +11,7 @@ public class ChatContainerView: UIView {
   private let isPreview: Bool
   private(set) var theme: IOSThemeSnapshot
   private var lastAppliedDraftSignature: DraftSignature?
-  private var lastRequestedFocusMessageID: Int64?
+  private var lastRequestedFocus: (messageID: Int64, revision: Int)?
 
   private struct DraftSignature: Equatable {
     let text: String
@@ -207,9 +207,14 @@ public class ChatContainerView: UIView {
     composeView.loadDraft(from: draftMessage)
   }
 
-  func focusMessage(_ messageID: Int64?) {
-    guard let messageID, lastRequestedFocusMessageID != messageID else { return }
-    lastRequestedFocusMessageID = messageID
+  func focusMessage(_ messageID: Int64?, requestRevision: Int) {
+    guard let messageID else {
+      lastRequestedFocus = nil
+      messagesCollectionView.cancelPendingMessageFocus()
+      return
+    }
+    guard lastRequestedFocus?.messageID != messageID || lastRequestedFocus?.revision != requestRevision else { return }
+    lastRequestedFocus = (messageID, requestRevision)
     messagesCollectionView.scrollToMessageWhenAvailable(messageID)
   }
 
@@ -861,6 +866,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   let spaceId: Int64?
   let draftMessage: DraftMessage?
   let focusMessageID: Int64?
+  let focusRequestRevision: Int
   let collapsedMaxId: Int64?
   let isPreview: Bool
   let theme: IOSThemeSnapshot
@@ -876,10 +882,7 @@ struct ChatViewUIKit: UIViewRepresentable {
     )
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
-      view.focusMessage(focusMessageID)
-
-      // Mark messages as read when the interactive chat appears.
-      UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
+      view.focusMessage(focusMessageID, requestRevision: focusRequestRevision)
     }
 
     return view
@@ -890,7 +893,7 @@ struct ChatViewUIKit: UIViewRepresentable {
     view.setCollapsedMaxId(collapsedMaxId)
     if !isPreview {
       view.loadDraftIfNeeded(draftMessage)
-      view.focusMessage(focusMessageID)
+      view.focusMessage(focusMessageID, requestRevision: focusRequestRevision)
     }
   }
 }

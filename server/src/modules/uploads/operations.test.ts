@@ -15,7 +15,8 @@ import { inlineUploads, sessions } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import type { HandlerContext } from "@in/server/realtime/types"
-import type { MediaUploadFinalizer } from "./finalizer"
+import { UploadIntegrityError, type MediaUploadFinalizer } from "./finalizer"
+import { MEDIA_UPLOAD_MAX_BYTES } from "@in/server/modules/files/metadata"
 import { NativeUploadOperations } from "./operations"
 import type { UploadPartStore } from "./partStore"
 
@@ -118,6 +119,130 @@ const finalizer: MediaUploadFinalizer = {
 
 describe("native upload operations", () => {
   setupTestLifecycle()
+
+  test("reconciles an accepted part after a lost manifest commit response", async () => {
+    class Repository extends InlineUploadRepository {
+      override async acceptPart(
+        input: Parameters<InlineUploadRepository["acceptPart"]>[0],
+      ): ReturnType<InlineUploadRepository["acceptPart"]> {
+        await super.acceptPart(input)
+        throw new Error("commit response lost")
+      }
+    }
+    const user = await testUtils.createUser("native-upload-commit-lost@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(new Repository(), store, finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([1, 2, 3])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(61), fileName: "commit-lost.bin",
+      mimeType: "application/octet-stream", byteCount: 3n,
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    expect(await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
+      .toEqual({ alreadyPresent: true })
+    expect(store.objects.size).toBe(1)
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([0])
+  })
+
+  test("retains an unmanifested object on DB failure so an identical save can safely retry", async () => {
+    class Repository extends InlineUploadRepository {
+      failAcceptance = true
+      override async acceptPart(input: Parameters<InlineUploadRepository["acceptPart"]>[0]) {
+        if (this.failAcceptance) throw new Error("database unavailable")
+        return super.acceptPart(input)
+      }
+    }
+    const user = await testUtils.createUser("native-upload-accept-unavailable@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const repository = new Repository()
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(repository, store, finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([4, 5, 6])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(62), fileName: "accept-unavailable.bin",
+      mimeType: "application/octet-stream", byteCount: 3n,
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    const part = { uploadId: created.uploadId, partIndex: 0, data: body }
+    await expect(operations.savePart(part, requestContext)).rejects.toThrow("database unavailable")
+    expect(store.objects.size).toBe(1)
+    repository.failAcceptance = false
+    expect(await operations.savePart(part, requestContext)).toEqual({ alreadyPresent: false })
+    expect(store.objects.size).toBe(1)
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([0])
+  })
+
+  test("rejects impossible media sizes before reserving quota or looking up an owner", async () => {
+    let ownerLookups = 0
+    class Repository extends InlineUploadRepository {
+      override async resolveOwner() { ownerLookups += 1; return undefined }
+    }
+    const operations = new NativeUploadOperations(new Repository(), new MemoryPartStore(), finalizer)
+    for (const [kind, maximum] of [
+      [UploadKind.PHOTO, MEDIA_UPLOAD_MAX_BYTES.photo], [UploadKind.VIDEO, MEDIA_UPLOAD_MAX_BYTES.video],
+      [UploadKind.DOCUMENT, MEDIA_UPLOAD_MAX_BYTES.document], [UploadKind.VOICE, MEDIA_UPLOAD_MAX_BYTES.voice],
+    ] as const) {
+      await expect(operations.create({
+        clientUploadId: new Uint8Array(16), fileName: "too-large.bin", mimeType: "application/octet-stream",
+        byteCount: BigInt(maximum) + 1n, sha256: new Uint8Array(32), kind, metadata: { oneofKind: undefined },
+      }, context(1, 2))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    }
+    expect(ownerLookups).toBe(0)
+  })
+
+  test("does not report terminal failure after another finalizer takes the fence", async () => {
+    const user = await testUtils.createUser("native-upload-stolen-fence@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    class Repository extends InlineUploadRepository {
+      override async fail(input: Parameters<InlineUploadRepository["fail"]>[0]) {
+        await db.update(inlineUploads).set({ lockToken: Buffer.alloc(16, 77) }).where(eq(inlineUploads.id, input.uploadDbId))
+        return super.fail(input)
+      }
+    }
+    const operations = new NativeUploadOperations(new Repository(), new MemoryPartStore(), {
+      ...finalizer, async preparePublication() { throw new UploadIntegrityError() },
+    })
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([1, 2, 3])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(17), fileName: "proof.bin", mimeType: "application/octet-stream",
+      byteCount: 3n, sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT, metadata: { oneofKind: undefined },
+    }, requestContext)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+    expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).status).toBe(UploadStatus.PROCESSING)
+  })
+
+  test("bounds a hung lease renewal and releases the finalizer request", async () => {
+    class Repository extends InlineUploadRepository {
+      override async renew(): Promise<boolean> {
+        return new Promise(() => {})
+      }
+    }
+    const user = await testUtils.createUser("native-upload-hung-renewal@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(new Repository(), store, finalizer, 10)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([7, 8, 9])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(18), fileName: "lease.bin", mimeType: "application/octet-stream",
+      byteCount: 3n, sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+
+    const result = await Promise.race([
+      operations.finish({ uploadId: created.uploadId }, requestContext),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("lease renewal pinned finish")), 250)),
+    ])
+    expect(result.state.oneofKind).toBe("processing")
+  })
 
   test("runs create, durable save, reconciliation, finish, and cached finish", async () => {
     const user = await testUtils.createUser("native-upload-operations@example.com")
@@ -342,9 +467,9 @@ describe("native upload operations", () => {
       finalizer,
     )
     const requestContext = context(user.id, account.session.id, permanentKeyId)
-    const maximumFileBytes = 500n * 1_024n * 1_024n
+    const maximumFileBytes = 200_000_000n
 
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       await operations.create({
         clientUploadId: new Uint8Array(16).fill(index + 1),
         fileName: `reserved-${index}.bin`,
@@ -357,11 +482,11 @@ describe("native upload operations", () => {
     }
 
     await expect(operations.create({
-      clientUploadId: new Uint8Array(16).fill(9),
+      clientUploadId: new Uint8Array(16).fill(11),
       fileName: "over-budget.bin",
       mimeType: "application/octet-stream",
       byteCount: maximumFileBytes,
-      sha256: new Uint8Array(32).fill(9),
+      sha256: new Uint8Array(32).fill(11),
       kind: UploadKind.DOCUMENT,
       metadata: { oneofKind: undefined },
     }, requestContext)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })

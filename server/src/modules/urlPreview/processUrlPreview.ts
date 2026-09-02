@@ -91,7 +91,7 @@ export type ResolvedUrlPreview = {
 
 export type ResolveUrlPreviewInput = {
   url: string
-  chatId: number
+  chatId?: number | undefined
   spaceId?: number | null
   currentUserId: number
 }
@@ -196,7 +196,13 @@ export function getPreviewRoutesFromMessage(text: string, entities?: MessageEnti
  */
 export async function resolveUrlPreview(input: ResolveUrlPreviewInput): Promise<ResolvedUrlPreview | null> {
   const previewRoute = extractPreviewRoutes(input.url, [], { limit: 1 })[0]
-  if (!previewRoute || (await isSpaceUrlPreviewExcluded({ spaceId: input.spaceId, url: previewRouteUrl(previewRoute) }))) {
+  if (!previewRoute) {
+    return null
+  }
+  // New-thread Compose has no authorized space context and supports personal Notion only.
+  if (input.chatId === undefined) {
+    if (previewRoute.kind !== "authenticated" || previewRoute.parsedUrl.provider !== "notion") return null
+  } else if (await isSpaceUrlPreviewExcluded({ spaceId: input.spaceId, url: previewRouteUrl(previewRoute) })) {
     return null
   }
 

@@ -130,6 +130,7 @@ import {
   updateBotAgentHandler,
 } from "@in/server/realtime/handlers/bot.agents"
 import { nativeUploadOperations } from "@in/server/modules/uploads/operations"
+import { nativeDownloadOperations } from "@in/server/modules/files/downloads"
 import {
   createExternalTaskV3,
   createSpaceV3,
@@ -1104,6 +1105,11 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
     case Method.LOG_OUT: {
       if (call.input.oneofKind !== "logOut") throw RealtimeRpcError.BadRequest()
       return { oneofKind: "logOut", logOut: await logOutV3(handlerContext) }
+    }
+    case Method.GET_FILE_PART: {
+      if (call.input.oneofKind !== "getFilePart") throw RealtimeRpcError.BadRequest()
+      const result = await nativeDownloadOperations.getPart(call.input.getFilePart, handlerContext)
+      return { oneofKind: "getFilePart", getFilePart: result }
     }
     case Method.CREATE_UPLOAD: {
       if (call.input.oneofKind !== "createUpload") throw RealtimeRpcError.BadRequest()

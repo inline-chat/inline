@@ -8,6 +8,36 @@ import Testing
 
 @Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
+  @Test("external command RPCs and response updates reject stale account generations")
+  func testExternalCommandRejectsStaleAccount() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let current = try auth.handle.beginAccountMutation()
+    let transport = MockTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+    let staleTokens = [
+      AuthAccountMutationToken(generation: current.generation &+ 1, userID: current.userID),
+      AuthAccountMutationToken(generation: current.generation, userID: Int64.max),
+    ]
+    for token in staleTokens {
+      await #expect(throws: AuthStorageError.self) {
+        try await realtime.callRpcDirect(method: .sendMessage, input: .sendMessage(.init()), accountToken: token)
+      }
+      await #expect(throws: AuthStorageError.self) {
+        try await realtime.applyUpdatesAndWait([], accountToken: token)
+      }
+    }
+    #expect(await transport.sentMessages.contains { message in
+      if case .rpcCall = message.body { return true }
+      return false
+    } == false)
+    await realtime.loggedOut()
+  }
+
   @Test("first update after protocol open uses the manager session generation")
   func testImmediateFirstSessionUpdateIsApplied() async throws {
     let auth = Auth.mocked(authenticated: true)

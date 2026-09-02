@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { db } from "@in/server/db"
 import { chats, dialogs, members, spaces, updates, UpdateBucket } from "@in/server/db/schema"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -7,7 +7,9 @@ import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import { handler as createSpace } from "@in/server/methods/createSpace"
 import { Method } from "@inline-chat/protocol/core"
 import { normalizeSpaceHandle } from "@in/server/modules/spaces/spaceHandle"
-import { and, eq } from "drizzle-orm"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { and, asc, eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 
 const context = (userId: number) => ({ currentUserId: userId, currentSessionId: 1 })
@@ -142,6 +144,114 @@ describe("joinPublicSpace", () => {
         .where(and(eq(dialogs.chatId, primaryChat.id), eq(dialogs.userId, user.id))),
     ).toHaveLength(1)
     expect(await db.select().from(updates)).toHaveLength(4)
+  })
+
+  test("repairs an existing member's closed primary dialog once and fans it out to every session", async () => {
+    const user = await testUtils.createUser("public-existing-dialog@example.com")
+    const [space] = await db
+      .insert(spaces)
+      .values({ name: "Existing Community", handle: "existingcommunity", isPublic: true, canPublicJoin: true })
+      .returning()
+    if (!space) throw new Error("Failed to create public space")
+    const [primaryChat] = await db
+      .insert(chats)
+      .values({
+        spaceId: space.id,
+        type: "thread",
+        title: space.name,
+        publicThread: true,
+        threadNumber: 1,
+      })
+      .returning()
+    if (!primaryChat) throw new Error("Failed to create primary chat")
+    await db.insert(members).values({
+      spaceId: space.id,
+      userId: user.id,
+      role: "member",
+      canAccessPublicChats: true,
+    })
+    await db.insert(dialogs).values({
+      chatId: primaryChat.id,
+      userId: user.id,
+      spaceId: space.id,
+      open: false,
+    })
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+    try {
+      const first = await joinPublicSpace({ handle: "existingcommunity" }, context(user.id))
+      const second = await joinPublicSpace({ handle: "existingcommunity" }, context(user.id))
+      expect(first.alreadyMember).toBe(true)
+      expect(second.alreadyMember).toBe(true)
+      expect(push).toHaveBeenCalledTimes(1)
+      const [recipient, liveUpdates, options] = push.mock.calls[0]!
+      expect(recipient).toBe(user.id)
+      expect(liveUpdates.map((update) => update.update.oneofKind)).toEqual(["chatOpen"])
+      expect(options).toBeUndefined()
+    } finally {
+      push.mockRestore()
+    }
+
+    const storedUserUpdates = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
+      .orderBy(asc(updates.seq))
+    expect(storedUserUpdates).toHaveLength(1)
+    const payload = UpdatesModel.decrypt(storedUserUpdates[0]!).payload.update
+    expect(payload.oneofKind).toBe("userChatOpen")
+    if (payload.oneofKind !== "userChatOpen") throw new Error("Expected userChatOpen")
+    expect(payload.userChatOpen.chat?.permissions?.canUpdateInfo).toBe(true)
+    expect(payload.userChatOpen.dialog?.unreadCount).toBe(0)
+
+  })
+
+  test("rolls back membership, dialog, and both buckets when chat-open persistence fails", async () => {
+    const user = await testUtils.createUser("public-join-rollback@example.com")
+    const [space] = await db
+      .insert(spaces)
+      .values({ name: "Rollback Community", handle: "rollbackcommunity", isPublic: true, canPublicJoin: true })
+      .returning()
+    if (!space) throw new Error("Failed to create public space")
+    const [primaryChat] = await db
+      .insert(chats)
+      .values({
+        spaceId: space.id,
+        type: "thread",
+        title: space.name,
+        publicThread: true,
+        threadNumber: 1,
+      })
+      .returning()
+    if (!primaryChat) throw new Error("Failed to create primary chat")
+
+    const originalEnqueue = UserBucketUpdates.enqueue
+    let enqueueCount = 0
+    const enqueue = spyOn(UserBucketUpdates, "enqueue").mockImplementation(async (input, options) => {
+      enqueueCount += 1
+      if (enqueueCount === 2) {
+        throw new Error("injected chat-open persistence failure")
+      }
+      return originalEnqueue(input, options)
+    })
+    try {
+      await expect(joinPublicSpace({ handle: "rollbackcommunity" }, context(user.id))).rejects.toThrow(
+        "injected chat-open persistence failure",
+      )
+    } finally {
+      enqueue.mockRestore()
+    }
+
+    expect(
+      await db
+        .select()
+        .from(members)
+        .where(and(eq(members.spaceId, space.id), eq(members.userId, user.id))),
+    ).toHaveLength(0)
+    expect(await db.select().from(dialogs).where(eq(dialogs.userId, user.id))).toHaveLength(0)
+    expect(await db.select().from(updates)).toHaveLength(0)
+    const [storedSpace] = await db.select().from(spaces).where(eq(spaces.id, space.id)).limit(1)
+    expect(storedSpace?.updateSeq).toBe(0)
   })
 
   test("serializes concurrent retries into one membership", async () => {

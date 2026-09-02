@@ -21,9 +21,8 @@ actor ChatOpenPreloader {
   static let shared = ChatOpenPreloader()
   private static let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
 
-  private enum MessageDirection {
-    case older
-    case newer
+  enum TargetError: Error {
+    case unavailable
   }
 
   func prepare(
@@ -56,6 +55,17 @@ actor ChatOpenPreloader {
       MessagesProgressiveViewModel.defaultInitialLimit()
     }
     try Task.checkCancellation()
+
+    if let targetMessageId {
+      let outcome = try await MessageHistoryRepairCoordinator.shared.loadAround(
+        peer: peer,
+        anchorID: targetMessageId,
+        limit: initialLimit,
+        database: database
+      )
+      guard outcome != .empty else { throw TargetError.unavailable }
+      try Task.checkCancellation()
+    }
 
     let payload = try await database.reader.read { db in
       let readSignpostID = OSSignpostID(log: Self.signpostLog)
@@ -137,38 +147,35 @@ actor ChatOpenPreloader {
         )
       }
 
-      let messageIds = messages.map(\.message.messageId)
-      let oldestLoadedMessageId = messageIds.min()
-      let newestLoadedMessageId = messageIds.max()
-
-      let canLoadOlderFromLocal: Bool
-      let canLoadNewerFromLocal: Bool
+      let loadedWindowMetadata: MessagesProgressiveViewModel.LoadedWindowMetadata
       do {
         try Task.checkCancellation()
         let signpostID = OSSignpostID(log: Self.signpostLog)
-        os_signpost(.begin, log: Self.signpostLog, name: "ChatPreloaderFetchAvailability", signpostID: signpostID)
-        defer { os_signpost(.end, log: Self.signpostLog, name: "ChatPreloaderFetchAvailability", signpostID: signpostID) }
-        canLoadOlderFromLocal = try Self.hasLocalMessages(
-          peer: peer,
-          referenceMessageId: oldestLoadedMessageId,
-          direction: .older,
-          db: db
+        os_signpost(
+          .begin,
+          log: Self.signpostLog,
+          name: "ChatPreloaderFetchWindowMetadata",
+          signpostID: signpostID
         )
-        canLoadNewerFromLocal = try Self.hasLocalMessages(
+        defer {
+          os_signpost(
+            .end,
+            log: Self.signpostLog,
+            name: "ChatPreloaderFetchWindowMetadata",
+            signpostID: signpostID
+          )
+        }
+        loadedWindowMetadata = try MessagesProgressiveViewModel.loadedWindowMetadata(
+          db,
           peer: peer,
-          referenceMessageId: newestLoadedMessageId,
-          direction: .newer,
-          db: db
+          messages: messages
         )
       }
 
       let messagesInitialState = MessagesProgressiveViewModel.InitialState(
         messages: messages,
         threadAnchor: threadAnchor,
-        oldestLoadedMessageId: oldestLoadedMessageId,
-        newestLoadedMessageId: newestLoadedMessageId,
-        canLoadOlderFromLocal: canLoadOlderFromLocal,
-        canLoadNewerFromLocal: canLoadNewerFromLocal
+        loadedWindowMetadata: loadedWindowMetadata
       )
 
       return PreparedChatPayload(
@@ -247,8 +254,17 @@ actor ChatOpenPreloader {
     targetMessageId: Int64?,
     db: Database
   ) throws -> [FullMessage] {
-    if let targetMessageId,
-       let messages = try fetchMessagesAround(peer: peer, messageId: targetMessageId, limit: limit, db: db) {
+    if let targetMessageId {
+      guard let messages = try MessagesProgressiveViewModel.localWindowAroundCoordinate(
+        db,
+        peer: peer,
+        messageID: targetMessageId,
+        limit: limit
+      ), !messages.isEmpty else {
+        // A target route must remain a coordinate route. Falling back to the
+        // latest rows would silently open the wrong transcript location.
+        throw TargetError.unavailable
+      }
       return messages
     }
 
@@ -264,49 +280,6 @@ actor ChatOpenPreloader {
     return batch.reversed()
   }
 
-  private static func fetchMessagesAround(
-    peer: Peer,
-    messageId: Int64,
-    limit: Int,
-    db: Database
-  ) throws -> [FullMessage]? {
-    guard messageId > 0 else { return nil }
-
-    let totalWindow = max(60, limit)
-    let beforeLimit = max(20, totalWindow / 2)
-    let afterLimit = max(20, totalWindow - beforeLimit - 1)
-
-    guard let target = try baseQuery(peer: peer)
-      .filter(Column("messageId") == messageId)
-      .fetchOne(db)
-    else {
-      return nil
-    }
-
-    let targetDate = target.message.date
-    let targetMessageId = target.message.messageId
-
-    let olderOrTarget = try baseQuery(peer: peer)
-      .filter(
-        (Column("date") < targetDate)
-          || ((Column("date") == targetDate) && (Column("messageId") <= targetMessageId))
-      )
-      .order(Column("date").desc, Column("messageId").desc)
-      .limit(beforeLimit + 1)
-      .fetchAll(db)
-
-    let newer = try baseQuery(peer: peer)
-      .filter(
-        (Column("date") > targetDate)
-          || ((Column("date") == targetDate) && (Column("messageId") > targetMessageId))
-      )
-      .order(Column("date").asc, Column("messageId").asc)
-      .limit(afterLimit)
-      .fetchAll(db)
-
-    return sortMessages(Array(olderOrTarget.reversed()) + newer)
-  }
-
   private static func baseQuery(peer: Peer) -> QueryInterfaceRequest<FullMessage> {
     var query = FullMessage.queryRequest()
     switch peer {
@@ -316,10 +289,6 @@ actor ChatOpenPreloader {
         query = query.filter(Column("peerUserId") == id)
     }
     return query
-  }
-
-  private static func sortMessages(_ batch: [FullMessage]) -> [FullMessage] {
-    MessagesProgressiveViewModel.stableSortedMessages(batch, reversed: false)
   }
 
   private static func fetchThreadAnchorMessage(
@@ -395,45 +364,4 @@ actor ChatOpenPreloader {
     return try Chat.getByPeerId(db: db, peerId: peer)?.id
   }
 
-  private static func hasLocalMessages(
-    peer: Peer,
-    referenceMessageId: Int64?,
-    direction: MessageDirection,
-    db: Database
-  ) throws -> Bool {
-    guard let referenceMessageId else { return false }
-
-    var query = Message.all()
-    switch peer {
-      case let .thread(id):
-        query = query.filter(Message.Columns.peerThreadId == id)
-      case let .user(id):
-        query = query.filter(Message.Columns.peerUserId == id)
-    }
-
-    query = switch direction {
-      case .older:
-        query.filter(Message.Columns.messageId < referenceMessageId)
-      case .newer:
-        query.filter(Message.Columns.messageId > referenceMessageId)
-    }
-
-    query = switch direction {
-      case .older:
-        query.order(Message.Columns.date.desc, Message.Columns.messageId.desc)
-      case .newer:
-        query.order(Message.Columns.date.asc, Message.Columns.messageId.asc)
-    }
-
-    guard let candidate = try query.limit(1).fetchOne(db),
-          let chatId = try resolveChatId(peer: peer, chatItem: nil, db: db)
-    else { return false }
-
-    return try !MessageHistoryCoverageStore.intersects(
-      db,
-      chatId: chatId,
-      lowerId: min(candidate.messageId, referenceMessageId),
-      upperId: max(candidate.messageId, referenceMessageId)
-    )
-  }
 }

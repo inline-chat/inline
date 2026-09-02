@@ -229,6 +229,9 @@ class GlassComposeAppKit: NSView {
       limit: 24,
       emojiItems: { query, limit in
         ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
+      },
+      externalResourceItems: { query, limit in
+        try await ExternalResourceSearchClient.search(peer: nil, query: query, limit: limit)
       }
     )
   }
@@ -567,6 +570,9 @@ class GlassComposeAppKit: NSView {
     dialog = nil
 
     super.init(frame: .zero)
+    textEditor.textView.smartLinkEscapeAvailabilityDidChange = { [weak self] available in
+      self?.setSmartLinkEscapeHandlerEnabled(available)
+    }
     setupView()
     setupObservers()
     setupKeyDownHandler()
@@ -1819,6 +1825,9 @@ class GlassComposeAppKit: NSView {
       if detectEmojiAutocompleteAtCursor(trigger: trigger) {
         return
       }
+      if detectThreadAutocompleteAtCursor() {
+        return
+      }
       detectMentionAtCursor()
       return
     }
@@ -2339,6 +2348,7 @@ class GlassComposeAppKit: NSView {
 
   /// Send the message
   func send(sendMode: MessageSendMode? = nil) {
+    textEditor.textView.resetPastedLinks()
     if case let .newThread(context) = usage {
       sendNewThread(using: context, intent: .openThread)
       return

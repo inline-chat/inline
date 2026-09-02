@@ -10,6 +10,36 @@ const spaceRow = row({ id: 1, spaceId: 10, userId: 7, token: "space-token" })
 const userRow = row({ id: 2, spaceId: null, userId: 7, token: "user-token" })
 
 describe("url preview auth resolver", () => {
+  test("new-thread previews resolve only the requesting user's connection without a chat or space lookup", async () => {
+    const personalOnlyDeps: PreviewAuthResolverDeps = {
+      ...deps({ chatSpaceId: 10, spaceIntegration: spaceRow, userIntegration: userRow }),
+      async getChatSpaceId() { throw new Error("No chat should be resolved") },
+      async findSpaceIntegration() { throw new Error("No space connection should be resolved") },
+      async findUserIntegration(provider, userId) {
+        expect(provider).toBe("notion")
+        expect(userId).toBe(7)
+        return userRow
+      },
+    }
+    const input = { provider: "notion", currentUserId: 7 }
+    const candidates = await resolvePreviewAuthCandidatesWithDeps(input, personalOnlyDeps)
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]).toMatchObject({ integrationId: 2, owner: { type: "user", userId: 7 } })
+    expect(await resolvePreviewAuthWithDeps(input, personalOnlyDeps)).toEqual(candidates[0] ?? null)
+  })
+
+  test("new-thread previews never fall back to a space connection when personal Notion is disconnected", async () => {
+    const auth = await resolvePreviewAuthCandidatesWithDeps(
+      { provider: "notion", currentUserId: 7 },
+      {
+        ...deps({ chatSpaceId: 10, spaceIntegration: spaceRow, userIntegration: null }),
+        async getChatSpaceId() { throw new Error("No chat should be resolved") },
+        async findSpaceIntegration() { throw new Error("No space connection should be resolved") },
+      },
+    )
+    expect(auth).toEqual([])
+  })
+
   test("prefers the requesting user's integration for space-chat previews", async () => {
     const auth = await resolvePreviewAuthWithDeps(
       { provider: "notion", currentUserId: 7, chatId: 100 },

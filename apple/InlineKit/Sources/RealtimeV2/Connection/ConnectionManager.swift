@@ -283,7 +283,10 @@ actor ConnectionManager {
       guard availabilityChanged || routeChanged else { return }
       attempt = 0
       cancelBackoff()
-      if routeChanged, state.isActive, constraintsSatisfied() {
+      // Route notifications often arrive in a burst with foregrounding. An
+      // in-flight connect/handshake already observes the current system route;
+      // replacing it repeatedly can prevent that attempt from ever opening.
+      if routeChanged, state == .open, constraintsSatisfied() {
         log.info("Realtime network route changed; replacing transport session=\(sessionID)")
         await forceReconnect(reason: .none)
       } else if constraintsSatisfied() {
@@ -305,7 +308,7 @@ actor ConnectionManager {
       attempt = 0
       backgroundConnectionRetained = false
       cancelBackoff()
-      if !transportWasRetained, state.isActive {
+      if !transportWasRetained, state == .open {
         await forceReconnect(reason: .none)
       } else {
         await evaluateConstraints(resetBackoff: true)
@@ -328,7 +331,9 @@ actor ConnectionManager {
       attempt = 0
       backgroundConnectionRetained = false
       cancelBackoff()
-      resetPendingPing()
+      if wakeProbeTask == nil {
+        resetPendingPing()
+      }
       await evaluateConstraints(resetBackoff: true)
       if state == .open {
         startWakeProbe(sessionID: sessionID)
@@ -804,8 +809,8 @@ actor ConnectionManager {
     }
   }
 
-  private func probeConnection(timeout: Duration) async -> Bool {
-    guard state == .open else { return false }
+  func probeConnection(sessionID expectedSessionID: UInt64, timeout: Duration) async -> Bool {
+    guard !Task.isCancelled, sessionID == expectedSessionID, state == .open else { return false }
     if probeContinuation != nil {
       return false
     }
@@ -829,11 +834,12 @@ actor ConnectionManager {
   }
 
   private func startWakeProbe(sessionID: UInt64) {
-    cancelWakeProbe()
+    // Repeated wake notifications share one health decision and deadline.
+    guard wakeProbeTask == nil else { return }
     let timeout = policy.wakeProbeTimeout
     wakeProbeTask = Task { [weak self] in
       guard let self else { return }
-      let isHealthy = await self.probeConnection(timeout: timeout)
+      let isHealthy = await self.probeConnection(sessionID: sessionID, timeout: timeout)
       guard !Task.isCancelled else { return }
       await self.submit(.wakeProbeCompleted(sessionID: sessionID, isHealthy: isHealthy))
     }

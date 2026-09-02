@@ -123,6 +123,9 @@ struct PhoneNumber: View {
       } catch {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
         formState.reset()
+      } catch {
+        errorMsg = InlineProtocolNativeLogin.userFacingMessage(for: error)
+        formState.reset()
       }
     }
     #endif

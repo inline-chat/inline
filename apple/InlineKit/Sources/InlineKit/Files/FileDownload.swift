@@ -151,6 +151,8 @@ public final class FileDownloader: NSObject, Sendable {
   private var progressPublishers: [String: CurrentValueSubject<DownloadProgress, Never>] = [:]
   private var latestProgress: [String: DownloadProgress] = [:]
   private var activeTasks: [String: URLSessionDownloadTask] = [:]
+  // Keep canceled native work owned until it settles, including during logout.
+  private var nativeTasks: [UUID: Task<Void, Never>] = [:]
   private var activeDownloadTokens: [String: UUID] = [:]
   private var finalizationTasks: [String: FinalizationTask] = [:]
   private var session: URLSession!
@@ -209,8 +211,24 @@ public final class FileDownloader: NSObject, Sendable {
     for message: Message? = nil,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
-    log.debug("Starting document download \(document.id)")
-    guard let urlString = document.document.cdnUrl, let url = URL(string: urlString) else {
+    let nativeDownload: NativeDownloadOperation?
+    do {
+      if ExperimentalFeatureFlags.nativeFileDownloadsEnabled, let message {
+        let source = try NativeDocumentDownload()
+        nativeDownload = { destination, progress in
+          try await source.download(
+            documentID: document.document.documentId, message: message, to: destination, progress: progress
+          )
+        }
+      } else {
+        nativeDownload = nil
+      }
+    } catch {
+      completion(.failure(error))
+      return
+    }
+    let url = document.document.cdnUrl.flatMap(URL.init(string:))
+    guard url != nil || nativeDownload != nil else {
       let error = NSError(
         domain: "FileDownloader",
         code: 404,
@@ -224,43 +242,26 @@ public final class FileDownloader: NSObject, Sendable {
     let downloadId = "doc_\(document.id)"
     let localPath = "\(UUID().uuidString)_\(document.document.fileName ?? "Unknown")"
     let localUrl = FileCache.getUrl(for: .documents, localPath: localPath)
+    log.debug("Starting document download \(document.id) transport=\(nativeDownload == nil ? "cdn" : "native-v3")")
 
     downloadFile(
       id: downloadId,
       url: url,
       localUrl: localUrl,
       expectedBytes: Int64(document.document.size ?? 0),
+      nativeDownload: nativeDownload,
       completion: { [weak self] token, result in
         guard let self else { return }
 
         switch result {
           case let .success(fileUrl):
-            // Notify FileCache to update database
-            self.startFinalization(id: downloadId, token: token) { [weak self] in
-              guard let self else { return }
-              do {
-                try Task.checkCancellation()
-                try self.ensureActiveDownload(id: downloadId, token: token)
-                try await FileCache.shared.saveDocumentDownload(
+            self.finalizeDocumentDownload(id: downloadId, token: token, fileURL: fileUrl, persist: {
+              try await FileCache.shared.saveDocumentDownload(
                   document: document,
                   localPath: localPath,
                   message: message
-                )
-                guard self.isActiveDownload(id: downloadId, token: token) else {
-                  completion(.failure(URLError(.cancelled)))
-                  return
-                }
-                self.succeedDownload(id: downloadId, token: token)
-                completion(.success(fileUrl))
-              } catch {
-                try? FileManager.default.removeItem(at: fileUrl)
-                if self.isActiveDownload(id: downloadId, token: token), !Self.isCancellation(error) {
-                  self.log.error("Error saving document download", error: error)
-                }
-                self.failDownload(id: downloadId, token: token, error: error)
-                completion(.failure(error))
-              }
-            }
+              )
+            }, completion: completion)
 
           case let .failure(error):
             if !Self.isCancellation(error) {
@@ -434,9 +435,8 @@ public final class FileDownloader: NSObject, Sendable {
     cancelDownload(id: "voice_\(voiceId)")
   }
 
-  // Add this to FileDownloader class
   public func isDownloadActive(for id: String) -> Bool {
-    activeTasks[id] != nil || finalizationTasks[id] != nil
+    activeDownloadTokens[id] != nil
   }
 
   public func isDocumentDownloadActive(documentId: Int64) -> Bool {
@@ -465,7 +465,11 @@ public final class FileDownloader: NSObject, Sendable {
     let cancellation = URLError(.cancelled)
     let completions = Array(downloadCompletions.values)
     let finalizations = finalizationTasks.values.map(\.task)
+    let nativeTransfers = Array(nativeTasks.values)
     let reset = Task {
+      for task in nativeTransfers {
+        await task.value
+      }
       for task in finalizations {
         await task.value
       }
@@ -475,6 +479,9 @@ public final class FileDownloader: NSObject, Sendable {
     sessionResetTask = reset
 
     for task in activeTasks.values {
+      task.cancel()
+    }
+    for task in nativeTransfers {
       task.cancel()
     }
     activeTasks.removeAll()
@@ -587,6 +594,11 @@ public final class FileDownloader: NSObject, Sendable {
   }
 
   private func cancelDownload(id: String) {
+    // Once all bytes have arrived, let cache publication choose the outcome.
+    // Canceling that commit could report cancellation for an already-saved file.
+    // Account reset remains a separate barrier and drains finalization below.
+    guard finalizationTasks[id] == nil else { return }
+    if let token = activeDownloadTokens[id] { nativeTasks[token]?.cancel() }
     // Cancel the task and wait for it to complete
     if let task = activeTasks[id] {
       // Cancel with resume data to properly clean up
@@ -601,22 +613,24 @@ public final class FileDownloader: NSObject, Sendable {
         }
       }
     }
-    finalizationTasks[id]?.task.cancel()
-
     activeTasks[id] = nil
     activeDownloadTokens[id] = nil
-    finalizationTasks[id] = nil
     clearRetainedProgress(id: id)
     if let completion = downloadCompletions.removeValue(forKey: id) {
       completion.handler(.failure(URLError(.cancelled)))
     }
   }
 
-  private func downloadFile(
+  typealias NativeDownloadOperation = @Sendable (
+    URL, @escaping @Sendable (Int64, Int64) -> Void
+  ) async throws -> URL
+
+  func downloadFile(
     id: String,
-    url: URL,
+    url: URL?,
     localUrl: URL,
     expectedBytes: Int64 = 0,
+    nativeDownload: NativeDownloadOperation? = nil,
     completion: @escaping (UUID, Result<URL, Error>) -> Void
   ) {
     let token = UUID()
@@ -636,6 +650,19 @@ public final class FileDownloader: NSObject, Sendable {
 
     prepareForActiveDownload(id: id)
     activeDownloadTokens[id] = token
+
+    if let nativeDownload {
+      startNativeDownload(
+        id: id, token: token, localUrl: localUrl, expectedBytes: expectedBytes,
+        operation: nativeDownload, completion: completion
+      )
+      return
+    }
+    guard let url else {
+      activeDownloadTokens[id] = nil
+      completion(token, .failure(URLError(.badURL)))
+      return
+    }
 
     // Create download task
     let task = session.downloadTask(with: url)
@@ -679,6 +706,47 @@ public final class FileDownloader: NSObject, Sendable {
 
     // Start the download
     task.resume()
+  }
+
+  private func startNativeDownload(
+    id: String, token: UUID, localUrl: URL, expectedBytes: Int64,
+    operation: @escaping NativeDownloadOperation,
+    completion: @escaping (UUID, Result<URL, Error>) -> Void
+  ) {
+    downloadCompletions[id] = DownloadCompletion(token: token) { result in completion(token, result) }
+    let throttler = progressThrottler
+    nativeTasks[token] = Task { [weak self] in
+      guard let self else { return }
+      defer {
+        self.nativeTasks[token] = nil
+        if self.isActiveDownload(id: id, token: token), self.finalizationTasks[id]?.token != token {
+          self.activeDownloadTokens[id] = nil
+        }
+      }
+      do {
+        try Task.checkCancellation()
+        let file = try await operation(localUrl) { [weak self] received, total in
+          guard throttler.shouldPublish(id: id) else { return }
+          Task { @MainActor [weak self] in
+            guard let self, self.isActiveDownload(id: id, token: token), self.nativeTasks[token] != nil else { return }
+            self.publishProgress(.transferring(id: id, bytesReceived: received, totalBytes: total))
+          }
+        }
+        guard !Task.isCancelled, self.isActiveDownload(id: id, token: token) else {
+          try? FileManager.default.removeItem(at: file)
+          return
+        }
+        self.nativeTasks[token] = nil
+        self.downloadCompletions.removeValue(forKey: id)?.handler(.success(file))
+      } catch {
+        guard self.isActiveDownload(id: id, token: token) else { return }
+        self.nativeTasks[token] = nil
+        self.failDownload(id: id, token: token, error: error)
+        self.downloadCompletions.removeValue(forKey: id)?.handler(.failure(error))
+      }
+    }
+    // Install ownership/completion before an observer can synchronously cancel.
+    publishProgress(DownloadProgress(id: id, bytesReceived: 0, totalBytes: expectedBytes))
   }
 
   private var downloadCompletions: [String: DownloadCompletion] = [:]
@@ -742,6 +810,36 @@ public final class FileDownloader: NSObject, Sendable {
     publishProgress(DownloadProgress.completed(id: id, totalBytes: totalBytes))
   }
 
+  func finalizeDocumentDownload(
+    id: String, token: UUID, fileURL: URL,
+    persist: @escaping @MainActor () async throws -> Void,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
+    startFinalization(id: id, token: token) { [weak self] in
+      guard let self else { return }
+      do {
+        try Task.checkCancellation()
+        try self.ensureActiveDownload(id: id, token: token)
+        try await persist()
+        // Reset may fence this account while the cache commit is in flight.
+        // Keep a successfully committed file, but don't deliver it to a new session.
+        guard self.isActiveDownload(id: id, token: token) else {
+          completion(.failure(URLError(.cancelled)))
+          return
+        }
+        self.succeedDownload(id: id, token: token)
+        completion(.success(fileURL))
+      } catch {
+        try? FileManager.default.removeItem(at: fileURL)
+        if self.isActiveDownload(id: id, token: token), !Self.isCancellation(error) {
+          self.log.error("Error saving document download", error: error)
+        }
+        self.failDownload(id: id, token: token, error: error)
+        completion(.failure(error))
+      }
+    }
+  }
+
   private func startFinalization(
     id: String,
     token: UUID,
@@ -792,7 +890,7 @@ public final class FileDownloader: NSObject, Sendable {
     progressPublishers.count
   }
 
-  nonisolated static func isCancellation(_ error: Error) -> Bool {
+  public nonisolated static func isCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
     let nsError = error as NSError
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled

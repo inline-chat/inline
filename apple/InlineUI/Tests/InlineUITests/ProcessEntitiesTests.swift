@@ -1081,12 +1081,12 @@ struct ProcessEntitiesTests {
 
     let result = ProcessEntities.fromAttributedString(replacement.newAttributedText)
 
-    #expect(result.text == "[[🧭 Roadmap]] ")
+    #expect(result.text == "🧭 Roadmap ")
     #expect(result.entities.entities.count == 1)
     let entity = result.entities.entities[0]
     #expect(entity.type == .textURL)
     #expect(entity.offset == 0)
-    #expect(entity.length == Int64(("[[🧭 Roadmap]]" as NSString).length))
+    #expect(entity.length == Int64(("🧭 Roadmap" as NSString).length))
     #expect(entity.textURL.url == "https://www.notion.so/notion-roadmap")
   }
 

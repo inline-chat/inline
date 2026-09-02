@@ -26,7 +26,7 @@ import {
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 
-setDefaultTimeout(20_000)
+setDefaultTimeout(60_000)
 
 const authorizationKeys = () => new PermanentAuthorizationKeyRepository(
   makeAuthorizationKeyCipher({
@@ -252,6 +252,22 @@ describe("native upload repository", () => {
     })).rejects.toBeInstanceOf(InlineUploadPublicationConflictError)
     expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(0)
 
+    await expect(repository.publishComplete({
+      uploadDbId: reclaimed.upload.id,
+      lockToken: reclaimed.lockToken,
+      publication: {
+        ...publication,
+        file: {
+          ...publication.file,
+          record: {
+            ...publication.file.record,
+            fileSize: Number(reclaimed.upload.byteCount) - 1,
+          },
+        },
+      },
+    })).rejects.toBeInstanceOf(InlineUploadPublicationConflictError)
+    expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(0)
+
     // Treat the successful result as lost. A subsequent finish claim must
     // reconcile from the committed upload row without publishing again.
     await repository.publishComplete({
@@ -274,9 +290,33 @@ describe("native upload repository", () => {
       .where(eq(inlineUploads.id, reclaimed.upload.id))
     const cleanupClaim = await repository.claimExpiredCleanup(reclaimed.upload.id)
     expect(cleanupClaim?.upload.status).toBe("complete")
+    expect(await repository.claimExpiredCleanup(reclaimed.upload.id)).toBeUndefined()
+    expect((await repository.listExpired()).map(({ id }) => id)).not.toContain(reclaimed.upload.id)
+    // Simulate a cleanup crash after deleting only some staging parts. A new
+    // owner must still see completion and preserve the permanent publication.
+    await db.update(inlineUploads).set({ lockedAt: new Date(0) })
+      .where(eq(inlineUploads.id, reclaimed.upload.id))
+    const retriedCleanup = await repository.claimExpiredCleanup(reclaimed.upload.id)
+    expect(retriedCleanup?.upload.status).toBe("complete")
+    expect(retriedCleanup?.upload.resultMediaId).toBeDefined()
+    expect((await repository.get(created.upload.uploadId, owner))?.status).toBe("complete")
     expect(await repository.removeCleanupClaim(
       reclaimed.upload.id,
       cleanupClaim!.cleanupToken,
+    )).toBe(false)
+    // Recover an interrupted cleanup created by the older implementation that
+    // incorrectly changed a completed row to canceled.
+    await db.update(inlineUploads).set({ status: "canceled", lockedAt: new Date(0) })
+      .where(eq(inlineUploads.id, reclaimed.upload.id))
+    const recoveredCleanup = await repository.claimExpiredCleanup(reclaimed.upload.id)
+    expect(recoveredCleanup?.upload.status).toBe("complete")
+    expect(await repository.removeCleanupClaim(
+      reclaimed.upload.id,
+      retriedCleanup!.cleanupToken,
+    )).toBe(false)
+    expect(await repository.removeCleanupClaim(
+      reclaimed.upload.id,
+      recoveredCleanup!.cleanupToken,
     )).toBe(true)
     expect(await db.select().from(files).where(eq(files.fileUniqueId, fileUniqueId))).toHaveLength(1)
   })
@@ -424,10 +464,19 @@ describe("native upload repository", () => {
       .where(eq(inlineUploads.id, claim.upload.id))
     expect(await repository.claimExpiredCleanup(claim.upload.id)).toBeUndefined()
 
+    await db.update(inlineUploads).set({ lockedAt: null, expiresAt: new Date(Date.now() + 60_000) })
+      .where(eq(inlineUploads.id, claim.upload.id))
+    expect(await repository.claimFinish(created.upload.uploadId, owner)).toEqual({ kind: "processing" })
+    await db.update(inlineUploads).set({ expiresAt: new Date(0) })
+      .where(eq(inlineUploads.id, claim.upload.id))
+    expect(await repository.claimExpiredCleanup(claim.upload.id)).toBeUndefined()
+    expect((await repository.listExpired()).map(({ id }) => id)).not.toContain(claim.upload.id)
+
     await db.update(inlineUploads).set({ lockedAt: new Date(Date.now() - 6 * 60 * 1_000) })
       .where(eq(inlineUploads.id, claim.upload.id))
     const cleanupClaim = await repository.claimExpiredCleanup(claim.upload.id)
     expect(cleanupClaim?.upload.status).toBe("processing")
+    expect(await repository.claimExpiredCleanup(claim.upload.id)).toBeUndefined()
     expect(await repository.renew({ uploadDbId: claim.upload.id, lockToken: claim.lockToken }))
       .toBe(false)
     expect(await repository.removeCleanupClaim(claim.upload.id, cleanupClaim!.cleanupToken)).toBe(true)

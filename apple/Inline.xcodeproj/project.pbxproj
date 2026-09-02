@@ -80,6 +80,8 @@
 		E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */ = {isa = PBXBuildFile; productRef = E5A100022FA0000100000001 /* InlineSyntaxHighlighting */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 		F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */ = {isa = PBXBuildFile; productRef = F17C11002F9A000100000000 /* InlineCLIInstaller */; };
+		A55C00012FA0003000000001 /* InlineMacScripting in Frameworks */ = {isa = PBXBuildFile; productRef = A55C00022FA0003000000001 /* InlineMacScripting */; };
+		A55C00032FA0003000000001 /* Inline.sdef in Resources */ = {isa = PBXBuildFile; fileRef = A55C00042FA0003000000001 /* Inline.sdef */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -128,6 +130,8 @@
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		CD82F7F52F3618650012BA81 /* InlineIOSUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineIOSUI; sourceTree = "<group>"; };
 		E5A100012FA0000100000001 /* InlineSyntaxHighlighting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineSyntaxHighlighting; sourceTree = "<group>"; };
+		A55C00042FA0003000000001 /* Inline.sdef */ = {isa = PBXFileReference; lastKnownFileType = text.sdef; path = InlineMacScripting/Resources/Inline.sdef; sourceTree = "<group>"; };
+		A55C00052FA0003000000001 /* InlineMacScripting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacScripting; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -295,6 +299,7 @@
 				E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */,
 				D4B53A132F1C000100000001 /* InlineSearch in Frameworks */,
 				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
+				A55C00012FA0003000000001 /* InlineMacScripting in Frameworks */,
 				F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */,
 				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
 				E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */,
@@ -343,6 +348,8 @@
 				A9E100012F50000100000001 /* MemojiKit */,
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
+				A55C00052FA0003000000001 /* InlineMacScripting */,
+				A55C00042FA0003000000001 /* Inline.sdef */,
 				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
 				E5A100012FA0000100000001 /* InlineSyntaxHighlighting */,
 				CD82F7F52F3618650012BA81 /* InlineIOSUI */,
@@ -519,6 +526,7 @@
 				CD7C6F122E5847CD00C89032 /* RealtimeV2 */,
 				CD4CAEEF2E5E14AA00698C43 /* Sentry */,
 				CD0240C52EA439DA00976FDE /* Invite */,
+				A55C00022FA0003000000001 /* InlineMacScripting */,
 				F17C11002F9A000100000000 /* InlineCLIInstaller */,
 				CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */,
 				7BABF642C785B35DB0C34BF2 /* InlineMacWindow */,
@@ -600,6 +608,7 @@
 				CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */,
 				CD4D56CB2D2D4393006072AE /* XCRemoteSwiftPackageReference "Throttler" */,
 				CDB123D32D3E8066001AFC1A /* XCRemoteSwiftPackageReference "Nuke" */,
+				A55C00062FA0003000000001 /* XCLocalSwiftPackageReference "InlineMacScripting" */,
 				C37F343E2D5A4D4800D7D7CC /* XCLocalSwiftPackageReference "Vendor/MCEmojiPicker" */,
 				B77EE8062DC91CFD00C42B9E /* XCRemoteSwiftPackageReference "iPhoneNumberField" */,
 				B7F71EB72DDB3BA70091C872 /* XCRemoteSwiftPackageReference "RenderMeThis" */,
@@ -645,6 +654,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A55C00032FA0003000000001 /* Inline.sdef in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1707,6 +1717,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Vendor/MCEmojiPicker;
 		};
+		A55C00062FA0003000000001 /* XCLocalSwiftPackageReference "InlineMacScripting" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = InlineMacScripting;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -2028,6 +2042,11 @@
 		F17C11002F9A000100000000 /* InlineCLIInstaller */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineCLIInstaller;
+		};
+		A55C00022FA0003000000001 /* InlineMacScripting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A55C00062FA0003000000001 /* XCLocalSwiftPackageReference "InlineMacScripting" */;
+			productName = InlineMacScripting;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

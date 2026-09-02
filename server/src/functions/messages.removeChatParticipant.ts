@@ -14,6 +14,8 @@ import { UpdateBucket } from "@in/server/db/schema"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { retryParticipantMutation } from "@in/server/modules/updates/participantMutationRetry"
+import { pushChatCatchupHintsBestEffort, pushParticipantUserUpdateBestEffort } from "@in/server/modules/updates/participantLiveUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import {
   prepareChatPermissionUpdates,
@@ -53,7 +55,7 @@ export async function removeChatParticipant(
       throw RealtimeRpcError.BadRequest()
     }
 
-    const { update, accessUpdates, permissionUpdates } = await db.transaction(async (tx): Promise<{
+    const { update, accessUpdates, permissionUpdates } = await retryParticipantMutation(() => db.transaction(async (tx): Promise<{
       update: UpdateSeqAndDate
       accessUpdates: { chatId: number; update: UpdateSeqAndDate }[]
       permissionUpdates: PreparedChatPermissionUpdate[]
@@ -90,8 +92,6 @@ export async function removeChatParticipant(
       await tx
         .delete(chatParticipants)
         .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, userId)))
-
-      AccessGuardsCache.resetChatParticipant(input.chatId, userId)
 
       const chatServerUpdatePayload: ServerUpdate["update"] = {
         oneofKind: "participantDelete",
@@ -139,20 +139,22 @@ export async function removeChatParticipant(
       )
 
       return { update, accessUpdates, permissionUpdates }
-    })
+    }))
 
-    await pushUpdates({
-      chatId: input.chatId,
-      userId,
-      currentUserId: context.currentUserId,
-      update,
-    })
-    for (const accessUpdate of accessUpdates) {
-      pushUserRemovedFromChat(userId, accessUpdate.chatId, undefined, accessUpdate.update)
+    try {
+      // Cache effects belong after the successfully committed attempt.
+      AccessGuardsCache.resetChatParticipant(input.chatId, userId)
+      for (const accessUpdate of accessUpdates) {
+        await pushUserRemovedFromChat(userId, accessUpdate.chatId, undefined, accessUpdate.update)
+      }
+      await pushChatPermissionUpdates(permissionUpdates)
+      await pushUpdates({ chatId: input.chatId, userId, currentUserId: context.currentUserId, update })
+      const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
+      if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: false })
+    } catch (error) {
+      Log.shared.warn("Participant removal live projection failed after commit", { chatId: input.chatId, error })
+      await pushChatCatchupHintsBestEffort({ chatId: input.chatId, currentUserId: context.currentUserId, updateSeq: update.seq })
     }
-    pushChatPermissionUpdates(permissionUpdates)
-    const [chat] = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
-    if (chat) BotUpdateProjector.participationChanged({ botUserId: userId, chat, actorUserId: context.currentUserId, added: false })
   } catch (error) {
     Log.shared.error(`Failed to remove participant from chat ${input.chatId}: ${error}`)
     if (error instanceof RealtimeRpcError) {
@@ -166,7 +168,7 @@ async function removeChatParticipantGroup(
   input: { chatId: number; groupId: number },
   context: FunctionContext,
 ): Promise<void> {
-  const { update, affectedUserIds, accessUpdates, permissionUpdates } = await db.transaction(
+  const { update, affectedUserIds, accessUpdates, permissionUpdates } = await retryParticipantMutation(() => db.transaction(
     async (tx): Promise<{
       update: UpdateSeqAndDate
       affectedUserIds: number[]
@@ -256,24 +258,23 @@ async function removeChatParticipantGroup(
 
       return { update, affectedUserIds, accessUpdates, permissionUpdates }
     },
-  )
+  ))
 
-  await pushGroupDeleteUpdates({
-    chatId: input.chatId,
-    groupId: input.groupId,
-    currentUserId: context.currentUserId,
-    affectedUserIds,
-    update,
-  })
-  for (const accessUpdate of accessUpdates) {
-    pushUserRemovedFromChat(
-      accessUpdate.userId,
-      accessUpdate.chatId,
-      accessUpdate.chatId === input.chatId ? input.groupId : undefined,
-      accessUpdate.update,
-    )
+  try {
+    for (const accessUpdate of accessUpdates) {
+      await pushUserRemovedFromChat(
+        accessUpdate.userId,
+        accessUpdate.chatId,
+        accessUpdate.chatId === input.chatId ? input.groupId : undefined,
+        accessUpdate.update,
+      )
+    }
+    await pushChatPermissionUpdates(permissionUpdates)
+    await pushGroupDeleteUpdates({ chatId: input.chatId, groupId: input.groupId, currentUserId: context.currentUserId, affectedUserIds, update })
+  } catch (error) {
+    Log.shared.warn("Participant group removal live projection failed after commit", { chatId: input.chatId, error })
+    await pushChatCatchupHintsBestEffort({ chatId: input.chatId, currentUserId: context.currentUserId, updateSeq: update.seq })
   }
-  pushChatPermissionUpdates(permissionUpdates)
 }
 
 function pushUserRemovedFromChat(
@@ -281,8 +282,8 @@ function pushUserRemovedFromChat(
   chatId: number,
   groupId: number | undefined,
   update: UpdateSeqAndDate,
-): void {
-  RealtimeUpdates.pushToUser(userId, [{
+): Promise<void> {
+  return pushParticipantUserUpdateBestEffort(userId, {
     seq: update.seq,
     date: encodeDateStrict(update.date),
     update: {
@@ -292,7 +293,7 @@ function pushUserRemovedFromChat(
         groupId: groupId === undefined ? undefined : BigInt(groupId),
       },
     },
-  }])
+  })
 }
 
 /** Push updates for new chat creation */
@@ -322,18 +323,18 @@ const pushUpdates = async ({
       },
     },
   }
-  updateGroup.userIds.forEach((updateUserId) => {
-    RealtimeUpdates.pushToUser(updateUserId, [chatParticipantDelete])
+  await Promise.all(updateGroup.userIds.map(async (updateUserId) => {
+    await RealtimeUpdates.pushToUser(updateUserId, [chatParticipantDelete])
 
     if (updateUserId === currentUserId) {
       selfUpdates = [chatParticipantDelete]
     }
-  })
+  }))
 
   // Send to deleted user.
   // Because they're no longer in the chat topic we still need to deliver the realtime
   // event directly (the user-bucket update handles offline sync).
-  RealtimeUpdates.pushToUser(userId, [chatParticipantDelete])
+  await RealtimeUpdates.pushToUser(userId, [chatParticipantDelete])
 
   return { selfUpdates, updateGroup }
 }
@@ -368,13 +369,13 @@ const pushGroupDeleteUpdates = async ({
     },
   }
 
-  targetUserIds.forEach((updateUserId) => {
-    RealtimeUpdates.pushToUser(updateUserId, [chatParticipantGroupDelete])
+  await Promise.all(Array.from(targetUserIds).map(async (updateUserId) => {
+    await RealtimeUpdates.pushToUser(updateUserId, [chatParticipantGroupDelete])
 
     if (updateUserId === currentUserId) {
       selfUpdates = [chatParticipantGroupDelete]
     }
-  })
+  }))
 
   return { selfUpdates, updateGroup }
 }

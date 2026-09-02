@@ -39,12 +39,12 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { connectionManager, ConnVersion } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
+import { getCachedUserProfilePhoto } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
 import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
-import { messageNotificationBody } from "@in/server/modules/notifications/messagePreview"
+import { maxNotificationNameBytes, messageNotificationBody, notificationText } from "@in/server/modules/notifications/messagePreview"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
@@ -1110,7 +1110,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   let messageEntities = input.unencryptedEntities
 
   const senderNameInfo = await getCachedUserName(messageInfo.message.fromId)
-  const senderProfilePhotoUrl = await getCachedUserProfilePhotoUrl(messageInfo.message.fromId)
+  const senderPhoto = await getCachedUserProfilePhoto(messageInfo.message.fromId)
 
   const recipientUserIds = updateGroup.userIds.filter((userId) => userId !== currentUserId)
   const dialogNotificationSettingsByUserId = new Map<number, ReturnType<typeof decodeDialogNotificationSettings>>()
@@ -1152,7 +1152,8 @@ async function sendNotifications(input: SendPushForMsgInput) {
             inputPeer,
             currentUserId,
             senderNameInfo,
-            senderProfilePhotoUrl,
+            senderProfilePhotoUrl: senderPhoto?.cdnUrl,
+            senderHasProfilePhoto: senderPhoto?.hasPhoto,
             dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
           })
         } catch (error) {
@@ -1210,6 +1211,7 @@ async function sendNotificationToUser({
   currentUserId,
   senderNameInfo,
   senderProfilePhotoUrl,
+  senderHasProfilePhoto,
   dialogNotificationSettings,
 }: {
   userId: number
@@ -1227,6 +1229,7 @@ async function sendNotificationToUser({
   currentUserId: number
   senderNameInfo?: UserName
   senderProfilePhotoUrl?: string
+  senderHasProfilePhoto?: boolean
   dialogNotificationSettings?: ReturnType<typeof decodeDialogNotificationSettings>
 }) {
   // FIRST, check if we should notify this user or not ---------------------------------
@@ -1273,10 +1276,12 @@ async function sendNotificationToUser({
     mediaType: messageInfo.message.mediaType,
     isSticker: messageInfo.message.isSticker,
     documentFileName: messageInfo.document?.fileName,
+    isAnimated: messageInfo.video?.isAnimated,
+    voiceDuration: messageInfo.voice?.duration,
   })
 
   let includeSenderNameInMessage = false
-  const senderName = UserNamesCache.getDisplayName(senderUserName)
+  const senderName = notificationText(UserNamesCache.getDisplayName(senderUserName), maxNotificationNameBytes)
   // Only provide chat title for threads not DMs
   const chatTitle = chat?.type === "thread" ? chat.title ?? undefined : undefined
 
@@ -1319,6 +1324,7 @@ async function sendNotificationToUser({
         isUrgentNudge: isUrgentNudge,
         senderDisplayName: senderName ?? undefined,
         senderProfilePhotoUrl,
+        senderHasProfilePhoto,
         threadEmoji: chat?.emoji ?? undefined,
       },
     })

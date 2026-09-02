@@ -24,7 +24,7 @@ export async function resolvePreviewAuth(
   input: PreviewAuthInput,
   policy: PreviewAuthPolicy = defaultPreviewAuthPolicy,
 ): Promise<PreviewAuthToken | null> {
-  const [chat] = await db
+  const [chat] = input.chatId === undefined ? [] : await db
     .select({ spaceId: chats.spaceId })
     .from(chats)
     .where(eq(chats.id, input.chatId))
@@ -43,7 +43,7 @@ export async function resolvePreviewAuthCandidates(
   input: PreviewAuthInput,
   policy: PreviewAuthPolicy = defaultPreviewAuthPolicy,
 ): Promise<PreviewAuthToken[]> {
-  const [chat] = await db
+  const [chat] = input.chatId === undefined ? [] : await db
     .select({ spaceId: chats.spaceId })
     .from(chats)
     .where(eq(chats.id, input.chatId))
@@ -63,7 +63,7 @@ export async function resolvePreviewAuthWithDeps(
   deps: PreviewAuthResolverDeps,
   policy: PreviewAuthPolicy = defaultPreviewAuthPolicy,
 ): Promise<PreviewAuthToken | null> {
-  const spaceId = await deps.getChatSpaceId(input.chatId)
+  const spaceId = input.chatId === undefined ? null : await deps.getChatSpaceId(input.chatId)
   return resolveIntegrationAuthWithDeps(
     {
       provider: input.provider,
@@ -80,7 +80,7 @@ export async function resolvePreviewAuthCandidatesWithDeps(
   deps: PreviewAuthResolverDeps,
   policy: PreviewAuthPolicy = defaultPreviewAuthPolicy,
 ): Promise<PreviewAuthToken[]> {
-  const spaceId = await deps.getChatSpaceId(input.chatId)
+  const spaceId = input.chatId === undefined ? null : await deps.getChatSpaceId(input.chatId)
   return resolveIntegrationAuthCandidatesWithDeps(
     {
       provider: input.provider,

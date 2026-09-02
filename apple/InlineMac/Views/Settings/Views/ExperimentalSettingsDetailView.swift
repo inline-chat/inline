@@ -5,9 +5,24 @@ struct ExperimentalSettingsDetailView: View {
   @StateObject private var settings = AppSettings.shared
   @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
   private var mentionableAgentsEnabled = false
+  @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
+  private var nativeFileDownloadsEnabled = false
 
   var body: some View {
     Form {
+      Section {
+        Toggle(isOn: $nativeFileDownloadsEnabled) {
+          SettingsRowLabel(
+            "Native File Downloads",
+            description: "Download message documents over encrypted realtime. Other media still use CDN."
+          )
+        }
+      } header: {
+        SettingsSectionHeader("Files")
+      } footer: {
+        Text("Requires a V3 session and server support. Turn off to retry failed downloads using CDN.")
+      }
+
       Section {
         Toggle(isOn: $settings.richContentRendererEnabled) {
           SettingsRowLabel(

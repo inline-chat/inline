@@ -41,14 +41,14 @@ describe("URL preview substitution policy", () => {
       .toEqual({ canSubstitute: false })
   })
 
-  test.each(["notion.page", "notion.database"])("substitutes %s", (providerResourceType) => {
+  test.each(["notion.page", "notion.database", "notion.data_source"])("substitutes %s", (providerResourceType) => {
     expect(resolveUrlPreviewSubstitution({
       ...preview({ provider: "notion", title: "Roadmap" }),
       providerResourceType,
     })).toEqual({ canSubstitute: true, title: "Roadmap" })
   })
 
-  test.each(["notion.block", "notion.file", "notion.data_source", undefined])(
+  test.each(["notion.block", "notion.file", undefined])(
     "keeps %s literal",
     (providerResourceType) => {
       expect(resolveUrlPreviewSubstitution({

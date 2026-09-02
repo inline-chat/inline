@@ -15,7 +15,8 @@ extension View {
     goForward: @escaping @MainActor () -> Void,
     canGoBack: @escaping @MainActor () -> Bool,
     canGoForward: @escaping @MainActor () -> Bool,
-    selectedPeer: @escaping @MainActor () -> Peer?
+    selectedPeer: @escaping @MainActor () -> Peer?,
+    isViewingChat: @escaping @MainActor (Peer) -> Bool
   ) -> some View {
     modifier(MainWindowRegistrationModifier(
       id: id,
@@ -29,7 +30,8 @@ extension View {
       goForward: goForward,
       canGoBack: canGoBack,
       canGoForward: canGoForward,
-      selectedPeer: selectedPeer
+      selectedPeer: selectedPeer,
+      isViewingChat: isViewingChat
     ))
   }
 }
@@ -47,6 +49,7 @@ private struct MainWindowRegistrationModifier: ViewModifier {
   let canGoBack: @MainActor () -> Bool
   let canGoForward: @MainActor () -> Bool
   let selectedPeer: @MainActor () -> Peer?
+  let isViewingChat: @MainActor (Peer) -> Bool
 
   @Environment(\.appBridge) private var appBridge
 
@@ -71,6 +74,7 @@ private struct MainWindowRegistrationModifier: ViewModifier {
       window: appBridge?.currentWindow(),
       toastPresenter: toastPresenter,
       selectedPeer: selectedPeer(),
+      isViewingChat: isViewingChat,
       route: route,
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,

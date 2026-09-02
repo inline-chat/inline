@@ -215,7 +215,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
   ) {
-    guard let kind = userInfo["kind"] as? String else {
+    guard MessageNotificationAccount.capture(userInfo: userInfo) != nil,
+          let kind = userInfo["kind"] as? String else {
       completionHandler(.noData)
       return
     }
@@ -270,7 +271,29 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    completionHandler(UrgentNotificationPresentation.foregroundOptions(for: notification.request.content))
+    let content = notification.request.content
+    guard let account = MessageNotificationAccount.capture(userInfo: content.userInfo) else {
+      completionHandler([])
+      return
+    }
+    let urgentOptions = UrgentNotificationPresentation.foregroundOptions(for: content)
+    if !urgentOptions.isEmpty {
+      completionHandler(urgentOptions)
+      return
+    }
+    let target = MessageNotificationTarget(userInfo: content.userInfo, threadIdentifier: content.threadIdentifier)
+    Task { @MainActor in
+      let peer = await target?.resolvePeer()
+      guard MessageNotificationAccount.isCurrent(account) else {
+        completionHandler([])
+        return
+      }
+      let isViewingChat = peer.map { sceneRouterRegistry.isViewingChat($0) } ?? false
+      completionHandler(MessageNotificationPresentation.foregroundOptions(
+        for: content,
+        isViewingConversation: isViewingChat
+      ))
+    }
   }
 
   func userNotificationCenter(
@@ -278,20 +301,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
-    let userInfo = response.notification.request.content.userInfo
-    let userId = Self.coerceInt64(userInfo["userId"])
-    let isThread = Self.coerceBool(userInfo["isThread"]) == true
-    let threadId = Self.coerceThreadId(userInfo["threadId"])
-
-    let peerId: Peer? = if isThread, let threadId {
-      Peer.thread(id: threadId)
-    } else if let userId {
-      Peer.user(id: userId)
-    } else {
-      nil
-    }
-
-    guard let peerId else {
+    let content = response.notification.request.content
+    guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+          let target = MessageNotificationTarget(userInfo: content.userInfo, threadIdentifier: content.threadIdentifier),
+          let account = MessageNotificationAccount.capture(userInfo: content.userInfo)
+    else {
       completionHandler()
       return
     }
@@ -302,9 +316,42 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       waitForActivation: waitsForSceneActivation
     )
 
+    if let peer = target.peer {
+      navigateFromNotification(
+        peerId: peer, messageID: target.messageID, account: account,
+        waitsForSceneActivation: waitsForSceneActivation, navigationReservation: navigationReservation,
+        completionHandler: completionHandler
+      )
+    } else {
+      // The app is opening from a tap; do not keep the OS response callback
+      // outstanding while uncached encrypted-fallback metadata is fetched.
+      completionHandler()
+      Task { @MainActor in
+        guard let peer = await target.resolvePeer(fetchIfMissingFor: account) else { return }
+        navigateFromNotification(
+          peerId: peer, messageID: target.messageID, account: account,
+          waitsForSceneActivation: waitsForSceneActivation, navigationReservation: navigationReservation,
+          completionHandler: {}
+        )
+      }
+    }
+  }
+
+  private func navigateFromNotification(
+    peerId: Peer,
+    messageID: Int64?,
+    account: AuthAccountMutationToken,
+    waitsForSceneActivation: Bool,
+    navigationReservation: UInt64,
+    completionHandler: @escaping () -> Void
+  ) {
+    guard MessageNotificationAccount.isCurrent(account) else {
+      completionHandler()
+      return
+    }
     if waitsForSceneActivation {
       let accepted = sceneRouterRegistry.navigate(
-        .externalChat(peer: peerId, contextSpaceID: nil),
+        .externalChat(peer: peerId, contextSpaceID: nil, messageID: messageID),
         reservation: navigationReservation
       )
       if accepted {
@@ -313,9 +360,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       completionHandler()
 
       Task { @MainActor in
-        guard let contextSpaceID = await Self.localSpaceID(for: peerId) else { return }
+        guard let contextSpaceID = await Self.localSpaceID(for: peerId),
+              MessageNotificationAccount.isCurrent(account) else { return }
         sceneRouterRegistry.updatePendingRequest(
-          .externalChat(peer: peerId, contextSpaceID: contextSpaceID),
+          .externalChat(peer: peerId, contextSpaceID: contextSpaceID, messageID: messageID),
           reservation: navigationReservation
         )
       }
@@ -325,9 +373,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     Task { @MainActor in
       defer { completionHandler() }
       let contextSpaceID = await Self.localSpaceID(for: peerId)
+      guard MessageNotificationAccount.isCurrent(account) else { return }
       completeNotificationNavigation(
         peer: peerId,
         contextSpaceID: contextSpaceID,
+        messageID: messageID,
         reservation: navigationReservation
       )
     }
@@ -337,10 +387,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   private func completeNotificationNavigation(
     peer: Peer,
     contextSpaceID: Int64?,
+    messageID: Int64?,
     reservation: UInt64
   ) {
     let accepted = sceneRouterRegistry.navigate(
-      .externalChat(peer: peer, contextSpaceID: contextSpaceID),
+      .externalChat(peer: peer, contextSpaceID: contextSpaceID, messageID: messageID),
       reservation: reservation
     )
     if accepted {

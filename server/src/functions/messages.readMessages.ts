@@ -9,9 +9,12 @@ import { Notifications } from "@in/server/modules/notifications/notifications"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { ServerUpdate } from "@in/server/protocol/server"
-import { getLastMessageId } from "@in/server/db/models/chats"
+import { ChatModel, getLastMessageId } from "@in/server/db/models/chats"
 import { InlineError } from "@in/server/types/errors"
 import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import { ModelError } from "@in/server/db/models/_errors"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 type Input = {
   peer: InputPeer
@@ -23,6 +26,17 @@ type Output = {
 }
 
 export const readMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
+  const chat = await ChatModel.getChatFromInputPeer(input.peer, context).catch((error) => {
+    if (error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID) {
+      if (input.peer.type.oneofKind === "chat") throw RealtimeRpcError.ChatIdInvalid()
+      throw RealtimeRpcError.PeerIdInvalid()
+    }
+    throw error
+  })
+  // Dialog state survives list placement changes and may briefly survive revoked membership.
+  // Reauthorize the chat before reading or mutating that per-user projection.
+  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+
   const peerUserId =
     input.peer.type.oneofKind === "user"
       ? Number(input.peer.type.user.userId)

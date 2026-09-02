@@ -1170,6 +1170,8 @@ const spaceReplyCases: TestCase[] = [
         { spaceId: targetSpace.id, userId: owner.id, role: "owner", canAccessPublicChats: true },
         { spaceId: targetSpace.id, userId: targetMember.id, role: "member", canAccessPublicChats: true },
         { spaceId: otherSpace.id, userId: otherMember.id, role: "member", canAccessPublicChats: true },
+        { spaceId: otherSpace.id, userId: owner.id, role: "member", canAccessPublicChats: false },
+        { spaceId: otherSpace.id, userId: targetMember.id, role: "member", canAccessPublicChats: false },
       ])
       const parent = await chat({ spaceId: targetSpace.id, createdBy: owner.id, publicThread: true })
       await msg({ chatId: parent.id, messageId: 1, fromId: owner.id, date: OLD })
@@ -1229,6 +1231,7 @@ const spaceReplyCases: TestCase[] = [
       await db.insert(schema.members).values([
         { spaceId: targetSpace.id, userId: owner.id, role: "owner", canAccessPublicChats: true },
         { spaceId: targetSpace.id, userId: member.id, role: "member", canAccessPublicChats: true },
+        { spaceId: targetSpace.id, userId: privateMember.id, role: "member", canAccessPublicChats: false },
       ])
       const parent = await chat({ spaceId: targetSpace.id, createdBy: owner.id, publicThread: true })
       await msg({ chatId: parent.id, messageId: 1, fromId: owner.id, date: OLD })
@@ -1423,6 +1426,8 @@ const spaceReplyCases: TestCase[] = [
       await db.insert(schema.members).values([
         { spaceId: targetSpace.id, userId: owner.id, role: "owner", canAccessPublicChats: true },
         { spaceId: targetSpace.id, userId: targetMember.id, role: "member", canAccessPublicChats: true },
+        { spaceId: otherSpace.id, userId: owner.id, role: "member", canAccessPublicChats: false },
+        { spaceId: otherSpace.id, userId: targetMember.id, role: "member", canAccessPublicChats: false },
       ])
       const parent = await chat({ spaceId: targetSpace.id, createdBy: owner.id, publicThread: true })
       await msg({ chatId: parent.id, messageId: 1, fromId: owner.id, date: OLD })

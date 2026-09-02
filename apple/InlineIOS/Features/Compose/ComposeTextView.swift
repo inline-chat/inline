@@ -13,6 +13,51 @@ class ComposeTextView: UITextView {
   private var processedRanges = Set<String>()
   private var recentlySentImageHashes = Set<Int>()
   private let processingLock = NSLock()
+  private var pastedLinkSessionStorage: ComposePastedLinkSession?
+
+  private var pastedLinkSession: ComposePastedLinkSession {
+    if let pastedLinkSessionStorage { return pastedLinkSessionStorage }
+    let session = ComposePastedLinkSession(
+      snapshot: { [weak self] in
+        guard let self else { return nil }
+        return (NSAttributedString(attributedString: textStorage), selectedRange)
+      },
+      replace: { [weak self] range, replacement, selection, action in
+        self?.replacePastedLink(range: range, replacement: replacement, selection: selection, action: action) ?? false
+      }
+    )
+    pastedLinkSessionStorage = session
+    return session
+  }
+
+  override var text: String! {
+    didSet { resetPastedLinks() }
+  }
+
+  override var attributedText: NSAttributedString! {
+    didSet { resetPastedLinks() }
+  }
+
+  override var keyCommands: [UIKeyCommand]? {
+    let commands = super.keyCommands ?? []
+    guard pastedLinkSessionStorage?.canRevert == true else { return commands }
+    return commands + [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(revertPastedLink(_:)))]
+  }
+
+  @objc private func revertPastedLink(_ sender: Any?) {
+    pastedLinkSessionStorage?.revertLatest()
+  }
+
+  override func deleteBackward() {
+    if pastedLinkSessionStorage?.revertAtCaret() == true { return }
+    super.deleteBackward()
+  }
+
+  func resetPastedLinks() { pastedLinkSessionStorage?.reset() }
+
+  func willChangePastedLinks(in range: NSRange, replacement: String) {
+    pastedLinkSessionStorage?.willChange(range: range, replacement: replacement)
+  }
 
   override var inputAccessoryView: UIView? {
     get {
@@ -103,6 +148,7 @@ class ComposeTextView: UITextView {
   }
 
   @objc public func textDidChange() {
+    pastedLinkSessionStorage?.validate()
     showPlaceholder(text.isEmpty)
 
     if text.contains("￼") || attributedText.string.contains("￼") {
@@ -150,7 +196,9 @@ class ComposeTextView: UITextView {
       resetTypingAttributesToDefault()
       textDidChange()
       delegate?.textViewDidChange?(self)
-    } else if let string = UIPasteboard.general.string {
+    } else if let string = UIPasteboard.general.string ?? UIPasteboard.general.url?.absoluteString {
+      let replacedRange = selectedRange
+      willChangePastedLinks(in: replacedRange, replacement: string)
       let pasteResult = ComposeThreadLinkEditing.insertPlainText(
         string,
         into: attributedText ?? NSAttributedString(),
@@ -158,14 +206,26 @@ class ComposeTextView: UITextView {
         typingAttributes: typingAttributes,
         textColor: UIColor.label
       )
-      attributedText = pasteResult.attributedString
+      registerFormattingUndo(actionName: "Paste")
+      textStorage.setAttributedString(pasteResult.attributedString)
       selectedRange = pasteResult.selectedRange
       resetTypingAttributesToDefault()
+      let links = ComposeLinkPaste.links(
+        in: textStorage, range: NSRange(location: replacedRange.location, length: string.utf16.count)
+      )
+      for link in links {
+        textStorage.addAttributes(linkAttributes(urlString: link.url.absoluteString), range: link.range)
+      }
 
       // Programmatic text assignment bypasses the normal delegate path.
       // Route paste through the same change handlers as typing so send state stays in sync.
       textDidChange()
       delegate?.textViewDidChange?(self)
+      if INUserSettings.current.compose.replacePastedLinksWithTitles, let peer = composeView?.peerId {
+        pastedLinkSession.pasted(links: links) { url in
+          try await ExternalResourceSearchClient.resolveLinkLabel(peer: peer, url: url)
+        }
+      }
     } else {
       super.paste(sender)
       fixFontSizeAfterStickerInsertion()
@@ -186,9 +246,41 @@ class ComposeTextView: UITextView {
     return ComposeLinkPaste.normalizedURLString(from: url)
   }
 
+  private func replacePastedLink(
+    range: NSRange,
+    replacement: NSAttributedString,
+    selection: NSRange,
+    action: String
+  ) -> Bool {
+    guard markedTextRange == nil else { return false }
+    registerFormattingUndo(actionName: action)
+    textStorage.replaceCharacters(in: range, with: replacement)
+    selectedRange = selection
+    resetTypingAttributesToDefault()
+    textDidChange()
+    delegate?.textViewDidChange?(self)
+    return true
+  }
+
+  private func registerFormattingUndo(actionName: String) {
+    let previousText = NSAttributedString(attributedString: textStorage)
+    let previousSelection = selectedRange
+    let previousTyping = typingAttributes
+    undoManager?.registerUndo(withTarget: self) { target in
+      target.registerFormattingUndo(actionName: actionName)
+      target.textStorage.setAttributedString(previousText)
+      target.selectedRange = previousSelection
+      target.typingAttributes = previousTyping
+      target.textDidChange()
+      target.delegate?.textViewDidChange?(target)
+    }
+    undoManager?.setActionName(actionName)
+  }
+
   private func applyLink(_ urlString: String, to range: NSRange) {
     let safeRange = clampedRange(range)
     guard safeRange.length > 0 else { return }
+    willChangePastedLinks(in: safeRange, replacement: (textStorage.string as NSString).substring(with: safeRange))
 
     let selectedText = (attributedText.string as NSString).substring(with: safeRange)
     guard !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }

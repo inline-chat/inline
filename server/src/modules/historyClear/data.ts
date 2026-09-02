@@ -32,6 +32,11 @@ export type ClearChatHistoryResult = ClearHistorySideEffects & {
 
 export type ClearSpaceHistoryResult = ClearHistorySideEffects
 
+export type ClearSpaceHistoryPlan = {
+  affectedChatIds: number[]
+  recipientUserIds: number[]
+}
+
 export type ClearHistoryDeletedChat = {
   chat: DbChat
   userIds: number[]
@@ -74,6 +79,40 @@ type DeleteSpaceReplyThreadsResult = DeleteReplyThreadsResult & {
 type DetachReplyThreadsResult = {
   chatIds: number[]
   accessLosses: ClearHistoryAccessLoss[]
+}
+
+export async function planClearSpaceHistoryData(
+  tx: Transaction,
+  input: ClearSpaceHistoryInput,
+): Promise<ClearSpaceHistoryPlan> {
+  const deletedChatIds = input.deleteReplyThreads
+    ? (await getSpaceReplyThreadDepths(tx, input.spaceId, input.beforeDate)).map((row) => row.chatId)
+    : []
+  const detachedChatIds = await getExternalReplyThreadIdsForClearedSpaceMessages(
+    tx,
+    input.spaceId,
+    input.beforeDate,
+    false,
+  )
+  const detachedFromDeletedChatIds = input.deleteReplyThreads
+    ? await getExternalReplyThreadIdsForDeletedSpaceChats(tx, input.spaceId, deletedChatIds, false)
+    : []
+  const affectedChatIds = uniqueSortedNumbers([
+    ...deletedChatIds,
+    ...detachedChatIds,
+    ...detachedFromDeletedChatIds,
+  ])
+  const recipients = await getChatAccessMap(tx, affectedChatIds)
+  const spaceChatIds = await tx.select({ id: chats.id }).from(chats).where(eq(chats.spaceId, input.spaceId))
+
+  return {
+    // Every row that the mutation can update must be locked in one global
+    // order, including external children whose IDs may precede space chats.
+    affectedChatIds: uniqueSortedNumbers([...spaceChatIds.map((chat) => chat.id), ...affectedChatIds]),
+    recipientUserIds: uniqueSortedNumbers(
+      Array.from(recipients.values()).flatMap((userIds) => Array.from(userIds)),
+    ),
+  }
 }
 
 export async function clearChatHistoryData(
@@ -476,35 +515,7 @@ async function detachExternalReplyThreadsForClearedSpaceMessages(
   spaceId: number,
   beforeDate: Date | undefined,
 ): Promise<DetachReplyThreadsResult> {
-  const parentMessageClause = beforeDate
-    ? sql`
-        and exists (
-          select 1
-          from messages m
-          where m.chat_id = child.parent_chat_id
-            and m.message_id = child.parent_message_id
-            ${messageBeforeDateClause(beforeDate)}
-        )
-      `
-    : sql``
-
-  const rows = await tx.execute<ChatIdRow>(sql`
-    select child.id as "chatId"
-    from chats child
-    where child.parent_chat_id is not null
-      and child.parent_message_id is not null
-      and child.space_id is distinct from ${spaceId}
-      and exists (
-        select 1
-        from chats parent
-        where parent.id = child.parent_chat_id
-          and parent.space_id = ${spaceId}
-      )
-      ${parentMessageClause}
-    for update of child
-  `)
-
-  const chatIds = rows.map((row) => row.chatId)
+  const chatIds = await getExternalReplyThreadIdsForClearedSpaceMessages(tx, spaceId, beforeDate, true)
   if (chatIds.length === 0) {
     return { chatIds: [], accessLosses: [] }
   }
@@ -532,22 +543,7 @@ async function detachExternalReplyThreadsForDeletedSpaceChats(
   spaceId: number,
   deletedChatIds: number[],
 ): Promise<DetachReplyThreadsResult> {
-  if (deletedChatIds.length === 0) {
-    return { chatIds: [], accessLosses: [] }
-  }
-
-  const rows = await tx
-    .select({ chatId: chats.id })
-    .from(chats)
-    .where(
-      and(
-        inArray(chats.parentChatId, deletedChatIds),
-        or(isNull(chats.spaceId), ne(chats.spaceId, spaceId)),
-      ),
-    )
-    .for("update")
-
-  const chatIds = rows.map((row) => row.chatId)
+  const chatIds = await getExternalReplyThreadIdsForDeletedSpaceChats(tx, spaceId, deletedChatIds, true)
   if (chatIds.length === 0) {
     return { chatIds: [], accessLosses: [] }
   }
@@ -568,6 +564,66 @@ async function detachExternalReplyThreadsForDeletedSpaceChats(
     chatIds,
     accessLosses: getAccessLosses(chatIds, beforeAccess, afterAccess),
   }
+}
+
+async function getExternalReplyThreadIdsForClearedSpaceMessages(
+  tx: Transaction,
+  spaceId: number,
+  beforeDate: Date | undefined,
+  lockRows: boolean,
+): Promise<number[]> {
+  const parentMessageClause = beforeDate
+    ? sql`
+        and exists (
+          select 1
+          from messages m
+          where m.chat_id = child.parent_chat_id
+            and m.message_id = child.parent_message_id
+            ${messageBeforeDateClause(beforeDate)}
+        )
+      `
+    : sql``
+  const lockClause = lockRows ? sql`for update of child` : sql``
+  const rows = await tx.execute<ChatIdRow>(sql`
+    select child.id as "chatId"
+    from chats child
+    where child.parent_chat_id is not null
+      and child.parent_message_id is not null
+      and child.space_id is distinct from ${spaceId}
+      and exists (
+        select 1
+        from chats parent
+        where parent.id = child.parent_chat_id
+          and parent.space_id = ${spaceId}
+      )
+      ${parentMessageClause}
+    order by child.id
+    ${lockClause}
+  `)
+  return rows.map((row) => row.chatId)
+}
+
+async function getExternalReplyThreadIdsForDeletedSpaceChats(
+  tx: Transaction,
+  spaceId: number,
+  deletedChatIds: number[],
+  lockRows: boolean,
+): Promise<number[]> {
+  if (deletedChatIds.length === 0) return []
+
+  const query = tx
+    .select({ chatId: chats.id })
+    .from(chats)
+    .where(
+      and(
+        inArray(chats.parentChatId, deletedChatIds),
+        or(isNull(chats.spaceId), ne(chats.spaceId, spaceId)),
+      ),
+    )
+    .orderBy(chats.id)
+
+  const rows = lockRows ? await query.for("update") : await query
+  return rows.map((row) => row.chatId)
 }
 
 async function getChatAccessMap(tx: Transaction, chatIds: number[]): Promise<Map<number, Set<number>>> {
@@ -613,6 +669,10 @@ function getAccessLosses(
 
 function uniqueNumbers(values: number[]): number[] {
   return Array.from(new Set(values))
+}
+
+function uniqueSortedNumbers(values: number[]): number[] {
+  return uniqueNumbers(values).sort((left, right) => left - right)
 }
 
 function uniqueAccessLosses(losses: ClearHistoryAccessLoss[]): ClearHistoryAccessLoss[] {

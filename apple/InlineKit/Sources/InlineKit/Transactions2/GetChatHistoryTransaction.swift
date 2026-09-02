@@ -216,12 +216,32 @@ public struct GetChatHistoryTransaction: Transaction2 {
         return lower ... upper
 
       case .historyModeAround:
-        if let minimum = ids.first, let maximum = ids.last {
-          return minimum ... maximum
-        }
-        guard let anchor = context.anchorID, anchor > 0 else { return nil }
-        let coordinate = min(anchor, MessageHistoryHole.positiveMessageIDMax)
-        return coordinate ... coordinate
+        guard let coordinate = context.anchorID,
+              1 ... MessageHistoryHole.positiveMessageIDMax ~= coordinate
+        else { return nil }
+
+        let includeAnchor = context.includeAnchor ?? true
+        let anchorCount = ids.count(where: { $0 == coordinate })
+        guard anchorCount <= 1, includeAnchor || anchorCount == 0 else { return nil }
+
+        let requestedLimit = max(0, Int(context.limit ?? 60))
+        let defaultBeforeLimit = requestedLimit / 2
+        let defaultAfterLimit = max(requestedLimit - defaultBeforeLimit - anchorCount, 0)
+        let beforeLimit = max(0, Int(context.beforeLimit ?? Int32(clamping: defaultBeforeLimit)))
+        let afterLimit = max(0, Int(context.afterLimit ?? Int32(clamping: defaultAfterLimit)))
+        let olderIDs = ids.filter { $0 < coordinate }
+        let newerIDs = ids.filter { $0 > coordinate }
+        guard olderIDs.count <= beforeLimit, newerIDs.count <= afterLimit else { return nil }
+
+        // AROUND queries the exact coordinate and both numeric sides in one
+        // repeatable-read server snapshot. A short side proves its absolute
+        // boundary; otherwise only the returned extent is certified. Always
+        // include a requested anchor that the snapshot proved was deleted.
+        let lower = olderIDs.count < beforeLimit ? 1 : (olderIDs.first ?? coordinate)
+        let upper = newerIDs.count < afterLimit
+          ? MessageHistoryHole.positiveMessageIDMax
+          : (newerIDs.last ?? coordinate)
+        return min(lower, coordinate) ... max(upper, coordinate)
 
       case .UNRECOGNIZED:
         return nil

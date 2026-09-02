@@ -26,6 +26,8 @@ public struct MarkAsUnreadTransaction: Transaction2 {
     context = Context(peerId: peerId, intentId: UUID().uuidString)
   }
 
+  public var executionKey: TransactionExecutionKey? { .peerMutation(context.peerId) }
+
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .markAsUnread(.with {
       $0.peerID = context.peerId.toInputPeer()
@@ -40,6 +42,7 @@ public struct MarkAsUnreadTransaction: Transaction2 {
   // MARK: - Transaction Methods
 
   public func optimistic() async {
+    await UnreadManager.shared.cancelAutomaticReads(in: context.peerId)
     do {
       let original = try await AppDatabase.shared.reader.read { db in
         try Dialog.get(peerId: context.peerId).fetchOne(db)
@@ -71,7 +74,7 @@ public struct MarkAsUnreadTransaction: Transaction2 {
     }
 
     log.trace("result: \(result)")
-    await Api.realtime.applyUpdates(result.updates)
+    await Api.realtime.applyUpdatesAndWait(result.updates)
     await DialogMutationRollbackTracker.shared.complete(
       intentID: context.intentId,
       peer: context.peerId,

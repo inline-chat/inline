@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import Auth
 import CoreGraphics
 import Foundation
 import GRDB
@@ -116,7 +117,8 @@ public actor MacNotifications {
     forceSound: Bool = false,
     soundOverride: Bool? = nil,
     requestIdentifier: String? = nil,
-    threadIdentifier: String? = nil
+    threadIdentifier: String? = nil,
+    expectedAccount: AuthAccountMutationToken? = nil
   ) async -> Bool {
     guard Self.canPostSystemNotifications(bundleURL: Bundle.main.bundleURL) else { return false }
 
@@ -158,6 +160,7 @@ public actor MacNotifications {
 
     do {
       let center = UNUserNotificationCenter.current()
+      if let expectedAccount, !MessageNotificationAccount.isCurrent(expectedAccount) { return false }
       try await center.add(request)
       return true
     } catch {
@@ -320,7 +323,8 @@ extension MacNotifications {
     peerId: Peer
   ) async {
     let chat = await ObjectCache.shared.getChat(id: chatId)
-    let chatName = chat?.title ?? "Chat"
+    let projectedChatName = MessageNotificationPreview.singleLine(chat?.title ?? "Chat")
+    let chatName = projectedChatName.isEmpty ? "Chat" : projectedChatName
 
     let title = "Message failed to send"
     let body = "Tap to open \(chatName) and retry"
@@ -347,6 +351,7 @@ extension MacNotifications {
   func handleNewMessage(protocolMsg: InlineProtocol.Message) async {
     // Only show notification for incoming messages
     guard protocolMsg.out == false else { return }
+    guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
 
     let user = await ObjectCache.shared.getUser(id: protocolMsg.fromID)
     let chat = await ObjectCache.shared.getChat(id: protocolMsg.chatID)
@@ -356,25 +361,30 @@ extension MacNotifications {
       nil
     }
 
-    let senderName = user?.user.displayName ?? "Unknown"
-    let chatName = chat?.title ?? "New Message"
+    let projectedSenderName = MessageNotificationPreview.singleLine(user?.user.displayName ?? "Unknown")
+    let senderName = projectedSenderName.isEmpty ? "Unknown" : projectedSenderName
+    let projectedChatName = MessageNotificationPreview.singleLine(chat?.title ?? "New Message")
+    let chatName = projectedChatName.isEmpty ? "New Message" : projectedChatName
+    let isThread = protocolMsg.peerID.toPeer().isThread
 
     // Prepare notification content
     let title: String
     let subtitle: String?
     let body: String
 
-    if chat?.type == .thread {
-      title = "\(chatName) \(space != nil ? "(\(space!.name))" : "")"
+    if isThread {
+      title = MessageNotificationPreview.singleLine(
+        space.map { "\(chatName) (\($0.name))" } ?? chatName
+      )
       subtitle = senderName
-      body = protocolMsg.stringRepresentationWithEmoji
+      body = MessageNotificationPreview.body(for: protocolMsg)
     } else {
       title = senderName
       subtitle = nil
-      body = protocolMsg.stringRepresentationWithEmoji
+      body = MessageNotificationPreview.body(for: protocolMsg)
     }
 
-    let imageURL = if chat?.type == .thread {
+    let imageURL = if isThread {
       ThreadIconNotificationAttachmentRenderer.attachmentURL(for: chat)
     } else {
       await avatarBuilder.attachmentURL(for: user, fallbackUserID: protocolMsg.fromID)
@@ -382,13 +392,15 @@ extension MacNotifications {
     let isUrgentNudge = Self.isUrgentNudge(protocolMsg)
     var notificationUserInfo: [AnyHashable: Any] = [
       "userId": protocolMsg.fromID,
-      "isThread": chat?.type == .thread,
+      "isThread": isThread,
       "messageId": String(protocolMsg.id),
+      "chatId": String(protocolMsg.chatID),
+      "recipientUserId": String(account.userID),
     ]
-    if let chat, chat.type == .thread {
-      notificationUserInfo["threadId"] = chat.id
-      notificationUserInfo["isReplyThread"] = chat.isReplyThread
-      if let emoji = chat.emoji {
+    if isThread {
+      notificationUserInfo["threadId"] = protocolMsg.chatID
+      notificationUserInfo["isReplyThread"] = chat?.isReplyThread == true
+      if let emoji = chat?.emoji {
         notificationUserInfo["threadEmoji"] = emoji
       }
     }
@@ -404,7 +416,8 @@ extension MacNotifications {
         chatID: protocolMsg.chatID,
         messageID: protocolMsg.id
       ),
-      threadIdentifier: Self.notificationThreadIdentifier(chatID: protocolMsg.chatID)
+      threadIdentifier: Self.notificationThreadIdentifier(chatID: protocolMsg.chatID),
+      expectedAccount: account
     )
   }
 }

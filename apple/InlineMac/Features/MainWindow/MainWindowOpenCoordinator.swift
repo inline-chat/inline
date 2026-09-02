@@ -23,6 +23,7 @@ final class MainWindowOpenCoordinator {
     weak var window: NSWindow?
     weak var toastPresenter: (any ToastPresenting)?
     var selectedPeer: Peer?
+    let isViewingChat: @MainActor (Peer) -> Bool
     let route: @MainActor (MainWindowDestination) -> Void
     let openCommandBar: @MainActor () -> Void
     let toggleCommandBar: @MainActor () -> Void
@@ -60,6 +61,7 @@ final class MainWindowOpenCoordinator {
     window: NSWindow?,
     toastPresenter: (any ToastPresenting)?,
     selectedPeer: Peer?,
+    isViewingChat: @escaping @MainActor (Peer) -> Bool,
     route: @escaping @MainActor (MainWindowDestination) -> Void,
     openCommandBar: @escaping @MainActor () -> Void,
     toggleCommandBar: @escaping @MainActor () -> Void,
@@ -79,6 +81,7 @@ final class MainWindowOpenCoordinator {
       window: window,
       toastPresenter: toastPresenter,
       selectedPeer: selectedPeer,
+      isViewingChat: isViewingChat,
       route: route,
       openCommandBar: openCommandBar,
       toggleCommandBar: toggleCommandBar,
@@ -114,6 +117,13 @@ final class MainWindowOpenCoordinator {
     return windows.values.contains { entry in
       entry.window != nil && entry.selectedPeer == peer
     }
+  }
+
+  func isViewingChat(_ peer: Peer) -> Bool {
+    guard NSApp.isActive, let window = NSApp.keyWindow,
+          window.attachedSheet == nil, let entry = entry(for: window)
+    else { return false }
+    return entry.isViewingChat(peer)
   }
 
   func registerSidebarNavigation(

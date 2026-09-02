@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 
 @testable import InlineKit
@@ -134,22 +135,320 @@ struct MessagesProgressiveViewModelOrderingTests {
     #expect(appended.map(\.id) == [101, 102, 103, 104])
   }
 
-  @Test("gap range merge combines overlapping and adjacent ranges")
-  func testGapRangeMerge() async throws {
-    let merged = await MainActor.run {
-      MessagesProgressiveViewModel.mergedGapRanges([
-        .init(startMessageId: 10, endMessageId: 20),
-        .init(startMessageId: 21, endMessageId: 30),
-        .init(startMessageId: 40, endMessageId: 50),
-        .init(startMessageId: 45, endMessageId: 60),
-      ])
+  @Test("persisted holes project unknown adjacency and uncertified edges")
+  func testHistoryCoverageProjection() {
+    let messages = [10, 20, 30, 40].map {
+      makeFullMessage(
+        messageId: Int64($0),
+        globalId: Int64($0),
+        date: Date(timeIntervalSince1970: Double($0))
+      )
+    }
+    let projection = MessageHistoryCoverageProjection(
+      messages: messages,
+      holes: [
+        MessageHistoryHole(chatId: 1, lowerId: 1, upperId: 9),
+        MessageHistoryHole(chatId: 1, lowerId: 21, upperId: 29),
+        MessageHistoryHole(
+          chatId: 1,
+          lowerId: 41,
+          upperId: MessageHistoryHole.positiveMessageIDMax
+        ),
+      ],
+      olderCandidateMessageID: nil,
+      newerCandidateMessageID: nil
+    )
+
+    #expect(projection.unknownAdjacencyBoundaries.count == 1)
+    #expect(projection.unknownAdjacencyBoundaries.first?.lowerMessageID == 20)
+    #expect(projection.unknownAdjacencyBoundaries.first?.upperMessageID == 30)
+    #expect(projection.isCertifiedContinuation(between: 10, and: 20))
+    #expect(!projection.isCertifiedContinuation(between: 20, and: 30))
+    #expect(!projection.hasCertifiedOlderEdge)
+    #expect(!projection.hasCertifiedNewerEdge)
+    #expect(!projection.isAtCertifiedLiveEnd)
+  }
+
+  @Test("candidate edges are certified without claiming the live end")
+  func testHistoryCoverageCandidateEdges() {
+    let messages = [20, 30].map {
+      makeFullMessage(
+        messageId: Int64($0),
+        globalId: Int64($0),
+        date: Date(timeIntervalSince1970: Double($0))
+      )
+    }
+    let projection = MessageHistoryCoverageProjection(
+      messages: messages,
+      holes: [
+        MessageHistoryHole(chatId: 1, lowerId: 1, upperId: 9),
+        MessageHistoryHole(
+          chatId: 1,
+          lowerId: 41,
+          upperId: MessageHistoryHole.positiveMessageIDMax
+        ),
+      ],
+      olderCandidateMessageID: 10,
+      newerCandidateMessageID: 40
+    )
+
+    #expect(projection.hasCertifiedOlderEdge)
+    #expect(projection.hasCertifiedNewerEdge)
+    #expect(!projection.isAtCertifiedLiveEnd)
+    #expect(projection.unknownAdjacencyBoundaries.isEmpty)
+  }
+
+  @Test("a hole-free empty snapshot is a certified live end")
+  func testCompleteEmptyHistoryCoverage() {
+    let projection = MessageHistoryCoverageProjection(
+      messages: [],
+      holes: [],
+      olderCandidateMessageID: nil,
+      newerCandidateMessageID: nil
+    )
+
+    #expect(projection.hasCertifiedOlderEdge)
+    #expect(projection.hasCertifiedNewerEdge)
+    #expect(projection.isAtCertifiedLiveEnd)
+  }
+
+  @Test("progressive coverage snapshot reads the persisted hole authority")
+  func testPersistedHistoryCoverageProjection() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    let messages = [10, 20].map {
+      makeFullMessage(
+        messageId: Int64($0),
+        globalId: Int64($0),
+        date: Date(timeIntervalSince1970: Double($0))
+      )
     }
 
-    #expect(merged.count == 2)
-    #expect(merged[0].startMessageId == 10)
-    #expect(merged[0].endMessageId == 30)
-    #expect(merged[1].startMessageId == 40)
-    #expect(merged[1].endMessageId == 60)
+    try queue.write { (db: Database) throws in
+      try User(id: 1, email: "coverage@example.com", firstName: "Coverage").insert(db)
+      try Chat(
+        id: 1,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Coverage",
+        spaceId: nil,
+        lastMsgId: 20
+      ).insert(db)
+      for fullMessage in messages {
+        var message = fullMessage.message
+        try message.saveMessage(db)
+      }
+      try MessageHistoryCoverageStore.subtract(db, chatId: 1, lowerId: 1, upperId: 10)
+      try MessageHistoryCoverageStore.subtract(
+        db,
+        chatId: 1,
+        lowerId: 20,
+        upperId: MessageHistoryHole.positiveMessageIDMax
+      )
+
+      let metadata = try MessagesProgressiveViewModel.loadedWindowMetadata(
+        db,
+        peer: .thread(id: 1),
+        messages: messages
+      )
+      let descendingMetadata = try MessagesProgressiveViewModel.loadedWindowMetadata(
+        db,
+        peer: .thread(id: 1),
+        messages: Array(messages.reversed())
+      )
+      let optimistic = makeFullMessage(
+        messageId: -1,
+        globalId: nil,
+        date: Date(timeIntervalSince1970: 1_000)
+      )
+      let optimisticMetadata = try MessagesProgressiveViewModel.loadedWindowMetadata(
+        db,
+        peer: .thread(id: 1),
+        messages: [optimistic] + messages
+      )
+      let projection = metadata.historyCoverage
+      #expect(metadata == descendingMetadata)
+      #expect(metadata == optimisticMetadata)
+      #expect(metadata.oldestLoadedMessageId == 10)
+      #expect(metadata.newestLoadedMessageId == 20)
+      #expect(!metadata.canLoadOlderFromLocal)
+      #expect(!metadata.canLoadNewerFromLocal)
+      #expect(!projection.isCertifiedContinuation(between: 10, and: 20))
+      #expect(projection.hasCertifiedOlderEdge)
+      #expect(projection.hasCertifiedNewerEdge)
+      #expect(projection.isAtCertifiedLiveEnd)
+    }
+  }
+
+  @Test("prepared first frame installs canonical coverage and pagination metadata")
+  @MainActor
+  func testPreparedFirstFrameUsesCanonicalMetadata() async {
+    let peer = Peer.user(id: 9_003)
+    let message = makeFullMessage(
+      messageId: 30,
+      globalId: 30,
+      date: Date(timeIntervalSince1970: 30),
+      peerUserId: peer.id
+    )
+    let coverage = MessageHistoryCoverageProjection(
+      messages: [message],
+      holes: [],
+      olderCandidateMessageID: nil,
+      newerCandidateMessageID: nil
+    )
+    let metadata = MessagesProgressiveViewModel.LoadedWindowMetadata(
+      messages: [message],
+      holes: []
+    )
+    let viewModel = MessagesProgressiveViewModel(
+      peer: peer,
+      initialState: .init(messages: [message], loadedWindowMetadata: metadata)
+    )
+
+    #expect(viewModel.oldestLoadedMessageId == 30)
+    #expect(viewModel.newestLoadedMessageId == 30)
+    #expect(viewModel.historyCoverage == coverage)
+    #expect(viewModel.historyCoverage.isAtCertifiedLiveEnd)
+    #expect(!viewModel.needsNewerHistoryRepair)
+    let didLoadRedundantNewerBatch = await viewModel.loadBatchAsync(
+      at: .newer,
+      allowUnavailableLocal: true
+    )
+    #expect(!didLoadRedundantNewerBatch)
+  }
+
+  @Test("deleted numeric anchor loads certified neighbors without requiring an exact row")
+  func testDeletedAnchorLoadsCertifiedNeighborWindow() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+
+    try queue.write { (db: Database) throws in
+      try User(id: 1, email: "coordinate@example.com", firstName: "Coordinate").insert(db)
+      try Chat(
+        id: 1,
+        date: Date(timeIntervalSince1970: 1),
+        type: .thread,
+        title: "Coordinate",
+        spaceId: nil,
+        lastMsgId: 61
+      ).insert(db)
+      for id in [59, 61] as [Int64] {
+        var message = Message(
+          messageId: id,
+          fromId: 1,
+          date: Date(timeIntervalSince1970: Double(id)),
+          text: "Message \(id)",
+          peerUserId: nil,
+          peerThreadId: 1,
+          chatId: 1
+        )
+        try message.saveMessage(db)
+      }
+
+      #expect(try MessagesProgressiveViewModel.localWindowAroundCoordinate(
+        db,
+        peer: .thread(id: 1),
+        messageID: 60,
+        limit: 60
+      ) == nil)
+
+      try MessageHistoryCoverageStore.subtract(db, chatId: 1, lowerId: 59, upperId: 61)
+      let window = try MessagesProgressiveViewModel.localWindowAroundCoordinate(
+        db,
+        peer: .thread(id: 1),
+        messageID: 60,
+        limit: 60
+      )
+      #expect(window?.map(\.message.messageId) == [59, 61])
+    }
+  }
+
+  @Test("latest repair merge preserves the prepared island and adds the live tail")
+  func testLatestRepairMergePreservesPreparedWindow() {
+    let prepared = [40, 50].map {
+      makeFullMessage(
+        messageId: Int64($0),
+        globalId: Int64($0),
+        date: Date(timeIntervalSince1970: Double($0))
+      )
+    }
+    let latest = [90, 100].map {
+      makeFullMessage(
+        messageId: Int64($0),
+        globalId: Int64($0),
+        date: Date(timeIntervalSince1970: Double($0))
+      )
+    }
+
+    let ascending = MessagesProgressiveViewModel.mergingLatestMessages(
+      existing: prepared,
+      latest: latest,
+      reversed: false
+    )
+    let descending = MessagesProgressiveViewModel.mergingLatestMessages(
+      existing: Array(prepared.reversed()),
+      latest: Array(latest.reversed()),
+      reversed: true
+    )
+
+    #expect(ascending.map(\.message.messageId) == [40, 50, 90, 100])
+    #expect(descending.map(\.message.messageId) == [100, 90, 50, 40])
+  }
+
+  @Test("stale generation or window fingerprint cannot overwrite newer metadata")
+  @MainActor
+  func testStaleWindowMetadataIsRejected() {
+    let peer = Peer.user(id: 9_004)
+    let first = makeFullMessage(
+      messageId: 40,
+      globalId: 40,
+      date: Date(timeIntervalSince1970: 40),
+      peerUserId: peer.id
+    )
+    let second = makeFullMessage(
+      messageId: 50,
+      globalId: 50,
+      date: Date(timeIntervalSince1970: 50),
+      peerUserId: peer.id
+    )
+    let initialCoverage = MessageHistoryCoverageProjection(
+      messages: [first],
+      holes: [],
+      olderCandidateMessageID: nil,
+      newerCandidateMessageID: nil
+    )
+    let viewModel = MessagesProgressiveViewModel(
+      peer: peer,
+      initialState: .init(
+        messages: [first],
+        loadedWindowMetadata: .init(messages: [first], holes: [])
+      )
+    )
+
+    let staleFingerprintRequest = viewModel.beginLoadedWindowMetadataRequest()
+    viewModel.messages = [first, second]
+    let staleMetadata = testLoadedWindowMetadata(messages: [first])
+    #expect(!viewModel.applyLoadedWindowMetadata(staleMetadata, for: staleFingerprintRequest))
+    #expect(viewModel.historyCoverage == initialCoverage)
+
+    let staleGenerationRequest = viewModel.beginLoadedWindowMetadataRequest()
+    let currentRequest = viewModel.beginLoadedWindowMetadataRequest()
+    let newerMetadata = testLoadedWindowMetadata(messages: [first, second])
+    #expect(!viewModel.applyLoadedWindowMetadata(newerMetadata, for: staleGenerationRequest))
+
+    let currentCoverage = MessageHistoryCoverageProjection(
+      messages: [first, second],
+      holes: [],
+      olderCandidateMessageID: nil,
+      newerCandidateMessageID: nil
+    )
+    let currentMetadata = MessagesProgressiveViewModel.LoadedWindowMetadata(
+      messages: [first, second],
+      holes: []
+    )
+    #expect(viewModel.applyLoadedWindowMetadata(currentMetadata, for: currentRequest))
+    #expect(viewModel.newestLoadedMessageId == 50)
+    #expect(viewModel.historyCoverage == currentCoverage)
   }
 
   @Test("reversed add reports inserted head index")
@@ -161,10 +460,7 @@ struct MessagesProgressiveViewModelOrderingTests {
     let added = makeFullMessage(messageId: -1_234, globalId: nil, date: date, peerUserId: peer.id)
     let initialState = MessagesProgressiveViewModel.InitialState(
       messages: [existing],
-      oldestLoadedMessageId: existing.message.messageId,
-      newestLoadedMessageId: existing.message.messageId,
-      canLoadOlderFromLocal: false,
-      canLoadNewerFromLocal: false
+      loadedWindowMetadata: testLoadedWindowMetadata(messages: [existing])
     )
     let viewModel = MessagesProgressiveViewModel(
       peer: peer,
@@ -185,6 +481,21 @@ struct MessagesProgressiveViewModelOrderingTests {
     #expect(indexSet == [0])
     #expect(viewModel.messages.map(\.id) == [added.id, existing.id])
   }
+}
+
+private func testLoadedWindowMetadata(
+  messages: [FullMessage] = []
+) -> MessagesProgressiveViewModel.LoadedWindowMetadata {
+  .init(
+    messages: messages,
+    holes: [
+      MessageHistoryHole(
+        chatId: 0,
+        lowerId: 1,
+        upperId: MessageHistoryHole.positiveMessageIDMax
+      ),
+    ]
+  )
 }
 
 private func makeFullMessage(

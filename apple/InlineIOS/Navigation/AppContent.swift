@@ -6,12 +6,12 @@ typealias Router = NavigationModel<AppTab, Destination, Sheet>
 
 enum AppNavigationRequest: Sendable {
   case chat(peer: Peer)
-  case externalChat(peer: Peer, contextSpaceID: Int64?)
+  case externalChat(peer: Peer, contextSpaceID: Int64?, messageID: Int64? = nil)
   case message(peer: Peer, messageID: Int64)
 
   var peer: Peer {
     switch self {
-    case let .chat(peer), let .externalChat(peer, _), let .message(peer, _):
+    case let .chat(peer), let .externalChat(peer, _, _), let .message(peer, _):
       peer
     }
   }
@@ -21,6 +21,7 @@ enum AppNavigationRequest: Sendable {
 final class IOSSceneRouterRegistry {
   private struct Entry {
     weak var router: Router?
+    weak var window: UIWindow?
     var activationOrder: UInt64
     var isActive: Bool
   }
@@ -35,7 +36,7 @@ final class IOSSceneRouterRegistry {
   private var accountUserID: Int64?
 
   func register(_ router: Router, sceneID: UUID, isActive: Bool, accountUserID: Int64?) {
-    entries[sceneID] = Entry(router: router, activationOrder: 0, isActive: isActive)
+    entries[sceneID] = Entry(router: router, window: entries[sceneID]?.window, activationOrder: 0, isActive: isActive)
     establishAccountIfNeeded(accountUserID)
     if isActive {
       activate(sceneID)
@@ -62,9 +63,45 @@ final class IOSSceneRouterRegistry {
     entries.removeValue(forKey: sceneID)
   }
 
+  func attachWindow(_ window: UIWindow?, sceneID: UUID) {
+    if entries[sceneID] != nil {
+      entries[sceneID]?.window = window
+    } else if let window {
+      // UIKit may attach before SwiftUI's onAppear registers the router.
+      entries[sceneID] = Entry(window: window, activationOrder: 0, isActive: false)
+    }
+  }
+
   func hasActiveRouter() -> Bool {
     pruneReleasedRouters()
     return activeRouter != nil
+  }
+
+  func isViewingChat(_ peer: Peer) -> Bool {
+    entries.values.contains { entry in
+      guard entry.isActive, let router = entry.router, router.presentedSheet == nil,
+            let window = entry.window, !window.isHidden,
+            let root = window.rootViewController, !Self.hasPresentedContent(root)
+      else { return false }
+      return router.selectedTabPath.last?.chatPeer == peer
+    }
+  }
+
+  /// Menu commands must not navigate beneath another presentation in this scene.
+  func canPerformNavigation(in sceneID: UUID) -> Bool {
+    guard let entry = entries[sceneID], entry.isActive,
+          let router = entry.router, router.presentedSheet == nil,
+          let window = entry.window, !window.isHidden,
+          let root = window.rootViewController
+    else { return false }
+    return !Self.hasPresentedContent(root)
+  }
+
+  private static func hasPresentedContent(_ controller: UIViewController) -> Bool {
+    if let presented = controller.presentedViewController, !presented.isBeingDismissed { return true }
+    return controller.children.contains { child in
+      child.viewIfLoaded?.window != nil && hasPresentedContent(child)
+    }
   }
 
   /// Reserves ordering before notification context is resolved off the main actor.
@@ -219,7 +256,7 @@ enum Destination: DestinationType, Codable {
   case spaces
   case space(id: Int64)
   case chat(peer: Peer)
-  case externalChat(peer: Peer, contextSpaceID: Int64?)
+  case externalChat(peer: Peer, contextSpaceID: Int64?, messageID: Int64? = nil)
   case chatMessage(peer: Peer, messageID: Int64)
   case chatInfo(chatItem: SpaceChatItem)
   case spaceSettings(spaceId: Int64)
@@ -285,8 +322,8 @@ extension Router {
     switch request {
     case let .chat(peer):
       navigateFromNotification(peer: peer)
-    case let .externalChat(peer, contextSpaceID):
-      navigateFromExternalNotification(peer: peer, contextSpaceID: contextSpaceID)
+    case let .externalChat(peer, contextSpaceID, messageID):
+      navigateFromExternalNotification(peer: peer, contextSpaceID: contextSpaceID, messageID: messageID)
     case let .message(peer, messageID):
       resignFirstResponderForExternalRoute()
       resetTransientPresentation()
@@ -296,9 +333,9 @@ extension Router {
     }
   }
 
-  func navigateFromExternalNotification(peer: Peer, contextSpaceID: Int64?) {
+  func navigateFromExternalNotification(peer: Peer, contextSpaceID: Int64?, messageID: Int64? = nil) {
     let targetTab = selectedTab.experimentalHomeFallbackTab
-    let destination = Destination.externalChat(peer: peer, contextSpaceID: contextSpaceID)
+    let destination = Destination.externalChat(peer: peer, contextSpaceID: contextSpaceID, messageID: messageID)
 
     // External navigation replaces the root stack and any covering sheet. Assign
     // the target path before switching tabs so no stale chat is presented between updates.
@@ -356,7 +393,7 @@ extension Destination {
 
   var chatPeer: Peer? {
     switch self {
-    case let .chat(peer), let .externalChat(peer, _), let .chatMessage(peer, _):
+    case let .chat(peer), let .externalChat(peer, _, _), let .chatMessage(peer, _):
       peer
     case .chats, .archived, .spaces, .space, .chatInfo, .spaceSettings,
          .spaceIntegrations, .integrationOptions, .createSpaceChat, .createThread, .createSpace:

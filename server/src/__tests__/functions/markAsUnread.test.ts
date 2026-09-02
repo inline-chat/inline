@@ -139,6 +139,55 @@ describe("markAsUnread", () => {
     )).rejects.toThrow()
   })
 
+  test("markAsUnread rejects revoked thread access without changing a stale dialog", async () => {
+    const inaccessible = await testUtils.createChat(null, "Revoked unread thread", "thread", false, otherUser.id)
+    if (!inaccessible) throw new Error("Failed to create inaccessible thread")
+    await testUtils.addParticipant(inaccessible.id, otherUser.id)
+    await db.insert(dialogs).values({
+      chatId: inaccessible.id,
+      userId: currentUser.id,
+      open: false,
+      unreadMark: false,
+    })
+    const peer: InputPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(inaccessible.id) } },
+    }
+
+    await expect(markAsUnread({ peer }, context)).rejects.toThrow()
+
+    const [staleDialog] = await db
+      .select({ unreadMark: dialogs.unreadMark })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, inaccessible.id), eq(dialogs.userId, currentUser.id)))
+      .limit(1)
+    expect(staleDialog?.unreadMark).toBe(false)
+  })
+
+  test("readMessages rejects revoked thread access without changing a stale dialog", async () => {
+    const inaccessible = await testUtils.createChat(null, "Revoked read thread", "thread", false, otherUser.id)
+    if (!inaccessible) throw new Error("Failed to create inaccessible thread")
+    await testUtils.addParticipant(inaccessible.id, otherUser.id)
+    await db.insert(dialogs).values({
+      chatId: inaccessible.id,
+      userId: currentUser.id,
+      open: false,
+      unreadMark: true,
+      readInboxMaxId: 0,
+    })
+    const peer: InputPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(inaccessible.id) } },
+    }
+
+    await expect(readMessages({ peer, maxId: 1 }, context)).rejects.toThrow()
+
+    const [staleDialog] = await db
+      .select({ unreadMark: dialogs.unreadMark, readInboxMaxId: dialogs.readInboxMaxId })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, inaccessible.id), eq(dialogs.userId, currentUser.id)))
+      .limit(1)
+    expect(staleDialog).toMatchObject({ unreadMark: true, readInboxMaxId: 0 })
+  })
+
   test("readMessages should set unreadMark to false", async () => {
     // First mark the dialog as unread
     await markAsUnread(

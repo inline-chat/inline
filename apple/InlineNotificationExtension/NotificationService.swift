@@ -1,74 +1,96 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import InlineIntents
 import OSLog
 import Security
 import UIKit
 import UserNotifications
 
-final class NotificationService: UNNotificationServiceExtension {
+final class NotificationService: UNNotificationServiceExtension, @unchecked Sendable {
   private let logger = Logger(subsystem: "chat.inline.InlineNotificationExtension", category: "NotificationService")
-  private var contentHandler: ((UNNotificationContent) -> Void)?
-  private var bestAttemptContent: UNMutableNotificationContent?
-  private var avatarTask: URLSessionDataTask?
+  private let deliveryLock = NSLock()
+  private var currentDelivery: InlineNotificationDelivery?
 
   override func didReceive(
     _ request: UNNotificationRequest,
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
-    self.contentHandler = contentHandler
-    bestAttemptContent = request.content.mutableCopy() as? UNMutableNotificationContent
+    // Install a fallback synchronously: system expiry cannot depend on the main queue.
+    let delivery = InlineNotificationDelivery(content: request.content, handler: contentHandler)
+    let previous = deliveryLock.withLock {
+      let previous = currentDelivery
+      currentDelivery = delivery
+      return previous
+    }
+    previous?.finish()
+    Task { @MainActor in
+      process(request, delivery: delivery)
+    }
+  }
 
-    guard let bestAttemptContent else {
-      contentHandler(request.content)
+  @MainActor
+  private func process(_ request: UNNotificationRequest, delivery: InlineNotificationDelivery) {
+    guard delivery.isPending else { return }
+    guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else {
+      delivery.finish()
+      return
+    }
+    hydrateFromEncryptedContentIfNeeded(content: content)
+    delivery.updateFallback(content)
+
+    // Artwork and intent donation share a total deadline; neither gates text delivery.
+    let deadline = Task.detached {
+      do { try await Task.sleep(for: .seconds(2)) } catch { return }
+      delivery.finish()
+    }
+    delivery.cancelOnFinish { deadline.cancel() }
+
+    guard let sender = SenderPayload(userInfo: content.userInfo) else {
+      delivery.finish()
       return
     }
 
-    hydrateFromEncryptedContentIfNeeded(content: bestAttemptContent)
-
-    let userInfo = bestAttemptContent.userInfo
-    guard let sender = SenderPayload(userInfo: userInfo) else {
-      // No sender metadata; deliver as-is to avoid breaking existing behaviour
-      finish(with: bestAttemptContent)
-      return
-    }
-
-    // If we have an avatar URL, fetch it before finalising; otherwise finish immediately
     if let avatarURL = sender.profilePhotoUrl {
-      logger.info("fetching notification avatar")
-      avatarTask = URLSession.shared.dataTask(with: avatarURL) { [weak self] data, _, error in
-        if error != nil {
-          self?.logger.error("notification avatar download failed")
-        }
-        let imageData: Data? = if let data, UIImage(data: data) != nil {
-          data
-        } else {
-          nil
-        }
-        let avatarSource: InlineMessageIntentDonation.UserAvatar.Source = if let imageData {
-          .imageData(imageData)
-        } else {
-          .configuredPhotoUnavailable
-        }
-        self?.applyIntent(sender: sender, avatarSource: avatarSource)
+      let avatarTask = Task.detached { [weak self] in
+        let data = await InlineNotificationAvatar.data(from: avatarURL)
+        guard !Task.isCancelled, delivery.isPending else { return }
+        // Decode only the bounded data, off the completion/deadline queue.
+        let imageData = Self.avatarImageData(data)
+        await self?.applyIntent(
+          sender: sender, content: content, delivery: delivery,
+          avatarSource: imageData.map { .imageData($0) } ?? .configuredPhotoUnavailable
+        )
       }
-      avatarTask?.resume()
+      delivery.cancelOnFinish { avatarTask.cancel() }
     } else {
-      logger.info("no avatar URL provided")
-      applyIntent(sender: sender, avatarSource: .noPhotoConfigured)
+      applyIntent(
+        sender: sender, content: content, delivery: delivery,
+        avatarSource: sender.fallbackAvatarSource
+      )
     }
   }
 
   override func serviceExtensionTimeWillExpire() {
-    avatarTask?.cancel()
-    guard let bestAttemptContent else { return }
-    finish(with: bestAttemptContent)
+    deliveryLock.withLock { currentDelivery }?.finish()
   }
 }
 
 // MARK: - Private helpers
 
 private extension NotificationService {
+  static func avatarImageData(_ data: Data?) -> Data? {
+    guard let data, data.count <= InlineNotificationAvatar.maximumBytes,
+          let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 128,
+          ] as CFDictionary)
+    else { return nil }
+    return UIImage(cgImage: image).pngData()
+  }
+
   static let pushContentHkdfInfo = Data("inline.push-content.v1".utf8)
   static let pushContentKeychainService = "chat.inline.push-content"
   static let pushContentPrivateKeyAccount = "private-key-v1"
@@ -114,6 +136,7 @@ private extension NotificationService {
       let id: Int
       let displayName: String?
       let profilePhotoUrl: String?
+      let hasProfilePhoto: Bool?
     }
 
     let kind: String
@@ -172,6 +195,9 @@ private extension NotificationService {
       }
       if let profilePhotoUrl = payload.sender.profilePhotoUrl {
         senderInfo["profilePhotoUrl"] = profilePhotoUrl
+      }
+      if let hasProfilePhoto = payload.sender.hasProfilePhoto {
+        senderInfo["hasProfilePhoto"] = hasProfilePhoto
       }
       userInfo["sender"] = senderInfo
       content.userInfo = userInfo
@@ -240,10 +266,11 @@ private extension NotificationService {
     return nil
   }
 
-  struct SenderPayload {
+  struct SenderPayload: Sendable {
     let id: String
     let displayName: String?
     let profilePhotoUrl: URL?
+    let fallbackAvatarSource: InlineMessageIntentDonation.UserAvatar.Source
 
     init?(userInfo: [AnyHashable: Any]) {
       guard let sender = userInfo["sender"] as? [String: Any] else { return nil }
@@ -257,19 +284,28 @@ private extension NotificationService {
       }
 
       displayName = sender["displayName"] as? String
-      if let urlString = sender["profilePhotoUrl"] as? String {
-        profilePhotoUrl = URL(string: urlString)
+      let urlString = sender["profilePhotoUrl"] as? String
+      // Missing metadata is unknown, not proof that this person has no photo.
+      fallbackAvatarSource = InlineNotificationAvatar.fallbackSource(
+        hasProfilePhoto: sender["hasProfilePhoto"] as? Bool,
+        hasPhotoURL: urlString?.isEmpty == false
+      )
+      if let urlString, let url = URL(string: urlString), url.scheme == "https", url.host != nil {
+        profilePhotoUrl = url
       } else {
         profilePhotoUrl = nil
       }
     }
   }
 
+  @MainActor
   func applyIntent(
     sender: SenderPayload,
+    content bestAttemptContent: UNMutableNotificationContent,
+    delivery: InlineNotificationDelivery,
     avatarSource: InlineMessageIntentDonation.UserAvatar.Source
   ) {
-    guard let bestAttemptContent else { return }
+    guard delivery.isPending else { return }
 
     logger.info("applying notification intent")
 
@@ -350,28 +386,25 @@ private extension NotificationService {
       content: bestAttemptContent.body
     )
 
-    Task {
+    let donationTask = Task { @MainActor in
+      guard !Task.isCancelled, delivery.isPending else { return }
       let contentToDeliver: UNNotificationContent
       do {
         let intent = try await InlineMessageIntentDonation.donate(request)
+        guard !Task.isCancelled, delivery.isPending else { return }
         logger.info("notification interaction donation succeeded")
-        let updated = try bestAttemptContent.updating(from: intent)
-        if let mutableUpdated = updated.mutableCopy() as? UNMutableNotificationContent {
-          mutableUpdated.interruptionLevel = bestAttemptContent.interruptionLevel
-          mutableUpdated.sound = bestAttemptContent.sound
-          contentToDeliver = mutableUpdated
-          self.bestAttemptContent = mutableUpdated
-        } else {
-          contentToDeliver = updated
-          self.bestAttemptContent = updated as? UNMutableNotificationContent
-        }
+        contentToDeliver = InlineMessageIntentDonation.preservingNotificationMetadata(
+          from: bestAttemptContent,
+          in: try bestAttemptContent.updating(from: intent)
+        )
         logger.info("notification content updated from intent")
       } catch {
         logger.error("notification interaction donation or content update failed")
         contentToDeliver = bestAttemptContent
       }
-      finish(with: contentToDeliver)
+      delivery.finish(with: contentToDeliver)
     }
+    delivery.cancelOnFinish { donationTask.cancel() }
   }
 
   func senderNameComponents(_ displayName: String?) -> PersonNameComponents {
@@ -389,14 +422,6 @@ private extension NotificationService {
     return isThread
       ? InlineMessageIntentDonation.threadConversationIdentifier(rawValue)
       : InlineMessageIntentDonation.userConversationIdentifier(senderId)
-  }
-
-  func finish(with content: UNNotificationContent) {
-    DispatchQueue.main.async { [weak self] in
-      guard let self, let contentHandler = self.contentHandler else { return }
-      self.contentHandler = nil
-      contentHandler(content)
-    }
   }
 
   func boolValue(_ value: Any?) -> Bool {

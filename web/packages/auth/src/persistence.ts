@@ -111,11 +111,10 @@ export class BrowserAuthSessionPersistence
     if (this.hasLogoutTombstone()) {
       try {
         await this.deleteRecord()
-        this.removeLogoutTombstone()
+        if (this.clearLegacyCredentials()) this.removeLogoutTombstone()
       } catch {
         // The non-secret tombstone remains authoritative on this origin.
       }
-      this.clearLegacyCredentials()
       return { status: "ready", session: null }
     }
 
@@ -174,7 +173,9 @@ export class BrowserAuthSessionPersistence
     this.writeLogoutTombstone()
     try {
       await this.deleteRecord()
-      this.clearLegacyCredentials()
+      if (!this.clearLegacyCredentials()) {
+        throw new Error("Legacy session cleanup is unavailable")
+      }
       this.removeLogoutTombstone()
       this.notifyChanged()
     } catch (error) {
@@ -303,14 +304,17 @@ export class BrowserAuthSessionPersistence
 
   private clearLegacyCredentials() {
     const storage = this.localStorage()
-    if (!storage) return
-    try {
-      storage.removeItem(this.legacyTokenKey)
-      storage.removeItem(this.legacyUserIdKey)
-      storage.removeItem(this.legacyRecordKey)
-    } catch {
-      // IndexedDB remains canonical even if legacy cleanup is unavailable.
+    if (!storage) return false
+    let cleared = true
+    for (const key of [this.legacyTokenKey, this.legacyUserIdKey, this.legacyRecordKey]) {
+      try {
+        storage.removeItem(key)
+        if (storage.getItem(key) !== null) cleared = false
+      } catch {
+        cleared = false
+      }
     }
+    return cleared
   }
 
   private hasLogoutTombstone() {

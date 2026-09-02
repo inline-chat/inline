@@ -1,11 +1,43 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { db, schema } from "@in/server/db"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { setupTestLifecycle, testUtils } from "../setup"
+import { connectionManager } from "@in/server/ws/connections"
 
 describe("SessionsModel push sessions", () => {
   setupTestLifecycle()
+
+  test("concurrent same-device login replaces authority atomically", async () => {
+    const user = await testUtils.createUser("session-race@example.com")
+    const close = spyOn(connectionManager, "closeConnectionForSession")
+    try {
+      const results = await Promise.all(Array.from({ length: 2 }, () =>
+        testUtils.createSessionForUser(user.id, { deviceId: "same-device" })))
+      const rows = await db.select().from(schema.sessions).where(eq(schema.sessions.userId, user.id))
+      expect(results).toHaveLength(2)
+      expect(rows).toHaveLength(2)
+      expect(rows.filter((row) => !row.revoked)).toHaveLength(1)
+      const revoked = rows.find((row) => row.revoked)!
+      expect(revoked.deviceId).toBeNull()
+      expect(close).toHaveBeenCalledWith(user.id, revoked.id, { authenticationInvalidated: true }, undefined)
+    } finally {
+      close.mockRestore()
+    }
+  })
+
+  test("failed replacement insert preserves the previous live authority", async () => {
+    const user = await testUtils.createUser("session-rollback@example.com")
+    const previous = await testUtils.createSessionForUser(user.id, { deviceId: "rollback-device" })
+    await expect(SessionsModel.create({
+      userId: user.id, deviceId: "rollback-device", tokenHash: "x".repeat(65), personalData: {}, clientType: "web",
+    })).rejects.toThrow()
+    const rows = await db.select().from(schema.sessions).where(eq(schema.sessions.userId, user.id))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.id).toBe(previous.session.id)
+    expect(rows[0]?.revoked).toBeNull()
+    expect(rows[0]?.deviceId).toBe("rollback-device")
+  })
 
   test("returns only non-revoked iOS sessions with push tokens", async () => {
     const user = await testUtils.createUser("push-sessions@test.com")
