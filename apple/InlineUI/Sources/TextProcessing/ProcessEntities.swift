@@ -234,13 +234,9 @@ public class ProcessEntities {
       return attributedString
     }
 
+    let nsText = text as NSString
     for entity in entities.entities {
-      let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
-
-      // Validate range is within bounds
-      guard range.location >= 0, range.location + range.length <= text.utf16.count else {
-        continue
-      }
+      guard let range = validatedRange(of: entity, in: nsText) else { continue }
 
       switch entity.type {
         case .url:
@@ -487,6 +483,21 @@ public class ProcessEntities {
             .italic: true,
           ], range: range)
 
+        case .underline, .strikethrough, .highlight:
+          if let style = InlineTextStyle.allCases.first(where: { $0.entityType == entity.type }) {
+            attributedString.addAttribute(style.marker, value: true, range: range)
+          }
+
+        case .math:
+          // Keep editor/draft text in canonical UTF-16 coordinates. Formula
+          // attachments belong only in the later display projection.
+          // A stable per-source range value keeps adjacent formulas distinct
+          // when Foundation coalesces runs. Extraction uses the actual run range.
+          attributedString.addAttribute(.richTextMath, value: NSValue(range: range), range: range)
+          if case let .math(metadata)? = entity.entity, metadata.display {
+            attributedString.addAttribute(.richTextMathDisplay, value: true, range: range)
+          }
+
         case .code:
           // monospace font with custom marker
           let monospaceFont = createMonospaceFont(
@@ -531,7 +542,25 @@ public class ProcessEntities {
       }
     }
 
+    // Link attributes clear incidental underlines. Intentional styles win regardless of entity order.
+    InlineTextStyle.reapply(to: attributedString)
     return attributedString
+  }
+
+  private static func validatedRange(of entity: MessageEntity, in text: NSString) -> NSRange? {
+    guard entity.offset >= 0, entity.length > 0,
+          entity.offset <= Int64(text.length),
+          entity.length <= Int64(text.length) - entity.offset
+    else { return nil }
+    let start = Int(entity.offset)
+    let end = start + Int(entity.length)
+    func splitsSurrogate(_ position: Int) -> Bool {
+      position > 0 && position < text.length
+        && (0xD800 ... 0xDBFF).contains(text.character(at: position - 1))
+        && (0xDC00 ... 0xDFFF).contains(text.character(at: position))
+    }
+    guard !splitsSurrogate(start), !splitsSurrogate(end) else { return nil }
+    return NSRange(location: start, length: end - start)
   }
 
   private static func threadLinkAttributes(
@@ -605,6 +634,9 @@ public class ProcessEntities {
     var text = attributedString.string
     let nsText = attributedString.string as NSString
     var entities: [MessageEntity] = []
+    // Complete oversized math is literal source, but must stay opaque during this extraction.
+    // This metadata is revision-local and never becomes a protobuf entity.
+    var opaqueMathRanges: [NSRange] = []
     let fullRange = NSRange(location: 0, length: attributedString.length)
 
     // Extract mention entities first (before text modification)
@@ -847,6 +879,30 @@ public class ProcessEntities {
       }
     }
 
+    attributedString.enumerateAttribute(.richTextMath, in: fullRange) { value, range, _ in
+      guard value is NSValue else { return }
+      entities.append(MessageEntity.with {
+        $0.type = .math
+        $0.offset = Int64(range.location)
+        $0.length = Int64(range.length)
+        if attributedString.attribute(.richTextMathDisplay, at: range.location, effectiveRange: nil) as? Bool == true {
+          $0.math = .with { $0.display = true }
+        }
+      })
+    }
+
+    // Only semantic markers become styles; pasted colors and incidental link underlines do not.
+    for style in InlineTextStyle.allCases {
+      attributedString.enumerateAttribute(style.marker, in: fullRange) { value, range, _ in
+        guard value as? Bool == true else { return }
+        entities.append(MessageEntity.with {
+          $0.type = style.entityType
+          $0.offset = Int64(range.location)
+          $0.length = Int64(range.length)
+        })
+      }
+    }
+
     // Extract inline code entities from custom attribute
     attributedString.enumerateAttribute(
       .inlineCode,
@@ -944,35 +1000,50 @@ public class ProcessEntities {
     }
 
     if parseMarkdown {
+      entities = extractMathFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
+
       // Extract pre code entities from ```text``` markdown syntax and update all entity offsets
-      // NOTE: This must come FIRST to establish all code blocks before other markdown parsing
-      entities = extractPreFromMarkdown(text: &text, existingEntities: entities)
+      // The math scan already honors code precedence; TeX itself now shields code-like syntax.
+      entities = extractPreFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
 
       // Extract inline code entities from `text` markdown syntax and update all entity offsets
       // NOTE: This must come SECOND to avoid interference with pre code blocks
-      entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
+      entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
 
       // Extract markdown links after code so code spans shield their contents from link parsing.
-      entities = extractLinksFromMarkdown(text: &text, existingEntities: entities)
+      entities = extractLinksFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
+
+      entities = extractAdditionalStylesFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
 
       // Extract bold entities from **text** markdown syntax and update all entity offsets
       // NOTE: Only extract if not within code blocks
-      entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
+      entities = extractBoldFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
 
       // Extract italic entities from _text_ markdown syntax and update all entity offsets
       // NOTE: Only extract if not within code blocks
-      entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
+      entities = extractItalicFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
 
       if let threadLinkSpaceId, threadLinkSpaceId >= 0 {
-        entities = extractThreadTitleLinks(text: &text, spaceId: threadLinkSpaceId, existingEntities: entities)
+        entities = extractThreadTitleLinks(text: &text, spaceId: threadLinkSpaceId, existingEntities: entities, opaqueRanges: opaqueMathRanges)
+      }
+    }
+
+    // Explicit styles and typed Markdown can describe the same visible span after remapping.
+    var seenStyles = Set<MessageEntity>()
+    entities.removeAll { entity in
+      switch entity.type {
+        case .bold, .italic, .underline, .strikethrough, .highlight:
+          return !seenStyles.insert(entity).inserted
+        default:
+          return false
       }
     }
 
     // Detect whole URLs before email/phone substrings inside their paths or queries.
-    entities = extractMissingURLEntities(text: text, existingEntities: entities)
-    entities = extractBotCommandEntities(text: text, existingEntities: entities)
-    entities = extractEmailEntities(text: text, existingEntities: entities)
-    entities = extractPhoneNumberEntities(text: text, existingEntities: entities)
+    entities = extractMissingURLEntities(text: text, existingEntities: entities, opaqueRanges: opaqueMathRanges)
+    entities = extractBotCommandEntities(text: text, existingEntities: entities, opaqueRanges: opaqueMathRanges)
+    entities = extractEmailEntities(text: text, existingEntities: entities, opaqueRanges: opaqueMathRanges)
+    entities = extractPhoneNumberEntities(text: text, existingEntities: entities, opaqueRanges: opaqueMathRanges)
 
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
@@ -986,18 +1057,20 @@ public class ProcessEntities {
   /// Paste/send must not depend on a platform data detector running after a delimiter.
   private static func extractMissingURLEntities(
     text: String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: [NSRange]
   ) -> [MessageEntity] {
     let protected = existingEntities.filter { entity in
       switch entity.type {
-      case .bold, .italic: false
+      case .bold, .italic, .underline, .strikethrough, .highlight: false
       default: true
       }
     }
     let source = NSAttributedString(string: text)
     let detected = ComposeLinkPaste.links(in: source, range: NSRange(location: 0, length: source.length))
       .compactMap { match -> MessageEntity? in
-      guard !protected.contains(where: { rangesOverlap(lhs: $0, rhs: match.range) })
+      guard !protected.contains(where: { rangesOverlap(lhs: $0, rhs: match.range) }),
+            !opaqueRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 })
       else { return nil }
       return MessageEntity.with {
         $0.type = .url
@@ -1318,10 +1391,10 @@ public class ProcessEntities {
     entities.sort { $0.offset < $1.offset }
   }
 
-  /// Check if a given position is within any code block or pre entity
+  /// Code and TeX source must remain opaque to Markdown and semantic detectors.
   private static func isPositionWithinCodeBlock(position: Int, entities: [MessageEntity]) -> Bool {
     for entity in entities {
-      if entity.type == .code || entity.type == .pre {
+      if entity.type == .code || entity.type == .pre || entity.type == .math {
         let start = Int(entity.offset)
         let end = start + Int(entity.length)
         if position >= start, position < end {
@@ -1330,6 +1403,26 @@ public class ProcessEntities {
       }
     }
     return false
+  }
+
+  /// Recognition uses a mask, but extraction always slices the original text.
+  /// Keeping UTF-16 length and line endings preserves source ranges and prevents
+  /// markers inside TeX or literal HTML tokens from closing outer formatting.
+  private static func markdownSyntaxMask(_ text: String, entities: [MessageEntity], opaqueRanges: [NSRange]) -> String {
+    let nsText = text as NSString
+    let protected = entities.filter { $0.type == .code || $0.type == .pre || $0.type == .math }
+      .compactMap { validatedRange(of: $0, in: nsText) } + opaqueRanges
+    let ranges = entities.filter { $0.type == .math }.compactMap { validatedRange(of: $0, in: nsText) } + opaqueRanges
+      + InlineMathMarkdown.literalHTMLRanges(in: text, protectedRanges: protected)
+    guard !ranges.isEmpty else { return text }
+    let masked = NSMutableString(string: text)
+    for range in ranges {
+      let units = nsText.substring(with: range).utf16.map { unit in
+        unit == 10 || unit == 13 ? unit : UInt16(120)
+      }
+      masked.replaceCharacters(in: range, with: String(decoding: units, as: UTF16.self))
+    }
+    return masked as String
   }
 
   private struct OffsetRemoval {
@@ -1355,7 +1448,8 @@ public class ProcessEntities {
 
   private static func extractBotCommandEntities(
     text: String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: [NSRange]
   ) -> [MessageEntity] {
     guard !text.isEmpty else { return existingEntities }
 
@@ -1370,6 +1464,7 @@ public class ProcessEntities {
       }
 
       if !isPositionWithinCodeBlock(position: commandRange.location, entities: entities),
+         !opaqueRanges.contains(where: { NSIntersectionRange($0, commandRange).length > 0 }),
          !entities.contains(where: { rangesOverlap(lhs: $0, rhs: commandRange) })
       {
         var entity = MessageEntity()
@@ -1446,7 +1541,8 @@ public class ProcessEntities {
 
   private static func extractEmailEntities(
     text: String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: [NSRange]
   ) -> [MessageEntity] {
     guard !text.isEmpty else { return existingEntities }
 
@@ -1457,7 +1553,8 @@ public class ProcessEntities {
     for match in matches {
       guard match.range.length > 0 else { continue }
 
-      if isPositionWithinCodeBlock(position: match.range.location, entities: entities) {
+      if isPositionWithinCodeBlock(position: match.range.location, entities: entities)
+        || opaqueRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
         continue
       }
 
@@ -1477,7 +1574,8 @@ public class ProcessEntities {
 
   private static func extractPhoneNumberEntities(
     text: String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: [NSRange]
   ) -> [MessageEntity] {
     guard !text.isEmpty else { return existingEntities }
 
@@ -1489,7 +1587,8 @@ public class ProcessEntities {
     for match in matches {
       guard match.range.length > 0 else { continue }
 
-      if isPositionWithinCodeBlock(position: match.range.location, entities: entities) {
+      if isPositionWithinCodeBlock(position: match.range.location, entities: entities)
+        || opaqueRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
         continue
       }
 
@@ -1521,7 +1620,7 @@ public class ProcessEntities {
     guard rangesOverlap(lhs: entity, rhs: range) else { return false }
 
     switch entity.type {
-      case .bold, .italic:
+      case .bold, .italic, .underline, .strikethrough, .highlight:
         return false
       default:
         return true
@@ -1550,6 +1649,16 @@ public class ProcessEntities {
       entities[i].offset = Int64(max(0, entityOffset - offsetAdjustment))
       entities[i].length = Int64(max(0, entityLength - lengthAdjustment))
     }
+  }
+
+  private static func applyOffsetRemovals(_ ranges: inout [NSRange], removals: [OffsetRemoval]) {
+    guard !removals.isEmpty else { return }
+    ranges = ranges.map { range in
+      NSRange(
+        location: range.location - totalRemovedCharacters(before: range.location, removals: removals),
+        length: range.length - totalRemovedCharacters(in: range, removals: removals)
+      )
+    }.filter { $0.length > 0 }
   }
 
   private static func totalRemovedCharacters(in range: NSRange, removals: [OffsetRemoval]) -> Int {
@@ -1584,6 +1693,17 @@ public class ProcessEntities {
       let entityOffset = Int(entities[i].offset)
       let adjustment = totalOffsetAdjustment(before: entityOffset, adjustments: adjustments)
       entities[i].offset = Int64(max(0, entityOffset + adjustment))
+    }
+  }
+
+  private static func applyOffsetAdjustments(_ ranges: inout [NSRange], adjustments: [OffsetAdjustment]) {
+    guard !adjustments.isEmpty else { return }
+    // Code extraction cannot rewrite an opaque formula; only its preceding text changes.
+    ranges = ranges.map { range in
+      NSRange(
+        location: range.location + totalOffsetAdjustment(before: range.location, adjustments: adjustments),
+        length: range.length
+      )
     }
   }
 
@@ -1641,10 +1761,91 @@ public class ProcessEntities {
     #endif
   }
 
+  /// Extract typed math before Markdown, with code precedence and literal oversized fallback.
+  private static func extractMathFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
+  ) -> [MessageEntity] {
+    guard text.contains("$") else { return existingEntities }
+    let nsText = text as NSString
+    let protected = existingEntities.filter { $0.type == .code || $0.type == .pre || $0.type == .math }
+      .compactMap { validatedRange(of: $0, in: nsText) }
+    let matches = InlineMathMarkdown.matches(in: text, protectedRanges: protected)
+    guard !matches.isEmpty else { return existingEntities }
+    let supported = matches.filter(\.isSupported)
+    opaqueRanges = matches.filter { !$0.isSupported }.map(\.range)
+    let removals = supported.flatMap { match in
+      [
+        OffsetRemoval(position: match.range.location, length: match.content.location - match.range.location),
+        OffsetRemoval(position: NSMaxRange(match.content), length: NSMaxRange(match.range) - NSMaxRange(match.content)),
+      ]
+    }
+    let preserved = existingEntities.filter { entity in
+      switch entity.type {
+        case .bold, .italic, .underline, .strikethrough, .highlight:
+          // Outer formatting may wrap a formula; its interior is opaque TeX.
+          return matches.allSatisfy { match in
+            !rangesOverlap(lhs: entity, rhs: match.range)
+              || (entity.offset <= Int64(match.range.location)
+                && entity.offset + entity.length >= Int64(NSMaxRange(match.range)))
+          }
+        default: return !matches.contains { rangesOverlap(lhs: entity, rhs: $0.range) }
+      }
+    }
+    var entities = preserved + supported.map { match in
+      MessageEntity.with {
+        $0.type = .math
+        $0.offset = Int64(match.content.location)
+        $0.length = Int64(match.content.length)
+        if match.blockDisplay { $0.math = .with { $0.display = true } }
+      }
+    }
+    let output = NSMutableString(string: text)
+    for removal in removals.sorted(by: { $0.position > $1.position }) {
+      output.deleteCharacters(in: NSRange(location: removal.position, length: removal.length))
+    }
+    text = output as String
+    applyOffsetRemovals(&entities, removals: removals)
+    applyOffsetRemovals(&opaqueRanges, removals: removals)
+    return entities.filter { $0.length > 0 }
+  }
+
+  /// Remove only complete additive style markers and remap explicit entities through the removals.
+  private static func extractAdditionalStylesFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
+  ) -> [MessageEntity] {
+    let nsText = text as NSString
+    let codeRanges = existingEntities.filter { $0.type == .code || $0.type == .pre }
+      .compactMap { validatedRange(of: $0, in: nsText) }
+    let matches = InlineStyleMarkdown.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), codeRanges: codeRanges)
+    guard !matches.isEmpty else { return existingEntities }
+    let removals = matches.flatMap { [$0.opening, $0.closing] }
+      .map { OffsetRemoval(position: $0.location, length: $0.length) }
+    var entities = existingEntities + matches.map { match in
+      MessageEntity.with {
+        $0.type = match.entityType
+        $0.offset = Int64(match.content.location)
+        $0.length = Int64(match.content.length)
+      }
+    }
+    let output = NSMutableString(string: text)
+    for removal in removals.sorted(by: { $0.position > $1.position }) {
+      output.deleteCharacters(in: NSRange(location: removal.position, length: removal.length))
+    }
+    text = output as String
+    applyOffsetRemovals(&entities, removals: removals)
+    applyOffsetRemovals(&opaqueRanges, removals: removals)
+    return entities.filter { $0.length > 0 }
+  }
+
   /// Extract bold entities from **text** markdown syntax
   private static func extractBoldFromMarkdown(
     text: inout String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var boldEntities: [MessageEntity] = []
@@ -1652,7 +1853,7 @@ public class ProcessEntities {
     do {
       let regex = try NSRegularExpression(pattern: boldTextPattern, options: [])
       let nsText = text as NSString
-      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid offset issues when removing ** markers
       var removals: [OffsetRemoval] = []
@@ -1701,6 +1902,7 @@ public class ProcessEntities {
       }
 
       applyOffsetRemovals(&allEntities, removals: removals)
+      applyOffsetRemovals(&opaqueRanges, removals: removals)
       applyOffsetRemovals(&boldEntities, removals: removals)
 
       // Add bold entities to the list
@@ -1715,7 +1917,8 @@ public class ProcessEntities {
 
   private static func extractInlineCodeFromMarkdown(
     text: inout String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var inlineCodeEntities: [MessageEntity] = []
@@ -1723,7 +1926,7 @@ public class ProcessEntities {
     do {
       let regex = try NSRegularExpression(pattern: inlineCodePattern, options: [])
       let nsText = text as NSString
-      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid offset issues when removing ` markers
       var removals: [OffsetRemoval] = []
@@ -1772,6 +1975,7 @@ public class ProcessEntities {
       }
 
       applyOffsetRemovals(&allEntities, removals: removals)
+      applyOffsetRemovals(&opaqueRanges, removals: removals)
       applyOffsetRemovals(&inlineCodeEntities, removals: removals)
 
       // Add inline code entities to the list
@@ -1880,11 +2084,12 @@ public class ProcessEntities {
 
   private static func extractLinksFromMarkdown(
     text: inout String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var textUrlEntities: [MessageEntity] = []
-    let matches = findMarkdownLinkMatches(in: text)
+    let matches = findMarkdownLinkMatches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges))
 
     guard !matches.isEmpty else { return allEntities }
 
@@ -1892,6 +2097,20 @@ public class ProcessEntities {
 
     for match in matches.reversed() {
       if isPositionWithinCodeBlock(position: match.fullRange.location, entities: allEntities) {
+        continue
+      }
+
+      // A math marker in a URL destination is source, never a masked URL payload.
+      let syntaxRanges = [
+        NSRange(location: match.fullRange.location, length: match.textRange.location - match.fullRange.location),
+        NSRange(location: NSMaxRange(match.textRange), length: NSMaxRange(match.fullRange) - NSMaxRange(match.textRange)),
+      ]
+      let mathRanges = allEntities.filter { $0.type == .math }
+        .compactMap { validatedRange(of: $0, in: text as NSString) } + opaqueRanges
+      guard !syntaxRanges.contains(where: { syntax in mathRanges.contains { NSIntersectionRange(syntax, $0).length > 0 } })
+      else {
+        // Keep the unparsed destination intact during all subsequent style passes.
+        opaqueRanges.append(contentsOf: syntaxRanges)
         continue
       }
 
@@ -1937,6 +2156,7 @@ public class ProcessEntities {
     }
 
     applyOffsetRemovals(&allEntities, removals: removals)
+    applyOffsetRemovals(&opaqueRanges, removals: removals)
     applyOffsetRemovals(&textUrlEntities, removals: removals)
     allEntities.append(contentsOf: textUrlEntities)
     return allEntities
@@ -1945,7 +2165,8 @@ public class ProcessEntities {
   private static func extractThreadTitleLinks(
     text: inout String,
     spaceId: Int64,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: [NSRange]
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var threadEntities: [MessageEntity] = []
@@ -1961,6 +2182,8 @@ public class ProcessEntities {
       if allEntities.contains(where: { blocksThreadTitleLinkExtraction(entity: $0, range: match.fullRange) }) {
         continue
       }
+
+      if opaqueRanges.contains(where: { NSIntersectionRange($0, match.fullRange).length > 0 }) { continue }
 
       var entity = MessageEntity()
       entity.type = .threadTitle
@@ -2056,7 +2279,8 @@ public class ProcessEntities {
 
   private static func extractPreFromMarkdown(
     text: inout String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var preEntities: [MessageEntity] = []
@@ -2064,7 +2288,7 @@ public class ProcessEntities {
     do {
       let regex = try NSRegularExpression(pattern: preBlockPattern, options: [.dotMatchesLineSeparators])
       let nsText = text as NSString
-      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid index invalidation while editing the text.
       var adjustments: [OffsetAdjustment] = []
@@ -2189,6 +2413,7 @@ public class ProcessEntities {
       }
 
       applyOffsetAdjustments(&allEntities, adjustments: adjustments)
+      applyOffsetAdjustments(&opaqueRanges, adjustments: adjustments)
       applyOffsetAdjustments(&preEntities, adjustments: adjustments)
 
       // Add pre entities to the list
@@ -2203,7 +2428,8 @@ public class ProcessEntities {
 
   private static func extractItalicFromMarkdown(
     text: inout String,
-    existingEntities: [MessageEntity]
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var italicEntities: [MessageEntity] = []
@@ -2213,7 +2439,7 @@ public class ProcessEntities {
         options: []
       )
       let nsText = text as NSString
-      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid offset issues when removing _ markers
       var removals: [OffsetRemoval] = []
@@ -2274,6 +2500,7 @@ public class ProcessEntities {
       }
 
       applyOffsetRemovals(&allEntities, removals: removals)
+      applyOffsetRemovals(&opaqueRanges, removals: removals)
       applyOffsetRemovals(&italicEntities, removals: removals)
 
       // Add italic entities to the list

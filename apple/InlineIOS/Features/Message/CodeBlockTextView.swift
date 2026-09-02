@@ -9,6 +9,32 @@ final class CodeBlockTextView: UITextView {
   var codeBlockStyle = CodeBlockStyle.block
   var inlineCodeStyle = CodeBlockStyle.inline
 
+  override var attributedText: NSAttributedString! {
+    get { super.attributedText }
+    set {
+      let previous = super.attributedText
+      let selection = selectedRange
+      super.attributedText = newValue
+      if let previous, let newValue,
+         RichTextMath.containsRenderedMath(previous) || RichTextMath.containsRenderedMath(newValue),
+         let mapped = RichTextMath.remapSelection(selection, from: previous, to: newValue) {
+        selectedRange = mapped
+      }
+    }
+  }
+
+  override func copy(_ sender: Any?) {
+    guard let text = attributedText, RichTextMath.containsRenderedMath(text, range: selectedRange),
+          let source = RichTextMath.sourceAttributedText(text, range: selectedRange)
+    else { super.copy(sender); return }
+    var item: [String: Any] = ["public.utf8-plain-text": source.string]
+    if let rtf = try? source.data(from: NSRange(location: 0, length: source.length),
+                                  documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
+      item["public.rtf"] = rtf
+    }
+    UIPasteboard.general.items = [item]
+  }
+
   override func draw(_ rect: CGRect) {
     drawCodeBlocks(in: rect)
     drawInlineCode(in: rect)

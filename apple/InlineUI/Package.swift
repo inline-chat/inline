@@ -34,6 +34,7 @@ let package = Package(
 
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
+    .package(path: "../InlineMath"),
     .package(url: "https://github.com/onevcat/Kingfisher", from: "7.0.0"),
   ],
 
@@ -89,7 +90,7 @@ let package = Package(
 
     .target(
       name: "TextProcessing",
-      dependencies: baseDependencies + ["EmojiAutocomplete"],
+      dependencies: baseDependencies + ["EmojiAutocomplete", .product(name: "InlineMath", package: "InlineMath")],
       swiftSettings: swiftSettings
     ),
 

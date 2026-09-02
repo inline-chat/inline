@@ -1,4 +1,5 @@
 import AppKit
+import TextProcessing
 
 protocol RichBlockTextMenuProviding: AnyObject {
   func richBlockTextMenu(
@@ -57,11 +58,12 @@ final class RichBlockTextSurface: NSView {
     onEntityClick: @escaping (MessageTextEntityHit, NSAttributedString) -> Bool
   ) {
     let textChanged = !self.text.isEqual(to: text)
-    let preservedSelections = textChanged ? clampedSelections(to: text.length) : []
+    let preservedSelections = textChanged ? preservedSelections(in: text) : []
     if textChanged {
       renderRevision &+= 1
     }
     self.text = text
+    label.setAccessibilityValue(RichTextMath.containsRenderedMath(text) ? RichTextMath.sourceText(text) : nil)
     label.linkTextAttributes = [
       .foregroundColor: linkColor,
       .cursor: NSCursor.pointingHand,
@@ -98,14 +100,30 @@ final class RichBlockTextSurface: NSView {
     }
   }
 
-  private func clampedSelections(to textLength: Int) -> [NSValue] {
-    label.selectedRanges.compactMap { value in
+  private func preservedSelections(in nextText: NSAttributedString) -> [NSValue] {
+    let textLength = nextText.length
+    return label.selectedRanges.compactMap { value -> NSValue? in
       let range = value.rangeValue
       guard range.location != NSNotFound else { return nil }
+      if let mapped = RichTextMath.remapSelection(range, from: text, to: nextText) {
+        return NSValue(range: mapped)
+      }
       let location = min(max(0, range.location), textLength)
       let length = min(max(0, range.length), textLength - location)
-      return NSValue(range: NSRange(location: location, length: length))
+      let clamped = NSRange(location: location, length: length)
+      guard isUTF16Boundary(clamped.location, in: nextText),
+            isUTF16Boundary(NSMaxRange(clamped), in: nextText)
+      else { return nil }
+      return NSValue(range: clamped)
     }
+  }
+
+  private func isUTF16Boundary(_ offset: Int, in text: NSAttributedString) -> Bool {
+    guard offset >= 0, offset <= text.length else { return false }
+    guard offset > 0, offset < text.length else { return true }
+    let source = text.string as NSString
+    return !((0xD800 ... 0xDBFF).contains(source.character(at: offset - 1))
+      && (0xDC00 ... 0xDFFF).contains(source.character(at: offset)))
   }
 
   override func layout() {

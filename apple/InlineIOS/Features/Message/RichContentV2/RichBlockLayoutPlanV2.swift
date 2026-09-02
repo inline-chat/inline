@@ -1,4 +1,5 @@
 import InlineKit
+import TextProcessing
 import UIKit
 
 enum RichBlockTextRoleV2: Hashable {
@@ -10,6 +11,7 @@ enum RichBlockTextRoleV2: Hashable {
 }
 
 enum RichBlockRenderKindV2: Hashable {
+  case math
   case text
   case listMarker
   case code
@@ -41,6 +43,11 @@ struct RichBlockLayoutPlanV2: Hashable {
     let gutterWidth: CGFloat
     let lineCount: Int
     let contentWidth: CGFloat
+  }
+
+  struct MathNode: Hashable {
+    let range: NSRange
+    let imageSize: CGSize?
   }
 
   struct ImageNode: Hashable {
@@ -84,6 +91,7 @@ struct RichBlockLayoutPlanV2: Hashable {
   }
 
   enum NodeKind: Hashable {
+    case math(MathNode)
     case text(TextNode)
     case code(CodeNode)
     case separator
@@ -100,6 +108,7 @@ struct RichBlockLayoutPlanV2: Hashable {
 
     var reuseKind: RichBlockRenderKindV2 {
       switch kind {
+        case .math: .math
         case let .text(text):
           switch text.role {
             case .listMarker: .listMarker
@@ -117,6 +126,20 @@ struct RichBlockLayoutPlanV2: Hashable {
   }
 
   let size: CGSize
+  let mathSignature: Int
+  /// Keep measured readiness until view binding, outside the geometry cache.
+  var mathSnapshot: RichTextMath.Snapshot? = nil
   let nodes: [Node]
   let trailingTextLine: TrailingTextLine?
+
+  // Snapshot ownership is separate from the geometry's mathSignature.
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.size == rhs.size && lhs.mathSignature == rhs.mathSignature
+      && lhs.nodes == rhs.nodes && lhs.trailingTextLine == rhs.trailingTextLine
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(size); hasher.combine(mathSignature)
+    hasher.combine(nodes); hasher.combine(trailingTextLine)
+  }
 }

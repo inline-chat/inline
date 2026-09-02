@@ -319,6 +319,13 @@ public extension NSAttributedString.Key {
   static let inlineCode = NSAttributedString.Key("inlineCode")
   static let preCode = NSAttributedString.Key("preCode")
   static let italic = NSAttributedString.Key("italic")
+  static let richTextUnderline = NSAttributedString.Key("richTextUnderline")
+  static let richTextStrikethrough = NSAttributedString.Key("richTextStrikethrough")
+  static let richTextHighlight = NSAttributedString.Key("richTextHighlight")
+  /// Canonical TeX source, independent of any presentation-only attachment.
+  static let richTextMath = NSAttributedString.Key("richTextMath")
+  /// Present only for TeX entered with display delimiters (`$$...$$`).
+  static let richTextMathDisplay = NSAttributedString.Key("richTextMathDisplay")
   static let codeBlock = NSAttributedString.Key("codeBlock")
   static let codeBlockBackground = NSAttributedString.Key("codeBlockBackground")
   static let inlineCodeBackground = NSAttributedString.Key("inlineCodeBackground")

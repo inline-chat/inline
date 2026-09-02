@@ -2,6 +2,7 @@ import InlineIOSUI
 import InlineKit
 import InlineProtocol
 import InlineUI
+import TextProcessing
 import UIKit
 
 private func richTextCharacterIndex(
@@ -62,6 +63,7 @@ struct RichBlockImageGallerySelectionV2 {
 }
 
 private struct RichBlockRenderContextV2 {
+  let math: RichTextMath.Snapshot
   let attributedText: NSAttributedString
   let baseFontSize: CGFloat
   let palette: RichBlockPaletteV2
@@ -70,7 +72,7 @@ private struct RichBlockRenderContextV2 {
   let onEntityTap: (NSAttributedString, Int) -> Void
   let onImageTap: (RichBlockImageGallerySelectionV2) -> Void
 
-  func text(for node: RichBlockLayoutPlanV2.TextNode) -> NSAttributedString {
+  func text(for node: RichBlockLayoutPlanV2.TextNode, maximumWidth: CGFloat? = nil) -> NSAttributedString {
     if let literal = node.literal {
       return NSAttributedString(
         string: literal,
@@ -85,7 +87,9 @@ private struct RichBlockRenderContextV2 {
       range: node.range,
       role: node.role,
       baseFontSize: baseFontSize,
-      isRTL: node.isRTL
+      isRTL: node.isRTL,
+      math: math,
+      maximumWidth: maximumWidth
     ) ?? NSAttributedString(string: "")
   }
 }
@@ -117,6 +121,122 @@ private protocol RichBlockEntityHittableV2: AnyObject {
 
 private protocol RichBlockTextSurfaceProvidingV2: AnyObject {
   var textSurface: UITextView { get }
+}
+
+private final class RichBlockMathNodeViewV2: RichBlockRenderableViewV2 {
+  private let sourceView = CodeBlockTextView()
+  private let scrollView = UIScrollView()
+  private let imageView = UIImageView()
+  private let progress = UIActivityIndicatorView(style: .medium)
+  private var request: RichTextMath.Request?
+  private var imageSize: CGSize?
+  private var source = ""
+
+  init() {
+    super.init(.math)
+    sourceView.backgroundColor = .clear
+    sourceView.isEditable = false
+    sourceView.isSelectable = true
+    sourceView.isScrollEnabled = false
+    sourceView.textContainerInset = .zero
+    sourceView.textContainer.lineFragmentPadding = 0
+    sourceView.dataDetectorTypes = []
+    scrollView.showsHorizontalScrollIndicator = true
+    scrollView.showsVerticalScrollIndicator = false
+    scrollView.alwaysBounceVertical = false
+    imageView.contentMode = .scaleToFill
+    scrollView.addSubview(imageView)
+    addSubview(sourceView)
+    addSubview(scrollView)
+    addSubview(progress)
+    isAccessibilityElement = false
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  override func apply(node: RichBlockLayoutPlanV2.Node, context: RichBlockRenderContextV2) {
+    guard case let .math(math) = node.kind,
+          math.range.location >= 0, math.range.length >= 0,
+          math.range.location <= context.attributedText.length,
+          math.range.length <= context.attributedText.length - math.range.location
+    else { prepareForReuse(); return }
+    source = (context.attributedText.string as NSString).substring(with: math.range)
+    let next = RichTextMath.request(
+      text: context.attributedText,
+      range: math.range,
+      fontSize: context.baseFontSize
+    )
+    if request != next {
+      imageView.image = nil
+      scrollView.contentOffset = .zero
+    }
+    request = next
+    imageSize = math.imageSize
+    if let image = context.math.image(for: math.range) {
+      imageView.image = UIImage(cgImage: image.image, scale: image.scale, orientation: .up)
+    }
+    let rendered = math.imageSize != nil
+    if !rendered { imageView.image = nil }
+    sourceView.isHidden = rendered
+    scrollView.isHidden = !rendered
+    if rendered, imageView.image == nil { progress.startAnimating() } else { progress.stopAnimating() }
+    if !rendered {
+      sourceView.attributedText = context.text(
+        for: .init(range: math.range, role: .paragraph, literal: nil, isRTL: false)
+      )
+    }
+    isAccessibilityElement = rendered
+    if rendered {
+      accessibilityTraits = .image
+      accessibilityLabel = "Formula: \(source)"
+      accessibilityCustomActions = [
+        UIAccessibilityCustomAction(
+          name: NSLocalizedString("Copy LaTeX", comment: "VoiceOver action for rendered math"),
+          target: self,
+          selector: #selector(copySource)
+        ),
+      ]
+    } else {
+      accessibilityLabel = nil
+      accessibilityCustomActions = nil
+    }
+    setNeedsLayout()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    sourceView.frame = bounds
+    scrollView.frame = bounds
+    let size = imageSize ?? .zero
+    imageView.frame = CGRect(
+      x: 0,
+      y: max(0, (bounds.height - size.height) / 2),
+      width: size.width,
+      height: size.height
+    )
+    scrollView.contentSize = CGSize(width: max(bounds.width, size.width), height: bounds.height)
+    progress.center = CGPoint(x: min(bounds.width / 2, 16), y: bounds.height / 2)
+  }
+
+  @objc private func copySource() -> Bool {
+    guard !source.isEmpty else { return false }
+    UIPasteboard.general.string = source
+    return true
+  }
+
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    progress.stopAnimating()
+    imageView.image = nil
+    sourceView.attributedText = nil
+    request = nil
+    imageSize = nil
+    source = ""
+    isAccessibilityElement = false
+    accessibilityLabel = nil
+    accessibilityCustomActions = nil
+  }
 }
 
 private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
@@ -151,10 +271,10 @@ private final class RichBlockTextNodeViewV2: RichBlockRenderableViewV2,
 
   override func apply(node: RichBlockLayoutPlanV2.Node, context: RichBlockRenderContextV2) {
     guard case let .text(text) = node.kind else { return }
-    textView.attributedText = context.text(for: text)
+    textView.attributedText = context.text(for: text, maximumWidth: node.frame.width)
     onEntityTap = context.onEntityTap
     isAccessibilityElement = true
-    accessibilityLabel = textView.attributedText.string
+    accessibilityLabel = RichTextMath.sourceText(textView.attributedText) ?? textView.attributedText.string
   }
 
   @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
@@ -371,7 +491,9 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
     isRTL = text.isRTL
     onToggle = context.onDisclosureToggle
     onEntityTap = context.onEntityTap
-    let attributed = NSMutableAttributedString(attributedString: context.text(for: text))
+    let attributed = NSMutableAttributedString(
+      attributedString: context.text(for: text, maximumWidth: max(1, node.frame.width - 24))
+    )
     if progress {
       attributed.addAttribute(
         .foregroundColor,
@@ -384,7 +506,7 @@ private final class RichBlockDisclosureNodeViewV2: RichBlockRenderableViewV2,
     chevron.tintColor = context.palette.secondary
     backgroundColor = .clear
     shimmer.isHidden = !progress
-    accessibilityLabel = attributed.string
+    accessibilityLabel = RichTextMath.sourceText(attributed) ?? attributed.string
     accessibilityValue = isExpanded ? "Expanded" : "Collapsed"
     updateShimmerAnimation()
   }
@@ -1404,7 +1526,8 @@ private final class RichBlockTableNodeViewV2: RichBlockRenderableViewV2 {
         baseFontSize: context.baseFontSize,
         isRTL: table.isRTL,
         alignment: cell.alignment,
-        isHeader: cell.isHeader
+        isHeader: cell.isHeader,
+        math: context.math
       )?.mutableCopy() as? NSMutableAttributedString
       if let text {
         text.addAttribute(
@@ -1465,11 +1588,17 @@ final class RichBlockContentViewV2: UIView {
   var onDisclosureToggle: ((BlockContentPath, Bool) -> Void)?
   var onEntityTap: ((NSAttributedString, Int) -> Void)?
   var onImageTap: ((RichBlockImageGallerySelectionV2) -> Void)?
+  var onMathPrepared: (() -> Void)?
 
   private var nodeViews: [BlockContentPath: RichBlockRenderableViewV2] = [:]
   private var reusePool: [RichBlockRenderKindV2: [RichBlockRenderableViewV2]] = [:]
   private var previousContent: InlineProtocol.BlockContent?
   private var currentPlan: RichBlockLayoutPlanV2?
+  private var mathSnapshot: RichTextMath.Snapshot?
+  private var mathLayoutSignature = 0
+  private var mathPreparationTask: Task<Void, Never>?
+  private var mathGeneration: UInt64 = 0
+  private var mathPrepared = false
   private var disappearingSnapshots: [DisappearingSnapshot] = []
 
   override init(frame: CGRect) {
@@ -1489,9 +1618,14 @@ final class RichBlockContentViewV2: UIView {
     baseFontSize: CGFloat,
     palette: RichBlockPaletteV2,
     message: InlineKit.Message,
+    mathPreparationEnabled: Bool = true,
     deferLayout: Bool,
     transitionGeneration: UInt
   ) {
+    guard let math = plan.mathSnapshot, math.signature == plan.mathSignature else {
+      assertionFailure("Rich block geometry must be prepared before binding")
+      return
+    }
     let reconciliation = BlockContentReconciler.reconcile(previous: previousContent, current: content)
     previousContent = content
 
@@ -1511,6 +1645,7 @@ final class RichBlockContentViewV2: UIView {
     }
 
     let context = RichBlockRenderContextV2(
+      math: math,
       attributedText: attributedText,
       baseFontSize: baseFontSize,
       palette: palette,
@@ -1563,6 +1698,10 @@ final class RichBlockContentViewV2: UIView {
       }
     }
     currentPlan = plan
+    updateMathPreparation(
+      mathPreparationEnabled ? math : nil,
+      layoutSignature: plan.mathSignature
+    )
   }
 
   func applyLayout(_ plan: RichBlockLayoutPlanV2) {
@@ -1622,6 +1761,8 @@ final class RichBlockContentViewV2: UIView {
   }
 
   func prepareForReuse() {
+    cancelMathPreparation()
+    mathSnapshot = nil
     for view in nodeViews.values {
       enqueue(view)
     }
@@ -1632,6 +1773,11 @@ final class RichBlockContentViewV2: UIView {
     disappearingSnapshots.removeAll(keepingCapacity: true)
     previousContent = nil
     currentPlan = nil
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window == nil { cancelMathPreparation() } else { startMathPreparation() }
   }
 
   func entityHit(at point: CGPoint) -> (text: NSAttributedString, characterIndex: Int)? {
@@ -1645,6 +1791,47 @@ final class RichBlockContentViewV2: UIView {
     }
     return nil
   }
+
+  private func updateMathPreparation(_ snapshot: RichTextMath.Snapshot?, layoutSignature: Int) {
+    if mathSnapshot?.requests != snapshot?.requests || mathSnapshot?.signature != snapshot?.signature
+      || mathLayoutSignature != layoutSignature {
+      cancelMathPreparation()
+    }
+    mathSnapshot = snapshot
+    mathLayoutSignature = layoutSignature
+    startMathPreparation()
+  }
+
+  private func cancelMathPreparation() {
+    mathGeneration &+= 1
+    mathPreparationTask?.cancel()
+    mathPreparationTask = nil
+    mathPrepared = false
+  }
+
+  private func startMathPreparation() {
+    guard window != nil, !mathPrepared, mathPreparationTask == nil,
+          let snapshot = mathSnapshot?.refreshed(), !snapshot.requests.isEmpty else { return }
+    guard snapshot.hasPending || snapshot.signature != mathLayoutSignature
+      || snapshot.signature != mathSnapshot?.signature else {
+      mathPrepared = true
+      return
+    }
+    let generation = mathGeneration
+    mathPreparationTask = Task { @MainActor [weak self] in
+      _ = await RichTextMath.prepare(snapshot.requests)
+      guard !Task.isCancelled, let self, self.window != nil,
+            self.mathGeneration == generation else { return }
+      self.mathPreparationTask = nil
+      self.mathPrepared = true
+      let ready = snapshot.refreshed()
+      guard ready.signature != self.mathLayoutSignature
+        || ready.signature != self.mathSnapshot?.signature else { return }
+      self.onMathPrepared?()
+    }
+  }
+
+  deinit { mathPreparationTask?.cancel() }
 
   var primaryTextSurface: UITextView? {
     guard let currentPlan else { return nil }
@@ -1697,6 +1884,7 @@ final class RichBlockContentViewV2: UIView {
       return view
     }
     return switch kind {
+      case .math: RichBlockMathNodeViewV2()
       case .text: RichBlockTextNodeViewV2()
       case .listMarker: RichBlockListMarkerNodeViewV2()
       case .disclosure: RichBlockDisclosureNodeViewV2()

@@ -1,5 +1,6 @@
 import InlineKit
 import InlineProtocol
+import TextProcessing
 import UIKit
 
 final class RichBlockLayoutPlannerV2 {
@@ -10,6 +11,7 @@ final class RichBlockLayoutPlannerV2 {
     let plan: RichBlockLayoutPlanV2
     let content: InlineProtocol.BlockContent
     let attributedText: NSAttributedString
+    let literalTextHash: Int
     let width: CGFloat
     let disclosureOverrides: [BlockContentPath: Bool]
 
@@ -17,12 +19,16 @@ final class RichBlockLayoutPlannerV2 {
       plan: RichBlockLayoutPlanV2,
       content: InlineProtocol.BlockContent,
       attributedText: NSAttributedString,
+      literalTextHash: Int,
       width: CGFloat,
       disclosureOverrides: [BlockContentPath: Bool]
     ) {
-      self.plan = plan
+      var geometry = plan
+      geometry.mathSnapshot = nil
+      self.plan = geometry
       self.content = content
       self.attributedText = attributedText.copy() as? NSAttributedString ?? attributedText
+      self.literalTextHash = literalTextHash
       self.width = width
       self.disclosureOverrides = disclosureOverrides
     }
@@ -66,6 +72,8 @@ final class RichBlockLayoutPlannerV2 {
     attributedText: NSAttributedString,
     availableWidth: CGFloat,
     baseFontSize: CGFloat,
+    primaryColor: UIColor = .label,
+    secondaryColor: UIColor = .secondaryLabel,
     disclosureOverrides: [BlockContentPath: Bool]
   ) -> RichBlockLayoutPlanV2? {
     guard availableWidth.isFinite, availableWidth >= 1,
@@ -75,23 +83,31 @@ final class RichBlockLayoutPlannerV2 {
           contentByteCount <= Self.maximumContentByteCount
     else { return nil }
 
+    let math = Self.mathSnapshot(content: content, text: attributedText, fontSize: baseFontSize,
+                                 primaryColor: primaryColor, secondaryColor: secondaryColor)
     let overridesKey = disclosureOverrides
       .map { "\($0.key.components)=\($0.value)" }
       .sorted()
       .joined(separator: ",")
+    let literalTextHash = Data(attributedText.string.utf8).hashValue
     let key =
-      "\(contentCacheSignature)|\(attributedText.hash)|\(Int(availableWidth.rounded()))|\(baseFontSize)|\(overridesKey)" as NSString
+      "\(contentCacheSignature)|\(literalTextHash)|\(attributedText.hash)|\(Int(availableWidth.rounded()))|\(baseFontSize)|\(overridesKey)|\(math.signature)" as NSString
     if let cached = cache.object(forKey: key),
        cached.content == content,
+       cached.literalTextHash == literalTextHash,
+       cached.attributedText.string.utf8.elementsEqual(attributedText.string.utf8),
        cached.attributedText.isEqual(to: attributedText),
        cached.width == availableWidth,
        cached.disclosureOverrides == disclosureOverrides
     {
-      return cached.plan
+      var prepared = cached.plan
+      prepared.mathSnapshot = math
+      return prepared
     }
 
     var builder = Builder(
       attributedText: attributedText,
+      math: math,
       baseFontSize: baseFontSize,
       disclosureOverrides: disclosureOverrides
     )
@@ -110,6 +126,8 @@ final class RichBlockLayoutPlannerV2 {
       : min(availableWidth, max(1, ceil(builder.measuredMaxX)))
     let plan = RichBlockLayoutPlanV2(
       size: CGSize(width: resolvedWidth, height: ceil(builder.height)),
+      mathSignature: math.signature,
+      mathSnapshot: math,
       nodes: builder.nodes,
       trailingTextLine: builder.trailingTextLine
     )
@@ -118,6 +136,7 @@ final class RichBlockLayoutPlannerV2 {
         plan: plan,
         content: content,
         attributedText: attributedText,
+        literalTextHash: literalTextHash,
         width: availableWidth,
         disclosureOverrides: disclosureOverrides
       ),
@@ -127,22 +146,45 @@ final class RichBlockLayoutPlannerV2 {
     return plan
   }
 
+  static func mathSnapshot(content: InlineProtocol.BlockContent, text: NSAttributedString,
+                           fontSize: CGFloat, primaryColor: UIColor, secondaryColor: UIColor) -> RichTextMath.Snapshot {
+    RichTextMath.snapshot(content: content, text: text, fontSize: fontSize) { range, role in
+      let nativeRole: RichBlockTextRoleV2
+      switch role {
+      case .paragraph: nativeRole = .paragraph
+      case let .heading(level): nativeRole = .heading(level: level)
+      case .footer: nativeRole = .footer
+      case let .disclosure(progress): nativeRole = .disclosure(progress: progress, expanded: false)
+      case let .table(header):
+        return styledTableText(from: text, range: range, baseFontSize: fontSize,
+                               isRTL: false, alignment: .leading, isHeader: header)
+      }
+      guard let value = styledText(from: text, range: range, role: nativeRole, baseFontSize: fontSize,
+                                   isRTL: false)?.mutableCopy() as? NSMutableAttributedString else { return nil }
+      if case .footer = role { value.addAttribute(.foregroundColor, value: secondaryColor,
+                                                 range: NSRange(location: 0, length: value.length)) }
+      if case .disclosure = role {
+        value.addAttribute(.foregroundColor, value: secondaryColor,
+                           range: NSRange(location: 0, length: value.length))
+      }
+      return value
+    }
+  }
+
   static func styledText(
     from attributedText: NSAttributedString,
     range: NSRange,
     role: RichBlockTextRoleV2,
     baseFontSize: CGFloat,
-    isRTL: Bool
+    isRTL: Bool,
+    math: RichTextMath.Snapshot? = nil,
+    maximumWidth: CGFloat? = nil
   ) -> NSAttributedString? {
-    guard range.location >= 0, range.length >= 0, NSMaxRange(range) <= attributedText.length else {
+    guard range.location >= 0, range.length >= 0, range.location <= attributedText.length,
+          range.length <= attributedText.length - range.location else {
       return nil
     }
     let result = NSMutableAttributedString(attributedString: attributedText.attributedSubstring(from: range))
-    var inheritedTraits: [(NSRange, UIFontDescriptor.SymbolicTraits)] = []
-    result.enumerateAttribute(.font, in: NSRange(location: 0, length: result.length)) { value, range, _ in
-      guard let font = value as? UIFont else { return }
-      inheritedTraits.append((range, font.fontDescriptor.symbolicTraits))
-    }
     let font: UIFont = switch role {
       case .paragraph: .systemFont(ofSize: baseFontSize)
       case let .heading(level):
@@ -151,28 +193,16 @@ final class RichBlockLayoutPlannerV2 {
           weight: .medium
         )
       case .footer: .systemFont(ofSize: max(12, baseFontSize * 0.82))
-      case .disclosure: .systemFont(ofSize: baseFontSize, weight: .semibold)
+      case .disclosure: .systemFont(ofSize: baseFontSize, weight: .regular)
       case .listMarker: .systemFont(ofSize: baseFontSize)
     }
     let paragraph = NSMutableParagraphStyle()
     paragraph.baseWritingDirection = isRTL ? .rightToLeft : .leftToRight
     paragraph.alignment = isRTL ? .right : .natural
     paragraph.lineBreakMode = .byWordWrapping
-    result.addAttributes([
-      .font: font,
-      .paragraphStyle: paragraph,
-    ], range: NSRange(location: 0, length: result.length))
-    let supportedTraits: UIFontDescriptor.SymbolicTraits = [
-      .traitBold, .traitItalic, .traitMonoSpace, .traitCondensed, .traitExpanded,
-    ]
-    for (range, traits) in inheritedTraits {
-      let retained = traits.intersection(supportedTraits)
-      guard !retained.isEmpty else { continue }
-      let desiredTraits = font.fontDescriptor.symbolicTraits.union(retained)
-      let descriptor = font.fontDescriptor.withSymbolicTraits(desiredTraits) ?? font.fontDescriptor
-      result.addAttribute(.font, value: UIFont(descriptor: descriptor, size: font.pointSize), range: range)
-    }
-    return result
+    PlatformFontTraits.applyBaseFont(font, to: result)
+    result.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: result.length))
+    return math.map { RichTextMath.projectInline(result, sourceOffset: range.location, snapshot: $0, maximumWidth: maximumWidth) } ?? result
   }
 
   static func styledTableText(
@@ -181,7 +211,9 @@ final class RichBlockLayoutPlannerV2 {
     baseFontSize: CGFloat,
     isRTL: Bool,
     alignment: RichBlockLayoutPlanV2.TableAlignment,
-    isHeader: Bool
+    isHeader: Bool,
+    math: RichTextMath.Snapshot? = nil,
+    maximumWidth: CGFloat? = nil
   ) -> NSAttributedString? {
     let tableFontSize = baseFontSize * tableFontScale
     guard let value = styledText(
@@ -201,13 +233,9 @@ final class RichBlockLayoutPlannerV2 {
     }
     value.addAttribute(.paragraphStyle, value: paragraph, range: fullRange)
     if isHeader {
-      value.addAttribute(
-        .font,
-        value: UIFont.systemFont(ofSize: tableFontSize, weight: .medium),
-        range: fullRange
-      )
+      PlatformFontTraits.applyBaseFont(.systemFont(ofSize: tableFontSize, weight: .medium), to: value)
     }
-    return value
+    return math.map { RichTextMath.projectInline(value, sourceOffset: range.location, snapshot: $0, maximumWidth: maximumWidth) } ?? value
   }
 
   private struct TextMeasurement {
@@ -237,6 +265,7 @@ final class RichBlockLayoutPlannerV2 {
     static let tableVerticalPadding: CGFloat = 7
 
     let attributedText: NSAttributedString
+    let math: RichTextMath.Snapshot
     let baseFontSize: CGFloat
     let disclosureOverrides: [BlockContentPath: Bool]
     var nodes: [RichBlockLayoutPlanV2.Node] = []
@@ -287,6 +316,8 @@ final class RichBlockLayoutPlannerV2 {
     ) -> Bool {
       guard let kind = block.kind else { return false }
       switch kind {
+        case let .math(text):
+          return appendMath(text, path: path, x: x, width: width)
         case let .paragraph(text):
           return appendText(text, role: .paragraph, path: path, x: x, width: width, inheritedRTL: inheritedRTL)
         case let .heading(heading):
@@ -366,6 +397,27 @@ final class RichBlockLayoutPlannerV2 {
       }
     }
 
+    mutating func appendMath(_ text: InlineProtocol.BlockText, path: BlockContentPath, x: CGFloat, width: CGFloat) -> Bool {
+      guard text.offset >= 0, text.length > 0, text.offset <= Int64(attributedText.length),
+            text.length <= Int64(attributedText.length) - text.offset else { return false }
+      let range = NSRange(location: Int(text.offset), length: Int(text.length))
+      if let image = math.image(for: range) {
+        let imageSize = CGSize(width: image.width, height: image.height)
+        let frame = CGRect(x: x, y: height, width: min(width, max(40, image.width)),
+                           height: ceil(max(baseFontSize * 1.25, image.height)))
+        nodes.append(.init(path: path, frame: frame, kind: .math(.init(range: range, imageSize: imageSize))))
+        measuredMaxX = max(measuredMaxX, frame.maxX)
+        height = frame.maxY
+      } else {
+        guard appendText(text, role: .paragraph, path: path, x: x, width: width, inheritedRTL: false)
+        else { return false }
+        let old = nodes.removeLast()
+        nodes.append(.init(path: old.path, frame: old.frame, kind: .math(.init(range: range, imageSize: nil))))
+      }
+      trailingTextLine = nil
+      return true
+    }
+
     mutating func appendText(
       _ text: InlineProtocol.BlockText,
       role: RichBlockTextRoleV2,
@@ -377,14 +429,16 @@ final class RichBlockLayoutPlannerV2 {
     ) -> Bool {
       let range = NSRange(location: Int(text.offset), length: Int(text.length))
       let rtl = text.hasIsRtl ? text.isRtl : (inheritedRTL ?? false)
+      let disclosureChrome: CGFloat = if case .disclosure = role { 24 } else { 0 }
       guard let styled = Self.styled(
         attributedText,
         range: range,
         role: role,
         baseFontSize: baseFontSize,
-        rtl: rtl
+        rtl: rtl,
+        math: math,
+        maximumWidth: max(1, width - disclosureChrome)
       ) else { return false }
-      let disclosureChrome: CGFloat = if case .disclosure = role { 24 } else { 0 }
       let measurement = measureText(styled, width: max(1, width - disclosureChrome))
       let nodeWidth = min(width, max(1, measurement.maxLineWidth + disclosureChrome))
       let frame = CGRect(x: rtl ? x + width - nodeWidth : x, y: height, width: nodeWidth, height: measurement.height)
@@ -414,7 +468,8 @@ final class RichBlockLayoutPlannerV2 {
     ) -> Bool {
       guard code.hasText else { return false }
       let range = NSRange(location: Int(code.text.offset), length: Int(code.text.length))
-      guard range.location >= 0, range.length >= 0, NSMaxRange(range) <= attributedText.length else { return false }
+      guard range.location >= 0, range.length >= 0, range.location <= attributedText.length,
+          range.length <= attributedText.length - range.location else { return false }
       let plain = attributedText.attributedSubstring(from: range).string
       let lineCount = max(1, plain.components(separatedBy: .newlines).count)
       let language = code.hasLanguage && !code.language.isEmpty ? code.language : nil
@@ -467,10 +522,13 @@ final class RichBlockLayoutPlannerV2 {
       depth: Int,
       inheritedRTL: Bool?
     ) -> Bool {
-      guard !list.items.isEmpty else { return false }
+      guard !list.items.isEmpty, list.items.count <= 1_024,
+            list.kind == .ordered || list.kind == .unordered
+      else { return false }
       let rtl = list.hasIsRtl ? list.isRtl : (inheritedRTL ?? false)
       if rtl { claimsMaximumWidth = true }
-      let start = list.hasStart ? list.start : 1
+      let start = list.kind == .ordered && list.hasStart ? list.start : 1
+      guard (0 ... 999_999_999).contains(start) else { return false }
       let lastOrdinal = start + Int64(max(0, list.items.count - 1))
       let widestMarker = list.items.contains(where: \.hasChecked)
         ? "☑"
@@ -615,7 +673,9 @@ final class RichBlockLayoutPlannerV2 {
       }
       var minimumColumnWidths = Array(repeating: CGFloat(1), count: columns)
       var maximumColumnWidths = Array(repeating: CGFloat(1), count: columns)
+      var styledRows: [[NSAttributedString]] = []
       for (rowIndex, row) in table.rows.enumerated() {
+        var styledRow: [NSAttributedString] = []
         for (column, cell) in row.cells.enumerated() {
           let range = NSRange(location: Int(cell.offset), length: Int(cell.length))
           guard let styled = RichBlockLayoutPlannerV2.styledTableText(
@@ -624,8 +684,10 @@ final class RichBlockLayoutPlannerV2 {
             baseFontSize: baseFontSize,
             isRTL: rtl,
             alignment: alignments[column],
-            isHeader: rowIndex == 0
+            isHeader: rowIndex == 0,
+            math: math
           ) else { return false }
+          styledRow.append(styled)
           let minimumTextWidth = minimumUnbreakableTextWidth(styled)
           let maximumTextWidth = styled.boundingRect(
             with: CGSize(
@@ -645,6 +707,7 @@ final class RichBlockLayoutPlannerV2 {
           minimumColumnWidths[column] = max(minimumColumnWidths[column], minimumCellWidth)
           maximumColumnWidths[column] = max(maximumColumnWidths[column], maximumCellWidth)
         }
+        styledRows.append(styledRow)
       }
       let columnWidths = allocateTableColumnWidths(
         minimum: minimumColumnWidths,
@@ -656,16 +719,7 @@ final class RichBlockLayoutPlannerV2 {
       var rowY: CGFloat = 0
       for (rowIndex, row) in table.rows.enumerated() {
         var rowHeight = max(32, baseFontSize + Self.tableVerticalPadding * 2)
-        for (column, cell) in row.cells.enumerated() {
-          let range = NSRange(location: Int(cell.offset), length: Int(cell.length))
-          guard let styled = RichBlockLayoutPlannerV2.styledTableText(
-            from: attributedText,
-            range: range,
-            baseFontSize: baseFontSize,
-            isRTL: rtl,
-            alignment: alignments[column],
-            isHeader: rowIndex == 0
-          ) else { return false }
+        for (column, styled) in styledRows[rowIndex].enumerated() {
           rowHeight = max(
             rowHeight,
             measureText(
@@ -768,9 +822,14 @@ final class RichBlockLayoutPlannerV2 {
       let widthPixels = containerWidth < CGFloat(Int.max) / scale
         ? Int((containerWidth * scale).rounded())
         : Int.max
-      let key = "\(text.hash)|\(widthPixels)|\(baseFontSize)" as NSString
-      if let cached = RichBlockLayoutPlannerV2.textMeasurementCache.object(forKey: key),
+      let key = "\(Data(text.string.utf8).hashValue)|\(text.hash)|\(widthPixels)|\(baseFontSize)" as NSString
+      // Projected text owns raster attachments. Do not retain it in a cache
+      // whose cost only accounts for characters; the rich plan already caches
+      // geometry and the shared renderer bounds image memory.
+      let cacheable = !RichTextMath.containsRenderedMath(text)
+      if cacheable, let cached = RichBlockLayoutPlannerV2.textMeasurementCache.object(forKey: key),
          cached.width == containerWidth,
+         cached.text.string.utf8.elementsEqual(text.string.utf8),
          cached.text.isEqual(to: text)
       {
         return cached.measurement
@@ -799,11 +858,13 @@ final class RichBlockLayoutPlannerV2 {
         lastLineWidth: ceil(lastLineWidth),
         lastLineHeight: ceil(lastLineHeight)
       )
-      RichBlockLayoutPlannerV2.textMeasurementCache.setObject(
-        TextMeasurementBox(text: text, width: containerWidth, measurement: measurement),
-        forKey: key,
-        cost: max(128, text.length * 8)
-      )
+      if cacheable {
+        RichBlockLayoutPlannerV2.textMeasurementCache.setObject(
+          TextMeasurementBox(text: text, width: containerWidth, measurement: measurement),
+          forKey: key,
+          cost: max(128, text.length * 8)
+        )
+      }
       return measurement
     }
 
@@ -812,14 +873,18 @@ final class RichBlockLayoutPlannerV2 {
       range: NSRange,
       role: RichBlockTextRoleV2,
       baseFontSize: CGFloat,
-      rtl: Bool
+      rtl: Bool,
+      math: RichTextMath.Snapshot? = nil,
+      maximumWidth: CGFloat? = nil
     ) -> NSAttributedString? {
       RichBlockLayoutPlannerV2.styledText(
         from: attributedText,
         range: range,
         role: role,
         baseFontSize: baseFontSize,
-        isRTL: rtl
+        isRTL: rtl,
+        math: math,
+        maximumWidth: maximumWidth
       )
     }
 

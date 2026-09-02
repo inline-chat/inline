@@ -978,6 +978,7 @@ class MessageSizeCalculator {
 
     if richContentRendererEnabled,
        message.translationText == nil,
+       text.utf8.elementsEqual((message.message.text ?? "").utf8),
        let blockContentPayload = message.message.blockContentPayload
     {
       let richContentInset = hasBubbleColor ? bubbleContentHorizontalInset : 0
@@ -990,6 +991,9 @@ class MessageSizeCalculator {
         availableWidth: richViewportWidth,
         contentHorizontalInset: richContentInset,
         baseFontSize: fontSize,
+        primaryColor: primaryColor(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
+        secondaryColor: secondaryColor(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
+        nativeMathEnabled: AppSettings.shared.richTextNativeMathEnabled,
         disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
       )
       if let richBlockPlan {
@@ -1764,6 +1768,7 @@ class MessageSizeCalculator {
 
     if richContentRendererEnabled,
        message.translationText == nil,
+       text.utf8.elementsEqual((message.message.text ?? "").utf8),
        let blockContentPayload = message.message.blockContentPayload
     {
       richBlockPlan = RichBlockLayoutPlanner.shared.plan(
@@ -1773,6 +1778,9 @@ class MessageSizeCalculator {
         attributedText: attributedString,
         availableWidth: textAvailableWidth,
         baseFontSize: fontSize,
+        primaryColor: primaryColor(for: .minimal, usesOutgoingBubbleStyle: false),
+        secondaryColor: secondaryColor(for: .minimal, usesOutgoingBubbleStyle: false),
+        nativeMathEnabled: AppSettings.shared.richTextNativeMathEnabled,
         disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
       )
       if let richBlockPlan {

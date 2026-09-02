@@ -8,6 +8,15 @@ import UIKit
 extension ComposeView: UITextViewDelegate {
   private static let log = Log.scoped("ComposeView.UITextViewDelegate")
 
+  func textView(
+    _ textView: UITextView,
+    editMenuForTextIn range: NSRange,
+    suggestedActions: [UIMenuElement]
+  ) -> UIMenu? {
+    guard let composeTextView = textView as? ComposeTextView, textView.isEditable else { return nil }
+    return UIMenu(children: suggestedActions + [composeTextView.inlineStyleMenu()])
+  }
+
   func textViewDidBeginEditing(_ textView: UITextView) {
     _ = autocompleteManager?.handleTextChange(in: textView)
   }

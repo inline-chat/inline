@@ -1543,6 +1543,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           textView.text = ""
         }
 
+        textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+        textView.resetTypingAttributesToDefault()
+
         textView.showPlaceholder(false)
         buttonAppear()
         DispatchQueue.main.async { [weak self] in

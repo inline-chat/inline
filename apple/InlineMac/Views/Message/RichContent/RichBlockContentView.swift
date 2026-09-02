@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import InlineProtocol
+import TextProcessing
 
 final class RichBlockContentView: NSView {
   var onDisclosureToggle: ((BlockContentPath, Bool) -> Void)?
@@ -12,6 +13,11 @@ final class RichBlockContentView: NSView {
   private var currentPlan: RichBlockLayoutPlan?
   private var messageStableID: Int64?
   private var isContentVisible = true
+  private var mathSnapshot: RichTextMath.Snapshot?
+  private var mathLayoutSignature = 0
+  private var mathPreparationTask: Task<Void, Never>?
+  private var mathGeneration: UInt64 = 0
+  private var mathPrepared = false
 
   override var isFlipped: Bool { true }
 
@@ -38,6 +44,12 @@ final class RichBlockContentView: NSView {
     renderStyle: MessageRenderStyle,
     animated: Bool
   ) {
+    // Bind the exact readiness snapshot that produced this geometry. A cache
+    // fill between measurement and binding must not silently change wrapping.
+    guard let math = plan.mathSnapshot, math.signature == plan.mathSignature else {
+      assertionFailure("Rich block geometry must be prepared before binding")
+      return
+    }
     if messageStableID != relatedMessage.stableId {
       prepareForReuse()
       messageStableID = relatedMessage.stableId
@@ -46,6 +58,7 @@ final class RichBlockContentView: NSView {
     previousContent = content
     currentPlan = plan
     let context = RichBlockRenderContext(
+      math: math,
       attributedText: attributedText,
       baseFontSize: baseFontSize,
       palette: palette,
@@ -116,6 +129,7 @@ final class RichBlockContentView: NSView {
     }
 
     animate(frameChanges)
+    updateMathPreparation(math, layoutSignature: plan.mathSignature)
   }
 
   func applyLayout(_ plan: RichBlockLayoutPlan, animated: Bool) {
@@ -136,6 +150,7 @@ final class RichBlockContentView: NSView {
   func setContentVisible(_ visible: Bool) {
     guard isContentVisible != visible else { return }
     isContentVisible = visible
+    if visible { startMathPreparation() } else { cancelMathPreparation() }
     for view in nodeViews.values {
       view.setContentVisible(visible)
     }
@@ -174,6 +189,7 @@ final class RichBlockContentView: NSView {
         return disclosure.interactiveHitTest(local)
       }
       if let text = view as? NSTextView, text.isSelectable { return text }
+      if view is RichBlockMathNodeView { return view }
       if view is NSControl { return view }
       for child in view.subviews.reversed() {
         if let hit = find(in: child) { return hit }
@@ -187,6 +203,8 @@ final class RichBlockContentView: NSView {
   }
 
   override func prepareForReuse() {
+    cancelMathPreparation()
+    mathSnapshot = nil
     super.prepareForReuse()
     for view in nodeViews.values {
       view.prepareForReuse()
@@ -197,6 +215,55 @@ final class RichBlockContentView: NSView {
     currentPlan = nil
     messageStableID = nil
   }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil { cancelMathPreparation() } else { startMathPreparation() }
+  }
+
+  private func updateMathPreparation(_ snapshot: RichTextMath.Snapshot, layoutSignature: Int) {
+    if mathSnapshot?.requests != snapshot.requests || mathSnapshot?.signature != snapshot.signature
+      || mathLayoutSignature != layoutSignature {
+      cancelMathPreparation()
+    }
+    mathSnapshot = snapshot
+    mathLayoutSignature = layoutSignature
+    startMathPreparation()
+  }
+
+  private func cancelMathPreparation() {
+    mathGeneration &+= 1
+    mathPreparationTask?.cancel()
+    mathPreparationTask = nil
+    mathPrepared = false
+  }
+
+  private func startMathPreparation() {
+    guard window != nil, isContentVisible, !mathPrepared, mathPreparationTask == nil,
+          let snapshot = mathSnapshot?.refreshed(), !snapshot.requests.isEmpty else { return }
+    guard snapshot.hasPending || snapshot.signature != mathLayoutSignature
+      || snapshot.signature != mathSnapshot?.signature else {
+      mathPrepared = true
+      return
+    }
+    let generation = mathGeneration
+    mathPreparationTask = Task { @MainActor [weak self] in
+      _ = await RichTextMath.prepare(snapshot.requests)
+      guard !Task.isCancelled, let self, self.window != nil,
+            self.mathGeneration == generation else { return }
+      self.mathPreparationTask = nil
+      self.mathPrepared = true
+      let ready = snapshot.refreshed()
+      guard ready.signature != self.mathLayoutSignature || ready.signature != self.mathSnapshot?.signature else { return }
+      NotificationCenter.default.post(
+        name: .richBlockDisclosureStateDidChange,
+        object: self,
+        userInfo: ["messageStableID": self.messageStableID ?? 0]
+      )
+    }
+  }
+
+  deinit { mathPreparationTask?.cancel() }
 
   private func animate(_ changes: [(RichBlockRenderableView, CGRect)]) {
     guard !changes.isEmpty else { return }

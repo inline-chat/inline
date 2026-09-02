@@ -55,6 +55,9 @@ extension ComposeView {
         textView.attributedText = attributedText
       }
 
+      textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+      textView.resetTypingAttributesToDefault()
+
       textView.showPlaceholder(false)
       updateSendButtonVisibility()
       updateHeight()

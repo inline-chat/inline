@@ -173,6 +173,7 @@ final class AppSettings: ObservableObject {
   static let sidebarModeKey = "sidebarMode"
   static let showGridInSidebarKey = "showGridInSidebar"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
+  static let richTextNativeMathEnabledKey = "experimental.richTextNativeMathEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -446,6 +447,15 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var richTextNativeMathEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(
+        richTextNativeMathEnabled,
+        forKey: Self.richTextNativeMathEnabledKey
+      )
+    }
+  }
+
   @Published var showMainTabStrip: Bool {
     didSet {
       UserDefaults.standard.set(showMainTabStrip, forKey: "showMainTabStrip")
@@ -545,6 +555,9 @@ final class AppSettings: ObservableObject {
     richContentRendererEnabled = UserDefaults.standard.object(
       forKey: Self.richContentRendererEnabledKey
     ) as? Bool ?? true
+    richTextNativeMathEnabled = UserDefaults.standard.object(
+      forKey: Self.richTextNativeMathEnabledKey
+    ) as? Bool ?? false
     let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
       .flatMap(SidebarMode.init(rawValue:))
     let legacyInbox = persistentDefaults?[ExperimentalFeatureFlags.sidebarAsInboxKey] as? Bool

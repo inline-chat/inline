@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import TextProcessing
 
 enum RichBlockTextRole: Codable, Hashable {
   case paragraph
@@ -10,6 +11,7 @@ enum RichBlockTextRole: Codable, Hashable {
 }
 
 enum RichBlockRenderKind: String, Codable, Hashable {
+  case math
   case text
   case listMarker
   case code
@@ -42,6 +44,11 @@ struct RichBlockLayoutPlan: Codable, Hashable {
     var language: String?
     var gutterWidth: CGFloat
     var lineCount: Int
+  }
+
+  struct MathNode: Codable, Hashable {
+    var range: NSRange
+    var imageSize: CGSize?
   }
 
   struct ImageNode: Codable, Hashable {
@@ -85,6 +92,7 @@ struct RichBlockLayoutPlan: Codable, Hashable {
   }
 
   enum NodeKind: Codable, Hashable {
+    case math(MathNode)
     case text(TextNode)
     case code(CodeNode)
     case separator
@@ -101,6 +109,7 @@ struct RichBlockLayoutPlan: Codable, Hashable {
 
     var reuseKind: RichBlockRenderKind {
       switch kind {
+      case .math: return .math
       case let .text(text):
         if case .disclosureSummary = text.role { return .disclosure }
         if case .listMarker = text.role { return .listMarker }
@@ -122,7 +131,28 @@ struct RichBlockLayoutPlan: Codable, Hashable {
   }
 
   var size: CGSize
+  var mathSignature: Int
+  /// Pixels/readiness used to measure this plan travel with the live handoff.
+  /// Geometry caches and diagnostic JSON deliberately do not retain them.
+  var mathSnapshot: RichTextMath.Snapshot? = nil
   var contentHorizontalInset: CGFloat
   var nodes: [Node]
   var trailingTextLine: TrailingTextLine?
+
+  private enum CodingKeys: String, CodingKey {
+    case size, mathSignature, contentHorizontalInset, nodes, trailingTextLine
+  }
+
+  // Snapshot ownership does not change geometric equality. Its render inputs
+  // and availability are already represented by mathSignature.
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.size == rhs.size && lhs.mathSignature == rhs.mathSignature
+      && lhs.contentHorizontalInset == rhs.contentHorizontalInset
+      && lhs.nodes == rhs.nodes && lhs.trailingTextLine == rhs.trailingTextLine
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(size); hasher.combine(mathSignature); hasher.combine(contentHorizontalInset)
+    hasher.combine(nodes); hasher.combine(trailingTextLine)
+  }
 }

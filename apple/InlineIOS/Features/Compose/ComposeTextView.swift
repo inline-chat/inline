@@ -216,6 +216,7 @@ class ComposeTextView: UITextView {
       for link in links {
         textStorage.addAttributes(linkAttributes(urlString: link.url.absoluteString), range: link.range)
       }
+      if !links.isEmpty { InlineTextStyle.reapply(to: textStorage) }
 
       // Programmatic text assignment bypasses the normal delegate path.
       // Route paste through the same change handlers as typing so send state stays in sync.
@@ -262,6 +263,42 @@ class ComposeTextView: UITextView {
     return true
   }
 
+  override func toggleUnderline(_ sender: Any?) { toggleStyle(.underline, actionName: "Underline") }
+
+  func inlineStyleMenu() -> UIMenu {
+    let styles: [(InlineTextStyle, String, String)] = [
+      (.underline, "Underline", "underline"),
+      (.strikethrough, "Strikethrough", "strikethrough"),
+      (.highlight, "Highlight", "highlighter"),
+    ]
+    let range = clampedRange(selectedRange)
+    return UIMenu(title: "Text Styles", children: styles.map { style, title, symbol in
+      let enabled = range.length == 0
+        ? typingAttributes[style.marker] as? Bool == true
+        : style.isEnabled(in: textStorage, range: range)
+      return UIAction(title: title, image: UIImage(systemName: symbol), state: enabled ? .on : .off) { [weak self] _ in
+        self?.toggleStyle(style, actionName: title)
+      }
+    })
+  }
+
+  private func toggleStyle(_ style: InlineTextStyle, actionName: String) {
+    guard isEditable, selectedRange.location != NSNotFound else { return }
+    let range = clampedRange(selectedRange)
+    registerFormattingUndo(actionName: actionName)
+    if range.length == 0 {
+      typingAttributes = style.settingEnabled(typingAttributes[style.marker] as? Bool != true, in: typingAttributes)
+    } else {
+      let enabled = !style.isEnabled(in: textStorage, range: range)
+      textStorage.beginEditing()
+      style.setEnabled(enabled, in: textStorage, range: range)
+      textStorage.endEditing()
+      selectedRange = range
+    }
+    textDidChange()
+    delegate?.textViewDidChange?(self)
+  }
+
   private func registerFormattingUndo(actionName: String) {
     let previousText = NSAttributedString(attributedString: textStorage)
     let previousSelection = selectedRange
@@ -289,6 +326,7 @@ class ComposeTextView: UITextView {
     textStorage.removeAttribute(.emailAddress, range: safeRange)
     textStorage.removeAttribute(.phoneNumber, range: safeRange)
     textStorage.addAttributes(linkAttributes(urlString: urlString), range: safeRange)
+    InlineTextStyle.reapply(to: textStorage)
     textStorage.endEditing()
 
     selectedRange = ComposeLinkPaste.selectionAfterApplyingLink(to: safeRange)
@@ -761,10 +799,13 @@ class ComposeTextView: UITextView {
 
         if !shouldAllowBold {
           Log.shared.debug("🛡️ BLOCKING bold typing attributes! Setting default instead.")
-          let defaultAttributes: [NSAttributedString.Key: Any] = [
+          var defaultAttributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 17),
             .foregroundColor: UIColor.label,
           ]
+          for style in InlineTextStyle.allCases where newValue[style.marker] as? Bool == true {
+            defaultAttributes = style.settingEnabled(true, in: defaultAttributes)
+          }
           super.typingAttributes = defaultAttributes
           return
         } else {
@@ -1061,7 +1102,13 @@ extension UITextView {
        hasTypingAttributesMentionStyling || hasTypingAttributesThreadLinkStyling ||
        hasTypingAttributesBoldStyling
     {
+      let previousTyping = typingAttributes
       resetTypingAttributesToDefault()
+      var attributes = typingAttributes
+      for style in InlineTextStyle.allCases where previousTyping[style.marker] as? Bool == true {
+        attributes = style.settingEnabled(true, in: attributes)
+      }
+      typingAttributes = attributes
     }
 
     // Check if cursor is within a code block and maintain monospace font
@@ -1089,6 +1136,9 @@ extension UITextView {
 
     var newTypingAttributes = defaultTypingAttributes
     newTypingAttributes[.font] = monospaceFont
+    for style in InlineTextStyle.allCases where attributes[style.marker] as? Bool == true {
+      newTypingAttributes = style.settingEnabled(true, in: newTypingAttributes)
+    }
 
     // Preserve preCode or inlineCode attribute for continued typing
     if attributes[NSAttributedString.Key("preCode")] != nil {

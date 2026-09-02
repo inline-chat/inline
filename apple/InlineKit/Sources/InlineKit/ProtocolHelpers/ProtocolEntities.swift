@@ -78,6 +78,7 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
     case threadTitle
     case groupMention
     case botCommand
+    case math
   }
 
   public init(from decoder: Decoder) throws {
@@ -97,6 +98,8 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
       self = .groupMention(groupMention)
     } else if let botCommand = try container.decodeIfPresent(MessageEntity.MessageEntityBotCommand.self, forKey: .botCommand) {
       self = .botCommand(botCommand)
+    } else if let math = try container.decodeIfPresent(MessageEntity.MessageEntityMath.self, forKey: .math) {
+      self = .math(math)
     } else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
@@ -125,7 +128,24 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
         try container.encode(groupMention, forKey: .groupMention)
       case let .botCommand(botCommand):
         try container.encode(botCommand, forKey: .botCommand)
+      case let .math(math):
+        try container.encode(math, forKey: .math)
     }
+  }
+}
+
+extension InlineProtocol.MessageEntity.MessageEntityMath: Codable {
+  private enum CodingKeys: String, CodingKey { case display }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init()
+    display = try container.decode(Bool.self, forKey: .display)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(display, forKey: .display)
   }
 }
 

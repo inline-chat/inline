@@ -489,6 +489,10 @@ final class AppMenu: NSObject {
       keyEquivalent: "i"
     )
 
+    formatMenu.addItem(withTitle: "Underline", action: #selector(ComposeNSTextView.toggleUnderline(_:)), keyEquivalent: "u")
+    formatMenu.addItem(withTitle: "Strikethrough", action: #selector(ComposeNSTextView.toggleStrikethrough(_:)), keyEquivalent: "")
+    formatMenu.addItem(withTitle: "Highlight", action: #selector(ComposeNSTextView.toggleHighlight(_:)), keyEquivalent: "")
+
     let inlineCodeItem = NSMenuItem(
       title: "Inline Code",
       action: #selector(ComposeNSTextView.toggleInlineCode(_:)),

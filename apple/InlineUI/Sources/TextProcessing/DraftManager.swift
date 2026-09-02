@@ -187,8 +187,20 @@ public final class DraftManager {
   func makePayload(peerId: InlineKit.Peer?, attributedString: NSAttributedString) -> DraftPersistencePayload? {
     guard let peerId else { return nil }
 
-    let (rawText, extractedEntities) = ProcessEntities.fromAttributedString(attributedString, parseMarkdown: false)
-    let text = rawText.replacingOccurrences(of: Self.attachmentMarker, with: "")
+    let rawText = attributedString.string
+    let textForSave: NSAttributedString
+    if rawText.contains(Self.attachmentMarker) {
+      // Remove attachment placeholders before extracting ranges, as the send path does.
+      let copy = NSMutableAttributedString(attributedString: attributedString)
+      let source = rawText as NSString
+      for index in (0 ..< source.length).reversed() where source.character(at: index) == 0xFFFC {
+        copy.deleteCharacters(in: NSRange(location: index, length: 1))
+      }
+      textForSave = copy
+    } else {
+      textForSave = attributedString
+    }
+    let (text, extractedEntities) = ProcessEntities.fromAttributedString(textForSave, parseMarkdown: false)
 
     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       return .clear(peerId: peerId)
@@ -315,7 +327,7 @@ public final class DraftManager {
     text: String,
     extractedEntities: MessageEntities
   ) -> MessageEntities? {
-    if rawText == text, let entities = normalizedEntities(extractedEntities) {
+    if let entities = normalizedEntities(extractedEntities) {
       return entities
     }
 

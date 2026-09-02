@@ -126,6 +126,9 @@ class MessageTextView: NSTextView {
   // when the click should not continue into AppKit text selection.
   var onEntityClick: ((NSPoint, NSEvent) -> Bool)?
   var onTextLongPress: ((NSPoint, NSEvent) -> Void)?
+  // Existing message gesture routing reads this optional hook. The focused
+  // rich-text path leaves it unset and does not install custom click tracking.
+  var onPlainSingleClick: ((NSPoint, NSEvent) -> Void)?
 
   private var textHoldTimer: Timer?
   private var textHoldMonitor: Any?
@@ -138,6 +141,31 @@ class MessageTextView: NSTextView {
 
   deinit {
     cancelTextHold(reason: "deinit")
+  }
+
+  override func writeSelection(to pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+    guard let storage = textStorage,
+          selectedRanges.contains(where: { RichTextMath.containsRenderedMath(storage, range: $0.rangeValue) })
+    else { return super.writeSelection(to: pasteboard, type: type) }
+    let source = NSMutableAttributedString(string: "")
+    for value in selectedRanges {
+      guard let selection = RichTextMath.sourceAttributedText(storage, range: value.rangeValue) else { return false }
+      if source.length > 0 { source.append(NSAttributedString(string: "\n")) }
+      source.append(selection)
+    }
+    if type == .string { return pasteboard.setString(source.string, forType: type) }
+    let documentType: NSAttributedString.DocumentType
+    switch type {
+    case .rtf: documentType = .rtf
+    case .rtfd: documentType = .rtfd
+    case .html: documentType = .html
+    default: return false
+    }
+    guard let data = try? source.data(
+      from: NSRange(location: 0, length: source.length),
+      documentAttributes: [.documentType: documentType]
+    ) else { return false }
+    return pasteboard.setData(data, forType: type)
   }
 
   override func resignFirstResponder() -> Bool {

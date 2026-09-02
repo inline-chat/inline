@@ -189,6 +189,7 @@ public struct TransactionSendMessage: Transaction {
           $0.voice = voiceContent
         }
       },
+      blockContentPayload: .literalMath(text: text, entities: entities),
       transactionId: id,
       isSticker: isSticker,
       entities: entities

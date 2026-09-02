@@ -671,7 +671,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
           blocks: quote.children,
           materializedPhotoIDs: &materializedPhotoIDs
         )
-      case .paragraph, .heading, .code, .separator, .footer, .table, nil:
+      case .paragraph, .heading, .code, .separator, .footer, .table, .math, nil:
         break
       }
     }
@@ -1209,7 +1209,15 @@ public extension Message {
     let isUpdate = existing != nil
     var message = Message(from: protocolMessage)
     let textOrEntitiesChanged = existing.map {
-      $0.text != message.text || $0.entities != message.entities
+      let sameText: Bool
+      switch ($0.text, message.text) {
+      case let (previous?, current?): sameText = previous.utf8.elementsEqual(current.utf8)
+      case (nil, nil): sameText = true
+      default: sameText = false
+      }
+      // Entity and block offsets address literal UTF-16, not Swift String's
+      // canonical Unicode equivalence. Translation invalidation must agree.
+      return !sameText || $0.entities != message.entities
     } ?? false
 
     if protocolMessage.hasBlockContent {

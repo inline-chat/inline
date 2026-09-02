@@ -22,6 +22,7 @@ public struct BlockContentPath: Codable, Hashable, Sendable {
 }
 
 public enum BlockContentNodeKind: Hashable, Sendable {
+  case math
   case paragraph
   case heading
   case code
@@ -95,6 +96,8 @@ public enum BlockContentReconciler {
       guard let kind = block.kind else { return [] }
 
       switch kind {
+      case .math:
+        return [Node(path: path, kind: .math)]
       case .paragraph:
         return [Node(path: path, kind: .paragraph)]
       case .heading:

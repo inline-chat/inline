@@ -1,12 +1,15 @@
 import AppKit
 import InlineKit
 import InlineProtocol
+import TextProcessing
 
 final class RichBlockLayoutPlanner {
   static let shared = RichBlockLayoutPlanner()
   // Mirrors the server validation ceiling. A larger/forged snapshot falls
   // back to the ordinary message projection before creating native surfaces.
   private static let maxTableCells = 256
+  private static let maximumBlocks = 1_024
+  private static let maximumContentByteCount = 512 * 1_024
 
   private final class PlanBox: NSObject {
     let plan: RichBlockLayoutPlan
@@ -16,6 +19,7 @@ final class RichBlockLayoutPlanner {
     let availableWidth: CGFloat
     let contentHorizontalInset: CGFloat
     let baseFontSize: CGFloat
+    let nativeMathEnabled: Bool
     let disclosureOverrides: [BlockContentPath: Bool]
 
     init(
@@ -26,15 +30,19 @@ final class RichBlockLayoutPlanner {
       availableWidth: CGFloat,
       contentHorizontalInset: CGFloat,
       baseFontSize: CGFloat,
+      nativeMathEnabled: Bool,
       disclosureOverrides: [BlockContentPath: Bool]
     ) {
-      self.plan = plan
+      var geometry = plan
+      geometry.mathSnapshot = nil
+      self.plan = geometry
       self.content = content
       self.contentCacheSignature = contentCacheSignature
       self.attributedText = attributedText.copy() as? NSAttributedString ?? attributedText
       self.availableWidth = availableWidth
       self.contentHorizontalInset = contentHorizontalInset
       self.baseFontSize = baseFontSize
+      self.nativeMathEnabled = nativeMathEnabled
       self.disclosureOverrides = disclosureOverrides
     }
 
@@ -45,14 +53,17 @@ final class RichBlockLayoutPlanner {
       availableWidth: CGFloat,
       contentHorizontalInset: CGFloat,
       baseFontSize: CGFloat,
+      nativeMathEnabled: Bool,
       disclosureOverrides: [BlockContentPath: Bool]
     ) -> Bool {
       self.contentCacheSignature == contentCacheSignature
         && self.content == content
+        && self.attributedText.string.utf8.elementsEqual(attributedText.string.utf8)
         && self.attributedText.isEqual(to: attributedText)
         && self.availableWidth == availableWidth
         && self.contentHorizontalInset == contentHorizontalInset
         && self.baseFontSize == baseFontSize
+        && self.nativeMathEnabled == nativeMathEnabled
         && self.disclosureOverrides == disclosureOverrides
     }
   }
@@ -72,13 +83,30 @@ final class RichBlockLayoutPlanner {
     availableWidth: CGFloat,
     contentHorizontalInset: CGFloat = 0,
     baseFontSize: CGFloat,
+    primaryColor: NSColor = .labelColor,
+    secondaryColor: NSColor = .secondaryLabelColor,
+    nativeMathEnabled: Bool,
     disclosureOverrides: [BlockContentPath: Bool] = [:]
   ) -> RichBlockLayoutPlan? {
-    guard availableWidth >= 1 else { return nil }
+    guard availableWidth.isFinite, availableWidth >= 1,
+          !content.blocks.isEmpty,
+          contentByteCount >= 0,
+          contentByteCount <= Self.maximumContentByteCount
+    else { return nil }
     var remainingTableCells = Self.maxTableCells
-    guard Self.consumeTableCellBudget(content.blocks, remaining: &remainingTableCells, depth: 0) else {
+    var remainingBlocks = Self.maximumBlocks
+    guard Self.consumeStructuralBudget(
+      content.blocks,
+      remainingTableCells: &remainingTableCells,
+      remainingBlocks: &remainingBlocks,
+      depth: 0
+    ) else {
       return nil
     }
+    let math = nativeMathEnabled
+      ? Self.mathSnapshot(content: content, text: attributedText, fontSize: baseFontSize,
+                          primaryColor: primaryColor, secondaryColor: secondaryColor)
+      : RichTextMath.snapshot(ranges: [], text: attributedText, fontSize: baseFontSize)
     let resolvedContentInset = min(max(0, contentHorizontalInset), max(0, (availableWidth - 1) / 2))
     let key = cacheKey(
       contentCacheSignature: contentCacheSignature,
@@ -86,7 +114,9 @@ final class RichBlockLayoutPlanner {
       availableWidth: availableWidth,
       contentHorizontalInset: resolvedContentInset,
       baseFontSize: baseFontSize,
-      disclosureOverrides: disclosureOverrides
+      nativeMathEnabled: nativeMathEnabled,
+      disclosureOverrides: disclosureOverrides,
+      mathSignature: math.signature
     )
     if let cached = cache.object(forKey: key),
        cached.matches(
@@ -96,14 +126,18 @@ final class RichBlockLayoutPlanner {
          availableWidth: availableWidth,
          contentHorizontalInset: resolvedContentInset,
          baseFontSize: baseFontSize,
+         nativeMathEnabled: nativeMathEnabled,
          disclosureOverrides: disclosureOverrides
        )
     {
-      return cached.plan
+      var prepared = cached.plan
+      prepared.mathSnapshot = math
+      return prepared
     }
 
     var builder = Builder(
       attributedText: attributedText,
+      math: math,
       baseFontSize: baseFontSize,
       contentHorizontalInset: resolvedContentInset,
       disclosureOverrides: disclosureOverrides
@@ -125,6 +159,8 @@ final class RichBlockLayoutPlanner {
     )
     let plan = RichBlockLayoutPlan(
       size: CGSize(width: resolvedWidth, height: ceil(builder.height)),
+      mathSignature: math.signature,
+      mathSnapshot: math,
       contentHorizontalInset: resolvedContentInset,
       nodes: builder.nodes,
       trailingTextLine: builder.trailingTextLine
@@ -137,6 +173,7 @@ final class RichBlockLayoutPlanner {
       availableWidth: availableWidth,
       contentHorizontalInset: resolvedContentInset,
       baseFontSize: baseFontSize,
+      nativeMathEnabled: nativeMathEnabled,
       disclosureOverrides: disclosureOverrides
     )
     let estimatedCost = contentByteCount + attributedText.length * 8 + plan.nodes.count * 128
@@ -144,38 +181,43 @@ final class RichBlockLayoutPlanner {
     return plan
   }
 
-  private static func consumeTableCellBudget(
+  private static func consumeStructuralBudget(
     _ blocks: [InlineProtocol.Block],
-    remaining: inout Int,
+    remainingTableCells: inout Int,
+    remainingBlocks: inout Int,
     depth: Int
   ) -> Bool {
-    guard depth <= 16 else { return false }
+    guard depth <= 16, blocks.count <= remainingBlocks else { return false }
+    remainingBlocks -= blocks.count
     for block in blocks {
       guard let kind = block.kind else { continue }
       switch kind {
       case let .table(table):
         for row in table.rows {
-          guard row.cells.count <= remaining else { return false }
-          remaining -= row.cells.count
+          guard row.cells.count <= remainingTableCells else { return false }
+          remainingTableCells -= row.cells.count
         }
       case let .list(list):
         for item in list.items {
-          guard consumeTableCellBudget(
+          guard consumeStructuralBudget(
             item.children,
-            remaining: &remaining,
+            remainingTableCells: &remainingTableCells,
+            remainingBlocks: &remainingBlocks,
             depth: depth + 1
           ) else { return false }
         }
       case let .disclosure(disclosure):
-        guard consumeTableCellBudget(
+        guard consumeStructuralBudget(
           disclosure.children,
-          remaining: &remaining,
+          remainingTableCells: &remainingTableCells,
+          remainingBlocks: &remainingBlocks,
           depth: depth + 1
         ) else { return false }
       case let .quote(quote):
-        guard consumeTableCellBudget(
+        guard consumeStructuralBudget(
           quote.children,
-          remaining: &remaining,
+          remainingTableCells: &remainingTableCells,
+          remainingBlocks: &remainingBlocks,
           depth: depth + 1
         ) else { return false }
       default:
@@ -191,15 +233,43 @@ final class RichBlockLayoutPlanner {
     availableWidth: CGFloat,
     contentHorizontalInset: CGFloat,
     baseFontSize: CGFloat,
-    disclosureOverrides: [BlockContentPath: Bool]
+    nativeMathEnabled: Bool,
+    disclosureOverrides: [BlockContentPath: Bool],
+    mathSignature: Int
   ) -> NSString {
     let overrides = disclosureOverrides
       .map { "\(String(describing: $0.key.components)):\($0.value)" }
       .sorted()
       .joined(separator: ",")
     return NSString(
-      string: "\(contentCacheSignature)_\(attributedText.hash)_\(Int(availableWidth.rounded()))_\(contentHorizontalInset)_\(baseFontSize)_\(overrides)"
+      string: "\(contentCacheSignature)_\(Data(attributedText.string.utf8).hashValue)_\(attributedText.hash)_\(Int(availableWidth.rounded()))_\(contentHorizontalInset)_\(baseFontSize)_\(nativeMathEnabled)_\(overrides)_\(mathSignature)"
     )
+  }
+
+  static func mathSnapshot(content: InlineProtocol.BlockContent, text: NSAttributedString,
+                           fontSize: CGFloat, primaryColor: NSColor, secondaryColor: NSColor) -> RichTextMath.Snapshot {
+    RichTextMath.snapshot(content: content, text: text, fontSize: fontSize) { range, role in
+      let nativeRole: RichBlockTextRole
+      switch role {
+      case .paragraph: nativeRole = .paragraph
+      case let .heading(level): nativeRole = .heading(level: level)
+      case .footer: nativeRole = .footer
+      case let .disclosure(progress): nativeRole = .disclosureSummary(progress: progress, expanded: false)
+      case let .table(header):
+        return styledTableText(text, offset: range.location, length: range.length, baseFontSize: fontSize,
+                               isRTL: false, alignment: .left, isHeader: header)
+      }
+      guard let value = styledText(text, offset: range.location, length: range.length, role: nativeRole,
+                                   baseFontSize: fontSize, isRTL: false)?.mutableCopy() as? NSMutableAttributedString
+      else { return nil }
+      if case .footer = role { value.addAttribute(.foregroundColor, value: secondaryColor,
+                                                 range: NSRange(location: 0, length: value.length)) }
+      if case .disclosure = role {
+        value.addAttribute(.foregroundColor, value: secondaryColor,
+                           range: NSRange(location: 0, length: value.length))
+      }
+      return value
+    }
   }
 
   static func styledText(
@@ -208,7 +278,9 @@ final class RichBlockLayoutPlanner {
     length: Int,
     role: RichBlockTextRole,
     baseFontSize: CGFloat,
-    isRTL: Bool
+    isRTL: Bool,
+    math: RichTextMath.Snapshot? = nil,
+    maximumWidth: CGFloat? = nil
   ) -> NSAttributedString? {
     guard offset >= 0, length >= 0, offset <= attributedText.length,
           length <= attributedText.length - offset
@@ -224,25 +296,18 @@ final class RichBlockLayoutPlanner {
     case let .heading(level):
       let clamped = min(max(level, 1), 6)
       let scale = [1.22, 1.14, 1.07, 1.02, 1.0, 1.0][clamped - 1]
-      value.addAttribute(
-        .font,
-        value: ChatTypography.current.font(
+      PlatformFontTraits.applyBaseFont(
+        ChatTypography.current.font(
           sized: baseFontSize * scale,
           weight: clamped == 1 ? .semibold : .medium
         ),
-        range: fullRange
+        to: value
       )
     case .footer:
-      value.addAttributes([
-        .font: ChatTypography.current.font(sized: baseFontSize * 0.82),
-        .foregroundColor: NSColor.secondaryLabelColor,
-      ], range: fullRange)
+      PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: baseFontSize * 0.82), to: value)
+      value.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: fullRange)
     case .disclosureSummary:
-      value.addAttribute(
-        .font,
-        value: ChatTypography.current.font(sized: baseFontSize, weight: .regular),
-        range: fullRange
-      )
+      PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: baseFontSize, weight: .regular), to: value)
     case .listMarker:
       break
     }
@@ -250,7 +315,7 @@ final class RichBlockLayoutPlanner {
     paragraph.baseWritingDirection = isRTL ? .rightToLeft : .leftToRight
     paragraph.alignment = isRTL ? .right : .left
     value.addAttribute(.paragraphStyle, value: paragraph, range: fullRange)
-    return value
+    return math.map { RichTextMath.projectInline(value, sourceOffset: offset, snapshot: $0, maximumWidth: maximumWidth) } ?? value
   }
 
   static func styledTableText(
@@ -260,7 +325,9 @@ final class RichBlockLayoutPlanner {
     baseFontSize: CGFloat,
     isRTL: Bool,
     alignment: RichBlockLayoutPlan.TableAlignment,
-    isHeader: Bool
+    isHeader: Bool,
+    math: RichTextMath.Snapshot? = nil,
+    maximumWidth: CGFloat? = nil
   ) -> NSAttributedString? {
     guard let value = styledText(
       attributedText,
@@ -280,13 +347,9 @@ final class RichBlockLayoutPlanner {
     }
     value.addAttribute(.paragraphStyle, value: paragraph, range: range)
     if isHeader {
-      value.addAttribute(
-        .font,
-        value: ChatTypography.current.font(sized: baseFontSize, weight: .semibold),
-        range: range
-      )
+      PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: baseFontSize, weight: .semibold), to: value)
     }
-    return value
+    return math.map { RichTextMath.projectInline(value, sourceOffset: offset, snapshot: $0, maximumWidth: maximumWidth) } ?? value
   }
 
   private struct Builder {
@@ -305,6 +368,7 @@ final class RichBlockLayoutPlanner {
     private static let whitespaceExpression = try? NSRegularExpression(pattern: #"\s+"#)
 
     let attributedText: NSAttributedString
+    let math: RichTextMath.Snapshot
     let baseFontSize: CGFloat
     let contentHorizontalInset: CGFloat
     let disclosureOverrides: [BlockContentPath: Bool]
@@ -353,7 +417,7 @@ final class RichBlockLayoutPlanner {
       inheritedDirection: Bool? = nil,
       fullBleedContainer: (x: CGFloat, width: CGFloat)? = nil
     ) -> Bool {
-      guard depth <= 16 else { return false }
+      guard depth <= 16, nodes.count + blocks.count <= RichBlockLayoutPlanner.maximumBlocks else { return false }
       for (index, block) in blocks.enumerated() {
         if index == 0, case .heading? = block.kind {
           height += parent.components.isEmpty ? 6 : 4
@@ -398,6 +462,8 @@ final class RichBlockLayoutPlanner {
     ) -> Bool {
       guard let kind = block.kind else { return false }
       switch kind {
+      case let .math(text):
+        return appendMath(text, path: path, x: x, width: width)
       case let .paragraph(text):
         return appendText(
           text,
@@ -513,7 +579,11 @@ final class RichBlockLayoutPlanner {
       depth: Int,
       inheritedDirection: Bool?
     ) -> Bool {
-      let firstOrdinal = list.hasStart ? list.start : 1
+      guard !list.items.isEmpty, list.items.count <= 1_024,
+            list.kind == .ordered || list.kind == .unordered
+      else { return false }
+      let firstOrdinal = list.kind == .ordered && list.hasStart ? list.start : 1
+      guard (0 ... 999_999_999).contains(firstOrdinal) else { return false }
       let lastOrdinal = firstOrdinal + Int64(max(0, list.items.count - 1))
       let markerWidth = RichBlockListMetrics.markerWidth(
         ordered: list.kind == .ordered,
@@ -681,7 +751,8 @@ final class RichBlockLayoutPlanner {
             baseFontSize: baseFontSize,
             isRTL: isRTL,
             alignment: alignments[column],
-            isHeader: rowIndex == 0
+            isHeader: rowIndex == 0,
+            math: math
           ) else { return false }
           let minimumTextWidth = minimumUnbreakableTextWidth(text)
           let maximumTextWidth = text.boundingRect(
@@ -725,7 +796,8 @@ final class RichBlockLayoutPlanner {
             baseFontSize: baseFontSize,
             isRTL: isRTL,
             alignment: alignments[column],
-            isHeader: isHeader
+            isHeader: isHeader,
+            math: math
           ) else { return false }
           rowHeight = max(
             rowHeight,
@@ -855,6 +927,26 @@ final class RichBlockLayoutPlanner {
       )
     }
 
+    private mutating func appendMath(_ text: InlineProtocol.BlockText, path: BlockContentPath, x: CGFloat, width: CGFloat) -> Bool {
+      guard text.offset >= 0, text.length > 0, text.offset <= Int64(attributedText.length),
+            text.length <= Int64(attributedText.length) - text.offset else { return false }
+      let range = NSRange(location: Int(text.offset), length: Int(text.length))
+      if let image = math.image(for: range) {
+        let imageSize = CGSize(width: image.width, height: image.height)
+        let frame = CGRect(x: x, y: height, width: min(width, max(40, image.width)),
+                           height: ceil(max(baseFontSize * 1.25, image.height)))
+        nodes.append(.init(path: path, frame: frame, kind: .math(.init(range: range, imageSize: imageSize))))
+        recordMeasuredFrame(frame)
+        height = frame.maxY
+      } else {
+        guard appendText(text, role: .paragraph, path: path, x: x, width: width, inheritedDirection: false)
+        else { return false }
+        nodes[nodes.count - 1].kind = .math(.init(range: range, imageSize: nil))
+      }
+      trailingTextLine = nil
+      return true
+    }
+
     private mutating func appendText(
       _ text: InlineProtocol.BlockText,
       role: RichBlockTextRole,
@@ -866,19 +958,21 @@ final class RichBlockLayoutPlanner {
       capturesTrailingLine: Bool = false
     ) -> Bool {
       let isRTL = text.hasIsRtl ? text.isRtl : (inheritedDirection ?? false)
+      let renderedTextWidth: CGFloat = if case .disclosureSummary = role {
+        RichBlockDisclosureMetrics.titleViewportWidth(containerWidth: width)
+      } else {
+        width
+      }
       guard let attributed = RichBlockLayoutPlanner.styledText(
         attributedText,
         offset: Int(text.offset),
         length: Int(text.length),
         role: role,
         baseFontSize: baseFontSize,
-        isRTL: isRTL
+        isRTL: isRTL,
+        math: math,
+        maximumWidth: max(1, renderedTextWidth - inset * 2)
       ) else { return false }
-      let renderedTextWidth: CGFloat = if case .disclosureSummary = role {
-        RichBlockDisclosureMetrics.titleViewportWidth(containerWidth: width)
-      } else {
-        width
-      }
       let measuredWidth = max(1, renderedTextWidth - inset * 2)
       let measurement = measureText(attributed, width: measuredWidth)
       let measuredHeight = measurement.height

@@ -30,6 +30,12 @@ struct ExperimentalSettingsDetailView: View {
             description: "Render supported agent Markdown as native rich-content blocks in messages."
           )
         }
+        Toggle(isOn: $settings.richTextNativeMathEnabled) {
+          SettingsRowLabel(
+            "Native Math Rendering",
+            description: "Render supported LaTeX as native formulas. When off, formulas remain readable and copyable as source."
+          )
+        }
       } header: {
         SettingsSectionHeader("Messages")
       }

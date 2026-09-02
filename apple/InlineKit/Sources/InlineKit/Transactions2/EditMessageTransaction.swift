@@ -68,16 +68,7 @@ public struct EditMessageTransaction: Transaction2 {
     log.debug("Optimistic edit message \(messageId) \(peerId) \(chatId)")
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        var message = try Message
-          .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
-        if let current = message?.text, current == text {
-          message?.editDate = nil
-        } else {
-          message?.editDate = Date()
-          message?.text = text
-          message?.entities = entities
-        }
-        try message?.saveMessage(db)
+        try applyOptimisticEdit(in: db)
       }
 
       Task(priority: .userInitiated) { @MainActor in
@@ -91,6 +82,24 @@ public struct EditMessageTransaction: Transaction2 {
     } catch {
       log.error("Failed to edit message \(error)")
     }
+  }
+
+  /// Keep canonical text, entity ranges and their optional block projection in
+  /// one write. An unchanged string can still have a formatting-only edit.
+  func applyOptimisticEdit(in db: Database, date: Date = Date()) throws {
+    guard var message = try Message
+      .filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db),
+      message.text?.utf8.elementsEqual(text.utf8) != true || message.entities != entities else { return }
+    message.text = text
+    message.entities = entities
+    message.editDate = date
+    message.blockContentPayload = .literalMath(text: text, entities: entities)
+    try message.saveMessage(db, preserveExistingBlockContentWhenMissing: false)
+    // The acknowledgement may contain the same text/entities we just saved;
+    // it cannot detect that these cached translations belong to the old source.
+    try Translation
+      .filter(Translation.Columns.messageId == messageId && Translation.Columns.chatId == chatId)
+      .deleteAll(db)
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(

@@ -4,6 +4,8 @@ import AppKit
 enum RichBlockViewFactory {
   static func make(for node: RichBlockLayoutPlan.Node) -> RichBlockRenderableView {
     switch node.reuseKind {
+    case .math:
+      RichBlockMathNodeView()
     case .text:
       RichBlockTextNodeView()
     case .listMarker:

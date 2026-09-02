@@ -73,6 +73,10 @@ class ComposeNSTextView: NSTextView {
       toggleItalic(self)
       return
     }
+    if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "u" {
+      toggleUnderline(self)
+      return
+    }
     if modifiers == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "c" {
       toggleInlineCode(self)
       return
@@ -362,6 +366,29 @@ class ComposeNSTextView: NSTextView {
     )
   }
 
+  @objc func toggleUnderline(_ sender: Any?) { toggleStyle(.underline, actionName: "Underline") }
+  @objc func toggleStrikethrough(_ sender: Any?) { toggleStyle(.strikethrough, actionName: "Strikethrough") }
+  @objc func toggleHighlight(_ sender: Any?) { toggleStyle(.highlight, actionName: "Highlight") }
+
+  private func toggleStyle(_ style: InlineTextStyle, actionName: String) {
+    guard isEditable, selectedRange().location != NSNotFound else { return }
+    let range = clampedRange(selectedRange())
+    registerUndo(FormattingSnapshot(
+      attributedString: NSAttributedString(attributedString: attributedString()),
+      selectedRange: range, typingAttributes: typingAttributes, actionName: actionName
+    ))
+    if range.length == 0 {
+      typingAttributes = style.settingEnabled(typingAttributes[style.marker] as? Bool != true, in: typingAttributes)
+    } else if let textStorage {
+      let enabled = !style.isEnabled(in: textStorage, range: range)
+      textStorage.beginEditing()
+      style.setEnabled(enabled, in: textStorage, range: range)
+      textStorage.endEditing()
+      setSelectedRange(range)
+    }
+    notifyDelegateAboutFormattingChange()
+  }
+
   @objc func toggleInlineCode(_ sender: Any?) {
     let range = selectedRange()
     guard range.location != NSNotFound else { return }
@@ -509,7 +536,8 @@ class ComposeNSTextView: NSTextView {
     switch item.action {
     case #selector(makeLink(_:)):
       selectedLinkTextRange() != nil
-    case #selector(toggleBold(_:)), #selector(toggleItalic(_:)), #selector(toggleInlineCode(_:)):
+    case #selector(toggleBold(_:)), #selector(toggleItalic(_:)), #selector(toggleInlineCode(_:)),
+         #selector(toggleUnderline(_:)), #selector(toggleStrikethrough(_:)), #selector(toggleHighlight(_:)):
       isEditable
     default:
       super.validateUserInterfaceItem(item)
@@ -570,6 +598,7 @@ class ComposeNSTextView: NSTextView {
     textStorage.removeAttribute(.emailAddress, range: safeRange)
     textStorage.removeAttribute(.phoneNumber, range: safeRange)
     textStorage.addAttributes(linkAttributes(urlString: urlString), range: safeRange)
+    InlineTextStyle.reapply(to: textStorage)
     textStorage.endEditing()
 
     setSelectedRange(ComposeLinkPaste.selectionAfterApplyingLink(to: safeRange))
@@ -799,11 +828,12 @@ class ComposeNSTextView: NSTextView {
       sanitized.addAttribute(.italic, value: true, range: range)
     }
 
-    // Strip underline everywhere; we don't support it (and links shouldn't be underlined either).
+    // Strip incidental underlines; restore only styles explicitly authored by Inline.
     if fullRange.length > 0 {
       sanitized.addAttribute(.underlineStyle, value: 0, range: fullRange)
       sanitized.removeAttribute(.underlineColor, range: fullRange)
     }
+    InlineTextStyle.reapply(to: sanitized)
 
     // Normalize list markers that arrive as tab-delimited prefixes (common in RTF/HTML lists).
     stats.listFixes = normalizeTabDelimitedListMarkers(in: sanitized)
@@ -1213,7 +1243,8 @@ class ComposeNSTextView: NSTextView {
     var newTypingAttributes = typingAttributes
     let currentFont = (newTypingAttributes[.font] as? NSFont) ?? ComposeTextEditor.font
     newTypingAttributes[.font] = PlatformFontTraits.settingBold(wantsBold, on: currentFont)
-    newTypingAttributes[.underlineStyle] = 0
+    newTypingAttributes[.underlineStyle] = newTypingAttributes[.richTextUnderline] as? Bool == true
+      ? NSUnderlineStyle.single.rawValue : 0
     typingAttributes = newTypingAttributes
   }
 }

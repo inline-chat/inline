@@ -823,6 +823,11 @@ final class UIMessageView2: UIMessageView {
   }
 
   private func measuredLayout(containerWidth: CGFloat) -> MessageBubbleLayoutV2? {
+    let existingKey = layoutCacheKey(containerWidth: containerWidth)
+    if currentLayoutKey == existingKey, let currentLayout,
+       currentRichPlan?.mathSnapshot?.hasPending != true {
+      return currentLayout
+    }
     guard ensureRichPlan(containerWidth: containerWidth) else { return nil }
     let key = layoutCacheKey(containerWidth: containerWidth)
     if currentLayoutKey == key, let currentLayout {
@@ -878,7 +883,10 @@ final class UIMessageView2: UIMessageView {
     } else {
       geometryTransitionGeneration &+= 1
     }
-    guard prepared.key == layoutCacheKey(containerWidth: bounds.width) else {
+    guard prepared.key == layoutCacheKey(
+      containerWidth: bounds.width,
+      mathSignature: prepared.rich?.mathSignature ?? 0
+    ) else {
       cancelPendingGeometryTransitions()
       return false
     }
@@ -894,6 +902,7 @@ final class UIMessageView2: UIMessageView {
         baseFontSize: richBaseFontSize,
         palette: richPalette,
         message: message,
+        mathPreparationEnabled: false,
         deferLayout: shouldAnimate,
         transitionGeneration: geometryTransitionGeneration
       )
@@ -1244,7 +1253,7 @@ final class UIMessageView2: UIMessageView {
     bubbleView.side
   }
 
-  private func layoutCacheKey(containerWidth: CGFloat) -> NSString {
+  private func layoutCacheKey(containerWidth: CGFloat, mathSignature: Int? = nil) -> NSString {
     let scale = max(traitCollection.displayScale, 1)
     let widthPixels = Int((containerWidth * scale).rounded())
     let maximumWidthPixels = Int((maximumBubbleWidth * scale).rounded())
@@ -1261,6 +1270,7 @@ final class UIMessageView2: UIMessageView {
       String(traitCollection.layoutDirection.rawValue),
       String(describing: resolvedTailSide),
       disclosureOverridesCacheKey,
+      String(mathSignature ?? currentRichPlan?.mathSignature ?? 0),
     ].joined(separator: "|") as NSString
   }
 
@@ -1289,6 +1299,8 @@ final class UIMessageView2: UIMessageView {
       attributedText: attributedText,
       availableWidth: availableWidth,
       baseFontSize: richBaseFontSize,
+      primaryColor: richPalette.primary,
+      secondaryColor: richPalette.secondary,
       disclosureOverrides: RichBlockDisclosureStateStoreV2.shared.overrides(for: message)
     ) else {
       currentRichPlan = nil
@@ -1307,6 +1319,7 @@ final class UIMessageView2: UIMessageView {
         baseFontSize: richBaseFontSize,
         palette: richPalette,
         message: message,
+        mathPreparationEnabled: renderingMode == .automatic,
         deferLayout: transitionOldRichPlan != nil,
         transitionGeneration: geometryTransitionGeneration
       )
@@ -1766,6 +1779,7 @@ final class UIMessageView2: UIMessageView {
     richContentView.onEntityTap = { [weak self] text, character in
       self?.handleRichEntityTap(text: text, characterIndex: character)
     }
+    richContentView.onMathPrepared = { [weak self] in self?.mathPrepared() }
     richContentView.onImageTap = { [weak self] selection in
       self?.openRichImages(selection)
     }
@@ -1900,6 +1914,30 @@ final class UIMessageView2: UIMessageView {
 
   private var hasMessageActionRowsV2: Bool {
     !filteredMessageActionRows(in: fullMessage).isEmpty
+  }
+
+  private func mathPrepared() {
+    guard renderingMode == .automatic, window != nil else { return }
+    let width = bounds.width > 0 ? bounds.width : maximumBubbleWidth
+    let oldLayout = currentLayout
+    finishGeometryTransition(generation: geometryTransitionGeneration)
+    transitionOldRichPlan = currentRichPlan
+    geometryTransitionGeneration &+= 1
+    currentLayout = nil
+    currentLayoutKey = nil
+    currentRichPlan = nil
+    invalidateIntrinsicContentSize()
+    setNeedsLayout()
+    guard let newLayout = measuredLayout(containerWidth: width) else {
+      cancelPendingGeometryTransitions()
+      return
+    }
+    if let oldLayout, let onGeometryChange {
+      onGeometryChange(oldLayout, newLayout)
+    } else {
+      applyGeometryTransition(to: newLayout, generation: geometryTransitionGeneration)
+      finishGeometryTransition(generation: geometryTransitionGeneration)
+    }
   }
 
   private func messageActionTopology(in fullMessage: FullMessage) -> [[String]] {

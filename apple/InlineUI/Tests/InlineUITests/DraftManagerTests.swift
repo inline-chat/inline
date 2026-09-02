@@ -7,6 +7,27 @@ import Testing
 @Suite("DraftManager")
 @MainActor
 struct DraftManagerTests {
+  @Test("attachment placeholders are removed without dropping or shifting draft styles")
+  func attachmentStyles() {
+    let manager = DraftManager(debounceDelay: 0)
+    let draft = NSMutableAttributedString(string: "\u{FFFC}😀 he\u{FFFC}llo")
+    draft.addAttributes(InlineTextStyle.underline.attributes, range: NSRange(location: 4, length: 6))
+    draft.addAttributes(InlineTextStyle.highlight.attributes, range: NSRange(location: 7, length: 3))
+    let payload = manager.makePayload(peerId: .user(id: 1), attributedString: draft)
+    guard case let .update(_, text, entities, _) = payload else {
+      Issue.record("Expected draft update")
+      return
+    }
+    #expect(text == "😀 hello")
+    let underline = entities?.entities.first { $0.type == .underline }
+    #expect(underline?.offset == 3)
+    #expect(underline?.length == 5)
+    let highlight = entities?.entities.first { $0.type == .highlight }
+    #expect(highlight?.offset == 5)
+    #expect(highlight?.length == 3)
+    #expect(draft.string == "\u{FFFC}😀 he\u{FFFC}llo")
+  }
+
   @Test("plain text drafts do not persist empty entities")
   func plainTextDraftsDoNotPersistEmptyEntities() {
     let manager = DraftManager(debounceDelay: 0)

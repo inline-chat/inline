@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import TextProcessing
 
 /// Presentation only: both modes consume the same raw code text and layout plan.
 enum RichBlockCodePresentation: String, Codable, Hashable {
@@ -42,6 +43,7 @@ struct RichBlockInteractions {
 }
 
 struct RichBlockRenderContext {
+  let math: RichTextMath.Snapshot
   let attributedText: NSAttributedString
   let baseFontSize: CGFloat
   let palette: RichBlockPalette
@@ -52,7 +54,7 @@ struct RichBlockRenderContext {
   let renderStyle: MessageRenderStyle
   let contentHorizontalInset: CGFloat
 
-  func text(for node: RichBlockLayoutPlan.TextNode) -> NSAttributedString {
+  func text(for node: RichBlockLayoutPlan.TextNode, maximumWidth: CGFloat? = nil) -> NSAttributedString {
     let value: NSMutableAttributedString
     if let literal = node.literal {
       value = NSMutableAttributedString(
@@ -71,7 +73,9 @@ struct RichBlockRenderContext {
           length: node.rangeLength,
           role: node.role,
           baseFontSize: baseFontSize,
-          isRTL: node.isRTL
+          isRTL: node.isRTL,
+          math: math,
+          maximumWidth: maximumWidth
         ) ?? NSAttributedString()
       )
     }
@@ -105,7 +109,8 @@ struct RichBlockRenderContext {
         baseFontSize: baseFontSize,
         isRTL: isRTL,
         alignment: cell.alignment,
-        isHeader: cell.isHeader
+        isHeader: cell.isHeader,
+        math: math
       ) ?? NSAttributedString()
     )
     let range = NSRange(location: 0, length: value.length)

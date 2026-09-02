@@ -1814,14 +1814,12 @@ struct ProcessEntitiesTests {
     // The function should handle emoji properly and not crash
     #expect(result.text == "👍 bold text")
 
-    // The function extracts both markdown and the bold entity
-    #expect(result.entities.entities.count == 2)
-
-    // Find the bold entity
-    let boldEntity = result.entities.entities.first { $0.type == .bold }
-    #expect(boldEntity != nil)
-    #expect(boldEntity!.offset == 3) // After emoji (UTF-16 length 2) and a space (1)
-    #expect(boldEntity!.length == 9) // "bold text"
+    // Native bold and Markdown describe the same remapped span, so emit it once.
+    #expect(result.entities.entities == [MessageEntity.with {
+      $0.type = .bold
+      $0.offset = 3 // Emoji occupies two UTF-16 units, followed by a space.
+      $0.length = 9 // "bold text"
+    }])
   }
 
   @Test("Mention inside bold markdown keeps correct offsets")
@@ -2149,15 +2147,13 @@ struct ProcessEntitiesTests {
 
     let result = ProcessEntities.fromAttributedString(attributedString)
 
-    // The function extracts both markdown and the italic entity
     #expect(result.text == "This is italic text")
-    #expect(result.entities.entities.count == 2)
-
-    // Find the italic entity
-    let italicEntity = result.entities.entities.first { $0.type == .italic }
-    #expect(italicEntity != nil)
-    #expect(italicEntity!.offset == 8) // Position after markdown is stripped
-    #expect(italicEntity!.length == 6) // "italic"
+    // Native italic and Markdown describe the same remapped span, so emit it once.
+    #expect(result.entities.entities == [MessageEntity.with {
+      $0.type = .italic
+      $0.offset = 8 // Position after Markdown is stripped.
+      $0.length = 6 // "italic"
+    }])
   }
 
   @Test("Should not extract italic from attributed string with markdown if no space before or after")
