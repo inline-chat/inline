@@ -39,6 +39,22 @@ export class UsersModel {
     return user
   }
 
+  static async getActiveUsersWithPhoto(ids: number[]): Promise<Array<{ user: DbUser; photoFile?: DbFile | undefined }>> {
+    if (ids.length === 0) return []
+    const rows = await db._query.users.findMany({
+      // Bind as bigint so an unknown protocol ID outside PostgreSQL's current int4 key
+      // range is omitted, without overflowing the parameter or casting the indexed column.
+      where: and(
+        sql`${users.id} in (${sql.join(ids.map((id) => sql`${id}::bigint`), sql`, `)})`,
+        userNotDeleted(),
+        // Match isSignupComplete: legacy NULL means complete; only true is pending.
+        sql`${users.pendingSetup} is not true`,
+      ),
+      with: { photo: true },
+    })
+    return rows.map((user) => ({ user, photoFile: user.photo ?? undefined }))
+  }
+
   /**
    * Get a user by id
    *

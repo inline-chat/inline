@@ -18,6 +18,7 @@ import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThrea
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import {
   getMessageThreadProjectionsMap,
   isSubthreadParentMessage,
@@ -42,6 +43,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
   const chatId = chat.id
   const currentUserId = context.currentUserId
+  await AccessGuards.ensureChatAccess(chat, currentUserId)
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
   if (fullMessage && await isSubthreadParentMessage(fullMessage.globalId)) {
     throw RealtimeRpcError.BadRequest()

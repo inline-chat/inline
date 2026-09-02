@@ -597,7 +597,7 @@ func inlineProtocolRpcMethodIsReadOnly(_ method: InlineProtocol.Method) -> Bool 
        .getUserGroups, .getSpaceSettings, .getThreadReferences,
        .getThreadSubthreads, .getPeerBots, .getMyBotCapabilities, .getGrid,
        .getGridHome, .getExternalProfilePhoto, .getChatTranscript,
-       .searchExternalResources, .listConnectors, .searchUsers,
+       .searchExternalResources, .listConnectors, .searchUsers, .getUsers,
        .resolveURLPreview, .getBotAgent, .listBotAgents, .getConnectorConfig, .getSpace,
        .getUploadState, .getFilePart:
     true

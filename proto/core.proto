@@ -1551,6 +1551,7 @@ enum Method {
   SET_SPACE_INVITE_LINK_ENABLED = 135;
   GET_FILE_PART = 136;
   ACKNOWLEDGE_MESSAGES = 137;
+  GET_USERS = 138;
   GET_BOT_SKILLS = 139;
 }
 
@@ -1694,6 +1695,7 @@ message RpcCall {
     SetSpaceInviteLinkEnabledInput setSpaceInviteLinkEnabled = 136;
     GetFilePartInput getFilePart = 137;
     AcknowledgeMessagesInput acknowledgeMessages = 138;
+    GetUsersInput getUsers = 139;
     GetBotSkillsInput getBotSkills = 140;
   }
 }
@@ -1839,6 +1841,7 @@ message RpcResult {
     SetSpaceInviteLinkEnabledResult setSpaceInviteLinkEnabled = 136;
     GetFilePartResult getFilePart = 137;
     AcknowledgeMessagesResult acknowledgeMessages = 138;
+    GetUsersResult getUsers = 139;
     GetBotSkillsResult getBotSkills = 140;
   }
 }
@@ -4020,6 +4023,11 @@ message SearchUsersInput {
 }
 
 message SearchUsersResult { repeated User users = 1; }
+
+// Read-only public profile lookup by stable ID, without creating a DM or dialog.
+// Up to 50 IDs. Missing, deleted, and pending-setup users are omitted.
+message GetUsersInput { repeated int64 user_ids = 1; }
+message GetUsersResult { repeated User users = 1; }
 
 message InviteToInlineInput {
   oneof via {

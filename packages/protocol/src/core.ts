@@ -4392,6 +4392,12 @@ export interface RpcCall {
          */
         acknowledgeMessages: AcknowledgeMessagesInput;
     } | {
+        oneofKind: "getUsers";
+        /**
+         * @generated from protobuf field: GetUsersInput getUsers = 139;
+         */
+        getUsers: GetUsersInput;
+    } | {
         oneofKind: "getBotSkills";
         /**
          * @generated from protobuf field: GetBotSkillsInput getBotSkills = 140;
@@ -5228,6 +5234,12 @@ export interface RpcResult {
          * @generated from protobuf field: AcknowledgeMessagesResult acknowledgeMessages = 138;
          */
         acknowledgeMessages: AcknowledgeMessagesResult;
+    } | {
+        oneofKind: "getUsers";
+        /**
+         * @generated from protobuf field: GetUsersResult getUsers = 139;
+         */
+        getUsers: GetUsersResult;
     } | {
         oneofKind: "getBotSkills";
         /**
@@ -10921,6 +10933,27 @@ export interface SearchUsersResult {
     users: User[];
 }
 /**
+ * Read-only public profile lookup by stable ID, without creating a DM or dialog.
+ * Up to 50 IDs. Missing, deleted, and pending-setup users are omitted.
+ *
+ * @generated from protobuf message GetUsersInput
+ */
+export interface GetUsersInput {
+    /**
+     * @generated from protobuf field: repeated int64 user_ids = 1;
+     */
+    userIds: bigint[];
+}
+/**
+ * @generated from protobuf message GetUsersResult
+ */
+export interface GetUsersResult {
+    /**
+     * @generated from protobuf field: repeated User users = 1;
+     */
+    users: User[];
+}
+/**
  * @generated from protobuf message InviteToInlineInput
  */
 export interface InviteToInlineInput {
@@ -13441,6 +13474,10 @@ export enum Method {
      * @generated from protobuf enum value: ACKNOWLEDGE_MESSAGES = 137;
      */
     ACKNOWLEDGE_MESSAGES = 137,
+    /**
+     * @generated from protobuf enum value: GET_USERS = 138;
+     */
+    GET_USERS = 138,
     /**
      * @generated from protobuf enum value: GET_BOT_SKILLS = 139;
      */
@@ -22288,6 +22325,7 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "input", T: () => SetSpaceInviteLinkEnabledInput },
             { no: 137, name: "getFilePart", kind: "message", oneof: "input", T: () => GetFilePartInput },
             { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "input", T: () => AcknowledgeMessagesInput },
+            { no: 139, name: "getUsers", kind: "message", oneof: "input", T: () => GetUsersInput },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput }
         ]);
     }
@@ -23123,6 +23161,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         acknowledgeMessages: AcknowledgeMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).acknowledgeMessages)
                     };
                     break;
+                case /* GetUsersInput getUsers */ 139:
+                    message.input = {
+                        oneofKind: "getUsers",
+                        getUsers: GetUsersInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getUsers)
+                    };
+                    break;
                 case /* GetBotSkillsInput getBotSkills */ 140:
                     message.input = {
                         oneofKind: "getBotSkills",
@@ -23552,6 +23596,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* AcknowledgeMessagesInput acknowledgeMessages = 138; */
         if (message.input.oneofKind === "acknowledgeMessages")
             AcknowledgeMessagesInput.internalBinaryWrite(message.input.acknowledgeMessages, writer.tag(138, WireType.LengthDelimited).fork(), options).join();
+        /* GetUsersInput getUsers = 139; */
+        if (message.input.oneofKind === "getUsers")
+            GetUsersInput.internalBinaryWrite(message.input.getUsers, writer.tag(139, WireType.LengthDelimited).fork(), options).join();
         /* GetBotSkillsInput getBotSkills = 140; */
         if (message.input.oneofKind === "getBotSkills")
             GetBotSkillsInput.internalBinaryWrite(message.input.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
@@ -23706,6 +23753,7 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 136, name: "setSpaceInviteLinkEnabled", kind: "message", oneof: "result", T: () => SetSpaceInviteLinkEnabledResult },
             { no: 137, name: "getFilePart", kind: "message", oneof: "result", T: () => GetFilePartResult },
             { no: 138, name: "acknowledgeMessages", kind: "message", oneof: "result", T: () => AcknowledgeMessagesResult },
+            { no: 139, name: "getUsers", kind: "message", oneof: "result", T: () => GetUsersResult },
             { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult }
         ]);
     }
@@ -24541,6 +24589,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         acknowledgeMessages: AcknowledgeMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).acknowledgeMessages)
                     };
                     break;
+                case /* GetUsersResult getUsers */ 139:
+                    message.result = {
+                        oneofKind: "getUsers",
+                        getUsers: GetUsersResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getUsers)
+                    };
+                    break;
                 case /* GetBotSkillsResult getBotSkills */ 140:
                     message.result = {
                         oneofKind: "getBotSkills",
@@ -24970,6 +25024,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* AcknowledgeMessagesResult acknowledgeMessages = 138; */
         if (message.result.oneofKind === "acknowledgeMessages")
             AcknowledgeMessagesResult.internalBinaryWrite(message.result.acknowledgeMessages, writer.tag(138, WireType.LengthDelimited).fork(), options).join();
+        /* GetUsersResult getUsers = 139; */
+        if (message.result.oneofKind === "getUsers")
+            GetUsersResult.internalBinaryWrite(message.result.getUsers, writer.tag(139, WireType.LengthDelimited).fork(), options).join();
         /* GetBotSkillsResult getBotSkills = 140; */
         if (message.result.oneofKind === "getBotSkills")
             GetBotSkillsResult.internalBinaryWrite(message.result.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
@@ -43050,6 +43107,108 @@ class SearchUsersResult$Type extends MessageType<SearchUsersResult> {
  * @generated MessageType for protobuf message SearchUsersResult
  */
 export const SearchUsersResult = new SearchUsersResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetUsersInput$Type extends MessageType<GetUsersInput> {
+    constructor() {
+        super("GetUsersInput", [
+            { no: 1, name: "user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetUsersInput>): GetUsersInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetUsersInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetUsersInput): GetUsersInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated int64 user_ids */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.userIds.push(reader.int64().toBigInt());
+                    else
+                        message.userIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetUsersInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated int64 user_ids = 1; */
+        if (message.userIds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.userIds.length; i++)
+                writer.int64(message.userIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetUsersInput
+ */
+export const GetUsersInput = new GetUsersInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetUsersResult$Type extends MessageType<GetUsersResult> {
+    constructor() {
+        super("GetUsersResult", [
+            { no: 1, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<GetUsersResult>): GetUsersResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.users = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetUsersResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetUsersResult): GetUsersResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated User users */ 1:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetUsersResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated User users = 1; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetUsersResult
+ */
+export const GetUsersResult = new GetUsersResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class InviteToInlineInput$Type extends MessageType<InviteToInlineInput> {
     constructor() {

@@ -18,6 +18,7 @@ import {
   blockContents,
   files,
   messages,
+  members,
   photos,
   threadGraphLinks,
   users,
@@ -124,6 +125,24 @@ describe("editMessage function", () => {
     const message = extractEditedMessage(result)
     expect(message?.message?.length).toBeGreaterThan(90_000)
     expect(message?.blockContent?.blocks).toHaveLength(1)
+  })
+
+  test("former space members cannot edit their own message through a retained chat grant", async () => {
+    const { space, users: spaceUsers } = await testUtils.createSpaceWithMembers("Edit access", [nextEmail("edit-access")])
+    const author = spaceUsers[0]
+    if (!author) throw new Error("Author not created")
+    const chat = await testUtils.createChat(space.id, "Edit access", "thread", false, author.id)
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, author.id)
+    const peer: InputPeer = { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } }
+    const authorContext = testUtils.functionContext({ userId: author.id, sessionId: 1 })
+    const sent = await sendMessage({ peerId: peer, message: "before revocation" }, authorContext)
+    const messageId = extractSentMessageId(sent)
+    if (!messageId) throw new Error("Message not sent")
+    await db.delete(members).where(and(eq(members.spaceId, space.id), eq(members.userId, author.id)))
+    await expect(editMessage({ peer, messageId, text: "must not replace" }, authorContext)).rejects.toMatchObject({
+      codeName: "SPACE_ID_INVALID",
+    })
   })
 
   test("parses markdown when parseMarkdown is enabled", async () => {

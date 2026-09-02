@@ -122,6 +122,7 @@ import {
   prepareConnectorOAuth,
 } from "@in/server/functions/connectors"
 import { searchUsersHandler } from "@in/server/realtime/handlers/users.search"
+import { getUsersHandler } from "@in/server/realtime/handlers/users.get"
 import { inviteToInline } from "@in/server/functions/user.inviteToInline"
 import { resolveUrlPreviewHandler } from "@in/server/realtime/handlers/urlPreview.resolve"
 import {
@@ -891,6 +892,13 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await searchUsersHandler(call.input.searchUsers, handlerContext)
       return { oneofKind: "searchUsers", searchUsers: result }
+    }
+
+    case Method.GET_USERS: {
+      if (call.input.oneofKind !== "getUsers") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      return { oneofKind: "getUsers", getUsers: await getUsersHandler(call.input.getUsers, handlerContext) }
     }
 
     case Method.INVITE_TO_INLINE: {
