@@ -1,5 +1,6 @@
 import Auth
 import InlineKit
+import InlineMacUI
 import Logger
 import Sentry
 import SwiftUI
@@ -170,6 +171,10 @@ struct OnboardingEnterCode: View {
           }
           AppSettings.shared.resolveSidebarModeForAccount(
             createdAt: Date(timeIntervalSince1970: TimeInterval(result.user.date))
+          )
+          GettingStartedVisibility.prepare(
+            for: result.userId,
+            isNewSignup: onboardingViewModel.existingUser == false
           )
         }
 

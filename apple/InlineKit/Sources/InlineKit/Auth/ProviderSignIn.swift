@@ -8,6 +8,7 @@ public struct ProviderSignInCompletion: Equatable, Sendable {
   public let id: UUID
   public let userId: Int64
   public let pendingSetup: Bool
+  public let isNewSignup: Bool
   public let userCreatedAt: Date
   public let accountMutationToken: AuthAccountMutationToken
 }
@@ -500,6 +501,7 @@ public final class ProviderSignInCoordinator: ObservableObject {
         id: UUID(),
         userId: result.userId,
         pendingSetup: result.user.pendingSetup == true || result.user.firstName?.isEmpty != false,
+        isNewSignup: result.user.pendingSetup == true,
         userCreatedAt: Date(timeIntervalSince1970: TimeInterval(result.user.date)),
         accountMutationToken: commit.accountMutationToken
       )

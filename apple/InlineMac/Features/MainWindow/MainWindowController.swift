@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import InlineMacUI
 import Logger
 import SwiftUI
 
@@ -223,12 +224,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     )
 
     keyMonitor = KeyMonitor(window: window)
-    nav3 = Nav3(
+    let restoredNav = Nav3(
       routeState: routeState,
       pendingRoute: destination?.route,
       persistsActiveSpace: true,
       restoresActiveSpace: restoresActiveSpace
     )
+    if destination == nil,
+       let userID = dependencies.auth.getCurrentUserId(),
+       GettingStartedVisibility.shouldShow(for: userID)
+    {
+      restoredNav.reset()
+    }
+    nav3 = restoredNav
 
     super.init(window: window)
 

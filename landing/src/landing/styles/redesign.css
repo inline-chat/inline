@@ -1,0 +1,544 @@
+@import "./preflight.css";
+
+@layer priority1 {
+  :root {
+    color-scheme: light dark;
+    --landing-background: #ffffff;
+    --landing-foreground: #151515;
+    --landing-muted: #9b9b9b;
+    --landing-subtle: #a0a0a0;
+    --landing-primary-background: #2f2f2f;
+    --landing-primary-hover: #171717;
+    --landing-primary-foreground: #ffffff;
+    --landing-frame-background: #e6e6ec;
+    --landing-frame-border: rgba(24, 24, 24, 0.06);
+    --landing-frame-shadow: rgba(16, 16, 24, 0.04);
+    --landing-dot: #d5d5d5;
+    --landing-dot-hover: #8e8e8e;
+    --landing-selection-background: #f1f1f1;
+    --landing-selection-foreground: #000000;
+    --landing-logo-filter: none;
+    --landing-footer-brand: rgba(15, 15, 15, 0.78);
+    --landing-footer-heading: rgba(15, 15, 15, 0.64);
+    --landing-footer-link: rgba(15, 15, 15, 0.46);
+    --landing-footer-muted: rgba(15, 15, 15, 0.38);
+    --landing-footer-hover: #0f0f0f;
+    --landing-footer-logo-filter: invert(1);
+    background: var(--landing-background);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --landing-background: #111111;
+      --landing-foreground: #f3f3f3;
+      --landing-muted: #9a9a9a;
+      --landing-subtle: #858585;
+      --landing-primary-background: #eeeeee;
+      --landing-primary-hover: #ffffff;
+      --landing-primary-foreground: #111111;
+      --landing-frame-background: #25252a;
+      --landing-frame-border: rgba(255, 255, 255, 0.11);
+      --landing-frame-shadow: rgba(0, 0, 0, 0.28);
+      --landing-dot: #484848;
+      --landing-dot-hover: #a8a8a8;
+      --landing-selection-background: rgba(255, 255, 255, 0.2);
+      --landing-selection-foreground: #ffffff;
+      --landing-logo-filter: invert(1);
+      --landing-footer-brand: rgba(255, 255, 255, 0.72);
+      --landing-footer-heading: rgba(255, 255, 255, 0.64);
+      --landing-footer-link: rgba(255, 255, 255, 0.36);
+      --landing-footer-muted: rgba(255, 255, 255, 0.36);
+      --landing-footer-hover: #ffffff;
+      --landing-footer-logo-filter: none;
+    }
+  }
+
+  html,
+  body {
+    min-height: 100%;
+    margin: 0;
+    background: var(--landing-background);
+  }
+
+  body {
+    color: var(--landing-foreground);
+  }
+
+  ::selection {
+    color: var(--landing-selection-foreground);
+    background: var(--landing-selection-background);
+  }
+
+  ::-moz-selection {
+    color: var(--landing-selection-foreground);
+    background: var(--landing-selection-background);
+  }
+}
+
+.landing-redesign {
+  --landing-indent: 42px;
+  min-height: 100vh;
+  padding: 0 0 112px;
+  overflow: hidden;
+  background: var(--landing-background);
+  color: var(--landing-foreground);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.25;
+  -webkit-font-smoothing: antialiased;
+}
+
+.landing-redesign__shell {
+  width: min(100%, 1148px);
+  padding: 0 24px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.landing-redesign__header {
+  padding-top: 46px;
+  margin-left: var(--landing-indent);
+}
+
+.landing-redesign__brand {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  transition: opacity 120ms ease-out;
+}
+
+.landing-redesign__brand:hover {
+  opacity: 0.64;
+}
+
+.landing-redesign__brand:focus-visible,
+.landing-redesign__primary-action:focus-visible,
+.landing-redesign__secondary-action:focus-visible {
+  outline: 2px solid var(--landing-foreground);
+  outline-offset: 3px;
+}
+
+.landing-redesign__brand img {
+  width: 36px;
+  height: 36px;
+  filter: var(--landing-logo-filter);
+}
+
+.landing-redesign__intro {
+  max-width: 460px;
+  margin: 48px 0 0 var(--landing-indent);
+}
+
+.landing-redesign__intro h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.026em;
+}
+
+.landing-redesign__summary {
+  margin-top: 8px;
+  color: var(--landing-muted);
+  font-size: 22px;
+  line-height: 1.23;
+  letter-spacing: -0.018em;
+}
+
+.landing-redesign__actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 38px;
+}
+
+.landing-redesign__primary-action,
+.landing-redesign__secondary-action {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  transition: transform 120ms ease-out;
+}
+
+.landing-redesign__primary-action {
+  padding: 0 17px;
+  background: var(--landing-primary-background);
+  color: var(--landing-primary-foreground);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.landing-redesign__primary-action:hover {
+  transform: translateY(-1px);
+}
+
+.landing-redesign__primary-action:active {
+  transform: translateY(0);
+}
+
+.landing-redesign__secondary-action {
+  gap: 4px;
+  padding: 0 12px;
+  margin-left: -12px;
+  color: var(--landing-foreground);
+}
+
+.landing-redesign__secondary-action:hover {
+  transform: translateY(-1px);
+}
+
+.landing-redesign__secondary-action:active {
+  transform: translateY(0);
+}
+
+.landing-redesign__availability {
+  margin-top: 16px;
+  color: var(--landing-subtle);
+  font-size: 12px;
+  line-height: 1.35;
+  letter-spacing: 0.005em;
+}
+
+.landing-redesign__product {
+  width: min(100%, 976px);
+  margin: 38px 0 0;
+}
+
+.landing-redesign__product-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.472;
+  overflow: hidden;
+  border: 1px solid var(--landing-frame-border);
+  border-radius: 17px;
+  background: var(--landing-frame-background);
+  box-shadow: 0 1px 1px var(--landing-frame-shadow);
+}
+
+.landing-redesign__product-track {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.landing-redesign__product-slide {
+  position: relative;
+  flex: 0 0 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--landing-frame-background);
+}
+
+.landing-redesign__product-image {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  transform: translate(-50%, -50%);
+  user-select: none;
+}
+
+.landing-redesign__product-image--threads {
+  top: 52%;
+  left: 39%;
+  width: 126%;
+}
+
+.landing-redesign__product-image--sidebar {
+  top: 50%;
+  left: 61%;
+  width: 128%;
+}
+
+.landing-redesign__product-image--agents {
+  top: 61%;
+  left: 36%;
+  width: 142%;
+}
+
+.landing-redesign__pagination {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: 18px;
+  margin: 11px 0 0 calc(var(--landing-indent) - 5px);
+}
+
+.landing-redesign__pagination-dot {
+  display: grid;
+  width: 16px;
+  height: 18px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.landing-redesign__pagination-dot::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--landing-dot);
+  content: "";
+  transition:
+    background-color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.landing-redesign__pagination-dot--active::before {
+  background: var(--landing-foreground);
+}
+
+.landing-redesign__pagination-dot:hover::before {
+  background: var(--landing-dot-hover);
+  transform: scale(1.12);
+}
+
+.landing-redesign__pagination-dot--active:hover::before {
+  background: var(--landing-foreground);
+}
+
+.landing-redesign__pagination-dot:focus-visible {
+  outline: 2px solid var(--landing-foreground);
+  outline-offset: 1px;
+}
+
+.landing-redesign__story {
+  max-width: 620px;
+  margin: 38px 0 0 var(--landing-indent);
+  font-size: 16px;
+  line-height: 1.24;
+  letter-spacing: -0.012em;
+}
+
+.landing-redesign__story p + p {
+  margin-top: 19px;
+}
+
+.landing-redesign__footer {
+  width: min(100%, 976px);
+  padding: 28px 0 32px;
+  margin-top: 96px;
+  background: var(--landing-background);
+  box-sizing: border-box;
+  color: var(--landing-footer-hover);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.landing-redesign__footer-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 30px;
+}
+
+.landing-redesign__footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--landing-footer-brand);
+  line-height: 1;
+  text-decoration: none;
+  transition: opacity 120ms ease-out;
+}
+
+.landing-redesign__footer-brand:hover {
+  opacity: 0.7;
+}
+
+.landing-redesign__footer-brand:focus-visible,
+.landing-redesign__footer-group a:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid var(--landing-footer-hover);
+  outline-offset: 3px;
+}
+
+.landing-redesign__footer-brand img {
+  display: block;
+  width: 82px;
+  height: auto;
+  filter: var(--landing-footer-logo-filter);
+  opacity: 0.78;
+}
+
+.landing-redesign__footer-beta {
+  display: inline-flex;
+  height: 16px;
+  padding: 0 5px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  box-sizing: border-box;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.045em;
+  line-height: 1;
+}
+
+.landing-redesign__footer-copyright {
+  margin-top: 14px;
+  color: var(--landing-footer-muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.landing-redesign__footer-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.landing-redesign__footer-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.landing-redesign__footer-group h2,
+.landing-redesign__footer-group a {
+  font-size: 13px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.landing-redesign__footer-group h2 {
+  margin: 0 0 14px;
+  color: var(--landing-footer-heading);
+  font-weight: 500;
+}
+
+.landing-redesign__footer-group a {
+  position: relative;
+  color: var(--landing-footer-link);
+  font-weight: 500;
+  transition: color 120ms ease-out;
+}
+
+.landing-redesign__footer-group a + a {
+  margin-top: 8px;
+}
+
+.landing-redesign__footer-group a:hover {
+  color: var(--landing-footer-hover);
+}
+
+.landing-redesign__visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 820px) {
+  .landing-redesign__footer-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px 24px;
+  }
+}
+
+@media (max-width: 720px) {
+  .landing-redesign {
+    --landing-indent: 0px;
+    padding: 0 0 72px;
+  }
+
+  .landing-redesign__shell {
+    padding: 0 18px;
+  }
+
+  .landing-redesign__header {
+    padding-top: 28px;
+  }
+
+  .landing-redesign__intro {
+    margin-top: 42px;
+  }
+
+  .landing-redesign__product {
+    margin-top: 38px;
+  }
+
+  .landing-redesign__product-frame {
+    aspect-ratio: 1.472;
+    border-radius: 14px;
+  }
+
+  .landing-redesign__story {
+    max-width: 560px;
+  }
+
+  .landing-redesign__footer {
+    width: 100%;
+    padding: 24px 0 28px;
+    margin-top: 80px;
+  }
+
+  .landing-redesign__footer-brand-row {
+    margin-bottom: 28px;
+  }
+
+  .landing-redesign__footer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 22px;
+  }
+}
+
+@media (max-width: 460px) {
+  .landing-redesign__summary br,
+  .landing-redesign__availability br {
+    display: none;
+  }
+
+  .landing-redesign__actions {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 11px;
+    margin-top: 38px;
+  }
+
+  .landing-redesign__story {
+    font-size: 15px;
+    line-height: 1.28;
+  }
+
+  .landing-redesign__footer-group h2,
+  .landing-redesign__footer-group a {
+    font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-redesign__brand,
+  .landing-redesign__primary-action,
+  .landing-redesign__secondary-action,
+  .landing-redesign__footer-brand,
+  .landing-redesign__footer-group a,
+  .landing-redesign__pagination-dot::before,
+  .landing-redesign__product-track {
+    transition: none;
+  }
+}
