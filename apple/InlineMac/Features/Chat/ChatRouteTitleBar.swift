@@ -143,7 +143,7 @@ struct ChatRouteTitleBar: View {
         EmojiTextFieldPicker(
           emoji: $model.emojiDraft,
           size: 28,
-          placeholderSystemImage: "number",
+          placeholderSystemImage: "bubble.middle.bottom.fill",
           accessibilityLabel: "Chat icon"
         )
 
