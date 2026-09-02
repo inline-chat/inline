@@ -730,6 +730,7 @@ final class DeveloperSidebarPlaygroundModel {
         rename: { [weak self] in self?.record("Selected Rename for \(item.title).") },
         togglePin: { [weak self] in self?.togglePin(item.chatId) },
         toggleReadUnread: { [weak self] in self?.toggleRead(item.chatId) },
+        toggleArchive: { [weak self] in self?.record("Selected Archive/Unarchive for \(item.title).") },
         folderMenu: { nil }
       )
     )
