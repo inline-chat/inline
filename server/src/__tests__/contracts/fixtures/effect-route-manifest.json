@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "count": 303,
+  "count": 309,
   "methodCounts": {
-    "GET": 150,
-    "POST": 151,
+    "GET": 152,
+    "POST": 155,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "7d644e14aa2755e50a5369e82c2737c836b2f3f3c2096f11964fdf9f74c25ebb",
+  "sha256": "b01abbc34f3b068422406fe08b19ca74f118cc534081aeff62a4663ef8e4c1c3",
   "routes": [
     {
       "method": "GET",
@@ -131,6 +131,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getMySkills"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getUpdates"
     },
     {
@@ -172,6 +176,10 @@
     {
       "method": "GET",
       "path": "/bot{token}/getMyCommands"
+    },
+    {
+      "method": "GET",
+      "path": "/bot{token}/getMySkills"
     },
     {
       "method": "GET",
@@ -723,6 +731,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/deleteMySkills"
+    },
+    {
+      "method": "POST",
       "path": "/bot/deleteReaction"
     },
     {
@@ -783,6 +795,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/setMySkills"
+    },
+    {
+      "method": "POST",
       "path": "/bot/setThreadTitle"
     },
     {
@@ -836,6 +852,10 @@
     {
       "method": "POST",
       "path": "/bot{token}/deleteMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/bot{token}/deleteMySkills"
     },
     {
       "method": "POST",
@@ -896,6 +916,10 @@
     {
       "method": "POST",
       "path": "/bot{token}/setMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/bot{token}/setMySkills"
     },
     {
       "method": "POST",

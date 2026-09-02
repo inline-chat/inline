@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 257,
+  "count": 263,
   "methodCounts": {
     "ALL": 3,
-    "GET": 101,
+    "GET": 103,
     "OPTIONS": 18,
-    "POST": 134,
+    "POST": 138,
     "WS": 1
   },
-  "sha256": "32961d0d3158cbdd8d662a69bad2cd4b347c7ecf3f229054ebd1572e0cf9ed09",
+  "sha256": "2c10f537ff021f882e4a7d7233ace164c256f4371d4aa094f41ab5662a268300",
   "routes": [
     {
       "method": "ALL",
@@ -128,6 +128,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getMySkills"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getUpdates"
     },
     {
@@ -169,6 +173,10 @@
     {
       "method": "GET",
       "path": "/bot:token/getMyCommands"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getMySkills"
     },
     {
       "method": "GET",
@@ -580,6 +588,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot/deleteMySkills"
+    },
+    {
+      "method": "POST",
       "path": "/bot/deleteReaction"
     },
     {
@@ -625,6 +637,10 @@
     {
       "method": "POST",
       "path": "/bot/setMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/bot/setMySkills"
     },
     {
       "method": "POST",
@@ -680,6 +696,10 @@
     },
     {
       "method": "POST",
+      "path": "/bot:token/deleteMySkills"
+    },
+    {
+      "method": "POST",
       "path": "/bot:token/deleteReaction"
     },
     {
@@ -725,6 +745,10 @@
     {
       "method": "POST",
       "path": "/bot:token/setMyCommands"
+    },
+    {
+      "method": "POST",
+      "path": "/bot:token/setMySkills"
     },
     {
       "method": "POST",
