@@ -59,7 +59,6 @@ struct SidebarView: View {
   @State private var pendingSpaceAction: SidebarSpacePendingAction?
   @State private var sidebarRenameItem: SidebarViewModel.Item?
   @State private var sidebarRenameFolder: SidebarFolderRenameRequest?
-  @State private var fetchingDialogSpaceIds = Set<Int64>()
   @State private var sidebarDrag = SidebarDragViewModel()
   @State private var cleanupOwnerID = UUID()
   @State private var visibleSidebarItemIDs = Set<ChatListItem.Identifier>()
@@ -199,7 +198,6 @@ struct SidebarView: View {
       }
       syncUnreadCountsScope(spaceId: spaceId)
       syncSource(spaceId: spaceId)
-      refreshSpaceIfNeeded(spaceId)
       if let spaceId {
         Task { await gridStore.load(spaceID: spaceId) }
       } else {
@@ -2064,10 +2062,6 @@ struct SidebarView: View {
     guard settings.sidebarAsInbox == false else { return false }
     guard !isArchiveVisible else { return false }
 
-    if let activeSpaceId {
-      return fetchingDialogSpaceIds.contains(activeSpaceId)
-    }
-
     return dependencies?.session.isFetchingSidebarChats == true
   }
 
@@ -2107,7 +2101,7 @@ struct SidebarView: View {
   }
 
   private var isFetchingSidebarServerState: Bool {
-    dependencies?.session.isFetchingSidebarChats == true || fetchingDialogSpaceIds.isEmpty == false
+    dependencies?.session.isFetchingSidebarChats == true
   }
 
   private var cleanupConnectionStateKey: Int {
@@ -3175,36 +3169,6 @@ struct SidebarView: View {
     dependencies?.nav2?.navigate(to: .empty)
     dependencies?.nav3?.selectHome()
     dependencies?.nav3?.open(.empty)
-  }
-
-  private func refreshSpaceIfNeeded(_ spaceId: Int64?) {
-    guard let spaceId else { return }
-    guard let dependencies else { return }
-
-    fetchingDialogSpaceIds.insert(spaceId)
-    Task {
-      defer {
-        fetchingDialogSpaceIds.remove(spaceId)
-      }
-
-      do {
-        try await dependencies.data.getSpace(spaceId: spaceId)
-      } catch {
-        Log.shared.error("Failed to refresh space \(spaceId)", error: error)
-      }
-
-      do {
-        try await dependencies.realtimeV2.send(.getSpaceMembers(spaceId: spaceId))
-      } catch {
-        Log.shared.error("Failed to refresh space members \(spaceId)", error: error)
-      }
-
-      do {
-        try await dependencies.data.getDialogs(spaceId: spaceId)
-      } catch {
-        Log.shared.error("Failed to refresh dialogs for space \(spaceId)", error: error)
-      }
-    }
   }
 
   private func navigateChat(offset: Int) {
