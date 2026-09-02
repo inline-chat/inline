@@ -19,7 +19,7 @@ import { UpdatesModel } from "@in/server/db/models/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
-import { chats, chatParticipantGroups, dialogs, members, messages, spaces, userGroupMembers, userGroups, users as usersTable } from "@in/server/db/schema"
+import { chats, chatParticipantGroups, chatParticipants, dialogs, members, messages, spaces, userGroupMembers, userGroups, users as usersTable } from "@in/server/db/schema"
 import { handler as readMessages } from "@in/server/methods/readMessages"
 import { and, desc, eq } from "drizzle-orm"
 
@@ -782,6 +782,103 @@ describe("getUpdates", () => {
     expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["spaceMemberDelete"])
     expect(result.skippedSequences).toEqual([{ seq: 1n, reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET }])
     expect(result.sidecars).toBeUndefined()
+  })
+
+  test("serves a complete chatOpen envelope while chat access remains current", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Current Chat Open", ["current-chat-open@example.com"])
+    const viewer = users[0]
+    if (!viewer) throw new Error("Missing current chatOpen viewer")
+    const chat = await testUtils.createChat(space.id, "Current Private Thread", "thread", false)
+    if (!chat) throw new Error("Missing current chatOpen chat")
+    await testUtils.addParticipant(chat.id, viewer.id)
+    const [dialog] = await db.insert(dialogs).values({ chatId: chat.id, userId: viewer.id, spaceId: space.id }).returning()
+    if (!dialog) throw new Error("Missing current chatOpen dialog")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 1,
+      payload: { oneofKind: "userChatOpen", userChatOpen: {
+        chat: Encoders.chat(chat, { encodingForUserId: viewer.id }),
+        dialog: Encoders.dialog(dialog, { unreadCount: 0 }),
+      } },
+    })
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } }, startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }, { currentUserId: viewer.id } as any)
+
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["chatOpen"])
+    expect(result.skippedSequences).toEqual([])
+    expect(result.sidecars?.chats.map((row) => Number(row.id))).toContain(chat.id)
+  })
+
+  test("accounts a revoked chatOpen without disclosing its embedded snapshot and still delivers removal", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Revoked Chat Open", ["revoked-chat-open@example.com"])
+    const viewer = users[0]
+    if (!viewer) throw new Error("Missing revoked chatOpen viewer")
+    const chat = await testUtils.createChat(space.id, "Historical Private Thread", "thread", false)
+    if (!chat) throw new Error("Missing revoked chatOpen chat")
+    await testUtils.addParticipant(chat.id, viewer.id)
+    const [dialog] = await db.insert(dialogs).values({ chatId: chat.id, userId: viewer.id, spaceId: space.id }).returning()
+    if (!dialog) throw new Error("Missing revoked chatOpen dialog")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 1,
+      payload: { oneofKind: "userChatOpen", userChatOpen: {
+        chat: Encoders.chat(chat, { encodingForUserId: viewer.id }),
+        dialog: Encoders.dialog(dialog, { unreadCount: 0 }),
+      } },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 2,
+      payload: { oneofKind: "userRemovedFromChat", userRemovedFromChat: { chatId: BigInt(chat.id) } },
+    })
+    await db.delete(chatParticipants).where(and(
+      eq(chatParticipants.chatId, chat.id),
+      eq(chatParticipants.userId, viewer.id),
+    ))
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } }, startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }, { currentUserId: viewer.id } as any)
+
+    expect(result.seq).toBe(2n)
+    expect(result.final).toBe(true)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["userRemovedFromChat"])
+    expect(result.skippedSequences).toEqual([{ seq: 1n, reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET }])
+    expect(result.sidecars).toBeUndefined()
+  })
+
+  test("accounts a malformed chatOpen envelope while continuing the user replay", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Malformed Chat Open", ["malformed-chat-open@example.com"])
+    const viewer = users[0]
+    if (!viewer) throw new Error("Missing malformed chatOpen viewer")
+    const chat = await testUtils.createChat(space.id, "Accessible Thread", "thread", false)
+    if (!chat) throw new Error("Missing malformed chatOpen chat")
+    await testUtils.addParticipant(chat.id, viewer.id)
+    const [dialog] = await db.insert(dialogs).values({ chatId: chat.id, userId: viewer.id, spaceId: space.id }).returning()
+    if (!dialog) throw new Error("Missing malformed chatOpen dialog")
+    const malformedDialog = { ...Encoders.dialog(dialog, { unreadCount: 0 }), chatId: BigInt(chat.id + 1) }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 1,
+      payload: { oneofKind: "userChatOpen", userChatOpen: {
+        chat: Encoders.chat(chat, { encodingForUserId: viewer.id }),
+        dialog: malformedDialog,
+      } },
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.User, entityId: viewer.id, seq: 2,
+      payload: { oneofKind: "userChatParticipantDelete", userChatParticipantDelete: { chatId: BigInt(chat.id) } },
+    })
+
+    const result = await getUpdates({
+      bucket: { type: { oneofKind: "user", user: {} } }, startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }, { currentUserId: viewer.id } as any)
+
+    expect(result.seq).toBe(2n)
+    expect(result.final).toBe(true)
+    expect(result.updates.map((update) => update.update.oneofKind)).toEqual(["participantDelete"])
+    expect(result.skippedSequences).toEqual([{ seq: 1n, reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET }])
   })
 
   test("preserves current chat discovery while stripping an obsolete optional group grant", async () => {

@@ -44,6 +44,7 @@ import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/
 
 const log = new Log("Sync", LogLevel.DEBUG)
 const missingMessageLogs = new BoundedLogAggregator(15 * 60 * 1000, 1_024)
+const malformedUserReplayLogs = new BoundedLogAggregator(15 * 60 * 1000, 1_024)
 
 const logMissingMessage = (
   updateKind: "newMessage" | "editMessage",
@@ -1468,32 +1469,74 @@ async function getAccessibleReplayChatIds(chatIds: number[], userId: number): Pr
   return new Set(Array.from(access).flatMap(([chatId, users]) => users.has(userId) ? [chatId] : []))
 }
 
-/** An obsolete access grant must be accounted without reviving a cached grant
- * or requiring dependencies that current access no longer allows us to send. */
+type ReplayChatAccessRef = {
+  chatId: bigint
+  userId?: bigint
+  groupId?: bigint
+  valid: boolean
+}
+
+function replayPeerIdentity(peer: Peer | undefined): { kind: "chat" | "user"; id: number } | undefined {
+  switch (peer?.type.oneofKind) {
+    case "chat": {
+      const id = safePositiveId(peer.type.chat.chatId)
+      return id === undefined ? undefined : { kind: "chat", id }
+    }
+    case "user": {
+      const id = safePositiveId(peer.type.user.userId)
+      return id === undefined ? undefined : { kind: "user", id }
+    }
+    case undefined:
+      return undefined
+  }
+}
+
+function replayChatAccessRef(update: Update): ReplayChatAccessRef | undefined {
+  switch (update.update.oneofKind) {
+    case "chatOpen": {
+      const opened = update.update.chatOpen
+      const chatId = safePositiveId(opened.chat?.id)
+      const chatPeer = replayPeerIdentity(opened.chat?.peerId)
+      const dialogPeer = replayPeerIdentity(opened.dialog?.peer)
+      const dialogChatId = safePositiveId(opened.dialog?.chatId)
+      const peerMatches = chatPeer !== undefined && dialogPeer !== undefined &&
+        chatPeer.kind === dialogPeer.kind && chatPeer.id === dialogPeer.id
+      const threadIdentityMatches = chatPeer?.kind !== "chat" || chatPeer.id === chatId
+      const spaceMatches = opened.chat?.spaceId === opened.dialog?.spaceId
+      const userMatches = opened.user === undefined ||
+        (chatPeer?.kind === "user" && safePositiveId(opened.user.id) === chatPeer.id)
+      return {
+        chatId: BigInt(chatId ?? 0),
+        valid: chatId !== undefined && dialogChatId === chatId && peerMatches &&
+          threadIdentityMatches && spaceMatches && userMatches,
+      }
+    }
+    case "userAddedToChat": {
+      const added = update.update.userAddedToChat
+      return { chatId: added.chatId, userId: added.participant?.userId, groupId: added.group?.groupId, valid: true }
+    }
+    case "participantAdd": {
+      const added = update.update.participantAdd
+      return { chatId: added.chatId, userId: added.participant?.userId, valid: added.participant !== undefined }
+    }
+    case "participantGroupAdd": {
+      const added = update.update.participantGroupAdd
+      return { chatId: added.chatId, groupId: added.groupParticipant?.groupId, valid: added.groupParticipant !== undefined }
+    }
+    default:
+      return undefined
+  }
+}
+
+/** Access-bearing replay must be complete and currently authorized. Obsolete
+ * grants and snapshots are accounted without reviving private cached state. */
 async function prepareUserUpdatesPage(dbUpdates: DbUpdate[], userId: number): Promise<InflatedUpdatesPage> {
   const page = inflateUserUpdatesPage(dbUpdates)
-  const accessAddRef = (update: Update): { chatId: bigint; userId?: bigint; groupId?: bigint; valid: boolean } | undefined => {
-    switch (update.update.oneofKind) {
-      case "userAddedToChat": {
-        const added = update.update.userAddedToChat
-        return { chatId: added.chatId, userId: added.participant?.userId, groupId: added.group?.groupId, valid: true }
-      }
-      case "participantAdd": {
-        const added = update.update.participantAdd
-        return { chatId: added.chatId, userId: added.participant?.userId, valid: added.participant !== undefined }
-      }
-      case "participantGroupAdd": {
-        const added = update.update.participantGroupAdd
-        return { chatId: added.chatId, groupId: added.groupParticipant?.groupId, valid: added.groupParticipant !== undefined }
-      }
-      default: return undefined
-    }
-  }
   const ids = new Set<number>()
   const userIds = new Set<number>()
   const groupIds = new Set<number>()
   for (const update of page.updates) {
-    const ref = accessAddRef(update)
+    const ref = replayChatAccessRef(update)
     addSafeId(ids, ref?.chatId)
     addSafeId(userIds, ref?.userId)
     addSafeId(groupIds, ref?.groupId)
@@ -1526,7 +1569,7 @@ async function prepareUserUpdatesPage(dbUpdates: DbUpdate[], userId: number): Pr
   }
   const updates: Update[] = []
   for (const update of page.updates) {
-    const ref = accessAddRef(update)
+    const ref = replayChatAccessRef(update)
     const validUser = ref?.userId === undefined || validUsers.has(`${ref.chatId}:${ref.userId}`)
     const validGroup = ref?.groupId === undefined || validGroups.has(`${ref.chatId}:${ref.groupId}`)
     if (ref !== undefined && ref.valid && accessible.has(Number(ref.chatId)) && update.update.oneofKind === "userAddedToChat") {
@@ -1540,6 +1583,16 @@ async function prepareUserUpdatesPage(dbUpdates: DbUpdate[], userId: number): Pr
     } else if (ref === undefined || (ref.valid && accessible.has(Number(ref.chatId)) && validUser && validGroup)) {
       updates.push(update)
     } else {
+      if (!ref.valid && update.update.oneofKind === "chatOpen") {
+        const decision = malformedUserReplayLogs.record("chatOpen")
+        if (decision.emit) {
+          log.warn("Accounting malformed durable user replay envelope", {
+            updateKind: "chatOpen",
+            sampleSeq: String(update.seq ?? 0),
+            suppressedCount: decision.suppressedCount,
+          })
+        }
+      }
       page.skippedSequences.push({
         seq: BigInt(update.seq ?? 0),
         reason: SyncSkippedSequence_Reason.IRRELEVANT_TO_BUCKET,
