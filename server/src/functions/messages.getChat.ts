@@ -9,7 +9,7 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { db } from "@in/server/db"
 import { and, desc, eq, isNull, not } from "drizzle-orm"
-import { chats, dialogs, messages, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
+import { chats, dialogs, messages, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import {
   ensureLinkedSubthreadDialogs,
@@ -324,8 +324,8 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
         })
       })
 
-      const [peerUser] = peerUserId
-        ? await tx.select().from(users).where(eq(users.id, peerUserId)).limit(1)
+      const [peer] = peerUserId
+        ? await UsersModel.getUsersWithPhotos([peerUserId], { tx })
         : []
 
       return {
@@ -333,7 +333,9 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
         dialog: snapshotDialog ? Encoders.dialog(snapshotDialog, { unreadCount }) : undefined,
         pinnedMessageIds: pinnedRows.map((row) => BigInt(row.messageId)),
         anchorMessage: encodedAnchorMessage,
-        user: peerUser ? Encoders.user({ user: peerUser, viewerUserId: currentUserId }) : undefined,
+        user: peer
+          ? Encoders.user({ user: peer.user, photoFile: peer.photoFile, viewerUserId: currentUserId })
+          : undefined,
         messages: encodedMessages,
       }
     },

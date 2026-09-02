@@ -47,6 +47,17 @@ public struct GetChatTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
+        if response.hasUser {
+          do {
+            try Self.repairPeerProfilePhoto(response.user, in: db)
+          } catch {
+            // Peer enrichment must not make an otherwise valid chat snapshot fail.
+            log.warning(
+              "Skipping peer user for getChat result because it could not be saved: \(error)"
+            )
+          }
+        }
+
         do {
           var chat = Chat(from: response.chat)
           try clearMissingOptionalReferences(in: &chat, db: db)
@@ -89,6 +100,45 @@ public struct GetChatTransaction: Transaction2 {
 
   public func failed(error: TransactionError2) async {
     log.error("Failed to get chat", error: error)
+  }
+
+  @discardableResult
+  static func repairPeerProfilePhoto(_ user: InlineProtocol.User, in db: Database) throws -> Bool {
+    if let existing = try User.fetchOne(db, id: user.id), !profilePhotoNeedsRepair(existing: existing, incoming: user) {
+      return false
+    }
+
+    _ = try User.save(db, user: user)
+    return true
+  }
+
+  private static func profilePhotoNeedsRepair(existing: User, incoming: InlineProtocol.User) -> Bool {
+    let existingIdentity = normalized(existing.profileFileUniqueId)
+    let existingURL = normalized(existing.profileCdnUrl)
+    let existingHasPhoto = existingIdentity != nil
+      || normalized(existing.profileFileId) != nil
+      || existingURL != nil
+      || normalized(existing.profileLocalPath) != nil
+
+    guard incoming.hasProfilePhoto else { return existingHasPhoto }
+
+    let incomingIdentity = incoming.profilePhoto.hasFileUniqueID
+      ? normalized(incoming.profilePhoto.fileUniqueID)
+      : nil
+    let incomingURL = incoming.profilePhoto.hasCdnURL
+      ? normalized(incoming.profilePhoto.cdnURL)
+      : nil
+
+    if incomingIdentity != existingIdentity { return true }
+    if let incomingURL, incomingURL != existingURL { return true }
+    return false
+  }
+
+  private static func normalized(_ value: String?) -> String? {
+    guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+      return nil
+    }
+    return value
   }
 
   private func clearMissingOptionalReferences(in chat: inout Chat, db: Database) throws {

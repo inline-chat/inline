@@ -6,6 +6,16 @@ import InlineProtocol
 import Logger
 import UniformTypeIdentifiers
 
+public struct ApiUserProfilePhotoReference: Codable, Hashable, Sendable {
+  public let cdnURL: String?
+  public let fileUniqueID: String?
+
+  public init(cdnURL: String?, fileUniqueID: String?) {
+    self.cdnURL = cdnURL
+    self.fileUniqueID = fileUniqueID
+  }
+}
+
 public struct ApiUser: Codable, Hashable, Sendable {
   public var id: Int64
   public var email: String?
@@ -21,6 +31,8 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var photo: [ApiPhoto]?
   public var timeZone: String?
   public var bot: Bool? = nil
+  /// Compact V3 profile-photo reference. Legacy API responses continue using `photo`.
+  public var profilePhoto: ApiUserProfilePhotoReference? = nil
   public static let preview = Self(
     id: 1,
     email: "mo@inline.chat",
@@ -32,6 +44,19 @@ public struct ApiUser: Codable, Hashable, Sendable {
 
   public var anyName: String {
     firstName ?? username ?? email?.components(separatedBy: "@").first ?? "User \(id)"
+  }
+
+  public var avatarURL: URL? {
+    let value = photo?.first?.temporaryUrl ?? profilePhoto?.cdnURL
+    return value.flatMap(URL.init(string:))
+  }
+
+  public var avatarFileUniqueID: String? {
+    photo?.first?.fileUniqueId ?? profilePhoto?.fileUniqueID
+  }
+
+  public var hasConfiguredProfilePhoto: Bool {
+    photo?.first != nil || profilePhoto != nil
   }
 }
 
@@ -51,7 +76,13 @@ public extension ApiUser {
       username: user.hasUsername ? user.username : nil,
       photo: nil,
       timeZone: user.hasTimeZone ? user.timeZone : nil,
-      bot: user.hasBot ? user.bot : false
+      bot: user.hasBot ? user.bot : false,
+      profilePhoto: user.hasProfilePhoto
+        ? ApiUserProfilePhotoReference(
+          cdnURL: user.profilePhoto.hasCdnURL ? user.profilePhoto.cdnURL : nil,
+          fileUniqueID: user.profilePhoto.hasFileUniqueID ? user.profilePhoto.fileUniqueID : nil
+        )
+        : nil
     )
   }
 }
@@ -281,8 +312,8 @@ public extension ApiUser {
     let existing = try? User.fetchOne(db, id: id)
     var user = User(from: self)
 
-    var profileCdnUrl: String? = nil
-    var profileFileUniqueId: String? = nil
+    var profileCdnUrl = profilePhoto?.cdnURL
+    var profileFileUniqueId = profilePhoto?.fileUniqueID
 
     // TODO: support clearing photo
     var file: File? = nil
@@ -337,7 +368,7 @@ public extension ApiUser {
       // attach main photo
       user.profileFileId = file?.id
       user.profileCdnUrl = profileCdnUrl
-      user.profileFileUniqueId = file?.fileUniqueId
+      user.profileFileUniqueId = file?.fileUniqueId ?? profilePhoto?.fileUniqueID
 
       // TODO: handle multiple files
       try user.save(db)
@@ -587,7 +618,7 @@ public extension UserInfo {
   }
 
   var stableAvatarIdentity: String? {
-    profilePhoto?.first?.stableAvatarIdentity ?? user.stableAvatarIdentity
+    user.stableAvatarIdentity ?? profilePhoto?.first?.stableAvatarIdentity
   }
 }
 

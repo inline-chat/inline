@@ -1,5 +1,6 @@
 import Foundation
 import InlineKit
+import InlineProtocol
 import Testing
 
 @testable import InlineUI
@@ -61,7 +62,7 @@ struct UserAvatarEqualityTests {
   @Test("API user preserves public-search photo identity and URL")
   @MainActor
   func apiUserPreservesSearchPhoto() throws {
-    let user = try JSONDecoder().decode(ApiUser.self, from: Data(#"""
+    var user = try JSONDecoder().decode(ApiUser.self, from: Data(#"""
       {
         "id": 42,
         "firstName": "Avatar",
@@ -78,11 +79,36 @@ struct UserAvatarEqualityTests {
         }]
       }
       """#.utf8))
+    user.profilePhoto = ApiUserProfilePhotoReference(
+      cdnURL: "https://cdn.inline.chat/v3-avatar.jpg?token=new",
+      fileUniqueID: "profile-unique-v3"
+    )
 
     let avatar = UserAvatar(apiUser: user, size: 32, cacheRemoteAvatar: false)
 
+    // A legacy response remains authoritative when both representations are present.
     #expect(avatar.stableAvatarIdentity == "unique:profile-unique-1")
     #expect(avatar.remoteUrl == URL(string: "https://cdn.inline.chat/avatar.jpg?token=signed"))
+    #expect(avatar.hasConfiguredPhoto)
+  }
+
+  @Test("V3 search user renders its compact profile photo")
+  @MainActor
+  func protocolApiUserPreservesSearchPhoto() {
+    let user = ApiUser(from: InlineProtocol.User.with {
+      $0.id = 43
+      $0.firstName = "Realtime"
+      $0.min = true
+      $0.profilePhoto = .with {
+        $0.cdnURL = "https://cdn.inline.chat/realtime.jpg?token=signed"
+        $0.fileUniqueID = "profile-unique-v3"
+      }
+    })
+
+    let avatar = UserAvatar(apiUser: user, size: 32, cacheRemoteAvatar: false)
+
+    #expect(avatar.stableAvatarIdentity == "unique:profile-unique-v3")
+    #expect(avatar.remoteUrl == URL(string: "https://cdn.inline.chat/realtime.jpg?token=signed"))
     #expect(avatar.hasConfiguredPhoto)
   }
 }

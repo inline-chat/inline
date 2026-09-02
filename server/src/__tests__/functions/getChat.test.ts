@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { getChat } from "@in/server/functions/messages.getChat"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { testUtils, defaultTestContext, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
@@ -98,6 +99,40 @@ describe("getChat", () => {
         ),
       )
     expect(storedDialogs).toHaveLength(1)
+  })
+
+  test("passes the DM peer profile photo to the user encoder", async () => {
+    const currentUser = await testUtils.createUser("profile-photo-current@example.com")
+    const peerUser = await testUtils.createUser("profile-photo-peer@example.com")
+    if (!currentUser || !peerUser) throw new Error("Users not created")
+
+    const fileUniqueId = `get-chat-profile-photo-${peerUser.id}`
+    const [photo] = await db
+      .insert(schema.files)
+      .values({
+        fileUniqueId,
+        userId: peerUser.id,
+        fileType: "photo",
+        mimeType: "image/jpeg",
+        fileSize: 123,
+      })
+      .returning()
+    if (!photo) throw new Error("Profile photo not created")
+    await db.update(schema.users).set({ photoFileId: photo.id }).where(eq(schema.users.id, peerUser.id))
+
+    const userEncoderSpy = spyOn(Encoders, "user")
+    const result = await getChat(
+      { peerId: makeInputPeerUser(peerUser.id) },
+      makeHandlerContext(currentUser.id),
+    )
+
+    const encodedPeerPhoto = userEncoderSpy.mock.calls.some(
+      ([input]) => input.user.id === peerUser.id && input.photoFile?.fileUniqueId === fileUniqueId,
+    )
+    userEncoderSpy.mockRestore()
+
+    expect(result.user?.id).toBe(BigInt(peerUser.id))
+    expect(encodedPeerPhoto).toBe(true)
   })
 
   test("returns the optional newest repair window with the existing unread semantics", async () => {

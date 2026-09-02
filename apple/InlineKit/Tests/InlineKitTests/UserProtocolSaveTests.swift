@@ -13,6 +13,66 @@ struct UserProtocolSaveTests {
     return queue
   }
 
+  @Test("V3 API user preserves compact profile photo")
+  func apiUserPreservesCompactProfilePhoto() {
+    let protocolUser = InlineProtocol.User.with {
+      $0.id = 102
+      $0.firstName = "Photo"
+      $0.min = true
+      $0.profilePhoto = .with {
+        $0.cdnURL = "https://cdn.inline.chat/profile.jpg?token=signed"
+        $0.fileUniqueID = "profile-unique-102"
+      }
+    }
+
+    let apiUser = ApiUser(from: protocolUser)
+
+    #expect(apiUser.photo == nil)
+    #expect(apiUser.profilePhoto?.cdnURL == "https://cdn.inline.chat/profile.jpg?token=signed")
+    #expect(apiUser.profilePhoto?.fileUniqueID == "profile-unique-102")
+    #expect(apiUser.avatarURL == URL(string: "https://cdn.inline.chat/profile.jpg?token=signed"))
+    #expect(apiUser.avatarFileUniqueID == "profile-unique-102")
+    #expect(apiUser.hasConfiguredProfilePhoto)
+  }
+
+  @Test("V3 API user without a profile photo preserves no-photo state")
+  func apiUserPreservesNoPhotoState() {
+    let apiUser = ApiUser(from: .with {
+      $0.id = 104
+      $0.firstName = "Initials"
+      $0.min = true
+    })
+
+    #expect(apiUser.photo == nil)
+    #expect(apiUser.profilePhoto == nil)
+    #expect(apiUser.avatarURL == nil)
+    #expect(apiUser.avatarFileUniqueID == nil)
+    #expect(apiUser.hasConfiguredProfilePhoto == false)
+  }
+
+  @Test("compact API photo is persisted without fabricated file metadata")
+  func compactApiPhotoPersistsToNewUser() throws {
+    let dbQueue = try makeInMemoryDB()
+    let apiUser = ApiUser(from: .with {
+      $0.id = 103
+      $0.firstName = "Persisted"
+      $0.min = true
+      $0.profilePhoto = .with {
+        $0.cdnURL = "https://cdn.inline.chat/persisted.jpg?token=signed"
+        $0.fileUniqueID = "profile-unique-103"
+      }
+    })
+
+    try dbQueue.write { db in
+      let saved = try apiUser.saveFull(db)
+
+      #expect(saved.profileCdnUrl == "https://cdn.inline.chat/persisted.jpg?token=signed")
+      #expect(saved.profileFileUniqueId == "profile-unique-103")
+      #expect(saved.profileFileId == nil)
+      #expect(try File.filter(Column("profileForUserId") == 103).fetchCount(db) == 0)
+    }
+  }
+
   @Test("full protocol user clears omitted optional profile fields")
   func fullUserClearsOmittedProfileFields() throws {
     let dbQueue = try makeInMemoryDB()

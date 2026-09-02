@@ -171,19 +171,18 @@ public struct UserAvatar: View, Equatable {
     backgroundOpacity: Double = 1.0,
     cacheRemoteAvatar: Bool = true
   ) {
-    let profilePhoto = apiUser.photo?.first
     userId = apiUser.id
     firstName = apiUser.firstName
     lastName = apiUser.lastName
     email = apiUser.email
     username = apiUser.username
-    stableAvatarIdentity = profilePhoto.map { "unique:\($0.fileUniqueId)" }
-    remoteUrl = profilePhoto.flatMap { URL(string: $0.temporaryUrl) }
+    stableAvatarIdentity = apiUser.avatarFileUniqueID.map { "unique:\($0)" }
+    remoteUrl = apiUser.avatarURL
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
     self.cacheRemoteAvatar = cacheRemoteAvatar
-    hasConfiguredPhoto = profilePhoto != nil
+    hasConfiguredPhoto = apiUser.hasConfiguredProfilePhoto
     let presentation = Self.avatarPresentation(
       firstName: apiUser.firstName,
       lastName: apiUser.lastName,
