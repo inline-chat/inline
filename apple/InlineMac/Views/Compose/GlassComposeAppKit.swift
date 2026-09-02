@@ -1367,6 +1367,14 @@ class GlassComposeAppKit: NSView {
       }
       .store(in: &cancellables)
 
+    NotificationCenter.default.publisher(for: .botAgentsChanged)
+      .sink { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.loadMentionAgents(forceRefresh: true)
+        }
+      }
+      .store(in: &cancellables)
+
     refreshMentionAgentsForExperiment()
   }
 
@@ -1377,14 +1385,20 @@ class GlassComposeAppKit: NSView {
       applyMentionCandidates()
       return
     }
-    guard let chatPeerID else {
+    guard chatPeerID != nil else {
       applyMentionCandidates()
       return
     }
+    loadMentionAgents()
+  }
+
+  private func loadMentionAgents(forceRefresh: Bool = false) {
+    guard ExperimentalFeatureFlags.mentionableAgentsEnabled, let chatPeerID else { return }
+    mentionAgentsTask?.cancel()
     mentionAgentsTask = Task { @MainActor [weak self, peerId = chatPeerID] in
       guard let self else { return }
       do {
-        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId)
+        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId, forceRefresh: forceRefresh)
       } catch is CancellationError {
         return
       } catch {
@@ -1677,7 +1691,11 @@ class GlassComposeAppKit: NSView {
     log.trace("detectMentionAtCursor cursor=\(cursorPosition)")
 
     if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: attributedText) {
+      let isNewMentionSession = currentMentionRange?.range.location != mentionRange.range.location
       currentMentionRange = mentionRange
+      if isNewMentionSession {
+        loadMentionAgents()
+      }
       showMentionCompletion(for: mentionRange.query)
     } else {
       hideMentionCompletion()

@@ -10,6 +10,8 @@ struct BotsSettingsDetailView: View {
   @Environment(\.auth) private var auth
   @Environment(\.dependencies) private var dependencies
   @Environment(\.realtimeV2) private var realtimeV2
+  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
+  private var mentionableAgentsEnabled = false
 
   @StateObject private var viewModel = BotsSettingsViewModel()
   @State private var name = ""
@@ -174,6 +176,10 @@ struct BotsSettingsDetailView: View {
           "Your Bots",
           subtitle: "Manage bots used by integrations and automated workflows."
         )
+      }
+
+      if mentionableAgentsEnabled {
+        MacBotAgentsSection(bots: viewModel.bots)
       }
     }
     .settingsFormStyle()
@@ -701,8 +707,6 @@ private struct BotRow: View {
 
 private struct ManagedBotSettingsSheet: View {
   @Environment(\.dismiss) private var dismiss
-  @AppStorage(ExperimentalFeatureFlags.mentionableAgentsKey)
-  private var mentionableAgentsEnabled = false
   @State private var botToEdit: BotEditItem?
   @State private var botToEditAvatar: BotAvatarEditItem?
   @State private var isConfirmingRotation = false
@@ -732,9 +736,6 @@ private struct ManagedBotSettingsSheet: View {
           onCopyToken: onCopyToken,
           onRotateToken: { isConfirmingRotation = true }
         )
-        if mentionableAgentsEnabled {
-          MacBotAgentsSection(botUserId: bot.id)
-        }
       }
       .formStyle(.grouped)
 
@@ -767,86 +768,98 @@ private struct ManagedBotSettingsSheet: View {
   }
 }
 
-private struct MacBotAgentsSection: View {
-  @State private var model: BotAgentsSettingsModel
-  @State private var editorItem: MacBotAgentEditorItem?
-  @State private var agentToDelete: InlineProtocol.BotAgent?
+private struct MacBotAgentRow: Identifiable {
+  let bot: InlineProtocol.User
+  let agent: InlineProtocol.BotAgent
 
-  init(botUserId: Int64) {
-    _model = State(initialValue: BotAgentsSettingsModel(botUserId: botUserId))
+  var id: Int64 { agent.id }
+}
+
+private struct MacBotAgentsSection: View {
+  let bots: [InlineProtocol.User]
+
+  @State private var models: [Int64: BotAgentsSettingsModel] = [:]
+  @State private var editorItem: MacBotAgentEditorItem?
+  @State private var agentToDelete: MacBotAgentRow?
+
+  private var rows: [MacBotAgentRow] {
+    bots.flatMap { bot in
+      (models[bot.id]?.agents ?? []).map { MacBotAgentRow(bot: bot, agent: $0) }
+    }
+  }
+
+  private var isLoading: Bool {
+    models.values.contains { $0.isLoading }
+  }
+
+  private var skillCatalogs: [Int64: [InlineProtocol.BotSkill]] {
+    models.mapValues(\.skills)
   }
 
   var body: some View {
     Section {
-      if model.isLoading, model.agents.isEmpty {
+      if bots.isEmpty {
+        Text("Create a bot before adding an Agent.")
+          .foregroundStyle(.secondary)
+      } else if isLoading, rows.isEmpty {
         HStack(spacing: 8) {
           ProgressView().controlSize(.small)
           Text("Loading agents...")
             .foregroundStyle(.secondary)
         }
-      } else if model.agents.isEmpty {
-        Text("No agents yet. Create a named specialization people can @mention wherever this bot has access.")
+      } else if rows.isEmpty {
+        Text("No agents yet. Create a named specialization people can @mention wherever its bot has access.")
           .foregroundStyle(.secondary)
       } else {
-        ForEach(model.agents, id: \.id) { agent in
-          HStack(spacing: 10) {
-            Text(agent.hasEmoji ? agent.emoji : "🤖")
-              .font(.title3)
-              .frame(width: 30, height: 30)
-              .background(.quaternary, in: Circle())
-            VStack(alignment: .leading, spacing: 1) {
-              Text(agent.name)
-              if agent.hasDescription_p, !agent.description_p.isEmpty {
-                Text(agent.description_p)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-                  .lineLimit(1)
-              }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if model.deletingAgentIds.contains(agent.id) {
-              ProgressView().controlSize(.small)
-            } else {
-              Button("Edit...") {
-                editorItem = MacBotAgentEditorItem(agent: agent)
-              }
-              Button(role: .destructive) {
-                agentToDelete = agent
-              } label: {
-                Image(systemName: "trash")
-              }
-              .buttonStyle(.borderless)
-              .help("Delete Agent")
-            }
-          }
+        ForEach(rows) { row in
+          MacBotAgentRowView(
+            bot: row.bot,
+            agent: row.agent,
+            isDeleting: models[row.bot.id]?.deletingAgentIds.contains(row.agent.id) == true,
+            onEdit: {
+              editorItem = MacBotAgentEditorItem(botUserId: row.bot.id, agent: row.agent)
+            },
+            onDelete: { agentToDelete = row }
+          )
         }
       }
 
-      if let errorMessage = model.errorMessage {
-        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-          .foregroundStyle(.red)
+      ForEach(bots, id: \.id) { bot in
+        if let errorMessage = models[bot.id]?.errorMessage {
+          Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
+        }
       }
 
       HStack {
         Spacer()
         Button {
-          editorItem = MacBotAgentEditorItem(agent: nil)
+          guard let bot = bots.first else { return }
+          editorItem = MacBotAgentEditorItem(botUserId: bot.id, agent: nil)
         } label: {
           Label("New Agent...", systemImage: "plus")
         }
+        .disabled(bots.isEmpty)
       }
     } header: {
-      Text("Agents")
+      SettingsSectionHeader(
+        "Agents",
+        subtitle: "Create mentionable specializations on your existing bots and harnesses."
+      )
     } footer: {
-      Text("Agents reuse this bot’s harness, credentials, memory, skills, and chat access. Harness fields remain private to bot managers and the harness.")
+      Text("Skill and instructions are independently optional. Agents reuse the selected bot’s identity, credentials, memory, skills, and chat access.")
     }
-    .task { await model.load() }
+    .task(id: bots.map(\.id)) {
+      await synchronizeModels()
+    }
     .sheet(item: $editorItem) { item in
       MacBotAgentEditor(
-        agent: item.agent,
-        onSave: { draft in
-          await model.save(draft, agentId: item.agent?.id)
+        item: item,
+        bots: bots,
+        skillCatalogs: skillCatalogs,
+        onSave: { botUserId, draft in
+          guard let model = models[botUserId] else { return false }
+          return await model.save(draft, agentId: item.agent?.id)
         }
       )
     }
@@ -859,18 +872,77 @@ private struct MacBotAgentsSection: View {
       titleVisibility: .visible
     ) {
       Button("Delete Agent", role: .destructive) {
-        guard let agent = agentToDelete else { return }
+        guard let row = agentToDelete, let model = models[row.bot.id] else { return }
         agentToDelete = nil
-        Task { await model.delete(agentId: agent.id) }
+        Task { await model.delete(agentId: row.agent.id) }
       }
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("Existing messages keep their text, but future mentions will no longer activate this specialization.")
     }
   }
+
+  private func synchronizeModels() async {
+    let validIds = Set(bots.map(\.id))
+    models = models.filter { validIds.contains($0.key) }
+    for bot in bots where models[bot.id] == nil {
+      models[bot.id] = BotAgentsSettingsModel(botUserId: bot.id)
+    }
+    for bot in bots {
+      await models[bot.id]?.load()
+    }
+  }
+}
+
+private struct MacBotAgentRowView: View {
+  let bot: InlineProtocol.User
+  let agent: InlineProtocol.BotAgent
+  let isDeleting: Bool
+  let onEdit: () -> Void
+  let onDelete: () -> Void
+
+  private var botUser: User { User(from: bot) }
+
+  var body: some View {
+    HStack(spacing: 10) {
+      UserAvatar(user: botUser, size: 30)
+      VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 5) {
+          if agent.hasEmoji, !agent.emoji.isEmpty {
+            Text(agent.emoji)
+          }
+          Text(agent.name)
+            .fontWeight(.medium)
+        }
+        Text("via \(botUser.displayName)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        if agent.hasDescription_p, !agent.description_p.isEmpty {
+          Text(agent.description_p)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if isDeleting {
+        ProgressView().controlSize(.small)
+      } else {
+        Button("Edit...", action: onEdit)
+        Button(role: .destructive, action: onDelete) {
+          Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Delete Agent")
+        .help("Delete Agent")
+      }
+    }
+  }
 }
 
 private struct MacBotAgentEditorItem: Identifiable {
+  let botUserId: Int64
   let agent: InlineProtocol.BotAgent?
   let id = UUID()
 }
@@ -878,18 +950,34 @@ private struct MacBotAgentEditorItem: Identifiable {
 private struct MacBotAgentEditor: View {
   @Environment(\.dismiss) private var dismiss
   @State private var draft: ManagedBotAgentDraft
+  @State private var selectedBotUserId: Int64
   @State private var isSaving = false
 
-  let agent: InlineProtocol.BotAgent?
-  let onSave: (ManagedBotAgentDraft) async -> Bool
+  let item: MacBotAgentEditorItem
+  let bots: [InlineProtocol.User]
+  let skillCatalogs: [Int64: [InlineProtocol.BotSkill]]
+  let onSave: (Int64, ManagedBotAgentDraft) async -> Bool
 
   init(
-    agent: InlineProtocol.BotAgent?,
-    onSave: @escaping (ManagedBotAgentDraft) async -> Bool
+    item: MacBotAgentEditorItem,
+    bots: [InlineProtocol.User],
+    skillCatalogs: [Int64: [InlineProtocol.BotSkill]],
+    onSave: @escaping (Int64, ManagedBotAgentDraft) async -> Bool
   ) {
-    self.agent = agent
+    self.item = item
+    self.bots = bots
+    self.skillCatalogs = skillCatalogs
     self.onSave = onSave
-    _draft = State(initialValue: agent.map { ManagedBotAgentDraft(agent: $0) } ?? ManagedBotAgentDraft())
+    _selectedBotUserId = State(initialValue: item.botUserId)
+    _draft = State(initialValue: item.agent.map { ManagedBotAgentDraft(agent: $0) } ?? ManagedBotAgentDraft())
+  }
+
+  private var selectedSkills: [InlineProtocol.BotSkill] {
+    skillCatalogs[selectedBotUserId] ?? []
+  }
+
+  private var hasUnavailableSkill: Bool {
+    !draft.skillKey.isEmpty && !selectedSkills.contains { $0.key == draft.skillKey }
   }
 
   var body: some View {
@@ -900,26 +988,44 @@ private struct MacBotAgentEditor: View {
             TextField("Data Analyst", text: $draft.name)
               .frame(width: 320)
           }
-          LabeledContent("Handle") {
+          LabeledContent("Handle (Optional)") {
             TextField("data-analyst", text: $draft.handle)
               .frame(width: 320)
           }
-          LabeledContent("Emoji") {
+          LabeledContent("Emoji (Optional)") {
             TextField("📊", text: $draft.emoji)
               .frame(width: 320)
           }
-          LabeledContent("Description") {
+          LabeledContent("Description (Optional)") {
             TextField("What this Agent is for", text: $draft.description)
               .frame(width: 320)
           }
         }
 
         Section {
-          LabeledContent("Skill key") {
-            TextField("Optional harness skill", text: $draft.skillKey)
-              .frame(width: 320)
+          Picker("Harness", selection: $selectedBotUserId) {
+            ForEach(bots, id: \.id) { bot in
+              Text(User(from: bot).displayName).tag(bot.id)
+            }
           }
-          LabeledContent("Instructions") {
+          .disabled(item.agent != nil)
+          .onChange(of: selectedBotUserId) { _, _ in
+            if item.agent == nil {
+              draft.skillKey = ""
+            }
+          }
+
+          Picker("Skill (Optional)", selection: $draft.skillKey) {
+            Text("No Skill").tag("")
+            if hasUnavailableSkill {
+              Text("Unavailable: \(draft.skillKey)").tag(draft.skillKey)
+            }
+            ForEach(selectedSkills, id: \.key) { skill in
+              Text(skill.name).tag(skill.key)
+            }
+          }
+
+          LabeledContent("Instructions (Optional)") {
             TextEditor(text: $draft.instructions)
               .font(.body)
               .frame(width: 320, height: 120)
@@ -929,9 +1035,9 @@ private struct MacBotAgentEditor: View {
               }
           }
         } header: {
-          Text("Harness")
+          Text("Specialization")
         } footer: {
-          Text("A name-only Agent is valid and receives a minimal identity instruction.")
+          Text("Choose a skill, add instructions, use both, or leave both empty. A name-only Agent receives a minimal specialization instruction.")
         }
       }
       .formStyle(.grouped)
@@ -943,18 +1049,22 @@ private struct MacBotAgentEditor: View {
         Button(isSaving ? "Saving..." : "Save") {
           isSaving = true
           Task {
-            if await onSave(draft) {
+            if await onSave(selectedBotUserId, draft) {
               dismiss()
             }
             isSaving = false
           }
         }
         .keyboardShortcut(.defaultAction)
-        .disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+        .disabled(
+          draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || selectedBotUserId == 0
+            || isSaving
+        )
       }
       .padding()
     }
-    .frame(width: 560, height: 590)
+    .frame(width: 580, height: 640)
   }
 }
 

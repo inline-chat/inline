@@ -123,7 +123,11 @@ final class ComposeAutocompleteManager: NSObject {
       return false
     }
 
+    let isNewMentionSession = match.kind == .mention && viewModel.match?.kind != .mention
     viewModel.update(match: match)
+    if isNewMentionSession {
+      loadMentionAgents()
+    }
     loadCommandsIfNeeded(for: match)
     return true
   }
@@ -222,12 +226,12 @@ final class ComposeAutocompleteManager: NSObject {
     }
   }
 
-  private func loadMentionAgents() {
+  private func loadMentionAgents(forceRefresh: Bool = false) {
     agentLoadTask?.cancel()
     agentLoadTask = Task { @MainActor [weak self, peerId = peerId] in
       guard let self else { return }
       do {
-        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId)
+        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId, forceRefresh: forceRefresh)
         applyMentionCandidates()
       } catch is CancellationError {
         return
@@ -243,6 +247,14 @@ final class ComposeAutocompleteManager: NSObject {
       .sink { [weak self] _ in
         Task { @MainActor [weak self] in
           self?.refreshMentionAgentsForExperiment()
+        }
+      }
+      .store(in: &cancellables)
+
+    NotificationCenter.default.publisher(for: .botAgentsChanged)
+      .sink { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.loadMentionAgents(forceRefresh: true)
         }
       }
       .store(in: &cancellables)

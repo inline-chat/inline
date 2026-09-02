@@ -3,6 +3,10 @@ import InlineProtocol
 import Logger
 import Observation
 
+public extension Notification.Name {
+  static let botAgentsChanged = Notification.Name("inline.botAgentsChanged")
+}
+
 public struct MentionableBotAgent: Hashable, Identifiable, Sendable {
   public let id: Int64
   public let botUserId: Int64
@@ -228,7 +232,9 @@ public struct ManagedBotAgentDraft: Equatable, Sendable {
 @Observable
 public final class BotAgentsSettingsModel {
   public private(set) var agents: [InlineProtocol.BotAgent] = []
+  public private(set) var skills: [InlineProtocol.BotSkill] = []
   public private(set) var isLoading = false
+  public private(set) var isLoadingSkills = false
   public private(set) var savingAgentId: Int64?
   public private(set) var deletingAgentIds: Set<Int64> = []
   public private(set) var errorMessage: String?
@@ -258,6 +264,31 @@ public final class BotAgentsSettingsModel {
       agents = result.agents.sorted { $0.id < $1.id }
     } catch {
       errorMessage = "Could not load agents."
+    }
+
+    await loadSkills()
+  }
+
+  public func loadSkills() async {
+    guard !isLoadingSkills else { return }
+    isLoadingSkills = true
+    defer { isLoadingSkills = false }
+
+    do {
+      let response = try await Api.realtime.callRpcDirect(
+        method: .getBotSkills,
+        input: .getBotSkills(.with { $0.botUserID = botUserId })
+      )
+      guard case let .getBotSkills(result)? = response else {
+        throw PeerBotCommandsViewModelError.invalidResponse
+      }
+      skills = result.skills.sorted {
+        if $0.sortOrder != $1.sortOrder { return $0.sortOrder < $1.sortOrder }
+        if $0.name != $1.name { return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return $0.key < $1.key
+      }
+    } catch {
+      skills = []
     }
   }
 
@@ -311,6 +342,7 @@ public final class BotAgentsSettingsModel {
       agents.append(agent)
       agents.sort { $0.id < $1.id }
       directory.invalidate(botUserId: botUserId)
+      NotificationCenter.default.post(name: .botAgentsChanged, object: botUserId)
       return true
     } catch {
       errorMessage = agentId == nil ? "Could not create the agent." : "Could not update the agent."
@@ -334,6 +366,7 @@ public final class BotAgentsSettingsModel {
       }
       agents.removeAll { $0.id == agentId }
       directory.invalidate(botUserId: botUserId)
+      NotificationCenter.default.post(name: .botAgentsChanged, object: botUserId)
       return true
     } catch {
       errorMessage = "Could not delete the agent."
