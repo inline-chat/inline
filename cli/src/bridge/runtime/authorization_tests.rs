@@ -111,6 +111,123 @@ async fn delivery(events: &mut LosslessEventReceiver) -> LosslessEventDelivery {
     .expect("message delivery deadline")
 }
 
+async fn record_bound_dialog(route: &InboundRoute, model_id: &str) {
+    let mut dialog = DialogRecord::new(InlineId::new(706));
+    dialog.peer_user_id = Some(InlineId::new(7));
+    dialog.agent_context = Some(inline_client::AgentThreadContext {
+        bot_user_id: InlineId::new(17),
+        agent_id: None,
+        configuration: Some(inline_client::AgentThreadConfiguration {
+            project_id: Some("project".to_string()),
+            model_id: Some(model_id.to_string()),
+            reasoning_effort_id: None,
+        }),
+    });
+    route.bot_store.record_dialog(dialog).await.expect("dialog");
+}
+
+fn history_contains(history: &inline_client::HistoryPage, expected: &str) -> bool {
+    history.messages.iter().any(|message| {
+        matches!(&message.content, MessageContent::Text { text } if text.contains(expected))
+    })
+}
+
+#[tokio::test]
+async fn provider_unavailable_bound_context_without_catalog_handles_status_and_queues_work() {
+    let route = route("codex");
+    record_bound_dialog(&route, "gpt-test").await;
+    let (bot, backend, mut events) = client().await;
+
+    backend.push_event_batch(vec![ClientEvent::MessageStored {
+        message: message(7, Some(false), "/status"),
+    }]);
+    accept_provider_unavailable_delivery(&bot, delivery(&mut events).await, &route)
+        .await
+        .expect("status delivery");
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(706),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("status history");
+    assert!(history_contains(&history, "local provider is restarting"));
+
+    let mut work = message(7, Some(false), "continue working");
+    work.message_id = InlineId::new(10);
+    backend.push_event_batch(vec![ClientEvent::MessageStored { message: work }]);
+    accept_provider_unavailable_delivery(&bot, delivery(&mut events).await, &route)
+        .await
+        .expect("work delivery");
+    assert_eq!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .expect("queued work")
+            .len(),
+        1
+    );
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn invalid_bound_configuration_is_explained_without_failing_the_delivery() {
+    let route = route("codex");
+    route
+        .bot_agent_resolver
+        .store_configuration_catalog(AgentConfigurationCatalog {
+            projects: Some(AgentProjectCatalog {
+                options: vec![AgentProjectOption {
+                    id: "project".to_string(),
+                    label: "Project".to_string(),
+                    description: None,
+                }],
+                can_select_folder: None,
+            }),
+            models: Some(AgentModelCatalog {
+                options: vec![AgentModelOption {
+                    id: "gpt-test".to_string(),
+                    label: "GPT Test".to_string(),
+                    description: None,
+                    reasoning_effort_ids: Vec::new(),
+                }],
+            }),
+            reasoning: None,
+        });
+    record_bound_dialog(&route, "missing-model").await;
+    let (bot, backend, mut events) = client().await;
+
+    backend.push_event_batch(vec![ClientEvent::MessageStored {
+        message: message(7, Some(false), "continue working"),
+    }]);
+    accept_provider_unavailable_delivery(&bot, delivery(&mut events).await, &route)
+        .await
+        .expect("invalid configuration delivery");
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(706),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("failure history");
+    assert!(history_contains(
+        &history,
+        "model selection is no longer available"
+    ));
+    assert!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .expect("queued work")
+            .is_empty()
+    );
+    bot.shutdown().await.expect("shutdown");
+}
+
 #[tokio::test]
 async fn unauthorized_messages_are_silent_before_admission_for_every_provider() {
     for provider in ["codex", "claude", "opencode", "amp"] {

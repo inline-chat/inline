@@ -264,9 +264,13 @@ impl BotAgentResolver {
             .configuration_catalog
             .read()
             .expect("Agent configuration catalog poisoned");
-        let catalog = catalog.as_ref().ok_or_else(|| {
-            "This thread's Agent configuration is unavailable on this provider.".to_string()
-        })?;
+        // The resolver exists before the provider starts and publishes its
+        // catalog. Defer provider-owned validation during that window; the
+        // conversation resolver still validates the project against the local
+        // workspace store before accepting work.
+        let Some(catalog) = catalog.as_ref() else {
+            return Ok(());
+        };
         if let Some(project_id) = configuration.project_id.as_deref()
             && !catalog.projects.as_ref().is_some_and(|projects| {
                 projects
@@ -860,6 +864,18 @@ pub(super) async fn inbound_from_delivery(
                 message.message_id.get(),
                 &notice,
                 &format!("{event_id}-missing-workspace"),
+                BridgeNotificationClass::ImportantFailure,
+            )
+            .await?;
+            return Ok(None);
+        }
+        Err(ConversationResolutionError::InvalidAgentContext(notice)) => {
+            send_text_reply(
+                bot,
+                message.chat_id.get(),
+                message.message_id.get(),
+                &notice,
+                &format!("{event_id}-invalid-agent-context"),
                 BridgeNotificationClass::ImportantFailure,
             )
             .await?;

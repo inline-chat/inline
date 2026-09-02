@@ -8,6 +8,22 @@ use std::sync::{
 use inline_client::{MessageMutation, RandomId, TransactionId, TransactionIdentity};
 
 #[test]
+fn bound_configuration_validation_waits_for_the_provider_catalog() {
+    let resolver = BotAgentResolver::disabled();
+    let context = proto::AgentThreadContext {
+        bot_user_id: 17,
+        agent_id: None,
+        configuration: Some(proto::AgentThreadConfiguration {
+            project_id: Some("inline".to_string()),
+            model_id: Some("gpt-test".to_string()),
+            reasoning_effort_id: Some("high".to_string()),
+        }),
+    };
+
+    assert!(resolver.validate_configuration(&context).is_ok());
+}
+
+#[test]
 fn bound_configuration_must_match_the_published_catalog() {
     let resolver = BotAgentResolver::disabled();
     resolver.store_configuration_catalog(AgentConfigurationCatalog {
