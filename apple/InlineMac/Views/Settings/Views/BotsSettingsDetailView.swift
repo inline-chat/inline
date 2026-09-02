@@ -800,12 +800,15 @@ private struct MacBotAgentsSection: View {
       } else if isLoading, rows.isEmpty {
         HStack(spacing: 8) {
           ProgressView().controlSize(.small)
-          Text("Loading Skilled Agents...")
+          Text("Loading Skilled Agents…")
             .foregroundStyle(.secondary)
         }
       } else if rows.isEmpty {
-        Text("No Skilled Agents yet. Create a named specialization people can @mention wherever its bot has access.")
-          .foregroundStyle(.secondary)
+        SettingsEmptyRow(
+          "No Skilled Agents Yet",
+          description: "Create one from an existing bot.",
+          systemImage: "person.crop.circle.badge.plus"
+        )
       } else {
         ForEach(rows) { row in
           MacBotAgentRowView(
@@ -833,17 +836,17 @@ private struct MacBotAgentsSection: View {
           guard let bot = bots.first else { return }
           editorItem = MacBotAgentEditorItem(botUserId: bot.id, agent: nil)
         } label: {
-          Label("New Skilled Agent...", systemImage: "plus")
+          Label("New Skilled Agent…", systemImage: "plus")
         }
         .disabled(bots.isEmpty)
       }
     } header: {
       SettingsSectionHeader(
         "Skilled Agents",
-        subtitle: "Create mentionable specializations on your existing bots and harnesses."
+        subtitle: "Give your bots focused roles people can @mention for repeatable work."
       )
     } footer: {
-      Text("Skill and instructions are independently optional. Skilled Agents reuse the selected bot’s identity, credentials, memory, skills, and chat access.")
+      Text("Skilled Agents use their bot’s access, memory, and tools.")
     }
     .task(id: bots.map(\.id)) {
       await synchronizeModels()
@@ -925,7 +928,7 @@ private struct MacBotAgentRowView: View {
       if isDeleting {
         ProgressView().controlSize(.small)
       } else {
-        Button("Edit...", action: onEdit)
+        Button("Edit…", action: onEdit)
         Button(role: .destructive, action: onDelete) {
           Image(systemName: "trash")
         }
@@ -976,91 +979,160 @@ private struct MacBotAgentEditor: View {
     !draft.skillKey.isEmpty && !selectedSkills.contains { $0.key == draft.skillKey }
   }
 
+  private var canSave: Bool {
+    !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && selectedBotUserId != 0
+      && !isSaving
+  }
+
+  private var title: LocalizedStringResource {
+    if item.agent == nil {
+      "New Skilled Agent"
+    } else {
+      "Edit Skilled Agent"
+    }
+  }
+
   var body: some View {
-    VStack(spacing: 0) {
-      Form {
-        Section("Identity") {
-          LabeledContent("Name") {
-            TextField("Data Analyst", text: $draft.name)
-              .frame(width: 320)
-          }
-          LabeledContent("Handle (Optional)") {
-            TextField("data-analyst", text: $draft.handle)
-              .frame(width: 320)
-          }
-          LabeledContent("Emoji (Optional)") {
-            TextField("📊", text: $draft.emoji)
-              .frame(width: 320)
-          }
-          LabeledContent("Description (Optional)") {
-            TextField("What this Skilled Agent is for", text: $draft.description)
-              .frame(width: 320)
-          }
-        }
-
-        Section {
-          Picker("Harness", selection: $selectedBotUserId) {
-            ForEach(bots, id: \.id) { bot in
-              Text(User(from: bot).displayName).tag(bot.id)
-            }
-          }
-          .disabled(item.agent != nil)
-          .onChange(of: selectedBotUserId) { _, _ in
-            if item.agent == nil {
-              draft.skillKey = ""
-            }
-          }
-
-          Picker("Skill (Optional)", selection: $draft.skillKey) {
-            Text("No Skill").tag("")
-            if hasUnavailableSkill {
-              Text("Unavailable: \(draft.skillKey)").tag(draft.skillKey)
-            }
-            ForEach(selectedSkills, id: \.key) { skill in
-              Text(skill.name).tag(skill.key)
-            }
-          }
-
-          LabeledContent("Instructions (Optional)") {
-            TextEditor(text: $draft.instructions)
-              .font(.body)
-              .frame(width: 320, height: 120)
-              .overlay {
-                RoundedRectangle(cornerRadius: 5)
-                  .stroke(.secondary.opacity(0.25), lineWidth: 1)
-              }
-          }
-        } header: {
-          Text("Specialization")
-        } footer: {
-          Text("Choose a skill, add instructions, use both, or leave both empty. A name-only Skilled Agent receives a minimal specialization instruction.")
+    SettingsEditSheet(
+      title: title,
+      detail: "Name the role, choose its bot, then optionally add a skill or instructions.",
+      isSaving: isSaving,
+      canSave: canSave,
+      onCancel: { dismiss() },
+      onSave: save,
+      content: {
+        Form {
+          MacBotAgentIdentitySection(draft: $draft)
+          MacBotAgentSpecializationSection(
+            draft: $draft,
+            selectedBotUserId: $selectedBotUserId,
+            bots: bots,
+            selectedSkills: selectedSkills,
+            hasUnavailableSkill: hasUnavailableSkill,
+            locksBotSelection: item.agent != nil
+          )
         }
       }
-      .formStyle(.grouped)
+    )
+    .frame(width: 560, height: 560)
+  }
 
-      Divider()
-      HStack {
-        Spacer()
-        Button("Cancel") { dismiss() }
-        Button(isSaving ? "Saving..." : "Save") {
-          isSaving = true
-          Task {
-            if await onSave(selectedBotUserId, draft) {
-              dismiss()
-            }
-            isSaving = false
-          }
-        }
-        .keyboardShortcut(.defaultAction)
-        .disabled(
-          draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || selectedBotUserId == 0
-            || isSaving
+  private func save() {
+    guard canSave else { return }
+    isSaving = true
+    Task {
+      if await onSave(selectedBotUserId, draft) {
+        dismiss()
+      }
+      isSaving = false
+    }
+  }
+}
+
+private struct MacBotAgentIdentitySection: View {
+  @Binding var draft: ManagedBotAgentDraft
+  @FocusState private var isNameFocused: Bool
+
+  var body: some View {
+    Section {
+      LabeledContent("Name") {
+        TextField(
+          "Name",
+          text: $draft.name,
+          prompt: Text("e.g. Data Analyst")
+        )
+        .labelsHidden()
+        .textFieldStyle(.plain)
+        .multilineTextAlignment(.trailing)
+        .focused($isNameFocused)
+        .frame(width: 320, alignment: .trailing)
+      }
+
+      LabeledContent("Icon") {
+        EmojiTextFieldPicker(
+          emoji: $draft.emoji,
+          size: 30,
+          accessibilityLabel: "Skilled Agent icon"
         )
       }
-      .padding()
+
+      LabeledContent("Description") {
+        TextField(
+          "Description",
+          text: $draft.description,
+          prompt: Text("What should people use it for?")
+        )
+        .labelsHidden()
+        .textFieldStyle(.plain)
+        .multilineTextAlignment(.trailing)
+        .frame(width: 320, alignment: .trailing)
+      }
     }
-    .frame(width: 580, height: 640)
+    .onAppear {
+      isNameFocused = true
+    }
+  }
+}
+
+private struct MacBotAgentSpecializationSection: View {
+  @Binding var draft: ManagedBotAgentDraft
+  @Binding var selectedBotUserId: Int64
+
+  let bots: [InlineProtocol.User]
+  let selectedSkills: [InlineProtocol.BotSkill]
+  let hasUnavailableSkill: Bool
+  let locksBotSelection: Bool
+
+  var body: some View {
+    Section {
+      Picker("Bot", selection: $selectedBotUserId) {
+        ForEach(bots, id: \.id) { bot in
+          Text(User(from: bot).displayName).tag(bot.id)
+        }
+      }
+      .disabled(locksBotSelection)
+      .onChange(of: selectedBotUserId) { _, _ in
+        if !locksBotSelection {
+          draft.skillKey = ""
+        }
+      }
+
+      Picker("Skill", selection: $draft.skillKey) {
+        Text("None").tag("")
+        if hasUnavailableSkill {
+          Text("Unavailable: \(draft.skillKey)").tag(draft.skillKey)
+        }
+        ForEach(selectedSkills, id: \.key) { skill in
+          Text(skill.name).tag(skill.key)
+        }
+      }
+
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Instructions")
+
+        ZStack(alignment: .topLeading) {
+          TextEditor(text: $draft.instructions)
+            .font(.body)
+            .scrollContentBackground(.hidden)
+            .background(.clear)
+            .accessibilityLabel("Instructions")
+
+          if draft.instructions.isEmpty {
+            Text("How should this role work?")
+              .foregroundStyle(.tertiary)
+              .padding(.top, 5)
+              .padding(.leading, 5)
+              .allowsHitTesting(false)
+              .accessibilityHidden(true)
+          }
+        }
+        .frame(minHeight: 96, idealHeight: 110, maxHeight: 150, alignment: .topLeading)
+      }
+      .padding(.vertical, 2)
+    } footer: {
+      Text("Only the name is required.")
+    }
   }
 }
 
