@@ -12,6 +12,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 import { getChatIdFromPeer } from "@in/server/methods/sendMessage"
+import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
 
 export const Input = Type.Object({
   messageId: TInputId,
@@ -65,6 +66,10 @@ export const handler = async (input: Input, context: Context): Promise<Response>
 const deleteMessage = async (messageId: number, chatId: number, currentUserId: number) => {
   try {
     let chat = await getAuthorizedChat(chatId, currentUserId)
+
+    if (await isImportedAgentMessage(chatId, messageId)) {
+      throw new InlineError(InlineError.ApiError.AGENT_SESSION_MESSAGE_IMMUTABLE)
+    }
 
     let [message] = await db
       .select()

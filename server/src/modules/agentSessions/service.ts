@@ -1045,12 +1045,16 @@ export async function syncAgentSessionMessages(
 
 export async function isImportedAgentMessage(chatId: number, messageId: number): Promise<boolean> {
   const [row] = await db
-    .select({ relation: agentSessionMessages.relation })
+    .select({ id: agentSessionMessages.id })
     .from(messages)
     .innerJoin(agentSessionMessages, eq(agentSessionMessages.messageGlobalId, messages.globalId))
-    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+    .where(and(
+      eq(messages.chatId, chatId),
+      eq(messages.messageId, messageId),
+      eq(agentSessionMessages.relation, AgentSessionMessageRelation.IMPORTED),
+    ))
     .limit(1)
-  return row?.relation === AgentSessionMessageRelation.IMPORTED
+  return row !== undefined
 }
 
 export async function hasImportedAgentMessages(chatId: number, messageIds: readonly number[]): Promise<boolean> {

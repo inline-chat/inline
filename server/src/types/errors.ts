@@ -62,6 +62,11 @@ export const ApiError = {
   // 409 CONFLICT
   POLL_CONFLICT: ["POLL_CONFLICT", 409, "Another getUpdates request is active for this bot"],
   WEBHOOK_ACTIVE: ["WEBHOOK_ACTIVE", 409, "Disable the webhook before using getUpdates"],
+  AGENT_SESSION_MESSAGE_IMMUTABLE: [
+    "AGENT_SESSION_MESSAGE_IMMUTABLE",
+    409,
+    "Imported agent session history cannot be edited or deleted yet",
+  ],
 
   // 500 SERVER_ERROR
   INTERNAL: ["INTERNAL", 500, "Internal server error happened"],

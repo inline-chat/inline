@@ -376,8 +376,15 @@ async function addAgentSessionInfo(messagesList: DbInputFullMessage[]): Promise<
     .where(inArray(agentSessionMessages.messageGlobalId, globalIds))
 
   const byMessageGlobalId = new Map<bigint, AgentSessionMessageInfo>()
+  const ambiguousMessageGlobalIds = new Set<bigint>()
   for (const row of rows) {
     if (row.messageGlobalId === null) continue
+    if (ambiguousMessageGlobalIds.has(row.messageGlobalId)) continue
+    if (byMessageGlobalId.has(row.messageGlobalId)) {
+      byMessageGlobalId.delete(row.messageGlobalId)
+      ambiguousMessageGlobalIds.add(row.messageGlobalId)
+      continue
+    }
     byMessageGlobalId.set(row.messageGlobalId, {
       agentSessionId: row.agentSessionId,
       provider: row.provider,
