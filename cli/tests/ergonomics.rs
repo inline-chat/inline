@@ -273,6 +273,9 @@ fn aliases_and_new_flags_appear_in_command_help() {
     let help = String::from_utf8(output.stdout).unwrap();
     assert!(help.contains("--text-file"));
     assert!(help.contains("-c, --chat-id"));
+    assert!(help.contains("Rich text formatting"));
+    assert!(help.contains("Whitespace is preserved"));
+    assert!(help.contains("<details open>"));
 }
 
 #[test]

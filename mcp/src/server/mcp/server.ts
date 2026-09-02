@@ -30,6 +30,9 @@ const DEFAULT_RESOURCE_METADATA_URL = "https://mcp.inline.chat/.well-known/oauth
 const INLINE_MCP_INSTRUCTIONS =
   "Inline MCP gives scoped access to the user's work chats. Resolve people, spaces, or thread names with people.search, spaces.list, and conversations.list before using chatId; inspect a target with conversations.get; read context with messages.list/search/context/unread; send only after the target is clear. IDs are strings. Time filters accept today, yesterday, 2d ago, YYYY-MM-DD, or epoch seconds. Use account.me to inspect scopes and allowed chat contexts."
 
+const INLINE_MARKDOWN_HELP =
+  'Parsed as supported Inline Markdown: **bold**, *italic*, <u>underline</u>, ~~strikethrough~~, ==highlight==, `code`, fenced code (optional language), four-space indented code, [label](https://example.com), [Name](inline://user?id=42), [[Title]](inline://chat?id=123), # headings, - bullets, 1. numbered lists, - [ ] / - [x] checklists, > quotes, pipe tables with a header separator row, --- separators, and ![alt](https://example.com/image.png). Math uses $TeX$ inline or $$TeX$$ on separate lines for display. Disclosures use <details open> / <summary>Title</summary> / body / </details> on separate lines; omit open to start collapsed and use <summary kind="progress"> only while working. Use <footer>metadata</footer> on its own line. Preserve indentation/newlines; use backslash escapes or code for literal syntax. Do not fence the whole message or tables unless literal code is intended. Footnotes and arbitrary HTML are unsupported. Rich formatting and math rendering depend on the recipient client.'
+
 type RequestedUploadKind = "auto" | InlineUploadedMediaKind
 
 type ResolvedUploadSource = {
@@ -2203,7 +2206,7 @@ export function createInlineMcpServer(params: {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
             mediaKind: z.enum(["photo", "video", "document"]).describe("Uploaded media kind"),
             mediaId: z.string().regex(/^[1-9]\d*$/).describe("Uploaded media ID"),
-            text: z.string().max(8000).optional().describe("Optional caption text; parsed as supported Inline Markdown"),
+            text: z.string().max(8000).optional().describe(`Optional caption text. ${INLINE_MARKDOWN_HELP}`),
             replyToMsgId: z.string().regex(/^[1-9]\d*$/).optional().describe("Reply-to message ID"),
             sendMode: z.enum(["normal", "silent"]).optional().describe("Message delivery mode; defaults to normal"),
           }
@@ -2212,7 +2215,7 @@ export function createInlineMcpServer(params: {
             userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
             mediaKind: z.enum(["photo", "video", "document"]).describe("Uploaded media kind"),
             mediaId: z.string().min(1).describe("Uploaded media ID"),
-            text: z.string().max(8000).optional().describe("Optional caption text; parsed as supported Inline Markdown"),
+            text: z.string().max(8000).optional().describe(`Optional caption text. ${INLINE_MARKDOWN_HELP}`),
             replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
             sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
           },
@@ -2254,7 +2257,7 @@ export function createInlineMcpServer(params: {
         ? { chatId: parseChatId(chatId!) }
         : parseTarget({ chatId, userId }, "messages.send_media")
       const safeSendMode: "normal" | "silent" = sendMode === "silent" ? "silent" : "normal"
-      const caption = text?.trim()
+      const caption = text?.trim() ? text : undefined
       const parsedMediaId = parseInlineId(mediaId, "mediaId")
       const res = await params.inline.sendMediaMessage({
         ...target,
@@ -2311,7 +2314,7 @@ export function createInlineMcpServer(params: {
                     .string()
                     .min(1)
                     .max(8000)
-                    .describe("Message text for type text; uploaded Inline media ID for photo, video, or document"),
+                    .describe(`For type text: message text. ${INLINE_MARKDOWN_HELP} For photo, video, or document: uploaded Inline media ID, not Markdown.`),
                 }).strict(),
               )
               .min(1)
@@ -2326,7 +2329,7 @@ export function createInlineMcpServer(params: {
               .array(
                 z.object({
                   type: z.enum(["text", "media"]).describe("Message item type"),
-                  text: z.string().min(1).max(8000).optional().describe("Required for text items; optional caption for media items"),
+                  text: z.string().min(1).max(8000).optional().describe(`Required for text items; optional caption for media items. ${INLINE_MARKDOWN_HELP}`),
                   mediaKind: z.enum(["photo", "video", "document"]).optional().describe("Required for media items; omit for text items"),
                   mediaId: z.string().min(1).optional().describe("Required for media items; omit for text items"),
                   replyToMsgId: z.string().min(1).optional().describe("Optional message ID to reply to"),
@@ -2410,7 +2413,7 @@ export function createInlineMcpServer(params: {
           if (!mediaKind) throw new Error(`items[${index}].mediaKind is required for media items`)
           if (!mediaId) throw new Error(`items[${index}].mediaId is required for media items`)
           const parsedMediaId = parseInlineId(mediaId, submissionV2 ? "content" : "mediaId")
-          const caption = submissionV2 ? undefined : (item as LegacySendBatchItem).text?.trim()
+          const caption = legacyItem?.text?.trim() ? legacyItem.text : undefined
           const sent = await params.inline.sendMediaMessage({
             ...target,
             media: {
@@ -2819,14 +2822,14 @@ export function createInlineMcpServer(params: {
       inputSchema: submissionV2
         ? {
             chatId: z.string().regex(/^[1-9]\d*$/).describe("Inline chat ID; required for every conversation, including DMs"),
-            text: z.string().min(1).max(8000).describe("Message text; parsed as supported Inline Markdown"),
+            text: z.string().min(1).max(8000).describe(`Message text. ${INLINE_MARKDOWN_HELP}`),
             replyToMsgId: z.string().regex(/^[1-9]\d*$/).optional().describe("Reply-to message ID"),
             sendMode: z.enum(["normal", "silent"]).optional().describe("Message delivery mode; defaults to normal"),
           }
         : {
             chatId: z.string().min(1).optional().describe("Inline chat ID"),
             userId: z.string().min(1).optional().describe("Inline user ID (DM target)"),
-            text: z.string().min(1).max(8000).describe("Message text; parsed as supported Inline Markdown"),
+            text: z.string().min(1).max(8000).describe(`Message text. ${INLINE_MARKDOWN_HELP}`),
             replyToMsgId: z.string().min(1).optional().describe("Reply-to message ID"),
             sendMode: z.enum(["normal", "silent"]).default("normal").describe("Message delivery mode"),
           },

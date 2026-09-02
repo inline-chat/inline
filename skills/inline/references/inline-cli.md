@@ -100,6 +100,8 @@ inline notifications set-chat --chat-id CHAT_ID --mode mentions
 
 Destructive commands never prompt in JSON mode and require `--yes`. Pass it only for the exact user-approved target. After an uncertain write result, inspect the target before retrying to avoid duplicates.
 
+Send text and attachment captions support [rich Markdown](message-formatting.md), including tables, code, images, disclosures, inline styles, and math. Use `--text-file report.md` or `--stdin` for multiline content, or single-quote `--text` to protect backticks and dollar signs from the shell. `inline messages send --help` lists the syntax. Explicit `--mention` ranges disable Markdown parsing; use Markdown mention links when combining mentions with formatting.
+
 ## Install the Codex plugin
 
 When the user asks to install the full Codex integration, use `inline plugin install`. It delegates to Codex's plugin manager with fixed arguments and installs the Inline skill plus its OAuth MCP server. The operation is idempotent; inspect it first with `inline plugin install --dry-run`. Use `inline skill install` only when the user explicitly wants the standalone skill without MCP.

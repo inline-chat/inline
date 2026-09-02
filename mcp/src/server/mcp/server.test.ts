@@ -1603,6 +1603,43 @@ describe("mcp tool server", () => {
     expect(res.result.content?.[0]?.text).toContain("https")
   })
 
+  it.each(["legacy", "submission-v2"] as const)("%s sends rich Markdown unchanged through text, captions, and batches", async (contractVersion) => {
+    const markdown = "    code();\n\n# Update\n\n**Ready** ~~old~~ ==new== <u>reviewed</u> $x^2$\n\n| Task | Status |\n| --- | --- |\n| Tests | Passed |\n"
+    const sendMessage = vi.fn<InlineApi["sendMessage"]>().mockResolvedValue({ messageId: 300n, spaceId: 10n })
+    const sendMediaMessage = vi.fn<InlineApi["sendMediaMessage"]>().mockResolvedValue({ messageId: 301n, spaceId: 10n })
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ sendMessage, sendMediaMessage }), contractVersion })
+    const authInfo = createAuthInfo(["messages:write"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    const calls = [
+      { name: "messages.send", arguments: { chatId: "7", text: markdown, replyToMsgId: "9" } },
+      { name: "messages.send_media", arguments: { chatId: "7", mediaKind: "photo", mediaId: "501", text: markdown } },
+      { name: "messages.send_batch", arguments: { chatId: "7", items: contractVersion === "submission-v2"
+        ? [{ type: "text", content: markdown }, { type: "photo", content: "501" }]
+        : [{ type: "text", text: markdown }, { type: "media", mediaKind: "photo", mediaId: "501", text: markdown }] } },
+      { name: "messages.send_media", arguments: { chatId: "7", mediaKind: "photo", mediaId: "501", text: " \n\t " } },
+    ]
+    try {
+      for (const [index, params] of calls.entries()) {
+        const id = index + 2
+        await sendRequest(transport, { jsonrpc: "2.0", id, method: "tools/call", params } as any, { authInfo })
+        expect((await waitForResponse(sent, id)).result.isError).not.toBe(true)
+      }
+      expect(sendMessage).toHaveBeenCalledTimes(2)
+      expect(sendMessage.mock.calls.map(([input]) => input)).toEqual([
+        { chatId: 7n, text: markdown, replyToMsgId: 9n, sendMode: "normal", parseMarkdown: true },
+        { chatId: 7n, text: markdown, sendMode: "normal", parseMarkdown: true },
+      ])
+      expect(sendMediaMessage).toHaveBeenCalledTimes(3)
+      expect(sendMediaMessage.mock.calls.map(([input]) => input)).toEqual([
+        { chatId: 7n, media: { kind: "photo", id: 501n }, text: markdown, sendMode: "normal", parseMarkdown: true },
+        { chatId: 7n, media: { kind: "photo", id: 501n }, ...(contractVersion === "legacy" ? { text: markdown } : {}), sendMode: "normal", parseMarkdown: true },
+        { chatId: 7n, media: { kind: "photo", id: 501n }, sendMode: "normal", parseMarkdown: true },
+      ])
+    } finally {
+      await server.close()
+    }
+  })
+
   it("messages.send_media sends uploaded media", async () => {
     const inline = createInlineStub({
       async sendMediaMessage({ userId, media, text, replyToMsgId, sendMode, parseMarkdown }) {

@@ -38,7 +38,7 @@ When running inside an Inline local-agent bridge, use the host's `inline` tool n
 - Use string IDs exactly as returned. Do not infer IDs from names.
 - Use `chatId` for every conversation-scoped tool, including DMs. Resolve a person's `dmChatId` with `people.search` or `conversations.list` before reading or writing.
 - Prefer canonical Inline URIs returned by tools when referring to people, chats, or messages.
-- Inline's supported Markdown input is emphasis, inline/fenced code, links, headings, lists/checklists, quotes, tables, separators, HTTP(S) images, and the disclosure/footer extensions below. Do not rely on strikethrough, footnotes, or arbitrary HTML; unrecognized or ambiguous incomplete syntax remains visible text.
+- Send rich Markdown directly in message text or captions; CLI and MCP parse it automatically. Supported syntax includes **bold**, *italic*, `<u>underline</u>`, `~~strikethrough~~`, `==highlight==`, code, links, headings, lists/checklists, quotes, tables, separators, HTTP(S) images, dollar-delimited TeX, and disclosures/footers. Read [Message formatting](references/message-formatting.md) when composing rich content for syntax, examples, and client limitations. Footnotes and arbitrary HTML are unsupported.
 - Use ordinary Markdown tables for genuinely tabular output; never put a table in a fenced code block.
 - For collapsible work, use `<details open>`, then `<summary>Title</summary>`, body Markdown, and `</details>`. Add `kind="progress"` to the summary only while work is in progress.
 - Use `<footer>Attribution or brief metadata</footer>` for a short message footer.

@@ -1186,7 +1186,7 @@ enum MessagesCommand {
 "#
     )]
     Get(MessagesGetArgs),
-    #[command(about = "Send a message to a chat or user")]
+    #[command(about = "Send a Markdown message to a chat or user", after_help = MESSAGE_SEND_HELP)]
     Send(MessagesSendArgs),
     #[command(about = "Forward messages between chats or DMs")]
     Forward(MessagesForwardArgs),
@@ -1475,6 +1475,40 @@ impl MessagesPinArgs {
     }
 }
 
+const MESSAGE_SEND_HELP: &str = r#"Rich text formatting (parsed by the server automatically):
+  Bold **text** or __text__; italic *text* or _text_;
+  underline <u>text</u>; strikethrough ~~text~~; highlight ==text==.
+  Inline code `code`; fenced code with triple backticks and an optional language;
+  four-space indented code. Code contents are literal.
+  Links [label](https://example.com); mentions [Name](inline://user?id=42);
+  thread links [[Title]](inline://chat?id=123).
+  Headings # through ######; bullet lists - item; numbered lists 1. item;
+  checklists - [ ] todo / - [x] done; block quotes > text; separators ---.
+  Pipe tables with a header separator row; do not wrap tables in code fences.
+  Images ![alt](https://example.com/image.png); use --attach for local files.
+  Math $x^2$ inline or $$...$$ on separate lines for display TeX.
+  Disclosures (put tags on separate lines):
+    <details open>
+    <summary>Title</summary>
+    Body Markdown
+    </details>
+  Omit open to start collapsed; use <summary kind="progress"> only while working.
+  Footers: <footer>Attribution or brief metadata</footer> on its own line.
+
+Text and attachment captions use the same formatting. Whitespace is preserved.
+With --mention, Markdown is kept literal so UTF-16 offsets stay valid; use
+Markdown mention links to combine mentions with formatting instead.
+Escape punctuation with a backslash for literal syntax. Footnotes and arbitrary
+HTML are unsupported. Rich block/style and math display depend on the recipient's
+client; older clients may show a simpler text or TeX fallback.
+
+Examples (single quotes protect backticks and dollar signs from the shell):
+  inline messages send --chat-id 123 --text '**Ready**: ~~old~~ ==new=='
+  inline messages send --chat-id 123 --text-file report.md
+  inline messages send --chat-id 123 --attach ./chart.png --text '**Results**'
+  inline messages send --chat-id 123 --stdin < report.md
+"#;
+
 #[derive(Args)]
 struct MessagesSendArgs {
     #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
@@ -1493,7 +1527,7 @@ struct MessagesSendArgs {
         short = 'm',
         alias = "message",
         alias = "msg",
-        help = "Message text (used as caption for attachments)"
+        help = "Inline Markdown text (also used as attachment caption; preserves whitespace)"
     )]
     text: Option<String>,
 
@@ -1505,7 +1539,7 @@ struct MessagesSendArgs {
         value_name = "USER_ID:OFFSET:LENGTH",
         num_args = 1..,
         action = ArgAction::Append,
-        help = "Mention entity (repeatable). Format: user_id:offset:length (offset/length are UTF-16 units)."
+        help = "Mention entity (repeatable). UTF-16 offsets into literal input; disables Markdown parsing."
     )]
     mentions: Vec<String>,
 
@@ -1522,7 +1556,10 @@ struct MessagesSendArgs {
     )]
     attachments: Vec<PathBuf>,
 
-    #[arg(long, help = "Read message text/caption from stdin")]
+    #[arg(
+        long,
+        help = "Read Markdown text/caption from stdin (preserves whitespace)"
+    )]
     stdin: bool,
 
     #[arg(long, value_name = "PATH", conflicts_with_all = ["text", "stdin"], value_hint = clap::ValueHint::FilePath,
@@ -4378,19 +4415,17 @@ fn resolve_message_caption(
         use std::io::Read;
         let mut buffer = String::new();
         std::io::stdin().read_to_string(&mut buffer)?;
-        let trimmed = buffer.trim();
-        if trimmed.is_empty() {
+        if buffer.trim().is_empty() {
             return Err(CliError::invalid_args("stdin was empty").into());
         }
-        return Ok(Some(trimmed.to_string()));
+        return Ok(Some(buffer));
     }
 
     if let Some(text) = text {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
+        if text.trim().is_empty() {
             return Err(CliError::invalid_args("message text is empty").into());
         }
-        return Ok(Some(trimmed.to_string()));
+        return Ok(Some(text));
     }
 
     Ok(None)
@@ -6048,7 +6083,7 @@ mod cli_parsing_tests {
             resolve_message_source(Some("  legacy\n".into()), false, None)
                 .unwrap()
                 .as_deref(),
-            Some("legacy")
+            Some("  legacy\n")
         );
     }
 
@@ -7553,6 +7588,39 @@ mod cli_parsing_tests {
             } => assert_eq!(args.text.as_deref(), Some("updated")),
             _ => panic!("expected messages edit"),
         }
+    }
+
+    #[test]
+    fn message_sources_preserve_markdown_indentation_and_mention_offsets() {
+        let markdown = "    code();\n\n# Update\n\n**Ready** ~~old~~ ==new== <u>reviewed</u> $x^2$\n\n| Task | Status |\n| --- | --- |\n| Tests | Passed |\n";
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("message.md");
+        std::fs::write(&path, markdown).unwrap();
+        assert_eq!(
+            resolve_message_source(Some(markdown.into()), false, None).unwrap(),
+            Some(markdown.into())
+        );
+        assert_eq!(
+            resolve_message_source(None, false, Some(&path)).unwrap(),
+            Some(markdown.into())
+        );
+
+        let literal = "  😀 @Sam **literal**\n";
+        let entities = parse_mention_entities(&["42:5:4".into()]).unwrap();
+        let text = resolve_message_caption(Some(literal.into()), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(text, literal);
+        assert!(!parse_markdown_for_entities(&entities));
+        let mention = &entities.unwrap().entities[0];
+        let utf16: Vec<u16> = text.encode_utf16().collect();
+        assert_eq!(
+            String::from_utf16(
+                &utf16[mention.offset as usize..(mention.offset + mention.length) as usize]
+            )
+            .unwrap(),
+            "@Sam"
+        );
     }
 
     #[test]

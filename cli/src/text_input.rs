@@ -42,7 +42,7 @@ fn read_text(reader: impl Read) -> Result<String, Box<dyn std::error::Error>> {
     if text.trim().is_empty() {
         return Err(CliError::invalid_args("--text-file was empty").into());
     }
-    // Unlike legacy --text/--stdin, file input preserves indentation and newlines.
+    // Preserve indentation and newlines for Markdown and explicit mention offsets.
     Ok(text)
 }
 

@@ -9,6 +9,7 @@ const realtimeSdk = vi.hoisted(() => {
     connect: vi.fn(),
     events: vi.fn(),
     invoke: vi.fn(),
+    sendMessage: vi.fn(),
   }
   return {
     client,
@@ -47,6 +48,30 @@ describe("createInlineApi", () => {
       async *[Symbol.asyncIterator]() {},
     })
     realtimeSdk.client.invoke.mockReset()
+    realtimeSdk.client.sendMessage.mockReset().mockResolvedValue({ messageId: 300n })
+  })
+
+  it.each(["text", "caption", "blank caption"])("forwards %s through the SDK without changing Markdown", async (kind) => {
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test",
+      token: "test-token",
+      allowed: { allowedSpaceIds: [], allowDms: true, allowHomeThreads: false },
+    })
+    const text = kind === "blank caption" ? " \n\t " : "    code();\n\n**Ready** ~~old~~ ==new== <u>reviewed</u> $x^2$\n"
+    const common = { userId: 2n, text, replyToMsgId: 9n, sendMode: "silent" as const, parseMarkdown: true }
+    try {
+      if (kind === "text") await api.sendMessage(common)
+      else await api.sendMediaMessage({ ...common, media: { kind: "photo", id: 501n } })
+      expect(realtimeSdk.client.sendMessage).toHaveBeenCalledWith({
+        userId: 2n,
+        replyToMsgId: 9n,
+        sendMode: "silent",
+        ...(kind === "blank caption" ? {} : { text, parseMarkdown: true }),
+        ...(kind === "text" ? {} : { media: { kind: "photo", photoId: 501n } }),
+      })
+    } finally {
+      await api.close()
+    }
   })
 
   it("acknowledges the SDK event stream and joins it on close", async () => {

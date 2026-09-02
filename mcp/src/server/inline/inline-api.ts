@@ -1309,12 +1309,12 @@ export function createInlineApi(params: {
       }
 
       const chat = target.kind === "chat" ? await getAllowedChat({ chatId: target.chatId }) : null
-      const trimmedText = text?.trim()
+      const caption = text?.trim() ? text : undefined
 
       await ensureConnected()
       const res = await client.sendMessage({
         ...(target.kind === "chat" ? { chatId: target.chatId } : { userId: target.userId }),
-        ...(trimmedText ? { text: trimmedText } : {}),
+        ...(caption ? { text: caption } : {}),
         media:
           media.kind === "photo"
             ? { kind: "photo", photoId: media.id }
@@ -1323,7 +1323,7 @@ export function createInlineApi(params: {
               : { kind: "document", documentId: media.id },
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         sendMode: sendMode === "silent" ? "silent" : undefined,
-        ...(trimmedText ? { parseMarkdown } : {}),
+        ...(caption ? { parseMarkdown } : {}),
       })
       return { messageId: res.messageId, spaceId: chat?.spaceId ?? null }
     },
