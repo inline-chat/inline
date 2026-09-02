@@ -69,15 +69,27 @@ public struct GetChatsTransaction: Transaction2 {
 
     do {
       let mutationToken = try Auth.shared.handle.beginAccountMutation()
-      let importResult = try await AppDatabase.shared.dbWriter.write { db in
-        try Auth.shared.handle.validateAccountMutation(mutationToken)
-        return try Self.applySnapshot(
-          result,
-          userProjectionAdmission: context.expectedUserBucketState.map {
-            .compareAndSwap(expected: $0)
-          } ?? .missingOnly,
-          in: db
-        )
+      let span = PerformanceTrace.begin(
+        "InitialGetChatsApply",
+        category: .launch,
+        "spaces=\(result.spaces.count) users=\(result.users.count) chats=\(result.chats.count) messages=\(result.messages.count) folders=\(result.folders.count) dialogs=\(result.dialogs.count)"
+      )
+      let importResult: SnapshotImportResult
+      do {
+        importResult = try await AppDatabase.shared.dbWriter.write { db in
+          try Auth.shared.handle.validateAccountMutation(mutationToken)
+          return try Self.applySnapshot(
+            result,
+            userProjectionAdmission: context.expectedUserBucketState.map {
+              .compareAndSwap(expected: $0)
+            } ?? .missingOnly,
+            in: db
+          )
+        }
+        span.end("success=1")
+      } catch {
+        span.end("success=0")
+        throw error
       }
       // Ordinary GET_CHATS is catalog-only. It may reconcile actors for truly
       // pristine children seeded by this writer, but must never turn repair
