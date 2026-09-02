@@ -1,36 +1,30 @@
 ---
 title: "Realtime API"
-description: "WebSocket API and TypeScript SDK quick start."
+description: "WebSocket endpoints and TypeScript quick start."
 ---
-
-Inline Realtime carries typed RPCs, updates, and live state over WebSocket. V3 is current; V2 is the bearer-token compatibility path.
 
 ## Versions
 
-| Version | Endpoint | Authentication | Status |
-| --- | --- | --- | --- |
-| V3 | `wss://api.inline.chat/realtime/v3` | Inline Protocol permanent and bound temporary keys | Current protocol |
-| V2 | `wss://api.inline.chat/realtime` | Inline bearer token | Compatibility |
+- V3: `wss://api.inline.chat/realtime/v3` — Inline Protocol keys; current.
+- V2: `wss://api.inline.chat/realtime` — bearer token; compatibility.
 
-## TypeScript
+## Install
 
-#### Bun
+Bun:
 
 ```bash
 bun add @inline-chat/realtime-sdk
 ```
 
-#### npm
+npm:
 
 ```bash
 npm install @inline-chat/realtime-sdk
 ```
 
-## Bearer-Token Quick Start
+## V2 Quick Start
 
-This example uses **V2 compatibility**, not V3. For a bot integration, [create a bot](/docs/creating-a-bot) and provide its token as `INLINE_TOKEN`. Set `INLINE_CHAT_ID` to a chat the bot can access. A CLI login does not automatically provide a token to this program.
-
-Save as `send-realtime.ts`:
+Set `INLINE_TOKEN` and `INLINE_CHAT_ID`. Save as `send-realtime.ts`:
 
 ```ts
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
@@ -43,29 +37,26 @@ const client = new InlineSdkClient({ token })
 try {
   await client.connect()
   await client.sendMessage({ chatId: BigInt(chatId), text: "Hello over Realtime" })
-  console.log("Message accepted. Verify it in Inline.")
 } finally {
   await client.close()
 }
 ```
 
-Run with [Bun](https://bun.sh):
+Run it:
 
 ```bash
 bun run send-realtime.ts
 ```
 
-Confirm the message appears in the intended chat. Connection success alone does not prove the send succeeded. Before adding retries or a persistent cache, read [RPC semantics](/docs/technical/rpc) and [Sync](/docs/technical/sync).
+Verify the message in Inline.
 
-## Using V3
+## V3
 
-V3 requires `inlineProtocol.credentials` with Inline Protocol authorization keys. A bearer token and a different endpoint are not sufficient. Follow the [V3 authentication lifecycle](/docs/technical/realtime#authentication-lifecycle) and the SDK's [V3 client implementation](https://github.com/inline-chat/inline/blob/main/sdk/src/realtime/v3-client.ts).
+V3 requires `inlineProtocol.credentials` with permanent and bound temporary authorization keys. A bearer token cannot authenticate V3.
 
-## Reference
-
-- [Realtime V3](/docs/technical/realtime)
-- [Inline Protocol](/docs/technical/protocol)
-- [TypeScript V3 source](https://github.com/inline-chat/inline/tree/main/sdk/src/realtime)
+- [V3 authentication and transport](/docs/technical/realtime)
+- [Protocol specification](https://github.com/inline-chat/inline/blob/main/packages/protocol/docs/realtime-v3.md)
+- [TypeScript implementation](https://github.com/inline-chat/inline/tree/main/sdk/src/realtime)
+- [RPC retry rules](/docs/technical/rpc)
+- [Sync](/docs/technical/sync)
 - [Rust SDK](/docs/rust-sdk)
-- [core.proto](https://github.com/inline-chat/inline/blob/main/proto/core.proto)
-- [`@inline-chat/protocol`](https://github.com/inline-chat/inline/tree/main/packages/protocol)

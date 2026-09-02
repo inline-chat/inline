@@ -5,6 +5,7 @@
       "title": "Technical Docs",
       "pages": [
         { "slug": "technical/index", "label": "Overview" },
+        "technical/deep-links",
         "technical/protocol",
         "technical/realtime",
         "technical/rpc",

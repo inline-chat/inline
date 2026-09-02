@@ -153,4 +153,4 @@ macOS Automation permission is required. Errors: `-1743` permission, `-10004` ac
 
 ---
 
-[Deep-link formats](/docs/deep-links) · [Bot API](/docs/bot-api) · [CLI](/docs/cli)
+[Deep-link formats](/docs/technical/deep-links) · [Bot API](/docs/bot-api) · [CLI](/docs/cli)
