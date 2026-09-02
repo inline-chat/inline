@@ -3,7 +3,7 @@ title: "Add Inline to Your Agent"
 description: "Add Inline tools to an existing agent."
 ---
 
-Add Inline's skill and plugin to ChatGPT, Claude, etc. If you want to bring your bot/agent to Inline instead use [Set Up an Agent](/docs/agents).
+Add Inline's skill and plugin to ChatGPT, Claude, etc. If you want to bring your bot/agent to Inline instead, use [Set Up an Agent](/docs/agents).
 
 ## Setup Prompt
 
@@ -46,7 +46,7 @@ npx skills add inline-chat/inline --skill inline --global
 
 You may need to restart the agent for it to show up.
 
-For manual install, download and copy the folder [`skills/inline` folder](https://github.com/inline-chat/inline/tree/main/skills/inline).
+For manual install, download and copy the [`skills/inline` folder](https://github.com/inline-chat/inline/tree/main/skills/inline).
 
 - Codex: `~/.codex/skills/inline`
 - Claude Code: `~/.claude/skills/inline`
@@ -59,7 +59,7 @@ Follow [Connect MCP](/docs/mcp).
 
 [Install the CLI](/docs/cli) if you haven't.
 
-Heads up: `inline agents setup` when you only want the plugin, skill, MCP, etc.
+Heads up: don't use `inline agents setup` when you only want the plugin, skill, MCP, etc.
 
 ## Verify
 

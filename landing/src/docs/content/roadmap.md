@@ -4,4 +4,6 @@ description: "Current product roadmap status."
 draft: true
 ---
 
-See [What's New](/docs/changelog) for recent Inline releases.
+We'll be publishing a roadmap soon.
+
+Check out [What's New](/docs/changelog) to get an idea of what we're working on.

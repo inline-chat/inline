@@ -12,6 +12,7 @@ For connecting your agents, you need a bot. However, our CLI's `inline agents se
 2. Enter a name and a username ending in `bot`.
 3. Select **Create Bot**.
 4. Copy the token.
+5. Find your bot by entering its username in CMD+K on macOS or the Search tab on iOS.
 
 ## CLI
 

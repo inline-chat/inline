@@ -38,7 +38,7 @@ Confirm your login:
 inline me
 ```
 
-CLI uses your account, not a bot or bot token. It's extremely useful for pairing with your Codex/Claude/etc for chatting, searching, creating thread, summarizing, etc.
+CLI uses your account, not a bot or bot token. It's extremely useful for pairing with your Codex/Claude/etc for chatting, searching, creating threads, summarizing, etc.
 
 ## Update
 
