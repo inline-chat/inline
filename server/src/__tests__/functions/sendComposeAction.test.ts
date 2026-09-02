@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { UpdateComposeAction_ComposeAction } from "@inline-chat/protocol/core"
 import { sendComposeAction } from "@in/server/functions/messages.sendComposeAction"
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
@@ -6,8 +6,8 @@ import { setupTestLifecycle, testUtils } from "../setup"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 
 // Mock RealtimeUpdates.pushToUser to track what updates are sent
-const mockPushToUser = mock()
-RealtimeUpdates.pushToUser = mockPushToUser
+const mockPushToUser = mock(async () => {})
+let restorePushToUser: (() => void) | undefined
 let emailCounter = 0
 const nextEmail = (label: string) => `${label}-${++emailCounter}@example.com`
 
@@ -16,6 +16,13 @@ describe("sendComposeAction", () => {
 
   beforeEach(() => {
     mockPushToUser.mockClear()
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(mockPushToUser)
+    restorePushToUser = () => push.mockRestore()
+  })
+
+  afterEach(() => {
+    restorePushToUser?.()
+    restorePushToUser = undefined
   })
 
   test("should send typing action to DM participant with correct peer encoding", async () => {
