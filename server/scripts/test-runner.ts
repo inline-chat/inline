@@ -72,7 +72,7 @@ if (bunFiles.length === 0) {
 console.info(
   effectBunLane
     ? `Running ${bunFiles.length} Effect Bun test files in isolated processes.`
-    : `Running ${bunFiles.length} Bun-owned test files; Vitest and Effect Bun files run in test:effect.`,
+    : `Running ${bunFiles.length} Bun-owned test files in isolated processes; Vitest and Effect Bun files run in test:effect.`,
 )
 const startedAt = performance.now()
 const runFiles = (
@@ -104,16 +104,12 @@ const runFiles = (
 }
 
 let exitCode = 0
-if (effectBunLane) {
-  for (const file of bunFiles) {
-    const fileExitCode =
-      await runFiles([file])
-    if (fileExitCode !== 0) {
-      exitCode = fileExitCode
-    }
+for (const file of bunFiles) {
+  const fileExitCode =
+    await runFiles([file])
+  if (fileExitCode !== 0) {
+    exitCode = fileExitCode
   }
-} else {
-  exitCode = await runFiles(bunFiles)
 }
 
 console.info(
