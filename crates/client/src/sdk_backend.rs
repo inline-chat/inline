@@ -5779,6 +5779,7 @@ fn message_entity_from_proto(entity: &proto::MessageEntity) -> crate::MessageEnt
             None,
             None,
         ),
+        Some(Entity::Math(_)) => (None, None, None, None, None),
         None => (None, None, None, None, None),
     };
     crate::MessageEntityRecord {
@@ -6348,6 +6349,32 @@ mod tests {
         assert_eq!(record.metadata.actions[0].kind, "callback");
         let encoded = serde_json::to_string(&record).expect("message json");
         assert!(!encoded.contains("private-callback"));
+    }
+
+    #[test]
+    fn message_entity_conversion_preserves_math_kind_and_range() {
+        let entity = proto::MessageEntity {
+            r#type: proto::message_entity::Type::Math as i32,
+            offset: 3,
+            length: 5,
+            entity: Some(proto::message_entity::Entity::Math(
+                proto::message_entity::MessageEntityMath { display: true },
+            )),
+        };
+
+        assert_eq!(
+            message_entity_from_proto(&entity),
+            crate::MessageEntityRecord {
+                kind: "TYPE_MATH".to_string(),
+                offset: 3,
+                length: 5,
+                user_id: None,
+                agent_id: None,
+                group_id: None,
+                chat_id: None,
+                value: None,
+            }
+        );
     }
 
     #[test]
