@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import InlineKit
 
 enum MainWindowDestination: Hashable, Codable {
@@ -40,6 +41,7 @@ final class MainWindowOpenCoordinator {
   }
 
   private var pendingDestination: MainWindowDestination?
+  private var pendingDestinationAccount: AuthAccountMutationToken?
   private var openMainWindow: (() -> Void)?
   private var openOnboardingWindow: (() -> Void)?
   private var windows: [UUID: WindowEntry] = [:]
@@ -191,6 +193,7 @@ final class MainWindowOpenCoordinator {
 
   func resetWindows() {
     pendingDestination = nil
+    pendingDestinationAccount = nil
     windows.removeAll()
     sidebarNavigation.removeAll()
     threadRenaming.removeAll()
@@ -198,21 +201,24 @@ final class MainWindowOpenCoordinator {
     spaceMenuContexts.removeAll()
   }
 
-  func openWindow(_ destination: MainWindowDestination) {
+  func openWindow(_ destination: MainWindowDestination, expectedAccount: AuthAccountMutationToken? = nil) {
+    if let expectedAccount, (try? Auth.shared.handle.validateAccountMutation(expectedAccount)) == nil { return }
     if routeExistingWindow(to: destination) {
       return
     }
 
-    openNewWindow(destination)
+    openNewWindow(destination, expectedAccount: expectedAccount)
   }
 
-  func openNewWindow(_ destination: MainWindowDestination) {
+  func openNewWindow(_ destination: MainWindowDestination, expectedAccount: AuthAccountMutationToken? = nil) {
     pendingDestination = destination
+    pendingDestinationAccount = expectedAccount
     openMainWindow?()
   }
 
   func openTab(_ destination: MainWindowDestination) {
     pendingDestination = destination
+    pendingDestinationAccount = nil
     openTab()
   }
 
@@ -398,7 +404,9 @@ final class MainWindowOpenCoordinator {
   }
 
   func consumePendingDestination() -> MainWindowDestination? {
-    defer { pendingDestination = nil }
+    defer { pendingDestination = nil; pendingDestinationAccount = nil }
+    if let account = pendingDestinationAccount,
+       (try? Auth.shared.handle.validateAccountMutation(account)) == nil { return nil }
     return pendingDestination
   }
 

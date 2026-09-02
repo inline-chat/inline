@@ -202,6 +202,7 @@ extension AppDelegate {
     // Stop every account-owned producer before clearing credentials or the database.
     guard await runLogoutPhase(.realtimeV2, attempt: attempt, operation: {
       await Api.realtime.loggedOut()
+      await ReservedChatIDPool.shared.drainForAccountTransition()
     }) else { return }
     guard await runLogoutPhase(.legacyRealtime, attempt: attempt, operation: {
       await dependencies.realtime.loggedOut()

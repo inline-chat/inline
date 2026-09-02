@@ -1539,11 +1539,41 @@ public final class MessagesPublisher {
 
   private let db: AppDatabase
   let publisher = PassthroughSubject<UpdateType, Never>()
+  private var acceptsUpdates = true
+  private var activeDatabaseReads = 0
+  private var databaseReadDrainWaiters: [CheckedContinuation<Void, Never>] = []
   private var nextAcknowledgementProjectionToken: Int64 = 1
   private var pendingAcknowledgements: [OptimisticAcknowledgementKey: PendingAcknowledgement] = [:]
 
   init(database: AppDatabase) {
     db = database
+  }
+
+  /// Process teardown closes admission synchronously before the shared SQLCipher owner drains.
+  public func closeAdmissionForTermination() {
+    acceptsUpdates = false
+  }
+
+  public func waitForAdmittedDatabaseReadsForTermination() async {
+    guard activeDatabaseReads > 0 else { return }
+    await withCheckedContinuation { continuation in
+      databaseReadDrainWaiters.append(continuation)
+    }
+  }
+
+  private func beginDatabaseRead(peer: Peer) -> Bool {
+    guard shouldPublish(peer: peer) else { return false }
+    activeDatabaseReads += 1
+    return true
+  }
+
+  private func finishDatabaseRead() {
+    precondition(activeDatabaseReads > 0)
+    activeDatabaseReads -= 1
+    guard !acceptsUpdates, activeDatabaseReads == 0 else { return }
+    let waiters = databaseReadDrainWaiters
+    databaseReadDrainWaiters.removeAll()
+    for waiter in waiters { waiter.resume() }
   }
 
 #if os(iOS)
@@ -1580,18 +1610,19 @@ public final class MessagesPublisher {
   }
 
   private func shouldPublish(peer: Peer) -> Bool {
-    isChatActive(peer: peer)
+    acceptsUpdates && isChatActive(peer: peer)
   }
 #else
   private func shouldPublish(peer _: Peer) -> Bool {
-    true
+    acceptsUpdates
   }
 #endif
 
   // Static methods to publish update
   func messageAdded(message: Message, peer: Peer) async {
 //    Log.shared.debug("Message added: \(message)")
-    guard shouldPublish(peer: peer) else { return }
+    guard beginDatabaseRead(peer: peer) else { return }
+    defer { finishDatabaseRead() }
 
     let startedAt = Date()
     let span = PerformanceTrace.begin(
@@ -1625,6 +1656,7 @@ public final class MessagesPublisher {
         return
       }
 
+      guard acceptsUpdates else { return }
       publisher.send(.add(MessageAdd(messages: [fullMessage], peer: peer)))
     } catch {
       Log.shared.error("Failed to get full message", error: error)
@@ -1648,7 +1680,8 @@ public final class MessagesPublisher {
   public func messageUpdated(message: Message, peer: Peer, animated: Bool?) async {
     //    Log.shared.debug("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
-    guard shouldPublish(peer: peer) else { return }
+    guard beginDatabaseRead(peer: peer) else { return }
+    defer { finishDatabaseRead() }
 
     let startedAt = Date()
     let span = PerformanceTrace.begin(
@@ -1689,6 +1722,7 @@ public final class MessagesPublisher {
       Log.shared.error("Failed to get full message")
       return
     }
+    guard acceptsUpdates else { return }
     publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
   }
 

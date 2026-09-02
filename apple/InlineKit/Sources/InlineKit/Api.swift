@@ -64,7 +64,7 @@ public enum Api {
 
     Task(priority: .utility) {
       guard Auth.shared.handle.isLoggedIn() else { return }
-      try? await ReservedChatIDPool.shared.refillIfNeeded(realtimeV2: realtime)
+      await ReservedChatIDPool.shared.scheduleRefill(realtimeV2: realtime)
     }
 
     return realtime

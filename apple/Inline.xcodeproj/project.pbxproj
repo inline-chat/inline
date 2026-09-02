@@ -68,6 +68,8 @@
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
+		A83010012F52000100000001 /* InlineAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = A83010002F52000100000001 /* InlineAppIntents */; };
+		A83010022F52000100000001 /* InlineAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = A83010002F52000100000001 /* InlineAppIntents */; };
 		A9F100012F52000100000001 /* InlineTheme in Frameworks */ = {isa = PBXBuildFile; productRef = A9F100002F52000100000001 /* InlineTheme */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
@@ -283,6 +285,7 @@
 				D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */,
+				A83010012F52000100000001 /* InlineAppIntents in Frameworks */,
 				A9F100012F52000100000001 /* InlineTheme in Frameworks */,
 				CD0240C42EA439D400976FDE /* Invite in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
@@ -294,6 +297,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A83010022F52000100000001 /* InlineAppIntents in Frameworks */,
 				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
 				A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */,
 				E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */,
@@ -481,6 +485,7 @@
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 				CD735FEF2E493C8E00F7BFFE /* Translation */,
 				D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */,
+				A83010002F52000100000001 /* InlineAppIntents */,
 				A9F100002F52000100000001 /* InlineTheme */,
 				CD0240C32EA439D400976FDE /* Invite */,
 				B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */,
@@ -506,6 +511,7 @@
 			);
 			name = InlineMac;
 			packageProductDependencies = (
+				A83010002F52000100000001 /* InlineAppIntents */,
 				A9E100022F50000100000001 /* MemojiKit */,
 				A9E100032F50000100000001 /* MemojiPickerUI */,
 				E5A100022FA0000100000001 /* InlineSyntaxHighlighting */,
@@ -1998,6 +2004,10 @@
 		D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIOSUI;
+		};
+		A83010002F52000100000001 /* InlineAppIntents */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineAppIntents;
 		};
 		A9F100002F52000100000001 /* InlineTheme */ = {
 			isa = XCSwiftPackageProductDependency;

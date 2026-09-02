@@ -551,11 +551,15 @@ public class DataManager: ObservableObject {
   }
 
   /// Deletes a thread only when it is untitled and has no messages.
+  /// - Parameter canDelete: Optional synchronous final check after the database read.
+  ///   A caller can cancel cleanup if the thread reopened while eligibility was
+  ///   being read. Existing callers omit it. This does not indicate deletion success.
   /// - Returns: `true` when deletion was performed; otherwise `false`.
   @discardableResult
   public func deleteThreadIfUntitledAndEmpty(
     peerId: Peer,
-    mutationToken suppliedMutationToken: AuthAccountMutationToken? = nil
+    mutationToken suppliedMutationToken: AuthAccountMutationToken? = nil,
+    canDelete: (@MainActor () -> Bool)? = nil
   ) async throws -> Bool {
     guard case let .thread(threadId) = peerId else { return false }
     let mutationToken = try suppliedMutationToken ?? beginAccountMutation()
@@ -569,6 +573,7 @@ public class DataManager: ObservableObject {
     }
 
     guard shouldDelete else { return false }
+    guard canDelete?() != false else { return false }
 
     do {
       _ = try await Api.realtime.send(.deleteChat(peerId: peerId))

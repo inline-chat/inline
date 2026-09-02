@@ -9,6 +9,11 @@ import UIKit
 struct InlineApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+  init() {
+    InlineShortcuts.registerNavigation(routerRegistry: appDelegate.sceneRouterRegistry)
+    InlineShortcuts.updateAppShortcutParameters()
+  }
+
   var body: some Scene {
     WindowGroup {
       InlineSceneRoot(appDelegate: appDelegate)

@@ -2,6 +2,8 @@ public enum ConnectionEvent: Sendable {
   case start
   case stop
   case connectNow
+  case userInitiatedOperationStarted
+  case userInitiatedOperationFinished
 
   case authAvailable
   case authLost
@@ -40,6 +42,8 @@ extension ConnectionEvent {
     case .start: "start"
     case .stop: "stop"
     case .connectNow: "connectNow"
+    case .userInitiatedOperationStarted: "userInitiatedOperationStarted"
+    case .userInitiatedOperationFinished: "userInitiatedOperationFinished"
     case .authAvailable: "authAvailable"
     case .authLost: "authLost"
     case .networkAvailable: "networkAvailable"

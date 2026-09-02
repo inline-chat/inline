@@ -2063,6 +2063,19 @@ class LegacyComposeAppKit: NSView {
     updateSendButtonIfNeeded()
   }
 
+  func acceptExternalDraft(_ text: String, for peer: InlineKit.Peer) -> Bool {
+    guard peerId == peer else { return false }
+    if !text.isEmpty {
+      guard commandLaunchState() == .empty else { return false }
+      setText(text)
+      _ = saveDraft()
+    }
+    focusEditor()
+    return true
+  }
+
+  func isComposer(for peer: InlineKit.Peer) -> Bool { peerId == peer }
+
   private var keyMonitorUnsubscribe: (() -> Void)?
   private var keyMonitorPasteUnsubscribe: (() -> Void)?
   private var smartLinkEscapeKeyUnsubscribe: (() -> Void)?

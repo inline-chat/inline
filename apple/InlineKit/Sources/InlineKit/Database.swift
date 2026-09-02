@@ -88,6 +88,8 @@ public final class AppDatabase: @unchecked Sendable {
   public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
     _dbWriter = dbWriter
     preparedDatabaseKey = nil
+    let span = PerformanceTrace.begin("DatabaseMigrate", category: .launch)
+    defer { span.end() }
     try migrator.migrate(dbWriter)
   }
 
@@ -111,6 +113,11 @@ public final class AppDatabase: @unchecked Sendable {
   public func closePersistentStorage() throws {
     guard let databasePool = dbWriter as? DatabasePool else { return }
     try databasePool.close()
+  }
+
+  /// Waits for already-admitted reads and writes without invalidating the shared process owner.
+  public func waitForPendingOperationsForTermination() async throws {
+    try await dbWriter.barrierWriteWithoutTransaction { _ in () }
   }
 }
 
@@ -1111,6 +1118,17 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("agent thread context and catalog") { db in
+      try db.alter(table: "chat") { table in
+        table.add(column: "agentContext", .blob)
+      }
+      try db.create(table: "agentConfigurationCatalog") { table in
+        table.column("botUserId", .integer).primaryKey()
+        table.column("payload", .blob).notNull()
+        table.column("fetchedAt", .datetime).notNull()
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
@@ -1603,7 +1621,12 @@ public extension AppDatabase {
   }
 
   private static func makeShared() -> AppDatabase {
+    let sharedSpan = PerformanceTrace.begin("DatabaseMakeShared", category: .launch)
+    defer { sharedSpan.end() }
+
+    let pathSpan = PerformanceTrace.begin("DatabaseResolvePath", category: .launch)
     let databaseUrl = getDatabaseUrl()
+    pathSpan.end()
     let databasePath = databaseUrl.path
     let fileManager = FileManager.default
     let fileExists = fileManager.fileExists(atPath: databasePath)
@@ -1611,7 +1634,9 @@ public extension AppDatabase {
     var pathForLog = databasePath
     pathForLog.replace(" ", with: "\\ ")
     log.debug("Database path: \(pathForLog)")
+    let keySpan = PerformanceTrace.begin("DatabaseKeyLoad", category: .launch)
     let keyAvailability = DatabaseKeyStore.load()
+    keySpan.end()
     log.info(
       "Database config: build=\(buildFlavor)" +
         " profile=\(ProjectConfig.userProfile ?? "default")" +
@@ -1626,10 +1651,17 @@ public extension AppDatabase {
     #endif
 
     func openPersistent(passphrase: String) throws -> (db: AppDatabase, pool: DatabasePool) {
-      let config = AppDatabase.makeConfiguration(passphrase: passphrase)
-      let pool = try DatabasePool(path: databasePath, configuration: config)
-      let db = try AppDatabase(pool)
-      return (db: db, pool: pool)
+      let span = PerformanceTrace.begin("DatabaseOpenPersistent", category: .launch)
+      do {
+        let config = AppDatabase.makeConfiguration(passphrase: passphrase)
+        let pool = try DatabasePool(path: databasePath, configuration: config)
+        let db = try AppDatabase(pool)
+        span.end("success=1")
+        return (db: db, pool: pool)
+      } catch {
+        span.end("success=0")
+        throw error
+      }
     }
 
     func openInMemory() -> AppDatabase {

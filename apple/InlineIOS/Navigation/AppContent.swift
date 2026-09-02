@@ -142,6 +142,15 @@ final class IOSSceneRouterRegistry {
   }
 
   @discardableResult
+  func navigate(_ request: AppNavigationRequest, accountUserID: Int64) -> Bool {
+    // Requests cannot replace the account tracked by the scene/auth lifecycle.
+    guard self.accountUserID == nil || self.accountUserID == accountUserID else { return false }
+    establishAccountIfNeeded(accountUserID)
+    navigate(request)
+    return true
+  }
+
+  @discardableResult
   func navigate(_ request: AppNavigationRequest, reservation requestID: UInt64) -> Bool {
     guard requestID == latestRequestID else { return false }
     pruneReleasedRouters()

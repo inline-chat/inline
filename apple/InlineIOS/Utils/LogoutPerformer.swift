@@ -47,6 +47,7 @@ enum LogoutPerformer {
 
     // Stop every account-owned producer before clearing credentials or the database.
     await Api.realtime.loggedOut()
+    await ReservedChatIDPool.shared.drainForAccountTransition()
     await Realtime.shared.loggedOut()
     await FileUploader.shared.cancelAll()
     await FileCache.shared.cancelAllDownloads()

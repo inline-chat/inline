@@ -41,10 +41,26 @@ public final actor RealtimeDirectSession {
 
   /// Starts or nudges this request's connection. Idempotent until `finish()`.
   public func connectIfNeeded() async {
-    guard !finished, auth.isLoggedIn() else { return }
-    await startIfNeeded()
+    guard let account = try? auth.beginAccountMutation() else { return }
+    await connectIfNeeded(account: account)
+  }
+
+  private func connectIfNeeded(account: AuthAccountMutationToken) async {
+    guard isCurrent(account) else { return }
+    await startIfNeeded(account: account)
+    guard isCurrent(account) else { return }
     await connectionManager.setAuthAvailable(true)
+    guard isCurrent(account) else {
+      await connectionManager.setAuthAvailable(false)
+      await connectionManager.stop()
+      return
+    }
     await connectionManager.connectNow()
+    guard isCurrent(account) else {
+      await connectionManager.setAuthAvailable(false)
+      await connectionManager.stop()
+      return
+    }
   }
 
   public func callRpcDirect(
@@ -53,29 +69,32 @@ public final actor RealtimeDirectSession {
     timeout: Duration? = .seconds(15)
   ) async throws -> RpcResult.OneOf_Result? {
     guard !finished else { throw RealtimeDirectRpcError.notConnected }
-    guard auth.isLoggedIn() else { throw RealtimeDirectRpcError.notAuthorized }
+    let account: AuthAccountMutationToken
     do {
-      try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
+      account = try auth.beginAccountMutation()
     } catch {
       throw RealtimeDirectRpcError.notAuthorized
     }
 
-    await connectIfNeeded()
+    await connectIfNeeded(account: account)
+    try validateDispatch(account, allowDuringLogout: method == .logOut)
     // Admission is bounded before execution. Once admitted, the RPC's own timeout owns
     // its complete execution window; this is not a whole-operation or upload deadline.
     guard await waitUntilOpen(timeout: connectionAdmissionTimeout) else {
       try Task.checkCancellation()
       throw RealtimeDirectRpcError.notConnected
     }
+    try validateDispatch(account, allowDuringLogout: method == .logOut)
 
     do {
-      try auth.requireAccountMutationAllowed(allowDuringLogout: method == .logOut)
-    } catch {
-      throw RealtimeDirectRpcError.notAuthorized
-    }
-
-    do {
-      return try await session.callRpc(method: method, input: input, timeout: timeout)
+      return try await session.callRpc(
+        method: method,
+        input: input,
+        timeout: timeout,
+        beforeDispatch: { [self] in
+          try await validateDispatch(account, allowDuringLogout: method == .logOut)
+        }
+      )
     } catch let error as ProtocolSessionError {
       switch error {
         case .notAuthorized:
@@ -103,6 +122,9 @@ public final actor RealtimeDirectSession {
     guard !finished else { return }
     finished = true
     await connectionManager.stop()
+    // A timed-out or cancelled caller may still own an in-flight transport write.
+    await session.waitForDirectDispatches()
+    await connectionManager.stop()
     await connectionManager.finishSessionEventForwarding()
     let task = eventDrainTask
     eventDrainTask = nil
@@ -110,8 +132,8 @@ public final actor RealtimeDirectSession {
     await task?.value
   }
 
-  private func startIfNeeded() async {
-    guard !started, !finished else { return }
+  private func startIfNeeded(account: AuthAccountMutationToken) async {
+    guard !started, isCurrent(account) else { return }
     started = true
 
     let manager = connectionManager
@@ -128,7 +150,32 @@ public final actor RealtimeDirectSession {
     }
 
     await session.start()
+    guard isCurrent(account) else {
+      await connectionManager.stop()
+      return
+    }
     await connectionManager.start()
+    guard isCurrent(account) else {
+      await connectionManager.stop()
+      return
+    }
+  }
+
+  private func isCurrent(_ account: AuthAccountMutationToken) -> Bool {
+    !finished && (try? auth.validateAccountMutation(account)) != nil
+  }
+
+  private func validateDispatch(
+    _ account: AuthAccountMutationToken,
+    allowDuringLogout: Bool
+  ) throws {
+    guard !finished else { throw RealtimeDirectRpcError.notConnected }
+    do {
+      try auth.validateAccountMutation(account)
+      try auth.requireAccountMutationAllowed(allowDuringLogout: allowDuringLogout)
+    } catch {
+      throw RealtimeDirectRpcError.notAuthorized
+    }
   }
 
   private func waitUntilOpen(timeout: Duration) async -> Bool {

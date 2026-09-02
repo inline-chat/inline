@@ -52,8 +52,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
   @MainActor private lazy var scriptingAdapter = MacScriptingAdapter(delegate: self)
-  @MainActor var scriptingAccountIsReady: Bool {
+  @MainActor private var accountOperationAdmissionIsOpen: Bool {
     !isLoggingOut && !isResettingLocalData && terminationTask == nil
+  }
+  @MainActor var scriptingAccountIsReady: Bool {
+    accountOperationAdmissionIsOpen
       && dependencies.viewModel.topLevelRoute == .main
   }
   @MainActor private var terminationTask: Task<Void, Never>?
@@ -78,18 +81,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var notificationNavigationTask: Task<Void, Never>?
 
   func applicationWillFinishLaunching(_: Notification) {
+    InlineMacIntents.register { [weak self] in
+      self?.scriptingAccountIsReady == true
+    }
+    InlineMacShortcuts.updateAppShortcutParameters()
+    let launchSpan = PerformanceTrace.begin("ApplicationWillFinish", category: .launch)
+    defer { launchSpan.end() }
+
     NSWindow.allowsAutomaticWindowTabbing = true
 
     // Freeze the chat font before any message layout or settings UI is created.
+    let typographySpan = PerformanceTrace.begin("ChatTypographyBootstrap", category: .launch)
     _ = ChatTypography.current
+    typographySpan.end()
 
+    let devtoolsSpan = PerformanceTrace.begin("MacDevtoolsBootstrap", category: .launch)
     MacDevtools.bootstrap()
+    devtoolsSpan.end()
+
+    let defaultsSpan = PerformanceTrace.begin("GlobalSettingsBootstrap", category: .launch)
     registerMacGlobalSettings()
+    defaultsSpan.end()
 
     // Setup Notifications Delegate
+    let notificationsSpan = PerformanceTrace.begin("NotificationBootstrap", category: .launch)
     setupNotifications()
+    notificationsSpan.end()
 
+    let dependenciesSpan = PerformanceTrace.begin("AppDependenciesInit", category: .launch)
     _ = dependencies
+    dependenciesSpan.end()
     InlineScripting.install { [weak self] request in
       guard let self else { throw ScriptingError.unavailable }
       return try await self.scriptingAdapter.execute(request)
@@ -98,10 +119,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_: Notification) {
     MessageGestureTrace.restoreSetting()
+    let launchSpan = PerformanceTrace.begin("ApplicationDidFinish", category: .launch)
+    defer { launchSpan.end() }
+
+    let servicesSpan = PerformanceTrace.begin("LaunchServicesInit", category: .launch)
     initializeServices()
+    servicesSpan.end()
+
+    let appearanceSpan = PerformanceTrace.begin("AppearanceBootstrap", category: .launch)
     setupAppearanceSetting()
     setupThemeSetting()
+    appearanceSpan.end()
+
+    let menuSpan = PerformanceTrace.begin("MainMenuBootstrap", category: .launch)
     setupMainMenu()
+    menuSpan.end()
     Task { @MainActor in
       await dependencies.cliInstaller.refresh()
     }
@@ -155,6 +187,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       guard terminationTask == nil else { return .terminateLater }
 
       let terminationGate = ApplicationTerminationGate()
+      let messagesPublisher = MessagesPublisher.shared
+      messagesPublisher.closeAdmissionForTermination()
       Task.detached(priority: .userInitiated) {
         try? await Task.sleep(for: .seconds(3))
         guard terminationGate.claim() else { return }
@@ -172,15 +206,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       let realtime = dependencies.realtimeV2
       let database = dependencies.database
       terminationTask = Task { @MainActor in
-        await realtime.prepareForTermination()
+        async let publisherTermination: Void = messagesPublisher.waitForAdmittedDatabaseReadsForTermination()
+        async let realtimeTermination: Void = realtime.prepareForTermination()
+        async let reservationTermination: Void = ReservedChatIDPool.shared.prepareForTermination()
+        _ = await (publisherTermination, realtimeTermination, reservationTermination)
 
-        let databaseCloseTask = Task.detached(priority: .userInitiated) {
-          try database.closePersistentStorage()
-        }
         do {
-          try await databaseCloseTask.value
+          try await database.waitForPendingOperationsForTermination()
         } catch {
-          log.error("Database did not close cleanly during application termination", error: error)
+          log.error("Database did not drain cleanly during application termination", error: error)
+          return
         }
 
         guard terminationGate.claim() else { return }
@@ -210,6 +245,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidBecomeActive(_: Notification) {
+    guard accountOperationAdmissionIsOpen else { return }
+    let isInitialActivation = didHandleInitialActivation == false
+    let activationSpan = PerformanceTrace.begin(
+      "ApplicationDidBecomeActive",
+      category: .launch,
+      "initial=\(isInitialActivation ? 1 : 0)"
+    )
+    defer { activationSpan.end() }
+
 //    Task {
 //      if Auth.shared.isLoggedIn {
 //        // Mark online
@@ -217,8 +261,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 //      }
 //    }
     Task { @MainActor [weak self] in
-      guard Auth.shared.isLoggedIn else { return }
-      await self?.dependencies.gridRuntime.applicationDidWake()
+      guard let self, self.accountOperationAdmissionIsOpen, Auth.shared.isLoggedIn else { return }
+      await self.dependencies.gridRuntime.applicationDidWake()
     }
 
     if !didHandleInitialActivation {
@@ -254,7 +298,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @discardableResult
   @MainActor private func setupMainWindow() -> MainWindowController {
-    MainWindowController.showDefault(dependencies: dependencies)
+    let span = PerformanceTrace.begin("SetupMainWindow", category: .launch)
+    defer { span.end() }
+    return MainWindowController.showDefault(dependencies: dependencies)
   }
 
   /// CMD+Tab can activate the app without triggering `applicationShouldHandleReopen`.
@@ -677,6 +723,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     await Task.yield()
 
     do {
+      await ReservedChatIDPool.shared.pauseAndDrain()
       await Api.realtime.loggedOut()
       try requireLocalDataResetMayContinue()
       await dependencies.realtime.loggedOut()
@@ -694,11 +741,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await dependencies.commandBarCatalog.reset()
       try AppDatabase.clearDB()
     } catch {
-      guard Auth.shared.getHasPendingAccountTransition() == false, !isLoggingOut else {
+      guard terminationTask == nil, Auth.shared.getHasPendingAccountTransition() == false, !isLoggingOut else {
         dependencies.viewModel.navigate(.loading)
         throw AuthStorageError.logoutInProgress
       }
       await Api.realtime.resumeAfterLocalDataReset()
+      await ReservedChatIDPool.shared.resume(realtimeV2: Api.realtime)
       await dependencies.realtime.start()
       dependencies.viewModel.navigate(restoreRoute)
       throw error
@@ -706,6 +754,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     try requireLocalDataResetMayContinue()
     await Api.realtime.resumeAfterLocalDataReset()
+    await ReservedChatIDPool.shared.resume(realtimeV2: Api.realtime)
     try requireLocalDataResetMayContinue()
     await dependencies.realtime.start()
     try requireLocalDataResetMayContinue()
@@ -723,7 +772,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor
   private func requireLocalDataResetMayContinue() throws {
-    guard !isLoggingOut, Auth.shared.getHasPendingAccountTransition() == false,
+    guard terminationTask == nil, !isLoggingOut, Auth.shared.getHasPendingAccountTransition() == false,
           Auth.shared.getStatus().isAuthenticated
     else { throw AuthStorageError.logoutInProgress }
   }

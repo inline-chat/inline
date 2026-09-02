@@ -106,10 +106,12 @@ final class AuthConnectionAdapter: @unchecked Sendable {
     }
   }
 
-  func stop() {
+  func stop(isolation: isolated (any Actor)? = #isolation) async {
     generationLock.withLock { generation &+= 1 }
-    task?.cancel()
+    let endingTask = task
     task = nil
+    endingTask?.cancel()
+    await endingTask?.value
   }
 
   deinit {
@@ -444,6 +446,18 @@ final class LifecycleConnectionAdapter {
     }
   }
 
+  func stop(isolation: isolated (any Actor)? = #isolation) async {
+    for observer in observers {
+      notificationCenter.removeObserver(observer)
+    }
+    observers.removeAll()
+    signalContinuation.finish()
+    let endingTask = task
+    task = nil
+    endingTask?.cancel()
+    await endingTask?.value
+  }
+
   deinit {
     for observer in observers {
       notificationCenter.removeObserver(observer)
@@ -569,23 +583,65 @@ final class LifecycleConnectionAdapter {
   }
 }
 #elseif canImport(AppKit)
+private enum MacLifecycleSignal: Sendable {
+  case appDidBecomeActive
+  case systemWillSleep
+  case systemDidWake
+}
+
 final class LifecycleConnectionAdapter {
   private let manager: ConnectionManager
+  private let signalStream: AsyncStream<MacLifecycleSignal>
+  private let signalContinuation: AsyncStream<MacLifecycleSignal>.Continuation
   private var observersInstalled = false
+  private var task: Task<Void, Never>?
 
   init(manager: ConnectionManager) {
     self.manager = manager
+    (signalStream, signalContinuation) = AsyncStream.create(
+      MacLifecycleSignal.self,
+      bufferingPolicy: .unbounded
+    )
   }
 
   func start() {
     guard !observersInstalled else { return }
     observersInstalled = true
     installObservers()
+    let manager = self.manager
+    let signals = signalStream
+    task = Task {
+      for await signal in signals {
+        guard !Task.isCancelled else { return }
+        switch signal {
+        case .appDidBecomeActive:
+          await manager.applicationBecameActive(transportWasRetained: true)
+        case .systemWillSleep:
+          await manager.applicationBecameInactive(keepConnection: false)
+        case .systemDidWake:
+          await manager.systemDidWake()
+        }
+      }
+    }
+  }
+
+  func stop(isolation: isolated (any Actor)? = #isolation) async {
+    guard observersInstalled || task != nil else { return }
+    observersInstalled = false
+    NotificationCenter.default.removeObserver(self)
+    NSWorkspace.shared.notificationCenter.removeObserver(self)
+    signalContinuation.finish()
+    let endingTask = task
+    task = nil
+    endingTask?.cancel()
+    await endingTask?.value
   }
 
   deinit {
     NotificationCenter.default.removeObserver(self)
     NSWorkspace.shared.notificationCenter.removeObserver(self)
+    signalContinuation.finish()
+    task?.cancel()
   }
 
   private func installObservers() {
@@ -610,27 +666,22 @@ final class LifecycleConnectionAdapter {
   }
 
   @objc private func handleAppDidBecomeActive() {
-    Task { [manager] in
-      await manager.applicationBecameActive(transportWasRetained: true)
-    }
+    signalContinuation.yield(.appDidBecomeActive)
   }
 
   @objc private func handleSystemWillSleep() {
-    Task { [manager] in
-      await manager.applicationBecameInactive(keepConnection: false)
-    }
+    signalContinuation.yield(.systemWillSleep)
   }
 
   @objc private func handleSystemDidWake() {
-    Task { [manager] in
-      await manager.systemDidWake()
-    }
+    signalContinuation.yield(.systemDidWake)
   }
 }
 #else
 final class LifecycleConnectionAdapter {
   init(manager _: ConnectionManager) {}
   func start() {}
+  func stop(isolation: isolated (any Actor)? = #isolation) async {}
 }
 #endif
 
@@ -759,6 +810,16 @@ final class NetworkConnectionAdapter {
       snapshotContinuation.yield(ConnectionPathSnapshot(path: path))
     }
     monitor.start(queue: DispatchQueue(label: "RealtimeV2.ConnectionManager.path"))
+  }
+
+  func stop(isolation: isolated (any Actor)? = #isolation) async {
+    monitor.pathUpdateHandler = nil
+    monitor.cancel()
+    snapshotContinuation.finish()
+    let endingTask = task
+    task = nil
+    endingTask?.cancel()
+    await endingTask?.value
   }
 
   deinit {

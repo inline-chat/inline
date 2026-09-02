@@ -420,6 +420,15 @@ extension ProtocolSession {
     input: RpcCall.OneOf_Input?,
     timeout: Duration? = .seconds(15)
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    try await callRpc(method: method, input: input, timeout: timeout, beforeDispatch: {})
+  }
+
+  func callRpc(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout: Duration?,
+    beforeDispatch: @escaping @Sendable () async throws -> Void
+  ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     try Task.checkCancellation()
     guard rpcContinuations.count < Self.maxPendingDirectRPCs else {
       recordDirectCapacityRejection()
@@ -442,7 +451,9 @@ extension ProtocolSession {
           return
         }
 
-        let dispatchTask = Task { await self.performDirectRpcDispatch(message) }
+        let dispatchTask = Task {
+          await self.performDirectRpcDispatch(message, beforeDispatch: beforeDispatch)
+        }
         directDispatchTasks[message.id] = dispatchTask
 
         if let timeout {
@@ -489,8 +500,19 @@ extension ProtocolSession {
     directDispatchTasks.removeValue(forKey: msgID)
   }
 
-  private func performDirectRpcDispatch(_ message: ClientMessage) async {
+  private func performDirectRpcDispatch(
+    _ message: ClientMessage,
+    beforeDispatch: @escaping @Sendable () async throws -> Void
+  ) async {
     defer { directDispatchFinished(message.id) }
+    // A cancelled caller removes its continuation before this task gets actor time.
+    guard rpcContinuations[message.id] != nil else { return }
+    do {
+      try await beforeDispatch()
+    } catch {
+      await failRpcContinuation(for: message.id, error: error)
+      return
+    }
     // Admission is the irreversible boundary for direct RPCs. Mark it on this actor before
     // awaiting transport so timeout/cancellation cannot report a false not-sent classification.
     guard beginRpcDispatch(for: message.id) else { return }

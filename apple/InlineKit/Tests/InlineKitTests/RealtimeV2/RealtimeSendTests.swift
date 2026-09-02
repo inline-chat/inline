@@ -6,6 +6,8 @@ import Testing
 @testable import Auth
 @testable import RealtimeV2
 
+// These transport fixtures leave sync discovery pending. A connected or updating session can
+// send; settled connection presentation is covered separately by the sync presentation suites.
 @Suite("RealtimeV2.Send", .serialized)
 final class RealtimeSendTests {
   @Test("external command RPCs and response updates reject stale account generations")
@@ -25,11 +27,135 @@ final class RealtimeSendTests {
     ]
     for token in staleTokens {
       await #expect(throws: AuthStorageError.self) {
+        try await realtime.withUserInitiatedConnection(accountToken: token) { _ in
+          Issue.record("Stale account work must not begin")
+        }
+      }
+      await #expect(throws: AuthStorageError.self) {
         try await realtime.callRpcDirect(method: .sendMessage, input: .sendMessage(.init()), accountToken: token)
       }
       await #expect(throws: AuthStorageError.self) {
         try await realtime.applyUpdatesAndWait([], accountToken: token)
       }
+    }
+    #expect(await transport.sentMessages.contains { message in
+      if case .rpcCall = message.body { return true }
+      return false
+    } == false)
+    await realtime.loggedOut()
+  }
+
+  @Test("user-initiated connection deadline cancels admitted work and permits the next operation")
+  func testUserInitiatedDeadlineAndCancellation() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let account = try auth.handle.beginAccountMutation()
+    let realtime = RealtimeV2(
+      transport: HangingRpcTransport(), auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(), syncStorage: SendTestSyncStorage()
+    )
+    let clock = ContinuousClock()
+    let start = clock.now
+    await #expect(throws: RealtimeDirectRpcError.self) {
+      try await realtime.withUserInitiatedConnection(accountToken: account, timeout: .milliseconds(150)) { _ in
+        try await Task.sleep(for: .seconds(30))
+      }
+    }
+    #expect(clock.now - start < .seconds(3))
+    let result = try await realtime.withUserInitiatedConnection(accountToken: account) { _ in 7 }
+    #expect(result == 7)
+    let admitted = SendTestFlag()
+    let task = Task {
+      try await realtime.withUserInitiatedConnection(accountToken: account) { _ in
+        await admitted.set()
+        try await Task.sleep(for: .seconds(30))
+      }
+    }
+    #expect(await waitForCondition(timeout: .seconds(2)) { await admitted.get() })
+    task.cancel()
+    await #expect(throws: CancellationError.self) { try await task.value }
+    await realtime.loggedOut()
+  }
+
+  @Test("termination cancels system work, drains its cleanup, and rejects new admission")
+  func testUserInitiatedConnectionTermination() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let account = try auth.handle.beginAccountMutation()
+    let realtime = RealtimeV2(transport: HangingRpcTransport(), auth: auth.handle,
+                              applyUpdates: SendTestApplyUpdates(), syncStorage: SendTestSyncStorage())
+    let admitted = SendTestFlag()
+    let cleanedUp = SendTestFlag()
+    let task = Task {
+      try await realtime.withUserInitiatedConnection(accountToken: account) { _ in
+        await admitted.set()
+        do { try await Task.sleep(for: .seconds(30)) }
+        catch {
+          // Like an async DB API, cleanup finishes before its task returns after cancellation.
+          await cleanedUp.set()
+          throw error
+        }
+      }
+    }
+    #expect(await waitForCondition(timeout: .seconds(2)) { await admitted.get() })
+    await realtime.prepareForTermination()
+    #expect(await cleanedUp.get())
+    await #expect(throws: CancellationError.self) { try await task.value }
+    await #expect(throws: CancellationError.self) {
+      try await realtime.withUserInitiatedConnection(accountToken: account) { _ in
+        Issue.record("No system action may begin after termination admission closes")
+      }
+    }
+  }
+
+  @Test("nested system sends reject an account replacement without deadlocking its owner drain", arguments: [false, true])
+  func testNestedSystemSendDuringAccountReplacement(sameUser: Bool) async throws {
+    await SendTestRecorder.shared.reset()
+    let auth = Auth.mocked(authenticated: true)
+    let account = try auth.handle.beginAccountMutation()
+    let realtime = RealtimeV2(transport: HangingRpcTransport(), auth: auth.handle,
+                              applyUpdates: SendTestApplyUpdates(), syncStorage: SendTestSyncStorage())
+    let finished = SendTestFlag()
+    let id = UUID()
+    let operation = Task {
+      do {
+        try await realtime.withUserInitiatedConnection(accountToken: account) { realtime in
+          try await auth.saveCredentials(token: "2:test-replacement", userId: sameUser ? account.userID : account.userID + 1)
+          _ = try await realtime.send(SendTestTransaction(id: id), expectedAccount: account)
+          Issue.record("Stale send must be rejected")
+        }
+      } catch {
+        // Either account validation or owner admission rejects the replaced generation.
+      }
+      await finished.set()
+    }
+    let didFinish = await waitForCondition(timeout: .seconds(3)) { await finished.get() }
+    #expect(didFinish)
+    #expect(await SendTestRecorder.shared.didRunOptimistic(id) == false)
+    operation.cancel()
+    if didFinish { await realtime.prepareForTermination() }
+  }
+
+  @Test("a send resolved for another account or generation is rejected before optimistic work or dispatch")
+  func testExpectedAccountRejectsStaleTarget() async throws {
+    await SendTestRecorder.shared.reset()
+    let auth = Auth.mocked(authenticated: true)
+    let current = try auth.handle.beginAccountMutation()
+    let transport = MockTransport()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: SendTestApplyUpdates(),
+      syncStorage: SendTestSyncStorage()
+    )
+    let staleTokens = [
+      AuthAccountMutationToken(generation: current.generation &+ 1, userID: current.userID),
+      AuthAccountMutationToken(generation: current.generation, userID: Int64.max),
+    ]
+    for token in staleTokens {
+      let id = UUID()
+      await #expect(throws: (any Error).self) {
+        try await realtime.send(SendTestTransaction(id: id), expectedAccount: token)
+      }
+      #expect(await SendTestRecorder.shared.didRunOptimistic(id) == false)
     }
     #expect(await transport.sentMessages.contains { message in
       if case .rpcCall = message.body { return true }
@@ -357,7 +483,7 @@ final class RealtimeSendTests {
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
       return await MainActor.run {
-        stateObject.connectionState == .connected
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
       }
     }
     #expect(connected)
@@ -386,7 +512,7 @@ final class RealtimeSendTests {
 
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
-      return await MainActor.run { stateObject.connectionState == .connected }
+      return await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating }
     }
     #expect(connected)
 
@@ -430,7 +556,7 @@ final class RealtimeSendTests {
 
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
-      return await MainActor.run { stateObject.connectionState == .connected }
+      return await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating }
     }
     #expect(connected)
 
@@ -483,7 +609,7 @@ final class RealtimeSendTests {
 
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
-      return await MainActor.run { stateObject.connectionState == .connected }
+      return await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating }
     }
     #expect(connected)
 
@@ -515,7 +641,7 @@ final class RealtimeSendTests {
 
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
-      return await MainActor.run { stateObject.connectionState == .connected }
+      return await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating }
     }
     #expect(connected)
 
@@ -547,7 +673,7 @@ final class RealtimeSendTests {
 
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
-      return await MainActor.run { stateObject.connectionState == .connected }
+      return await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating }
     }
     #expect(connected)
 
@@ -576,7 +702,7 @@ final class RealtimeSendTests {
 
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
-      return await MainActor.run { stateObject.connectionState == .connected }
+      return await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating }
     }
     #expect(connected)
 
@@ -609,7 +735,7 @@ final class RealtimeSendTests {
     }
     _ = try await send.value
     let stateObject = realtime.stateObject
-    #expect(await MainActor.run { stateObject.connectionState == .connected })
+    #expect(await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating })
     withExtendedLifetime(realtime) {}
   }
 
@@ -626,7 +752,7 @@ final class RealtimeSendTests {
 
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
-      return await MainActor.run { stateObject.connectionState == .connected }
+      return await MainActor.run { stateObject.connectionState == .connected || stateObject.connectionState == .updating }
     }
     #expect(connected)
 
@@ -698,7 +824,7 @@ final class RealtimeSendTests {
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
       return await MainActor.run {
-        stateObject.connectionState == .connected
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
       }
     }
     #expect(connected)
@@ -725,7 +851,7 @@ final class RealtimeSendTests {
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
       return await MainActor.run {
-        stateObject.connectionState == .connected
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
       }
     }
     #expect(connected)
@@ -771,7 +897,7 @@ final class RealtimeSendTests {
     )
 
     #expect(await waitForCondition(timeout: .seconds(2)) {
-      await MainActor.run { realtime.stateObject.connectionState == .connected }
+      await MainActor.run { realtime.stateObject.connectionState == .connected || realtime.stateObject.connectionState == .updating }
     })
 
     do {
@@ -805,7 +931,7 @@ final class RealtimeSendTests {
     let initiallyConnected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
       return await MainActor.run {
-        stateObject.connectionState == .connected
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
       }
     }
     #expect(initiallyConnected)
@@ -826,7 +952,7 @@ final class RealtimeSendTests {
     let reconnected = await waitForCondition(timeout: .seconds(3)) {
       let stateObject = realtime.stateObject
       return await MainActor.run {
-        stateObject.connectionState == .connected
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
       }
     }
     #expect(reconnected)
@@ -857,7 +983,7 @@ final class RealtimeSendTests {
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
       return await MainActor.run {
-        stateObject.connectionState == .connected
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
       }
     }
     #expect(connected)
@@ -942,7 +1068,7 @@ final class RealtimeSendTests {
     )
 
     #expect(await waitForCondition(timeout: .seconds(2)) {
-      await MainActor.run { realtime.stateObject.connectionState == .connected }
+      await MainActor.run { realtime.stateObject.connectionState == .connected || realtime.stateObject.connectionState == .updating }
     })
 
     let sendTask = Task {
@@ -996,7 +1122,7 @@ final class RealtimeSendTests {
     )
 
     #expect(await waitForCondition(timeout: .seconds(2)) {
-      await MainActor.run { realtime.stateObject.connectionState == .connected }
+      await MainActor.run { realtime.stateObject.connectionState == .connected || realtime.stateObject.connectionState == .updating }
     })
 
     let sendTask = Task {
@@ -1076,7 +1202,7 @@ final class RealtimeSendTests {
     let connected = await waitForCondition(timeout: .seconds(2)) {
       let stateObject = realtime.stateObject
       return await MainActor.run {
-        stateObject.connectionState == .connected
+        stateObject.connectionState == .connected || stateObject.connectionState == .updating
       }
     }
     #expect(connected)
@@ -1283,6 +1409,28 @@ final class RealtimeSendTests {
     }
     #expect(receivedInvalidation)
     withExtendedLifetime(realtime) {}
+  }
+
+  @Test("a session reset during direct dispatch validation prevents the old write")
+  func testResetDuringDirectDispatchValidation() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = MockTransport()
+    let session = ProtocolSession(transport: transport, auth: auth.handle)
+    let entered = SendTestFlag()
+    let gate = DirectRpcStartGate()
+    let request = Task {
+      try await session.callRpc(method: .sendMessage, input: nil, timeout: .seconds(2), beforeDispatch: {
+        await entered.set()
+        await gate.wait()
+      })
+    }
+    let didEnter = await waitForCondition(timeout: .seconds(1)) { await entered.get() }
+    #expect(didEnter)
+    await session.stopTransport()
+    await gate.release()
+    await #expect(throws: (any Error).self) { try await request.value }
+    await session.waitForDirectDispatches()
+    #expect(await transport.sentMessages.isEmpty)
   }
 
   @Test("protocol session registers RPC ownership before transport write")

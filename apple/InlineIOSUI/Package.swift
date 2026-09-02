@@ -21,6 +21,7 @@ let package = Package(
   products: [
     .library(name: "InlineIOSUI", targets: ["InlineIOSUI"]),
     .library(name: "Onboarding", targets: ["Onboarding"]),
+    .library(name: "InlineAppIntents", targets: ["InlineAppIntents"]),
   ],
 
   dependencies: [
@@ -29,6 +30,19 @@ let package = Package(
   ],
 
   targets: [
+    .target(
+      name: "InlineAppIntents",
+      dependencies: [
+        .product(name: "InlineKit", package: "InlineKit"),
+        .product(name: "RealtimeV2", package: "InlineKit"),
+      ],
+      swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+    .testTarget(
+      name: "InlineAppIntentsTests",
+      dependencies: ["InlineAppIntents"],
+      swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
     .target(
       name: "InlineIOSUI",
       dependencies: baseDependencies,

@@ -12,6 +12,7 @@ public enum PerformanceTrace {
   }
 
   public enum Category: String, Sendable {
+    case launch = "AppLaunch"
     case sync = "SyncPerformance"
     case updates = "UpdateApply"
     case messages = "MessageList"
@@ -54,6 +55,7 @@ public enum PerformanceTrace {
   }
 
   private static let subsystem = Bundle.main.bundleIdentifier ?? "chat.inline"
+  private static let launchLog = OSLog(subsystem: subsystem, category: Category.launch.rawValue)
   private static let syncLog = OSLog(subsystem: subsystem, category: Category.sync.rawValue)
   private static let updatesLog = OSLog(subsystem: subsystem, category: Category.updates.rawValue)
   private static let messagesLog = OSLog(subsystem: subsystem, category: Category.messages.rawValue)
@@ -255,6 +257,8 @@ public enum PerformanceTrace {
 
   private static func osLog(for category: Category) -> OSLog {
     switch category {
+      case .launch:
+        launchLog
       case .sync:
         syncLog
       case .updates:

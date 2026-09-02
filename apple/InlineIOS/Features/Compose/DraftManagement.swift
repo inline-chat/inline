@@ -67,6 +67,19 @@ extension ComposeView {
     }
   }
 
+  /// External compose requests use the live editor, so pending text and attachments are preserved.
+  func acceptExternalDraft(_ text: String, for peer: InlineKit.Peer) -> Bool {
+    guard peerId == peer else { return false }
+    if !text.isEmpty {
+      guard canRestoreDraft else { return false }
+      guard commandLaunchState() == .empty else { return false }
+      applyDraft(text)
+      saveDraft()
+    }
+    textView.becomeFirstResponder()
+    return true
+  }
+
   private var canRestoreDraft: Bool {
     let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
     return normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&

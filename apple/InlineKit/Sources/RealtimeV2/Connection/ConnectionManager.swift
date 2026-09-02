@@ -71,6 +71,8 @@ actor ConnectionManager {
   private var probeNonce: UInt64?
   private var pendingPingNonce: UInt64?
   private var backgroundConnectionRetained = false
+  // System-invoked work may run while UIKit is inactive. Keep lifecycle state truthful.
+  private var userInitiatedOperations = 0
 
   init(
     session: ProtocolSessionType,
@@ -119,6 +121,14 @@ actor ConnectionManager {
 
   func connectNow() async {
     await enqueue(.connectNow)
+  }
+
+  func beginUserInitiatedOperation() async {
+    await enqueue(.userInitiatedOperationStarted)
+  }
+
+  func endUserInitiatedOperation() async {
+    await enqueue(.userInitiatedOperationFinished)
   }
 
   func setAuthAvailable(_ available: Bool) async {
@@ -228,6 +238,20 @@ actor ConnectionManager {
 
   private func handle(_ event: ConnectionEvent) async {
     switch event {
+    case .userInitiatedOperationStarted:
+      userInitiatedOperations += 1
+      await evaluateConstraints(resetBackoff: false)
+
+    case .userInitiatedOperationFinished:
+      userInitiatedOperations = max(0, userInitiatedOperations - 1)
+      if userInitiatedOperations == 0, !constraints.appActive, !backgroundConnectionRetained {
+        // Preserve auth loss, explicit stop, and network failure as the stronger constraints.
+        if constraints.authAvailable, constraints.networkAvailable, constraints.userWantsConnection {
+          await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
+          await stopTransportAndReset()
+        }
+      }
+
     case .start:
       constraints.userWantsConnection = true
       await evaluateConstraints(resetBackoff: false)
@@ -308,7 +332,7 @@ actor ConnectionManager {
       attempt = 0
       backgroundConnectionRetained = false
       cancelBackoff()
-      if !transportWasRetained, state == .open {
+      if !transportWasRetained, userInitiatedOperations == 0, state == .open {
         await forceReconnect(reason: .none)
       } else {
         await evaluateConstraints(resetBackoff: true)
@@ -321,7 +345,7 @@ actor ConnectionManager {
       )
       constraints.appActive = false
       backgroundConnectionRetained = keepConnection
-      if !keepConnection {
+      if !keepConnection, userInitiatedOperations == 0 {
         await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
         await stopTransportAndReset()
       }
@@ -434,6 +458,7 @@ actor ConnectionManager {
     case .backgroundGraceExpired:
       guard !constraints.appActive else { return }
       backgroundConnectionRetained = false
+      guard userInitiatedOperations == 0 else { return }
       await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
       await stopTransportAndReset()
 
@@ -699,7 +724,7 @@ actor ConnectionManager {
   }
 
   private func constraintsSatisfied() -> Bool {
-    let appActiveEffective = constraints.appActive || backgroundConnectionRetained
+    let appActiveEffective = constraints.appActive || backgroundConnectionRetained || userInitiatedOperations > 0
     return constraints.authAvailable && constraints.networkAvailable && appActiveEffective && constraints.userWantsConnection
   }
 

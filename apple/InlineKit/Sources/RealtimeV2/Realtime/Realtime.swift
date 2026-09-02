@@ -250,15 +250,31 @@ public actor RealtimeV2 {
       return
     }
     await startListeners()
+    guard !isPreparingForTermination else { return }
 
     await session.start()
+    guard !isPreparingForTermination else {
+      await connectionManager.stop()
+      return
+    }
     await connectionManager.start()
+    guard !isPreparingForTermination else {
+      await connectionManager.stop()
+      return
+    }
     lifecycleAdapter?.start()
     networkAdapter?.start()
     authAdapter?.start()
     if auth.snapshot().isLoggedIn, auth.hasPendingAccountTransition() == false {
       await connectionManager.setAuthAvailable(true)
+      guard !isPreparingForTermination else {
+        await connectionManager.stop()
+        return
+      }
       await connectionManager.connectNow()
+      if isPreparingForTermination {
+        await connectionManager.stop()
+      }
     }
   }
 
@@ -297,6 +313,7 @@ public actor RealtimeV2 {
 
   /// Restarts account work after an in-place local-data reset that preserved authentication.
   public func resumeAfterLocalDataReset() async {
+    guard !isPreparingForTermination else { return }
     guard let mutationToken = try? auth.beginAccountMutation() else {
       log.warning("Local-data reset resume skipped because authentication is unavailable")
       return
@@ -324,6 +341,15 @@ public actor RealtimeV2 {
     log.info("Quiescing realtime for application termination")
     isPreparingForTermination = true
     acceptsTransactions = false
+    let endingAuthAdapter = authAdapter
+    let endingLifecycleAdapter = lifecycleAdapter
+    let endingNetworkAdapter = networkAdapter
+    authAdapter = nil
+    lifecycleAdapter = nil
+    networkAdapter = nil
+    await endingAuthAdapter?.stop()
+    await endingLifecycleAdapter?.stop()
+    await endingNetworkAdapter?.stop()
     await stateObject.stop()
     authRecoveryTask?.cancel()
     authRecoveryTask = nil
@@ -344,15 +370,21 @@ public actor RealtimeV2 {
       task.cancel()
     }
 
-    async let connectionTermination: Void = connectionManager.stop()
     async let syncTermination: Void = sync.prepareForTermination()
+    await connectionManager.stop()
+    // A caller may already have timed out while its transport write is still in progress.
+    // Drain that session-owned write before SQLCipher or other app owners can tear down.
+    await session.waitForDirectDispatches()
     await retryTask?.value
     for task in listenerTasks {
       await task.value
     }
-    await connectionTermination
-    await connectionManager.finishSessionEventForwarding()
     await waitForTransactionOperationsToFinish()
+    await waitForDirectRPCOperationsToFinish()
+    // An admitted operation can enqueue lifecycle cleanup while the drains above suspend.
+    // Reassert the terminal constraint before ending event forwarding.
+    await connectionManager.stop()
+    await connectionManager.finishSessionEventForwarding()
 
     if let endingOwner {
       // Durable transactions and their optimistic database projections belong
@@ -538,6 +570,7 @@ public actor RealtimeV2 {
   }
 
   private func authDiagnosticSnapshotReceived(_ snapshot: AuthSnapshot) async {
+    guard !isPreparingForTermination else { return }
     authRecoverySequence = authRecoverySequence &+ 1
     let sequence = authRecoverySequence
     authRecoveryDiagnostics.recordSnapshot(sequence: sequence, snapshot: snapshot)
@@ -559,6 +592,7 @@ public actor RealtimeV2 {
 
     acceptsTransactions = true
     _ = await ensureTransactionOwnerIfNeeded()
+    guard !isPreparingForTermination else { return }
 
     authRecoveryTask = Task { [weak self] in
       do {
@@ -611,13 +645,16 @@ public actor RealtimeV2 {
   }
 
   private func startTransport() async {
+    guard !isPreparingForTermination else { return }
     guard let mutationToken = try? auth.beginAccountMutation() else {
       await connectionManager.setAuthAvailable(false)
       return
     }
-    await updateTransportConnectionState(.connecting)
+    // The snapshot listener owns transport state. Starting an already-open manager is a
+    // no-op, so forcing `.connecting` here would strand subsequent system work and sends.
     await connectionManager.start()
-    guard (try? auth.validateAccountMutation(mutationToken)) != nil else {
+    guard !isPreparingForTermination,
+          (try? auth.validateAccountMutation(mutationToken)) != nil else {
       await connectionManager.setAuthAvailable(false)
       await connectionManager.stop()
       return
@@ -632,9 +669,11 @@ public actor RealtimeV2 {
   /// Ensure the transport is started when credentials are available.
   /// This is intentionally light-weight so callers can pre-warm the connection without using transactions.
   public func connectIfNeeded() async {
+    guard !isPreparingForTermination else { return }
     guard let mutationToken = try? auth.beginAccountMutation() else { return }
     await connectionManager.setAuthAvailable(true)
-    guard (try? auth.validateAccountMutation(mutationToken)) != nil else {
+    guard !isPreparingForTermination,
+          (try? auth.validateAccountMutation(mutationToken)) != nil else {
       await connectionManager.setAuthAvailable(false)
       return
     }
@@ -1075,7 +1114,7 @@ public actor RealtimeV2 {
 
     if let transactionOwnerTransitionTask {
       await transactionOwnerTransitionTask.value
-      guard acceptsTransactions,
+      guard !isPreparingForTermination, acceptsTransactions,
             auth.hasPendingAccountTransition() == false,
             auth.userId() == accountID,
             let transactionOwner,
@@ -1097,7 +1136,7 @@ public actor RealtimeV2 {
       transactionOwnerTransitionTask = nil
     }
 
-    guard acceptsTransactions,
+    guard !isPreparingForTermination, acceptsTransactions,
           auth.hasPendingAccountTransition() == false,
           auth.userId() == accountID,
           let transactionOwner,
@@ -1107,7 +1146,7 @@ public actor RealtimeV2 {
   }
 
   private func transitionTransactionOwner(to accountID: Int64) async {
-    guard acceptsTransactions,
+    guard !isPreparingForTermination, acceptsTransactions,
           auth.hasPendingAccountTransition() == false,
           auth.userId() == accountID
     else { return }
@@ -1124,7 +1163,7 @@ public actor RealtimeV2 {
       await sync.clearSyncState(acceptNewWork: false)
     }
 
-    guard acceptsTransactions,
+    guard !isPreparingForTermination, acceptsTransactions,
           auth.hasPendingAccountTransition() == false,
           auth.userId() == accountID,
           transactionOwner == nil
@@ -1136,7 +1175,7 @@ public actor RealtimeV2 {
     await transactions.activate(owner: newOwner)
     await sync.activateGeneration()
 
-    guard acceptsTransactions,
+    guard !isPreparingForTermination, acceptsTransactions,
           auth.hasPendingAccountTransition() == false,
           auth.userId() == accountID,
           transactionOwner == newOwner
@@ -1165,7 +1204,7 @@ public actor RealtimeV2 {
   }
 
   private func isCurrentTransactionOwner(_ owner: TransactionOwner) -> Bool {
-    acceptsTransactions
+    !isPreparingForTermination && acceptsTransactions
       && auth.hasPendingAccountTransition() == false
       && transactionOwner == owner
       && auth.userId() == owner.accountID
@@ -1500,6 +1539,7 @@ public actor RealtimeV2 {
     timeout: Duration? = .seconds(15),
     accountToken: AuthAccountMutationToken? = nil
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    guard !isPreparingForTermination else { throw RealtimeDirectRpcError.notConnected }
     // External integrations may have resolved their destination before hopping to this actor.
     // Validate at admission so an old request cannot be sent using a replacement account.
     if let accountToken { try auth.validateAccountMutation(accountToken) }
@@ -1507,7 +1547,16 @@ public actor RealtimeV2 {
     beginDirectRPCOperation()
     defer { endDirectRPCOperation() }
     do {
-      return try await session.callRpc(method: method, input: input, timeout: timeout)
+      return try await session.callRpc(
+        method: method,
+        input: input,
+        timeout: timeout,
+        beforeDispatch: { [self] in
+          try await validateDirectRPCDispatch(accountToken, allowDuringLogout: method == .logOut)
+        }
+      )
+    } catch let error as RealtimeDirectRpcError {
+      throw error
     } catch let error as ProtocolSessionError {
       switch error {
         case .notAuthorized:
@@ -1529,6 +1578,87 @@ public actor RealtimeV2 {
       throw CancellationError()
     } catch {
       throw RealtimeDirectRpcError.unknown(error)
+    }
+  }
+
+  /// Bounded user-requested work (for example system automation) on the existing account owner.
+  /// This does not claim the app is foreground, create a second connection, or enqueue offline work.
+  public func withUserInitiatedConnection<Value: Sendable>(
+    accountToken: AuthAccountMutationToken,
+    timeout: Duration = .seconds(20),
+    operation: @escaping @Sendable (RealtimeV2) async throws -> Value
+  ) async throws -> Value {
+    try validateUserInitiatedOperation(accountToken)
+    // Finish any previous-owner drain before admitting this operation into that same drain.
+    guard let owner = await ensureTransactionOwnerIfNeeded(), isCurrentTransactionOwner(owner) else {
+      throw CancellationError()
+    }
+    try validateUserInitiatedOperation(accountToken)
+    // Include the whole operation (also gaps between RPCs and local reads) in the existing drain.
+    // Termination must not close SQLCipher underneath work admitted by a system action.
+    beginTransactionOperation()
+    defer { endTransactionOperation() }
+    await connectionManager.beginUserInitiatedOperation()
+    let manager = connectionManager
+    do {
+      let value = try await withThrowingTaskGroup(of: Value.self) { group in
+        group.addTask {
+          await self.connectIfNeeded()
+          while true {
+            let transportIsOpen = await manager.currentSnapshot().state == .open
+            let transactionsAreReady = try await self.isUserInitiatedOperationReady(accountToken)
+            if transportIsOpen, transactionsAreReady { break }
+            try Task.checkCancellation()
+            try await self.validateUserInitiatedOperation(accountToken)
+            try await Task.sleep(for: .milliseconds(50))
+          }
+          try await self.validateUserInitiatedOperation(accountToken)
+          let result = try await operation(self)
+          try await self.validateUserInitiatedOperation(accountToken)
+          return result
+        }
+        group.addTask {
+          let clock = ContinuousClock()
+          let deadline = clock.now.advanced(by: timeout)
+          while clock.now < deadline {
+            try await self.validateUserInitiatedOperation(accountToken)
+            try await Task.sleep(for: min(.milliseconds(50), clock.now.duration(to: deadline)))
+          }
+          throw RealtimeDirectRpcError.timeout
+        }
+        defer { group.cancelAll() }
+        guard let value = try await group.next() else { throw CancellationError() }
+        return value
+      }
+      await connectionManager.endUserInitiatedOperation()
+      return value
+    } catch {
+      await connectionManager.endUserInitiatedOperation()
+      throw error
+    }
+  }
+
+  private func validateUserInitiatedOperation(_ account: AuthAccountMutationToken) throws {
+    try Task.checkCancellation()
+    guard acceptsTransactions, !isPreparingForTermination else { throw CancellationError() }
+    try auth.validateAccountMutation(account)
+  }
+
+  private func isUserInitiatedOperationReady(_ account: AuthAccountMutationToken) throws -> Bool {
+    try validateUserInitiatedOperation(account)
+    return canExecuteTransactions()
+  }
+
+  private func validateDirectRPCDispatch(
+    _ account: AuthAccountMutationToken?,
+    allowDuringLogout: Bool
+  ) throws {
+    guard !isPreparingForTermination else { throw RealtimeDirectRpcError.notConnected }
+    do {
+      if let account { try auth.validateAccountMutation(account) }
+      try auth.requireAccountMutationAllowed(allowDuringLogout: allowDuringLogout)
+    } catch {
+      throw RealtimeDirectRpcError.notAuthorized
     }
   }
 
