@@ -385,7 +385,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let agentContextUpdate: UpdateSeqAndDate | undefined
   try {
     // insert new msg with new ID
-    ;({ message: newMessage, update, agentContextUpdate } = await MessageModel.insertMessage({
+    ;({ chat, message: newMessage, update, agentContextUpdate } = await MessageModel.insertMessage({
       chatId: chatId,
       fromId: fromId,
       textEncrypted: encryptedMessage?.encrypted ?? null,
@@ -436,10 +436,6 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       log.error("error inserting message", error)
       throw RealtimeRpcError.InternalError()
     }
-  }
-
-  if (initialAgentContext && encodedInitialAgentContext) {
-    chat = { ...chat, agentContext: encodedInitialAgentContext }
   }
 
   queueMessageThreadLinkMaterialization({

@@ -274,7 +274,9 @@ export async function connectAgentSession(
     }
 
     const [occupied] = await tx.select().from(agentSessions).where(
-      eq(agentSessions.chatId, chat.id),
+      boundContext
+        ? eq(agentSessions.chatId, chat.id)
+        : and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
     ).limit(1)
     if (occupied) throw RealtimeRpcError.BadRequest()
 

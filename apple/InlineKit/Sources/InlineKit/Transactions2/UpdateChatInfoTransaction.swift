@@ -70,9 +70,6 @@ public struct UpdateChatInfoTransaction: Transaction2 {
           if let emoji = context.emoji {
             chat.emoji = emoji.isEmpty ? nil : emoji
           }
-          if let agentContext = context.agentContext {
-            chat.agentContext = agentContext
-          }
           try chat.save(db)
         }
       }

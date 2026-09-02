@@ -455,7 +455,10 @@ describe("agent session continuity", () => {
     }
   })
 
-  test("requires a second agent bot to use a distinct Chat", async () => {
+  test("requires a second agent bot to use a distinct bound Chat", async () => {
+    await db.update(chats).set({
+      agentContext: encodeAgentThreadContext({ botUserId: BigInt(botId) }),
+    }).where(eq(chats.id, chatId))
     await connect()
     const secondBot = await testUtils.createUser(`agent-bot-two-${crypto.randomUUID()}@example.com`)
     await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
@@ -792,19 +795,21 @@ describe("agent session continuity", () => {
     }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
 
-  test("a Chat admits only one provider session even before it is bound", async () => {
+  test("an unbound Chat keeps independent bot sessions", async () => {
     await connect()
     const secondBot = await testUtils.createUser(`agent-session-other-${crypto.randomUUID()}@example.com`)
     await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
     await testUtils.addParticipant(chatId, secondBot.id)
 
-    await expect(connectAgentSession({
+    const connected = await connectAgentSession({
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
       botUserId: BigInt(secondBot.id),
       provider: AgentSessionProvider.CLAUDE,
       instanceRef: "other-installation",
       sessionRef: "other-session",
-    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    }, ownerId)
+
+    expect(connected.state).toBe(ConnectAgentSessionState.CREATED)
   })
 
   test("a selected Chat project must match the provider session project", async () => {

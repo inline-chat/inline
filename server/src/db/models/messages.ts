@@ -28,6 +28,7 @@ import {
   blockContents,
   messages,
   type DbBlockContent,
+  type DbChat,
   type DbMessage,
   type DbNewMessage,
   type DbReaction,
@@ -688,6 +689,7 @@ function equalMessageEntities(left: MessageEntities | undefined, right: MessageE
 }
 
 type InsertMessageOutput = {
+  chat: DbChat
   message: DbMessage & { blockContent?: BlockContent | null }
   update: UpdateSeqAndDate
   agentContextUpdate?: UpdateSeqAndDate
@@ -805,6 +807,16 @@ async function insertMessage(
       .where(eq(chats.id, chatId))
 
     return {
+      chat: {
+        ...chat,
+        agentContext: initialAgentContext
+          ? Buffer.from(initialAgentContext.encoded)
+          : chat.agentContext,
+        lastMsgId: nextId,
+        messageIdCounter: nextId,
+        updateSeq: update.seq,
+        lastUpdateDate: update.date,
+      },
       message: {
         ...newDbMessage,
         blockContent: preparedBlockContent?.blockContent ?? null,
