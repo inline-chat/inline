@@ -1,6 +1,8 @@
 import Foundation
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
 import Logger
+#endif
 import SwiftUI
 
 public class OnboardingUtils: @unchecked Sendable {
@@ -9,43 +11,45 @@ public class OnboardingUtils: @unchecked Sendable {
   public var hPadding: CGFloat = 24
   public var buttonBottomPadding: CGFloat = 18
 
+  #if !IOS_ONBOARDING_GALLERY_APP
   public func showError(
-    error: APIError,
-    errorMsg: Binding<String>,
-    isEmail: Bool = false,
-    isPhoneNumber: Bool = false
+    error: any Error,
+    errorMsg: Binding<String>
   ) {
-    switch error {
-      case .invalidURL:
-        Log.shared.error("Failed invalidURL", error: error)
-      case .invalidResponse:
-        errorMsg.wrappedValue =
-          "Your \(isPhoneNumber ? "phone number" : isEmail ? "email" : "code") is incorrect. Please try again."
-        Log.shared.error("Failed invalidResponse", error: error)
-      case let .httpError(statusCode):
-        if statusCode == 500 {
-          errorMsg.wrappedValue =
-            "Your \(isPhoneNumber ? "phone number" : isEmail ? "email" : "code") is incorrect. Please try again."
-          Log.shared.error("Failed httpError \(statusCode)", error: error)
+    let fallback = String(localized: "Something went wrong. Please try again.")
+    let message: String?
 
-        } else {
-          Log.shared.error("Failed httpError \(statusCode)", error: error)
-        }
-      case .decodingError:
-        errorMsg.wrappedValue =
-          "Your \(isPhoneNumber ? "phone number" : isEmail ? "email" : "code") is incorrect. Please try again."
-        Log.shared.error("Failed decodingError", error: error)
+    if let apiError = error as? APIError {
+      message = switch apiError {
       case .networkError:
-        errorMsg.wrappedValue = "Please check your connection."
-        Log.shared.error("Failed networkError", error: error)
-      case .rateLimited:
-        errorMsg.wrappedValue = "Too many tries. Please try again after a few minutes."
-        Log.shared.error("Failed rateLimited", error: error)
-      case let .error(error_, errorCode, description):
-        errorMsg.wrappedValue = description ?? "Unknown error"
-        Log.shared.error("Failed error \(error_)", error: error)
+        String(localized: "Check your connection and try again.")
+      case .rateLimited, .httpError(statusCode: 420), .httpError(statusCode: 429):
+        String(localized: "Too many tries. Please try again after a few minutes.")
+      case .httpError(statusCode: 408):
+        String(localized: "The request took too long. Please try again.")
+      case let .error(_, _, description):
+        description
+      case .invalidURL, .invalidResponse, .httpError, .decodingError:
+        fallback
+      }
+    } else if let urlError = error as? URLError {
+      message = urlError.code == .timedOut
+        ? String(localized: "The request took too long. Please try again.")
+        : String(localized: "Check your connection and try again.")
+    } else {
+      // Native login preserves public RPC messages through LocalizedError.
+      message = (error as? any LocalizedError)?.errorDescription
     }
+
+    if let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      errorMsg.wrappedValue = message
+    } else {
+      errorMsg.wrappedValue = fallback
+    }
+    Log.shared.error("Onboarding request failed", error: error)
   }
+
+  #endif
 
   public init() {}
 }

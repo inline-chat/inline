@@ -1,7 +1,11 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import Auth
 import InlineKit
+import InlineUI
 import Logger
+import MultipartFormDataKit
 import RealtimeV2
+#endif
 import SwiftUI
 
 enum UsernameStatus: Equatable {
@@ -15,33 +19,47 @@ struct Profile: View {
   let userId: Int64
 
   @State private var errorMsg = ""
+  @State private var isLoadingPhoto = false
+  @State private var saveTask: Task<Void, Never>?
+  #if IOS_ONBOARDING_GALLERY_APP
+  @State private var hasHydratedProfile = true
+  #else
   @State private var hasHydratedProfile = false
+  @State private var persistedUser: User?
+  @State private var avatarLocalURL: URL?
+  #endif
   @FocusState private var isFocused: Bool
 
   @EnvironmentObject private var nav: OnboardingNavigation
+  #if !IOS_ONBOARDING_GALLERY_APP
   @Environment(\.appDatabase) private var database
   @Environment(\.realtimeV2) private var realtimeV2
+  #endif
   @FormState private var formState
 
-  private let placeHolder = "Name"
+  private let placeHolder = "Enter your name"
+  private let profilePhotoSize: CGFloat = 160
 
   var body: some View {
     Group {
       if hasHydratedProfile {
-        VStack(spacing: 20) {
-          Spacer()
-
-          VStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.fill")
-              .resizable()
-              .scaledToFit()
-              .frame(width: 34, height: 34)
-              .foregroundColor(.primary)
-
-            Text(NSLocalizedString("Set up your profile", comment: "Profile setup title"))
-              .font(.onboardingIOSTitle.weight(.medium))
-              .foregroundStyle(.primary)
+        OnboardingFormPage(
+          focus: $isFocused,
+          autofocus: nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        ) {
+          OnboardingProfilePhotoPicker(
+            photo: $nav.profilePhoto,
+            isLoading: $isLoadingPhoto,
+            errorMessage: $errorMsg,
+            size: profilePhotoSize,
+            hasExistingPhoto: hasExistingPhoto,
+            isSaving: formState.isLoading,
+            lookupPhoto: lookupXPhoto,
+            savePhoto: saveSelectedPhoto
+          ) {
+            existingProfileAvatar
           }
+          .padding(.bottom, 16)
 
           VStack(spacing: 8) {
             nameSection
@@ -51,13 +69,12 @@ struct Profile: View {
                 .font(.callout)
                 .foregroundColor(.red)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
             }
           }
-          .padding(.horizontal, OnboardingUtils.shared.hPadding)
-
-          Spacer()
+        } actions: {
+          bottomButton
         }
-        .safeAreaInset(edge: .bottom) { bottomButton }
       } else {
         ProgressView()
           .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -65,20 +82,27 @@ struct Profile: View {
     }
     .onChange(of: nav.profileName) { _, _ in errorMsg = "" }
     .task { await hydratePersistedProfile() }
+    .navigationBarBackButtonHidden(formState.isLoading)
+    .onDisappear { saveTask?.cancel() }
   }
 }
 
 extension Profile {
   @MainActor
   private func hydratePersistedProfile() async {
+    #if !IOS_ONBOARDING_GALLERY_APP
     nav.prepareProfileDraft(for: userId)
-    defer {
-      hasHydratedProfile = true
-      isFocused = true
-    }
+    defer { hasHydratedProfile = true }
 
     do {
       guard let user = try await User.fetch(id: userId, from: database) else { return }
+      let localURL = await Task.detached { () -> URL? in
+        guard let url = user.getLocalURL(), FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+      }.value
+      guard !Task.isCancelled else { return }
+      persistedUser = user
+      avatarLocalURL = localURL
       if nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         let persistedName = user.fullName.trimmingCharacters(in: .whitespacesAndNewlines)
         nav.profileName = persistedName
@@ -86,42 +110,146 @@ extension Profile {
     } catch {
       Log.shared.error("Failed to load persisted onboarding profile", error: error)
     }
+    #endif
   }
 
   private func submitName() {
-    guard !formState.isLoading else { return }
+    guard !formState.isLoading, !isLoadingPhoto else { return }
+    let trimmedName = nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedName.isEmpty else {
+      errorMsg = "Please enter your name"
+      return
+    }
 
-    Task {
+    #if IOS_ONBOARDING_GALLERY_APP
+    nav.push(.username(userId: userId))
+    #else
+    let photo = nav.profilePhoto
+    errorMsg = ""
+    isFocused = false
+    formState.startLoading()
+    saveTask = Task {
+      defer { formState.reset() }
       do {
-        formState.startLoading()
-        let trimmedName = nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-          errorMsg = "Please enter your name"
-          formState.reset()
-          return
-        }
+        let mutationToken = try Auth.shared.handle.beginAccountMutation()
+        guard mutationToken.userID == userId else { throw CancellationError() }
 
         let (firstName, lastName) = parseNameComponents(from: trimmedName)
         let result = try await realtimeV2.updateProfile(
           firstName: firstName,
-          lastName: lastName,
+          lastName: lastName ?? "",
           bio: nil
         )
-        await realtimeV2.applyUpdates(result.updates)
-        try await database.dbWriter.write { db in
-          try User(from: result.user).save(db)
+        try Auth.shared.handle.validateAccountMutation(mutationToken)
+        try Task.checkCancellation()
+        await realtimeV2.applyUpdatesAndWait(result.updates)
+        persistedUser = try await database.dbWriter.write { db in
+          try Auth.shared.handle.validateAccountMutation(mutationToken)
+          return try User.save(db, user: result.user)
         }
-        formState.reset()
+
+        if let photo, !photo.isUploaded {
+          nav.profilePhoto = try await saveProfilePhoto(photo, mutationToken: mutationToken)
+        }
+
+        try Auth.shared.handle.validateAccountMutation(mutationToken)
+        try Task.checkCancellation()
         nav.push(.username(userId: userId))
+      } catch is CancellationError {
+        return
       } catch let error as APIError {
+        guard !Task.isCancelled else { return }
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
-        formState.reset()
       } catch {
-        Log.shared.error("Failed to save onboarding name", error: error)
-        errorMsg = "Failed to save your name. Please try again."
-        formState.reset()
+        guard !Task.isCancelled else { return }
+        Log.shared.error("Failed to save onboarding profile", error: error)
+        errorMsg = error.localizedDescription
       }
     }
+    #endif
+  }
+
+  private func saveSelectedPhoto(_ photo: OnboardingProfilePhoto) async throws -> OnboardingProfilePhoto {
+    #if IOS_ONBOARDING_GALLERY_APP
+    var savedPhoto = photo
+    savedPhoto.isUploaded = true
+    return savedPhoto
+    #else
+    let mutationToken = try Auth.shared.handle.beginAccountMutation()
+    return try await saveProfilePhoto(photo, mutationToken: mutationToken)
+    #endif
+  }
+
+  #if !IOS_ONBOARDING_GALLERY_APP
+  private func saveProfilePhoto(
+    _ photo: OnboardingProfilePhoto,
+    mutationToken: AuthAccountMutationToken
+  ) async throws -> OnboardingProfilePhoto {
+    try Auth.shared.handle.validateAccountMutation(mutationToken)
+    guard mutationToken.userID == userId else { throw CancellationError() }
+    try Task.checkCancellation()
+    guard !photo.isUploaded else { return photo }
+
+    let (filename, mimeType) = switch photo.fileFormat {
+    case .jpeg: ("profile-photo.jpg", MIMEType.imageJpeg)
+    case .png: ("profile-photo.png", MIMEType.imagePng)
+    }
+    let upload = try await ApiClient.shared.uploadFile(
+      type: .photo,
+      data: photo.data,
+      filename: filename,
+      mimeType: mimeType,
+      progress: { _ in }
+    )
+    try Auth.shared.handle.validateAccountMutation(mutationToken)
+    try Task.checkCancellation()
+    let result = try await realtimeV2.setProfilePhoto(fileUniqueID: upload.fileUniqueId)
+    try Auth.shared.handle.validateAccountMutation(mutationToken)
+    try Task.checkCancellation()
+    await realtimeV2.applyUpdatesAndWait(result.updates)
+    let savedUser = try await database.dbWriter.write { db in
+      try Auth.shared.handle.validateAccountMutation(mutationToken)
+      return try User.save(db, user: result.user)
+    }
+    try Auth.shared.handle.validateAccountMutation(mutationToken)
+    try Task.checkCancellation()
+    persistedUser = savedUser
+    avatarLocalURL = nil
+    do {
+      try await User.cacheImageData(userId: userId, data: photo.data)
+      if let cachedUser = try await User.fetch(id: userId, from: database) {
+        try Auth.shared.handle.validateAccountMutation(mutationToken)
+        try Task.checkCancellation()
+        persistedUser = cachedUser
+        avatarLocalURL = cachedUser.getLocalURL()
+      }
+    } catch {
+      Log.shared.error("Failed to cache onboarding profile photo", error: error)
+    }
+    try Auth.shared.handle.validateAccountMutation(mutationToken)
+    try Task.checkCancellation()
+    var savedPhoto = photo
+    savedPhoto.isUploaded = true
+    return savedPhoto
+  }
+  #endif
+
+  private func lookupXPhoto(_ username: String) async throws -> Data {
+    #if IOS_ONBOARDING_GALLERY_APP
+    throw OnboardingProfilePhotoError.previewUnavailable
+    #else
+    let result = try await realtimeV2.getExternalProfilePhoto(provider: .x, username: username)
+    switch result.status {
+    case .externalProfilePhotoFound where !result.photo.isEmpty:
+      return result.photo
+    case .externalProfilePhotoNotFound:
+      throw OnboardingProfilePhotoError.notFound
+    case .externalProfilePhotoUnavailable:
+      throw OnboardingProfilePhotoError.unavailable
+    case .unspecified, .externalProfilePhotoFound, .UNRECOGNIZED:
+      throw OnboardingProfilePhotoError.invalidImage
+    }
+    #endif
   }
 
   private func parseNameComponents(from fullName: String) -> (firstName: String, lastName: String?) {
@@ -139,6 +267,45 @@ extension Profile {
 // MARK: - Views
 
 extension Profile {
+  private var canContinue: Bool {
+    !nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && !formState.isLoading
+      && !isLoadingPhoto
+  }
+
+  private var hasExistingPhoto: Bool {
+    #if IOS_ONBOARDING_GALLERY_APP
+    false
+    #else
+    persistedUser?.stableAvatarIdentity != nil
+      || persistedUser?.profileCdnUrl != nil
+      || avatarLocalURL != nil
+    #endif
+  }
+
+  @ViewBuilder
+  private var existingProfileAvatar: some View {
+    #if IOS_ONBOARDING_GALLERY_APP
+    Color.clear
+    #else
+    if let user = persistedUser {
+      UserAvatar(
+        userID: userId,
+        firstName: nav.profileName,
+        lastName: nil,
+        email: user.email,
+        username: user.username,
+        stableAvatarIdentity: user.stableAvatarIdentity,
+        remoteURL: user.getRemoteURL(),
+        localURL: avatarLocalURL,
+        size: profilePhotoSize
+      )
+    } else {
+      Color.clear
+    }
+    #endif
+  }
+
   @ViewBuilder
   private var nameSection: some View {
     TextField(placeHolder, text: $nav.profileName)
@@ -146,32 +313,29 @@ extension Profile {
       .textContentType(.name)
       .textInputAutocapitalization(.words)
       .multilineTextAlignment(.center)
-      .font(.body)
-      .padding(.horizontal, 20)
-      .padding(.vertical, 16)
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(.ultraThinMaterial)
-          .overlay(
-            RoundedRectangle(cornerRadius: 16)
-              .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
-          )
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 16))
+      .onboardingFormField()
+      .frame(maxWidth: 320)
+      .submitLabel(.continue)
+      .disabled(formState.isLoading)
       .onSubmit { submitName() }
   }
 
   @ViewBuilder
   private var bottomButton: some View {
-    Button(formState.isLoading ? "Saving..." : "Continue") {
+    Button {
       submitName()
+    } label: {
+      HStack(spacing: 8) {
+        if formState.isLoading || isLoadingPhoto {
+          ProgressView()
+            .tint(.secondary)
+        }
+        Text("Continue")
+      }
     }
-    .buttonStyle(OnboardingAccentButtonStyle())
-    .frame(maxWidth: .infinity)
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
-    .disabled(formState.isLoading)
-    .opacity(formState.isLoading ? 0.5 : 1)
+    .buttonStyle(OnboardingFormButtonStyle())
+    .frame(maxWidth: 320)
+    .disabled(!canContinue)
   }
 }
 
@@ -180,33 +344,29 @@ struct OnboardingUsername: View {
 
   @State private var errorMsg = ""
   @State private var usernameStatus: UsernameStatus = .idle
+  #if IOS_ONBOARDING_GALLERY_APP
+  @State private var hasHydratedProfile = true
+  #else
   @State private var hasHydratedProfile = false
+  #endif
   @FocusState private var isFocused: Bool
 
   @EnvironmentObject private var nav: OnboardingNavigation
+  #if IOS_ONBOARDING_GALLERY_APP
+  @EnvironmentObject private var gallery: OnboardingGallerySession
+  #else
   @EnvironmentObject private var appNavigation: Navigation
   @EnvironmentObject private var mainViewRouter: MainViewRouter
   @Environment(\.appDatabase) private var database
   @Environment(\.realtimeV2) private var realtimeV2
+  #endif
   @FormState private var formState
 
   var body: some View {
     Group {
       if hasHydratedProfile {
-        VStack(spacing: 20) {
-          Spacer()
-
-          VStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.fill")
-              .resizable()
-              .scaledToFit()
-              .frame(width: 34, height: 34)
-              .foregroundColor(.primary)
-
-            Text("Choose a username")
-              .font(.onboardingIOSTitle.weight(.medium))
-              .foregroundStyle(.primary)
-          }
+        OnboardingFormPage(focus: $isFocused) {
+          OnboardingFormHeader(title: Text("Choose a username"), systemImage: "at")
 
           VStack(spacing: 8) {
             usernameSection
@@ -216,13 +376,12 @@ struct OnboardingUsername: View {
                 .font(.callout)
                 .foregroundColor(.red)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
             }
           }
-          .padding(.horizontal, OnboardingUtils.shared.hPadding)
-
-          Spacer()
+        } actions: {
+          bottomButton
         }
-        .safeAreaInset(edge: .bottom) { bottomButton }
       } else {
         ProgressView()
           .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -236,11 +395,9 @@ struct OnboardingUsername: View {
 extension OnboardingUsername {
   @MainActor
   private func hydratePersistedProfile() async {
+    #if !IOS_ONBOARDING_GALLERY_APP
     nav.prepareProfileDraft(for: userId)
-    defer {
-      hasHydratedProfile = true
-      isFocused = true
-    }
+    defer { hasHydratedProfile = true }
 
     do {
       guard let user = try await User.fetch(id: userId, from: database) else { return }
@@ -249,6 +406,7 @@ extension OnboardingUsername {
     } catch {
       Log.shared.error("Failed to load persisted onboarding username", error: error)
     }
+    #endif
   }
 
   @MainActor
@@ -262,6 +420,9 @@ extension OnboardingUsername {
       return
     }
 
+    #if IOS_ONBOARDING_GALLERY_APP
+    usernameStatus = candidate == "taken" ? .taken : .available
+    #else
     usernameStatus = .checking
     do {
       try await Task.sleep(for: .milliseconds(400))
@@ -284,19 +445,23 @@ extension OnboardingUsername {
       usernameStatus = .idle
       errorMsg = error.localizedDescription
     }
+    #endif
   }
 
   private func submitUsername() {
     guard !formState.isLoading, usernameStatus == .available else { return }
 
+    #if IOS_ONBOARDING_GALLERY_APP
+    gallery.didFinish = true
+    #else
     let candidate = cleanUsername(nav.profileUsername)
     Task {
       do {
         formState.startLoading()
         let result = try await realtimeV2.changeUsername(candidate)
-        await realtimeV2.applyUpdates(result.updates)
-        try await database.dbWriter.write { db in
-          try User(from: result.user).save(db)
+        await realtimeV2.applyUpdatesAndWait(result.updates)
+        _ = try await database.dbWriter.write { db in
+          try User.save(db, user: result.user)
         }
         appNavigation.reset()
         nav.reset()
@@ -313,6 +478,7 @@ extension OnboardingUsername {
         usernameStatus = .idle
       }
     }
+    #endif
   }
 
   private func cleanUsername(_ value: String) -> String {
@@ -331,18 +497,7 @@ extension OnboardingUsername {
       .textInputAutocapitalization(.never)
       .autocorrectionDisabled(true)
       .multilineTextAlignment(.center)
-      .font(.body)
-      .padding(.horizontal, 20)
-      .padding(.vertical, 16)
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(.ultraThinMaterial)
-          .overlay(
-            RoundedRectangle(cornerRadius: 16)
-              .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
-          )
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 16))
+      .onboardingFormField(horizontalPadding: 48)
       .overlay(alignment: .trailing) {
         usernameStatusIndicator
           .padding(.trailing, 20)
@@ -377,15 +532,12 @@ extension OnboardingUsername {
     Button(formState.isLoading ? "Creating Account..." : "Continue") {
       submitUsername()
     }
-    .buttonStyle(OnboardingAccentButtonStyle())
-    .frame(maxWidth: .infinity)
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
-    .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+    .buttonStyle(OnboardingFormButtonStyle())
     .disabled(formState.isLoading || usernameStatus != .available)
-    .opacity((formState.isLoading || usernameStatus != .available) ? 0.5 : 1)
   }
 }
 
+#if !IOS_ONBOARDING_GALLERY_APP
 #Preview("Profile - Light Mode") {
   Profile(userId: 1)
     .preferredColorScheme(.light)
@@ -423,3 +575,4 @@ extension OnboardingUsername {
     .environmentObject(MainViewRouter())
     .environment(\.appDatabase, AppDatabase.empty())
 }
+#endif

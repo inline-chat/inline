@@ -440,6 +440,10 @@ extension UIMessageView {
   func createServiceContainerView() -> UIView {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
+    if case .pinnedMessage = message.serviceMessage?.event {
+      view.backgroundColor = .clear
+      return view
+    }
     view.backgroundColor = .tertiarySystemFill
     view.layer.cornerRadius = 11
     view.layer.masksToBounds = true

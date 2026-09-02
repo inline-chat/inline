@@ -232,6 +232,10 @@ class MessageTableCell: NSView {
     messageView?.setListHoverState(isHovered)
   }
 
+  var quickActionsMessageView: MinimalMessageViewAppKit? {
+    messageView as? MinimalMessageViewAppKit
+  }
+
   func containsMessageHoverPoint(_ point: NSPoint, from coordinateView: NSView) -> Bool {
     messageView?.containsListHoverPoint(point, from: coordinateView) ?? false
   }

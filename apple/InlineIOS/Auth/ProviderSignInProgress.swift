@@ -1,68 +1,61 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 import SwiftUI
 import UIKit
 
 struct ProviderSignInProgress: View {
   let provider: ProviderSignInProvider
 
+  #if IOS_ONBOARDING_GALLERY_APP
+  @EnvironmentObject private var coordinator: OnboardingGalleryProviderState
+  #else
   @ObservedObject private var coordinator = ProviderSignInCoordinator.shared
+  #endif
   @State private var attemptID = UUID()
   @State private var openingBrowser = false
   @State private var signInURL: URL?
 
   var body: some View {
-    VStack(spacing: 16) {
-      Spacer()
+    OnboardingFormPage {
+      VStack(spacing: 12) {
+        OnboardingFormHeader(title: Text("Continue in your browser"), systemImage: "safari")
 
-      Image(systemName: "safari")
-        .font(.system(size: 28, weight: .regular))
-        .foregroundStyle(.secondary)
-
-      Text("Continue in your browser")
-        .font(.onboardingIOSTitle.weight(.medium))
-        .multilineTextAlignment(.center)
-
-      if let error = coordinator.errorMessage {
-        Text(error)
+        Text(coordinator.errorMessage ?? statusDescription)
+          .font(.subheadline)
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
-          .frame(maxWidth: 340)
-
+      }
+    } actions: {
+      if coordinator.errorMessage != nil {
         Button("Try Again") {
           coordinator.clearError()
           signInURL = nil
           attemptID = UUID()
         }
-        .buttonStyle(OnboardingAccentButtonStyle())
+        .buttonStyle(OnboardingFormButtonStyle())
       } else {
-        Text(statusDescription)
-          .foregroundStyle(.secondary)
-          .multilineTextAlignment(.center)
-
         Button {
           Task { await openSignInURL() }
         } label: {
           HStack(spacing: 8) {
             if isBusy {
               ProgressView()
-                .tint(.white)
             }
             Text(buttonTitle)
           }
         }
-        .buttonStyle(OnboardingAccentButtonStyle())
+        .buttonStyle(OnboardingFormButtonStyle())
         .disabled(isBusy)
-        .frame(maxWidth: 340)
       }
-
-      Spacer()
     }
-    .padding(.horizontal, OnboardingUtils.shared.hPadding)
     .task(id: attemptID) {
       await start()
     }
     .onDisappear {
+      #if !IOS_ONBOARDING_GALLERY_APP
       coordinator.cancelPendingAttempt()
+      #endif
     }
   }
 
@@ -87,6 +80,10 @@ struct ProviderSignInProgress: View {
   }
 
   private func start() async {
+    #if IOS_ONBOARDING_GALLERY_APP
+    // Keep the real page's waiting state without opening a browser or starting authentication.
+    signInURL = URL(string: "https://example.invalid/onboarding-gallery")
+    #else
     guard !openingBrowser, !coordinator.isRedeeming else { return }
     openingBrowser = true
     defer { openingBrowser = false }
@@ -100,9 +97,13 @@ struct ProviderSignInProgress: View {
     } catch {
       // startURL records failures only when this is still the active attempt.
     }
+    #endif
   }
 
   private func openSignInURL() async {
+    #if IOS_ONBOARDING_GALLERY_APP
+    coordinator.showBrowserPreviewNotice()
+    #else
     guard let signInURL, !openingBrowser, !coordinator.isRedeeming else { return }
     openingBrowser = true
     defer { openingBrowser = false }
@@ -110,5 +111,6 @@ struct ProviderSignInProgress: View {
       coordinator.recordBrowserOpenFailure(APIError.invalidURL, for: signInURL)
       return
     }
+    #endif
   }
 }

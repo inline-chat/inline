@@ -101,9 +101,7 @@ class MentionTableCellView: NSTableCellView {
       let imageView = NSImageView()
       imageView.image = NSImage(systemSymbolName: "person.2.fill", accessibilityDescription: nil)
       imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-      imageView.contentTintColor = .secondaryLabelColor
       imageView.wantsLayer = true
-      imageView.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.2).cgColor
       imageView.layer?.cornerRadius = MentionCompletionMenu.Layout.avatarSize / 2
       imageView.translatesAutoresizingMaskIntoConstraints = false
       containerView.addSubview(imageView)
@@ -155,6 +153,7 @@ class MentionTableCellView: NSTableCellView {
     // Set content compression resistance so username can shrink if needed
     nameLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
     usernameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    updateAppearance()
   }
 
   private func updateAppearance() {
@@ -170,6 +169,15 @@ class MentionTableCellView: NSTableCellView {
       containerView.layer?.backgroundColor = NSColor.clear.cgColor
       nameLabel.textColor = .labelColor
       usernameLabel.textColor = .secondaryLabelColor
+    }
+
+    if let groupIconView {
+      groupIconView.contentTintColor = isSelected ? .white : .secondaryLabelColor
+      let backgroundColor: NSColor = isSelected ? .white : .quaternaryLabelColor
+      groupIconView.layer?.backgroundColor = backgroundColor
+        .withAlphaComponent(0.2)
+        .resolvedColor(with: effectiveAppearance)
+        .cgColor
     }
   }
 

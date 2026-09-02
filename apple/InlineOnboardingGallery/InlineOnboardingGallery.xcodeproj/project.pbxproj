@@ -1,0 +1,518 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1028923892C9F70BC0E4AA37 /* OnboardingNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6362E9137FFC8FFC0CE1B72 /* OnboardingNavigation.swift */; };
+		123A14FE983E59416E110B9C /* CircularCropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7B58198247500705FB58CE5 /* CircularCropView.swift */; };
+		13AD8FB1C7A7E43AA7F5C1AF /* GetStarted.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4426D5977187DC95F791CFEC /* GetStarted.swift */; };
+		38504EA8A1937209199BE423 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80492AB402DAE178A0526C72 /* OnboardingView.swift */; };
+		3F20944D51EAB67D621DF3FE /* OnboardingGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F764465503A1C08B48986B7 /* OnboardingGalleryView.swift */; };
+		43082A10191AE71CFBB43C95 /* NativeAppleSignInProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5ADBF3F32195C0296FFC0C2 /* NativeAppleSignInProgress.swift */; };
+		4A373F3A81F666D028740269 /* Code.swift in Sources */ = {isa = PBXBuildFile; fileRef = D68F72483AF2301A1A02A283 /* Code.swift */; };
+		4F7749DCD109D8CF5CAC7DB0 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DFE59A06AE214B88C77D65 /* ImagePicker.swift */; };
+		50E4B879AFBB39EC28B6F65D /* InviteCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD4634E9ACB81025D5A49D1 /* InviteCode.swift */; };
+		529DFC6BF81D3CA6E5D76F1A /* NativeAppleSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E510D8E1312282977AAB1E74 /* NativeAppleSignInButton.swift */; };
+		5C4CABE62470832E9A0B7EEB /* OnboardingGalleryPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A03AC7F03D65F3F0F80095FF /* OnboardingGalleryPage.swift */; };
+		67F38E2749A1D6DC7D4E18E2 /* PhoneNumber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79D6BB39EF78DFA65EEE100F /* PhoneNumber.swift */; };
+		6D3EB2482AB1165F424509EA /* ProviderSignInProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1520CA548AC43ED2C9579758 /* ProviderSignInProgress.swift */; };
+		720950381FCA7BA3ED741DDF /* ProviderSignInProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30C36537900C18104F851E65 /* ProviderSignInProvider.swift */; };
+		7951C1286DBFE4B4A5148FA9 /* OnboardingGallerySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCC02B4BCC659187361A1231 /* OnboardingGallerySession.swift */; };
+		7EEA37332D72EF7A4D7E654E /* ButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A95070A6E70C9BCE528E41B /* ButtonStyles.swift */; };
+		8684E0C042E24093BCFB7035 /* FormState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798A3DEA2F5F19BBB579519B /* FormState.swift */; };
+		94C750C61F04464B42DA630A /* Countries.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFCA86F1F898A1DF42B803D4 /* Countries.swift */; };
+		9EE5F04D9A71D3D9E45A332C /* Email.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043A0F387DE8945082079642 /* Email.swift */; };
+		AD541D06A6318349266430CA /* OnboardingProfilePhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEF59CE06DD4280FF34348DF /* OnboardingProfilePhoto.swift */; };
+		B6D7F14DFE3F29DBDE03A430 /* OnboardingPlatform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F8CB1799FADD77EA32ECD61 /* OnboardingPlatform.swift */; };
+		C28257FE7C8993E4F943E75D /* OnboardingUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184BE89D1841F6F24CFDC5BA /* OnboardingUtils.swift */; };
+		C8B03832C72627B1C8D0E842 /* OnboardingFormComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF456A0DA851C2A94B0F0EF /* OnboardingFormComponents.swift */; };
+		C8D74D55915656059D528A87 /* Welcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B2CEB44E7B2D9CE7CCB7A99 /* Welcome.swift */; };
+		CDF83903BC83E3C91B9A2BE3 /* OnboardingGalleryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A03E853329AE1449DE0A987B /* OnboardingGalleryApp.swift */; };
+		DF7D02B36C7A099FD21E35BB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4C20101A422A390D6F1183C1 /* Assets.xcassets */; };
+		EB9FA81854C762B06A714C58 /* PhoneNumberCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA70B08E4D91990EB55EC32E /* PhoneNumberCode.swift */; };
+		F690C5ED593B638FDFA3E9AB /* PhoneNumberField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75EA0E1B7D5D93E0978E1A9F /* PhoneNumberField.swift */; };
+		F6BE50ED3F8FADA377B7ED91 /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7984E0AEC2BDC595DED2E588 /* Profile.swift */; };
+		F9CE8C5BA3206D28939FC37C /* OnboardingGalleryPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2741350581E97ED5397331 /* OnboardingGalleryPreview.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		043A0F387DE8945082079642 /* Email.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Email.swift; sourceTree = "<group>"; };
+		1520CA548AC43ED2C9579758 /* ProviderSignInProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSignInProgress.swift; sourceTree = "<group>"; };
+		184BE89D1841F6F24CFDC5BA /* OnboardingUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingUtils.swift; sourceTree = "<group>"; };
+		1F8CB1799FADD77EA32ECD61 /* OnboardingPlatform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingPlatform.swift; sourceTree = "<group>"; };
+		30C36537900C18104F851E65 /* ProviderSignInProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSignInProvider.swift; sourceTree = "<group>"; };
+		4426D5977187DC95F791CFEC /* GetStarted.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GetStarted.swift; sourceTree = "<group>"; };
+		4A95070A6E70C9BCE528E41B /* ButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonStyles.swift; sourceTree = "<group>"; };
+		4BD4634E9ACB81025D5A49D1 /* InviteCode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteCode.swift; sourceTree = "<group>"; };
+		4C20101A422A390D6F1183C1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5B2CEB44E7B2D9CE7CCB7A99 /* Welcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Welcome.swift; sourceTree = "<group>"; };
+		5C2741350581E97ED5397331 /* OnboardingGalleryPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGalleryPreview.swift; sourceTree = "<group>"; };
+		5F764465503A1C08B48986B7 /* OnboardingGalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGalleryView.swift; sourceTree = "<group>"; };
+		5FF456A0DA851C2A94B0F0EF /* OnboardingFormComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFormComponents.swift; sourceTree = "<group>"; };
+		75EA0E1B7D5D93E0978E1A9F /* PhoneNumberField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneNumberField.swift; sourceTree = "<group>"; };
+		7984E0AEC2BDC595DED2E588 /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
+		798A3DEA2F5F19BBB579519B /* FormState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormState.swift; sourceTree = "<group>"; };
+		79D6BB39EF78DFA65EEE100F /* PhoneNumber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneNumber.swift; sourceTree = "<group>"; };
+		80492AB402DAE178A0526C72 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		A03AC7F03D65F3F0F80095FF /* OnboardingGalleryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGalleryPage.swift; sourceTree = "<group>"; };
+		A03E853329AE1449DE0A987B /* OnboardingGalleryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGalleryApp.swift; sourceTree = "<group>"; };
+		B5DFE59A06AE214B88C77D65 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
+		B6362E9137FFC8FFC0CE1B72 /* OnboardingNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingNavigation.swift; sourceTree = "<group>"; };
+		BEF59CE06DD4280FF34348DF /* OnboardingProfilePhoto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingProfilePhoto.swift; sourceTree = "<group>"; };
+		BFCA86F1F898A1DF42B803D4 /* Countries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Countries.swift; sourceTree = "<group>"; };
+		C7B58198247500705FB58CE5 /* CircularCropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularCropView.swift; sourceTree = "<group>"; };
+		CA70B08E4D91990EB55EC32E /* PhoneNumberCode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneNumberCode.swift; sourceTree = "<group>"; };
+		CCC02B4BCC659187361A1231 /* OnboardingGallerySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGallerySession.swift; sourceTree = "<group>"; };
+		D68F72483AF2301A1A02A283 /* Code.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Code.swift; sourceTree = "<group>"; };
+		E510D8E1312282977AAB1E74 /* NativeAppleSignInButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAppleSignInButton.swift; sourceTree = "<group>"; };
+		E5ADBF3F32195C0296FFC0C2 /* NativeAppleSignInProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAppleSignInProgress.swift; sourceTree = "<group>"; };
+		F5C5C503B93473A1E2CDDC09 /* InlineOnboardingGallery.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = InlineOnboardingGallery.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		33F745649DB52B64E65B494B /* InlineIOS */ = {
+			isa = PBXGroup;
+			children = (
+				4C20101A422A390D6F1183C1 /* Assets.xcassets */,
+				4F0937B79E2592FE88895497 /* Auth */,
+				C0D414EFB349E242FCD5848D /* UI */,
+				85EC6CDE84B59B7E7674739B /* Utils */,
+			);
+			path = InlineIOS;
+			sourceTree = "<group>";
+		};
+		365EB8D46569DE00325F7429 /* InlineKit */ = {
+			isa = PBXGroup;
+			children = (
+				6BAEB5537539DBE77159BF29 /* Sources */,
+			);
+			path = InlineKit;
+			sourceTree = "<group>";
+		};
+		452B56BD4A08A28A5F68A838 /* InlineKit */ = {
+			isa = PBXGroup;
+			children = (
+				798A3DEA2F5F19BBB579519B /* FormState.swift */,
+				599DE0493DB9EE77444F547B /* Auth */,
+			);
+			path = InlineKit;
+			sourceTree = "<group>";
+		};
+		4F0937B79E2592FE88895497 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				D68F72483AF2301A1A02A283 /* Code.swift */,
+				043A0F387DE8945082079642 /* Email.swift */,
+				4426D5977187DC95F791CFEC /* GetStarted.swift */,
+				4BD4634E9ACB81025D5A49D1 /* InviteCode.swift */,
+				E510D8E1312282977AAB1E74 /* NativeAppleSignInButton.swift */,
+				E5ADBF3F32195C0296FFC0C2 /* NativeAppleSignInProgress.swift */,
+				5FF456A0DA851C2A94B0F0EF /* OnboardingFormComponents.swift */,
+				BEF59CE06DD4280FF34348DF /* OnboardingProfilePhoto.swift */,
+				80492AB402DAE178A0526C72 /* OnboardingView.swift */,
+				79D6BB39EF78DFA65EEE100F /* PhoneNumber.swift */,
+				CA70B08E4D91990EB55EC32E /* PhoneNumberCode.swift */,
+				7984E0AEC2BDC595DED2E588 /* Profile.swift */,
+				1520CA548AC43ED2C9579758 /* ProviderSignInProgress.swift */,
+				5B2CEB44E7B2D9CE7CCB7A99 /* Welcome.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		599DE0493DB9EE77444F547B /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				30C36537900C18104F851E65 /* ProviderSignInProvider.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		672745CEB7B93CE5280F1C8B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F5C5C503B93473A1E2CDDC09 /* InlineOnboardingGallery.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		6BAEB5537539DBE77159BF29 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				452B56BD4A08A28A5F68A838 /* InlineKit */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		85EC6CDE84B59B7E7674739B /* Utils */ = {
+			isa = PBXGroup;
+			children = (
+				B5DFE59A06AE214B88C77D65 /* ImagePicker.swift */,
+				B6362E9137FFC8FFC0CE1B72 /* OnboardingNavigation.swift */,
+			);
+			path = Utils;
+			sourceTree = "<group>";
+		};
+		86F7A3BC7778C293FB8CDCCD /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A03E853329AE1449DE0A987B /* OnboardingGalleryApp.swift */,
+				A03AC7F03D65F3F0F80095FF /* OnboardingGalleryPage.swift */,
+				5C2741350581E97ED5397331 /* OnboardingGalleryPreview.swift */,
+				CCC02B4BCC659187361A1231 /* OnboardingGallerySession.swift */,
+				5F764465503A1C08B48986B7 /* OnboardingGalleryView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A74C13C59FFBA1618EC5DC6A = {
+			isa = PBXGroup;
+			children = (
+				C7A9FCC6218F8E5454091915 /* apple */,
+				86F7A3BC7778C293FB8CDCCD /* Sources */,
+				672745CEB7B93CE5280F1C8B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C0D414EFB349E242FCD5848D /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				4A95070A6E70C9BCE528E41B /* ButtonStyles.swift */,
+				C7B58198247500705FB58CE5 /* CircularCropView.swift */,
+				BFCA86F1F898A1DF42B803D4 /* Countries.swift */,
+				1F8CB1799FADD77EA32ECD61 /* OnboardingPlatform.swift */,
+				184BE89D1841F6F24CFDC5BA /* OnboardingUtils.swift */,
+				75EA0E1B7D5D93E0978E1A9F /* PhoneNumberField.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		C7A9FCC6218F8E5454091915 /* apple */ = {
+			isa = PBXGroup;
+			children = (
+				33F745649DB52B64E65B494B /* InlineIOS */,
+				365EB8D46569DE00325F7429 /* InlineKit */,
+			);
+			name = apple;
+			path = ..;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AB35144B2F833C77D3304A21 /* InlineOnboardingGallery */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5109CACAE836C7B3D86EC9D7 /* Build configuration list for PBXNativeTarget "InlineOnboardingGallery" */;
+			buildPhases = (
+				469B676B3E38056BD2396EA8 /* Sources */,
+				F0178BF09A494222138A00EB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = InlineOnboardingGallery;
+			packageProductDependencies = (
+			);
+			productName = InlineOnboardingGallery;
+			productReference = F5C5C503B93473A1E2CDDC09 /* InlineOnboardingGallery.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		12117738F8787DA1375A7E15 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					AB35144B2F833C77D3304A21 = {
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = A94E57B860BFA9AA6ED4FF24 /* Build configuration list for PBXProject "InlineOnboardingGallery" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = A74C13C59FFBA1618EC5DC6A;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 672745CEB7B93CE5280F1C8B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AB35144B2F833C77D3304A21 /* InlineOnboardingGallery */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F0178BF09A494222138A00EB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DF7D02B36C7A099FD21E35BB /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		469B676B3E38056BD2396EA8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7EEA37332D72EF7A4D7E654E /* ButtonStyles.swift in Sources */,
+				123A14FE983E59416E110B9C /* CircularCropView.swift in Sources */,
+				4A373F3A81F666D028740269 /* Code.swift in Sources */,
+				94C750C61F04464B42DA630A /* Countries.swift in Sources */,
+				9EE5F04D9A71D3D9E45A332C /* Email.swift in Sources */,
+				8684E0C042E24093BCFB7035 /* FormState.swift in Sources */,
+				13AD8FB1C7A7E43AA7F5C1AF /* GetStarted.swift in Sources */,
+				4F7749DCD109D8CF5CAC7DB0 /* ImagePicker.swift in Sources */,
+				50E4B879AFBB39EC28B6F65D /* InviteCode.swift in Sources */,
+				529DFC6BF81D3CA6E5D76F1A /* NativeAppleSignInButton.swift in Sources */,
+				43082A10191AE71CFBB43C95 /* NativeAppleSignInProgress.swift in Sources */,
+				C8B03832C72627B1C8D0E842 /* OnboardingFormComponents.swift in Sources */,
+				CDF83903BC83E3C91B9A2BE3 /* OnboardingGalleryApp.swift in Sources */,
+				5C4CABE62470832E9A0B7EEB /* OnboardingGalleryPage.swift in Sources */,
+				F9CE8C5BA3206D28939FC37C /* OnboardingGalleryPreview.swift in Sources */,
+				7951C1286DBFE4B4A5148FA9 /* OnboardingGallerySession.swift in Sources */,
+				3F20944D51EAB67D621DF3FE /* OnboardingGalleryView.swift in Sources */,
+				1028923892C9F70BC0E4AA37 /* OnboardingNavigation.swift in Sources */,
+				B6D7F14DFE3F29DBDE03A430 /* OnboardingPlatform.swift in Sources */,
+				AD541D06A6318349266430CA /* OnboardingProfilePhoto.swift in Sources */,
+				C28257FE7C8993E4F943E75D /* OnboardingUtils.swift in Sources */,
+				38504EA8A1937209199BE423 /* OnboardingView.swift in Sources */,
+				67F38E2749A1D6DC7D4E18E2 /* PhoneNumber.swift in Sources */,
+				EB9FA81854C762B06A714C58 /* PhoneNumberCode.swift in Sources */,
+				F690C5ED593B638FDFA3E9AB /* PhoneNumberField.swift in Sources */,
+				F6BE50ED3F8FADA377B7ED91 /* Profile.swift in Sources */,
+				6D3EB2482AB1165F424509EA /* ProviderSignInProgress.swift in Sources */,
+				720950381FCA7BA3ED741DDF /* ProviderSignInProvider.swift in Sources */,
+				C8D74D55915656059D528A87 /* Welcome.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		11823B0E187B48326615848E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) IOS_ONBOARDING_GALLERY_APP";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		2E51E2ADAEB2DD8400652967 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Resources/OnboardingGallery.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose a profile photo for this local onboarding preview.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "chat.inline.tools.ios-onboarding-gallery";
+				PRODUCT_NAME = "iOS Onboarding";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		56316CE58201A48FF430B7B8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = YES;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) IOS_ONBOARDING_GALLERY_APP";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		D3AC78F56005A0D2B3C68AC0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Resources/OnboardingGallery.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose a profile photo for this local onboarding preview.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "chat.inline.tools.ios-onboarding-gallery";
+				PRODUCT_NAME = "iOS Onboarding";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5109CACAE836C7B3D86EC9D7 /* Build configuration list for PBXNativeTarget "InlineOnboardingGallery" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E51E2ADAEB2DD8400652967 /* Debug */,
+				D3AC78F56005A0D2B3C68AC0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A94E57B860BFA9AA6ED4FF24 /* Build configuration list for PBXProject "InlineOnboardingGallery" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				11823B0E187B48326615848E /* Debug */,
+				56316CE58201A48FF430B7B8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 12117738F8787DA1375A7E15 /* Project object */;
+}

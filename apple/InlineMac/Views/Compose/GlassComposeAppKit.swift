@@ -316,6 +316,7 @@ class GlassComposeAppKit: NSView {
   private let rightButtonSpacing: CGFloat = 6
   private var silentModeButtonWidthConstraint: NSLayoutConstraint?
   private var silentModeToSendConstraint: NSLayoutConstraint?
+  private var silentModeToEdgeConstraint: NSLayoutConstraint?
   private var glassTextTrailingConstraint: NSLayoutConstraint?
   private var glassAttachmentWidthConstraint: NSLayoutConstraint?
   private var glassTrailingWidthConstraint: NSLayoutConstraint?
@@ -349,10 +350,19 @@ class GlassComposeAppKit: NSView {
   )
 
   private lazy var silentModeButton: ComposeSilentModeButton = {
-    let view = ComposeSilentModeButton(mode: controlMode)
+    let view = ComposeSilentModeButton(
+      mode: controlMode,
+      presentation: layout == .accessoryBar ? .accessoryBar : .standard
+    )
     view.onClick = { [weak self] in
-      guard let self, case .chat = usage else { return }
-      state.setSendSilently(false)
+      guard let self, canMutateDraft else { return }
+      switch usage {
+        case .chat:
+          state.setSendSilently(false)
+        case let .newThread(context):
+          context.setSendSilently(!context.sendSilently())
+          updateSilentModeUI(animated: false)
+      }
     }
     view.isHidden = true
     return view
@@ -450,7 +460,7 @@ class GlassComposeAppKit: NSView {
   private var glassTrailingView: NSView?
   private var glassAccessoryBarView: NSView?
   private var glassAccessoryHeightConstraint: NSLayoutConstraint?
-  private var glassSupplementaryToSendConstraint: NSLayoutConstraint?
+  private var glassSupplementaryToControlsConstraint: NSLayoutConstraint?
   private var glassSupplementaryToEdgeConstraint: NSLayoutConstraint?
   private var isAccessoryBarExpanded = false
   private var newThreadEscapeKeyUnsubscribe: (() -> Void)?
@@ -592,9 +602,7 @@ class GlassComposeAppKit: NSView {
       setupReplyingView()
     }
     setUpConstraints()
-    if case .chat = usage {
-      updateSilentModeUI(animated: false, forceLayout: false)
-    }
+    updateSilentModeUI(animated: false, forceLayout: false)
     updateVoiceAvailability()
     setupTextEditor()
   }
@@ -662,6 +670,9 @@ class GlassComposeAppKit: NSView {
           supplementaryView.translatesAutoresizingMaskIntoConstraints = false
           supplementaryView.setContentHuggingPriority(.defaultLow, for: .horizontal)
           accessoryBarView.addSubview(supplementaryView)
+        }
+        if capabilities.showsSilentModeToggle {
+          accessoryBarView.addSubview(silentModeButton)
         }
         accessoryBarView.addSubview(sendButton)
         glassAccessoryBarView = accessoryBarView
@@ -903,10 +914,26 @@ class GlassComposeAppKit: NSView {
           sendButton.centerYAnchor.constraint(equalTo: glassAccessoryBarView.centerYAnchor),
         ])
 
+        if capabilities.showsSilentModeToggle {
+          silentModeButtonWidthConstraint?.constant = controlMode.silentButtonSize
+          silentModeToSendConstraint?.constant = -rightButtonSpacing
+          silentModeToEdgeConstraint = silentModeButton.trailingAnchor.constraint(
+            equalTo: glassAccessoryBarView.trailingAnchor,
+            constant: -6
+          )
+          constraints.append(contentsOf: [
+            silentModeButton.centerYAnchor.constraint(equalTo: glassAccessoryBarView.centerYAnchor),
+            silentModeButtonWidthConstraint!,
+            silentModeButton.heightAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
+            silentModeToSendConstraint!,
+          ])
+        }
+
         if case let .newThread(context) = usage {
           let supplementaryView = context.supplementaryAccessoryView
-          glassSupplementaryToSendConstraint = supplementaryView.trailingAnchor.constraint(
-            equalTo: sendButton.leadingAnchor,
+          let trailingControl = capabilities.showsSilentModeToggle ? silentModeButton.leadingAnchor : sendButton.leadingAnchor
+          glassSupplementaryToControlsConstraint = supplementaryView.trailingAnchor.constraint(
+            equalTo: trailingControl,
             constant: -6
           )
           glassSupplementaryToEdgeConstraint = supplementaryView.trailingAnchor.constraint(
@@ -915,7 +942,7 @@ class GlassComposeAppKit: NSView {
           )
           constraints.append(contentsOf: [
             supplementaryView.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor, constant: 6),
-            glassSupplementaryToSendConstraint!,
+            glassSupplementaryToControlsConstraint!,
             supplementaryView.topAnchor.constraint(equalTo: glassAccessoryBarView.topAnchor),
             supplementaryView.bottomAnchor.constraint(equalTo: glassAccessoryBarView.bottomAnchor),
           ])
@@ -1020,7 +1047,16 @@ class GlassComposeAppKit: NSView {
     forceLayout: Bool = true,
     isVoiceActive: Bool? = nil
   ) {
-    guard case .chat = usage else { return }
+    if case let .newThread(context) = usage {
+      guard capabilities.showsSilentModeToggle else { return }
+      let isEnabled = context.sendSilently()
+      sendButton.updateSendSilently(isEnabled)
+      silentModeButton.updateSendSilently(isEnabled)
+      // The accessory bar owns collapsed visibility. Keep the toggle available
+      // even before the draft has content and Send becomes visible.
+      silentModeButton.isHidden = false
+      return
+    }
     let isEnabled = state.sendSilently
     let voiceActive = isVoiceActive ?? currentVoiceActive
     let shouldShow = isEnabled && !voiceActive && canSend
@@ -1092,13 +1128,22 @@ class GlassComposeAppKit: NSView {
     if layout == .accessoryBar {
       let showsSend = canSend
       sendButton.isHidden = !showsSend
-      if showsSend {
+      if capabilities.showsSilentModeToggle {
+        if showsSend {
+          silentModeToEdgeConstraint?.isActive = false
+          silentModeToSendConstraint?.isActive = true
+        } else {
+          silentModeToSendConstraint?.isActive = false
+          silentModeToEdgeConstraint?.isActive = true
+        }
+      } else if showsSend {
         glassSupplementaryToEdgeConstraint?.isActive = false
-        glassSupplementaryToSendConstraint?.isActive = true
+        glassSupplementaryToControlsConstraint?.isActive = true
       } else {
-        glassSupplementaryToSendConstraint?.isActive = false
+        glassSupplementaryToControlsConstraint?.isActive = false
         glassSupplementaryToEdgeConstraint?.isActive = true
       }
+      updateSilentModeUI(animated: false, forceLayout: false)
       return
     }
 
@@ -2514,6 +2559,13 @@ class GlassComposeAppKit: NSView {
       shortcut: InlineTooltipShortcut("\r"),
       placement: placement
     )
+    if capabilities.showsSilentModeToggle {
+      silentModeButton.setInlineTooltip(
+        "Silent mode",
+        description: "Send without notifying people. This choice is remembered for new threads.",
+        placement: placement
+      )
+    }
   }
 
   private func sendNewThread(
@@ -2537,7 +2589,8 @@ class GlassComposeAppKit: NSView {
       text: rawText,
       entities: entities,
       attachments: context.attachmentStore.attachments,
-      destination: context.destination()
+      destination: context.destination(),
+      sendSilently: context.sendSilently()
     )
     guard !draft.isEmpty else { return }
 
@@ -2574,6 +2627,7 @@ class GlassComposeAppKit: NSView {
     guard case .newThread = usage else { return }
     textEditor.textView.isEditable = enabled
     menuButton.isEnabled = enabled
+    silentModeButton.isEnabled = enabled
     if !enabled {
       hideMentionCompletion()
       hideCommandCompletion()

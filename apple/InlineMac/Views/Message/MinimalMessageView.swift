@@ -5,6 +5,7 @@ import Combine
 import Foundation
 import GRDB
 import InlineKit
+import InlineMacUI
 import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageActionRow
 import struct InlineProtocol.MessageEntities
@@ -303,6 +304,7 @@ class MinimalMessageViewAppKit: NSView {
 
   // State
   private var isMouseInside = false
+  private var quickActionsMenu: NSMenu?
 
   private enum Metrics {
     static let hoverSideInset: CGFloat = MessageSizeCalculator.minimalHoverSideInset
@@ -979,6 +981,7 @@ class MinimalMessageViewAppKit: NSView {
     super.viewDidMoveToSuperview()
 
     if superview == nil {
+      quickActionsMenu?.cancelTracking()
       updateHoverState(false)
     }
 
@@ -2983,6 +2986,7 @@ class MinimalMessageViewAppKit: NSView {
     richBlockContentView?.setContentVisible(window != nil)
 
     if window == nil {
+      quickActionsMenu?.cancelTracking()
       updateHoverState(false)
     }
 
@@ -3076,6 +3080,63 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   // MARK: - Context Menu
+
+  var quickActionsCanReact: Bool {
+    message.status != .sending && message.status != .failed
+  }
+
+  var quickActionsCanReply: Bool {
+    quickActionsCanReact && !isAnchorMessage
+  }
+
+  func quickActionsAnchorRect(in coordinateView: NSView) -> NSRect {
+    let anchor = convert(hoverBackgroundView.frame, to: coordinateView)
+    let offset: CGFloat = props.layout.hasAvatar && props.layout.hasName ? 4 : 10
+    return anchor.offsetBy(dx: 0, dy: coordinateView.isFlipped ? -offset : offset)
+  }
+
+  func performQuickAction(
+    _ action: MessageQuickActionsView.Action,
+    from button: NSButton,
+    capsule: NSView
+  ) -> ReactionOverlayWindow? {
+    guard window != nil else { return nil }
+    focusWindowIfNeeded()
+
+    switch action {
+      case .replyInThread:
+        guard quickActionsCanReply else { return nil }
+        replyInThread()
+      case .reaction:
+        guard quickActionsCanReact else { return nil }
+        guard let capsuleWindow = capsule.window else { return nil }
+        let anchorRect = capsuleWindow.convertToScreen(capsule.convert(capsule.bounds, to: nil))
+        return showReactionOverlay(above: anchorRect)
+      case .more:
+        let contextMenu = createMenu(context: .message)
+        // The accessory is a sibling of the row. Preserve message ownership rather than
+        // resolving untargeted actions through the accessory's responder chain.
+        for item in contextMenu.items where item.action != nil && item.target == nil {
+          item.target = self
+        }
+        quickActionsMenu = contextMenu
+        defer { quickActionsMenu = nil }
+        contextMenu.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
+        // A pull-down opens off the button's lower edge instead of centering a
+        // selected menu item over it. Keep the first real action visible.
+        let pullDown = NSPopUpButtonCell(textCell: "", pullsDown: true)
+        pullDown.usesItemFromMenu = false
+        pullDown.arrowPosition = .noArrow
+        pullDown.isBordered = false
+        pullDown.image = button.image
+        pullDown.imagePosition = .imageOnly
+        pullDown.controlSize = .small
+        pullDown.menu = contextMenu
+        pullDown.preferredEdge = button.isFlipped ? .maxY : .minY
+        pullDown.performClick(withFrame: button.bounds.insetBy(dx: 0, dy: -6), in: button)
+    }
+    return nil
+  }
 
   private func setupContextMenu() {
     let newMenu = NSMenu()
@@ -3790,6 +3851,9 @@ class MinimalMessageViewAppKit: NSView {
     )
 
     let prev = self.fullMessage
+    if prev.message.stableId != fullMessage.message.stableId {
+      quickActionsMenu?.cancelTracking()
+    }
 
     prevInViewport = false
 
@@ -4187,6 +4251,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   func reset() {
+    quickActionsMenu?.cancelTracking()
     resetSwipePresentation()
 
     // Cancel translation state observation
@@ -4662,7 +4727,7 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
   func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil, linkURL: URL? = nil) -> NSMenu {
     let menu = NSMenu()
 
-    let regularMessage = message.status != .sending && message.status != .failed
+    let regularMessage = quickActionsCanReact
 
     // Reply
     if regularMessage, !isAnchorMessage {

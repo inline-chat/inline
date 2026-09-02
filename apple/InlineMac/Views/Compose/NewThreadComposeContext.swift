@@ -207,6 +207,7 @@ struct PreparedNewThreadDraft {
   let entities: MessageEntities?
   let attachments: [Drafts2Attachment]
   let destination: NewThreadComposeDestination
+  let sendSilently: Bool
   let mentionedUserIDs: Set<Int64>
   let mentionedGroupIDs: Set<Int64>
 
@@ -215,13 +216,15 @@ struct PreparedNewThreadDraft {
     text: String,
     entities: MessageEntities?,
     attachments: [Drafts2Attachment],
-    destination: NewThreadComposeDestination
+    destination: NewThreadComposeDestination,
+    sendSilently: Bool
   ) {
     self.authorUserID = authorUserID
     self.text = text
     self.entities = Drafts2.normalizedEntities(entities)
     self.attachments = attachments
     self.destination = destination
+    self.sendSilently = sendSilently
     mentionedUserIDs = Self.mentionedUserIDs(in: entities)
     mentionedGroupIDs = Self.mentionedGroupIDs(in: entities)
   }
@@ -271,6 +274,8 @@ struct NewThreadComposeContext {
 
   let sessionID: UUID
   let destination: @MainActor () -> NewThreadComposeDestination
+  let sendSilently: @MainActor () -> Bool
+  let setSendSilently: @MainActor (Bool) -> Void
   let mentionSource: any NewThreadComposeMentionSource
   let attachmentStore: NewThreadComposeAttachmentStore
   let overlayHostView: @MainActor () -> NSView?
@@ -284,6 +289,8 @@ struct NewThreadComposeContext {
   init(
     sessionID: UUID = UUID(),
     destination: @escaping @MainActor () -> NewThreadComposeDestination,
+    sendSilently: @escaping @MainActor () -> Bool,
+    setSendSilently: @escaping @MainActor (Bool) -> Void,
     mentionSource: any NewThreadComposeMentionSource,
     attachmentStore: NewThreadComposeAttachmentStore,
     overlayHostView: @escaping @MainActor () -> NSView?,
@@ -296,6 +303,8 @@ struct NewThreadComposeContext {
   ) {
     self.sessionID = sessionID
     self.destination = destination
+    self.sendSilently = sendSilently
+    self.setSendSilently = setSendSilently
     self.mentionSource = mentionSource
     self.attachmentStore = attachmentStore
     self.overlayHostView = overlayHostView

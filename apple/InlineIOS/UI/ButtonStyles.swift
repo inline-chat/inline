@@ -1,21 +1,16 @@
 import SwiftUI
 
-struct SimpleWhiteButtonStyle: ButtonStyle {
+struct SimpleWhiteButtonStyle: PrimitiveButtonStyle {
   @Environment(\.colorScheme) private var colorScheme
 
   func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .foregroundColor(.black)
-      .font(.body)
-      .frame(height: 52)
-      .frame(maxWidth: .infinity)
-      .background(
-        colorScheme == .light ? Color.onboardingSystemGray6 : Color.white.opacity(0.96),
-        in: Capsule()
-      )
-      .opacity(configuration.isPressed ? 0.8 : 1)
-      .scaleEffect(configuration.isPressed ? 0.9 : 1)
-      .animation(.easeInOut(duration: 0.2), value: configuration.isPressed)
+    Button(role: configuration.role, action: configuration.trigger) {
+      configuration.label
+    }
+    .buttonStyle(OnboardingFormButtonStyle(
+      tint: colorScheme == .light ? .onboardingSystemGray6 : .white,
+      foregroundColor: .black
+    ))
   }
 }
 

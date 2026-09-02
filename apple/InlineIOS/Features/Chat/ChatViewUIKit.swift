@@ -833,6 +833,27 @@ private final class KeyboardTrackingAccessoryView: UIView {
 extension ChatContainerView: UIGestureRecognizerDelegate {
   public func gestureRecognizer(
     _ gestureRecognizer: UIGestureRecognizer,
+    shouldReceive touch: UITouch
+  ) -> Bool {
+    guard gestureRecognizer === keyboardDismissTapGestureRecognizer else { return true }
+
+    // A date tap owns navigation. Dismissing the keyboard on the same tap can
+    // change the list's insets and cancel the scroll started by the button.
+    var touchedView = touch.view
+    while let view = touchedView {
+      if view is DateSeparatorView {
+        return false
+      }
+      if view === messagesCollectionView {
+        break
+      }
+      touchedView = view.superview
+    }
+    return true
+  }
+
+  public func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
     shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
   ) -> Bool {
     gestureRecognizer === keyboardDismissTapGestureRecognizer

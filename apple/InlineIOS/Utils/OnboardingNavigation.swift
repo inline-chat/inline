@@ -1,5 +1,7 @@
 import SwiftUI
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 
 enum OnboardingStep: Identifiable, Hashable {
   case welcome
@@ -42,9 +44,9 @@ class OnboardingNavigation: ObservableObject {
   @Published var path: [OnboardingStep] = [.welcome]
   @Published var email: String = ""
   @Published var existingUser: Bool? = nil
-  @Published var goingBack = false
   @Published var profileName = ""
   @Published var profileUsername = ""
+  @Published var profilePhoto: OnboardingProfilePhoto?
   private var profileDraftUserId: Int64?
 
   var canGoBack: Bool {
@@ -52,23 +54,15 @@ class OnboardingNavigation: ObservableObject {
   }
 
   func push(_ step: OnboardingStep) {
-    withAnimation(.snappy) {
-      path.append(step)
-    }
+    #if IOS_ONBOARDING_GALLERY_APP
+    guard path.last != step else { return }
+    #endif
+    path.append(step)
   }
 
   func pop() {
     guard canGoBack else { return }
-    withAnimation(.snappy) {
-      goingBack = true
-      path.removeLast()
-
-      // Reset going back flag after animation
-      Task { @MainActor in
-        try? await Task.sleep(for: .seconds(0.3))
-        goingBack = false
-      }
-    }
+    path.removeLast()
   }
 
   func prepareProfileDraft(for userId: Int64) {
@@ -76,15 +70,16 @@ class OnboardingNavigation: ObservableObject {
     profileDraftUserId = userId
     profileName = ""
     profileUsername = ""
+    profilePhoto = nil
   }
 
   func reset() {
     path = [.welcome]
     email = ""
     existingUser = nil
-    goingBack = false
     profileDraftUserId = nil
     profileName = ""
     profileUsername = ""
+    profilePhoto = nil
   }
 }

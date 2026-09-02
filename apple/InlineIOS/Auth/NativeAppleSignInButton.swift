@@ -1,36 +1,158 @@
 import AuthenticationServices
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 import SwiftUI
 import UIKit
 
-struct NativeAppleSignInButton: View {
-  @EnvironmentObject private var navigation: OnboardingNavigation
-  @Environment(\.colorScheme) private var colorScheme
+struct NativeAppleSignInButton<Label: View>: View {
+  #if IOS_ONBOARDING_GALLERY_APP
+  @EnvironmentObject private var coordinator: OnboardingGalleryProviderState
+  #else
   @ObservedObject private var coordinator = ProviderSignInCoordinator.shared
-  @State private var isPreparing = false
+  #endif
+  @StateObject private var authorization: NativeAppleAuthorizationCoordinator
+  private let label: Label
+
+  init(navigation: OnboardingNavigation, @ViewBuilder label: () -> Label) {
+    #if IOS_ONBOARDING_GALLERY_APP
+    _authorization = StateObject(wrappedValue: NativeAppleAuthorizationCoordinator(navigation: navigation))
+    #else
+    _authorization = StateObject(wrappedValue: NativeAppleAuthorizationCoordinator(
+      navigation: navigation,
+      coordinator: .shared
+    ))
+    #endif
+    self.label = label()
+  }
 
   var body: some View {
-    ZStack {
-      NativeAppleAuthorizationButton(
-        style: colorScheme == .dark ? .white : .whiteOutline,
-        isEnabled: !coordinator.isRedeeming,
-        prepare: coordinator.prepareNativeAppleAuthorization,
-        onPreparingChanged: { isPreparing = $0 },
-        onAuthorized: handleAuthorization,
-        onCancelled: coordinator.cancelNativeAppleAuthorization,
-        onFailure: handleFailure
-      )
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .id(colorScheme)
+    Button(action: authorization.begin) {
+      label
+        .opacity(authorization.isPreparing ? 0 : 1)
+        .overlay {
+          if authorization.isPreparing {
+            ProgressView()
+          }
+        }
+    }
+    .buttonStyle(SimpleWhiteButtonStyle())
+    .disabled(coordinator.isRedeeming || authorization.isBusy)
+    .accessibilityLabel("Continue with Apple")
+    .background(NativeAppleAuthorizationAnchor(authorization: authorization))
+  }
+}
 
-      if isPreparing {
-        ProgressView()
-          .tint(.black)
-          .allowsHitTesting(false)
+private struct NativeAppleAuthorizationAnchor: UIViewRepresentable {
+  let authorization: NativeAppleAuthorizationCoordinator
+
+  func makeUIView(context: Context) -> UIView {
+    let view = UIView()
+    view.isUserInteractionEnabled = false
+    authorization.presentationView = view
+    return view
+  }
+
+  func updateUIView(_ view: UIView, context: Context) {
+    authorization.presentationView = view
+  }
+}
+
+#if IOS_ONBOARDING_GALLERY_APP
+@MainActor
+private final class NativeAppleAuthorizationCoordinator: ObservableObject {
+  let isPreparing = false
+  let isBusy = false
+  weak var presentationView: UIView?
+  private let navigation: OnboardingNavigation
+
+  init(navigation: OnboardingNavigation) {
+    self.navigation = navigation
+  }
+
+  func begin() {
+    navigation.push(.nativeAppleProgress)
+  }
+}
+#else
+@MainActor
+private final class NativeAppleAuthorizationCoordinator: NSObject, ObservableObject,
+  ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+  @Published private(set) var isPreparing = false
+  @Published private var authorizationController: ASAuthorizationController?
+  weak var presentationView: UIView?
+
+  private let navigation: OnboardingNavigation
+  private let coordinator: ProviderSignInCoordinator
+
+  var isBusy: Bool {
+    isPreparing || authorizationController != nil
+  }
+
+  init(navigation: OnboardingNavigation, coordinator: ProviderSignInCoordinator) {
+    self.navigation = navigation
+    self.coordinator = coordinator
+    super.init()
+  }
+
+  func begin() {
+    guard !isBusy, !coordinator.isRedeeming else { return }
+    isPreparing = true
+
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      do {
+        let preparation = try await coordinator.prepareNativeAppleAuthorization()
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.requestedScopes = [.fullName, .email]
+        request.state = preparation.state
+        request.nonce = preparation.nonce
+        let controller = ASAuthorizationController(authorizationRequests: [request])
+        controller.delegate = self
+        controller.presentationContextProvider = self
+        authorizationController = controller
+        isPreparing = false
+        controller.performRequests()
+      } catch is CancellationError {
+        isPreparing = false
+      } catch {
+        isPreparing = false
+        handleFailure(error)
       }
     }
-    .frame(maxWidth: .infinity)
-    .frame(height: 52)
+  }
+
+  func authorizationController(
+    controller: ASAuthorizationController,
+    didCompleteWithAuthorization authorization: ASAuthorization
+  ) {
+    authorizationController = nil
+    guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+      handleFailure(APIError.invalidResponse)
+      return
+    }
+    handleAuthorization(credential)
+  }
+
+  func authorizationController(
+    controller: ASAuthorizationController,
+    didCompleteWithError error: Error
+  ) {
+    authorizationController = nil
+    let nsError = error as NSError
+    if nsError.domain == ASAuthorizationError.errorDomain,
+       nsError.code == ASAuthorizationError.canceled.rawValue {
+      coordinator.cancelNativeAppleAuthorization()
+    } else {
+      handleFailure(error)
+    }
+  }
+
+  func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+    if let window = presentationView?.window { return window }
+    return UIApplication.shared.connectedScenes
+      .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+      .first ?? UIWindow()
   }
 
   private func handleAuthorization(_ credential: ASAuthorizationAppleIDCredential) {
@@ -53,120 +175,6 @@ struct NativeAppleSignInButton: View {
   private func handleFailure(_ error: Error) {
     coordinator.recordNativeAppleAuthorizationFailure(error)
     navigation.push(.nativeAppleProgress)
-  }
-}
-
-private struct NativeAppleAuthorizationButton: UIViewRepresentable {
-  let style: ASAuthorizationAppleIDButton.Style
-  let isEnabled: Bool
-  let prepare: @MainActor () async throws -> NativeAppleAuthorizationRequest
-  let onPreparingChanged: @MainActor (Bool) -> Void
-  let onAuthorized: @MainActor (ASAuthorizationAppleIDCredential) -> Void
-  let onCancelled: @MainActor () -> Void
-  let onFailure: @MainActor (Error) -> Void
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator(parent: self)
-  }
-
-  func makeUIView(context: Context) -> ASAuthorizationAppleIDButton {
-    let button = ASAuthorizationAppleIDButton(type: .continue, style: style)
-    button.cornerRadius = 26
-    button.addTarget(context.coordinator, action: #selector(Coordinator.begin), for: .touchUpInside)
-    context.coordinator.button = button
-    return button
-  }
-
-  func updateUIView(_ button: ASAuthorizationAppleIDButton, context: Context) {
-    context.coordinator.parent = self
-    context.coordinator.updateButtonState()
-  }
-
-  @MainActor
-  final class Coordinator: NSObject, ASAuthorizationControllerDelegate,
-    ASAuthorizationControllerPresentationContextProviding {
-    var parent: NativeAppleAuthorizationButton
-    weak var button: ASAuthorizationAppleIDButton?
-    var isPreparing = false
-    private var authorizationController: ASAuthorizationController?
-
-    init(parent: NativeAppleAuthorizationButton) {
-      self.parent = parent
-    }
-
-    @objc func begin() {
-      guard !isPreparing, authorizationController == nil else { return }
-      isPreparing = true
-      updateButtonState()
-      parent.onPreparingChanged(true)
-
-      Task { @MainActor [weak self] in
-        guard let self else { return }
-        do {
-          let preparation = try await parent.prepare()
-          let request = ASAuthorizationAppleIDProvider().createRequest()
-          request.requestedScopes = [.fullName, .email]
-          request.state = preparation.state
-          request.nonce = preparation.nonce
-          let controller = ASAuthorizationController(authorizationRequests: [request])
-          controller.delegate = self
-          controller.presentationContextProvider = self
-          authorizationController = controller
-          finishPreparing()
-          controller.performRequests()
-        } catch is CancellationError {
-          finishPreparing()
-        } catch {
-          finishPreparing()
-          parent.onFailure(error)
-        }
-      }
-    }
-
-    func authorizationController(
-      controller: ASAuthorizationController,
-      didCompleteWithAuthorization authorization: ASAuthorization
-    ) {
-      authorizationController = nil
-      guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential else {
-        updateButtonState()
-        parent.onFailure(APIError.invalidResponse)
-        return
-      }
-      parent.onAuthorized(credential)
-    }
-
-    func authorizationController(
-      controller: ASAuthorizationController,
-      didCompleteWithError error: Error
-    ) {
-      authorizationController = nil
-      updateButtonState()
-      let nsError = error as NSError
-      if nsError.domain == ASAuthorizationError.errorDomain,
-         nsError.code == ASAuthorizationError.canceled.rawValue {
-        parent.onCancelled()
-      } else {
-        parent.onFailure(error)
-      }
-    }
-
-    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-      if let window = button?.window { return window }
-      return UIApplication.shared.connectedScenes
-        .compactMap { ($0 as? UIWindowScene)?.keyWindow }
-        .first ?? UIWindow()
-    }
-
-    private func finishPreparing() {
-      isPreparing = false
-      updateButtonState()
-      parent.onPreparingChanged(false)
-    }
-
-    func updateButtonState() {
-      button?.isEnabled = parent.isEnabled && !isPreparing && authorizationController == nil
-    }
   }
 }
 
@@ -213,3 +221,4 @@ private enum NativeAppleProfileCache {
     return value?.isEmpty == false ? value : nil
   }
 }
+#endif

@@ -157,21 +157,10 @@ final class ComposeEmojiButton: NSView {
   }
 
   private func updateBackgroundColor() {
-    guard mode.usesCustomHoverFill else {
-      layer?.backgroundColor = NSColor.clear.cgColor
-      return
-    }
-
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.2
-      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-
-      if isHovering {
-        layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.1).cgColor
-      } else {
-        layer?.backgroundColor = NSColor.clear.cgColor
-      }
-    }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer?.backgroundColor = isHovering ? NSColor.gray.withAlphaComponent(0.1).cgColor : NSColor.clear.cgColor
+    CATransaction.commit()
   }
 
   private func focusWindowIfNeeded() {

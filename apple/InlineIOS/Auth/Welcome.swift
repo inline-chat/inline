@@ -1,4 +1,6 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 import SwiftUI
 
 struct Welcome: View {
@@ -29,7 +31,7 @@ struct Welcome: View {
             .offset(y: isVisible ? 0 : 20)
             .animation(animation.delay(0.2), value: isVisible)
 
-          Text("A fast, tranquil, AI native work chat app")
+          Text("The interface for multiplayer work")
             .font(.onboardingIOSTitle2)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
@@ -48,7 +50,7 @@ struct Welcome: View {
       } label: {
         Text("Get Started").padding(.horizontal, 40)
       }
-      .buttonStyle(OnboardingAccentButtonStyle())
+      .buttonStyle(OnboardingFormButtonStyle())
       .frame(maxWidth: .infinity)
       .padding(.horizontal, OnboardingUtils.shared.hPadding)
       .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
@@ -69,11 +71,7 @@ struct Welcome: View {
   }
 
   private var onboardingAppIconName: String {
-    #if IOS_ONBOARDING_GALLERY_APP
-    "AppIcon-384"
-    #else
     "AppIconSmall"
-    #endif
   }
 
   struct Footer: View {

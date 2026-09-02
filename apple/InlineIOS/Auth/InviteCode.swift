@@ -1,4 +1,6 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 import SwiftUI
 
 struct InviteCode: View {
@@ -15,8 +17,10 @@ struct InviteCode: View {
   @State private var isChecking = false
   @FocusState private var isFocused: Bool
   @EnvironmentObject var nav: OnboardingNavigation
+  #if !IOS_ONBOARDING_GALLERY_APP
   @EnvironmentObject var api: ApiClient
   @ObservedObject private var providerSignIn = ProviderSignInCoordinator.shared
+  #endif
 
   private var normalizedCode: String {
     code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -27,19 +31,12 @@ struct InviteCode: View {
   }
 
   var body: some View {
-    VStack(spacing: 20) {
-      Spacer()
-
+    OnboardingFormPage(focus: $isFocused) {
       VStack(spacing: 12) {
-        Image(systemName: "ticket.fill")
-          .resizable()
-          .scaledToFit()
-          .frame(width: 34, height: 34)
-          .foregroundColor(.primary)
-
-        Text("Enter access invite code", comment: "Access invite code input title")
-          .font(.onboardingIOSTitle.weight(.medium))
-          .foregroundStyle(.primary)
+        OnboardingFormHeader(
+          title: Text("Enter access invite code", comment: "Access invite code input title"),
+          systemImage: "ticket"
+        )
 
         Text(inviteDescription)
           .font(.subheadline)
@@ -56,25 +53,15 @@ struct InviteCode: View {
             .font(.callout)
             .foregroundColor(.red)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
         }
       }
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-
-      Spacer()
-    }
-    .safeAreaInset(edge: .bottom) {
+    } actions: {
       Button(isChecking ? NSLocalizedString("Checking...", comment: "Checking invite code button loading state") : NSLocalizedString("Continue", comment: "Continue button")) {
         submit()
       }
-      .buttonStyle(OnboardingAccentButtonStyle())
-      .frame(maxWidth: .infinity)
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-      .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+      .buttonStyle(OnboardingFormButtonStyle())
       .disabled(!isInputValid || isChecking)
-      .opacity((isInputValid && !isChecking) ? 1 : 0.5)
-    }
-    .onAppear {
-      isFocused = true
     }
   }
 
@@ -85,19 +72,9 @@ struct InviteCode: View {
       .textInputAutocapitalization(.characters)
       .autocorrectionDisabled(true)
       .monospaced()
-      .font(.title2)
       .multilineTextAlignment(.center)
-      .padding(.horizontal, 20)
-      .padding(.vertical, 16)
-      .background(
-        RoundedRectangle(cornerRadius: 16)
-          .fill(.ultraThinMaterial)
-          .overlay(
-            RoundedRectangle(cornerRadius: 16)
-              .stroke(Color.onboardingSystemGray4, lineWidth: 0.5)
-          )
-      )
-      .clipShape(RoundedRectangle(cornerRadius: 16))
+      .onboardingFormField()
+      .disabled(isChecking)
       .onSubmit {
         submit()
       }
@@ -108,7 +85,8 @@ struct InviteCode: View {
   }
 
   func submit() {
-    guard isInputValid, !isChecking else {
+    guard !isChecking else { return }
+    guard isInputValid else {
       errorMsg = String(
         localized: "Enter the 8-character access invite code.",
         comment: "Access invite code validation error"
@@ -116,24 +94,36 @@ struct InviteCode: View {
       return
     }
 
+    let inviteCode = normalizedCode
+    #if IOS_ONBOARDING_GALLERY_APP
+    errorMsg = ""
+    switch destination {
+      case let .email(email, challengeToken):
+        nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: inviteCode))
+      case let .phone(phoneNumber):
+        nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode))
+      case .nativeApple:
+        nav.push(.profile(userId: OnboardingGallerySession.userID))
+    }
+    #else
     isChecking = true
     errorMsg = ""
 
     Task {
       do {
         if case .nativeApple = destination {
-          await providerSignIn.continueNativeAppleAuthorization(inviteCode: normalizedCode)
+          await providerSignIn.continueNativeAppleAuthorization(inviteCode: inviteCode)
           isChecking = false
           if let error = providerSignIn.errorMessage { errorMsg = error }
           return
         }
-        _ = try await api.checkInviteCode(normalizedCode)
+        _ = try await api.checkInviteCode(inviteCode)
         isChecking = false
         switch destination {
         case let .email(email, challengeToken):
-          nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: normalizedCode))
+          nav.push(.code(email: email, challengeToken: challengeToken, inviteCode: inviteCode))
         case let .phone(phoneNumber):
-          nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: normalizedCode))
+          nav.push(.phoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode))
         case .nativeApple:
           break
         }
@@ -145,6 +135,7 @@ struct InviteCode: View {
         errorMsg = error.localizedDescription
       }
     }
+    #endif
   }
 
   private var inviteDescription: LocalizedStringKey {
@@ -157,8 +148,10 @@ struct InviteCode: View {
   }
 }
 
+#if !IOS_ONBOARDING_GALLERY_APP
 #Preview("Invite Code") {
   InviteCode(destination: .email(email: "user@example.com", challengeToken: nil))
     .environmentObject(OnboardingNavigation())
     .environmentObject(ApiClient.shared)
 }
+#endif

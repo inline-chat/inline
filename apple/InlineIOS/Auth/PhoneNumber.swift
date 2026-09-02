@@ -1,5 +1,7 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
 import Logger
+#endif
 import SwiftUI
 
 struct PhoneNumber: View {
@@ -13,34 +15,27 @@ struct PhoneNumber: View {
 
   private let minPhoneLength = 10
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @EnvironmentObject var nav: OnboardingNavigation
+  #if !IOS_ONBOARDING_GALLERY_APP
   @EnvironmentObject var api: ApiClient
+  #endif
 
   init(prevPhoneNumber: String? = nil) {
     self.prevPhoneNumber = prevPhoneNumber
   }
 
   var body: some View {
-    VStack(spacing: 20) {
-      Spacer()
-
+    OnboardingFormPage(focus: $isFocused) {
       // Icon and title section
-      VStack(spacing: 12) {
-        Image(systemName: "checkmark.message.fill")
-          .resizable()
-          .scaledToFit()
-          .frame(width: 34, height: 34)
-          .foregroundColor(.primary)
-
-        Text(NSLocalizedString("Continue with phone", comment: "Phone sign in title"))
-          .font(.onboardingIOSTitle.weight(.medium))
-          .foregroundStyle(.primary)
-      }
+      OnboardingFormHeader(
+        title: Text(NSLocalizedString("Continue with phone", comment: "Phone sign in title")),
+        systemImage: "checkmark.message"
+      )
 
       // Phone input field
       VStack(spacing: 8) {
-        PhoneNumberField(phoneNumber: $phoneNumber, country: $selectedCountry)
-          .focused($isFocused)
+        PhoneNumberField(phoneNumber: $phoneNumber, country: $selectedCountry, focus: $isFocused)
           .onSubmit {
             submit()
           }
@@ -50,13 +45,13 @@ struct PhoneNumber: View {
             .font(.callout)
             .foregroundColor(.red)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .contentTransition(.opacity)
+            .transition(.opacity)
         }
       }
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-
-      Spacer()
-    }
-    .safeAreaInset(edge: .bottom) {
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: errorMsg)
+    } actions: {
       Button(
         formState
           .isLoading ? NSLocalizedString("Sending Code...", comment: "Sending code button loading state") :
@@ -64,19 +59,14 @@ struct PhoneNumber: View {
       ) {
         submit()
       }
-      .buttonStyle(OnboardingAccentButtonStyle())
-      .frame(maxWidth: .infinity)
-      .padding(.horizontal, OnboardingUtils.shared.hPadding)
-      .padding(.bottom, OnboardingUtils.shared.buttonBottomPadding)
+      .buttonStyle(OnboardingFormButtonStyle())
       .disabled(phoneNumber.count < minPhoneLength || formState.isLoading)
-      .opacity((phoneNumber.count < minPhoneLength || formState.isLoading) ? 0.5 : 1)
     }
     .onAppear {
       if let prevPhoneNumber {
         // Parse the previous phone number to extract country and number
         parsePreviousPhoneNumber(prevPhoneNumber)
       }
-      isFocused = true
     }
     .onChange(of: phoneNumber) { _, _ in
       // Clear error when user starts typing
@@ -100,6 +90,7 @@ struct PhoneNumber: View {
   }
 
   func submit() {
+    guard !formState.isLoading else { return }
     if phoneNumber.count < minPhoneLength {
       errorMsg = String(
         format: NSLocalizedString("Phone number must be at least %d digits.", comment: "Phone number validation error"),
@@ -111,9 +102,12 @@ struct PhoneNumber: View {
 
     let fullPhoneNumber = selectedCountry.dialCode + phoneNumber
 
+    #if IOS_ONBOARDING_GALLERY_APP
+    nav.push(.phoneNumberCode(phoneNumber: fullPhoneNumber))
+    #else
+    formState.startLoading()
     Task {
       do {
-        formState.startLoading()
         let result = try await api.sendSmsCode(phoneNumber: fullPhoneNumber)
 
         Log.shared.debug("result is \(result)")
@@ -124,17 +118,21 @@ struct PhoneNumber: View {
         } else {
           nav.push(.phoneNumberCode(phoneNumber: fullPhoneNumber))
         }
-      } catch let error as APIError {
-        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isPhoneNumber: true)
+      } catch is CancellationError {
+        formState.reset()
+      } catch {
+        OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg)
         formState.reset()
       } catch {
         errorMsg = InlineProtocolNativeLogin.userFacingMessage(for: error)
         formState.reset()
       }
     }
+    #endif
   }
 }
 
+#if !IOS_ONBOARDING_GALLERY_APP
 #Preview("PhoneNumber - Light Mode") {
   PhoneNumber()
     .preferredColorScheme(.light)
@@ -166,3 +164,4 @@ struct PhoneNumber: View {
     .environmentObject(OnboardingNavigation())
     .environmentObject(ApiClient.shared)
 }
+#endif

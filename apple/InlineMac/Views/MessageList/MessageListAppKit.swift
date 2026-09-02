@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import InlineMacUI
 import InlineUI
 import Logger
 import SwiftUI
@@ -105,6 +106,12 @@ class MessageListAppKit: NSViewController {
   private var hoveredMessageStableId: Int64?
   private weak var hoveredMessageCell: MessageTableCell?
   private var messageHoverRefreshScheduled = false
+  private var messageQuickActionsView: MessageQuickActionsView?
+  private var isQuickActionsMenuOpen = false
+  private weak var quickActionsReactionOverlay: ReactionOverlayWindow?
+  private var isQuickActionsPresentationOpen: Bool {
+    isQuickActionsMenuOpen || quickActionsReactionOverlay?.isVisible == true
+  }
   private var isDisposed = false
   private weak var observedToolbar: NSToolbar?
   private var toolbarDisplayModeObservation: NSKeyValueObservation?
@@ -408,6 +415,8 @@ class MessageListAppKit: NSViewController {
 
   private func emitMessageSelectionChange(changedStableIds: Set<Int64>) {
     guard !changedStableIds.isEmpty else { return }
+    hideMessageQuickActions()
+    scheduleMessageHoverRefresh()
     onMessageSelectionChange?(
       MessageListSelectionUpdate(
         isActive: messageSelection.isActive,
@@ -1359,10 +1368,10 @@ class MessageListAppKit: NSViewController {
     log.trace("Scrolling to bottom animated=\(animated)")
     #endif
 
-    isProgrammaticScroll = true
+    beginProgrammaticScroll()
 
     defer {
-      isProgrammaticScroll = false
+      endProgrammaticScroll()
     }
 
     if animated {
@@ -1507,13 +1516,14 @@ class MessageListAppKit: NSViewController {
 
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
+    guard !isQuickActionsPresentationOpen else { return }
     clearHoveredMessage()
   }
 
   private func refreshMessageHoverAfterGeometryChange() {
     guard messageRenderStyle == .minimal else { return }
 
-    guard scrollState == .idle, !isUserScrolling else {
+    guard scrollState == .idle, !isUserScrolling, !isProgrammaticScroll else {
       clearHoveredMessage()
       return
     }
@@ -1522,19 +1532,20 @@ class MessageListAppKit: NSViewController {
   }
 
   private func scheduleMessageHoverRefresh() {
-    guard messageRenderStyle == .minimal, !messageHoverRefreshScheduled else { return }
+    guard messageRenderStyle == .minimal, !isDisposed, !messageHoverRefreshScheduled else { return }
 
     messageHoverRefreshScheduled = true
     DispatchQueue.main.async(qos: .userInteractive) { [weak self] in
       guard let self else { return }
       self.messageHoverRefreshScheduled = false
+      guard !self.isDisposed else { return }
       self.updateHoveredMessageFromCurrentMouseLocation(force: true)
     }
   }
 
   private func updateHoveredMessage(from event: NSEvent) {
     guard messageRenderStyle == .minimal else { return }
-    guard scrollState == .idle, !isUserScrolling else {
+    guard scrollState == .idle, !isUserScrolling, !isProgrammaticScroll else {
       clearHoveredMessage()
       return
     }
@@ -1545,7 +1556,7 @@ class MessageListAppKit: NSViewController {
 
   private func updateHoveredMessageFromCurrentMouseLocation(force: Bool = false) {
     guard messageRenderStyle == .minimal else { return }
-    guard scrollState == .idle, !isUserScrolling else {
+    guard scrollState == .idle, !isUserScrolling, !isProgrammaticScroll else {
       clearHoveredMessage()
       return
     }
@@ -1559,6 +1570,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func updateHoveredMessage(at point: NSPoint, force: Bool = false) {
+    guard !isQuickActionsPresentationOpen else { return }
     guard let target = messageHoverTarget(at: point) else {
       setHoveredMessage(stableId: nil, cell: nil, force: force)
       return
@@ -1569,6 +1581,16 @@ class MessageListAppKit: NSViewController {
 
   private func messageHoverTarget(at point: NSPoint) -> (stableId: Int64, cell: MessageTableCell)? {
     guard tableView.visibleRect.contains(point) else { return nil }
+
+    // The capsule overlaps the preceding row. Keep ownership with its message while
+    // crossing that edge instead of letting NSTableView switch to the row underneath.
+    if let messageQuickActionsView, !messageQuickActionsView.isHidden,
+       messageQuickActionsView.frame.contains(point),
+       let stableId = hoveredMessageStableId, let cell = hoveredMessageCell,
+       cell.quickActionsMessageView?.fullMessage.message.stableId == stableId,
+       messageStableId(forRow: tableView.row(for: cell)) == stableId {
+      return (stableId, cell)
+    }
 
     let row = tableView.row(at: point)
     guard row >= 0, row < tableView.numberOfRows else { return nil }
@@ -1589,13 +1611,98 @@ class MessageListAppKit: NSViewController {
     hoveredMessageCell = cell
 
     if previousCell !== cell {
+      hideMessageQuickActions()
       previousCell?.setMessageHoverState(false)
     }
     cell?.setMessageHoverState(true)
+    updateMessageQuickActions()
   }
 
   private func clearHoveredMessage() {
+    hideMessageQuickActions()
     setHoveredMessage(stableId: nil, cell: nil)
+  }
+
+  private func hideMessageQuickActions() {
+    let reactionOverlay = quickActionsReactionOverlay
+    quickActionsReactionOverlay = nil
+    reactionOverlay?.close()
+    messageQuickActionsView?.setActiveAction(nil)
+    messageQuickActionsView?.hideTooltips()
+    messageQuickActionsView?.isHidden = true
+    messageQuickActionsView?.onAction = nil
+  }
+
+  private func updateMessageQuickActions() {
+    guard messageRenderStyle == .minimal,
+          !isDisposed, !messageSelection.isActive, scrollState == .idle, !isUserScrolling, !isProgrammaticScroll,
+          let cell = hoveredMessageCell, let stableId = hoveredMessageStableId,
+          let renderer = cell.quickActionsMessageView,
+          renderer.fullMessage.message.stableId == stableId,
+          renderer.window != nil else {
+      hideMessageQuickActions()
+      return
+    }
+
+    let anchor = renderer.quickActionsAnchorRect(in: tableView)
+    let viewport = scrollView.effectiveVisibleRect().intersection(tableView.visibleRect)
+    let size = MessageQuickActionsView.preferredSize
+    guard anchor.intersects(viewport), viewport.width >= size.width + 16,
+          viewport.height >= size.height + 8 else {
+      hideMessageQuickActions()
+      return
+    }
+
+    let capsule: MessageQuickActionsView
+    if let existing = messageQuickActionsView {
+      capsule = existing
+    } else {
+      capsule = MessageQuickActionsView(frame: NSRect(origin: .zero, size: size))
+      messageQuickActionsView = capsule
+    }
+
+    capsule.setActionsEnabled(canReply: renderer.quickActionsCanReply, canReact: renderer.quickActionsCanReact)
+    capsule.frame = NSRect(
+      x: min(max(anchor.maxX - size.width - 8, viewport.minX + 8), viewport.maxX - size.width - 8),
+      y: min(max(anchor.minY - size.height / 2, viewport.minY + 4), viewport.maxY - size.height - 4),
+      width: size.width,
+      height: size.height
+    )
+    if tableView.subviews.last !== capsule {
+      tableView.addSubview(capsule, positioned: .above, relativeTo: nil)
+    }
+    capsule.isHidden = false
+    capsule.refreshHoverState()
+    capsule.onAction = { [weak self, weak cell, weak capsule] action, button in
+      guard let self, let cell, let capsule, !isDisposed, !isProgrammaticScroll,
+            !messageSelection.isActive, hoveredMessageCell === cell,
+            let renderer = cell.quickActionsMessageView,
+            renderer.fullMessage.message.stableId == stableId,
+            messageStableId(forRow: tableView.row(for: cell)) == stableId else { return }
+      if action == .reaction, let overlay = quickActionsReactionOverlay, overlay.isVisible {
+        overlay.close()
+        return
+      }
+      // Protect hover during presentation as well as the synchronous menu loop.
+      isQuickActionsMenuOpen = action == .more || action == .reaction
+      quickActionsReactionOverlay?.close()
+      capsule.setActiveAction(isQuickActionsMenuOpen ? action : nil)
+      defer {
+        isQuickActionsMenuOpen = false
+        capsule.setActiveAction(quickActionsReactionOverlay?.isVisible == true ? .reaction : nil)
+        scheduleMessageHoverRefresh()
+      }
+      if let overlay = renderer.performQuickAction(action, from: button, capsule: capsule) {
+        quickActionsReactionOverlay = overlay
+        overlay.toggleButton = button
+        overlay.onClose = { [weak self, weak overlay] in
+          guard let self, quickActionsReactionOverlay === overlay else { return }
+          quickActionsReactionOverlay = nil
+          messageQuickActionsView?.setActiveAction(nil)
+          scheduleMessageHoverRefresh()
+        }
+      }
+    }
   }
 
   private func shouldHoverMessageCell(_ cell: MessageTableCell, stableId: Int64) -> Bool {
@@ -1660,6 +1767,16 @@ class MessageListAppKit: NSViewController {
 
   // True while we're changing scroll position programmatically
   private var isProgrammaticScroll = false
+
+  private func beginProgrammaticScroll() {
+    isProgrammaticScroll = true
+    clearHoveredMessage()
+  }
+
+  private func endProgrammaticScroll() {
+    isProgrammaticScroll = false
+    scheduleMessageHoverRefresh()
+  }
 
   // True when user is scrolling via trackpad or mouse wheel
   private var isUserScrolling = false
@@ -3471,7 +3588,10 @@ extension MessageListAppKit: NSTableViewDelegate {
     cell.identifier = identifier
     cell.setDependencies(dependencies)
     cell.setAvatarSwipeProvider { [weak self] sourceView in
-      self?.avatarOverlayView.grabAvatar(overlapping: sourceView)
+      if self?.messageQuickActionsView?.isHidden == false {
+        self?.clearHoveredMessage()
+      }
+      return self?.avatarOverlayView.grabAvatar(overlapping: sourceView)
     }
 
     let inputProps = messageProps(for: row)
@@ -3767,7 +3887,7 @@ extension MessageListAppKit {
     let distance = abs(targetY - currentY)
 
     // Prepare for animation
-    isProgrammaticScroll = true
+    beginProgrammaticScroll()
 
     // For long distances, use a two-phase animation
     if distance > viewportHeight * 2 {
@@ -3793,7 +3913,7 @@ extension MessageListAppKit {
         } completionHandler: { [weak self] in
           guard let self, !isDisposed, targetScrollRevision == revision else { return }
           // Clean up
-          isProgrammaticScroll = false
+          endProgrammaticScroll()
           updateUnreadIfNeeded()
 
           if shouldHighlight,
@@ -3812,7 +3932,7 @@ extension MessageListAppKit {
       } completionHandler: { [weak self] in
         guard let self, !isDisposed, targetScrollRevision == revision else { return }
         // Clean up
-        isProgrammaticScroll = false
+        endProgrammaticScroll()
         updateUnreadIfNeeded()
 
         if shouldHighlight,
@@ -3873,6 +3993,8 @@ extension MessageListAppKit {
 
     // If not animated, just jump to position
     if !animated {
+      beginProgrammaticScroll()
+      defer { endProgrammaticScroll() }
       scrollView.withoutScrollerFlash { [weak self] in
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -3886,7 +4008,7 @@ extension MessageListAppKit {
     let distance = abs(targetY - currentY)
 
     // Prepare for animation
-    isProgrammaticScroll = true
+    beginProgrammaticScroll()
 
     // For long distances, use a two-phase animation
     if distance > viewportHeight * 2 {
@@ -3911,7 +4033,7 @@ extension MessageListAppKit {
           self.scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
         } completionHandler: { [weak self] in
           // Clean up
-          self?.isProgrammaticScroll = false
+          self?.endProgrammaticScroll()
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.enableScrollbars()
@@ -3927,7 +4049,7 @@ extension MessageListAppKit {
         scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: targetY))
       } completionHandler: { [weak self] in
         // Clean up
-        self?.isProgrammaticScroll = false
+        self?.endProgrammaticScroll()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
           self?.enableScrollbars()

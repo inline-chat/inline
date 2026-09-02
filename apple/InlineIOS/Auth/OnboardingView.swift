@@ -1,11 +1,15 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import Auth
 import InlineKit
+#endif
 import SwiftUI
 
 struct OnboardingView: View {
   @EnvironmentObject private var navigation: OnboardingNavigation
+  #if !IOS_ONBOARDING_GALLERY_APP
   @EnvironmentObject private var mainViewRouter: MainViewRouter
   @ObservedObject private var providerSignIn = ProviderSignInCoordinator.shared
+  #endif
 
   var body: some View {
     NavigationStack(path: $navigation.path) {
@@ -45,7 +49,7 @@ struct OnboardingView: View {
           }
         }
     }
-    .animation(.snappy, value: navigation.path)
+    #if !IOS_ONBOARDING_GALLERY_APP
     .onChange(of: providerSignIn.completion?.id, initial: true) { _, completionID in
       guard let completionID,
         let completion = providerSignIn.consumeCompletion(id: completionID)
@@ -69,9 +73,11 @@ struct OnboardingView: View {
     .onDisappear {
       Task { await InlineProtocolNativeLogin.shared.cancel() }
     }
+    #endif
   }
 }
 
+#if !IOS_ONBOARDING_GALLERY_APP
 #Preview("OnboardingView - Light Mode") {
   OnboardingView()
     .preferredColorScheme(.light)
@@ -121,3 +127,4 @@ struct OnboardingView: View {
       navigation.push(.phoneNumber())
     }
 }
+#endif

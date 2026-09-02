@@ -4,11 +4,6 @@ import CryptoKit
 import Foundation
 import Logger
 
-public enum ProviderSignInProvider: String, Hashable, Sendable {
-  case google
-  case apple
-}
-
 public struct ProviderSignInCompletion: Equatable, Sendable {
   public let id: UUID
   public let userId: Int64

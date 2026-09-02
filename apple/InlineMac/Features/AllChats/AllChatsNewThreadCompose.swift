@@ -30,12 +30,14 @@ private struct AllChatsComposePreferences {
   private let defaults: UserDefaults
   private let destinationKey: String
   private let visibilityKey: String
+  private let sendSilentlyKey: String
 
   init(userID: Int64?, defaults: UserDefaults = .standard) {
     self.defaults = defaults
     let account = userID.map(String.init) ?? "signed-out"
     destinationKey = "macos.allChats.newThread.destination.\(account)"
     visibilityKey = "macos.allChats.newThread.public.\(account)"
+    sendSilentlyKey = "macos.allChats.newThread.sendSilently.\(account)"
   }
 
   var destinationSpaceID: Int64? {
@@ -56,6 +58,10 @@ private struct AllChatsComposePreferences {
     defaults.bool(forKey: visibilityKey) ? .public : .private
   }
 
+  var sendSilently: Bool {
+    defaults.bool(forKey: sendSilentlyKey)
+  }
+
   func save(destination: NewThreadComposeDestination) {
     if let spaceID = destination.spaceID {
       defaults.set("space:\(spaceID)", forKey: destinationKey)
@@ -66,6 +72,10 @@ private struct AllChatsComposePreferences {
 
   func save(visibility: NewThreadComposeDestination.SpaceVisibility) {
     defaults.set(visibility == .public, forKey: visibilityKey)
+  }
+
+  func save(sendSilently: Bool) {
+    defaults.set(sendSilently, forKey: sendSilentlyKey)
   }
 }
 
@@ -117,6 +127,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   )
   @Published private(set) var composeHeight: CGFloat = 42
   @Published private(set) var isSubmitting = false
+  private(set) var sendSilently: Bool
 
   let dependencies: AppDependencies
 
@@ -139,6 +150,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     lockedSpaceID = initialSpaceID
     let preferences = AllChatsComposePreferences(userID: dependencies.auth.currentUserId)
     self.preferences = preferences
+    sendSilently = preferences.sendSilently
     lastSpaceVisibility = preferences.visibility
     let persistedSpaceID = preferences.isHome ? nil : preferences.destinationSpaceID
     let restoredSpaceID = persistedSpaceID.flatMap { spaceID in
@@ -229,12 +241,20 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     setDestination(.space(id: id, visibility: next))
   }
 
+  private func setSendSilently(_ enabled: Bool) {
+    guard !isSubmitting, sendSilently != enabled else { return }
+    sendSilently = enabled
+    preferences.save(sendSilently: enabled)
+  }
+
   func makeContext(
     overlayHost: @escaping @MainActor () -> NSView?,
     supplementaryAccessoryView: NSView
   ) -> NewThreadComposeContext {
     NewThreadComposeContext(
       destination: { [weak self] in self?.destination ?? .home },
+      sendSilently: { self.sendSilently },
+      setSendSilently: { self.setSendSilently($0) },
       mentionSource: mentionSource,
       attachmentStore: attachmentStore,
       overlayHostView: overlayHost,
@@ -418,6 +438,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       )
       let peer: InlineKit.Peer = .thread(id: chatID)
       createdPeer = peer
+      ChatsManager.get(for: peer, chatId: chatID).setSendSilently(draft.sendSilently)
       os_signpost(
         .event,
         log: performanceLog,
@@ -501,6 +522,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       let chatID = response.chat.id
       let peer: InlineKit.Peer = .thread(id: chatID)
       createdPeer = peer
+      ChatsManager.get(for: peer, chatId: chatID).setSendSilently(draft.sendSilently)
       os_signpost(
         .event,
         log: performanceLog,
@@ -655,7 +677,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       text: text,
       peerId: peer,
       chatId: chatID,
-      entities: draft.entities
+      entities: draft.entities,
+      sendMode: draft.sendSilently ? .modeSilent : nil
     )) != nil
   }
 
@@ -674,7 +697,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
           peerId: peer,
           chatId: chatID,
           mediaItems: [attachment.media],
-          entities: index == 0 ? draft.entities : nil
+          entities: index == 0 ? draft.entities : nil,
+          sendMode: draft.sendSilently ? .modeSilent : nil
         )
       ))
       guard admitted else {
@@ -746,6 +770,7 @@ private final class NewThreadComposeOverlayHostView: NSView {
 private final class NewThreadGlassComposeHostView: NSView {
   let compose: GlassComposeAppKit
   private weak var completionOverlayHostView: NewThreadComposeOverlayHostView?
+  private var focusRequested: Binding<Bool> = .constant(false)
 
   init(
     model: AllChatsNewThreadComposeModel,
@@ -794,6 +819,33 @@ private final class NewThreadGlassComposeHostView: NSView {
     compose.didLayout()
   }
 
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    scheduleRequestedFocus()
+  }
+
+  func updateFocusRequest(_ focusRequested: Binding<Bool>) {
+    self.focusRequested = focusRequested
+    scheduleRequestedFocus()
+  }
+
+  private func scheduleRequestedFocus() {
+    guard focusRequested.wrappedValue, window != nil else { return }
+
+    // Focusing expands Compose and publishes its height, so wait until the
+    // native view is mounted and the current SwiftUI update has finished.
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.focusRequested.wrappedValue else { return }
+
+      self.focusRequested.wrappedValue = false
+      guard self.window?.isKeyWindow == true,
+            !self.isHiddenOrHasHiddenAncestor
+      else { return }
+
+      self.compose.focus()
+    }
+  }
+
   override func viewWillMove(toWindow newWindow: NSWindow?) {
     if newWindow == nil {
       completionOverlayHostView?.removeFromSuperview()
@@ -835,18 +887,22 @@ private final class NewThreadGlassComposeHostView: NSView {
 @available(macOS 26.0, *)
 private struct NewThreadGlassComposeRepresentable: NSViewRepresentable {
   @ObservedObject var model: AllChatsNewThreadComposeModel
+  @Binding var focusRequested: Bool
   let placement: AllChatsNewThreadComposePlacement
 
   func makeNSView(context: Context) -> NewThreadGlassComposeHostView {
     NewThreadGlassComposeHostView(model: model, placement: placement)
   }
 
-  func updateNSView(_ nsView: NewThreadGlassComposeHostView, context: Context) {}
+  func updateNSView(_ nsView: NewThreadGlassComposeHostView, context: Context) {
+    nsView.updateFocusRequest($focusRequested)
+  }
 }
 
 @available(macOS 26.0, *)
 struct AllChatsNewThreadComposeHost: View {
   @StateObject private var model: AllChatsNewThreadComposeModel
+  @Binding private var focusRequested: Bool
 
   let spaces: [AllChatsComposeSpace]
   let selectedSpaceID: Int64?
@@ -856,11 +912,13 @@ struct AllChatsNewThreadComposeHost: View {
     dependencies: AppDependencies,
     spaces: [AllChatsComposeSpace],
     selectedSpaceID: Int64?,
-    placement: AllChatsNewThreadComposePlacement
+    placement: AllChatsNewThreadComposePlacement,
+    focusRequested: Binding<Bool> = .constant(false)
   ) {
     self.spaces = spaces
     self.selectedSpaceID = selectedSpaceID
     self.placement = placement
+    _focusRequested = focusRequested
     _model = StateObject(wrappedValue: AllChatsNewThreadComposeModel(
       dependencies: dependencies,
       spaces: spaces,
@@ -869,7 +927,11 @@ struct AllChatsNewThreadComposeHost: View {
   }
 
   var body: some View {
-    NewThreadGlassComposeRepresentable(model: model, placement: placement)
+    NewThreadGlassComposeRepresentable(
+      model: model,
+      focusRequested: $focusRequested,
+      placement: placement
+    )
       .frame(maxWidth: .infinity)
       .frame(height: model.composeHeight)
       .padding(.horizontal, 12)

@@ -1,4 +1,6 @@
+#if !IOS_ONBOARDING_GALLERY_APP
 import InlineKit
+#endif
 import SwiftUI
 
 struct GetStarted: View {
@@ -33,7 +35,18 @@ private struct GetStartedHeader: View {
 private struct SignInMethods: View {
   @EnvironmentObject private var nav: OnboardingNavigation
 
+  @ViewBuilder
   var body: some View {
+    if #available(iOS 26.0, *) {
+      GlassEffectContainer(spacing: 0) {
+        buttons
+      }
+    } else {
+      buttons
+    }
+  }
+
+  private var buttons: some View {
     VStack(spacing: 8) {
       Button {
         nav.push(.provider(.google))
@@ -51,9 +64,9 @@ private struct SignInMethods: View {
         nav.push(.email())
       } label: {
         loginMethodLabel("Continue with Email") {
-          Image(systemName: "envelope")
+          Image(systemName: "envelope.fill")
             .font(.system(size: 16))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.black)
             .frame(width: 18, height: 18)
         }
       }
@@ -63,15 +76,22 @@ private struct SignInMethods: View {
         nav.push(.phoneNumber())
       } label: {
         loginMethodLabel("Continue with Phone") {
-          Image(systemName: "checkmark.message")
+          Image(systemName: "checkmark.message.fill")
             .font(.system(size: 16))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.black)
             .frame(width: 18, height: 18)
         }
       }
       .buttonStyle(SimpleWhiteButtonStyle())
 
-      NativeAppleSignInButton()
+      NativeAppleSignInButton(navigation: nav) {
+        loginMethodLabel("Continue with Apple") {
+          Image(systemName: "apple.logo")
+            .font(.system(size: 18, weight: .medium))
+            .frame(width: 18, height: 18)
+            .accessibilityHidden(true)
+        }
+      }
     }
   }
 

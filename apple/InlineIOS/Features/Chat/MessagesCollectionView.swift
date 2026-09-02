@@ -178,6 +178,24 @@ final class MessagesCollectionView: UICollectionView {
     syncVisibleBubbleGradients()
   }
 
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    guard !isHidden,
+          alpha > 0.01,
+          isUserInteractionEnabled,
+          self.point(inside: point, with: event)
+    else { return nil }
+
+    // Resolve pinned-date presses before UIScrollView can consume them to stop scrolling.
+    for case let separator as DateSeparatorView in visibleSupplementaryViews(
+      ofKind: UICollectionView.elementKindSectionFooter
+    ).reversed() {
+      if let dateHit = separator.hitTest(convert(point, to: separator), with: event) {
+        return dateHit
+      }
+    }
+    return super.hitTest(point, with: event)
+  }
+
   fileprivate func syncVisibleBubbleGradients() {
     guard let viewport = superview else { return }
     // Convert through the upright container so UIKit absorbs both the collection
@@ -1447,14 +1465,22 @@ private extension MessagesCollectionView {
             indexPath.section < collectionView.numberOfSections,
             indexPath.item < collectionView.numberOfItems(inSection: indexPath.section)
       else {
+        #if DEBUG || DEBUG_BUILD
+        Log.shared.debug("date-navigation event=target-unavailable")
+        #endif
         return
       }
 
-      // Both the collection and its messages are inverted. The oldest message is
-      // the section's last item, and physical `.bottom` is the visual top edge.
+      // Sections are newest-first and the collection is inverted. The last item
+      // is the day's first message; physical `.bottom` aligns it with the visual top.
       dateSeparatorHideWorkItem?.cancel()
       setDateSeparators(hidden: false, animated: false)
       let animated = !UIAccessibility.isReduceMotionEnabled
+      #if DEBUG || DEBUG_BUILD
+      Log.shared.debug(
+        "date-navigation event=scroll-request animated=\(animated) tracking=\(collectionView.isTracking) dragging=\(collectionView.isDragging) keyboard=\((collectionView as? MessagesCollectionView)?.isKeyboardVisible ?? false) offsetY=\(collectionView.contentOffset.y)"
+      )
+      #endif
       collectionView.scrollToItem(
         at: indexPath,
         at: .bottom,
@@ -2545,9 +2571,15 @@ private extension MessagesCollectionView {
           // Safely get section with bounds checking
           if let section = listSection(at: indexPath.section) {
             let sectionID = section.id
-            footerView.configure(with: section.dayString ?? "") { [weak self] in
-              self?.scrollToFirstMessage(in: sectionID)
-            }
+            footerView.configure(
+              with: section.dayString ?? "",
+              onTap: { [weak self] in
+                self?.scrollToFirstMessage(in: sectionID)
+              },
+              onInteractionChanged: { [weak self] isInteracting in
+                self?.dateSeparatorInteractionChanged(isInteracting)
+              }
+            )
           } else {
             // Fallback for invalid section
             footerView.configure(with: "")
@@ -4882,7 +4914,6 @@ private extension MessagesCollectionView {
       guard let collectionView = currentCollectionView else { return }
 
       let footers = collectionView.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionFooter)
-      let targetAlpha: CGFloat = hidden ? 0 : 1
 
       // The physical bottom edge of the visible rect in the collection-view's coordinate space
       let visibleBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.contentInset
@@ -4895,13 +4926,32 @@ private extension MessagesCollectionView {
         let isPinned = abs(separator.frame.maxY - visibleBottom) < 1.0
         guard isPinned else { continue }
 
-        if animated {
-          UIView.animate(withDuration: 0.2) {
-            separator.alpha = targetAlpha
-          }
-        } else {
-          separator.alpha = targetAlpha
-        }
+        separator.setVisible(!hidden, animated: animated)
+      }
+    }
+
+    private func dateSeparatorInteractionChanged(_ isInteracting: Bool) {
+      if isInteracting,
+         let collectionView = currentCollectionView,
+         !collectionView.isDragging,
+         collectionView.isDecelerating || collectionView.isScrollAnimating
+      {
+        // A date press should stop existing motion and still reach the button on this tap.
+        #if DEBUG || DEBUG_BUILD
+        Log.shared.debug(
+          "date-navigation event=stop-scroll decelerating=\(collectionView.isDecelerating) animating=\(collectionView.isScrollAnimating)"
+        )
+        #endif
+        isUserScrollInEffect = false
+        collectionView.stopScrollingAndZooming()
+      }
+
+      // Stopping motion can schedule a hide through scroll delegate callbacks.
+      dateSeparatorHideWorkItem?.cancel()
+      if isInteracting {
+        setDateSeparators(hidden: false, animated: false)
+      } else if !isUserDragging {
+        scheduleHideDateSeparators()
       }
     }
 

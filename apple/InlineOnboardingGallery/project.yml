@@ -1,0 +1,74 @@
+name: InlineOnboardingGallery
+options:
+  bundleIdPrefix: chat.inline.tools
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) IOS_ONBOARDING_GALLERY_APP"
+    SUPPORTS_MACCATALYST: YES
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  InlineOnboardingGallery:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      # These are file references to production sources, never copies or generated previews.
+      - path: ../InlineIOS/Auth
+      - path: ../InlineIOS/Utils/OnboardingNavigation.swift
+      - path: ../InlineIOS/UI/OnboardingPlatform.swift
+      - path: ../InlineIOS/UI/OnboardingUtils.swift
+      - path: ../InlineIOS/UI/ButtonStyles.swift
+      - path: ../InlineIOS/UI/PhoneNumberField.swift
+      - path: ../InlineIOS/UI/Countries.swift
+      - path: ../InlineIOS/UI/CircularCropView.swift
+      - path: ../InlineIOS/Utils/ImagePicker.swift
+      - path: ../InlineKit/Sources/InlineKit/FormState.swift
+      - path: ../InlineKit/Sources/InlineKit/Auth/ProviderSignInProvider.swift
+      - path: ../InlineIOS/Assets.xcassets
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: iOS Onboarding
+        LSApplicationCategoryType: public.app-category.developer-tools
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    entitlements:
+      path: Resources/OnboardingGallery.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+    settings:
+      base:
+        CODE_SIGN_IDENTITY[sdk=macosx*]: "-"
+        PRODUCT_BUNDLE_IDENTIFIER: chat.inline.tools.ios-onboarding-gallery
+        PRODUCT_NAME: iOS Onboarding
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Choose a profile photo for this local onboarding preview.
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+schemes:
+  InlineOnboardingGallery:
+    build:
+      targets:
+        InlineOnboardingGallery: all
+    run:
+      config: Debug

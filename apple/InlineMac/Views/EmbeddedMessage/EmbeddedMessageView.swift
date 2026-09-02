@@ -39,6 +39,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   private var nameTrailingConstraint: NSLayoutConstraint?
   private var messageTrailingConstraint: NSLayoutConstraint?
   private var rectangleWidthConstraint: NSLayoutConstraint?
+  private var rectangleTopConstraint: NSLayoutConstraint?
+  private var rectangleBottomConstraint: NSLayoutConstraint?
   private var heightConstraint: NSLayoutConstraint?
   private var nameLabelHeightConstraint: NSLayoutConstraint?
   private var nameLabelTopConstraint: NSLayoutConstraint?
@@ -225,6 +227,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
       equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
     )
     rectangleWidthConstraint = rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth)
+    rectangleTopConstraint = rectangleView.topAnchor.constraint(equalTo: topAnchor)
+    rectangleBottomConstraint = rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
     heightConstraint = heightAnchor.constraint(equalToConstant: Constants.height)
     nameLabelHeightConstraint = nameLabel.heightAnchor.constraint(equalToConstant: Theme.messageNameLabelHeight)
@@ -247,8 +251,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
       // Rectangle view
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleWidthConstraint!,
-      rectangleView.topAnchor.constraint(equalTo: topAnchor, constant: 0),
-      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 0),
+      rectangleTopConstraint!,
+      rectangleBottomConstraint!,
 
       // Name label
       textLeadingConstraint!,
@@ -337,6 +341,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
 
   func update(with embeddedMessage: EmbeddedMessage, kind: Kind) {
     guard let from = embeddedMessage.from else {
+      self.kind = kind
+      applyLeadingBarVerticalInsets()
       messageLabel.stringValue = "Unknown sender"
       return
     }
@@ -359,6 +365,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
 
   func update(with fullMessage: FullMessage, kind: Kind) {
     guard let from = fullMessage.from else {
+      self.kind = kind
+      applyLeadingBarVerticalInsets()
       messageLabel.stringValue = "Unknown sender"
       return
     }
@@ -502,6 +510,17 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     textLeadingConstraint?.constant = leadingPadding
   }
 
+  private func applyLeadingBarVerticalInsets() {
+    let verticalInset: CGFloat = switch kind {
+      case .replyingInCompose, .editingInCompose, .forwardingInCompose:
+        Constants.verticalPadding
+      case .replyInMessage, .pinnedInHeader:
+        0
+    }
+    rectangleTopConstraint?.constant = verticalInset
+    rectangleBottomConstraint?.constant = -verticalInset
+  }
+
   private func applyTextPadding() {
     nameTrailingConstraint?.constant = -textTrailingPadding
     messageTrailingConstraint?.constant = -textTrailingPadding
@@ -515,6 +534,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     nameLabel.textColor = nameLabelColor
     messageLabel.textColor = textColor
     applyBackgroundAppearance()
+    applyLeadingBarVerticalInsets()
   }
 
   private func setPressed(_ pressed: Bool) {

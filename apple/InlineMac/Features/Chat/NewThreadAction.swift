@@ -3,6 +3,16 @@ import RealtimeV2
 
 @MainActor
 enum NewThreadAction {
+  static func start(dependencies: AppDependencies, nav: Nav3) {
+    if #available(macOS 26.0, *) {
+      dependencies.nav3ChatOpenPreloader?.cancelPendingOpen()
+      nav.openNewThreadComposer()
+      return
+    }
+
+    start(dependencies: dependencies, spaceId: nav.selectedSpaceId)
+  }
+
   static func start(
     dependencies: AppDependencies,
     spaceId: Int64?,

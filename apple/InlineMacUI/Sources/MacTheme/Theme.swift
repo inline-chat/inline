@@ -100,7 +100,7 @@ public enum Theme {
       variant: variant,
       userDefaults: userDefaults
     ).canvas.nsColor
-    let amount: CGFloat = variant == .dark ? 0.189 : 0.126
+    let amount: CGFloat = variant == .dark ? 0.084 : 0.056
     let surface = native.blended(withFraction: amount, of: canvas) ?? native
     return ThemeColorValue(nsColor: surface, appearance: appearance)
   }
