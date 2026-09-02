@@ -126,7 +126,7 @@ type SourceLine = {
 let nextJobId = 0
 const pendingJobs = new Map<number, number>()
 
-export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput) {
+export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput): Promise<void> | undefined {
   const titleGuard = titleGuardForScheduling(input.chat)
   if (!titleGuard) {
     return
@@ -154,20 +154,23 @@ export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput) {
   const jobId = ++nextJobId
   pendingJobs.set(input.chat.id, jobId)
 
-  void generateAndApplyThreadTitle({
+  const generation = generateAndApplyThreadTitle({
     chatId: input.chat.id,
     messageId: input.message.messageId,
     text: sourceText,
     currentUserId: input.currentUserId,
     jobId,
     titleGuard,
-  }).catch((error) => {
-    log.warn("Thread title generation failed", {
-      chatId: input.chat.id,
-      messageId: input.message.messageId,
-      error,
-    })
   })
+    .then(() => undefined)
+    .catch((error) => {
+      log.warn("Thread title generation failed", {
+        chatId: input.chat.id,
+        messageId: input.message.messageId,
+        error,
+      })
+    })
+  return generation
 }
 
 export function cancelPendingThreadTitleGeneration(chatId: number) {

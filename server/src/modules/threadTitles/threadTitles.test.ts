@@ -203,7 +203,7 @@ describe("thread title generation", () => {
     await testUtils.addParticipant(chat.id, user.id)
 
     const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
-    maybeScheduleThreadTitleGeneration({
+    const generation = maybeScheduleThreadTitleGeneration({
       chat,
       message: textMessage,
       text: "https://www.youtube.com/watch?v=abc123",
@@ -221,6 +221,7 @@ describe("thread title generation", () => {
     })
 
     await waitForChatTitle(chat.id, "Roadmap Review")
+    await generation
 
     const request = parseCompletion.mock.calls[0]?.[0] as
       | { messages?: { role?: string; content?: string }[] }
@@ -324,7 +325,7 @@ describe("thread title generation", () => {
     await testUtils.addParticipant(chat.id, user.id)
 
     const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
-    maybeScheduleThreadTitleGeneration({
+    const generation = maybeScheduleThreadTitleGeneration({
       chat,
       message: textMessage,
       text: placeholder,
@@ -345,6 +346,7 @@ describe("thread title generation", () => {
 
     resolveCompletion(completion("Launch Checklist"))
     await waitForChatTitle(chat.id, "Launch Checklist")
+    await generation
 
     const updated = await db
       .select({ title: schema.chats.title, isUntitled: schema.chats.isUntitled })
@@ -487,7 +489,7 @@ describe("thread title generation", () => {
     const { generateAndApplyThreadTitle, maybeScheduleThreadTitleGeneration } = await import(
       "@in/server/modules/threadTitles"
     )
-    maybeScheduleThreadTitleGeneration({
+    const generation = maybeScheduleThreadTitleGeneration({
       chat: replyThread,
       message: textMessage,
       text: "Yes, after QA signs off on notification delivery and badge counts.",
@@ -495,6 +497,7 @@ describe("thread title generation", () => {
       currentUserId: user.id,
     })
     await waitForChatTitle(replyThread.id, "Beta notification timing")
+    await generation
 
     const updated = await db
       .select({ title: schema.chats.title, emoji: schema.chats.emoji, isUntitled: schema.chats.isUntitled })
@@ -665,7 +668,7 @@ describe("thread title generation", () => {
     await testUtils.addParticipant(chat.id, user.id)
 
     const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
-    maybeScheduleThreadTitleGeneration({
+    const firstGeneration = maybeScheduleThreadTitleGeneration({
       chat,
       message: textMessage,
       text: "Please draft the first launch checklist for tomorrow morning before the release.",
@@ -674,7 +677,7 @@ describe("thread title generation", () => {
     })
     await waitForParseCallCount(1)
 
-    maybeScheduleThreadTitleGeneration({
+    const secondGeneration = maybeScheduleThreadTitleGeneration({
       chat,
       message: { ...textMessage, messageId: 2 },
       text: "Please draft the second launch checklist for tomorrow morning before the release.",
@@ -684,7 +687,7 @@ describe("thread title generation", () => {
 
     await waitForChatTitle(chat.id, "Second Message Title")
     resolveFirst(completion("First Message Title"))
-    await sleep(20)
+    await Promise.all([firstGeneration, secondGeneration])
 
     const updated = await db
       .select({ title: schema.chats.title })
@@ -715,7 +718,7 @@ describe("thread title generation", () => {
     await testUtils.addParticipant(chat.id, user.id)
 
     const { maybeScheduleThreadTitleGeneration } = await import("@in/server/modules/threadTitles")
-    maybeScheduleThreadTitleGeneration({
+    const generation = maybeScheduleThreadTitleGeneration({
       chat,
       message: textMessage,
       text: "Please keep this first eligible title generation job running to completion.",
@@ -734,6 +737,7 @@ describe("thread title generation", () => {
 
     resolveCompletion(completion("Stable pending title"))
     await waitForChatTitle(chat.id, "Stable pending title")
+    await generation
     expect(parseCompletion).toHaveBeenCalledTimes(1)
   })
 })
