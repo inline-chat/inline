@@ -1334,6 +1334,80 @@ describe("getUpdates", () => {
     expect(result.sidecars?.dialogs.map((dialog) => dialog.chatId)).not.toContain(BigInt(parentChat.id))
   })
 
+  test("does not disclose an inaccessible parent through chat-bucket sidecars", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Private Parent Sidecars", [
+      "private-parent-owner@example.com",
+      "private-parent-viewer@example.com",
+    ])
+    const owner = users[0]
+    const viewer = users[1]
+    if (!owner || !viewer || !space) throw new Error("Fixture creation failed")
+
+    const parentChat = await testUtils.createChat(
+      space.id,
+      "Inaccessible Private Parent",
+      "thread",
+      false,
+      owner.id,
+    )
+    const childChat = await testUtils.createChat(
+      space.id,
+      "Accessible Private Child",
+      "thread",
+      false,
+      owner.id,
+    )
+    if (!parentChat || !childChat) throw new Error("Chat creation failed")
+    await testUtils.addParticipant(childChat.id, viewer.id)
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "private parent anchor",
+    })
+    await db
+      .update(chats)
+      .set({ parentChatId: parentChat.id, parentMessageId: 1 })
+      .where(eq(chats.id, childChat.id))
+    await db.insert(messages).values({
+      chatId: childChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "accessible child message",
+    })
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: childChat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "newMessage",
+        newMessage: { chatId: BigInt(childChat.id), msgId: 1n },
+      },
+    })
+
+    const result = await getUpdates({
+      bucket: {
+        type: {
+          oneofKind: "chat",
+          chat: {
+            peerId: {
+              type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
+            },
+          },
+        },
+      },
+      startSeq: 0n,
+      seqEnd: 0n,
+      totalLimit: 1000,
+      limit: 10,
+    }, { currentUserId: viewer.id } as any)
+
+    const sidecarChatIds = result.sidecars?.chats.map((chat) => Number(chat.id)) ?? []
+    expect(sidecarChatIds).toContain(childChat.id)
+    expect(sidecarChatIds).not.toContain(parentChat.id)
+    expect(result.sidecars?.spaces.map((sidecar) => Number(sidecar.id))).toEqual([space.id])
+  })
+
   test("returns sidecars only for the delivered page", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Prefix Sidecars", [
       "prefix-one@example.com",

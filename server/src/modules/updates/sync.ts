@@ -953,7 +953,15 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
     userIds.add(userId)
   }
 
-  const chatRows = await getSidecarChats(primaryChat, chatIds)
+  const candidateChatRows = await getSidecarChats(primaryChat, chatIds)
+  const accessibleChatIds = await getAccessibleReplayChatIds(
+    candidateChatRows.map((chat) => chat.id),
+    input.userId,
+  )
+  const chatRows = candidateChatRows.filter((chat) => accessibleChatIds.has(chat.id))
+  // Parent and payload references are dependencies, not authority. Rebuild
+  // Space enrichment only from chats the requester can still access.
+  spaceIds.clear()
   const encodedChats = await Encoders.chatsForUser(chatRows, { encodingForUserId: input.userId })
   for (const [index, chat] of chatRows.entries()) {
     collectChatSidecarRefs(chat, input.userId, { chatIds, userIds: structuralUserIds, spaceIds })

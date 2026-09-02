@@ -105,9 +105,18 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
 
   const seqDifference = latestSeq - seqStart
   if (replayRequiresAuthoritativeRepair(seqStart, latestSeq)) {
+    log.warn("Sync replay exceeded the retained repair window; requesting authoritative repair", {
+      scope: descriptor.scope,
+      startSeq: seqStart,
+      latestSeq,
+      seqDifference,
+      replayLimit: REPLAY_LIMIT,
+      repairReason: "replay_limit",
+    })
     logGetUpdatesTiming({
       scope: descriptor.scope,
       result: "too_long",
+      repairReason: "replay_limit",
       totalMs: elapsedMs(startedAt),
       resolveMs,
       fetchMs,
@@ -126,14 +135,19 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   if (pageGap) {
     log.warn("Non-contiguous durable sync page; requesting authoritative repair", {
       scope: descriptor.scope,
+      startSeq: seqStart,
       expectedSeq: pageGap.expectedSeq,
       actualSeq: pageGap.actualSeq,
       latestSeq,
+      seqDifference,
+      replayLimit: REPLAY_LIMIT,
+      repairReason: "journal_gap",
       dbUpdates: dbUpdates.length,
     })
     logGetUpdatesTiming({
       scope: descriptor.scope,
       result: "too_long",
+      repairReason: "journal_gap",
       totalMs: elapsedMs(startedAt),
       resolveMs,
       fetchMs,
@@ -308,6 +322,7 @@ const timed = async <T>(fn: () => Promise<T>): Promise<{ value: T; ms: number }>
 type GetUpdatesTiming = {
   scope: BucketDescriptor["scope"]
   result: "too_long" | "empty" | "slice"
+  repairReason?: "replay_limit" | "journal_gap"
   totalMs: number
   resolveMs: number
   fetchMs: number
