@@ -169,6 +169,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
          self.messageViewImplementation == messageViewImplementation,
          let messageView
       {
+        cancelPendingV2Snapshot()
         prevText = message.displayText
         self.message = message
         canReply = message.canReply && displayMode != .threadAnchor
@@ -214,6 +215,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
            let messageView,
            messageView.canUpdateReactionsInPlace(to: message)
         {
+          cancelPendingV2Snapshot()
           prevText = message.displayText
           self.message = message
           canReply = message.canReply && displayMode != .threadAnchor
@@ -236,6 +238,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
            outgoing: newOutgoing
          )
       {
+        cancelPendingV2Snapshot()
         self.lastInGroup = lastInGroup
         canReply = message.canReply && displayMode != .threadAnchor
         messageView?.updateBubbleTail(side: bubbleTailSide, animated: animateTail)
@@ -259,6 +262,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
           enqueueV2Snapshot(message, animatedReactionEmoji: animatedReactionEmoji)
           return
         }
+        cancelPendingV2Snapshot()
         prevText = message.displayText
         self.message = message
         canReply = message.canReply && displayMode != .threadAnchor

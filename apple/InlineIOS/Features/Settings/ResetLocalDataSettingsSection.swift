@@ -82,6 +82,7 @@ private enum LocalDataResetPerformer {
   private static let log = Log.scoped("LocalDataReset")
 
   static func perform(realtimeV2: RealtimeV2) async throws {
+    await ReservedChatIDPool.shared.pauseAndDrain()
     await realtimeV2.loggedOut()
     await Realtime.shared.loggedOut()
 
@@ -119,6 +120,7 @@ private enum LocalDataResetPerformer {
 
   private static func resumeAccountWork(realtimeV2: RealtimeV2) async {
     await realtimeV2.resumeAfterLocalDataReset()
+    await ReservedChatIDPool.shared.resume(realtimeV2: realtimeV2)
     await Realtime.shared.start()
   }
 }
