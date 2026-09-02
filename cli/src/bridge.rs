@@ -558,6 +558,12 @@ pub async fn run_service(
                     Err(error) => {
                         failures = failures.saturating_add(1);
                         provider_readiness.mark_restarting(&installation_id);
+                        crate::telemetry::report_bridge_runtime_error(
+                            &installation.provider_id,
+                            "provider_cycle",
+                            error.as_ref(),
+                            Some(failures),
+                        );
                         eprintln!(
                             "{provider_name} bridge cycle failed; reconnecting without affecting other agents: {}",
                             safe_diagnostic(&error.to_string())
@@ -1080,6 +1086,77 @@ struct ProviderRuntimeContext {
     shared_probe_capacity: Arc<tokio::sync::Semaphore>,
     shared_provider_readiness: Option<ProviderReadiness>,
     workspace_picker: Option<WorkspacePickerEndpoint>,
+}
+
+async fn settle_nonfatal_turn_error(
+    bot: &InlineClient,
+    store: &BridgeStore,
+    installation_id: &InstallationId,
+    provider_id: &ProviderId,
+    event_id: &str,
+    error: &(dyn std::error::Error + 'static),
+) {
+    let record = match store.get_inbound(event_id) {
+        Ok(Some(record)) if record.state == InboundState::Started => record,
+        Ok(_) => return,
+        Err(store_error) => {
+            crate::telemetry::report_bridge_runtime_error(
+                provider_id.as_str(),
+                "turn_recovery_store",
+                &store_error,
+                None,
+            );
+            eprintln!(
+                "Failed turn could not be reconciled from the durable inbox: {}",
+                safe_diagnostic(&store_error.to_string())
+            );
+            return;
+        }
+    };
+    let failure = safe_diagnostic(&error.to_string());
+    if let Err(recovery_error) = publish_inbound_final_send(
+        bot,
+        store,
+        event_id,
+        record.delivery_chat_id,
+        record.stream_message_id.map(InlineId::new),
+        "Failed.",
+        "I couldn’t finish that turn, but the bridge is still available. Please try again.",
+        InboundState::Failed,
+        Some(&failure),
+    )
+    .await
+    {
+        crate::telemetry::report_bridge_runtime_error(
+            provider_id.as_str(),
+            "turn_recovery_delivery",
+            recovery_error.as_ref(),
+            None,
+        );
+        eprintln!(
+            "Failed turn recovery is pending; later work can continue: {}",
+            safe_diagnostic(&recovery_error.to_string())
+        );
+        if let Err(pending_error) = recover_pending_final_sends_with_transport(
+            &InlineStreamMessageTransport(bot),
+            store,
+            installation_id,
+            message_retry_delay,
+        )
+        .await
+        {
+            crate::telemetry::report_bridge_runtime_error(
+                provider_id.as_str(),
+                "turn_recovery_pending_delivery",
+                pending_error.as_ref(),
+                None,
+            );
+            eprintln!(
+                "Pending failed-turn notice could not be delivered yet; later work can continue: {}",
+                safe_diagnostic(&pending_error.to_string())
+            );
+        }
+    }
 }
 
 async fn run_provider_installation(
@@ -1680,6 +1757,7 @@ async fn run_provider_installation(
                 let task_route = inbound_route.clone();
                 let task_identity = settings_identity.clone();
                 let task_chat_id = pending_binding.chat_id;
+                let task_event_id = record.event_id.clone();
                 let task_lane_promotions = lane_promotion_tx.clone();
                 turns.push(Box::pin(async move {
                     let _turn_capacity_permit = turn_capacity_permit;
@@ -1700,7 +1778,7 @@ async fn run_provider_installation(
                     )
                     .await;
                     let final_chat_id = conversation.snapshot().binding.chat_id;
-                    (task_chat_id, final_chat_id, result)
+                    (task_chat_id, final_chat_id, task_event_id, result)
                 }));
                 // Give an owner `/close` the first chance to acquire the
                 // epoch-wide writer. Continuing this batch could reserve a
@@ -1719,28 +1797,67 @@ async fn run_provider_installation(
                             "turn lane promotion channel closed",
                         ).into());
                     };
-                    let accepted = active_turns
+                    let mut accepted = active_turns
                         .get(&promotion.source_chat_id)
                         .is_some_and(|sender| sender.same_channel(&promotion.sender))
                         && !active_turns.contains_key(&promotion.delivery_chat_id);
                     if accepted {
-                        active_turns.remove(&promotion.source_chat_id);
-                        active_turns.insert(promotion.delivery_chat_id, promotion.sender);
-                        repair_promoted_conversation_cache(
+                        match repair_promoted_conversation_cache(
                             &inbound_route,
                             &mut conversations,
                             promotion.source_chat_id,
                             promotion.delivery_chat_id,
-                        )?;
+                        ) {
+                            Ok(()) => {
+                                active_turns.remove(&promotion.source_chat_id);
+                                active_turns.insert(promotion.delivery_chat_id, promotion.sender);
+                            }
+                            Err(error) => {
+                                accepted = false;
+                                crate::telemetry::report_bridge_runtime_error(
+                                    provider_id.as_str(),
+                                    "turn_lane_promotion",
+                                    &error,
+                                    None,
+                                );
+                                eprintln!(
+                                    "Turn lane promotion failed; preserving the source lane: {}",
+                                    safe_diagnostic(&error.to_string())
+                                );
+                            }
+                        }
                     }
                     let _ = promotion.acknowledged.send(accepted);
                 }
                 completed = turns.next(), if !turns.is_empty() => {
-                    if let Some((source_chat_id, final_chat_id, result)) = completed {
+                    if let Some((source_chat_id, final_chat_id, event_id, result)) = completed {
                         active_turns.remove(&source_chat_id);
                         active_turns.remove(&final_chat_id);
                         if let Err(error) = result {
-                            break 'runtime Err(error);
+                            crate::telemetry::report_bridge_runtime_error(
+                                provider_id.as_str(),
+                                "turn_runtime",
+                                error.as_ref(),
+                                None,
+                            );
+                            eprintln!(
+                                "Agent turn failed; later work can continue: {}",
+                                safe_diagnostic(&error.to_string())
+                            );
+                            if crate::telemetry::bridge_error_requires_provider_restart(
+                                error.as_ref(),
+                            ) {
+                                break 'runtime Err(error);
+                            }
+                            settle_nonfatal_turn_error(
+                                &bot,
+                                &bridge_store,
+                                &binding.installation_id,
+                                &provider_id,
+                                &event_id,
+                                error.as_ref(),
+                            )
+                            .await;
                         }
                     }
                 }
@@ -1751,9 +1868,24 @@ async fn run_provider_installation(
                             "deferred media channel closed",
                         ).into());
                     };
-                    if inbound_route.allows(record.sender_user_id)
-                        && accept_or_resume_queued_confirmation(&bridge_store, &record)?
+                    let admitted = match accept_or_resume_queued_confirmation(&bridge_store, &record)
                     {
+                        Ok(admitted) => admitted,
+                        Err(error) => {
+                            crate::telemetry::report_bridge_runtime_error(
+                                provider_id.as_str(),
+                                "deferred_media_admission",
+                                &error,
+                                None,
+                            );
+                            eprintln!(
+                                "Deferred media admission failed; later work can continue: {}",
+                                safe_diagnostic(&error.to_string())
+                            );
+                            false
+                        }
+                    };
+                    if inbound_route.allows(record.sender_user_id) && admitted {
                         log::trace!(
                             target: "inline::bridge::media",
                             "phase=voice_wait_elapsed event_id={:?} attachment_count={}",
@@ -1763,7 +1895,7 @@ async fn run_provider_installation(
                     }
                 }
                 delivery = inline_events.recv_delivery() => {
-                    let Some(mut delivery) = delivery else {
+                    let Some(delivery) = delivery else {
                         break 'runtime Err(io::Error::new(
                             io::ErrorKind::ConnectionAborted,
                             "Inline bot event stream closed",
@@ -1771,38 +1903,74 @@ async fn run_provider_installation(
                     };
                     connection_lease.observe(delivery.event(), &bot);
                     let chat_id = actionable_event_chat_id(delivery.event());
-                    let dispatch_chat_id = approval_dispatch_chat_id(
+                    let dispatch_chat_id = match approval_dispatch_chat_id(
                         delivery.event(),
                         &bridge_store,
-                    )?
-                    .or_else(|| active_turn_event_chat_id(delivery.event(), inbound_route.bot_user_id));
+                    ) {
+                        Ok(chat_id) => chat_id.or_else(|| {
+                            active_turn_event_chat_id(
+                                delivery.event(),
+                                inbound_route.bot_user_id,
+                            )
+                        }),
+                        Err(error) => {
+                            recover_failed_delivery(
+                                &bot,
+                                &delivery,
+                                &inbound_route,
+                                "active_turn_event_routing",
+                                error.as_ref(),
+                            )
+                            .await;
+                            continue 'runtime;
+                        }
+                    };
                     if let Some(dispatch_chat_id) = dispatch_chat_id
                         && let Some(sender) = active_turns.get(&dispatch_chat_id).cloned()
                     {
                         match tokio::time::timeout(
                             TURN_EVENT_DISPATCH_DEADLINE,
-                            sender.send(delivery),
+                            sender.reserve(),
                         )
                         .await
                         {
-                            Ok(Ok(())) => continue 'runtime,
-                            Ok(Err(error)) => {
+                            Ok(Ok(permit)) => {
+                                permit.send(delivery);
+                                continue 'runtime;
+                            }
+                            Ok(Err(_)) => {
                                 active_turns.remove(&dispatch_chat_id);
-                                delivery = error.0;
                             }
                             Err(_) => {
                                 active_turns.remove(&dispatch_chat_id);
-                                return Err(io::Error::new(
+                                let error = io::Error::new(
                                     io::ErrorKind::ConnectionAborted,
                                     "active turn stopped accepting Inline events; restarting its provider epoch",
+                                );
+                                recover_failed_delivery(
+                                    &bot,
+                                    &delivery,
+                                    &inbound_route,
+                                    "active_turn_event_dispatch",
+                                    &error,
                                 )
-                                .into());
+                                .await;
+                                return Err(error.into());
                             }
                         }
                     }
 
                     let Some(chat_id) = chat_id else {
-                        delivery.ack().await?;
+                        if let Err(error) = delivery.ack().await {
+                            recover_failed_delivery(
+                                &bot,
+                                &delivery,
+                                &inbound_route,
+                                "non_actionable_delivery_ack",
+                                &error,
+                            )
+                            .await;
+                        }
                         continue 'runtime;
                     };
                     let settings_conversation = if matches!(
@@ -1817,31 +1985,69 @@ async fn run_provider_installation(
                         .await;
                         match resolution {
                             Ok(SettingsConversationResolution::Unauthorized) => {
-                                handle_unavailable_settings_event(
-                                    &bot,
-                                    delivery.event(),
-                                    inbound_route.owner_user_id,
-                                )
-                                .await?;
-                                delivery.ack().await?;
+                                let handled: Result<(), Box<dyn std::error::Error>> = async {
+                                    handle_unavailable_settings_event(
+                                        &bot,
+                                        delivery.event(),
+                                        inbound_route.owner_user_id,
+                                    )
+                                    .await?;
+                                    delivery.ack().await?;
+                                    Ok(())
+                                }
+                                .await;
+                                if let Err(error) = handled {
+                                    recover_failed_delivery(
+                                        &bot,
+                                        &delivery,
+                                        &inbound_route,
+                                        "unauthorized_settings_delivery",
+                                        error.as_ref(),
+                                    )
+                                    .await;
+                                }
                                 continue 'runtime;
                             }
                             Ok(SettingsConversationResolution::Ready(conversation)) => {
                                 conversations.insert(chat_id, conversation.clone());
                                 conversation
                             }
-                                    Err(ConversationResolutionError::MissingWorkspace) => {
-                                        handle_unavailable_settings_event_with_message(
-                                            &bot,
-                                            delivery.event(),
-                                            inbound_route.owner_user_id,
-                                            BridgeNotice::MissingWorkspace.message(),
-                                        )
-                                        .await?;
-                                        delivery.ack().await?;
-                                        continue 'runtime;
-                                    }
-                                    Err(error) => return Err(error.into()),
+                            Err(ConversationResolutionError::MissingWorkspace) => {
+                                let handled: Result<(), Box<dyn std::error::Error>> = async {
+                                    handle_unavailable_settings_event_with_message(
+                                        &bot,
+                                        delivery.event(),
+                                        inbound_route.owner_user_id,
+                                        BridgeNotice::MissingWorkspace.message(),
+                                    )
+                                    .await?;
+                                    delivery.ack().await?;
+                                    Ok(())
+                                }
+                                .await;
+                                if let Err(error) = handled {
+                                    recover_failed_delivery(
+                                        &bot,
+                                        &delivery,
+                                        &inbound_route,
+                                        "missing_workspace_settings_delivery",
+                                        error.as_ref(),
+                                    )
+                                    .await;
+                                }
+                                continue 'runtime;
+                            }
+                            Err(error) => {
+                                recover_failed_delivery(
+                                    &bot,
+                                    &delivery,
+                                    &inbound_route,
+                                    "settings_conversation_resolution",
+                                    &error,
+                                )
+                                .await;
+                                continue 'runtime;
+                            }
                         }
                     } else {
                         conversations
@@ -1849,9 +2055,9 @@ async fn run_provider_installation(
                             .cloned()
                             .unwrap_or_else(|| active.clone())
                     };
-                    accept_idle_delivery(
+                    if let Err(error) = accept_idle_delivery(
                         &bot,
-                        delivery,
+                        &delivery,
                         &inbound_route,
                         &SettingsRuntime {
                             sessions: &sessions,
@@ -1862,7 +2068,23 @@ async fn run_provider_installation(
                         },
                         shared_turn_capacity.available_permits() == 0,
                     )
-                    .await?;
+                    .await
+                    {
+                        let restart = crate::telemetry::bridge_error_requires_provider_restart(
+                            error.as_ref(),
+                        );
+                        recover_failed_delivery(
+                            &bot,
+                            &delivery,
+                            &inbound_route,
+                            "provider_ready_delivery",
+                            error.as_ref(),
+                        )
+                        .await;
+                        if restart {
+                            break 'runtime Err(error);
+                        }
+                    }
                 }
                 _ = wait_for_control_shutdown(&mut shutdown_rx) => {
                     break 'runtime Ok(());
@@ -1872,6 +2094,7 @@ async fn run_provider_installation(
                 }
                 description = &mut provider_exit => {
                     health.mark_provider_unavailable();
+                    crate::telemetry::report_bridge_provider_exit(provider_id.as_str());
                     sessions.seal_provider_epoch();
                     inbound_route.control_epoch.advance();
                     let control_lane_quiesced = inbound_route
@@ -1889,7 +2112,7 @@ async fn run_provider_installation(
                     );
                     active_turns.clear();
                     if tokio::time::timeout(Duration::from_secs(10), async {
-                        while let Some((source_chat_id, delivery_chat_id, result)) = turns.next().await {
+                        while let Some((source_chat_id, delivery_chat_id, _event_id, result)) = turns.next().await {
                             if let Err(error) = result {
                                 eprintln!(
                                     "Turn cleanup failed for source chat {source_chat_id}, delivery chat {delivery_chat_id}: {}",
@@ -1943,12 +2166,22 @@ async fn run_provider_installation(
                                         ).into());
                                     };
                                     connection_lease.observe(delivery.event(), &bot);
-                                    accept_provider_unavailable_delivery(
+                                    if let Err(error) = accept_provider_unavailable_delivery(
                                         &bot,
-                                        delivery,
+                                        &delivery,
                                         &inbound_route,
                                     )
-                                    .await?;
+                                    .await
+                                    {
+                                        recover_failed_delivery(
+                                            &bot,
+                                            &delivery,
+                                            &inbound_route,
+                                            "provider_restart_backoff_delivery",
+                                            error.as_ref(),
+                                        )
+                                        .await;
+                                    }
                                 }
                                 _ = wait_for_control_shutdown(&mut shutdown_rx) => {
                                     break 'runtime Ok(());
@@ -1972,12 +2205,22 @@ async fn run_provider_installation(
                                         ).into());
                                     };
                                     connection_lease.observe(delivery.event(), &bot);
-                                    accept_provider_unavailable_delivery(
+                                    if let Err(error) = accept_provider_unavailable_delivery(
                                         &bot,
-                                        delivery,
+                                        &delivery,
                                         &inbound_route,
                                     )
-                                    .await?;
+                                    .await
+                                    {
+                                        recover_failed_delivery(
+                                            &bot,
+                                            &delivery,
+                                            &inbound_route,
+                                            "provider_restarting_delivery",
+                                            error.as_ref(),
+                                        )
+                                        .await;
+                                    }
                                 }
                                 _ = wait_for_control_shutdown(&mut shutdown_rx) => {
                                     break 'runtime Ok(());
@@ -2042,6 +2285,12 @@ async fn run_provider_installation(
                             Err(error) => {
                                 provider_restart_failures =
                                     provider_restart_failures.saturating_add(1);
+                                crate::telemetry::report_bridge_runtime_error(
+                                    provider_id.as_str(),
+                                    "provider_restart",
+                                    error.as_ref(),
+                                    Some(provider_restart_failures),
+                                );
                                 eprintln!(
                                     "{provider_name} restart attempt failed: {}",
                                     safe_diagnostic(&error.to_string())
@@ -2055,7 +2304,7 @@ async fn run_provider_installation(
 
         active_turns.clear();
         if tokio::time::timeout(Duration::from_secs(10), async {
-            while let Some((source_chat_id, delivery_chat_id, result)) = turns.next().await {
+            while let Some((source_chat_id, delivery_chat_id, _event_id, result)) = turns.next().await {
                 if let Err(error) = result {
                     eprintln!(
                         "Turn cleanup failed for source chat {source_chat_id}, delivery chat {delivery_chat_id}: {}",

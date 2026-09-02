@@ -208,9 +208,72 @@ fn ensure_unavailable_command_started(
     Ok(store.start_inbound(&record.event_id, now_seconds())?)
 }
 
+/// Settles one delivery-local failure without allowing it to own provider or
+/// account liveness. Accepted work stays in the existing durable inbox; a
+/// request that never reached that boundary gets a best-effort retry notice.
+/// The delivery is then acknowledged so a deterministic poison event cannot
+/// head-of-line block later work.
+pub(in crate::bridge) async fn recover_failed_delivery(
+    bot: &InlineClient,
+    delivery: &LosslessEventDelivery,
+    route: &InboundRoute,
+    phase: &'static str,
+    error: &(dyn std::error::Error + 'static),
+) {
+    crate::telemetry::report_bridge_runtime_error(route.provider_id.as_str(), phase, error, None);
+    eprintln!(
+        "Bridge delivery failed during {phase}; continuing with later work: {}",
+        safe_diagnostic(&error.to_string())
+    );
+
+    let notice_result = if let ClientEvent::MessageStored { message } = delivery.event() {
+        let event_id = format!("inline-message-{}-{}", message.chat_id, message.message_id);
+        match route.store.get_inbound(&event_id) {
+            Ok(Some(record)) if record.state == InboundState::Accepted => {
+                send_queue_confirmation(bot, &record, Acknowledgement::Queued.message()).await
+            }
+            Ok(Some(_)) => Ok(()),
+            Ok(None) | Err(_) => {
+                let sender_is_bot = message.is_outgoing
+                    || message_sender_is_bot(&route.bot_store, message)
+                        .await
+                        .unwrap_or(true);
+                if route.allows(message.sender_id.get()) && !sender_is_bot {
+                    send_text_reply(
+                        bot,
+                        message.chat_id.get(),
+                        message.message_id.get(),
+                        "I couldn’t process that request, so I skipped it to keep later messages moving. Please try again.",
+                        &format!("{event_id}-delivery-skipped"),
+                        BridgeNotificationClass::ImportantFailure,
+                    )
+                    .await
+                    .map(|_| ())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    } else {
+        Ok(())
+    };
+    if let Err(notice_error) = notice_result {
+        eprintln!(
+            "Bridge delivery recovery notice failed; still advancing the delivery: {}",
+            safe_diagnostic(&notice_error.to_string())
+        );
+    }
+    if let Err(ack_error) = delivery.ack().await {
+        eprintln!(
+            "Bridge delivery recovery acknowledgement failed; it can retry without stopping later work: {}",
+            safe_diagnostic(&ack_error.to_string())
+        );
+    }
+}
+
 pub(in crate::bridge) async fn accept_provider_unavailable_delivery(
     bot: &InlineClient,
-    delivery: LosslessEventDelivery,
+    delivery: &LosslessEventDelivery,
     route: &InboundRoute,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if handle_claude_history_action(bot, delivery.event(), route).await? {
@@ -256,7 +319,7 @@ pub(in crate::bridge) async fn accept_provider_unavailable_delivery(
         delivery.ack().await?;
         return Ok(());
     }
-    if let Some(record) = inbound_from_delivery(bot, &delivery, route).await? {
+    if let Some(record) = inbound_from_delivery(bot, delivery, route).await? {
         if handle_claude_history_command(bot, &record, route).await? {
             delivery.ack().await?;
             return Ok(());

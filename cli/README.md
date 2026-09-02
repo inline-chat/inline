@@ -4,7 +4,7 @@ Install the Inline CLI and have Claude/Codex interact with it.
 
 For setup failures, repeat the command with `--verbose` (twice for trace detail).
 See [diagnostics and optional error reporting](../docs/cli-diagnostics.md).
-Official binaries report metadata-only command failures to Sentry. Set
+Official binaries report metadata-only command, bridge-runtime, and panic failures to Sentry. Set
 `INLINE_CLI_TELEMETRY=off` to disable reporting. Command arguments, message contents,
 credentials, local paths, and raw errors are not sent.
 

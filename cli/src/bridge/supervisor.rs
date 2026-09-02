@@ -51,7 +51,19 @@ where
                                 launch.installation_id,
                             );
                         }
-                        accept_provider_unavailable_delivery(launch.bot, delivery, launch.route).await?;
+                        if let Err(error) = accept_provider_unavailable_delivery(
+                            launch.bot,
+                            &delivery,
+                            launch.route,
+                        ).await {
+                            recover_failed_delivery(
+                                launch.bot,
+                                &delivery,
+                                launch.route,
+                                "provider_start_backoff_delivery",
+                                error.as_ref(),
+                            ).await;
+                        }
                     }
                     _ = wait_for_control_shutdown(external_shutdown) => return Ok(None),
                     _ = termination.as_mut() => return Ok(None),
@@ -99,7 +111,19 @@ where
                             launch.installation_id,
                         );
                     }
-                    accept_provider_unavailable_delivery(launch.bot, delivery, launch.route).await?;
+                    if let Err(error) = accept_provider_unavailable_delivery(
+                        launch.bot,
+                        &delivery,
+                        launch.route,
+                    ).await {
+                        recover_failed_delivery(
+                            launch.bot,
+                            &delivery,
+                            launch.route,
+                            "provider_startup_delivery",
+                            error.as_ref(),
+                        ).await;
+                    }
                 }
                 _ = wait_for_control_shutdown(external_shutdown) => return Ok(None),
                 _ = termination.as_mut() => return Ok(None),
@@ -109,6 +133,13 @@ where
             Ok(spawned) => {
                 if let Some(description) = spawned.process_status.exit_description() {
                     failures = failures.saturating_add(1);
+                    let error = io::Error::other(description.clone());
+                    crate::telemetry::report_bridge_runtime_error(
+                        &launch.installation.provider_id,
+                        "provider_startup",
+                        &error,
+                        Some(failures),
+                    );
                     if let Some(readiness) = launch.readiness {
                         readiness.mark_startup_failure(launch.installation_id, false, &description);
                     }
@@ -124,6 +155,12 @@ where
             }
             Err(error) => {
                 failures = failures.saturating_add(1);
+                crate::telemetry::report_bridge_runtime_error(
+                    &launch.installation.provider_id,
+                    "provider_startup",
+                    error.as_ref(),
+                    Some(failures),
+                );
                 let requires_bridge_update = provider_probe_requires_bridge_update(
                     &launch.installation.provider_id,
                     &error.to_string(),
@@ -162,11 +199,19 @@ where
                                         launch.installation_id,
                                     );
                                 }
-                                accept_provider_unavailable_delivery(
+                                if let Err(error) = accept_provider_unavailable_delivery(
                                     launch.bot,
-                                    delivery,
+                                    &delivery,
                                     launch.route,
-                                ).await?;
+                                ).await {
+                                    recover_failed_delivery(
+                                        launch.bot,
+                                        &delivery,
+                                        launch.route,
+                                        "provider_update_required_delivery",
+                                        error.as_ref(),
+                                    ).await;
+                                }
                             }
                             _ = wait_for_control_shutdown(external_shutdown) => return Ok(None),
                             _ = termination.as_mut() => return Ok(None),

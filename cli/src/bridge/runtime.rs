@@ -45,10 +45,10 @@ pub(super) async fn send_inbound_response(
 }
 
 mod admission;
-pub(super) use admission::accept_provider_unavailable_delivery;
 use admission::{
     accept_inbound_or_session_handoff, handle_follow_command, handle_queue_undo_action,
 };
+pub(super) use admission::{accept_provider_unavailable_delivery, recover_failed_delivery};
 mod conversation;
 pub(in crate::bridge) use conversation::*;
 mod content;
@@ -186,6 +186,36 @@ pub(super) struct BotAgentResolver {
 
 type BotAgentCache = HashMap<i64, (Instant, Option<proto::BotAgent>)>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AgentConfigurationFallback {
+    Catalog,
+    Project,
+    Model,
+    Reasoning,
+}
+
+impl AgentConfigurationFallback {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Catalog => "agent_configuration_catalog_defaulted",
+            Self::Project => "agent_project_defaulted",
+            Self::Model => "agent_model_defaulted",
+            Self::Reasoning => "agent_reasoning_defaulted",
+        }
+    }
+
+    pub const fn message(self) -> &'static str {
+        "Some selected Agent settings are unavailable, so I’m using this provider’s defaults. Your request is still continuing."
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct ResolvedAgentConfiguration {
+    pub model: Option<String>,
+    pub reasoning: Option<String>,
+    pub fallback: Option<AgentConfigurationFallback>,
+}
+
 fn agent_thread_context_to_proto(
     context: inline_client::AgentThreadContext,
 ) -> proto::AgentThreadContext {
@@ -253,47 +283,42 @@ impl BotAgentResolver {
             .expect("Agent configuration catalog poisoned") = Some(catalog);
     }
 
-    pub(super) fn validate_configuration(
+    pub(super) fn resolve_configuration(
         &self,
         context: &proto::AgentThreadContext,
-    ) -> Result<(), String> {
+    ) -> ResolvedAgentConfiguration {
         let Some(configuration) = context.configuration.as_ref() else {
-            return Ok(());
+            return ResolvedAgentConfiguration::default();
         };
         let catalog = self
             .configuration_catalog
             .read()
             .expect("Agent configuration catalog poisoned");
-        // The resolver exists before the provider starts and publishes its
-        // catalog. Defer provider-owned validation during that window; the
-        // conversation resolver still validates the project against the local
-        // workspace store before accepting work.
         let Some(catalog) = catalog.as_ref() else {
-            return Ok(());
+            return ResolvedAgentConfiguration {
+                fallback: (configuration.model_id.is_some()
+                    || configuration.reasoning_effort_id.is_some())
+                .then_some(AgentConfigurationFallback::Catalog),
+                ..ResolvedAgentConfiguration::default()
+            };
         };
-        if let Some(project_id) = configuration.project_id.as_deref()
-            && !catalog.projects.as_ref().is_some_and(|projects| {
-                projects
-                    .options
-                    .iter()
-                    .any(|project| project.id == project_id)
-            })
-        {
-            return Err("This thread's project selection is no longer available.".to_string());
-        }
         let selected_model = configuration.model_id.as_deref().and_then(|model_id| {
             catalog
                 .models
                 .as_ref()
                 .and_then(|models| models.options.iter().find(|model| model.id == model_id))
         });
-        if configuration.model_id.is_some() && selected_model.is_none() {
-            return Err("This thread's model selection is no longer available.".to_string());
-        }
-        if let Some(reasoning_id) = configuration.reasoning_effort_id.as_deref() {
-            if catalog.models.is_some() && selected_model.is_none() {
-                return Err("Choose a model before selecting its reasoning effort.".to_string());
+        let model = match (&configuration.model_id, selected_model) {
+            (Some(model), Some(_)) => Some(model.clone()),
+            (Some(_), None) => {
+                return ResolvedAgentConfiguration {
+                    fallback: Some(AgentConfigurationFallback::Model),
+                    ..ResolvedAgentConfiguration::default()
+                };
             }
+            (None, _) => None,
+        };
+        let reasoning = if let Some(reasoning_id) = configuration.reasoning_effort_id.as_deref() {
             let reasoning_available = catalog.reasoning.as_ref().is_some_and(|reasoning| {
                 reasoning
                     .options
@@ -307,11 +332,23 @@ impl BotAgentResolver {
                         .iter()
                         .any(|id| id == reasoning_id)
             });
-            if !reasoning_available || !model_supports_reasoning {
-                return Err("This thread's reasoning selection is no longer available.".to_string());
+            if configuration.model_id.is_none() || !reasoning_available || !model_supports_reasoning
+            {
+                return ResolvedAgentConfiguration {
+                    model,
+                    fallback: Some(AgentConfigurationFallback::Reasoning),
+                    ..ResolvedAgentConfiguration::default()
+                };
             }
+            Some(reasoning_id.to_string())
+        } else {
+            None
+        };
+        ResolvedAgentConfiguration {
+            model,
+            reasoning,
+            fallback: None,
         }
-        Ok(())
     }
 
     fn cached(&self, agent_id: i64) -> Option<Option<proto::BotAgent>> {
@@ -496,7 +533,7 @@ async fn reject_agent_context_settings_command(
 
 pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource + 'static>(
     bot: &InlineClient,
-    delivery: LosslessEventDelivery,
+    delivery: &LosslessEventDelivery,
     route: &InboundRoute,
     settings: &SettingsRuntime<'_, D>,
     deferred_by_capacity: bool,
@@ -588,7 +625,7 @@ pub(super) async fn accept_idle_delivery<D: AgentDriver + SessionCatalogSource +
         delivery.ack().await?;
         return Ok(());
     }
-    if let Some(record) = inbound_from_delivery(bot, &delivery, route).await? {
+    if let Some(record) = inbound_from_delivery(bot, delivery, route).await? {
         if handle_terminal_question_reply(bot, delivery.event(), &record, route).await? {
             delivery.ack().await?;
             return Ok(());
@@ -797,35 +834,48 @@ pub(super) async fn inbound_from_delivery(
             .and_then(|context| context.agent_id)
             .or_else(|| mentioned_agent_id(message, route.bot_user_id))
     {
-        let Some(agent) = route.bot_agent_resolver.resolve(agent_id).await else {
-            send_text_reply(
-                bot,
-                message.chat_id.get(),
-                message.message_id.get(),
-                "The Agent selected for this thread is no longer available. The provider owner must choose another Agent.",
-                &format!("{event_id}-agent-unavailable-{agent_id}"),
-                BridgeNotificationClass::ImportantFailure,
-            )
-            .await?;
-            return Ok(None);
-        };
-        if agent.bot_user_id != route.bot_user_id {
-            send_text_reply(
-                bot,
-                message.chat_id.get(),
-                message.message_id.get(),
-                "The Agent selected for this thread does not belong to its provider. The provider owner must choose another Agent.",
-                &format!("{event_id}-agent-provider-mismatch-{agent_id}"),
-                BridgeNotificationClass::ImportantFailure,
-            )
-            .await?;
-            return Ok(None);
+        match route.bot_agent_resolver.resolve(agent_id).await {
+            Some(agent) if agent.bot_user_id == route.bot_user_id => {
+                let original = direction.text.clone();
+                replace_direction_text(
+                    &mut direction,
+                    agent_specialization_instruction(&agent, &original),
+                );
+            }
+            Some(_) => {
+                send_text_reply(
+                    bot,
+                    message.chat_id.get(),
+                    message.message_id.get(),
+                    "The selected Skilled Agent does not belong to this provider.",
+                    &format!("{event_id}-agent-provider-mismatch"),
+                    BridgeNotificationClass::ImportantFailure,
+                )
+                .await?;
+                return Ok(None);
+            }
+            None => {
+                crate::telemetry::report_bridge_configuration_fallback(
+                    route.provider_id.as_str(),
+                    "agent_specialization_defaulted",
+                );
+                if let Err(error) = send_text_reply(
+                    bot,
+                    message.chat_id.get(),
+                    message.message_id.get(),
+                    "The selected Skilled Agent is unavailable, so I’m continuing with this bot’s default behavior.",
+                    &format!("{event_id}-agent-defaulted"),
+                    BridgeNotificationClass::RoutineStatus,
+                )
+                .await
+                {
+                    eprintln!(
+                        "Agent fallback notice failed; continuing the request: {}",
+                        safe_diagnostic(&error.to_string())
+                    );
+                }
+            }
         }
-        let original = direction.text.clone();
-        replace_direction_text(
-            &mut direction,
-            agent_specialization_instruction(&agent, &original),
-        );
     }
     if let Some(notice) = content.unsupported_notice
         && !is_command
@@ -846,16 +896,42 @@ pub(super) async fn inbound_from_delivery(
         && (is_workspace_recovery_command(&direction.text, &route.bot_username)
             || is_provider_epoch_release_command(&direction.text, &route.bot_username))
     {
-        conversation_for_workspace_selection_inheriting_parent(route, message.chat_id.get()).await
+        conversation_for_workspace_selection_inheriting_parent(route, message.chat_id.get())
+            .await
+            .map(|conversation| (conversation, None))
     } else {
         conversation_for_chat_with_agent_context(
             route,
             message.chat_id.get(),
             chat_agent_context.as_ref(),
+            !is_command,
         )
     };
     let conversation = match resolved {
-        Ok(conversation) => conversation.snapshot(),
+        Ok((conversation, fallback)) => {
+            if let Some(fallback) = fallback {
+                crate::telemetry::report_bridge_configuration_fallback(
+                    route.provider_id.as_str(),
+                    fallback.code(),
+                );
+                if let Err(error) = send_text_reply(
+                    bot,
+                    message.chat_id.get(),
+                    message.message_id.get(),
+                    fallback.message(),
+                    &format!("{event_id}-agent-configuration-defaulted"),
+                    BridgeNotificationClass::RoutineStatus,
+                )
+                .await
+                {
+                    eprintln!(
+                        "Agent configuration fallback notice failed; continuing the request: {}",
+                        safe_diagnostic(&error.to_string())
+                    );
+                }
+            }
+            conversation.snapshot()
+        }
         Err(ConversationResolutionError::MissingWorkspace) => {
             let notice = BridgeNotice::MissingWorkspace.message().to_string();
             send_text_reply(
@@ -1488,6 +1564,12 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
     let (session_open, mut turn, _provider_turn_lease) = match started {
         Ok(started) => started,
         Err(error) => {
+            crate::telemetry::report_bridge_runtime_error(
+                sessions.provider_id().as_str(),
+                "turn_start",
+                &error,
+                None,
+            );
             let connection_epoch_ended =
                 matches!(&error, SessionManagerError::Driver(error) if error.ends_epoch());
             let diagnostic = safe_diagnostic(&error.to_string());

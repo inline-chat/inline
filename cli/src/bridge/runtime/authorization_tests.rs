@@ -101,7 +101,10 @@ async fn delivery(events: &mut LosslessEventReceiver) -> LosslessEventDelivery {
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let event = events.recv_delivery().await.expect("event delivery");
-            if matches!(event.event(), ClientEvent::MessageStored { .. }) {
+            if matches!(
+                event.event(),
+                ClientEvent::MessageStored { message } if !message.is_outgoing
+            ) {
                 return event;
             }
             event.ack().await.expect("ack status");
@@ -126,6 +129,21 @@ async fn record_bound_dialog(route: &InboundRoute, model_id: &str) {
     route.bot_store.record_dialog(dialog).await.expect("dialog");
 }
 
+async fn record_bound_dialog_with_project(route: &InboundRoute, project_id: &str, model_id: &str) {
+    let mut dialog = DialogRecord::new(InlineId::new(706));
+    dialog.peer_user_id = Some(InlineId::new(7));
+    dialog.agent_context = Some(inline_client::AgentThreadContext {
+        bot_user_id: InlineId::new(17),
+        agent_id: None,
+        configuration: Some(inline_client::AgentThreadConfiguration {
+            project_id: Some(project_id.to_string()),
+            model_id: Some(model_id.to_string()),
+            reasoning_effort_id: None,
+        }),
+    });
+    route.bot_store.record_dialog(dialog).await.expect("dialog");
+}
+
 fn history_contains(history: &inline_client::HistoryPage, expected: &str) -> bool {
     history.messages.iter().any(|message| {
         matches!(&message.content, MessageContent::Text { text } if text.contains(expected))
@@ -141,7 +159,8 @@ async fn provider_unavailable_bound_context_without_catalog_handles_status_and_q
     backend.push_event_batch(vec![ClientEvent::MessageStored {
         message: message(7, Some(false), "/status"),
     }]);
-    accept_provider_unavailable_delivery(&bot, delivery(&mut events).await, &route)
+    let status_delivery = delivery(&mut events).await;
+    accept_provider_unavailable_delivery(&bot, &status_delivery, &route)
         .await
         .expect("status delivery");
     let history = bot
@@ -158,7 +177,8 @@ async fn provider_unavailable_bound_context_without_catalog_handles_status_and_q
     let mut work = message(7, Some(false), "continue working");
     work.message_id = InlineId::new(10);
     backend.push_event_batch(vec![ClientEvent::MessageStored { message: work }]);
-    accept_provider_unavailable_delivery(&bot, delivery(&mut events).await, &route)
+    let work_delivery = delivery(&mut events).await;
+    accept_provider_unavailable_delivery(&bot, &work_delivery, &route)
         .await
         .expect("work delivery");
     assert_eq!(
@@ -173,7 +193,7 @@ async fn provider_unavailable_bound_context_without_catalog_handles_status_and_q
 }
 
 #[tokio::test]
-async fn invalid_bound_configuration_is_explained_without_failing_the_delivery() {
+async fn unavailable_bound_configuration_defaults_and_queues_the_delivery() {
     let route = route("codex");
     route
         .bot_agent_resolver
@@ -202,7 +222,8 @@ async fn invalid_bound_configuration_is_explained_without_failing_the_delivery()
     backend.push_event_batch(vec![ClientEvent::MessageStored {
         message: message(7, Some(false), "continue working"),
     }]);
-    accept_provider_unavailable_delivery(&bot, delivery(&mut events).await, &route)
+    let delivery = delivery(&mut events).await;
+    accept_provider_unavailable_delivery(&bot, &delivery, &route)
         .await
         .expect("invalid configuration delivery");
     let history = bot
@@ -214,9 +235,140 @@ async fn invalid_bound_configuration_is_explained_without_failing_the_delivery()
         })
         .await
         .expect("failure history");
+    assert!(history_contains(&history, "using this provider’s defaults"));
+    assert_eq!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .expect("queued work")
+            .len(),
+        1
+    );
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn unavailable_bound_project_defaults_and_queues_the_delivery() {
+    let route = route("codex");
+    record_bound_dialog_with_project(&route, "missing-project", "gpt-test").await;
+    let (bot, backend, mut events) = client().await;
+
+    backend.push_event_batch(vec![ClientEvent::MessageStored {
+        message: message(7, Some(false), "continue working"),
+    }]);
+    let delivery = delivery(&mut events).await;
+    accept_provider_unavailable_delivery(&bot, &delivery, &route)
+        .await
+        .expect("unavailable project delivery");
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(706),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("fallback history");
+    assert!(history_contains(&history, "using this provider’s defaults"));
+    assert_eq!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .expect("queued work")
+            .len(),
+        1
+    );
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn unavailable_skilled_agent_defaults_to_the_provider_bot_and_queues() {
+    let route = route("codex");
+    let mut dialog = DialogRecord::new(InlineId::new(706));
+    dialog.peer_user_id = Some(InlineId::new(7));
+    dialog.agent_context = Some(inline_client::AgentThreadContext {
+        bot_user_id: InlineId::new(17),
+        agent_id: Some(InlineId::new(99)),
+        configuration: Some(inline_client::AgentThreadConfiguration {
+            project_id: Some("project".to_string()),
+            model_id: None,
+            reasoning_effort_id: None,
+        }),
+    });
+    route.bot_store.record_dialog(dialog).await.expect("dialog");
+    let (bot, backend, mut events) = client().await;
+
+    backend.push_event_batch(vec![ClientEvent::MessageStored {
+        message: message(7, Some(false), "continue working"),
+    }]);
+    let delivery = delivery(&mut events).await;
+    accept_provider_unavailable_delivery(&bot, &delivery, &route)
+        .await
+        .expect("unavailable Agent delivery");
+
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(706),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("fallback history");
+    assert!(history_contains(&history, "default behavior"));
+    assert_eq!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .expect("queued work")
+            .len(),
+        1
+    );
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn skilled_agent_owned_by_another_provider_fails_closed_without_queuing() {
+    let route = route("codex");
+    route.bot_agent_resolver.store(
+        99,
+        Some(proto::BotAgent {
+            id: 99,
+            bot_user_id: 98,
+            name: "Foreign Agent".to_string(),
+            ..proto::BotAgent::default()
+        }),
+    );
+    let mut dialog = DialogRecord::new(InlineId::new(706));
+    dialog.peer_user_id = Some(InlineId::new(7));
+    dialog.agent_context = Some(inline_client::AgentThreadContext {
+        bot_user_id: InlineId::new(17),
+        agent_id: Some(InlineId::new(99)),
+        configuration: None,
+    });
+    route.bot_store.record_dialog(dialog).await.expect("dialog");
+    let (bot, backend, mut events) = client().await;
+
+    backend.push_event_batch(vec![ClientEvent::MessageStored {
+        message: message(7, Some(false), "continue working"),
+    }]);
+    let delivery = delivery(&mut events).await;
+    accept_provider_unavailable_delivery(&bot, &delivery, &route)
+        .await
+        .expect("foreign Agent delivery");
+
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(706),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("foreign Agent history");
     assert!(history_contains(
         &history,
-        "model selection is no longer available"
+        "does not belong to this provider"
     ));
     assert!(
         route
@@ -224,6 +376,101 @@ async fn invalid_bound_configuration_is_explained_without_failing_the_delivery()
             .pending_inbound_bindings(&route.installation_id, 10)
             .expect("queued work")
             .is_empty()
+    );
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn agent_context_for_another_provider_fails_closed_without_queuing() {
+    let route = route("codex");
+    let mut dialog = DialogRecord::new(InlineId::new(706));
+    dialog.peer_user_id = Some(InlineId::new(7));
+    dialog.agent_context = Some(inline_client::AgentThreadContext {
+        bot_user_id: InlineId::new(99),
+        agent_id: None,
+        configuration: None,
+    });
+    route.bot_store.record_dialog(dialog).await.expect("dialog");
+    let (bot, backend, mut events) = client().await;
+
+    backend.push_event_batch(vec![ClientEvent::MessageStored {
+        message: message(7, Some(false), "continue working"),
+    }]);
+    let delivery = delivery(&mut events).await;
+    accept_provider_unavailable_delivery(&bot, &delivery, &route)
+        .await
+        .expect("provider mismatch delivery");
+
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(706),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("mismatch history");
+    assert!(history_contains(&history, "different Agent provider"));
+    assert!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .expect("queued work")
+            .is_empty()
+    );
+    bot.shutdown().await.expect("shutdown");
+}
+
+#[tokio::test]
+async fn failed_delivery_is_settled_and_later_work_still_queues() {
+    let route = route("codex");
+    let (bot, backend, mut events) = client().await;
+
+    backend.push_event_batch(vec![ClientEvent::MessageStored {
+        message: message(7, Some(false), "poisoned request"),
+    }]);
+    let failed = delivery(&mut events).await;
+    recover_failed_delivery(
+        &bot,
+        &failed,
+        &route,
+        "test_delivery_recovery",
+        &std::io::Error::other("simulated deterministic failure"),
+    )
+    .await;
+
+    let mut next = message(7, Some(false), "continue working");
+    next.message_id = InlineId::new(10);
+    backend.push_event_batch(vec![ClientEvent::MessageStored { message: next }]);
+    let next = delivery(&mut events).await;
+    assert!(matches!(
+        next.event(),
+        ClientEvent::MessageStored { message } if message.message_id.get() == 10
+    ));
+    accept_provider_unavailable_delivery(&bot, &next, &route)
+        .await
+        .expect("later delivery");
+
+    let history = bot
+        .history(HistoryRequest {
+            chat_id: InlineId::new(706),
+            limit: Some(10),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .expect("recovery history");
+    assert!(history_contains(
+        &history,
+        "skipped it to keep later messages moving"
+    ));
+    assert_eq!(
+        route
+            .store
+            .pending_inbound_bindings(&route.installation_id, 10)
+            .expect("queued work")
+            .len(),
+        1
     );
     bot.shutdown().await.expect("shutdown");
 }

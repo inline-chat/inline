@@ -8,7 +8,7 @@ use std::sync::{
 use inline_client::{MessageMutation, RandomId, TransactionId, TransactionIdentity};
 
 #[test]
-fn bound_configuration_validation_waits_for_the_provider_catalog() {
+fn bound_configuration_defaults_while_the_provider_catalog_is_unavailable() {
     let resolver = BotAgentResolver::disabled();
     let context = proto::AgentThreadContext {
         bot_user_id: 17,
@@ -20,11 +20,18 @@ fn bound_configuration_validation_waits_for_the_provider_catalog() {
         }),
     };
 
-    assert!(resolver.validate_configuration(&context).is_ok());
+    assert_eq!(
+        resolver.resolve_configuration(&context),
+        ResolvedAgentConfiguration {
+            model: None,
+            reasoning: None,
+            fallback: Some(AgentConfigurationFallback::Catalog),
+        }
+    );
 }
 
 #[test]
-fn bound_configuration_must_match_the_published_catalog() {
+fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
     let resolver = BotAgentResolver::disabled();
     resolver.store_configuration_catalog(AgentConfigurationCatalog {
         projects: Some(AgentProjectCatalog {
@@ -62,38 +69,53 @@ fn bound_configuration_must_match_the_published_catalog() {
         }),
     };
 
-    assert!(
-        resolver
-            .validate_configuration(&context("inline", "gpt-test", "high"))
-            .is_ok()
+    assert_eq!(
+        resolver.resolve_configuration(&context("inline", "gpt-test", "high")),
+        ResolvedAgentConfiguration {
+            model: Some("gpt-test".to_string()),
+            reasoning: Some("high".to_string()),
+            fallback: None,
+        }
     );
-    assert!(
-        resolver
-            .validate_configuration(&context("missing", "gpt-test", "high"))
-            .is_err()
+    assert_eq!(
+        resolver.resolve_configuration(&context("missing", "gpt-test", "high")),
+        ResolvedAgentConfiguration {
+            model: Some("gpt-test".to_string()),
+            reasoning: Some("high".to_string()),
+            fallback: None,
+        }
     );
-    assert!(
-        resolver
-            .validate_configuration(&context("inline", "missing", "high"))
-            .is_err()
+    assert_eq!(
+        resolver.resolve_configuration(&context("inline", "missing", "high")),
+        ResolvedAgentConfiguration {
+            model: None,
+            reasoning: None,
+            fallback: Some(AgentConfigurationFallback::Model),
+        }
     );
-    assert!(
-        resolver
-            .validate_configuration(&context("inline", "gpt-test", "low"))
-            .is_err()
+    assert_eq!(
+        resolver.resolve_configuration(&context("inline", "gpt-test", "low")),
+        ResolvedAgentConfiguration {
+            model: Some("gpt-test".to_string()),
+            reasoning: None,
+            fallback: Some(AgentConfigurationFallback::Reasoning),
+        }
     );
-    assert!(
-        resolver
-            .validate_configuration(&proto::AgentThreadContext {
-                bot_user_id: 17,
-                agent_id: None,
-                configuration: Some(proto::AgentThreadConfiguration {
-                    project_id: Some("inline".to_string()),
-                    model_id: None,
-                    reasoning_effort_id: Some("high".to_string()),
-                }),
-            })
-            .is_err()
+    assert_eq!(
+        resolver.resolve_configuration(&proto::AgentThreadContext {
+            bot_user_id: 17,
+            agent_id: None,
+            configuration: Some(proto::AgentThreadConfiguration {
+                project_id: Some("inline".to_string()),
+                model_id: None,
+                reasoning_effort_id: Some("high".to_string()),
+            }),
+        }),
+        ResolvedAgentConfiguration {
+            model: None,
+            reasoning: None,
+            fallback: Some(AgentConfigurationFallback::Reasoning),
+        }
     );
 }
 
