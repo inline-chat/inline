@@ -150,6 +150,18 @@ export const TBotChatLastMessage = t.Object({
   rich_message: t.Optional(TBotRichMessage),
 })
 
+const TBotAgentThreadConfiguration = t.Object({
+  project_id: t.Optional(t.String()),
+  model_id: t.Optional(t.String()),
+  reasoning_effort_id: t.Optional(t.String()),
+})
+
+const TBotAgentThreadContext = t.Object({
+  bot_user_id: t.Number(),
+  agent_id: t.Optional(t.Number()),
+  configuration: t.Optional(TBotAgentThreadConfiguration),
+})
+
 const TBotChatBase = t.Object({
   chat_id: t.Number(),
   type: t.Union([t.Literal("user"), t.Literal("thread")]),
@@ -162,6 +174,7 @@ const TBotChatBase = t.Object({
   last_message_id: t.Optional(t.Number()),
   last_message: t.Optional(TBotChatLastMessage),
   emoji: t.Optional(t.String()),
+  agent_context: t.Optional(TBotAgentThreadContext),
 })
 
 export const TBotMessageReference = t.Object({
@@ -201,6 +214,7 @@ export const TSendMessageInput = t.Object({
   media: t.Optional(t.Any()),
   actions: t.Optional(t.Array(t.Array(TBotMessageAction, { maxItems: 8 }), { maxItems: 8 })),
   silent: t.Optional(t.Boolean()),
+  source_chat_id: t.Optional(TTargetId),
 })
 
 export const TGetChatInput = t.Object({

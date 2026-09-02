@@ -32,7 +32,7 @@ export const BotCapabilitiesModel = {
 
   async replaceForBotUserId(
     botUserId: number,
-    capabilities: ReadonlyArray<{ kind: string; version: number }>,
+    capabilities: ReadonlyArray<{ kind: string; version: number; payload?: Uint8Array | null }>,
   ): Promise<DbBotCapability[]> {
     return db.transaction(async (tx) => {
       if (capabilities.length === 0) {
@@ -43,10 +43,11 @@ export const BotCapabilitiesModel = {
       const now = new Date()
       await tx
         .insert(botCapabilities)
-        .values(capabilities.map(({ kind, version }) => ({
+        .values(capabilities.map(({ kind, version, payload }) => ({
           botUserId,
           kind,
           version,
+          payload: payload ? Buffer.from(payload) : null,
           createdAt: now,
           updatedAt: now,
         })))
@@ -54,6 +55,7 @@ export const BotCapabilitiesModel = {
           target: [botCapabilities.botUserId, botCapabilities.kind],
           set: {
             version: sql.raw(`excluded.${botCapabilities.version.name}`),
+            payload: sql.raw(`excluded.${botCapabilities.payload.name}`),
             updatedAt: now,
           },
         })

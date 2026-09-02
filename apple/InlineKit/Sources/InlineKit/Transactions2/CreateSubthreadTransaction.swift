@@ -18,6 +18,7 @@ public struct CreateSubthreadTransaction: Transaction2 {
     public var description: String?
     public var emoji: String?
     public var participants: [Int64]
+    public var agentContext: Data?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -30,7 +31,8 @@ public struct CreateSubthreadTransaction: Transaction2 {
     title: String? = nil,
     description: String? = nil,
     emoji: String? = nil,
-    participants: [Int64] = []
+    participants: [Int64] = [],
+    agentContext: InlineProtocol.AgentThreadContext? = nil
   ) {
     context = Context(
       parentChatId: parentChatId,
@@ -38,7 +40,8 @@ public struct CreateSubthreadTransaction: Transaction2 {
       title: title,
       description: description,
       emoji: emoji,
-      participants: participants
+      participants: participants,
+      agentContext: Chat.serializedAgentContext(agentContext)
     )
   }
 
@@ -61,6 +64,11 @@ public struct CreateSubthreadTransaction: Transaction2 {
       }
       $0.participants = context.participants.map { userId in
         InputChatParticipant.with { $0.userID = userId }
+      }
+      if let data = context.agentContext,
+         let agentContext = try? InlineProtocol.AgentThreadContext(serializedBytes: data)
+      {
+        $0.agentContext = agentContext
       }
     })
   }
@@ -104,7 +112,8 @@ public extension Transaction2 where Self == CreateSubthreadTransaction {
     title: String? = nil,
     description: String? = nil,
     emoji: String? = nil,
-    participants: [Int64] = []
+    participants: [Int64] = [],
+    agentContext: InlineProtocol.AgentThreadContext? = nil
   ) -> CreateSubthreadTransaction {
     CreateSubthreadTransaction(
       parentChatId: parentChatId,
@@ -112,7 +121,8 @@ public extension Transaction2 where Self == CreateSubthreadTransaction {
       title: title,
       description: description,
       emoji: emoji,
-      participants: participants
+      participants: participants,
+      agentContext: agentContext
     )
   }
 }

@@ -176,18 +176,28 @@ final class NewThreadComposeAttachmentStore {
 @MainActor
 final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource {
   private let viewModel: NewThreadMentionCandidatesViewModel
+  private let updates: CurrentValueSubject<MentionCompletionCandidates, Never>
+  private var agents: [MentionableBotAgent] = []
+  private var cancellable: AnyCancellable?
 
   var candidates: MentionCompletionCandidates {
-    viewModel.candidates
+    merged(viewModel.candidates)
   }
 
   var candidateUpdates: AnyPublisher<MentionCompletionCandidates, Never> {
     viewModel.startObserving()
-    return viewModel.$candidates.eraseToAnyPublisher()
+    updates.send(candidates)
+    return updates.removeDuplicates().eraseToAnyPublisher()
   }
 
   init(db: AppDatabase, destination: NewThreadComposeDestination) {
-    viewModel = NewThreadMentionCandidatesViewModel(db: db, spaceID: destination.spaceID)
+    let viewModel = NewThreadMentionCandidatesViewModel(db: db, spaceID: destination.spaceID)
+    self.viewModel = viewModel
+    updates = CurrentValueSubject(viewModel.candidates)
+    cancellable = viewModel.$candidates.sink { [weak self] candidates in
+      guard let self else { return }
+      updates.send(merged(candidates))
+    }
   }
 
   func setDestination(_ destination: NewThreadComposeDestination) {
@@ -196,6 +206,17 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
 
   func refresh() async {
     await viewModel.refresh()
+  }
+
+  func setAgents(_ agents: [MentionableBotAgent]) {
+    self.agents = agents
+    updates.send(candidates)
+  }
+
+  private func merged(_ candidates: MentionCompletionCandidates) -> MentionCompletionCandidates {
+    var candidates = candidates
+    candidates.agents = agents
+    return candidates
   }
 }
 
@@ -210,6 +231,7 @@ struct PreparedNewThreadDraft {
   let sendSilently: Bool
   let mentionedUserIDs: Set<Int64>
   let mentionedGroupIDs: Set<Int64>
+  let agentContext: InlineProtocol.AgentThreadContext?
 
   init(
     authorUserID: Int64,
@@ -217,7 +239,8 @@ struct PreparedNewThreadDraft {
     entities: MessageEntities?,
     attachments: [Drafts2Attachment],
     destination: NewThreadComposeDestination,
-    sendSilently: Bool
+    sendSilently: Bool,
+    agentContext: InlineProtocol.AgentThreadContext? = nil
   ) {
     self.authorUserID = authorUserID
     self.text = text
@@ -225,6 +248,7 @@ struct PreparedNewThreadDraft {
     self.attachments = attachments
     self.destination = destination
     self.sendSilently = sendSilently
+    self.agentContext = agentContext
     mentionedUserIDs = Self.mentionedUserIDs(in: entities)
     mentionedGroupIDs = Self.mentionedGroupIDs(in: entities)
   }
@@ -276,6 +300,7 @@ struct NewThreadComposeContext {
   let destination: @MainActor () -> NewThreadComposeDestination
   let sendSilently: @MainActor () -> Bool
   let setSendSilently: @MainActor (Bool) -> Void
+  let agentContext: @MainActor () -> InlineProtocol.AgentThreadContext?
   let mentionSource: any NewThreadComposeMentionSource
   let attachmentStore: NewThreadComposeAttachmentStore
   let overlayHostView: @MainActor () -> NSView?
@@ -291,6 +316,7 @@ struct NewThreadComposeContext {
     destination: @escaping @MainActor () -> NewThreadComposeDestination,
     sendSilently: @escaping @MainActor () -> Bool,
     setSendSilently: @escaping @MainActor (Bool) -> Void,
+    agentContext: @escaping @MainActor () -> InlineProtocol.AgentThreadContext? = { nil },
     mentionSource: any NewThreadComposeMentionSource,
     attachmentStore: NewThreadComposeAttachmentStore,
     overlayHostView: @escaping @MainActor () -> NSView?,
@@ -305,6 +331,7 @@ struct NewThreadComposeContext {
     self.destination = destination
     self.sendSilently = sendSilently
     self.setSendSilently = setSendSilently
+    self.agentContext = agentContext
     self.mentionSource = mentionSource
     self.attachmentStore = attachmentStore
     self.overlayHostView = overlayHostView

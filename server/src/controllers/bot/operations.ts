@@ -108,6 +108,7 @@ import { eq, inArray, sql } from "drizzle-orm"
 import { getSignedMediaFileProxyUrl } from "@in/server/modules/files/path"
 import { validateWebhookUrl } from "@in/server/modules/botUpdates/webhookSecurity"
 import { BotUpdateProjector, encodeBotActions, encodeBotMedia } from "@in/server/modules/botUpdates/projector"
+import { decodeAgentThreadContext } from "@in/server/modules/agentConfiguration"
 import {
   encodeBotEntities,
   type BotUserJson,
@@ -142,6 +143,7 @@ type BotChatSource = {
   readonly number?: number | null | undefined
   readonly threadNumber?: number | null | undefined
   readonly emoji?: string | null | undefined
+  readonly agentContext?: import("@inline-chat/protocol/core").AgentThreadContext | Uint8Array | null | undefined
 }
 
 type BotMessageSource = {
@@ -597,6 +599,9 @@ const makeInputPeerFromBotTarget = async (
 }
 
 const toBotChat = (chat: BotChatSource): BotChat => {
+  const agentContext = chat.agentContext instanceof Uint8Array
+    ? decodeAgentThreadContext(chat.agentContext)
+    : chat.agentContext
   const type =
     chat.type === "private"
       ? "user"
@@ -627,6 +632,19 @@ const toBotChat = (chat: BotChatSource): BotChat => {
       : undefined,
     number: chat.number ?? chat.threadNumber ?? undefined,
     emoji: chat.emoji ?? undefined,
+    agent_context: agentContext
+      ? {
+          bot_user_id: Number(agentContext.botUserId),
+          agent_id: agentContext.agentId === undefined ? undefined : Number(agentContext.agentId),
+          configuration: agentContext.configuration
+            ? {
+                project_id: agentContext.configuration.projectId,
+                model_id: agentContext.configuration.modelId,
+                reasoning_effort_id: agentContext.configuration.reasoningEffortId,
+              }
+            : undefined,
+        }
+      : undefined,
   }
 }
 
@@ -1148,6 +1166,10 @@ const sendMessage = async (
   const replyToMessageId = normalizeInputId(
     raw["reply_to_message_id"],
   )
+  const sourceChatId = normalizeInputId(raw["source_chat_id"])
+  if (raw["source_chat_id"] !== undefined && !sourceChatId) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
   const parseMarkdown = parseBotParseMarkdown(raw)
   const inputPeer = await makeInputPeerFromBotTarget(
     input,
@@ -1172,6 +1194,7 @@ const sendMessage = async (
     ...media,
     actions: toProtocolActions(input.actions),
     sendMode: input.silent ? MessageSendMode.MODE_SILENT : undefined,
+    sourceChatId,
   }, context)
 
   const sent = await MessageModel.getMessageByRandomId(

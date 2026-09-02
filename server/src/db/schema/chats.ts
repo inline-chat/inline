@@ -9,6 +9,7 @@ import { messages } from "@in/server/db/schema/messages"
 import { foreignKey } from "drizzle-orm/pg-core"
 import { text } from "drizzle-orm/pg-core"
 import { dialogs } from "@in/server/db/schema/dialogs"
+import { bytea } from "@in/server/db/schema/common"
 
 export const chatTypeEnum = pgEnum("chat_types", ["private", "thread"])
 
@@ -55,6 +56,9 @@ export const chats = pgTable(
     date: creationDate,
 
     emoji: varchar({ length: 20 }),
+
+    /** Encoded AgentThreadContext. Visible chat metadata, not provider session state. */
+    agentContext: bytea("agent_context"),
 
     /** Sequence of the updates for the chat */
     updateSeq: integer("update_seq").default(0),

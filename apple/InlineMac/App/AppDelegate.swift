@@ -736,6 +736,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await QuickSearchUsageStore.shared.clearCurrentAccount()
       await Transactions.shared.clearAllAndWait()
       try requireLocalDataResetMayContinue()
+      await AgentConfigurationCatalogStore.shared.clear()
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()
       await dependencies.commandBarCatalog.reset()

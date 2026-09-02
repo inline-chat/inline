@@ -18,7 +18,7 @@ async function getParticipantBotUserIds(chatId: number): Promise<number[]> {
   return rows.map((row) => row.userId)
 }
 
-async function getPublicSpaceBotUserIds(spaceId: number): Promise<number[]> {
+export async function getPublicSpaceBotUserIds(spaceId: number): Promise<number[]> {
   const rows = await db
     .select({ userId: members.userId })
     .from(members)

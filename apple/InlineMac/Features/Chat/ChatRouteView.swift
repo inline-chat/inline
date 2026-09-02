@@ -1,10 +1,10 @@
 import InlineKit
 import InlineUI
-import SwiftUI
 import os.signpost
+import SwiftUI
 
 struct ChatRouteView: View {
-  let peer: Peer
+  let peer: InlineKit.Peer
   private static let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
 
   @Environment(\.appDatabase) private var db
@@ -16,14 +16,16 @@ struct ChatRouteView: View {
   @ObservedObject private var settings = AppSettings.shared
   @State private var chatToolbarState = ChatToolbarState()
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
-  @State private var toolbarDialog: Dialog?
+  @StateObject private var agentThreadToolbarModel: AgentThreadToolbarModel
+  @State private var toolbarDialog: InlineKit.Dialog?
   @State private var navigationTitle = ""
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
   @State private var botAgentMentionTarget: BotAgentMentionTarget?
 
-  init(peer: Peer) {
+  init(peer: InlineKit.Peer) {
     self.peer = peer
     _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
+    _agentThreadToolbarModel = StateObject(wrappedValue: AgentThreadToolbarModel(peer: peer))
   }
 
   private var fallbackTitle: String {
@@ -140,12 +142,14 @@ struct ChatRouteView: View {
       }
       .task(id: peer.toString(), priority: .utility) {
         BotPresenceController.shared.setContext(peer: peer, realtimeV2: dependencies.realtimeV2)
+        agentThreadToolbarModel.start(database: dependencies.database)
         await ensureToolbarParticipantsLoaded(dependencies: dependencies)
         botChatSettingsCoordinator.startObservingDiscoveryScope(in: dependencies.database)
         await botChatSettingsCoordinator.warmUp()
       }
       .onDisappear {
         BotPresenceController.shared.clearContext(peer: peer)
+        agentThreadToolbarModel.cancel()
         botChatSettingsCoordinator.cancel()
         if let mainWindowID {
           MainWindowOpenCoordinator.shared.unregisterChatMenuContext(id: mainWindowID, peer: peer)
@@ -212,6 +216,28 @@ struct ChatRouteView: View {
 
         if #available(macOS 26.0, *) {
           ToolbarSpacer(.flexible)
+        }
+
+        if agentThreadToolbarModel.presentation != nil {
+          ToolbarItem {
+            AgentThreadToolbarIndicator(
+              model: agentThreadToolbarModel,
+              update: { context in
+                _ = try await dependencies.realtimeV2.send(.updateChatInfo(
+                  chatID: agentThreadToolbarModel.chatID,
+                  title: nil,
+                  emoji: nil,
+                  agentContext: context
+                ))
+              }
+            )
+            .macToolbarLayout(toolbarLayout)
+            .id("agent-context-\(peer.toString())")
+          }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+          }
         }
 
         if botPresenceController.toolbarItem(for: peer) != nil {
@@ -362,7 +388,7 @@ struct ChatRouteView: View {
 
   private func performChatMenuCommand(
     _ command: ChatMenuCommand,
-    dialog: Dialog?,
+    dialog: InlineKit.Dialog?,
     dependencies: AppDependencies
   ) {
     switch command {

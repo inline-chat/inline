@@ -15,6 +15,7 @@ export const updateChatInfoHandler = async (
       chatId: Number(input.chatId),
       title: input.title,
       emoji: input.emoji,
+      agentContext: input.agentContext,
     },
     {
       currentUserId: handlerContext.userId,

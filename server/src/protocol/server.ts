@@ -27,6 +27,7 @@ import { SpaceSettings } from "@inline-chat/protocol/core";
 import { User } from "@inline-chat/protocol/core";
 import { Member } from "@inline-chat/protocol/core";
 import { Reaction } from "@inline-chat/protocol/core";
+import { AgentThreadContext } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
 import { ChatAcknowledgement } from "@inline-chat/protocol/core";
@@ -541,6 +542,10 @@ export interface ServerChatUpdateInfo {
      * @generated from protobuf field: optional string emoji = 3;
      */
     emoji?: string;
+    /**
+     * @generated from protobuf field: optional AgentThreadContext agent_context = 4;
+     */
+    agentContext?: AgentThreadContext;
 }
 /**
  * Update for a chat when the thread moves between home and a space.
@@ -2368,7 +2373,8 @@ class ServerChatUpdateInfo$Type extends MessageType<ServerChatUpdateInfo> {
         super("server.ServerChatUpdateInfo", [
             { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "agent_context", kind: "message", T: () => AgentThreadContext }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateInfo>): ServerChatUpdateInfo {
@@ -2392,6 +2398,9 @@ class ServerChatUpdateInfo$Type extends MessageType<ServerChatUpdateInfo> {
                 case /* optional string emoji */ 3:
                     message.emoji = reader.string();
                     break;
+                case /* optional AgentThreadContext agent_context */ 4:
+                    message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2413,6 +2422,9 @@ class ServerChatUpdateInfo$Type extends MessageType<ServerChatUpdateInfo> {
         /* optional string emoji = 3; */
         if (message.emoji !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.emoji);
+        /* optional AgentThreadContext agent_context = 4; */
+        if (message.agentContext)
+            AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

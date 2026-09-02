@@ -26,6 +26,7 @@ import {
   getAgentSession,
   syncAgentSessionMessages,
 } from "@in/server/modules/agentSessions/service"
+import { encodeAgentThreadContext } from "@in/server/modules/agentConfiguration"
 import { and, asc, eq } from "drizzle-orm"
 
 describe("agent session continuity", () => {
@@ -454,62 +455,19 @@ describe("agent session continuity", () => {
     }
   })
 
-  test("lets two agent bots retain independent references to the same prompt", async () => {
-    const first = await connect()
+  test("requires a second agent bot to use a distinct Chat", async () => {
+    await connect()
     const secondBot = await testUtils.createUser(`agent-bot-two-${crypto.randomUUID()}@example.com`)
     await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
     await testUtils.addParticipant(chatId, secondBot.id)
-    const second = await connectAgentSession({
+    await expect(connectAgentSession({
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
       botUserId: BigInt(secondBot.id),
       provider: AgentSessionProvider.CLAUDE,
       instanceRef: "claude-installation",
       sessionRef: "claude-session",
-    }, ownerId)
-    const [prompt] = await db.insert(messages).values({
-      chatId,
-      messageId: 1,
-      fromId: teammateId,
-      text: "Ask both agents",
-    }).returning()
-    if (!prompt) throw new Error("prompt not created")
-    await db.update(chats).set({ lastMsgId: 1, messageIdCounter: 1 }).where(eq(chats.id, chatId))
-    await db.insert(botMessageRoutes).values([
-      {
-        botUserId: botId,
-        chatId,
-        messageId: 1,
-        activationReason: "mention",
-        expiresAt: new Date(Date.now() + 60_000),
-      },
-      {
-        botUserId: secondBot.id,
-        chatId,
-        messageId: 1,
-        activationReason: "mention",
-        expiresAt: new Date(Date.now() + 60_000),
-      },
-    ])
-    for (const [agentSessionId, routedBotId, correlationRef] of [
-      [first.agentSession!.id, botId, "codex-correlation"],
-      [second.agentSession!.id, secondBot.id, "claude-correlation"],
-    ] as const) {
-      const linked = await syncAgentSessionMessages({
-        agentSessionId,
-        mode: AgentSessionSyncMode.LIVE,
-        messages: [{
-          role: AgentSessionMessageRole.USER,
-          correlationRef,
-          complete: false,
-          operation: { oneofKind: "link", link: { messageId: 1n } },
-        }],
-      }, routedBotId)
-      expect(linked.messages[0]?.state).toBe(AgentSessionMessageSyncState.LINKED)
-    }
-    expect(await db.select().from(agentSessionMessages).where(eq(
-      agentSessionMessages.messageGlobalId,
-      prompt.globalId,
-    ))).toHaveLength(2)
+    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    expect(await db.select().from(agentSessions).where(eq(agentSessions.chatId, chatId))).toHaveLength(1)
   })
 
   test("links the bot response and enriches it from later provider history", async () => {
@@ -799,6 +757,74 @@ describe("agent session continuity", () => {
       botUserId: BigInt(botId),
     }, ownerId)
     expect(recovered.connection?.projectRef).toBe("inline-public")
+  })
+
+  test("keeps provider default project immutable after session creation", async () => {
+    const peerId = { type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chatId) } } }
+    const base = {
+      peerId,
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "default-project-installation",
+      sessionRef: "default-project-session",
+    }
+
+    await connectAgentSession(base, ownerId)
+    await expect(connectAgentSession({ ...base, projectRef: "late-project" }, ownerId))
+      .rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("a bound Chat only admits its configured bot", async () => {
+    await db.update(chats).set({
+      agentContext: encodeAgentThreadContext({ botUserId: BigInt(botId) }),
+    }).where(eq(chats.id, chatId))
+
+    const secondBot = await testUtils.createUser(`agent-bound-other-${crypto.randomUUID()}@example.com`)
+    await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
+    await testUtils.addParticipant(chatId, secondBot.id)
+
+    await expect(connectAgentSession({
+      peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
+      botUserId: BigInt(secondBot.id),
+      provider: AgentSessionProvider.CLAUDE,
+      instanceRef: "other-installation",
+      sessionRef: "other-session",
+    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("a Chat admits only one provider session even before it is bound", async () => {
+    await connect()
+    const secondBot = await testUtils.createUser(`agent-session-other-${crypto.randomUUID()}@example.com`)
+    await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
+    await testUtils.addParticipant(chatId, secondBot.id)
+
+    await expect(connectAgentSession({
+      peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
+      botUserId: BigInt(secondBot.id),
+      provider: AgentSessionProvider.CLAUDE,
+      instanceRef: "other-installation",
+      sessionRef: "other-session",
+    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("a selected Chat project must match the provider session project", async () => {
+    await db.update(chats).set({
+      agentContext: encodeAgentThreadContext({
+        botUserId: BigInt(botId),
+        configuration: { projectId: "selected-project" },
+      }),
+    }).where(eq(chats.id, chatId))
+
+    await expect(connect()).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    const connected = await connectAgentSession({
+      peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "selected-installation",
+      sessionRef: "selected-session",
+      projectRef: "selected-project",
+    }, ownerId)
+    expect(connected.state).toBe(ConnectAgentSessionState.CREATED)
   })
 
   test("rejects provider timestamps outside the JavaScript Date range", async () => {

@@ -15,14 +15,25 @@ public struct UpdateChatInfoTransaction: Transaction2 {
     let chatID: Int64
     let title: String?
     let emoji: String?
+    let agentContext: Data?
   }
 
-  public init(chatID: Int64, title: String?, emoji: String?) {
+  public init(
+    chatID: Int64,
+    title: String?,
+    emoji: String?,
+    agentContext: InlineProtocol.AgentThreadContext? = nil
+  ) {
     if chatID == 0 {
       log.error("chat ID is zero")
     }
 
-    context = Context(chatID: chatID, title: title, emoji: emoji)
+    context = Context(
+      chatID: chatID,
+      title: title,
+      emoji: emoji,
+      agentContext: Chat.serializedAgentContext(agentContext)
+    )
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -33,6 +44,11 @@ public struct UpdateChatInfoTransaction: Transaction2 {
       }
       if let emoji = context.emoji {
         $0.emoji = emoji
+      }
+      if let data = context.agentContext,
+         let agentContext = try? InlineProtocol.AgentThreadContext(serializedBytes: data)
+      {
+        $0.agentContext = agentContext
       }
     })
   }
@@ -53,6 +69,9 @@ public struct UpdateChatInfoTransaction: Transaction2 {
           }
           if let emoji = context.emoji {
             chat.emoji = emoji.isEmpty ? nil : emoji
+          }
+          if let agentContext = context.agentContext {
+            chat.agentContext = agentContext
           }
           try chat.save(db)
         }
@@ -91,7 +110,17 @@ public struct UpdateChatInfoTransaction: Transaction2 {
 }
 
 public extension Transaction2 where Self == UpdateChatInfoTransaction {
-  static func updateChatInfo(chatID: Int64, title: String?, emoji: String?) -> UpdateChatInfoTransaction {
-    UpdateChatInfoTransaction(chatID: chatID, title: title, emoji: emoji)
+  static func updateChatInfo(
+    chatID: Int64,
+    title: String?,
+    emoji: String?,
+    agentContext: InlineProtocol.AgentThreadContext? = nil
+  ) -> UpdateChatInfoTransaction {
+    UpdateChatInfoTransaction(
+      chatID: chatID,
+      title: title,
+      emoji: emoji,
+      agentContext: agentContext
+    )
   }
 }

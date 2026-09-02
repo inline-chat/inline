@@ -1,4 +1,5 @@
 import Foundation
+import InlineProtocol
 import Logger
 import RealtimeV2
 
@@ -42,7 +43,8 @@ public extension RealtimeV2 {
     emoji: String?,
     isPublic: Bool,
     spaceId: Int64?,
-    participants: [Int64]
+    participants: [Int64],
+    agentContext: InlineProtocol.AgentThreadContext? = nil
   ) async throws -> Int64 {
     let executor = CreateThreadExecutor(
       reservedChatIdProvider: {
@@ -57,7 +59,8 @@ public extension RealtimeV2 {
             isPublic: isPublic,
             spaceId: spaceId,
             participants: participants,
-            reservedChatId: reservedChatId
+            reservedChatId: reservedChatId,
+            agentContext: agentContext
           )
         ) != nil else {
           throw CreateThreadLocalError.queueAdmissionFailed
@@ -73,7 +76,8 @@ public extension RealtimeV2 {
             emoji: emoji,
             isPublic: isPublic,
             spaceId: spaceId,
-            participants: participants
+            participants: participants,
+            agentContext: agentContext
           )
         )
 

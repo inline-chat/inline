@@ -92,6 +92,7 @@ private enum LocalDataResetPerformer {
       NotionTaskService.shared.resetSession()
       await Drafts2.shared.resetForAccountChange()
       await Transactions.shared.clearAllAndWait()
+      await AgentConfigurationCatalogStore.shared.clear()
       ObjectCache.shared.clear()
 
       do {

@@ -1,5 +1,6 @@
 import { integer, pgTable, serial, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core"
 import { users } from "./users"
+import { bytea } from "./common"
 
 export const botCapabilities = pgTable(
   "bot_capabilities",
@@ -10,6 +11,8 @@ export const botCapabilities = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     kind: varchar("kind", { length: 64 }).notNull(),
     version: integer("version").notNull(),
+    /** Optional typed payload for capabilities that publish a cached catalog. */
+    payload: bytea("payload"),
     createdAt: timestamp("created_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
   },

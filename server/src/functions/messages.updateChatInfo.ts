@@ -9,10 +9,17 @@ import { invalidateChatInfoCache } from "@in/server/modules/cache/chatInfo"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
-import type { Update } from "@inline-chat/protocol/core"
+import type { AgentThreadContext, Update } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { emitMessageSubthreadUpdateIfNeeded } from "@in/server/modules/subthreads"
+import {
+  chatAgentContext,
+  encodeAgentThreadContext,
+  hasProviderSession,
+  validateAgentThreadContext,
+} from "@in/server/modules/agentConfiguration"
+import { requireManageableBot } from "@in/server/functions/bot.avatarHelpers"
 
 const log = new Log("functions.updateChatInfo")
 
@@ -20,6 +27,7 @@ type UpdateChatInfoInput = {
   chatId: number
   title?: string | null
   emoji?: string | null
+  agentContext?: AgentThreadContext
 }
 
 type UpdateChatInfoOutput = {
@@ -32,6 +40,7 @@ type UpdateThreadInfoInput = {
   chatId: number
   title?: string | null
   emoji?: string | null
+  agentContext?: AgentThreadContext
   currentUserId: number
   requireAccess?: boolean
   titleGuard?:
@@ -51,7 +60,8 @@ export async function updateChatInfo(
 
   const titleProvided = input.title !== undefined
   const emojiProvided = input.emoji !== undefined
-  if (!titleProvided && !emojiProvided) {
+  const agentContextProvided = input.agentContext !== undefined
+  if (!titleProvided && !emojiProvided && !agentContextProvided) {
     throw RealtimeRpcError.BadRequest()
   }
 
@@ -64,6 +74,13 @@ export async function updateChatInfo(
   }
 
   const nextEmoji = emojiProvided ? (input.emoji ?? "").trim() : undefined
+  const nextAgentContext = input.agentContext
+    ? await validateAgentThreadContext(input.agentContext)
+    : undefined
+  if (nextAgentContext) {
+    const bot = await requireManageableBot(Number(nextAgentContext.botUserId), context)
+    if (bot.botCreatorId !== context.currentUserId) throw RealtimeRpcError.UserIdInvalid()
+  }
 
   let result: UpdateChatInfoOutput | undefined
 
@@ -72,6 +89,7 @@ export async function updateChatInfo(
       chatId,
       title: titleProvided ? nextTitle : undefined,
       emoji: emojiProvided ? nextEmoji : undefined,
+      agentContext: nextAgentContext,
       currentUserId: context.currentUserId,
       requireAccess: true,
     })
@@ -93,7 +111,8 @@ export async function updateChatInfo(
 export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<UpdateChatInfoOutput> {
   const titleProvided = input.title !== undefined
   const emojiProvided = input.emoji !== undefined
-  if (!titleProvided && !emojiProvided) {
+  const agentContextProvided = input.agentContext !== undefined
+  if (!titleProvided && !emojiProvided && !agentContextProvided) {
     throw RealtimeRpcError.BadRequest()
   }
 
@@ -112,7 +131,31 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
     }
 
     if (input.requireAccess === true) {
-      await AccessGuards.ensureChatInfoEditAccess(chat, input.currentUserId, tx)
+      if (titleProvided || emojiProvided) {
+        await AccessGuards.ensureChatInfoEditAccess(chat, input.currentUserId, tx)
+      } else {
+        await AccessGuards.ensureChatAccess(chat, input.currentUserId, tx)
+      }
+    }
+
+    const currentAgentContext = chatAgentContext(chat)
+    if (agentContextProvided) {
+      if (
+        !currentAgentContext ||
+        !input.agentContext ||
+        currentAgentContext.botUserId !== input.agentContext.botUserId ||
+        currentAgentContext.agentId !== input.agentContext.agentId
+      ) {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const currentProjectId = currentAgentContext.configuration?.projectId
+      const nextProjectId = input.agentContext.configuration?.projectId
+      if (
+        currentProjectId !== nextProjectId &&
+        await hasProviderSession(chat.id, tx)
+      ) {
+        throw RealtimeRpcError.BadRequest()
+      }
     }
 
     if (input.titleGuard) {
@@ -129,8 +172,11 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
 
     const shouldUpdateTitle = titleProvided && chat.title !== nextTitle
     const shouldUpdateEmoji = emojiProvided && chat.emoji !== normalizedEmoji
+    const encodedAgentContext = input.agentContext ? encodeAgentThreadContext(input.agentContext) : undefined
+    const shouldUpdateAgentContext = agentContextProvided && encodedAgentContext !== undefined &&
+      !Buffer.from(chat.agentContext ?? []).equals(encodedAgentContext)
 
-    if (!shouldUpdateTitle && !shouldUpdateEmoji) {
+    if (!shouldUpdateTitle && !shouldUpdateEmoji && !shouldUpdateAgentContext) {
       return { chat, didUpdate: false }
     }
 
@@ -141,6 +187,7 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
         ...(shouldUpdateTitle ? { title: nextTitle } : {}),
         ...(shouldUpdateTitle && input.isUntitled === true ? { untitled: true } : {}),
         ...(emojiProvided ? { emoji: normalizedEmoji ?? "" } : {}),
+        ...(shouldUpdateAgentContext ? { agentContext: input.agentContext } : {}),
       },
     }
 
@@ -162,6 +209,9 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
 
     if (shouldUpdateEmoji) {
       updateFields.emoji = normalizedEmoji
+    }
+    if (shouldUpdateAgentContext) {
+      updateFields.agentContext = encodedAgentContext
     }
 
     const where = input.titleGuard?.kind === "empty"

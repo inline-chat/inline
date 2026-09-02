@@ -1,5 +1,6 @@
 import { Elysia, t, type TSchema } from "elysia"
 import { InlineError } from "@in/server/types/errors"
+import { decodeAgentThreadContext } from "@in/server/modules/agentConfiguration"
 import { authenticateBotHeader, authenticateBotPathOrHeader, type BotHandlerContext } from "./auth"
 import { handleBotError } from "./error"
 import { TApiEnvelope, normalizeInputId } from "./helpers"
@@ -284,6 +285,9 @@ const makeInputPeerFromBotTarget = async (input: BotTargetInput, currentUserId: 
 }
 
 const toBotChat = (chat: any): BotChat => {
+  const agentContext = chat.agentContext instanceof Uint8Array
+    ? decodeAgentThreadContext(chat.agentContext)
+    : chat.agentContext
   const chatId = typeof chat.id === "bigint" ? Number(chat.id) : Number(chat.id)
   const type =
     chat.type === "private" || chat.peerId?.type?.oneofKind === "user"
@@ -302,6 +306,19 @@ const toBotChat = (chat: any): BotChat => {
     last_message_id: chat.lastMsgId ? Number(chat.lastMsgId) : undefined,
     number: chat.number ?? chat.threadNumber ?? undefined,
     emoji: chat.emoji ?? undefined,
+    agent_context: agentContext
+      ? {
+          bot_user_id: Number(agentContext.botUserId),
+          agent_id: agentContext.agentId === undefined ? undefined : Number(agentContext.agentId),
+          configuration: agentContext.configuration
+            ? {
+                project_id: agentContext.configuration.projectId,
+                model_id: agentContext.configuration.modelId,
+                reasoning_effort_id: agentContext.configuration.reasoningEffortId,
+              }
+            : undefined,
+        }
+      : undefined,
   }
 }
 

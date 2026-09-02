@@ -6,6 +6,7 @@ enum ModelErrorCodes {
   DOCUMENT_INVALID = "DOCUMENT_INVALID",
   VOICE_INVALID = "VOICE_INVALID",
   FAILED = "FAILED",
+  AGENT_CONTEXT_ALREADY_SET = "AGENT_CONTEXT_ALREADY_SET",
 }
 
 export class ModelError extends Error {
@@ -26,4 +27,5 @@ export class ModelError extends Error {
   public static DocumentInvalid = new ModelError(ModelErrorCodes.DOCUMENT_INVALID)
   public static VoiceInvalid = new ModelError(ModelErrorCodes.VOICE_INVALID)
   public static Failed = new ModelError(ModelErrorCodes.FAILED)
+  public static AgentContextAlreadySet = new ModelError(ModelErrorCodes.AGENT_CONTEXT_ALREADY_SET)
 }

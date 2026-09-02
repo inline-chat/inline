@@ -20,6 +20,7 @@ const chat: DbChat = {
   maxUserId: null,
   date: new Date("2026-01-01T00:00:00Z"),
   emoji: null,
+  agentContext: null,
   updateSeq: 9,
   lastUpdateDate: new Date("2026-01-01T00:00:01Z"),
 }

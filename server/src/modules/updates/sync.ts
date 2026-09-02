@@ -744,6 +744,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               chatId: serverUpdate.update.chatInfo.chatId,
               title: serverUpdate.update.chatInfo.title,
               emoji: serverUpdate.update.chatInfo.emoji,
+              agentContext: serverUpdate.update.chatInfo.agentContext,
             },
           },
         })

@@ -459,6 +459,18 @@ export const BotChatLastMessage = Schema.Struct({
     "Compact representation of the most recent message in a chat.",
 })
 
+export const BotAgentThreadConfiguration = Schema.Struct({
+  project_id: OptionalString,
+  model_id: OptionalString,
+  reasoning_effort_id: OptionalString,
+})
+
+export const BotAgentThreadContext = Schema.Struct({
+  bot_user_id: UserId,
+  agent_id: OptionalWireInteger,
+  configuration: Schema.optionalKey(BotAgentThreadConfiguration),
+})
+
 const BotChatBase = Schema.Struct({
   chat_id: ChatId.annotateKey({
     description: "Unique identifier for this chat.",
@@ -502,6 +514,9 @@ const BotChatBase = Schema.Struct({
   }),
   emoji: OptionalString.annotateKey({
     description: "Emoji used as the chat's icon.",
+  }),
+  agent_context: Schema.optionalKey(BotAgentThreadContext).annotateKey({
+    description: "Visible Agent target and selected execution preset for this chat.",
   }),
 }).annotate({
   description:
@@ -845,6 +860,9 @@ export const SendMessageInput = Schema.Struct({
     Schema.Array(Schema.Array(BotMessageAction).check(Schema.isMaxLength(8))).check(Schema.isMaxLength(8)),
   ),
   silent: Schema.optionalKey(Schema.Boolean),
+  source_chat_id: OptionalChatId.annotateKey({
+    description: "Source chat for an explicit same-bot cross-thread Agent handoff.",
+  }),
 }).annotate({
   identifier: "SendMessageInput",
   description:

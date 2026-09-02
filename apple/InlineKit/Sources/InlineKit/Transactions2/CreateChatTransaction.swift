@@ -19,6 +19,7 @@ public struct CreateChatTransaction: Transaction2 {
     public var spaceId: Int64?
     public var participants: [Int64]
     public var reservedChatId: Int64?
+    public var agentContext: Data?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -34,7 +35,8 @@ public struct CreateChatTransaction: Transaction2 {
     isPublic: Bool,
     spaceId: Int64?,
     participants: [Int64],
-    reservedChatId: Int64? = nil
+    reservedChatId: Int64? = nil,
+    agentContext: InlineProtocol.AgentThreadContext? = nil
   ) {
     context = Context(
       title: title,
@@ -43,7 +45,8 @@ public struct CreateChatTransaction: Transaction2 {
       isPublic: isPublic,
       spaceId: spaceId,
       participants: participants,
-      reservedChatId: reservedChatId
+      reservedChatId: reservedChatId,
+      agentContext: Chat.serializedAgentContext(agentContext)
     )
   }
 
@@ -61,6 +64,11 @@ public struct CreateChatTransaction: Transaction2 {
       $0.isPublic = context.isPublic
       $0.participants = context.participants.map { userId in
         InputChatParticipant.with { $0.userID = Int64(userId) }
+      }
+      if let data = context.agentContext,
+         let agentContext = try? InlineProtocol.AgentThreadContext(serializedBytes: data)
+      {
+        $0.agentContext = agentContext
       }
     })
   }
@@ -86,7 +94,8 @@ public struct CreateChatTransaction: Transaction2 {
       isPublic: context.isPublic,
       createdBy: Auth.shared.getCurrentUserId(),
       isUntitled: explicitTitle == nil ? true : nil,
-      createState: .pending
+      createState: .pending,
+      agentContext: context.agentContext
     )
     let dialog = Dialog(optimisticForChat: chat)
 
@@ -198,7 +207,8 @@ public extension Transaction2 where Self == CreateChatTransaction {
     isPublic: Bool,
     spaceId: Int64?,
     participants: [Int64],
-    reservedChatId: Int64? = nil
+    reservedChatId: Int64? = nil,
+    agentContext: InlineProtocol.AgentThreadContext? = nil
   ) -> CreateChatTransaction {
     CreateChatTransaction(
       title: title,
@@ -207,7 +217,8 @@ public extension Transaction2 where Self == CreateChatTransaction {
       isPublic: isPublic,
       spaceId: spaceId,
       participants: participants,
-      reservedChatId: reservedChatId
+      reservedChatId: reservedChatId,
+      agentContext: agentContext
     )
   }
 }

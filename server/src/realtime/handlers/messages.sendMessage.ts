@@ -30,6 +30,8 @@ export const sendMessage = async (
       actions: input.actions,
       parseMarkdown: input.parseMarkdown ?? (handlerContext.isBot ? true : undefined),
       sendMode: input.sendMode ?? undefined,
+      initialAgentContext: input.initialAgentContext,
+      sourceChatId: input.sourceChatId === undefined ? undefined : Number(input.sourceChatId),
     },
     {
       currentSessionId: handlerContext.sessionId,

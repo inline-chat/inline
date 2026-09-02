@@ -35,6 +35,7 @@ import {
 } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { chatAgentContext } from "@in/server/modules/agentConfiguration"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import {
@@ -119,8 +120,19 @@ function ensureBounded(value: string | undefined, maxBytes: number, required: bo
 }
 
 function ensureCompatibleProjectRef(row: DbAgentSession, projectRef: string | undefined): void {
-  if (projectRef === undefined || row.projectRefEncrypted === null) return
+  if (projectRef === undefined) return
+  if (row.projectRefEncrypted === null) throw RealtimeRpcError.BadRequest()
   if (decryptAgentRef(row.projectRefEncrypted) !== projectRef) {
+    throw RealtimeRpcError.BadRequest()
+  }
+}
+
+function ensureSelectedProjectRef(
+  context: ReturnType<typeof chatAgentContext>,
+  projectRef: string | undefined,
+): void {
+  const selectedProjectId = context?.configuration?.projectId
+  if (selectedProjectId !== undefined && selectedProjectId !== projectRef) {
     throw RealtimeRpcError.BadRequest()
   }
 }
@@ -227,6 +239,14 @@ export async function connectAgentSession(
   })
 
   const result = await db.transaction(async (tx) => {
+    const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
+    if (!lockedChat) throw RealtimeRpcError.PeerIdInvalid()
+    const boundContext = chatAgentContext(lockedChat)
+    if (boundContext && Number(boundContext.botUserId) !== botUserId) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    ensureSelectedProjectRef(boundContext, projectRef)
+
     const [external] = await tx.select().from(agentSessions).where(and(
         eq(agentSessions.botUserId, botUserId),
         eq(agentSessions.provider, input.provider),
@@ -241,9 +261,7 @@ export async function connectAgentSession(
       const [updated] = await tx
         .update(agentSessions)
         .set({
-          projectRefEncrypted: external.projectRefEncrypted ?? (
-            projectRef === undefined ? null : encryptAgentRef(projectRef)
-          ),
+          projectRefEncrypted: external.projectRefEncrypted,
           statusMessageGlobalId: statusGlobalId ?? external.statusMessageGlobalId,
           updatedAt: new Date(),
         })
@@ -256,7 +274,7 @@ export async function connectAgentSession(
     }
 
     const [occupied] = await tx.select().from(agentSessions).where(
-      and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
+      eq(agentSessions.chatId, chat.id),
     ).limit(1)
     if (occupied) throw RealtimeRpcError.BadRequest()
 

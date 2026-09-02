@@ -9,6 +9,7 @@ import {
   resolveChatPermissionsForUsers,
 } from "@in/server/modules/authorization/chatPermissions"
 import type { Transaction } from "@in/server/db/types"
+import { chatAgentContext } from "@in/server/modules/agentConfiguration"
 
 type EncodeChatOptions = {
   encodingForUserId: number
@@ -59,6 +60,7 @@ export function encodeChat(chat: DbChat, { encodingForUserId, permissions }: Enc
     number: chat.threadNumber ?? undefined,
     permissions,
     seq: chat.updateSeq ?? undefined,
+    agentContext: chatAgentContext(chat),
   }
 }
 

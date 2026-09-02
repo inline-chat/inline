@@ -1410,7 +1410,13 @@ class GlassComposeAppKit: NSView {
 
   private func applyMentionCandidates() {
     var candidates = mentionCandidates
-    candidates.agents = ExperimentalFeatureFlags.mentionableAgentsEnabled ? mentionAgents : []
+    if ExperimentalFeatureFlags.mentionableAgentsEnabled {
+      if case .chat = usage {
+        candidates.agents = mentionAgents
+      }
+    } else {
+      candidates.agents = []
+    }
     mentionCompletionMenu?.updateCandidates(candidates)
   }
 
@@ -2585,7 +2591,8 @@ class GlassComposeAppKit: NSView {
       entities: entities,
       attachments: context.attachmentStore.attachments,
       destination: context.destination(),
-      sendSilently: context.sendSilently()
+      sendSilently: context.sendSilently(),
+      agentContext: context.agentContext()
     )
     guard !draft.isEmpty else { return }
 

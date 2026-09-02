@@ -2,7 +2,7 @@ import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
-import { Chat, Dialog, type ChatParticipant } from "@inline-chat/protocol/core"
+import { Chat, Dialog, type AgentThreadContext, type ChatParticipant } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { dialogs } from "@in/server/db/schema"
@@ -24,6 +24,8 @@ import { ensureCanCreateSpaceThread } from "@in/server/modules/authorization/spa
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { Transaction } from "@in/server/db/types"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
+import { encodeAgentThreadContext, validateAgentThreadContext } from "@in/server/modules/agentConfiguration"
+import { getPublicSpaceBotUserIds } from "@in/server/functions/bot.peerDiscovery"
 
 type InitialParticipant = {
   chatId: number
@@ -49,6 +51,7 @@ export async function createChat(
     isPublic?: boolean
     participants?: { userId: bigint }[]
     reservedChatId?: bigint
+    agentContext?: AgentThreadContext
   },
   context: FunctionContext,
 ): Promise<{ chat: Chat; dialog: Dialog }> {
@@ -132,6 +135,18 @@ export async function createChat(
     })
   }
 
+  const agentContext = input.agentContext
+    ? await validateAgentThreadContext(input.agentContext, context.currentUserId)
+    : undefined
+  if (agentContext) {
+    const botUserId = Number(agentContext.botUserId)
+    if (!isPublic && !participantUserIds.includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
+    if (isPublic && !(await getPublicSpaceBotUserIds(resolvedSpaceId)).includes(botUserId)) {
+      throw RealtimeRpcError.UserIdInvalid()
+    }
+  }
+  const encodedAgentContext = agentContext ? encodeAgentThreadContext(agentContext) : null
+
   const explicitTitle = normalizeOptionalString(input.title)
   const placeholderTitle = normalizePlaceholderTitle(input.placeholderTitle)
   if (explicitTitle && placeholderTitle) {
@@ -212,6 +227,7 @@ export async function createChat(
           emoji: input.emoji ?? null,
           description: input.description ?? null,
           createdBy: context.currentUserId,
+          agentContext: encodedAgentContext,
         })
         .returning()
 
@@ -306,6 +322,7 @@ export async function createChat(
           emoji: input.emoji ?? null,
           description: input.description ?? null,
           createdBy: context.currentUserId,
+          agentContext: encodedAgentContext,
         })
         .returning()
 

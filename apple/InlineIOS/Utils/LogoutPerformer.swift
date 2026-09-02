@@ -54,6 +54,7 @@ enum LogoutPerformer {
     await FileDownloader.shared.resetSession()
     NotionTaskService.shared.resetSession()
     await Transactions.shared.clearAllAndWait()
+    await AgentConfigurationCatalogStore.shared.clear()
 
     BotAgentDirectory.shared.clear()
     TabsManager.shared.reset()

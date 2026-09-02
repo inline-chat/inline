@@ -50,6 +50,9 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var canUpdateInfo: Bool?
   public var createState: ChatCreateState?
   public var participantRosterComplete: Bool = false
+  /// Serialized InlineProtocol.AgentThreadContext. The provider session stays
+  /// outside Inline; this is only the durable, user-selected Chat preset.
+  public var agentContext: Data?
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -69,6 +72,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let canUpdateInfo = Column(CodingKeys.canUpdateInfo)
     static let createState = Column(CodingKeys.createState)
     static let participantRosterComplete = Column(CodingKeys.participantRosterComplete)
+    public static let agentContext = Column(CodingKeys.agentContext)
   }
 
   public static let space = belongsTo(Space.self)
@@ -112,7 +116,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     parentMessageId: Int64? = nil,
     canUpdateInfo: Bool? = nil,
     createState: ChatCreateState? = nil,
-    participantRosterComplete: Bool = false
+    participantRosterComplete: Bool = false,
+    agentContext: Data? = nil
   ) {
     self.id = id
     self.date = date
@@ -131,10 +136,21 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.canUpdateInfo = canUpdateInfo
     self.createState = createState
     self.participantRosterComplete = participantRosterComplete
+    self.agentContext = agentContext
   }
 }
 
 public extension Chat {
+  var agentThreadContext: InlineProtocol.AgentThreadContext? {
+    guard let agentContext else { return nil }
+    return try? InlineProtocol.AgentThreadContext(serializedBytes: agentContext)
+  }
+
+  static func serializedAgentContext(_ context: InlineProtocol.AgentThreadContext?) -> Data? {
+    guard let context else { return nil }
+    return try? context.serializedData()
+  }
+
   var humanReadableTitle: String? {
     if let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines),
        trimmed.isEmpty == false
@@ -275,6 +291,7 @@ public extension Chat {
     lastMsgId = from.lastMsgId
     emoji = from.emoji
     createState = nil
+    agentContext = nil
   }
 
   static func fromTimestamp(from: Int) -> Date {
@@ -298,6 +315,7 @@ public extension Chat {
     parentMessageId = from.hasParentMessageID ? from.parentMessageID : nil
     canUpdateInfo = from.hasPermissions ? from.permissions.canUpdateInfo : nil
     createState = nil
+    agentContext = from.hasAgentContext ? Self.serializedAgentContext(from.agentContext) : nil
 
     if case let .user(peerUser) = from.peerID.type {
       peerUserId = peerUser.userID
@@ -317,10 +335,13 @@ public extension Chat {
   }
 
   private mutating func mergeLocalFieldsForFullSave(_ db: Database) throws {
+    guard let existing = try Chat.fetchOne(db, key: id) else { return }
+    if agentContext == nil {
+      agentContext = existing.agentContext
+    }
     if let title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
       return
     }
-    guard let existing = try Chat.fetchOne(db, key: id) else { return }
     guard let existingTitle = existing.title,
           existingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     else {

@@ -24,10 +24,12 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/server/protocol/server"
-import type { Chat, Dialog, Message } from "@inline-chat/protocol/core"
+import type { AgentThreadContext, Chat, Dialog, Message } from "@inline-chat/protocol/core"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 import { and, eq, inArray } from "drizzle-orm"
 import { queueReplyThreadGraphMaterialization } from "@in/server/modules/threadGraph"
+import { encodeAgentThreadContext, validateAgentThreadContext } from "@in/server/modules/agentConfiguration"
+import { getBotUserIdsForChatScope, getPublicSpaceBotUserIds } from "@in/server/functions/bot.peerDiscovery"
 
 type Input = {
   parentChatId: bigint
@@ -36,6 +38,7 @@ type Input = {
   description?: string
   emoji?: string
   participants?: { userId: bigint }[]
+  agentContext?: AgentThreadContext
 }
 
 type Output = {
@@ -83,6 +86,25 @@ export async function createSubthread(input: Input, context: FunctionContext): P
   const directParticipantUserIds = uniquePositiveUserIds(input.participants ?? [])
   await ensureUsersExist(directParticipantUserIds)
 
+  const agentContext = input.agentContext
+    ? await validateAgentThreadContext(input.agentContext, context.currentUserId)
+    : undefined
+  if (agentContext) {
+    const botUserId = Number(agentContext.botUserId)
+    if (
+      parentChat.spaceId !== null &&
+      parentChat.publicThread === true &&
+      !(await getPublicSpaceBotUserIds(parentChat.spaceId)).includes(botUserId)
+    ) {
+      throw RealtimeRpcError.UserIdInvalid()
+    }
+    const visibleBotIds = new Set([
+      ...directParticipantUserIds,
+      ...await getBotUserIdsForChatScope(parentChat, context.currentUserId),
+    ])
+    if (!visibleBotIds.has(botUserId)) throw RealtimeRpcError.UserIdInvalid()
+  }
+
   if (parentMessageId !== undefined) {
     const existingReplyThread = await db.query.chats.findFirst({
       where: {
@@ -92,6 +114,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     })
 
     if (existingReplyThread) {
+      requireMatchingAgentContext(existingReplyThread, agentContext)
       await ensureLinkedSubthreadDialogs({
         chat: existingReplyThread,
         userIds: [context.currentUserId],
@@ -132,6 +155,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     emoji,
     createdBy: context.currentUserId,
     directParticipantUserIds,
+    agentContext,
   })
 
   const { dialogs: materializedDialogs } =
@@ -248,6 +272,7 @@ async function createSubthreadChat(input: {
   emoji?: string
   createdBy: number
   directParticipantUserIds: number[]
+  agentContext?: AgentThreadContext
 }): Promise<DbChat> {
   try {
     const result = await db.transaction(async (tx): Promise<{
@@ -274,6 +299,7 @@ async function createSubthreadChat(input: {
           parentChatId: input.parentChat.id,
           parentMessageId: input.parentMessageId ?? null,
           threadNumber,
+          agentContext: input.agentContext ? encodeAgentThreadContext(input.agentContext) : null,
         })
         .returning()
 
@@ -313,11 +339,20 @@ async function createSubthreadChat(input: {
       })
 
       if (existingReplyThread) {
+        requireMatchingAgentContext(existingReplyThread, input.agentContext)
         return existingReplyThread
       }
     }
 
     throw error
+  }
+}
+
+function requireMatchingAgentContext(chat: DbChat, requested: AgentThreadContext | undefined): void {
+  if (!requested) return
+  const requestedBytes = encodeAgentThreadContext(requested)
+  if (!chat.agentContext || !Buffer.from(chat.agentContext).equals(requestedBytes)) {
+    throw RealtimeRpcError.BadRequest()
   }
 }
 

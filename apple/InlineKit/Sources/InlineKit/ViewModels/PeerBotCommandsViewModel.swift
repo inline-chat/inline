@@ -26,6 +26,16 @@ public struct MentionableBotAgent: Hashable, Identifiable, Sendable {
     self.botUserInfo = botUserInfo
   }
 
+  public init(agent: InlineProtocol.BotAgent, botUserInfo: UserInfo) {
+    id = agent.id
+    botUserId = agent.botUserID
+    name = agent.name
+    handle = agent.hasHandle ? agent.handle : nil
+    emoji = agent.hasEmoji ? agent.emoji : nil
+    description = agent.hasDescription_p ? agent.description_p : nil
+    self.botUserInfo = botUserInfo
+  }
+
   public var displayName: String {
     guard let emoji, !emoji.isEmpty else { return name }
     return "\(emoji) \(name)"

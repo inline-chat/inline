@@ -13,6 +13,7 @@ import type {
 import type { MessageActions, MessageEntities } from "@inline-chat/protocol/core"
 import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
 import { BotAgentsModel } from "@in/server/db/models/botAgents"
+import { chatAgentContext } from "@in/server/modules/agentConfiguration"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat, DbUser } from "@in/server/db/schema"
@@ -20,6 +21,7 @@ import { encodeBotEntities, type BotUserJson } from "@in/server/controllers/bot/
 import { encodeBotRichMessageFromStored } from "@in/server/controllers/bot/richContent"
 import type { UpdateGroup } from "@in/server/modules/updates"
 import { Log } from "@in/server/utils/log"
+import { isSubthreadParentMessage } from "@in/server/modules/subthreads"
 
 const log = new Log("botUpdates.projector")
 
@@ -43,6 +45,21 @@ const toEventChat = (chat: DbChat): BotEventChat => ({
   parent_chat_id: chat.parentChatId ?? undefined,
   number: chat.threadNumber ?? undefined,
   emoji: chat.emoji ?? undefined,
+  agent_context: (() => {
+    const context = chatAgentContext(chat)
+    if (!context) return undefined
+    return {
+      bot_user_id: Number(context.botUserId),
+      agent_id: context.agentId === undefined ? undefined : Number(context.agentId),
+      configuration: context.configuration
+        ? {
+            project_id: context.configuration.projectId,
+            model_id: context.configuration.modelId,
+            reasoning_effort_id: context.configuration.reasoningEffortId,
+          }
+        : undefined,
+    }
+  })(),
 })
 
 const mentionTargets = (entities: MessageEntities | null | undefined): number[] =>
@@ -50,6 +67,15 @@ const mentionTargets = (entities: MessageEntities | null | undefined): number[] 
     if (entity.entity.oneofKind === "mention") return [Number(entity.entity.mention.userId)]
     return []
   })
+
+const mentionsExactBoundTarget = (
+  entities: MessageEntities | null | undefined,
+  context: ReturnType<typeof chatAgentContext>,
+): boolean => context !== undefined && (entities?.entities ?? []).some((entity) => {
+  if (entity.entity.oneofKind !== "mention") return false
+  const mention = entity.entity.mention
+  return Number(mention.userId) === Number(context.botUserId) && mention.agentId === context.agentId
+})
 
 export const agentMentionTarget = (
   entities: MessageEntities | null | undefined,
@@ -61,6 +87,18 @@ export const agentMentionTarget = (
     if (entity.entity.mention.agentId !== undefined) return Number(entity.entity.mention.agentId)
   }
   return undefined
+}
+
+export const agentMentionTargetForChat = (
+  entities: MessageEntities | null | undefined,
+  botUserId: number,
+  chat: DbChat,
+): number | undefined => {
+  const boundContext = chatAgentContext(chat)
+  if (Number(boundContext?.botUserId) !== botUserId) {
+    return agentMentionTarget(entities, botUserId)
+  }
+  return boundContext?.agentId === undefined ? undefined : Number(boundContext.agentId)
 }
 
 const toAgent = (agent: import("@inline-chat/protocol/core").BotAgent): BotAgent => ({
@@ -75,12 +113,13 @@ const toAgent = (agent: import("@inline-chat/protocol/core").BotAgent): BotAgent
 })
 
 const activatedAgents = async (
+  chat: DbChat,
   entities: MessageEntities | null | undefined,
   botUserIds: number[],
 ): Promise<Map<number, BotAgent>> => {
   const agentIdByBotUserId = new Map<number, number>()
   for (const botUserId of botUserIds) {
-    const agentId = agentMentionTarget(entities, botUserId)
+    const agentId = agentMentionTargetForChat(entities, botUserId, chat)
     if (agentId !== undefined) agentIdByBotUserId.set(botUserId, agentId)
   }
   if (agentIdByBotUserId.size === 0) return new Map()
@@ -234,19 +273,54 @@ function eventMessage(
   }
 }
 
+export const hasConsumableAgentContent = (message: BotEventMessage): boolean => Boolean(
+  message.text?.trim() ||
+  message.rich_message ||
+  (message.media && message.media.type !== "nudge")
+)
+
+const requiresActivatedAgent = (chat: DbChat, botUserId: number): boolean => {
+  const context = chatAgentContext(chat)
+  return Number(context?.botUserId) === botUserId && context?.agentId !== undefined
+}
+
+export const hasResolvedBoundAgent = (
+  chat: DbChat,
+  botUserId: number,
+  activatedAgent: BotAgent | undefined,
+): boolean => !requiresActivatedAgent(chat, botUserId) || activatedAgent !== undefined
+
 export const activationReason = (input: {
   stream: { botUserId: number; messageTrigger: string }
   chat: DbChat
   message: DbFullMessage
   reply: DbFullMessage | null
+  sourceChatId?: number
 }): BotActivationReason | undefined => {
-  if (input.message.fromId === input.stream.botUserId) return undefined
   const explicitlyMentioned = mentionTargets(input.message.entities).includes(input.stream.botUserId)
-  if (input.message.from.bot) return explicitlyMentioned ? "mention" : undefined
+  if (input.message.fromId === input.stream.botUserId) {
+    const context = chatAgentContext(input.chat)
+    return mentionsExactBoundTarget(input.message.entities, context) &&
+      input.sourceChatId !== undefined &&
+      input.sourceChatId !== input.chat.id &&
+      Number(context?.botUserId) === input.stream.botUserId
+      ? "mention"
+      : undefined
+  }
+  if (input.message.from.bot) {
+    const context = chatAgentContext(input.chat)
+    const targetsBoundProvider = Number(context?.botUserId) === input.stream.botUserId
+    return (targetsBoundProvider
+      ? mentionsExactBoundTarget(input.message.entities, context)
+      : explicitlyMentioned)
+      ? "mention"
+      : undefined
+  }
   if (commandTargets(input.message.entities).includes(input.stream.botUserId)) return "command"
   if (explicitlyMentioned) return "mention"
   if (input.reply?.fromId === input.stream.botUserId) return "reply"
   if (input.chat.type === "private") return "direct"
+  if (Number(chatAgentContext(input.chat)?.botUserId) === input.stream.botUserId) return "all"
   return input.stream.messageTrigger === "all" ? "all" : undefined
 }
 
@@ -254,21 +328,41 @@ async function messageCreated(input: {
   chat: DbChat
   messageId: number
   updateGroup: UpdateGroup
+  sourceChatId?: number
 }): Promise<void> {
   const [message, streams] = await Promise.all([
     MessageModel.getMessage(input.messageId, input.chat.id),
     BotUpdatesModel.getStreamsForBotUserIds(input.updateGroup.userIds),
   ])
   if (streams.length === 0) return
+  if (message.systemMessage || await isSubthreadParentMessage(message.globalId)) return
   const reply = message.replyToMsgId
     ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
     : null
   const users = await loadEventMessageUsers(message, reply)
-  const agentsByBotUserId = await activatedAgents(message.entities, streams.map((stream) => stream.botUserId))
+  const agentsByBotUserId = await activatedAgents(
+    input.chat,
+    message.entities,
+    streams.map((stream) => stream.botUserId),
+  )
   for (const stream of streams) {
-    const reason = activationReason({ stream, chat: input.chat, message, reply })
+    const reason = activationReason({
+      stream,
+      chat: input.chat,
+      message,
+      reply,
+      sourceChatId: input.sourceChatId,
+    })
     if (!reason) continue
     const encoded = eventMessage(input.chat, message, reply, users, stream.botUserId)
+    if (!hasConsumableAgentContent(encoded)) continue
+    if (!hasResolvedBoundAgent(input.chat, stream.botUserId, agentsByBotUserId.get(stream.botUserId))) {
+      log.warn("Dropping Bot activation for a missing bound Agent", {
+        botUserId: stream.botUserId,
+        chatId: input.chat.id,
+      })
+      continue
+    }
     await BotUpdatesModel.recordMessageRoute({
       botUserId: stream.botUserId,
       chatId: input.chat.id,
@@ -294,13 +388,26 @@ async function messageEdited(input: { chat: DbChat; messageId: number }): Promis
   const routes = await BotUpdatesModel.getMessageRoutes(input.chat.id, [input.messageId])
   if (routes.length === 0) return
   const message = await MessageModel.getMessage(input.messageId, input.chat.id)
+  if (message.systemMessage || await isSubthreadParentMessage(message.globalId)) return
   const reply = message.replyToMsgId
     ? await MessageModel.getMessage(message.replyToMsgId, input.chat.id).catch(() => null)
     : null
   const users = await loadEventMessageUsers(message, reply)
-  const agentsByBotUserId = await activatedAgents(message.entities, routes.map((route) => route.botUserId))
+  const agentsByBotUserId = await activatedAgents(
+    input.chat,
+    message.entities,
+    routes.map((route) => route.botUserId),
+  )
   for (const route of routes) {
     const encoded = eventMessage(input.chat, message, reply, users, route.botUserId)
+    if (!hasConsumableAgentContent(encoded)) continue
+    if (!hasResolvedBoundAgent(input.chat, route.botUserId, agentsByBotUserId.get(route.botUserId))) {
+      log.warn("Dropping Bot edit for a missing bound Agent", {
+        botUserId: route.botUserId,
+        chatId: input.chat.id,
+      })
+      continue
+    }
     await BotUpdatesModel.queue({
       botUserId: route.botUserId,
       updateType: "edited_message",

@@ -232,6 +232,7 @@ extension AppDelegate {
     guard await runLogoutPhase(.transactions, attempt: attempt, operation: {
       await Transactions.shared.clearAllAndWait()
     }) else { return }
+    await AgentConfigurationCatalogStore.shared.clear()
     ObjectCache.shared.clear()
 
     beginLogoutPhase(.database, attempt: attempt)

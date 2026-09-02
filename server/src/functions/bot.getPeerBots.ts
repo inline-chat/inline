@@ -39,7 +39,7 @@ export async function getPeerBots(input: GetPeerBotsInput, context: FunctionCont
     bots: botRows.map((row) => ({
       bot: Encoders.user({ user: row.user, photoFile: row.photoFile, min: true }),
       capabilities: (capabilitiesByBotUserId.get(row.user.id) ?? []).flatMap((capability) => {
-        const encoded = toProtocolBotCapability(capability)
+        const encoded = toProtocolBotCapability(capability, { includePayload: false })
         return encoded ? [encoded] : []
       }),
       agents: agentsByBotUserId.get(row.user.id) ?? [],

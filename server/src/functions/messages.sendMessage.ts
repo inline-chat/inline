@@ -5,6 +5,7 @@ import {
   MessageEntities,
   MessageSendMode,
   Update,
+  type AgentThreadContext,
   type BlockContent,
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -13,7 +14,7 @@ import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
-import { dialogs, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { chats, dialogs, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
@@ -58,6 +59,7 @@ import {
   isLinkedSubthread,
   queueSubthreadParentUpdate,
   showAndOpenLinkedSubthreadDialogs,
+  getChatById,
 } from "@in/server/modules/subthreads"
 import { queueFirstMessageExperience } from "@in/server/modules/subthreadParentMaterialization"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
@@ -81,6 +83,14 @@ import { resolveGroupMentions } from "@in/server/modules/message/resolveGroupMen
 import { resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
+import { ModelError } from "@in/server/db/models/_errors"
+import {
+  encodeAgentThreadContext,
+  chatAgentContext,
+  normalizeAgentThreadContext,
+  validateAgentThreadContext,
+} from "@in/server/modules/agentConfiguration"
+import { getBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
 
 type Input = {
   peerId: InputPeer
@@ -112,6 +122,12 @@ type Input = {
 
   /** skip processing links into attachments */
   skipLinkProcessing?: boolean
+
+  /** Set-once binding for an existing unbound Chat's first Agent-directed message. */
+  initialAgentContext?: AgentThreadContext
+
+  /** Trusted Bot API provenance for an explicit same-bot cross-Chat handoff. */
+  sourceChatId?: number
 }
 
 type Output = {
@@ -137,10 +153,38 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const fromId = context.currentUserId
   const inputPeer = input.peerId
   const currentUserId = context.currentUserId
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  let chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
   const chatId = chat.id
+  if (input.sourceChatId !== undefined) {
+    const sourceChatId = Number(input.sourceChatId)
+    if (!Number.isSafeInteger(sourceChatId) || sourceChatId <= 0 || sourceChatId === chatId) {
+      throw RealtimeRpcError.BadRequest()
+    }
+    const sender = await UsersModel.getUserById(currentUserId)
+    const sourceChat = await getChatById(sourceChatId)
+    if (!sender?.bot || !sourceChat) throw RealtimeRpcError.BadRequest()
+    await AccessGuards.ensureChatAccess(sourceChat, currentUserId)
+    const sourceContext = chatAgentContext(sourceChat)
+    const destinationContext = chatAgentContext(chat)
+    if (
+      Number(sourceContext?.botUserId) !== currentUserId ||
+      destinationContext === undefined
+    ) {
+      throw RealtimeRpcError.BadRequest()
+    }
+  }
+  if (input.initialAgentContext && input.randomId) {
+    const normalizedRetryContext = normalizeAgentThreadContext(input.initialAgentContext)
+    const recovered = await recoverInitialAgentMessageRetry({
+      chatId,
+      currentUserId,
+      randomId: input.randomId,
+      expectedContext: normalizedRetryContext,
+    })
+    if (recovered) return { updates: recovered }
+  }
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
   const currentSessionConnections = connectionManager
     .getUserConnections(currentUserId)
@@ -196,6 +240,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
   })
   entities = groupMentions.entities
+  const destinationAgentContext = chatAgentContext(chat)
+  const selfMentionsExactBoundAgent = Number(destinationAgentContext?.botUserId) === currentUserId &&
+    (entities?.entities ?? []).some((entity) => {
+      if (entity.entity.oneofKind !== "mention") return false
+      const mention = entity.entity.mention
+      return Number(mention.userId) === currentUserId && mention.agentId === destinationAgentContext?.agentId
+    })
+  if (selfMentionsExactBoundAgent && input.sourceChatId === undefined) {
+    throw RealtimeRpcError.BadRequest()
+  }
   const mentionedUserIds = new Set<number>([
     ...getMentionedUserIds(entities),
     ...groupMentions.mentionedUserIds,
@@ -265,6 +319,34 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     mediaType = "voice"
   }
 
+  let initialAgentContext: AgentThreadContext | undefined
+  let encodedInitialAgentContext: Buffer | undefined
+  if (input.initialAgentContext) {
+    initialAgentContext = await validateAgentThreadContext(input.initialAgentContext, currentUserId)
+    const botUserId = Number(initialAgentContext.botUserId)
+    encodedInitialAgentContext = encodeAgentThreadContext(initialAgentContext)
+    if (chat.agentContext !== null) {
+      if (!input.randomId || !Buffer.from(chat.agentContext).equals(encodedInitialAgentContext)) {
+        throw RealtimeRpcError.BadRequest()
+      }
+      try {
+        const existing = await MessageModel.getMessageByRandomId(input.randomId, currentUserId)
+        if (existing.chatId !== chatId) throw RealtimeRpcError.BadRequest()
+        return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId) }
+      } catch (error) {
+        if (error instanceof RealtimeRpcError) throw error
+        throw RealtimeRpcError.BadRequest()
+      }
+    }
+
+    const visibleBotIds = await getBotUserIdsForChatScope(chat, currentUserId)
+    if (!visibleBotIds.includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
+
+    const hasConsumableInput = Boolean(text?.trim()) ||
+      mediaType === "photo" || mediaType === "video" || mediaType === "document" || mediaType === "voice"
+    if (!hasConsumableInput) throw RealtimeRpcError.BadRequest()
+  }
+
   // encrypt entities
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities.length > 0
@@ -300,9 +382,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   let newMessage: DbMessage & { blockContent?: BlockContent | null }
   let update: UpdateSeqAndDate
+  let agentContextUpdate: UpdateSeqAndDate | undefined
   try {
     // insert new msg with new ID
-    ;({ message: newMessage, update } = await MessageModel.insertMessage({
+    ;({ message: newMessage, update, agentContextUpdate } = await MessageModel.insertMessage({
       chatId: chatId,
       fromId: fromId,
       textEncrypted: encryptedMessage?.encrypted ?? null,
@@ -328,8 +411,22 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       actionsEncrypted: encryptedActions?.encrypted ?? null,
       actionsIv: encryptedActions?.iv ?? null,
       actionsTag: encryptedActions?.authTag ?? null,
-    }, preparedBlockContent))
+    }, preparedBlockContent, undefined, initialAgentContext && encodedInitialAgentContext
+      ? { value: initialAgentContext, encoded: encodedInitialAgentContext }
+      : undefined))
   } catch (error) {
+    if (error instanceof ModelError && error.code === ModelError.Codes.AGENT_CONTEXT_ALREADY_SET) {
+      if (input.randomId && encodedInitialAgentContext && initialAgentContext) {
+        const recovered = await recoverInitialAgentMessageRetry({
+          chatId,
+          currentUserId,
+          randomId: input.randomId,
+          expectedContext: initialAgentContext,
+        })
+        if (recovered) return { updates: recovered }
+      }
+      throw RealtimeRpcError.BadRequest()
+    }
     if (error instanceof Error && error.message.includes("random_id_per_sender_unique") && input.randomId) {
       log.debug("duplicate random id recovered from existing message", { currentUserId })
 
@@ -339,6 +436,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       log.error("error inserting message", error)
       throw RealtimeRpcError.InternalError()
     }
+  }
+
+  if (initialAgentContext && encodedInitialAgentContext) {
+    chat = { ...chat, agentContext: encodedInitialAgentContext }
   }
 
   queueMessageThreadLinkMaterialization({
@@ -400,6 +501,22 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+  let initialAgentContextRealtimeUpdate: Update | undefined
+  if (initialAgentContext && agentContextUpdate) {
+    initialAgentContextRealtimeUpdate = {
+      update: {
+        oneofKind: "chatInfo",
+        chatInfo: { chatId: BigInt(chat.id), agentContext: initialAgentContext },
+      },
+      seq: agentContextUpdate.seq,
+      date: encodeDateStrict(agentContextUpdate.date),
+    }
+    updateGroup.userIds.forEach((userId) => {
+      RealtimeUpdates.pushToUser(userId, [initialAgentContextRealtimeUpdate!], {
+        skipSessionId: userId === currentUserId ? context.currentSessionId : undefined,
+      })
+    })
+  }
   await autoFollowThreadMessage({
     chat,
     currentUserId,
@@ -458,8 +575,14 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }),
     updateGroup,
   })
+  if (initialAgentContextRealtimeUpdate) selfUpdates.unshift(initialAgentContextRealtimeUpdate)
 
-  BotUpdateProjector.messageCreated({ chat, messageId: newMessage.messageId, updateGroup })
+  BotUpdateProjector.messageCreated({
+    chat,
+    messageId: newMessage.messageId,
+    updateGroup,
+    sourceChatId: input.sourceChatId,
+  })
 
   // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
   if (previewRoutes.length > 0) {
@@ -1066,6 +1189,33 @@ async function selfUpdatesFromExistingMessage(randomId: bigint, currentUserId: n
     //   update: {
     //     oneofKind: "newMessage",
   ]
+}
+
+async function recoverInitialAgentMessageRetry(input: {
+  chatId: number
+  currentUserId: number
+  randomId: bigint
+  expectedContext: AgentThreadContext
+}): Promise<Update[] | undefined> {
+  let message: DbMessage
+  try {
+    message = await MessageModel.getMessageByRandomId(input.randomId, input.currentUserId)
+  } catch (error) {
+    if (error instanceof ModelError && error.code === ModelError.Codes.MESSAGE_INVALID) {
+      return undefined
+    }
+    throw error
+  }
+  const persistedChat = await db._query.chats.findFirst({ where: eq(chats.id, input.chatId) })
+  const persistedContext = persistedChat ? chatAgentContext(persistedChat) : undefined
+  if (
+    message.chatId !== input.chatId ||
+    persistedContext?.botUserId !== input.expectedContext.botUserId ||
+    persistedContext?.agentId !== input.expectedContext.agentId
+  ) {
+    throw RealtimeRpcError.BadRequest()
+  }
+  return selfUpdatesFromExistingMessage(input.randomId, input.currentUserId)
 }
 
 // ------------------------------------------------------------

@@ -155,6 +155,7 @@ message ServerChatUpdateInfo {
   int64 chat_id = 1;
   optional string title = 2;
   optional string emoji = 3;
+  optional AgentThreadContext agent_context = 4;
 }
 
 // Update for a chat when the thread moves between home and a space.

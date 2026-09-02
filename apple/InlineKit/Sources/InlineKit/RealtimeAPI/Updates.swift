@@ -2787,6 +2787,9 @@ extension InlineProtocol.UpdateChatInfo {
       if hasEmoji {
         chat.emoji = emoji.isEmpty ? nil : emoji
       }
+      if hasAgentContext {
+        chat.agentContext = Chat.serializedAgentContext(agentContext)
+      }
       try chat.save(db)
     }
   }

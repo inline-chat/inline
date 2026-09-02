@@ -46,6 +46,7 @@ import { getBotCommands } from "./bot.getCommands"
 import { setBotCommands } from "./bot.setCommands"
 import { getPeerBotCommands } from "./bot.getPeerCommands"
 import { getBotSkills } from "./bot.getSkills"
+import { getBotConfigurationCatalog } from "./bot.getConfigurationCatalog"
 import { getPeerBots } from "./bot.getPeerBots"
 import { getMyBotCapabilities } from "./bot.getMyCapabilities"
 import { setMyBotCapabilities } from "./bot.setMyCapabilities"
@@ -165,6 +166,7 @@ export const Functions = {
     setCommands: setBotCommands,
     getPeerCommands: getPeerBotCommands,
     getSkills: getBotSkills,
+    getConfigurationCatalog: getBotConfigurationCatalog,
     getPeerBots,
     getMyCapabilities: getMyBotCapabilities,
     setMyCapabilities: setMyBotCapabilities,

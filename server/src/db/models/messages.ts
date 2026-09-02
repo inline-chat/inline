@@ -1,6 +1,7 @@
 import {
   MessageActions,
   MessageEntities,
+  type AgentThreadContext,
   type AgentSessionMessageInfo,
   type BlockContent,
   type InputPeer,
@@ -61,6 +62,7 @@ import {
   collectReadyBlockPhotoIds,
   validateBlockContent,
 } from "@in/server/modules/message/blockContent"
+import { decryptAgentRef } from "@in/server/modules/agentSessions/crypto"
 
 const log = new Log("MessageModel", LogLevel.INFO)
 
@@ -681,12 +683,14 @@ function equalMessageEntities(left: MessageEntities | undefined, right: MessageE
 type InsertMessageOutput = {
   message: DbMessage & { blockContent?: BlockContent | null }
   update: UpdateSeqAndDate
+  agentContextUpdate?: UpdateSeqAndDate
 }
 
 async function insertMessage(
   message: Omit<DbNewMessage, "messageId">,
   preparedBlockContent?: PreparedBlockContent,
   transaction?: Transaction,
+  initialAgentContext?: { value: AgentThreadContext; encoded: Uint8Array },
 ): Promise<InsertMessageOutput> {
   const chatId = message.chatId
 
@@ -702,6 +706,51 @@ async function insertMessage(
     if (!chat) {
       throw ModelError.ChatInvalid
     }
+
+    if (initialAgentContext && chat.agentContext !== null) {
+      throw ModelError.AgentContextAlreadySet
+    }
+
+    if (initialAgentContext) {
+      const [existingSession] = await tx
+        .select({
+          botUserId: agentSessions.botUserId,
+          projectRefEncrypted: agentSessions.projectRefEncrypted,
+        })
+        .from(agentSessions)
+        .where(eq(agentSessions.chatId, chat.id))
+        .limit(1)
+      const selectedProjectId = initialAgentContext.value.configuration?.projectId
+      if (
+        existingSession &&
+        (
+          existingSession.botUserId !== Number(initialAgentContext.value.botUserId) ||
+          (
+            selectedProjectId !== undefined &&
+            (
+              existingSession.projectRefEncrypted === null ||
+              decryptAgentRef(existingSession.projectRefEncrypted) !== selectedProjectId
+            )
+          )
+        )
+      ) {
+        throw ModelError.AgentContextAlreadySet
+      }
+    }
+
+    const agentContextUpdate = initialAgentContext
+      ? await UpdatesModel.insertUpdate(tx, {
+          update: {
+            oneofKind: "chatInfo",
+            chatInfo: {
+              chatId: BigInt(chat.id),
+              agentContext: initialAgentContext.value,
+            },
+          },
+          bucket: UpdateBucket.Chat,
+          entity: chat,
+        })
+      : undefined
 
     const nextId = ChatModel.nextMessageId(chat)
     const blockContentId = preparedBlockContent
@@ -733,7 +782,7 @@ async function insertMessage(
         },
       },
       bucket: UpdateBucket.Chat,
-      entity: chat,
+      entity: agentContextUpdate ? { ...chat, updateSeq: agentContextUpdate.seq } : chat,
     })
 
     // Update chat's PTS and lastMsgId
@@ -744,6 +793,7 @@ async function insertMessage(
         messageIdCounter: nextId,
         updateSeq: update.seq,
         lastUpdateDate: update.date,
+        ...(initialAgentContext ? { agentContext: Buffer.from(initialAgentContext.encoded) } : {}),
       })
       .where(eq(chats.id, chatId))
 
@@ -753,6 +803,7 @@ async function insertMessage(
         blockContent: preparedBlockContent?.blockContent ?? null,
       },
       update,
+      agentContextUpdate,
     }
   }
 
