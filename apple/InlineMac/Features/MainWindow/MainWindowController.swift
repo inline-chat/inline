@@ -230,9 +230,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       persistsActiveSpace: true,
       restoresActiveSpace: restoresActiveSpace
     )
+    let shouldShowGettingStarted = dependencies.auth.getCurrentUserId().map {
+      GettingStartedVisibility.shouldShow(for: $0)
+    } ?? false
     if destination == nil,
-       let userID = dependencies.auth.getCurrentUserId(),
-       GettingStartedVisibility.shouldShow(for: userID)
+       shouldShowGettingStarted || GettingStartedPreview.isForced
     {
       restoredNav.reset()
     }
