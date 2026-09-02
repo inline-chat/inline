@@ -9,7 +9,7 @@ struct SyncConnectionPresentationTests {
     #expect(RealtimeConnectionDisplayPolicy.iOS.showDelaySeconds(for: .coldStart) == 0)
     #expect(RealtimeConnectionDisplayPolicy.iOS.showDelaySeconds(for: .reconnect) == 0.3)
     #expect(RealtimeConnectionDisplayPolicy.iOS.hideDelaySeconds == 0)
-    #expect(RealtimeConnectionDisplayPolicy.macOS.showDelaySeconds(for: .coldStart) == 1)
+    #expect(RealtimeConnectionDisplayPolicy.macOS.showDelaySeconds(for: .coldStart) == 0)
     #expect(RealtimeConnectionDisplayPolicy.macOS.showDelaySeconds(for: .reconnect) == 1)
     #expect(RealtimeConnectionDisplayPolicy.macOS.hideDelaySeconds == 0)
   }

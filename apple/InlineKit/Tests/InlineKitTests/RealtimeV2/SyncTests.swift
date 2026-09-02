@@ -974,6 +974,7 @@ final class SyncTests {
 
     let callCount = await client.getCallCount()
     #expect(callCount == 2)
+    await sync.prepareForTermination()
   }
 
   @Test("chat TOO_LONG rejects a metadata-only response that omits the current tail")
@@ -1009,6 +1010,7 @@ final class SyncTests {
     #expect(await apply.repairedChats.isEmpty)
     #expect(await storage.getBucketState(for: .chat(peer: peer)).seq == 0)
     #expect(await client.getChatRecentMessageRequests() == [true])
+    await sync.prepareForTermination()
   }
 
   @Test("space TOO_LONG repairs its authoritative snapshot and advances")
@@ -1102,6 +1104,7 @@ final class SyncTests {
     let bucketState = await storage.getBucketState(for: .space(id: 10))
     #expect(bucketState.seq == 5)
     #expect(bucketState.date == 150)
+    await sync.prepareForTermination()
   }
 
   @Test("user TOO_LONG captures state before fetching account projections")
@@ -1596,6 +1599,7 @@ final class SyncTests {
 
     let callCount = await client.getCallCount()
     #expect(callCount == 1)
+    await sync.prepareForTermination()
   }
 
   @Test("getUpdatesState response with missing child hints cannot borrow a user target", arguments: [Int32(0), Int32(10)])
@@ -2438,15 +2442,17 @@ final class SyncTests {
     await storage.setState(SyncState(lastSyncDate: storedDate))
 
     await sync.acceptedSessionOpened(sessionID: 1)
-    let didCallState = await waitForCondition(timeout: .seconds(3)) {
-      let methods = await client.getCalledMethods()
-      return methods.contains(.getUpdatesState)
+    let didCaptureCurrentUser = await waitForCondition(timeout: .seconds(3)) {
+      await client.getCalledMethods()
+        .filter { $0 == .getUpdatesState }
+        .count == 2
     }
-    #expect(didCallState)
+    #expect(didCaptureCurrentUser)
 
     let state = await storage.getState()
     #expect(state.lastSyncDate == storedDate)
     #expect(await client.getUpdatesStateDates() == [storedDate])
+    await sync.prepareForTermination()
   }
 
   @Test("a server-regressed checkpoint enters admitted user repair before rewinding global state")
@@ -2696,6 +2702,7 @@ final class SyncTests {
 
     #expect(didCallState == false)
     #expect(await client.getCallCount() == 0)
+    await sync.prepareForTermination()
   }
 
 #if DEBUG || DEBUG_BUILD
@@ -2727,6 +2734,7 @@ final class SyncTests {
     #expect(await client.getUpdatesStateDates() == [nil, nil])
     #expect(await storage.getState().lastSyncDate == 777)
     #expect(await storage.getBucketState(for: .user).seq == 12)
+    await sync.prepareForTermination()
   }
 
   @Test("debug clear-state scenario clears storage and queues discovery")
@@ -2747,6 +2755,7 @@ final class SyncTests {
       return methods.contains(.getUpdatesState)
     }
     #expect(didCallState)
+    await sync.prepareForTermination()
   }
 
   @Test("debug user rewind does not sweep chat buckets")
@@ -3239,6 +3248,7 @@ final class SyncTests {
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
     #expect(bucketState.seq == 5)
     #expect(bucketState.date == 100)
+    await sync.prepareForTermination()
   }
 
   @Test("space catch-up apply failure does not advance bucket state")
@@ -3277,6 +3287,7 @@ final class SyncTests {
     let bucketState = await storage.getBucketState(for: .space(id: 10))
     #expect(bucketState.seq == 5)
     #expect(bucketState.date == 100)
+    await sync.prepareForTermination()
   }
 
   @Test("catch-up bucket state storage failure does not advance bucket state")
@@ -3320,6 +3331,7 @@ final class SyncTests {
       await client.getCallCount() > 1
     }
     #expect(refetchedImmediately == false)
+    await sync.prepareForTermination()
   }
 
   @Test("non-retryable bucket error retires actor but preserves bucket state")
@@ -3383,6 +3395,7 @@ final class SyncTests {
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
     #expect(bucketState.seq == 5)
     #expect(bucketState.date == 100)
+    await sync.prepareForTermination()
   }
 
   @Test("non-retryable fetch clears buffered realtime")
@@ -3836,6 +3849,7 @@ final class SyncTests {
     let bucketState = await storage.getBucketState(for: .chat(peer: peer))
     #expect(bucketState.seq == 5)
     #expect(bucketState.date == 100)
+    await sync.prepareForTermination()
   }
 
   @Test("declared-final page below a frozen target cannot apply rows or advance cursor date")
@@ -3904,6 +3918,7 @@ final class SyncTests {
     let bucketState = await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 1)))
     #expect(bucketState.seq == 0)
     #expect(bucketState.date == 0)
+    await sync.prepareForTermination()
   }
 
   @Test("buffered realtime applies after multi-slice catch-up in order")
