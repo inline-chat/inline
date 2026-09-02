@@ -297,7 +297,12 @@ struct ChatInfoView: View {
                     },
                     openParticipantChat: { userInfo in
                       UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                      nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
+                      if router.tracksHistory {
+                        router.resetTransientPresentation()
+                        router.openPrimaryDestination(.chat(peer: Peer.user(id: userInfo.user.id)))
+                      } else {
+                        nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
+                      }
                     },
                     updateNotificationSelection: { selection in
                       updateNotificationSelection(selection)

@@ -104,9 +104,8 @@ private struct HelpCommunitySection: View {
   }
 
   private func open(_ destination: Destination) {
-    let tab = router.selectedTab
     router.dismissSheet()
-    router.push(destination, for: tab)
+    router.openPrimaryDestination(destination)
   }
 }
 

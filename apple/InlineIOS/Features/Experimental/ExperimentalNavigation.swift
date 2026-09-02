@@ -158,6 +158,7 @@ enum ExperimentalHomeNavigationPerformance {
 struct ExperimentalDestinationView: View {
   @Bindable var nav: ExperimentalNavigationModel
   let destination: Destination
+  var usesRouterNavigation = false
   let onSelectSpace: (Int64) -> Void
   let onMigrateLegacySpaceDestination: (Int64) -> Void
 
@@ -220,7 +221,7 @@ struct ExperimentalDestinationView: View {
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
     case let .spaceSettings(spaceId):
-      SpaceSettingsView(spaceId: spaceId)
+      SpaceSettingsView(spaceId: spaceId, usesRouterNavigation: usesRouterNavigation)
     case let .spaceIntegrations(spaceId):
       SpaceIntegrationsView(spaceId: spaceId)
     case let .integrationOptions(spaceId, provider):
@@ -262,7 +263,7 @@ struct ExperimentalSheetView: View {
         destination: .inline,
         onOpenChat: { peer in
           router.dismissSheet()
-          router.push(.chat(peer: peer), for: router.selectedTab)
+          router.openPrimaryDestination(.chat(peer: peer))
         },
         onCreateSpace: { router.presentSheet(.createSpace) }
       )
@@ -287,6 +288,7 @@ enum ExperimentalHomeTab: Hashable {
 struct ExperimentalHomeView: View {
   let initialTab: ExperimentalHomeTab
   var allChatsFilter: ChatListFilter = .all
+  private let selection: Binding<Destination?>?
 
   @AppStorage private var pinnedExpanded: Bool
 
@@ -301,10 +303,12 @@ struct ExperimentalHomeView: View {
 
   init(
     initialTab: ExperimentalHomeTab,
-    allChatsFilter: ChatListFilter = .all
+    allChatsFilter: ChatListFilter = .all,
+    selection: Binding<Destination?>? = nil
   ) {
     self.initialTab = initialTab
     self.allChatsFilter = allChatsFilter
+    self.selection = selection
     let surface: ExperimentalHomePinnedSurface = initialTab == .allChats ? .allChats : .inbox
     _pinnedExpanded = AppStorage(
       wrappedValue: true,
@@ -332,7 +336,8 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          pinnedExpanded: $pinnedExpanded
+          pinnedExpanded: $pinnedExpanded,
+          selection: selection
         )
       case .allChats:
         ExperimentalChatListView(
@@ -350,7 +355,8 @@ struct ExperimentalHomeView: View {
           unreadBadgeStyle: unreadBadgeStyle,
           isLoading: homeListStore.state.isLoading,
           status: homeStatus,
-          pinnedExpanded: $pinnedExpanded
+          pinnedExpanded: $pinnedExpanded,
+          selection: selection
         )
       case .archived:
         ExperimentalChatListView(
@@ -429,6 +435,7 @@ private struct ExperimentalChatListView: View {
   let isLoading: Bool
   let status: ExperimentalHomeStatus?
   @Binding var pinnedExpanded: Bool
+  var selection: Binding<Destination?>?
 
   @EnvironmentObject private var data: DataManager
   @EnvironmentObject private var themeManager: ThemeManager
@@ -450,80 +457,7 @@ private struct ExperimentalChatListView: View {
       } else if isEmpty {
         emptyContent
       } else {
-        List {
-          if !pinnedItems.isEmpty {
-            ExperimentalPinnedChatSection(
-              isExpanded: $pinnedExpanded,
-              chatItemRenderMode: chatItemRenderMode,
-              headerInsets: sectionHeaderInsets
-            ) {
-              rows(for: pinnedItems)
-            }
-          }
-
-          if mode == .allChats {
-            ForEach(timelineSections) { section in
-              Section {
-                ExperimentalChatTimelineSectionHeader(
-                  period: section.id,
-                  chatItemRenderMode: chatItemRenderMode
-                )
-                  .listRowInsets(sectionHeaderInsets)
-                  .listRowSeparator(.hidden)
-                  .listRowBackground(Color.clear)
-
-                rows(for: section.items)
-              }
-            }
-          } else if mode == .archived {
-            ForEach(daySections) { section in
-              Section {
-                ExperimentalChatDaySectionHeader(
-                  day: section.id,
-                  chatItemRenderMode: chatItemRenderMode
-                )
-                  .listRowInsets(sectionHeaderInsets)
-                  .listRowSeparator(.hidden)
-                  .listRowBackground(Color.clear)
-
-                rows(for: section.items)
-              }
-            }
-          } else if mode == .inbox {
-            ForEach(inboxSections) { section in
-              Section {
-                ExperimentalChatSectionHeader(
-                  title: section.title,
-                  chatItemRenderMode: chatItemRenderMode
-                )
-                  .listRowInsets(sectionHeaderInsets)
-                  .listRowSeparator(.hidden)
-                  .listRowBackground(Color.clear)
-
-                rows(for: section.items)
-              }
-            }
-          } else {
-            rows(for: items)
-          }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Color.clear)
-        .contentMargins(.top, listTopContentMargin, for: .scrollContent)
-        .contentMargins(.bottom, 32, for: .scrollContent)
-        .listSectionSpacing(.custom(listSectionSpacing))
-        .environment(\.defaultMinListRowHeight, defaultMinimumListRowHeight)
-        .animation(
-          mode == .inbox ? .snappy(duration: 0.25, extraBounce: 0) : nil,
-          value: animatedInboxRows
-        )
-        // Collapse changes rendered rows without changing their model identity,
-        // so it needs its own animation key at the List diff boundary.
-        .animation(
-          reduceMotion ? nil : .smooth(duration: 0.18),
-          value: pinnedExpanded
-        )
+        chatList
       }
     }
     .alert(
@@ -544,6 +478,105 @@ private struct ExperimentalChatListView: View {
     } message: { _ in
       Text("This chat will move to Archived Chats. You can find it from the ••• menu.")
     }
+  }
+
+  @ViewBuilder
+  private var chatList: some View {
+    if let selection {
+      styledList {
+        List(selection: selection) {
+          listRows
+        }
+      }
+    } else {
+      // Keep the phone construction as the original plain List. An absent iPad
+      // selection binding must not opt the phone surface into selection behavior.
+      styledList {
+        List {
+          listRows
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var listRows: some View {
+    if !pinnedItems.isEmpty {
+      ExperimentalPinnedChatSection(
+        isExpanded: $pinnedExpanded,
+        chatItemRenderMode: chatItemRenderMode,
+        headerInsets: sectionHeaderInsets
+      ) {
+        rows(for: pinnedItems)
+      }
+    }
+
+    if mode == .allChats {
+      ForEach(timelineSections) { section in
+        Section {
+          ExperimentalChatTimelineSectionHeader(
+            period: section.id,
+            chatItemRenderMode: chatItemRenderMode
+          )
+            .listRowInsets(sectionHeaderInsets)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+
+          rows(for: section.items)
+        }
+      }
+    } else if mode == .archived {
+      ForEach(daySections) { section in
+        Section {
+          ExperimentalChatDaySectionHeader(
+            day: section.id,
+            chatItemRenderMode: chatItemRenderMode
+          )
+            .listRowInsets(sectionHeaderInsets)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+
+          rows(for: section.items)
+        }
+      }
+    } else if mode == .inbox {
+      ForEach(inboxSections) { section in
+        Section {
+          ExperimentalChatSectionHeader(
+            title: section.title,
+            chatItemRenderMode: chatItemRenderMode
+          )
+            .listRowInsets(sectionHeaderInsets)
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+
+          rows(for: section.items)
+        }
+      }
+    } else {
+      rows(for: items)
+    }
+  }
+
+  private func styledList<Content: View>(
+    @ViewBuilder _ content: () -> Content
+  ) -> some View {
+    content()
+      .listStyle(.plain)
+      .scrollContentBackground(.hidden)
+      .background(Color.clear)
+      .contentMargins(.top, listTopContentMargin, for: .scrollContent)
+      .contentMargins(.bottom, 32, for: .scrollContent)
+      .listSectionSpacing(.custom(listSectionSpacing))
+      .environment(\.defaultMinListRowHeight, defaultMinimumListRowHeight)
+      .animation(
+        mode == .inbox ? .snappy(duration: 0.25, extraBounce: 0) : nil,
+        value: animatedInboxRows
+      )
+      .animation(
+        reduceMotion ? nil : .smooth(duration: 0.18),
+        value: pinnedExpanded
+      )
   }
 
   /// A focused animation trigger for Inbox membership and ordering changes.
@@ -1406,7 +1439,7 @@ struct ExperimentalMembersSheetView: View {
             member: member,
             onMessage: {
               router.dismissSheet()
-              router.push(.chat(peer: .user(id: member.userInfo.user.id)))
+              router.openPrimaryDestination(.chat(peer: .user(id: member.userInfo.user.id)))
             }
           )
           .listRowSeparator(.hidden)

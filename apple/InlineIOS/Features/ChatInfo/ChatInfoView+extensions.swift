@@ -163,6 +163,14 @@ extension ChatInfoView {
   }
 
   func showMessageInChat(_ message: Message) {
+    if router.tracksHistory {
+      router.resetTransientPresentation()
+      router.openPrimaryDestination(
+        .chatMessage(peer: chatItem.peerId, messageID: message.messageId)
+      )
+      return
+    }
+
     let targetTab = router.selectedTab.currentChatsTab
     router.selectedTab = targetTab
     router.pop(for: targetTab)

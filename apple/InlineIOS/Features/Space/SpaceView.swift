@@ -147,7 +147,7 @@ struct SpaceView: View {
   // MARK: - Actions
 
   private func handleItemTap(_ item: HomeChatItem) {
-    router.push(.chat(peer: item.peerId))
+    router.openPrimaryDestination(.chat(peer: item.peerId))
   }
 
   private func handleArchive(_ item: HomeChatItem) {

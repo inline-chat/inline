@@ -327,6 +327,15 @@ enum Sheet: SheetType, Codable {
 
 @MainActor
 extension Router {
+  func removeChatRoutes(for peer: Peer) {
+    removeInvalidDestinations { destination in
+      if case let .chatInfo(chatItem) = destination {
+        return chatItem.peerId == peer
+      }
+      return destination.chatPeer == peer
+    }
+  }
+
   func navigate(_ request: AppNavigationRequest) {
     switch request {
     case let .chat(peer):
@@ -343,7 +352,9 @@ extension Router {
   }
 
   func navigateFromExternalNotification(peer: Peer, contextSpaceID: Int64?, messageID: Int64? = nil) {
-    let targetTab = selectedTab.experimentalHomeFallbackTab
+    let targetTab = IPadNavigationLane.isEnabled
+      ? IPadNavigationLane.canonicalTab
+      : selectedTab.experimentalHomeFallbackTab
     let destination = Destination.externalChat(peer: peer, contextSpaceID: contextSpaceID, messageID: messageID)
 
     // External navigation replaces the root stack and any covering sheet. Assign
@@ -360,8 +371,8 @@ extension Router {
     resetTransientPresentation()
     let targetTab = canonicalDeepLinkTab
 
-    // Keep external chat opens canonical: they belong to Inbox even when the
-    // same peer happens to be visible through another tab's navigation path.
+    // Keep external chat opens canonical: phone uses Inbox and iPad uses its
+    // all-chats route even if another bucket already contains the same peer.
     if selectedTab == targetTab,
        let currentDestination = self[targetTab].last,
        currentDestination.chatPeer == peer {
@@ -373,7 +384,10 @@ extension Router {
   }
 
   private var canonicalDeepLinkTab: AppTab {
-    switch selectedTab {
+    if IPadNavigationLane.isEnabled {
+      return IPadNavigationLane.canonicalTab
+    }
+    return switch selectedTab {
     case .archived, .chats, .spaces:
       .chats
     case .inbox, .allChats, .search:
@@ -407,6 +421,31 @@ extension Destination {
     case .chats, .archived, .spaces, .space, .chatInfo, .spaceSettings,
          .spaceIntegrations, .integrationOptions, .createSpaceChat, .createThread, .createSpace:
       nil
+    }
+  }
+
+  /// The conversation represented by the visible route, including child pages
+  /// that do not themselves render ChatView.
+  var sidebarPeer: Peer? {
+    if case let .chatInfo(chatItem) = self {
+      return chatItem.peerId
+    }
+    return chatPeer
+  }
+}
+
+@MainActor
+extension Router {
+  /// Opens a primary conversation destination. iPad browser history records the
+  /// current route as one visit; phone retains its existing push behavior.
+  func openPrimaryDestination(_ destination: Destination) {
+    if tracksHistory {
+      self[IPadNavigationLane.canonicalTab] = [destination]
+      if selectedTab != IPadNavigationLane.canonicalTab {
+        selectedTab = IPadNavigationLane.canonicalTab
+      }
+    } else {
+      push(destination)
     }
   }
 }

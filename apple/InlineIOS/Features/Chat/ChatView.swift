@@ -297,7 +297,9 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("chatDeletedNotification"))
     ) { notification in
-      guard !preview else { return }
+      // The iPad root removes every affected route and history entry once.
+      // Keep the existing local pop for the phone's non-history navigation.
+      guard !preview, !router.tracksHistory else { return }
       if let chatId = notification.userInfo?["chatId"] as? Int64,
          chatId == fullChatViewModel.chat?.id ?? 0
       {
@@ -308,13 +310,14 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("MentionTapped"))
     ) { notification in
-      guard !preview else { return }
+      guard canHandleGlobalNavigation else { return }
       if let userId = notification.userInfo?["userId"] as? Int64 {
         Task {
           // TODO: hacky
           do {
             let peer = try await data.createPrivateChat(userId: userId)
-            router.push(.chat(peer: peer))
+            guard canHandleGlobalNavigation else { return }
+            router.openPrimaryDestination(.chat(peer: peer))
           } catch {
             Log.shared.error("Failed to create private chat for mention", error: error)
           }
@@ -346,16 +349,16 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToUser"))
     ) { notification in
-      guard !preview else { return }
+      guard canHandleGlobalNavigation else { return }
       if let userId = notification.userInfo?["userId"] as? Int64 {
-        router.push(.chat(peer: Peer.user(id: userId)))
+        router.openPrimaryDestination(.chat(peer: Peer.user(id: userId)))
       }
     }
     .onReceive(
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToForwardedMessage"))
     ) { notification in
-      guard !preview else { return }
+      guard canHandleGlobalNavigation else { return }
       guard let messageId = notification.userInfo?["messageId"] as? Int64 else { return }
 
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
@@ -369,14 +372,23 @@ struct ChatView: View {
       guard let targetPeer else { return }
 
       if targetPeer == peerId, let chatId = fullChatViewModel.chat?.id {
-        postScrollToMessage(messageId, chatId: chatId)
+        if router.tracksHistory {
+          router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
+        } else {
+          postScrollToMessage(messageId, chatId: chatId)
+        }
         return
       }
 
       Task { @MainActor in
         if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          router.push(.chat(peer: targetPeer))
-          postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
+          guard canHandleGlobalNavigation else { return }
+          if router.tracksHistory {
+            router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
+          } else {
+            router.push(.chat(peer: targetPeer))
+            postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
+          }
           return
         }
 
@@ -387,8 +399,13 @@ struct ChatView: View {
         }
 
         if let chat = try? Chat.getByPeerId(peerId: targetPeer) {
-          router.push(.chat(peer: targetPeer))
-          postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
+          guard canHandleGlobalNavigation else { return }
+          if router.tracksHistory {
+            router.openPrimaryDestination(.chatMessage(peer: targetPeer, messageID: messageId))
+          } else {
+            router.push(.chat(peer: targetPeer))
+            postScrollToMessage(messageId, chatId: chat.id, delay: 0.25)
+          }
           return
         }
 
@@ -404,7 +421,7 @@ struct ChatView: View {
       NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToForwardDestination"))
     ) { notification in
-      guard !preview else { return }
+      guard canHandleGlobalNavigation else { return }
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
         .user(id: userId)
       } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
@@ -414,13 +431,13 @@ struct ChatView: View {
       }
 
       guard let targetPeer, targetPeer != peerId else { return }
-      router.push(.chat(peer: targetPeer))
+      router.openPrimaryDestination(.chat(peer: targetPeer))
     }
     .onReceive(
       NotificationCenter.default
         .publisher(for: .navigateToThreadLink)
     ) { notification in
-      guard !preview else { return }
+      guard canHandleGlobalNavigation else { return }
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
         .user(id: userId)
       } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
@@ -430,13 +447,13 @@ struct ChatView: View {
       }
 
       guard let targetPeer, targetPeer != peerId else { return }
-      router.push(.chat(peer: targetPeer))
+      router.openPrimaryDestination(.chat(peer: targetPeer))
     }
     .onReceive(
       NotificationCenter.default
         .publisher(for: .navigateToReplyThread)
     ) { notification in
-      guard !preview else { return }
+      guard canHandleGlobalNavigation else { return }
       let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
         .user(id: userId)
       } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
@@ -453,6 +470,12 @@ struct ChatView: View {
     }
     .environmentObject(fullChatViewModel)
     .environment(router)
+  }
+
+  private var canHandleGlobalNavigation: Bool {
+    guard !preview else { return false }
+    guard router.tracksHistory else { return true }
+    return isVisible && router.selectedTabPath.last?.sidebarPeer == peerId
   }
 
   private func handleScenePhaseChange(_ newPhase: ScenePhase) {
@@ -665,7 +688,23 @@ struct ChatView: View {
 
       attemptedUntitledCleanupOnExit = true
       do {
-        _ = try await data.deleteThreadIfUntitledAndEmpty(peerId: peerId)
+        if router.tracksHistory {
+          let didDelete = try await data.deleteThreadIfUntitledAndEmpty(peerId: peerId, canDelete: {
+            // Eligibility reads suspend. Forward may have reopened the chat meanwhile.
+            guard !chatRouteStillPresent else {
+              attemptedUntitledCleanupOnExit = false
+              return false
+            }
+            return true
+          })
+          if didDelete {
+            // A failed deletion must preserve history. Remove confirmed deletions
+            // here as well as at the root, without waiting for notification delivery.
+            router.removeChatRoutes(for: peerId)
+          }
+        } else {
+          _ = try await data.deleteThreadIfUntitledAndEmpty(peerId: peerId)
+        }
       } catch {
         Log.shared.error("Failed to cleanup untitled empty thread on exit", error: error)
       }

@@ -13,7 +13,7 @@ struct ChatItemRow: View {
 
   var body: some View {
     Button {
-      router.push(.chat(peer: item.peerId))
+      router.openPrimaryDestination(.chat(peer: item.peerId))
     } label: {
       HStack(alignment: .center, spacing: 0) {
         HStack(alignment: .center, spacing: 5) {

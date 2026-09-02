@@ -9,7 +9,7 @@ struct MemberItemRow: View {
 
   var body: some View {
     Button {
-      router.push(.chat(peer: .user(id: member.userInfo.user.id)))
+      router.openPrimaryDestination(.chat(peer: .user(id: member.userInfo.user.id)))
     } label: {
       HStack(alignment: .center, spacing: 0) {
         HStack(alignment: .center, spacing: 5) {

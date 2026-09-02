@@ -18,6 +18,11 @@ struct InlineApp: App {
     WindowGroup {
       InlineSceneRoot(appDelegate: appDelegate)
     }
+    .commands {
+      if #available(iOS 26.0, *), IPadNavigationLane.isEnabled {
+        IPadCommands()
+      }
+    }
   }
 }
 
@@ -53,6 +58,9 @@ private struct InlineSceneRoot: View {
       .environment(\.realtime, Realtime.shared)
       .environment(\.transactions, Transactions.shared)
       .environment(router)
+      .focusedSceneValue(\.iPadSceneCommandGate, IPadNavigationLane.isEnabled
+        ? IPadSceneCommandGate(registry: appDelegate.sceneRouterRegistry, sceneID: sceneID)
+        : nil)
       .environmentObject(themeManager)
       .appDatabase(AppDatabase.shared)
       .environmentObject(appDelegate.notificationHandler)
@@ -121,6 +129,9 @@ private struct InlineSceneRoot: View {
     didRestoreScene = true
     if let routerState {
       _ = router.restorePersistentState(from: routerState)
+    }
+    if IPadNavigationLane.isEnabled {
+      IPadNavigationLane.normalizeRestoredState(in: router)
     }
     routerState = router.encodedPersistentState()
     UserDefaults.standard.set(true, forKey: Self.sceneMigrationKey)

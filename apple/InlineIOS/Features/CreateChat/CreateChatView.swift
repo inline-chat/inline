@@ -115,8 +115,13 @@ struct CreateChatView: View {
         )
 
         formState.succeeded()
-        router.popToRoot()
-        router.push(.chat(peer: .thread(id: chatId)))
+        let destination = Destination.chat(peer: .thread(id: chatId))
+        if router.tracksHistory {
+          router.replaceCurrentPath(with: [destination])
+        } else {
+          router.popToRoot()
+          router.push(destination)
+        }
       } catch {
         formState.failed(error: error.localizedDescription)
         Log.shared.error("Failed to create chat", error: error)

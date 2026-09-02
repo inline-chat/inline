@@ -146,6 +146,7 @@ private struct ExperimentalAuthedRootView: View {
   @State private var isCreatingThread = false
   @State private var isCleaningOpenChats = false
   @State private var isNotificationSettingsPresented = false
+  @State private var iPadCommandRequest: IPadCommandRequest?
   @State private var homeBootstrapTask: Task<HomeBootstrapOutcome, Never>?
   @State private var homeBootstrapRetryTask: Task<Void, Never>?
   @State private var homeBootstrapGeneration: UInt64 = 0
@@ -157,6 +158,8 @@ private struct ExperimentalAuthedRootView: View {
   private var sceneActiveSpaceIDRaw = ""
   @SceneStorage("ios.home.allChatsFilter.v1")
   private var allChatsFilterRaw = ChatListFilter.all.rawValue
+  @SceneStorage("ios.ipad.sidebarScope.v1")
+  private var iPadSidebarScopeRaw = IPadSidebarScope.allChats.rawValue
   @AppStorage("ios.experimental.root.didMigrateExplicitTabs")
   private var didMigrateExplicitTabs = false
   @AppStorage("ios.home.didMigrateActiveSpaceToScene.v1")
@@ -220,8 +223,8 @@ private struct ExperimentalAuthedRootView: View {
 
   var body: some View {
     rootNavigation
-      // The stack wraps the root TabView, so pushed destinations naturally replace
-      // the tab surface. Legacy per-destination tab-bar hiding is unnecessary here.
+      // Phone destinations replace the root tabs; the iPad lane has no tab bar.
+      // Neither container needs legacy per-destination tab-bar hiding.
       .environment(\.inlineHideTabBar, false)
       .environmentObject(data)
       .environmentObject(compactSpaceList)
@@ -265,26 +268,13 @@ private struct ExperimentalAuthedRootView: View {
 
   private var rootNavigation: some View {
     @Bindable var bindableRouter = router
-    @Bindable var bindableNav = nav
 
-    return NavigationStack(path: $bindableRouter[bindableRouter.selectedTab]) {
-      rootPage(nav: bindableNav)
-        .background(Color(.systemBackground))
-        .experimentalRootTitleDisplayMode()
-        .navigationTitle("")
-        .toolbarVisibility(isSearchActivePresentation ? .hidden : .visible, for: .navigationBar)
-        .animation(searchChromeAnimation, value: isSearchActivePresentation)
-        .toolbar {
-          experimentalToolbarContent()
-        }
-        .navigationDestination(for: Destination.self) { destination in
-          ExperimentalDestinationView(
-            nav: bindableNav,
-            destination: destination,
-            onSelectSpace: selectSpaceInHome,
-            onMigrateLegacySpaceDestination: migrateLegacySpaceDestination
-          )
-        }
+    return Group {
+      if #available(iOS 26.0, *), usesIPadSplitView {
+        iPadNavigation
+      } else {
+        phoneNavigation
+      }
     }
     // Prevent child views (e.g. ChatView) from leaking their toolbar appearance
     // back to Root when the shared stack pops.
@@ -328,8 +318,13 @@ private struct ExperimentalAuthedRootView: View {
       if chatItemRenderModeRaw == ExperimentalHomeChatItemRenderMode.oneLineLastMessage.rawValue {
         chatItemRenderModeRaw = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
       }
+      if usesIPadSplitView { router.tracksHistory = true }
     }
     .onChange(of: bindableRouter.selectedTab) { oldValue, newValue in
+      if usesIPadSplitView, newValue != IPadNavigationLane.canonicalTab {
+        IPadNavigationLane.normalizeRestoredState(in: router)
+        return
+      }
       let previousRootTab = RootTab(appTab: oldValue)
       let desiredRootTab = RootTab(appTab: newValue)
       if previousRootTab == .search, desiredRootTab != .search {
@@ -395,6 +390,114 @@ private struct ExperimentalAuthedRootView: View {
     }
     .onChange(of: excludedHomeSpaceIDsRaw) { _, _ in
       configureHomeList()
+    }
+  }
+
+  @available(iOS 26.0, *)
+  private var iPadNavigation: some View {
+    @Bindable var bindableRouter = router
+    @Bindable var bindableNav = nav
+
+    return IPadRootView(
+      path: $bindableRouter[IPadNavigationLane.canonicalTab],
+      router: router,
+      tab: IPadNavigationLane.canonicalTab,
+      nav: bindableNav,
+      onSelectSpace: selectSpaceInHome,
+      onMigrateLegacySpaceDestination: migrateLegacySpaceDestination
+    ) { selection in
+      iPadSidebar(selection: selection)
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: Notification.Name("chatDeletedNotification"))
+        .receive(on: DispatchQueue.main)
+    ) { notification in
+      guard let chatID = notification.userInfo?["chatId"] as? Int64 else { return }
+      router.removeChatRoutes(for: .thread(id: chatID))
+    }
+    .focusedSceneValue(
+      \.iPadNavigationContext,
+      IPadNavigationContext(router: router)
+    )
+    .focusedSceneValue(\.iPadSidebarScope, iPadSidebarScopeBinding)
+    .focusedSceneValue(\.iPadCommandRequest, $iPadCommandRequest)
+    .onChange(of: iPadCommandRequest) { _, request in
+      handleIPadCommandRequest(request)
+    }
+  }
+
+  private func handleIPadCommandRequest(_ request: IPadCommandRequest?) {
+    guard let request else { return }
+    iPadCommandRequest = nil
+    switch request {
+    case .newThread:
+      let spaceID: Int64? = nav.activeSpaceId
+      createThreadInstantly(spaceId: spaceID)
+    case .openArchive:
+      openHomeDestination(.archived)
+    }
+  }
+
+  // Keep the device lane stable when an iPad window becomes compact. The
+  // native split view owns size-class adaptation; iPhone never enters this lane.
+  private var usesIPadSplitView: Bool {
+    IPadNavigationLane.isEnabled
+  }
+
+  private var iPadSidebarScope: IPadSidebarScope {
+    IPadSidebarScope(rawValue: iPadSidebarScopeRaw) ?? .allChats
+  }
+
+  private var iPadSidebarScopeBinding: Binding<IPadSidebarScope> {
+    Binding(
+      get: { iPadSidebarScope },
+      set: { iPadSidebarScopeRaw = $0.rawValue }
+    )
+  }
+
+  @available(iOS 26.0, *)
+  private func iPadSidebar(selection: Binding<Destination?>) -> some View {
+    ExperimentalHomeView(
+      initialTab: iPadSidebarScope.homeTab,
+      allChatsFilter: ChatListFilter(rawValue: allChatsFilterRaw) ?? .all,
+      selection: selection
+    )
+    // ExperimentalHomeView selects its pinned disclosure persistence key in init.
+    // Give each sidebar projection an explicit identity when the scope changes.
+    .id(iPadSidebarScope)
+    .background(Color(.systemBackground))
+    .experimentalRootTitleDisplayMode()
+    .navigationTitle("")
+    .toolbar {
+      experimentalToolbarContent()
+    }
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      IPadSidebarSwitcher(selection: iPadSidebarScopeBinding)
+    }
+  }
+
+  private var phoneNavigation: some View {
+    @Bindable var bindableRouter = router
+    @Bindable var bindableNav = nav
+
+    return NavigationStack(path: $bindableRouter[bindableRouter.selectedTab]) {
+      rootPage(nav: bindableNav)
+        .background(Color(.systemBackground))
+        .experimentalRootTitleDisplayMode()
+        .navigationTitle("")
+        .toolbarVisibility(isSearchActivePresentation ? .hidden : .visible, for: .navigationBar)
+        .animation(searchChromeAnimation, value: isSearchActivePresentation)
+        .toolbar {
+          experimentalToolbarContent()
+        }
+        .navigationDestination(for: Destination.self) { destination in
+          ExperimentalDestinationView(
+            nav: bindableNav,
+            destination: destination,
+            onSelectSpace: selectSpaceInHome,
+            onMigrateLegacySpaceDestination: migrateLegacySpaceDestination
+          )
+        }
     }
   }
 
@@ -503,7 +606,7 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private var isSearchRootSelected: Bool {
-    RootTab(appTab: router.selectedTab) == .search && router.selectedTabPath.isEmpty
+    !usesIPadSplitView && RootTab(appTab: router.selectedTab) == .search && router.selectedTabPath.isEmpty
   }
 
   private var isSearchActivePresentation: Bool {
@@ -643,16 +746,28 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private func returnToCurrentTabRootAfterSpaceChange() {
-    router.popToRoot(for: router.selectedTab)
+    if usesIPadSplitView {
+      resetIPadNavigationForWorkspaceChange()
+    } else {
+      router.popToRoot(for: router.selectedTab)
+    }
   }
 
   private func selectSpaceInHome(_ spaceID: Int64) {
     let targetTab = router.selectedTab.experimentalHomeFallbackTab
     nav.activeSpaceId = spaceID
-    router.popToRoot(for: targetTab)
-    if router.selectedTab != targetTab {
-      router.selectedTab = targetTab
+    if usesIPadSplitView {
+      resetIPadNavigationForWorkspaceChange()
+    } else {
+      router.popToRoot(for: targetTab)
+      if router.selectedTab != targetTab {
+        router.selectedTab = targetTab
+      }
     }
+  }
+
+  private func resetIPadNavigationForWorkspaceChange() {
+    IPadNavigationLane.resetBoundary(in: router)
   }
 
   private func migrateLegacySpaceDestination(_ spaceID: Int64) {
@@ -667,9 +782,14 @@ private struct ExperimentalAuthedRootView: View {
           legacySpaceIDs.contains(spaceID)
     else { return }
 
-    let targetTab = sourceTab.experimentalHomeFallbackTab
     let migratedPath = sourcePath.filter { $0.legacySpaceID == nil }
     nav.activeSpaceId = spaceID
+    if usesIPadSplitView {
+      IPadNavigationLane.resetBoundary(in: router, path: migratedPath)
+      return
+    }
+
+    let targetTab = sourceTab.experimentalHomeFallbackTab
     router[targetTab] = migratedPath
     if sourceTab != targetTab {
       router[sourceTab] = []
@@ -704,6 +824,9 @@ private struct ExperimentalAuthedRootView: View {
     guard !compactSpaceList.spaces.isEmpty else { return }
     if !compactSpaceList.spaces.contains(where: { $0.id == activeSpaceID }) {
       nav.activeSpaceId = nil
+      if usesIPadSplitView {
+        resetIPadNavigationForWorkspaceChange()
+      }
     }
   }
 
@@ -787,6 +910,9 @@ private struct ExperimentalAuthedRootView: View {
     guard let activeSpaceID = nav.activeSpaceId else { return }
     if !spaces.contains(where: { $0.id == activeSpaceID }) {
       nav.activeSpaceId = nil
+      if usesIPadSplitView {
+        resetIPadNavigationForWorkspaceChange()
+      }
     }
   }
 
@@ -814,6 +940,14 @@ private struct ExperimentalAuthedRootView: View {
       authAvailable: auth.currentUserId != nil,
       realtimeState: realtimeState.connectionState
     )
+  }
+
+  private func openHomeDestination(_ destination: Destination) {
+    if usesIPadSplitView {
+      router[IPadNavigationLane.canonicalTab] = [destination]
+    } else {
+      router.push(destination, for: router.selectedTab)
+    }
   }
 
   private func createThreadInstantly(spaceId: Int64?) {
@@ -847,7 +981,7 @@ private struct ExperimentalAuthedRootView: View {
 
         await MainActor.run {
           isCreatingThread = false
-          router.push(.chat(peer: peer), for: router.selectedTab)
+          openHomeDestination(.chat(peer: peer))
         }
       } catch {
         await MainActor.run {
@@ -958,6 +1092,12 @@ private struct ExperimentalAuthedRootView: View {
       }
       .sharedBackgroundVisibility(.hidden)
 
+      if usesIPadSplitView {
+        ToolbarItem(placement: .topBarTrailing) {
+          newChatButton(activeSpaceId: nav.activeSpaceId)
+        }
+      }
+
       if let connectionState = realtimeState.displayedConnectionState {
         ToolbarItem(placement: .topBarTrailing) {
           connectionProgressIndicator(connectionState)
@@ -1023,11 +1163,17 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private var showsAllChatsFilter: Bool {
-    RootTab(appTab: router.selectedTab) == .allChats && router.selectedTabPath.isEmpty
+    if usesIPadSplitView {
+      return iPadSidebarScope == .allChats
+    }
+    return RootTab(appTab: router.selectedTab) == .allChats && router.selectedTabPath.isEmpty
   }
 
   private var showsOpenChatsCleanup: Bool {
-    RootTab(appTab: router.selectedTab) == .inbox && router.selectedTabPath.isEmpty
+    if usesIPadSplitView {
+      return iPadSidebarScope == .open
+    }
+    return RootTab(appTab: router.selectedTab) == .inbox && router.selectedTabPath.isEmpty
   }
 
   private func connectionProgressIndicator(
@@ -1065,7 +1211,7 @@ private struct ExperimentalAuthedRootView: View {
         isNotificationSettingsPresented = true
       },
       onArchive: {
-        router.push(.archived, for: router.selectedTab)
+        openHomeDestination(.archived)
       },
       onSelectItemSize: { mode in
         chatItemRenderModeRaw = mode.rawValue
@@ -1089,11 +1235,11 @@ private struct ExperimentalAuthedRootView: View {
         { router.presentSheet(.members(spaceId: space.id)) }
       },
       onManage: activeSpace.map { space in
-        { router.push(.spaceSettings(spaceId: space.id), for: router.selectedTab) }
+        { openHomeDestination(.spaceSettings(spaceId: space.id)) }
       }
     )
     .frame(width: 28, height: 28)
-    .accessibilityLabel("More")
+    .accessibilityLabel(usesIPadSplitView ? "Chat List Options" : "More")
     .popover(isPresented: $isNotificationSettingsPresented) {
       NotificationSettingsPopoverContent(
         notificationSettings: notificationSettings,

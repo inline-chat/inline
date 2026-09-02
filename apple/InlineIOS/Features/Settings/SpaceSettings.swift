@@ -6,14 +6,16 @@ import SwiftUI
 
 struct SpaceSettingsView: View {
   let spaceId: Int64
+  let usesRouterNavigation: Bool
   @EnvironmentObject private var navigation: Navigation
   @EnvironmentObject private var data: DataManager
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
   @StateObject private var urlPreviewExclusions: SpaceUrlPreviewExclusionsViewModel
   @StateObject private var userGroups: UserGroupsViewModel
 
-  init(spaceId: Int64) {
+  init(spaceId: Int64, usesRouterNavigation: Bool = false) {
     self.spaceId = spaceId
+    self.usesRouterNavigation = usesRouterNavigation
     _viewModel = EnvironmentStateObject { env in
       FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
     }
@@ -62,19 +64,14 @@ struct SpaceSettingsView: View {
       }
 
       Section {
-        NavigationLink(destination: SpaceIntegrationsView(spaceId: spaceId)) {
-          HStack {
-            Image(systemName: "app.connected.to.app.below.fill")
-              .foregroundColor(.white)
-              .frame(width: 25, height: 25)
-              .background(Color.purple)
-              .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text("Connectors")
-                
-              .padding(.leading, 4)
-            Spacer()
+        if usesRouterNavigation {
+          NavigationLink(value: Destination.spaceIntegrations(spaceId: spaceId)) {
+            SpaceConnectorsLinkLabel()
           }
-          .padding(.vertical, 2)
+        } else {
+          NavigationLink(destination: SpaceIntegrationsView(spaceId: spaceId)) {
+            SpaceConnectorsLinkLabel()
+          }
         }
       }
 
@@ -161,6 +158,22 @@ struct SpaceSettingsView: View {
     {
       rootVC.topmostPresentedViewController.present(alert, animated: true)
     }
+  }
+}
+
+private struct SpaceConnectorsLinkLabel: View {
+  var body: some View {
+    HStack {
+      Image(systemName: "app.connected.to.app.below.fill")
+        .foregroundColor(.white)
+        .frame(width: 25, height: 25)
+        .background(Color.purple)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+      Text("Connectors")
+        .padding(.leading, 4)
+      Spacer()
+    }
+    .padding(.vertical, 2)
   }
 }
 

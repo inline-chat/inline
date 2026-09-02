@@ -192,7 +192,7 @@ struct ChatToolbarLeadingView: View {
 
   private func openParentThread(_ parent: ReplyThreadToolbarContext.ParentLink) {
     guard parent.peer != peerId else { return }
-    router.push(.chat(peer: parent.peer))
+    router.openPrimaryDestination(.chat(peer: parent.peer))
   }
 
   private func openSpace(_ space: ReplyThreadToolbarContext.SpaceLink) {

@@ -120,9 +120,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         guard !Task.isCancelled, self?.spaceJoinGeneration == generation else { return }
         self?.pendingSpaceJoin = nil
         router.resetTransientPresentation()
-        router.popToRoot(for: .spaces)
-        router.push(.space(id: spaceID), for: .spaces)
-        router.selectedTab = .spaces
+        if IPadNavigationLane.isEnabled {
+          IPadNavigationLane.resetBoundary(in: router, path: [.space(id: spaceID)])
+        } else {
+          router.popToRoot(for: .spaces)
+          router.push(.space(id: spaceID), for: .spaces)
+          router.selectedTab = .spaces
+        }
       } catch is CancellationError {
         return
       } catch {
