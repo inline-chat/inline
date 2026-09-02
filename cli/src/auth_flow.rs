@@ -53,6 +53,14 @@ pub(crate) enum Contact {
     Phone(String),
 }
 
+fn noninteractive_login_examples() -> Vec<String> {
+    vec![
+        "inline auth login --email you@example.com --send-code --json".to_string(),
+        "inline auth login --email you@example.com --code 123456 --json".to_string(),
+        "INLINE_TOKEN=... inline auth me --json".to_string(),
+    ]
+}
+
 pub(crate) async fn handle_login(
     args: AuthLoginArgs,
     api: &ApiClient,
@@ -185,11 +193,7 @@ pub(crate) async fn handle_login(
     if json {
         return Err(CliError::interactive_required(
             "choose an explicit non-interactive login phase",
-            vec![
-                "inline auth login --email you@example.com --send-code --json".to_string(),
-                "inline auth login --email you@example.com --code 123456 --challenge-token TOKEN --json".to_string(),
-                "INLINE_TOKEN=... inline auth me --json".to_string(),
-            ],
+            noninteractive_login_examples(),
         )
         .into());
     }
@@ -199,15 +203,7 @@ pub(crate) async fn handle_login(
         } else {
             "choose email/phone and enter the login verification code"
         };
-        return Err(CliError::interactive_required(
-            action,
-            vec![
-                "inline auth login --email you@example.com --send-code --json".to_string(),
-                "inline auth login --email you@example.com --code 123456 --challenge-token TOKEN --json".to_string(),
-                "INLINE_TOKEN=... inline auth me --json".to_string(),
-            ],
-        )
-        .into());
+        return Err(CliError::interactive_required(action, noninteractive_login_examples()).into());
     }
 
     let device_name = client_info::device_name();
@@ -1100,6 +1096,31 @@ mod tests {
             let cli = crate::Cli::try_parse_from(argv).unwrap();
             let crate::Command::Login(args) = cli.command else {
                 panic!("expected login")
+            };
+            assert!(args.challenge_token.is_none());
+            assert!(args.send_code || args.code.is_some() || args.code_stdin);
+        }
+    }
+
+    #[test]
+    fn noninteractive_login_examples_use_current_v3_phases() {
+        use clap::Parser;
+
+        let examples = noninteractive_login_examples();
+        assert_eq!(examples.len(), 3);
+        assert!(
+            examples
+                .iter()
+                .all(|example| !example.contains("--challenge-token"))
+        );
+
+        for example in examples.iter().take(2) {
+            let cli = crate::Cli::try_parse_from(example.split_whitespace()).unwrap();
+            let crate::Command::Auth {
+                command: crate::AuthCommand::Login(args),
+            } = cli.command
+            else {
+                panic!("expected nested auth login")
             };
             assert!(args.challenge_token.is_none());
             assert!(args.send_code || args.code.is_some() || args.code_stdin);
