@@ -7,6 +7,76 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## September 2, 2026
+
+### New
+
+- 📝 Messages on macOS now support **rich formatting**, including headings, lists, checklists, tables, quotes, images, code blocks, and collapsible sections. This release also adds underline, strikethrough, highlight, and experimental native rendering for inline and display math.
+- 🗂️ Added **chat folders** on macOS. Group conversations, choose a name and emoji, and organize folders in Open or Pinned. Pinned folders also appear in All Chats, and collapsed folders show a combined unread badge, with clearer unread indicators for nested threads.
+- 🎨 iOS now has the same **themes** as macOS, with new color presets and gradient message bubbles.
+- ✅ Added **Ack** on iOS and macOS. Double-click or double-tap someone else's message to acknowledge it with a small check-mark pill; repeat the action to remove it.
+- Start a new thread directly from **All Chats** on macOS. Choose Home or a space, add participants and attachments, and write your first message in place. You can also filter All Chats by Home or a space without changing the selected sidebar chat.
+- 🔗 Added **space join links** on iOS and macOS. Share a public space or invite people into a private one, with controls to turn links on or off.
+- Added **Sign in with Apple** and **Sign in with Google** on iOS and macOS. iOS onboarding also has separate name and username steps and clearer sign-in progress.
+
+### Quality of life improvements
+
+- Copy links to DMs, threads, and individual messages on macOS. Message links open the referenced message. Home threads now have short numbered references, just like space threads, for linking and search.
+- Added `/thread` on iOS and macOS to create a reply thread from the current conversation. Open the command picker from the composer's plus menu.
+- Reply threads now show the message they branched from, so the original context is visible above the replies.
+- Follow or pin chats from more places on iOS, including All Chats and search.
+- Newly opened chats now appear at the top of Open Chats by default.
+- Command-K on macOS includes more of your local conversations, including chats that were previously missing from its results.
+- Undo closing chats or folders and archiving conversations on macOS.
+- Added **Cleanup** on iOS to close inactive chats and remove empty folders, matching macOS.
+- Turn on **Shorten Supported Links** on macOS to replace supported pasted URLs with readable titles. Escape, Undo, or Backspace restores the original URL.
+- Choose Grid's input and output devices in **Audio and Video** settings. Opt into unmuting when you join or muting when you are alone, and hide Grid from the sidebar if you prefer.
+- Improved sharing from other apps on iOS, including send progress and recovery from interrupted uploads.
+- Improved participant and mention search when adding people, bots, groups, or Agents. Reply-thread suggestions now include people and groups from the parent conversation, with better exact-name ranking.
+- Added dedicated bot-owner settings on iOS and macOS, including token rotation.
+- Improved macOS agent setup, with clearer progress, errors, repair options, and retry instructions.
+- Adjust chat text size on macOS across all message layouts.
+- Audio documents now play inline instead of opening as generic files.
+- Notifications preserve meaningful line breaks, describe photos and other media, show encrypted photo previews on iOS, and open the exact message when possible.
+- iOS now animates the delivery status from sending to sent. Also polished swipe-to-reply avatars and dark message bubbles.
+- Software updates on macOS now open in their own window.
+- Hover over truncated macOS sidebar titles to see the full name.
+
+### Better tools and APIs for agents and hackers
+
+- [OpenClaw](/docs/openclaw) can now create reply threads from DMs and keep replies, typing, and activity in the child thread. Also improved rich replies, DM routing, agent-authored buttons, and compatibility with OpenClaw 2026.8.
+- [Hermes](/docs/hermes) now has native pickers for questions, approvals, and model selection, plus richer replies and agent-authored buttons. Added optional processing reactions, quieter progress updates, and compatibility with Hermes 0.21.
+- Browse and open existing local Codex sessions with `/sessions` or `/open`, resume the exact session before another prompt, and release Codex from Inline with `/stop` or `/close`. Project discovery now includes saved Codex roots and larger paged catalogs.
+- Codex work now stays in one updating **Working** message and finishes as a normal reply, preserving complete long-form output instead of splitting progress across many messages. The message limit is now 100,000 characters.
+- Added browser-based login to the [Inline CLI](/docs/cli). Agents and non-interactive tools can start the login flow for you to finish in your browser. CLI 0.7.7 also preserves rich Markdown input, resumes interrupted Realtime V3 uploads, installs the Codex plugin without extra flags, and improves shell completions and update checks.
+- Added an **AppleScript API** for the Mac app. Find people and chats, create threads, inspect the current selection, read recent cached messages, send Markdown, and create Hookmark-compatible links from your own scripts.
+- Expanded the [Bot API](/docs/bot-api) with polling, webhooks, thread and participant events, files, skill catalogs, and a typed TypeScript client. Bots can send rich Markdown, add callback or copy-text buttons, update buttons independently, and forward or delete messages in batches.
+- Added [Realtime V3](/docs/realtime-api), with encrypted client-server transport, TypeScript and Rust support, durable resumable uploads, and authoritative recovery after reconnects or lost responses.
+- Added Agent profile management to the Bot API, CLI, SDK, OpenClaw, and Hermes. The experimental **Skilled Agents** UI on iOS and macOS lets bot owners create named specializations, set a skill and instructions, and mention them in existing conversations.
+
+### Fixes
+
+- Improved catching up on missed messages, read state, unread counts, and chat updates after reconnecting. Damaged or incomplete local chat history can now recover from bounded authoritative snapshots without clearing the account.
+- Fixed uploads that could stall, duplicate work, or unexpectedly sign you out. Large transfers now resume after reconnects and recover safely when finalization or a provider response is interrupted.
+- Improved sign-in retries, logout, and account switching, including cleanup of stale account state.
+- Fixed stale or duplicate macOS notifications, with better grouping and handling of replies and mentions.
+- Fixed iOS chat previews and transitions when opening a conversation from a notification.
+- Settings changes no longer interrupt OpenClaw's reply connection. Fixed agent settings that could stay loading or show stale results after switching bots or chats.
+- Fixed code-block and rich-formatting errors in streamed bot replies, including incomplete fences, repeated progress updates, stale disclosure state, and broken image-gallery selection.
+- Fixed pinned threads moving out of pinned folders, and restored chat placement when undoing a close on macOS.
+- Fixed file paths being mistaken for slash commands and improved command and mention completion in the macOS composer. Autocomplete no longer resizes the chat while it is open.
+- Improved macOS voice recording, including draft recovery, cancellation, and caption spacing.
+- Improved Grid reconnects, screen sharing, and cleanup after leaving or losing access.
+- Fixed cases where macOS could get stuck while quitting or loading the sidebar.
+- Improved MCP browser sign-in and fixed connections left open after failed initialization.
+- Improved macOS sidebar unread navigation and reporting when a chat cannot be opened.
+- Fixed the forwarding picker showing an empty state before chats had finished loading.
+- Fixed repeated press-and-hold urgent nudges and nudge toolbar press handling.
+- Restored active reaction colors and corrected macOS reply-preview backgrounds and swipe-to-reply avatar movement.
+- Fixed long link-heavy messages that could make the app unresponsive, and stopped URLs inside code from generating previews.
+
+---
+
 ## August 15, 2026
 
 [macOS 0.2 tip, build 4947](https://public-assets.inline.chat/mac/tip/4947/Inline.dmg) · [iOS TestFlight build 1193](https://testflight.apple.com/join/FkC3f7fz)
