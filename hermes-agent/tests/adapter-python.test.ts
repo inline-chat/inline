@@ -37,6 +37,7 @@ tools = types.ModuleType("tools")
 approval = types.ModuleType("tools.approval")
 slash_confirm = types.ModuleType("tools.slash_confirm")
 clarify_gateway = types.ModuleType("tools.clarify_gateway")
+skills_tool = types.ModuleType("tools.skills_tool")
 hermes_cli = types.ModuleType("hermes_cli")
 hermes_cli.__version__ = "0.18.2"
 commands = types.ModuleType("hermes_cli.commands")
@@ -182,6 +183,12 @@ commands.telegram_menu_commands = lambda max_commands=100: ([
     ("bad-name", "Hyphenated command"),
 ][:max_commands], max(0, 5 - max_commands))
 hermes_plugins.get_plugin_commands = lambda: {"inline-update": {}}
+skills_tool._find_all_skills = lambda skip_disabled=False: [
+    {"name": "research", "description": "Research with sources", "category": "knowledge"},
+    {"name": "data-analysis", "description": "Analyze data", "category": "analysis"},
+    {"name": "😀" * 129, "description": "Too long in UTF-16", "category": "unicode"},
+]
+skills_tool._sort_skills = lambda skills: sorted(skills, key=lambda skill: (skill.get("category") or "", skill["name"]))
 
 class HttpxResponse:
     def __init__(self, status_code, text):
@@ -259,6 +266,7 @@ sys.modules["tools"] = tools
 sys.modules["tools.approval"] = approval
 sys.modules["tools.slash_confirm"] = slash_confirm
 sys.modules["tools.clarify_gateway"] = clarify_gateway
+sys.modules["tools.skills_tool"] = skills_tool
 sys.modules["hermes_cli"] = hermes_cli
 sys.modules["hermes_cli.commands"] = commands
 sys.modules["hermes_cli.plugins"] = hermes_plugins
@@ -270,6 +278,7 @@ gateway.display_config = display_config
 tools.approval = approval
 tools.slash_confirm = slash_confirm
 tools.clarify_gateway = clarify_gateway
+tools.skills_tool = skills_tool
 hermes_cli.commands = commands
 hermes_cli.plugins = hermes_plugins
 hermes_cli.model_cost_guard = model_cost_guard
@@ -280,7 +289,7 @@ os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.j
 sys.path.insert(0, "plugin")
 
 import inline.adapter as inline_adapter_module
-from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _parse_inline_target_ref, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id, _validate_inline_target_ref
+from inline.adapter import InlineAdapter, _apply_yaml_config, _env_enablement, _inline_menu_commands, _inline_skill_catalog, _inline_update_lane, _inline_update_log_text, _install_inline_display_defaults, _normalize_inline_plugin_command_text, _parse_inline_target_ref, _resolve_inline_targeted_command, _standalone_send, _target_from_chat_id, _validate_inline_target_ref
 from inline.adapter import register, validate_config
 from inline import cli as inline_cli
 from inline import tools as inline_tools
@@ -360,6 +369,10 @@ assert menu_commands[1]["description"] == "Explicitly follow this Inline chat or
 assert menu_commands[2]["description"] == "Explicitly unfollow this Inline chat or thread"
 assert menu_commands[3]["description"] == "Update the Inline Hermes plugin"
 assert menu_commands[6]["description"] == "Update Hermes"
+assert _inline_skill_catalog() == [
+    {"key": "data-analysis", "name": "data-analysis", "description": "Analyze data", "sort_order": 0},
+    {"key": "research", "name": "research", "description": "Research with sources", "sort_order": 1},
+]
 assert all("/" not in name and "-" not in name for name in menu_names)
 assert _normalize_inline_plugin_command_text("/inline_update") == "/inline-update"
 assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline-update now"
@@ -1698,6 +1711,9 @@ async def assert_bot_command_sync():
     assert calls[0][1]["commands"][2]["description"] == "Explicitly unfollow this Inline chat or thread"
     assert calls[0][1]["commands"][3]["description"] == "Update the Inline Hermes plugin"
     assert calls[0][1]["commands"][6]["description"] == "Update Hermes"
+    await adapter._sync_bot_skills()
+    assert calls[1][0] == "https://api.inline.chat/bot/setMySkills"
+    assert calls[1][1] == {"skills": _inline_skill_catalog()}
 
     fallback = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "path token"}))
     fallback_calls = []
@@ -1932,8 +1948,29 @@ async def assert_mentioned_agent_projection():
     })
 
     assert len(events) == 1
-    assert 'You are a specialized agent named "Data Analyst".' in events[0].channel_prompt
+    assert 'You are a specialized agent named "Data Analyst"' not in events[0].channel_prompt
     assert events[0].auto_skill == ["triage", "analysis"]
+
+    await adapter._dispatch_message({
+        "seq": 11,
+        "chatId": "10",
+        "message": {
+            "id": "9003",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "Summarizer inspect this",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+            "activatedAgent": {"id": "74", "name": "Summarizer"},
+            "entities": {"entities": [{
+                "type": 4,
+                "offset": "0",
+                "length": "10",
+                "entity": {"oneofKind": "mention", "mention": {"userId": "20", "agentId": "74"}},
+            }]},
+        },
+    })
+    assert len(events) == 2
+    assert 'You are a specialized agent named "Summarizer". Proceed with the user\'s request.' in events[1].channel_prompt
 
 asyncio.run(assert_mentioned_agent_projection())
 

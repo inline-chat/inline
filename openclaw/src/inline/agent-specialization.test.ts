@@ -1,10 +1,25 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+  buildInlineAgentSpecializationPrompt,
   createInlineAgentSpecializationResolver,
   projectInlineAgentSessionKey,
 } from "./agent-specialization.js"
 
 describe("Inline Agent specialization resolver", () => {
+  it("uses the name fallback only when skill and instructions are both absent", () => {
+    expect(buildInlineAgentSpecializationPrompt({ name: "Data Analyst" })).toBe(
+      `You are a specialized agent named "Data Analyst". Proceed with the user's request.`,
+    )
+    expect(buildInlineAgentSpecializationPrompt({
+      name: "Data Analyst",
+      skillKey: "data-analysis",
+    })).toBeUndefined()
+    expect(buildInlineAgentSpecializationPrompt({
+      name: "Data Analyst",
+      instructions: "Prefer compact tables.",
+    })).toBe("Prefer compact tables.")
+  })
+
   it("projects a separate session only for an authenticated specialization", () => {
     expect(projectInlineAgentSessionKey("agent:main:inline:group:7", "42", {
       name: "Data Analyst",

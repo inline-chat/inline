@@ -1470,6 +1470,7 @@ enum Method {
   GET_AGENT_SESSION = 130;
   UPDATE_BOT_AGENT = 131;
   DELETE_BOT_AGENT = 132;
+  GET_BOT_SKILLS = 139;
 }
 
 message RpcCall {
@@ -1607,6 +1608,7 @@ message RpcCall {
     GetAgentSessionInput getAgentSession = 131;
     UpdateBotAgentInput updateBotAgent = 132;
     DeleteBotAgentInput deleteBotAgent = 133;
+    GetBotSkillsInput getBotSkills = 140;
   }
 }
 
@@ -1746,6 +1748,7 @@ message RpcResult {
     GetAgentSessionResult getAgentSession = 131;
     UpdateBotAgentResult updateBotAgent = 132;
     DeleteBotAgentResult deleteBotAgent = 133;
+    GetBotSkillsResult getBotSkills = 140;
   }
 }
 
@@ -2456,6 +2459,15 @@ message BotCommand {
   optional int32 sort_order = 3;
 }
 
+message BotSkill {
+  // Stable harness activation key, for example the installed skill name.
+  string key = 1;
+  // Human-facing name shown in Agent creation.
+  string name = 2;
+  optional string description = 3;
+  optional int32 sort_order = 4;
+}
+
 message PeerBotCommands {
   User bot = 1;
   repeated BotCommand commands = 2;
@@ -2471,6 +2483,10 @@ message SetBotCommandsInput {
 }
 
 message SetBotCommandsResult { repeated BotCommand commands = 1; }
+
+message GetBotSkillsInput { int64 bot_user_id = 1; }
+
+message GetBotSkillsResult { repeated BotSkill skills = 1; }
 
 message GetPeerBotCommandsInput { InputPeer peer_id = 1; }
 

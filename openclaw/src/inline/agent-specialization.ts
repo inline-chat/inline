@@ -4,6 +4,15 @@ export type InlineAgentSpecialization = {
   instructions?: string
 }
 
+export function buildInlineAgentSpecializationPrompt(
+  specialization: InlineAgentSpecialization,
+): string | undefined {
+  const instructions = specialization.instructions?.trim()
+  if (instructions) return instructions
+  if (specialization.skillKey?.trim()) return undefined
+  return `You are a specialized agent named "${specialization.name}". Proceed with the user's request.`
+}
+
 export function projectInlineAgentSessionKey(
   baseSessionKey: string,
   agentId: string | undefined,

@@ -795,18 +795,27 @@ pub(super) fn mentioned_agent_id(
 }
 
 pub(super) fn agent_specialization_instruction(agent: &proto::BotAgent, task: &str) -> String {
+    let skill_key = agent
+        .skill_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     let instructions = agent
         .instructions
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| format!("You are a specialized agent named {:?}.", agent.name));
-    let skill_hint = agent
-        .skill_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            skill_key.is_none().then(|| {
+                format!(
+                    "You are a specialized agent named {:?}. Proceed with the user's request.",
+                    agent.name
+                )
+            })
+        })
+        .unwrap_or_default();
+    let skill_hint = skill_key
         .map(|value| {
             format!("\nConfigured skill key: {value}. Use it when this harness provides it.")
         })

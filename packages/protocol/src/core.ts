@@ -4142,6 +4142,12 @@ export interface RpcCall {
          */
         deleteBotAgent: DeleteBotAgentInput;
     } | {
+        oneofKind: "getBotSkills";
+        /**
+         * @generated from protobuf field: GetBotSkillsInput getBotSkills = 140;
+         */
+        getBotSkills: GetBotSkillsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -4942,6 +4948,12 @@ export interface RpcResult {
          * @generated from protobuf field: DeleteBotAgentResult deleteBotAgent = 133;
          */
         deleteBotAgent: DeleteBotAgentResult;
+    } | {
+        oneofKind: "getBotSkills";
+        /**
+         * @generated from protobuf field: GetBotSkillsResult getBotSkills = 140;
+         */
+        getBotSkills: GetBotSkillsResult;
     } | {
         oneofKind: undefined;
     };
@@ -6802,6 +6814,31 @@ export interface BotCommand {
     sortOrder?: number;
 }
 /**
+ * @generated from protobuf message BotSkill
+ */
+export interface BotSkill {
+    /**
+     * Stable harness activation key, for example the installed skill name.
+     *
+     * @generated from protobuf field: string key = 1;
+     */
+    key: string;
+    /**
+     * Human-facing name shown in Agent creation.
+     *
+     * @generated from protobuf field: string name = 2;
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: optional string description = 3;
+     */
+    description?: string;
+    /**
+     * @generated from protobuf field: optional int32 sort_order = 4;
+     */
+    sortOrder?: number;
+}
+/**
  * @generated from protobuf message PeerBotCommands
  */
 export interface PeerBotCommands {
@@ -6853,6 +6890,24 @@ export interface SetBotCommandsResult {
      * @generated from protobuf field: repeated BotCommand commands = 1;
      */
     commands: BotCommand[];
+}
+/**
+ * @generated from protobuf message GetBotSkillsInput
+ */
+export interface GetBotSkillsInput {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+}
+/**
+ * @generated from protobuf message GetBotSkillsResult
+ */
+export interface GetBotSkillsResult {
+    /**
+     * @generated from protobuf field: repeated BotSkill skills = 1;
+     */
+    skills: BotSkill[];
 }
 /**
  * @generated from protobuf message GetPeerBotCommandsInput
@@ -12908,7 +12963,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: DELETE_BOT_AGENT = 132;
      */
-    DELETE_BOT_AGENT = 132
+    DELETE_BOT_AGENT = 132,
+    /**
+     * @generated from protobuf enum value: GET_BOT_SKILLS = 139;
+     */
+    GET_BOT_SKILLS = 139
 }
 /**
  * @generated from protobuf enum GridConnectionUnavailableReason
@@ -21187,7 +21246,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "input", T: () => SyncAgentSessionMessagesInput },
             { no: 131, name: "getAgentSession", kind: "message", oneof: "input", T: () => GetAgentSessionInput },
             { no: 132, name: "updateBotAgent", kind: "message", oneof: "input", T: () => UpdateBotAgentInput },
-            { no: 133, name: "deleteBotAgent", kind: "message", oneof: "input", T: () => DeleteBotAgentInput }
+            { no: 133, name: "deleteBotAgent", kind: "message", oneof: "input", T: () => DeleteBotAgentInput },
+            { no: 140, name: "getBotSkills", kind: "message", oneof: "input", T: () => GetBotSkillsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -21992,6 +22052,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         deleteBotAgent: DeleteBotAgentInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).deleteBotAgent)
                     };
                     break;
+                case /* GetBotSkillsInput getBotSkills */ 140:
+                    message.input = {
+                        oneofKind: "getBotSkills",
+                        getBotSkills: GetBotSkillsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBotSkills)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22400,6 +22466,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* DeleteBotAgentInput deleteBotAgent = 133; */
         if (message.input.oneofKind === "deleteBotAgent")
             DeleteBotAgentInput.internalBinaryWrite(message.input.deleteBotAgent, writer.tag(133, WireType.LengthDelimited).fork(), options).join();
+        /* GetBotSkillsInput getBotSkills = 140; */
+        if (message.input.oneofKind === "getBotSkills")
+            GetBotSkillsInput.internalBinaryWrite(message.input.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -22545,7 +22614,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 130, name: "syncAgentSessionMessages", kind: "message", oneof: "result", T: () => SyncAgentSessionMessagesResult },
             { no: 131, name: "getAgentSession", kind: "message", oneof: "result", T: () => GetAgentSessionResult },
             { no: 132, name: "updateBotAgent", kind: "message", oneof: "result", T: () => UpdateBotAgentResult },
-            { no: 133, name: "deleteBotAgent", kind: "message", oneof: "result", T: () => DeleteBotAgentResult }
+            { no: 133, name: "deleteBotAgent", kind: "message", oneof: "result", T: () => DeleteBotAgentResult },
+            { no: 140, name: "getBotSkills", kind: "message", oneof: "result", T: () => GetBotSkillsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -23350,6 +23420,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         deleteBotAgent: DeleteBotAgentResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).deleteBotAgent)
                     };
                     break;
+                case /* GetBotSkillsResult getBotSkills */ 140:
+                    message.result = {
+                        oneofKind: "getBotSkills",
+                        getBotSkills: GetBotSkillsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBotSkills)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23758,6 +23834,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* DeleteBotAgentResult deleteBotAgent = 133; */
         if (message.result.oneofKind === "deleteBotAgent")
             DeleteBotAgentResult.internalBinaryWrite(message.result.deleteBotAgent, writer.tag(133, WireType.LengthDelimited).fork(), options).join();
+        /* GetBotSkillsResult getBotSkills = 140; */
+        if (message.result.oneofKind === "getBotSkills")
+            GetBotSkillsResult.internalBinaryWrite(message.result.getBotSkills, writer.tag(140, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30139,6 +30218,75 @@ class BotCommand$Type extends MessageType<BotCommand> {
  */
 export const BotCommand = new BotCommand$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class BotSkill$Type extends MessageType<BotSkill> {
+    constructor() {
+        super("BotSkill", [
+            { no: 1, name: "key", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "sort_order", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BotSkill>): BotSkill {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.key = "";
+        message.name = "";
+        if (value !== undefined)
+            reflectionMergePartial<BotSkill>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotSkill): BotSkill {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string key */ 1:
+                    message.key = reader.string();
+                    break;
+                case /* string name */ 2:
+                    message.name = reader.string();
+                    break;
+                case /* optional string description */ 3:
+                    message.description = reader.string();
+                    break;
+                case /* optional int32 sort_order */ 4:
+                    message.sortOrder = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BotSkill, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string key = 1; */
+        if (message.key !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.key);
+        /* string name = 2; */
+        if (message.name !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.name);
+        /* optional string description = 3; */
+        if (message.description !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.description);
+        /* optional int32 sort_order = 4; */
+        if (message.sortOrder !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.sortOrder);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BotSkill
+ */
+export const BotSkill = new BotSkill$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class PeerBotCommands$Type extends MessageType<PeerBotCommands> {
     constructor() {
         super("PeerBotCommands", [
@@ -30388,6 +30536,100 @@ class SetBotCommandsResult$Type extends MessageType<SetBotCommandsResult> {
  * @generated MessageType for protobuf message SetBotCommandsResult
  */
 export const SetBotCommandsResult = new SetBotCommandsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetBotSkillsInput$Type extends MessageType<GetBotSkillsInput> {
+    constructor() {
+        super("GetBotSkillsInput", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetBotSkillsInput>): GetBotSkillsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetBotSkillsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBotSkillsInput): GetBotSkillsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetBotSkillsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBotSkillsInput
+ */
+export const GetBotSkillsInput = new GetBotSkillsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetBotSkillsResult$Type extends MessageType<GetBotSkillsResult> {
+    constructor() {
+        super("GetBotSkillsResult", [
+            { no: 1, name: "skills", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BotSkill }
+        ]);
+    }
+    create(value?: PartialMessage<GetBotSkillsResult>): GetBotSkillsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.skills = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetBotSkillsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBotSkillsResult): GetBotSkillsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated BotSkill skills */ 1:
+                    message.skills.push(BotSkill.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetBotSkillsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated BotSkill skills = 1; */
+        for (let i = 0; i < message.skills.length; i++)
+            BotSkill.internalBinaryWrite(message.skills[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBotSkillsResult
+ */
+export const GetBotSkillsResult = new GetBotSkillsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetPeerBotCommandsInput$Type extends MessageType<GetPeerBotCommandsInput> {
     constructor() {

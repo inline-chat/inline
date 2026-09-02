@@ -76,7 +76,9 @@ fn agent_specialization_uses_name_only_fallback_and_optional_harness_fields() {
         ..proto::BotAgent::default()
     };
     let fallback = agent_specialization_instruction(&name_only, "Inspect this");
-    assert!(fallback.contains("You are a specialized agent named \"Data Analyst\"."));
+    assert!(fallback.contains(
+        "You are a specialized agent named \"Data Analyst\". Proceed with the user's request."
+    ));
     assert!(fallback.ends_with("Current task:\nInspect this"));
 
     let configured = proto::BotAgent {
@@ -88,6 +90,15 @@ fn agent_specialization_uses_name_only_fallback_and_optional_harness_fields() {
     let projected = agent_specialization_instruction(&configured, "Find evidence");
     assert!(projected.contains("Use primary sources."));
     assert!(projected.contains("Configured skill key: research."));
+    assert!(!projected.contains("specialized agent named"));
+
+    let skill_only = proto::BotAgent {
+        name: "Analyst".to_string(),
+        skill_key: Some("data-analysis".to_string()),
+        ..proto::BotAgent::default()
+    };
+    let projected = agent_specialization_instruction(&skill_only, "Inspect this");
+    assert!(projected.contains("Configured skill key: data-analysis."));
     assert!(!projected.contains("specialized agent named"));
 }
 

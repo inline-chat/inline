@@ -600,6 +600,36 @@ def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[Li
     return commands, hidden_count + hidden_local + skipped
 
 
+def _inline_skill_catalog() -> List[Dict[str, Any]]:
+    """Return installed, enabled Hermes skills in the Bot API catalog shape."""
+    from tools.skills_tool import _find_all_skills, _sort_skills
+
+    published: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for skill in _sort_skills(_find_all_skills(skip_disabled=False)):
+        if len(published) >= 250:
+            break
+        key = str(skill.get("name") or "").strip()
+        if not key or _utf16_length(key) > 256 or key in seen:
+            continue
+        # At most two UTF-16 code units per Python Unicode scalar keeps the
+        # 4,000-unit validation bound even for non-BMP descriptions.
+        description = str(skill.get("description") or "").strip()[:2000].rstrip()
+        seen.add(key)
+        published.append({
+            "key": key,
+            "name": key,
+            **({"description": description} if description else {}),
+            "sort_order": len(published),
+        })
+    return published
+
+
+def _utf16_length(value: str) -> int:
+    """Match JavaScript and Bot API string-length validation."""
+    return len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+
+
 def _token_value(raw: Any) -> str:
     if raw is None:
         return ""
@@ -1965,8 +1995,6 @@ class InlineAdapter(BasePlatformAdapter):
                 self._sidecar_supervisor_task = None
 
     def _schedule_bot_command_sync(self) -> None:
-        if not self._sync_commands:
-            return
         if self._command_sync_task is not None and not self._command_sync_task.done():
             return
         self._command_sync_task = asyncio.get_event_loop().create_task(self._run_bot_command_sync())
@@ -1974,6 +2002,7 @@ class InlineAdapter(BasePlatformAdapter):
     async def _run_bot_command_sync(self) -> None:
         try:
             await self._sync_bot_commands()
+            await self._sync_bot_skills()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1997,6 +2026,16 @@ class InlineAdapter(BasePlatformAdapter):
             logger.info("[inline] bot commands synced (%d command%s%s)", len(synced), "" if len(synced) == 1 else "s", hidden_suffix)
         except Exception as exc:
             logger.warning("[inline] bot command sync failed: %s", exc)
+
+    async def _sync_bot_skills(self) -> None:
+        if self._http_client is None:
+            return
+        try:
+            skills = _inline_skill_catalog()
+            await self._call_bot_api("setMySkills", {"skills": skills})
+            logger.info("[inline] bot skills synced (%d skill%s)", len(skills), "" if len(skills) == 1 else "s")
+        except Exception as exc:
+            logger.warning("[inline] bot skill sync failed: %s", exc)
 
     async def _set_bot_commands_with_retry(self, commands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         try:
@@ -2367,8 +2406,13 @@ class InlineAdapter(BasePlatformAdapter):
                 agent_instructions = str(agent.get("instructions") or "").strip()
                 agent_skill = str(agent.get("skillKey") or agent.get("skill_key") or "").strip()
                 if agent_name:
-                    specialization = agent_instructions or f'You are a specialized agent named "{agent_name}".'
-                    channel_prompt = self._merge_channel_prompt(channel_prompt, specialization)
+                    if agent_instructions:
+                        channel_prompt = self._merge_channel_prompt(channel_prompt, agent_instructions)
+                    elif not agent_skill:
+                        channel_prompt = self._merge_channel_prompt(
+                            channel_prompt,
+                            f'You are a specialized agent named "{agent_name}". Proceed with the user\'s request.',
+                        )
                 if agent_skill:
                     auto_skill = list(dict.fromkeys([*(auto_skill or []), agent_skill]))
             except Exception as exc:

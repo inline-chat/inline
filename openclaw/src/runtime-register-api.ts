@@ -9,6 +9,7 @@ import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { createInlineAgentsTool } from "./inline/agents-tool.js"
 import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
+import { syncInlineAgentSkills } from "./inline/bot-skills-sync.js"
 import { createInlineFollowCommands } from "./inline/follow-command.js"
 import { createInlineThreadReplyCommand } from "./inline/threadreply-command.js"
 import { createInlineUpdateCommand } from "./inline/update-command.js"
@@ -60,6 +61,10 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   })
   api.on("gateway_start", async () => {
     await syncInlineNativeCommands({
+      cfg: api.config,
+      logger: api.logger,
+    })
+    await syncInlineAgentSkills({
       cfg: api.config,
       logger: api.logger,
     })

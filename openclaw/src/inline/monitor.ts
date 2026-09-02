@@ -116,6 +116,7 @@ import {
 } from "./message-content.js"
 import { callInlineBotApi } from "./bot-commands-api.js"
 import {
+  buildInlineAgentSpecializationPrompt,
   createInlineAgentSpecializationResolver,
   projectInlineAgentSessionKey,
 } from "./agent-specialization.js"
@@ -5133,7 +5134,7 @@ export async function monitorInlineProvider(params: {
       replyThread: Boolean(deliveryReplyThreadContext),
     })
     const inlineAgentPrompt = inlineAgent
-      ? inlineAgent.instructions?.trim() || `You are a specialized agent named "${inlineAgent.name}".`
+      ? buildInlineAgentSpecializationPrompt(inlineAgent)
       : undefined
     const systemPrompt = [baseSystemPrompt, inlineAgentPrompt].filter(Boolean).join("\n\n") || undefined
     const messageSid = buildInlineInboundMessageSid({
