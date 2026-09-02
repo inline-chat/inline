@@ -62,7 +62,7 @@ use self::bot_settings::{
 
 const DEFAULT_API_BASE_URL: &str = "https://api.inline.chat/v1";
 const DEFAULT_REALTIME_URL: &str = "wss://api.inline.chat/realtime";
-const CHAT_REPAIR_HISTORY_LIMIT: i32 = 50;
+const CHAT_REPAIR_MESSAGE_LIMIT: usize = 100;
 const CLIENT_EVENT_DELIVERY_PAGE_LIMIT: usize = 256;
 const CLIENT_EVENT_DELIVERY_PAGE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -2803,11 +2803,12 @@ impl SdkBackend {
     ) -> BackendResult<Vec<ClientEvent>> {
         let session = self.require_session().await?;
         let peer_id = input_peer_for_sync_bucket_peer(peer);
+        let expected_peer = peer_for_sync_bucket_peer(peer);
         let chat_result = match self
             .call_realtime(
                 &session,
                 proto::GetChatInput {
-                    peer_id: Some(peer_id.clone()),
+                    peer_id: Some(peer_id),
                     include_recent_messages: true,
                 },
             )
@@ -2832,6 +2833,22 @@ impl SdkBackend {
                 "chat bucket snapshot did not include the chat",
             )
         })?;
+        let dialog = chat_result.dialog.ok_or_else(|| {
+            BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "chat bucket snapshot did not include the dialog",
+            )
+        })?;
+        if chat.id <= 0
+            || chat.peer_id.as_ref() != Some(&expected_peer)
+            || dialog.chat_id != Some(chat.id)
+            || dialog.peer.as_ref() != Some(&expected_peer)
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "chat bucket snapshot did not match the requested peer",
+            ));
+        }
         if i64::from(chat.seq.unwrap_or_default()) < target_seq {
             return Err(BackendError::new(
                 ClientErrorCategory::ProtocolMismatch,
@@ -2839,29 +2856,73 @@ impl SdkBackend {
             ));
         }
         let chat_id = InlineId::new(chat.id);
-        let history = self.fetch_chat_repair_history(&session, peer_id).await?;
+        validate_chat_repair_messages(&chat, &expected_peer, &chat_result.messages)?;
 
-        let dialog = chat_result.dialog;
-        let read_state = dialog
-            .as_ref()
-            .and_then(|dialog| read_state_from_proto_dialog(chat_id, dialog));
+        let existing_dialog = self
+            .store
+            .dialog(chat_id)
+            .await
+            .map_err(store_error_to_backend)?;
+        let preserve_existing_user_state = existing_dialog.is_some();
+        let read_state = if preserve_existing_user_state {
+            None
+        } else {
+            read_state_from_proto_dialog(chat_id, &dialog)
+        };
+        let mut repair_dialog = dialog;
+        if preserve_existing_user_state {
+            clear_dialog_user_state(&mut repair_dialog);
+        }
         let pinned_message_ids = chat_result
             .pinned_message_ids
             .into_iter()
             .map(InlineId::new)
             .collect::<Vec<_>>();
+        if pinned_message_ids.iter().any(|id| id.get() <= 0)
+            || pinned_message_ids
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
+                .len()
+                != pinned_message_ids.len()
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "chat bucket snapshot returned invalid pinned message IDs",
+            ));
+        }
+        let anchor_message = chat_result.anchor_message;
+        if let Some(anchor) = anchor_message.as_ref()
+            && (anchor.id <= 0
+                || anchor.chat_id <= 0
+                || !valid_peer(anchor.peer_id.as_ref())
+                || chat.parent_chat_id != Some(anchor.chat_id)
+                || chat.parent_message_id != Some(anchor.id))
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::ProtocolMismatch,
+                "chat bucket snapshot returned a mismatched parent anchor",
+            ));
+        }
+        let history = chat_result.messages;
 
         self.store
             .mark_chat_participants_incomplete(chat_id)
             .await
             .map_err(store_error_to_backend)?;
-        let mut events = self.record_chat_update(chat, dialog, None).await?;
+        let mut events = self
+            .record_chat_update(chat, Some(repair_dialog), None)
+            .await?;
         events.push(ClientEvent::ChatParticipantsChanged { chat_id });
         self.mutate_dialog(chat_id, |dialog| {
             dialog.pinned_message_ids = pinned_message_ids;
         })
         .await?;
 
+        if let Some(message) = anchor_message {
+            let record = self.record_proto_message(message, None, None).await?;
+            events.push(ClientEvent::MessageStored { message: record });
+        }
         for message in history {
             let record = self
                 .record_proto_message(message, Some(chat_id), None)
@@ -2876,37 +2937,6 @@ impl SdkBackend {
             events.push(ClientEvent::ReadStateChanged { chat_id });
         }
         Ok(events)
-    }
-
-    async fn fetch_chat_repair_history(
-        &self,
-        session: &StoredSession,
-        peer_id: proto::InputPeer,
-    ) -> BackendResult<Vec<proto::Message>> {
-        let result = self
-            .call_realtime(
-                session,
-                proto::GetChatHistoryInput {
-                    peer_id: Some(peer_id),
-                    offset_id: None,
-                    limit: Some(CHAT_REPAIR_HISTORY_LIMIT),
-                    mode: Some(proto::GetChatHistoryMode::HistoryModeLatest as i32),
-                    anchor_id: None,
-                    before_id: None,
-                    after_id: None,
-                    before_limit: None,
-                    after_limit: None,
-                    include_anchor: None,
-                },
-            )
-            .await?;
-        if result.messages.len() > CHAT_REPAIR_HISTORY_LIMIT as usize {
-            return Err(BackendError::new(
-                ClientErrorCategory::ProtocolMismatch,
-                "chat repair history exceeded the requested page size",
-            ));
-        }
-        Ok(result.messages)
     }
 
     async fn apply_get_chats_snapshot(
@@ -4271,6 +4301,61 @@ fn read_state_from_proto_dialog(
     })
 }
 
+fn clear_dialog_user_state(dialog: &mut proto::Dialog) {
+    dialog.archived = None;
+    dialog.pinned = None;
+    dialog.read_max_id = None;
+    dialog.unread_count = None;
+    dialog.unread_mark = None;
+    dialog.notification_settings = None;
+    dialog.chat_list_hidden = None;
+    dialog.open = None;
+    dialog.opened_date = None;
+    dialog.order = None;
+    dialog.pinned_order = None;
+    dialog.follow_mode = None;
+    dialog.collapsed_max_id = None;
+    dialog.folder_id = None;
+}
+
+fn validate_chat_repair_messages(
+    chat: &proto::Chat,
+    expected_peer: &proto::Peer,
+    messages: &[proto::Message],
+) -> BackendResult<()> {
+    let valid_window = messages.len() <= CHAT_REPAIR_MESSAGE_LIMIT
+        && messages
+            .iter()
+            .all(|message| {
+                message.id > 0
+                    && message.chat_id == chat.id
+                    && message.peer_id.as_ref() == Some(expected_peer)
+            })
+        && messages
+            .iter()
+            .map(|message| message.id)
+            .collect::<HashSet<_>>()
+            .len()
+            == messages.len()
+        && messages.windows(2).all(|pair| pair[0].id > pair[1].id)
+        && messages.first().map(|message| message.id) == chat.last_msg_id;
+    if !valid_window {
+        return Err(BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "chat bucket snapshot returned an invalid recent message window",
+        ));
+    }
+    Ok(())
+}
+
+fn valid_peer(peer: Option<&proto::Peer>) -> bool {
+    match peer.and_then(|peer| peer.r#type.as_ref()) {
+        Some(proto::peer::Type::User(user)) => user.user_id > 0,
+        Some(proto::peer::Type::Chat(chat)) => chat.chat_id > 0,
+        None => false,
+    }
+}
+
 fn dialog_peer_user_id(dialog: Option<&proto::Dialog>, chat: &proto::Chat) -> Option<InlineId> {
     dialog
         .and_then(|dialog| dialog.peer.as_ref())
@@ -4968,6 +5053,24 @@ fn input_peer_for_sync_bucket_peer(peer: crate::SyncBucketPeer) -> proto::InputP
         }
     };
     proto::InputPeer {
+        r#type: Some(r#type),
+    }
+}
+
+fn peer_for_sync_bucket_peer(peer: crate::SyncBucketPeer) -> proto::Peer {
+    let r#type = match peer {
+        crate::SyncBucketPeer::User { user_id } => {
+            proto::peer::Type::User(proto::PeerUser {
+                user_id: user_id.get(),
+            })
+        }
+        crate::SyncBucketPeer::Chat { chat_id } => {
+            proto::peer::Type::Chat(proto::PeerChat {
+                chat_id: chat_id.get(),
+            })
+        }
+    };
+    proto::Peer {
         r#type: Some(r#type),
     }
 }
@@ -8075,36 +8178,21 @@ mod tests {
                             title: "Repaired".to_owned(),
                             peer_id: Some(peer.clone()),
                             seq: Some(400),
+                            last_msg_id: Some(11),
                             ..Default::default()
                         }),
                         dialog: Some(proto::Dialog {
                             chat_id: Some(7),
                             peer: Some(peer.clone()),
+                            unread_count: Some(1),
+                            archived: Some(false),
+                            pinned: Some(false),
+                            open: Some(false),
                             ..Default::default()
                         }),
                         pinned_message_ids: vec![11],
                         anchor_message: None,
                         user: None,
-                        ..Default::default()
-                    }),
-                ),
-            )
-            .await;
-
-            let history = read_test_client_message(&mut ws).await;
-            assert!(matches!(
-                &history.body,
-                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
-                    method,
-                    input: Some(proto::rpc_call::Input::GetChatHistory(_)),
-                })) if *method == proto::Method::GetChatHistory as i32
-            ));
-            send_test_server_message(
-                &mut ws,
-                rpc_result_message(
-                    6,
-                    history.id,
-                    proto::rpc_result::Result::GetChatHistory(proto::GetChatHistoryResult {
                         messages: vec![proto::Message {
                             id: 11,
                             chat_id: 7,
@@ -8123,7 +8211,7 @@ mod tests {
             send_test_server_message(
                 &mut ws,
                 rpc_result_message(
-                    7,
+                    6,
                     remaining.id,
                     proto::rpc_result::Result::GetUpdates(proto::GetUpdatesResult {
                         updates: Vec::new(),
@@ -8150,8 +8238,21 @@ mod tests {
         store.upsert_dialog(DialogRecord {
             chat_id: InlineId::new(7),
             title: Some("Stale".to_owned()),
+            unread_count: Some(9),
+            archived: Some(true),
+            pinned: Some(true),
+            open: Some(true),
             ..DialogRecord::new(InlineId::new(7))
         });
+        store
+            .record_read_state(StoredReadState {
+                chat_id: InlineId::new(7),
+                read_max_id: Some(InlineId::new(8)),
+                unread_count: Some(9),
+                marked_unread: true,
+            })
+            .await
+            .unwrap();
         store.insert_message(test_message_record(10));
         store
             .record_chat_participants(
@@ -8195,6 +8296,19 @@ mod tests {
         let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
         assert_eq!(dialog.title.as_deref(), Some("Repaired"));
         assert_eq!(dialog.pinned_message_ids, vec![InlineId::new(11)]);
+        assert_eq!(dialog.unread_count, Some(9));
+        assert_eq!(dialog.archived, Some(true));
+        assert_eq!(dialog.pinned, Some(true));
+        assert_eq!(dialog.open, Some(true));
+        assert_eq!(
+            store.read_state(InlineId::new(7)).await.unwrap(),
+            Some(StoredReadState {
+                chat_id: InlineId::new(7),
+                read_max_id: Some(InlineId::new(8)),
+                unread_count: Some(9),
+                marked_unread: true,
+            })
+        );
         assert!(
             store
                 .message(InlineId::new(7), InlineId::new(10))
@@ -8284,7 +8398,34 @@ mod tests {
                 rpc_result_message(
                     3,
                     chats.id,
-                    proto::rpc_result::Result::GetChats(proto::GetChatsResult::default()),
+                    proto::rpc_result::Result::GetChats(proto::GetChatsResult {
+                        chats: vec![proto::Chat {
+                            id: 7,
+                            title: "Authoritative title".to_owned(),
+                            peer_id: Some(proto::Peer {
+                                r#type: Some(proto::peer::Type::Chat(proto::PeerChat {
+                                    chat_id: 7,
+                                })),
+                            }),
+                            ..Default::default()
+                        }],
+                        dialogs: vec![proto::Dialog {
+                            chat_id: Some(7),
+                            peer: Some(proto::Peer {
+                                r#type: Some(proto::peer::Type::Chat(proto::PeerChat {
+                                    chat_id: 7,
+                                })),
+                            }),
+                            read_max_id: Some(20),
+                            unread_count: Some(1),
+                            unread_mark: Some(false),
+                            archived: Some(false),
+                            pinned: Some(false),
+                            open: Some(false),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }),
                 ),
             )
             .await;
@@ -8321,7 +8462,24 @@ mod tests {
         let store = InMemoryStore::new();
         store.save_session(connect_session()).await.unwrap();
         store
-            .record_dialog(DialogRecord::new(InlineId::new(7)))
+            .record_dialog(DialogRecord {
+                chat_id: InlineId::new(7),
+                title: Some("Stale title".to_owned()),
+                unread_count: Some(9),
+                archived: Some(true),
+                pinned: Some(true),
+                open: Some(true),
+                ..DialogRecord::new(InlineId::new(7))
+            })
+            .await
+            .unwrap();
+        store
+            .record_read_state(StoredReadState {
+                chat_id: InlineId::new(7),
+                read_max_id: Some(InlineId::new(8)),
+                unread_count: Some(9),
+                marked_unread: true,
+            })
             .await
             .unwrap();
         let backend = SdkBackend::builder()
@@ -8353,7 +8511,21 @@ mod tests {
                 .any(|event| matches!(event, ClientEvent::UserSettingsChanged {}))
         );
         assert!(store.deleted_chat_ids().await.unwrap().is_empty());
-        assert!(store.dialog(InlineId::new(7)).await.unwrap().is_some());
+        let dialog = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
+        assert_eq!(dialog.title.as_deref(), Some("Authoritative title"));
+        assert_eq!(dialog.unread_count, Some(1));
+        assert_eq!(dialog.archived, Some(false));
+        assert_eq!(dialog.pinned, Some(false));
+        assert_eq!(dialog.open, Some(false));
+        assert_eq!(
+            store.read_state(InlineId::new(7)).await.unwrap(),
+            Some(StoredReadState {
+                chat_id: InlineId::new(7),
+                read_max_id: Some(InlineId::new(20)),
+                unread_count: Some(1),
+                marked_unread: false,
+            })
+        );
         assert!(store.user_settings().await.unwrap().is_some());
         server.await.unwrap();
     }
