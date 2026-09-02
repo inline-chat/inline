@@ -4,6 +4,7 @@ import { SUPPORT_EMAIL, emailValue } from "~/lib/email"
 
 const INLINE_LOGOTYPE_SRC = "/logotype-white.svg?v=2"
 const INLINE_SYMBOL_SRC = "/inline-logo.svg"
+const BETA_BADGE_SRC = "/beta-badge.svg"
 
 const FOOTER_GROUPS = [
   {
@@ -156,7 +157,13 @@ export function SiteFooter({ ariaLabel = "Inline footer" }: { ariaLabel?: string
                       <span className="site-footer__wordmark-crop" aria-hidden="true">
                         <img src={INLINE_LOGOTYPE_SRC} alt="" width="72" height="16" />
                       </span>
-                      <span className="site-footer__beta">BETA</span>
+                      <img
+                        className="site-footer__beta"
+                        src={BETA_BADGE_SRC}
+                        alt="Beta"
+                        width="35"
+                        height="13"
+                      />
                     </a>
                   ) : (
                     <h2 id={titleId}>{group.title}</h2>

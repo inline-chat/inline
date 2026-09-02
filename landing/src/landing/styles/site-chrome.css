@@ -9,6 +9,7 @@
   --site-chrome-header-logo-filter: none;
   --site-chrome-docs-logo-filter: invert(1);
   --site-chrome-wordmark-filter: invert(1);
+  --site-chrome-beta-filter: none;
   color-scheme: light dark;
 }
 
@@ -119,18 +120,12 @@
 }
 
 .site-footer__beta {
-  display: inline-flex;
-  height: 16px;
-  padding: 0 5px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  box-sizing: border-box;
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.045em;
-  line-height: 1;
+  display: block;
+  width: 35px;
+  height: 13px;
+  flex: none;
+  filter: var(--site-chrome-beta-filter);
+  transform: translateY(1px);
 }
 
 .site-footer__grid {
@@ -223,6 +218,7 @@
     --site-chrome-header-logo-filter: invert(1);
     --site-chrome-docs-logo-filter: none;
     --site-chrome-wordmark-filter: none;
+    --site-chrome-beta-filter: invert(1);
   }
 }
 
