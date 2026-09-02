@@ -33,6 +33,7 @@ import type {
   InlineBotClientRequestOptions,
   InlineBotClientResponse,
   SetMyCommandsParams,
+  SetMySkillsParams,
   SendMessageParams,
   SendReactionParams,
   SendChatActionParams,
@@ -67,6 +68,9 @@ const botMethodTransports = {
   getMyCommands: "get",
   setMyCommands: "json",
   deleteMyCommands: "json",
+  getMySkills: "get",
+  setMySkills: "json",
+  deleteMySkills: "json",
   sendMessage: "json",
   editMessageText: "json",
   editMessageActions: "json",
@@ -323,6 +327,18 @@ export class InlineBotClient implements BotClientMethodSurface {
 
   deleteMyCommands(options?: InlineBotClientMethodOptions) {
     return this.method("deleteMyCommands", undefined, options)
+  }
+
+  getMySkills(options?: InlineBotClientMethodOptions) {
+    return this.method("getMySkills", undefined, options)
+  }
+
+  setMySkills(params: SetMySkillsParams, options?: InlineBotClientMethodOptions) {
+    return this.method("setMySkills", params, options)
+  }
+
+  deleteMySkills(options?: InlineBotClientMethodOptions) {
+    return this.method("deleteMySkills", undefined, options)
   }
 
   sendMessage(params: SendMessageParams, options?: InlineBotClientMethodOptions) {

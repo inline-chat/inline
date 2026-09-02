@@ -447,6 +447,42 @@ describe("InlineBotClient", () => {
     expect(seenUrl).toBe("https://api.inline.chat/bot/deleteMyCommands")
   })
 
+  it("uses the canonical transports for bot skills", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = []
+    const client = new InlineBotClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        calls.push({
+          url: String(input),
+          method: init?.method ?? "",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        })
+        return new Response(JSON.stringify({ ok: true, result: { skills: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    await client.getMySkills()
+    await client.setMySkills({
+      skills: [{ key: "research", name: "Research", description: "Find sources", sort_order: 1 }],
+    })
+    await client.deleteMySkills()
+
+    expect(calls).toEqual([
+      { url: "https://api.inline.chat/bot/getMySkills", method: "GET", body: undefined },
+      {
+        url: "https://api.inline.chat/bot/setMySkills",
+        method: "POST",
+        body: {
+          skills: [{ key: "research", name: "Research", description: "Find sources", sort_order: 1 }],
+        },
+      },
+      { url: "https://api.inline.chat/bot/deleteMySkills", method: "POST", body: undefined },
+    ])
+  })
+
   it("supports polling, webhook, action, and file transports", async () => {
     const calls: Array<{ url: string; method: string; body: unknown }> = []
     const client = new InlineBotClient({
