@@ -12,10 +12,7 @@ describe("Hermes Python adapter error telemetry", () => {
 import json
 import importlib.util
 import os
-import socket
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 telemetry_path = ${JSON.stringify(path.join(packageRoot, "plugin", "inline", "telemetry.py"))}
 spec = importlib.util.spec_from_file_location("inline_telemetry_test", telemetry_path)
@@ -24,24 +21,26 @@ spec.loader.exec_module(telemetry)
 capture_plugin_error = telemetry.capture_plugin_error
 
 received = []
-class Handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        size = int(self.headers.get("content-length") or "0")
-        received.append(self.rfile.read(size).decode("utf-8"))
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"{}")
-    def log_message(self, *_args):
-        pass
+class Response:
+    def __enter__(self):
+        return self
+    def __exit__(self, *_args):
+        return False
+    def read(self, _size):
+        return b"{}"
 
-server = HTTPServer(("127.0.0.1", 0), Handler)
-thread = threading.Thread(target=server.handle_request, daemon=True)
-thread.start()
+class Opener:
+    def open(self, request, timeout):
+        assert timeout == 2.0
+        received.append(request.data.decode("utf-8"))
+        return Response()
+
+telemetry.urllib.request.build_opener = lambda *_args: Opener()
 secret = "private-hermes-token"
 os.environ["NODE_ENV"] = "test"
 os.environ.pop("DO_NOT_TRACK", None)
 os.environ.pop("INLINE_PLUGIN_TELEMETRY", None)
-os.environ["INLINE_HERMES_SENTRY_DSN"] = f"http://fixture@127.0.0.1:{server.server_port}/123"
+os.environ["INLINE_HERMES_SENTRY_DSN"] = "http://fixture@127.0.0.1:4318/123"
 os.environ["INLINE_TOKEN"] = secret
 try:
     raise RuntimeError(f"failed at /Users/mo/private/adapter.py with Bearer {secret}")
@@ -49,8 +48,6 @@ except Exception as error:
     sender = capture_plugin_error("adapter.inbound", error, secrets=(secret,))
     if sender:
         sender.join(3)
-thread.join(3)
-server.server_close()
 os.environ.pop("INLINE_HERMES_SENTRY_DSN", None)
 default_disabled = capture_plugin_error("adapter.inbound", RuntimeError("not sent"))
 os.environ["INLINE_HERMES_SENTRY_DSN"] = "http://fixture@127.0.0.1:1/123"
