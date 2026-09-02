@@ -1,137 +1,103 @@
 ---
-title: "Agents"
-description: "Set up an agent as an Inline bot with the CLI, bridge, gateway, or integration plugins it needs."
+title: "Set Up an Agent"
+description: "Connect an agent to an Inline bot."
 ---
-
-Connect an agent running on your computer to an Inline bot. Send it work from Inline on your phone or desktop and receive its replies in the same chat. Setup installs the Inline CLI and any bridge, gateway, or integration plugins needed for that connection.
 
 ## Setup Prompt
 
-Copy this request to the agent you want to connect:
+Paste this in your favorite LLM to do it itself.
 
 ```text
-Set up this agent as a bot in Inline by following https://inline.chat/docs/agents.md
+Set up this agent as a bot in Inline:
+https://inline.chat/docs/agents.md
 ```
 
-## Instructions for Agents
+Ideally specify which of your agents you want to bring and if it's local or remote. For example:
 
-Use the existing agent runtime and let the Inline CLI create or reuse the bot, install the required integration, and start its bridge or gateway. Keep the agent's existing instructions and model/provider configuration.
+```text
+Set up my local OpenClaw as a bot in Inline:
+https://inline.chat/docs/agents.md
+```
 
-### 1. Prepare the Inline CLI
+## Inline for Mac
 
-Check whether the CLI is installed:
+If you have the macOS app, we have a wizard for setting up your local agents. It sets up the CLI, finds your harnesses, installs the plugins, configures it, creates a bot, authenticates the plugin and opens the chat ready to use. It may be brittle given the amount of moving parts, so if it failed, try those steps manually.
+Open **Inline → Settings → Bots → Set Up Agent…** or choose **Set Up an Agent…** from the app menu.
+
+## Using the CLI
+
+Check the CLI:
 
 ```bash
 inline --version
 ```
 
-If it is missing, install it on macOS or Linux:
+[Install](/docs/cli) it if missing:
 
 ```bash
 curl -fsSL https://inline.chat/cli/install.sh | sh
 ```
 
-If `inline agents setup --help` is unavailable, [update the CLI](/docs/cli#update-and-troubleshoot). Reuse the existing Inline sign-in; check it with `inline me`. If sign-in is needed, run the following and give the user the sign-in URL:
+Sign in if needed:
 
 ```bash
 inline login --browser --no-open
 ```
 
-Let the user complete sign-in. Do not ask them to paste tokens or read credential files.
-
-### 2. Connect the Current Agent
-
-Choose the runtime the user is addressing: Codex → `codex`, Claude Code → `claude`, OpenCode → `opencode`, Amp → `amp`, Hermes → `hermes`, or OpenClaw → `openclaw`. Do not choose Codex just because it is the example or install a different runtime. If the current runtime is unclear or unsupported, ask which installed agent to connect.
-
-Check which targets are installed without changing state:
+Find installed agents:
 
 ```bash
-inline agents discover --json --compact
+inline agents discover
 ```
 
-For Codex, run this command; replace `codex` with the selected target for another runtime:
-
-```bash
-inline agents setup --target codex --non-interactive --json
-```
-
-For a local coding agent scoped to a project, also pass `--folder /absolute/path/to/project`. Without it, local targets default to the home directory. Keep the default owner-only access unless the user explicitly requests otherwise. Setup creates or reuses the bot and starts the bridge or gateway; do not stop after installing the CLI or signing in.
-
-### 3. Hand Off the Bot and Verify a Reply
-
-Check the result's `status` and `service.ready`. If it reports `configured`, `partial`, or an error, follow [Recovery](#recovery); do not report the connection as ready. Do not use `--replace` without the user's approval.
-
-When `status` is `ready` and `service.ready` is `true`, give the user the returned `openUrl` and bot username. Ask them to send the [verification prompt](#verify-a-conversation) in that bot's Inline chat. Setup is verified only after a final reply arrives there. If you cannot observe the reply, report “connected; conversation verification pending.”
-
-## Local Coding Agents
-
-> **One-click setup on macOS**
-> Choose **Set Up an Agent…** from the app menu, or open **Settings → Bots → Set Up Agent…**. The wizard installs or updates the trusted CLI, signs in, detects local agents, creates or reuses the bot, installs the integration, and verifies it.
-
-Terminal setup:
+Run interactive setup:
 
 ```bash
 inline agents setup
 ```
 
-Agents and scripts should use the [non-interactive flow above](#instructions-for-agents).
-
-Supported targets: Codex, Claude, OpenCode, Amp, Hermes, and OpenClaw. Install and sign in to your chosen runtime first. Inline installs its adapter or plugin, not the third-party runtime. The computer running the bridge or gateway must remain available to receive work.
-
-Local targets default to the home directory unless `--folder` selects a narrower workspace. Select a project directory deliberately; chat access does not expand the provider's local permissions.
+Agents and scripts should select the current runtime explicitly:
 
 ```bash
-inline agents setup --target codex --folder /path/to/project
+inline agents setup --target codex
 ```
 
-Compatibility commands: `inline setup codex|opencode|claude|amp`. Gateway shortcuts: `inline setup hermes|openclaw`. Codex is the primary local-bridge beta path; Claude, OpenCode, and Amp are experimental.
+Targets: `codex`, `claude`, `opencode`, `amp`, `hermes`, and `openclaw`.
 
-Local bridge status:
+```bash
+inline agents setup --target codex
+```
+
+## Verify
+
+A ready setup has:
+
+- `status: "ready"`
+- `service.ready: true`
+- A bot username and `openUrl`
+
+Open the bot via CMD+K or search on iOS and start chatting
+
+## Status
+
+Check a local bridge (for Codex/Claude/OpenCode/Amp setups that use our bridge)
 
 ```bash
 inline bridge status
 ```
 
-Gateway status:
+Check Hermes:
 
 ```bash
 hermes inline status --json --probe
 ```
 
+Check OpenClaw:
+
 ```bash
 openclaw channels status --channel inline --probe --json
 ```
 
-### Verify a Conversation
+---
 
-Open the bot in Inline and send a small prompt, such as “Reply with hello; do not run commands or change files.” Confirm a final reply appears in the intended chat. A healthy process or successful setup result alone does not prove an agent can complete a turn.
-
-If you cannot find **Set Up an Agent…**, update Inline or use the terminal setup above. In a shared thread, use an explicit bot mention and check the integration's operator policy before sending work.
-
-### Recovery
-
-The app and JSON output report the failed phase, stable error code, retry command, documentation link, and confirmed changes. Setup is safe to retry. Conflicting Hermes or OpenClaw configurations require confirmation before `--replace`.
-
-| Error | What to do |
-| --- | --- |
-| `not_authenticated` | Sign in with `inline login`, then retry. |
-| `target_not_installed` | Install the selected harness, or choose another detected harness. |
-| `setup_conflict` / `mapped_bot_missing` | Retry from the app with **Repair Existing Setup**, or rerun the command with `--replace`. |
-| `plugin_unavailable` | Allow Inline to install the integration, or install/update it manually. |
-| `agent_setup_failed` | Run the provided retry command in Terminal; diagnostics do not print the token. |
-
-An outdated Homebrew CLI is preserved; the wizard installs a compatible signed copy elsewhere. If a runtime installed through Volta, nvm/fnm, asdf/mise, pnpm, or Bun is missing, run `inline agents discover --json --compact` in Terminal.
-
-`status: "partial"` means some listed changes completed. Retry normally; setup reconciles Inline-owned state instead of creating another bot.
-
-## Setup Paths
-
-| Path | Use |
-| --- | --- |
-| [Local agent](#local-coding-agents) | Run Codex, Claude, OpenCode, or Amp on your Mac from Inline chats |
-| [OpenClaw](/docs/openclaw) | Add Inline as an OpenClaw channel |
-| [Hermes](/docs/hermes) | Run Hermes from Inline chats and reply threads |
-
-## Agent Workflows
-
-For workspace routing, operator permissions, and local process ownership, see [Local Agents](/docs/technical/local-agents).
+[OpenClaw](/docs/openclaw) · [Hermes Agent](/docs/hermes) · [Local-agent boundaries (Technical)](/docs/technical/local-agents)
