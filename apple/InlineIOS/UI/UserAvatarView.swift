@@ -161,6 +161,8 @@ final class MessageAcknowledgementView: UIView {
   private var avatars: [UserAvatarView] = []
   private var actors: [FullAcknowledgement] = []
   private var avatarActors: [FullAcknowledgement] = []
+  private var activeBackgroundColor = ThemeManager.shared.selected.reactionIncomingPrimary
+    ?? ThemeManager.shared.selected.accent
 
   var onToggle: (() -> Void)?
 
@@ -187,6 +189,11 @@ final class MessageAcknowledgementView: UIView {
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  func refreshAppearance(activeColor: UIColor) {
+    activeBackgroundColor = activeColor
+    updateColors()
+  }
 
   func configure(_ message: FullMessage) {
     actors = message.acknowledgementActors
@@ -272,9 +279,8 @@ final class MessageAcknowledgementView: UIView {
   }
 
   private func updateColors() {
-    let alpha: CGFloat = traitCollection.accessibilityContrast == .high ? 0.34 : 0.20
-    backgroundColor = UIColor.systemBlue.withAlphaComponent(alpha)
-    check.tintColor = .label
-    countLabel.textColor = .label
+    backgroundColor = activeBackgroundColor
+    check.tintColor = .white
+    countLabel.textColor = .white
   }
 }

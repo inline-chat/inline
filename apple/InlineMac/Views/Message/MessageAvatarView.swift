@@ -377,12 +377,16 @@ final class MessageAcknowledgementView: NSView {
   }
 
   private func updateColors() {
-    let alpha: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.34 : 0.20
-    layer?.backgroundColor = NSColor.controlAccentColor
-      .withAlphaComponent(alpha)
+    layer?.backgroundColor = Theme.accentColor
       .resolvedColor(with: effectiveAppearance)
       .cgColor
-    check.contentTintColor = .labelColor
-    countLabel.textColor = .labelColor
+    check.contentTintColor = .white
+    countLabel.textColor = .white
+  }
+}
+
+extension MessageAcknowledgementView: AppThemeRefreshable {
+  func refreshAppTheme() {
+    updateColors()
   }
 }

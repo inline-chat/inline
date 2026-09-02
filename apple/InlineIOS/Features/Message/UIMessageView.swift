@@ -2537,6 +2537,7 @@ class UIMessageView: UIView {
     }
 
     messageLabel.attributedText = attributedMessageText()
+    acknowledgementView.refreshAppearance(activeColor: theme.primary.uiColor)
     updateReactionBackgroundOverridesForCurrentMessage()
   }
 
