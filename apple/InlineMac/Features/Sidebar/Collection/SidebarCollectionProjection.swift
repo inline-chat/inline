@@ -394,8 +394,6 @@ enum SidebarCollectionProjection {
         }
         let chats = activityOrdering.ordered(roots.filter { $0.chatID != nil })
         roots = folders + chats
-      } else if sortMode == .recentActivity {
-        roots = activityOrdering.ordered(roots)
       } else {
         roots.sort {
           ordered($0, before: $1, inputs: inputByID, byActivity: false)

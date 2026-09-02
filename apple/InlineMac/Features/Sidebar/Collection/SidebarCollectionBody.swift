@@ -288,7 +288,7 @@ final class SidebarCollectionBodyController: NSViewController {
       switch self {
       case .chat: true
       case .folder:
-        policy.allowsFolderMove(changesSection: true, reordersStableNormalLane: false)
+        policy.allowsFolderMove(changesSection: true, reordersStableLane: false)
       }
     }
   }
@@ -2752,7 +2752,9 @@ final class SidebarCollectionBodyController: NSViewController {
           let source = ReorderSource(sourceRow),
           source.supports(reorderPolicy),
           source.orderLane != nil,
-          reorderPolicy == .manual || source.parentID == nil,
+          reorderPolicy == .manual
+            || source.parentID == nil
+            || source.parentID?.folderID != nil,
           // A reply inherited into a pinned parent's presentation lane keeps
           // its own persisted order lane. Until those order domains are
           // decoupled, do not offer a drag whose apparent move would also
@@ -2778,11 +2780,10 @@ final class SidebarCollectionBodyController: NSViewController {
       }
     case let .chat(item):
       if item.parentID?.folderID != nil {
-        // Folder members may move between folders or return to the normal
-        // root, but never become a pinned root as a side effect of dragging.
-        legalSlots = allLegalSlots.filter {
-          !($0.sectionID == .pinned && $0.parentID == nil)
-        }
+        // Folder membership is presentation organization, independent of the
+        // ambient sort. A member may move to another folder or either root;
+        // the selected root lane explicitly determines whether it stays pinned.
+        legalSlots = allLegalSlots
       } else {
         legalSlots = item.parentID != nil && item.lane == .pinned
           ? allLegalSlots.filter { $0.parentID == item.parentID }
@@ -2891,7 +2892,9 @@ final class SidebarCollectionBodyController: NSViewController {
       legalChildProposals
     case .pinningOnly:
       legalChildProposals.filter {
-        $0.targetLane == .pinned && $0.slot.parentID?.folderID != nil
+        guard $0.slot.parentID?.folderID != nil else { return false }
+        return $0.slot.parentID != session.source.parentID
+          || session.tree.snapshot.isNode(session.source.nodeID, at: $0.slot)
       }
     }
     refreshProposalGroups(session: &session)
@@ -3943,25 +3946,32 @@ final class SidebarCollectionBodyController: NSViewController {
       return folderPinningOnlyProposals(from: proposals, session: session)
     }
     guard let sourceLane = session.source.orderLane else { return [] }
-    let targetLane: SidebarOrderLane = sourceLane == .pinned ? .normal : .pinned
-    let sourceProposal = proposals.first { proposal in
-      proposal.targetLane == sourceLane
-        && session.tree.snapshot.isNode(session.source.nodeID, at: proposal.slot)
+    var candidates = proposals.filter { proposal in
+      proposal.targetLane == .pinned && proposal.slot.parentID == nil
     }
-    let targetProposal = activityOwnedLaneTransferProposal(
-      to: targetLane,
+    if sourceLane == .normal, session.source.parentID == nil,
+       let sourceProposal = proposals.first(where: { proposal in
+         proposal.targetLane == .normal
+           && session.tree.snapshot.isNode(session.source.nodeID, at: proposal.slot)
+       }) {
+      candidates.append(sourceProposal)
+    }
+    if let normalProposal = activityOwnedLaneTransferProposal(
+      to: .normal,
       from: proposals,
       session: session
-    )
+    ) {
+      candidates.append(normalProposal)
+    }
 
-    return [sourceProposal, targetProposal].compactMap { $0 }
+    var seen = Set<ModelSlot>()
+    return candidates.filter { seen.insert($0.slot).inserted }
   }
 
   private func folderPinningOnlyProposals(
     from proposals: [Proposal],
     session: ReorderSession
   ) -> [Proposal] {
-    guard let sourceLane = session.source.orderLane else { return [] }
     let normalRoots = session.tree.snapshot.sections
       .first(where: { $0.id == .normal })?
       .rootIDs
@@ -3996,20 +4006,9 @@ final class SidebarCollectionBodyController: NSViewController {
     }
 
     var candidates = normalFolderProposals
-    if sourceLane == .pinned {
-      if let sourceProposal = proposals.first(where: { proposal in
-        proposal.targetLane == .pinned
-          && session.tree.snapshot.isNode(session.source.nodeID, at: proposal.slot)
-      }) {
-        candidates.append(sourceProposal)
-      }
-    } else if let pinnedProposal = activityOwnedLaneTransferProposal(
-      to: .pinned,
-      from: proposals,
-      session: session
-    ) {
-      candidates.append(pinnedProposal)
-    }
+    candidates.append(contentsOf: proposals.filter { proposal in
+      proposal.targetLane == .pinned && proposal.slot.parentID == nil
+    })
 
     var seen = Set<ModelSlot>()
     return candidates.filter { seen.insert($0.slot).inserted }
@@ -4651,8 +4650,7 @@ final class SidebarCollectionBodyController: NSViewController {
       guard proposal.slot.parentID == nil,
             session.reorderPolicy.allowsFolderMove(
               changesSection: sourceLane != proposal.targetLane,
-              reordersStableNormalLane: sourceLane == .normal
-                && proposal.targetLane == .normal
+              reordersStableLane: sourceLane == proposal.targetLane
             )
       else { return nil }
       return .folder(SidebarCollectionFolderMove(
@@ -4692,15 +4690,17 @@ final class SidebarCollectionBodyController: NSViewController {
       nil
     }
 
-    let entersPinnedContainer = session.reorderPolicy == .pinningOnly
-      && proposal.targetLane == .pinned
-      && proposal.slot.parentID?.folderID != nil
-      && dialogDestination != nil
+    let changesFolderMembership = dialogDestination != nil
+    let reordersPinnedLane = currentParentID == nil
+      && proposal.slot.parentID == nil
+      && sourceLane == .pinned
+      && targetOrderLane == .pinned
     guard session.reorderPolicy.allowsMove(
       sourceIsRoot: currentParentID == nil,
       changesSection: sourceLane != targetOrderLane,
       changesParent: hierarchyChange != nil || dialogDestination != nil,
-      entersPinnedContainer: entersPinnedContainer
+      changesFolderMembership: changesFolderMembership,
+      reordersPinnedLane: reordersPinnedLane
     ) else { return nil }
 
     return .chat(SidebarCollectionMove(

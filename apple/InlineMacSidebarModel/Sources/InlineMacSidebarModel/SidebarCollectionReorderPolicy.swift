@@ -8,25 +8,28 @@ public enum SidebarCollectionReorderPolicy: Equatable, Sendable {
     sourceIsRoot: Bool,
     changesSection: Bool,
     changesParent: Bool,
-    entersPinnedContainer: Bool = false
+    changesFolderMembership: Bool = false,
+    reordersPinnedLane: Bool = false
   ) -> Bool {
     switch self {
     case .manual:
       true
     case .pinningOnly:
-      entersPinnedContainer || (sourceIsRoot && changesSection && changesParent == false)
+      changesFolderMembership
+        || (reordersPinnedLane && sourceIsRoot && changesParent == false)
+        || (sourceIsRoot && changesSection && changesParent == false)
     }
   }
 
   public func allowsFolderMove(
     changesSection: Bool,
-    reordersStableNormalLane: Bool
+    reordersStableLane: Bool
   ) -> Bool {
     switch self {
     case .manual:
       true
     case .pinningOnly:
-      changesSection || reordersStableNormalLane
+      changesSection || reordersStableLane
     }
   }
 }

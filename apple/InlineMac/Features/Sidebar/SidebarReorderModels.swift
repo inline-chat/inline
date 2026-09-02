@@ -62,4 +62,5 @@ struct SidebarDragPreviewState: Equatable {
 
 enum SidebarReorderConstants {
   static let orderHoldDuration: Duration = .milliseconds(100)
+  static let dragActivationDistance: CGFloat = 4
 }

@@ -654,8 +654,8 @@ final class SidebarViewModel {
       let pinned2 = rhs.isPinned
       if pinned1 != pinned2 { return pinned1 }
 
-      if sortMode == .openedOrder, pinned1, pinned2 {
-        return stableOrder(lhs, rhs)
+      if pinned1, pinned2 {
+        return ordered(lhs.pinnedOrder, before: rhs.pinnedOrder, lhs: lhs, rhs: rhs)
       }
 
       let date1 = sortDate(for: lhs)
@@ -690,12 +690,12 @@ final class SidebarViewModel {
       let pinned1 = lhs.isPinned
       let pinned2 = rhs.isPinned
       if pinned1 != pinned2 { return pinned1 }
+      if pinned1, pinned2 {
+        return ordered(lhs.pinnedOrder, before: rhs.pinnedOrder, lhs: lhs, rhs: rhs)
+      }
 
       switch sortMode {
       case .openedOrder:
-        if pinned1, pinned2 {
-          return ordered(lhs.pinnedOrder, before: rhs.pinnedOrder, lhs: lhs, rhs: rhs)
-        }
         return ordered(lhs.order, before: rhs.order, lhs: lhs, rhs: rhs)
       case .recentActivity:
         let lhsActivity = sortDate(for: lhs)

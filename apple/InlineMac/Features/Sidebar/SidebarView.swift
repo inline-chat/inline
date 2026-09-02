@@ -2693,8 +2693,7 @@ struct SidebarView: View {
     if effectiveSidebarSort == .recentActivity,
        !SidebarCollectionReorderPolicy.pinningOnly.allowsFolderMove(
          changesSection: move.sourceLane != move.targetLane,
-         reordersStableNormalLane: move.sourceLane == .normal
-           && move.targetLane == .normal
+         reordersStableLane: move.sourceLane == move.targetLane
        ) {
       sidebarInteractionLog.error("rejected unstable folder reorder in recent-activity mode")
       completion(false)
@@ -2740,19 +2739,23 @@ struct SidebarView: View {
     completion: @escaping @MainActor @Sendable (Bool) -> Void
   ) {
     if effectiveSidebarSort == .recentActivity {
-      let entersPinnedContainer = isMoveIntoPinnedFolder(move)
+      let changesFolderMembership = move.dialogDestination != nil
+      let reordersPinnedLane = move.sourceIsRoot
+        && move.sourceLane == .pinned
+        && move.targetLane == .pinned
       guard SidebarCollectionReorderPolicy.pinningOnly.allowsMove(
         sourceIsRoot: move.sourceIsRoot,
         changesSection: move.sourceLane != move.targetLane,
         changesParent: move.hierarchyChange != nil || move.dialogDestination != nil,
-        entersPinnedContainer: entersPinnedContainer
+        changesFolderMembership: changesFolderMembership,
+        reordersPinnedLane: reordersPinnedLane
       )
       else {
         sidebarInteractionLog.error("rejected manual reorder in recent-activity mode")
         completion(false)
         return
       }
-      if entersPinnedContainer == false {
+      if changesFolderMembership == false, move.targetLane == .normal {
         applyRecentActivityPinMove(move, completion: completion)
         return
       }
@@ -2809,11 +2812,6 @@ struct SidebarView: View {
       },
       completion: completion
     )
-  }
-
-  private func isMoveIntoPinnedFolder(_ move: SidebarCollectionMove) -> Bool {
-    guard case let .folder(folderID)? = move.dialogDestination else { return false }
-    return viewModel.folders.first(where: { $0.id == folderID })?.isPinned == true
   }
 
   private func applyRecentActivityPinMove(

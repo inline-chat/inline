@@ -627,7 +627,8 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
   override func mouseDragged(with event: NSEvent) {
     guard let mouseDownPoint else { return }
     let point = convert(event.locationInWindow, from: nil)
-    if hypot(point.x - mouseDownPoint.x, point.y - mouseDownPoint.y) > 3 {
+    if hypot(point.x - mouseDownPoint.x, point.y - mouseDownPoint.y)
+      >= SidebarReorderConstants.dragActivationDistance {
       setPressedInteractionTarget(nil)
     }
   }

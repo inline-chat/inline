@@ -134,6 +134,7 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
   private var isHostedContentSuppressed = true
   private var usesNativeContent = false
   private var interactionDisabledForSnapshotRemoval = false
+  private var hasStartedReorderPan = false
 
   #if DEBUG
   private var transitionDebugConfigureGeneration = 0
@@ -197,6 +198,9 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
       isSectionDisclosureOnlyUpdate(from: $0, to: row)
     } ?? false
     let identityChanged = representedRowID != row.id
+    if identityChanged {
+      hasStartedReorderPan = false
+    }
     representedRowID = row.id
     representedRow = row
     self.panHandler = panHandler
@@ -297,6 +301,7 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     hostState.reset()
     usesNativeContent = false
     interactionDisabledForSnapshotRemoval = false
+    hasStartedReorderPan = false
     panHandler = nil
     panRecognizer.isEnabled = false
     layoutHidesAccessibility = true
@@ -341,12 +346,38 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     guard let representedRowID,
           let collectionView = view.enclosingCollectionView
     else { return }
-    panHandler?(
-      representedRowID,
-      recognizer.state,
-      recognizer.location(in: collectionView),
-      recognizer.translation(in: collectionView)
-    )
+    let location = recognizer.location(in: collectionView)
+    let translation = recognizer.translation(in: collectionView)
+
+    // AppKit exposes pan translation but no configurable minimum distance.
+    // Keep row mouse events immediate and gate only reorder side effects.
+    switch recognizer.state {
+    case .began, .changed:
+      if hasStartedReorderPan == false {
+        guard hypot(translation.x, translation.y)
+          >= SidebarReorderConstants.dragActivationDistance
+        else { return }
+        hasStartedReorderPan = true
+        panHandler?(representedRowID, .began, location, translation)
+      }
+      if recognizer.state == .changed {
+        panHandler?(representedRowID, .changed, location, translation)
+      }
+    case .ended:
+      guard hasStartedReorderPan else { return }
+      hasStartedReorderPan = false
+      panHandler?(representedRowID, .ended, location, translation)
+    case .cancelled, .failed:
+      guard hasStartedReorderPan else { return }
+      hasStartedReorderPan = false
+      panHandler?(representedRowID, recognizer.state, location, translation)
+    case .possible:
+      break
+    @unknown default:
+      guard hasStartedReorderPan else { return }
+      hasStartedReorderPan = false
+      panHandler?(representedRowID, .cancelled, location, translation)
+    }
   }
 
   func gestureRecognizer(

@@ -13,7 +13,7 @@ struct SidebarCollectionReorderPolicyTests {
     ))
   }
 
-  @Test("pinning mode permits root lane transfers and pinned-container entry")
+  @Test("activity mode permits pinning, pinned order, and folder membership changes")
   func pinningOnlyPolicy() {
     let policy = SidebarCollectionReorderPolicy.pinningOnly
     #expect(policy.allowsMove(
@@ -33,30 +33,42 @@ struct SidebarCollectionReorderPolicyTests {
     ))
     #expect(policy.allowsMove(
       sourceIsRoot: false,
+      changesSection: true,
+      changesParent: true,
+      changesFolderMembership: true
+    ))
+    #expect(policy.allowsMove(
+      sourceIsRoot: false,
       changesSection: false,
       changesParent: true,
-      entersPinnedContainer: true
+      changesFolderMembership: true
+    ))
+    #expect(policy.allowsMove(
+      sourceIsRoot: true,
+      changesSection: false,
+      changesParent: false,
+      reordersPinnedLane: true
     ))
   }
 
-  @Test("folder policy permits lane transfer and only the stable normal-lane reorder")
+  @Test("folder policy permits lane transfer and reorder within either stable lane")
   func folderPolicy() {
     let policy = SidebarCollectionReorderPolicy.pinningOnly
     #expect(policy.allowsFolderMove(
       changesSection: true,
-      reordersStableNormalLane: false
+      reordersStableLane: false
     ))
     #expect(policy.allowsFolderMove(
       changesSection: false,
-      reordersStableNormalLane: true
+      reordersStableLane: true
     ))
     #expect(!policy.allowsFolderMove(
       changesSection: false,
-      reordersStableNormalLane: false
+      reordersStableLane: false
     ))
     #expect(SidebarCollectionReorderPolicy.manual.allowsFolderMove(
       changesSection: false,
-      reordersStableNormalLane: false
+      reordersStableLane: false
     ))
   }
 }
