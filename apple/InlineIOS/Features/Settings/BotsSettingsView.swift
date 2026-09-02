@@ -436,11 +436,11 @@ private struct IOSBotAgentsSection: View {
       if model.isLoading, model.agents.isEmpty {
         HStack {
           ProgressView()
-          Text("Loading agents…")
+          Text("Loading Skilled Agents…")
             .foregroundStyle(.secondary)
         }
       } else if model.agents.isEmpty {
-        Text("Create a named specialization people can @mention in chats where this bot has access.")
+        Text("Create a Skilled Agent people can @mention in chats where this bot has access.")
           .foregroundStyle(.secondary)
       } else {
         ForEach(model.agents, id: \.id) { agent in
@@ -485,12 +485,12 @@ private struct IOSBotAgentsSection: View {
       Button {
         editorItem = IOSBotAgentEditorItem(agent: nil)
       } label: {
-        Label("New Agent", systemImage: "plus")
+        Label("New Skilled Agent", systemImage: "plus")
       }
     } header: {
-      Text("Agents")
+      Text("Skilled Agents")
     } footer: {
-      Text("Agents reuse this bot’s harness, credentials, memory, skills, and chat access. Instructions and skill keys are visible only to bot managers and the harness.")
+      Text("Skilled Agents reuse this bot’s harness, credentials, memory, skills, and chat access. Instructions and skill keys are visible only to bot managers and the harness.")
     }
     .task { await model.load() }
     .sheet(item: $editorItem) { item in
@@ -506,14 +506,14 @@ private struct IOSBotAgentsSection: View {
       )
     }
     .confirmationDialog(
-      "Delete Agent?",
+      "Delete Skilled Agent?",
       isPresented: Binding(
         get: { agentToDelete != nil },
         set: { if !$0 { agentToDelete = nil } }
       ),
       titleVisibility: .visible
     ) {
-      Button("Delete Agent", role: .destructive) {
+      Button("Delete Skilled Agent", role: .destructive) {
         guard let agent = agentToDelete else { return }
         agentToDelete = nil
         editorItem = nil
@@ -578,19 +578,19 @@ private struct IOSBotAgentEditor: View {
         } header: {
           Text("Harness")
         } footer: {
-          Text("A name-only Agent is valid. Harnesses receive a minimal identity instruction when these fields are empty.")
+          Text("A name-only Skilled Agent is valid. Harnesses receive a minimal identity instruction when these fields are empty.")
         }
 
         if onDelete != nil {
           Section {
-            Button("Delete Agent…", role: .destructive) {
+            Button("Delete Skilled Agent…", role: .destructive) {
               isConfirmingDelete = true
             }
             .disabled(isDeleting)
           }
         }
       }
-      .navigationTitle(agent == nil ? "New Agent" : "Edit Agent")
+      .navigationTitle(agent == nil ? "New Skilled Agent" : "Edit Skilled Agent")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -610,11 +610,11 @@ private struct IOSBotAgentEditor: View {
         }
       }
       .confirmationDialog(
-        "Delete Agent?",
+        "Delete Skilled Agent?",
         isPresented: $isConfirmingDelete,
         titleVisibility: .visible
       ) {
-        Button("Delete Agent", role: .destructive) {
+        Button("Delete Skilled Agent", role: .destructive) {
           isDeleting = true
           Task {
             if await onDelete?() == true {

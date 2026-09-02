@@ -263,7 +263,7 @@ public final class BotAgentsSettingsModel {
       }
       agents = result.agents.sorted { $0.id < $1.id }
     } catch {
-      errorMessage = "Could not load agents."
+      errorMessage = "Could not load Skilled Agents."
     }
 
     await loadSkills()
@@ -345,7 +345,7 @@ public final class BotAgentsSettingsModel {
       NotificationCenter.default.post(name: .botAgentsChanged, object: botUserId)
       return true
     } catch {
-      errorMessage = agentId == nil ? "Could not create the agent." : "Could not update the agent."
+      errorMessage = agentId == nil ? "Could not create the Skilled Agent." : "Could not update the Skilled Agent."
       return false
     }
   }
@@ -369,7 +369,7 @@ public final class BotAgentsSettingsModel {
       NotificationCenter.default.post(name: .botAgentsChanged, object: botUserId)
       return true
     } catch {
-      errorMessage = "Could not delete the agent."
+      errorMessage = "Could not delete the Skilled Agent."
       return false
     }
   }

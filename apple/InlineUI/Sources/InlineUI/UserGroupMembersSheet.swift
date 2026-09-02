@@ -111,7 +111,7 @@ public struct BotAgentProfileSheet: View {
         }
 
         Section {
-          Text("This Agent is a specialization of \(agent.botDisplayName). It uses the bot’s existing chat access and integration.")
+          Text("This Skilled Agent is a specialization of \(agent.botDisplayName). It uses the bot’s existing chat access and integration.")
             .foregroundStyle(.secondary)
         }
       }
@@ -123,7 +123,7 @@ public struct BotAgentProfileSheet: View {
       .listStyle(.inset)
       .frame(width: 380, height: 360)
       #endif
-      .navigationTitle("Agent")
+      .navigationTitle("Skilled Agent")
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Close") { dismiss() }

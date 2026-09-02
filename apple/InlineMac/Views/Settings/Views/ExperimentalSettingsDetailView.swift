@@ -43,12 +43,12 @@ struct ExperimentalSettingsDetailView: View {
       Section {
         Toggle(isOn: $mentionableAgentsEnabled) {
           SettingsRowLabel(
-            "Mentionable Agents",
-            description: "Show Agent creation, profiles, and @mention autocomplete in the app."
+            "Skilled Agents",
+            description: "Show Skilled Agent creation, profiles, and @mention autocomplete in the app."
           )
         }
       } header: {
-        SettingsSectionHeader("Agents")
+        SettingsSectionHeader("Skilled Agents")
       } footer: {
         Text("Server and Bot API support remain available when this is off.")
       }

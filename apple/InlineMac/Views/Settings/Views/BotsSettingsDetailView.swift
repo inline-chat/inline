@@ -799,16 +799,16 @@ private struct MacBotAgentsSection: View {
   var body: some View {
     Section {
       if bots.isEmpty {
-        Text("Create a bot before adding an Agent.")
+        Text("Create a bot before adding a Skilled Agent.")
           .foregroundStyle(.secondary)
       } else if isLoading, rows.isEmpty {
         HStack(spacing: 8) {
           ProgressView().controlSize(.small)
-          Text("Loading agents...")
+          Text("Loading Skilled Agents...")
             .foregroundStyle(.secondary)
         }
       } else if rows.isEmpty {
-        Text("No agents yet. Create a named specialization people can @mention wherever its bot has access.")
+        Text("No Skilled Agents yet. Create a named specialization people can @mention wherever its bot has access.")
           .foregroundStyle(.secondary)
       } else {
         ForEach(rows) { row in
@@ -837,17 +837,17 @@ private struct MacBotAgentsSection: View {
           guard let bot = bots.first else { return }
           editorItem = MacBotAgentEditorItem(botUserId: bot.id, agent: nil)
         } label: {
-          Label("New Agent...", systemImage: "plus")
+          Label("New Skilled Agent...", systemImage: "plus")
         }
         .disabled(bots.isEmpty)
       }
     } header: {
       SettingsSectionHeader(
-        "Agents",
+        "Skilled Agents",
         subtitle: "Create mentionable specializations on your existing bots and harnesses."
       )
     } footer: {
-      Text("Skill and instructions are independently optional. Agents reuse the selected bot’s identity, credentials, memory, skills, and chat access.")
+      Text("Skill and instructions are independently optional. Skilled Agents reuse the selected bot’s identity, credentials, memory, skills, and chat access.")
     }
     .task(id: bots.map(\.id)) {
       await synchronizeModels()
@@ -864,14 +864,14 @@ private struct MacBotAgentsSection: View {
       )
     }
     .confirmationDialog(
-      "Delete Agent",
+      "Delete Skilled Agent",
       isPresented: .init(
         get: { agentToDelete != nil },
         set: { if !$0 { agentToDelete = nil } }
       ),
       titleVisibility: .visible
     ) {
-      Button("Delete Agent", role: .destructive) {
+      Button("Delete Skilled Agent", role: .destructive) {
         guard let row = agentToDelete, let model = models[row.bot.id] else { return }
         agentToDelete = nil
         Task { await model.delete(agentId: row.agent.id) }
@@ -934,8 +934,8 @@ private struct MacBotAgentRowView: View {
           Image(systemName: "trash")
         }
         .buttonStyle(.borderless)
-        .accessibilityLabel("Delete Agent")
-        .help("Delete Agent")
+        .accessibilityLabel("Delete Skilled Agent")
+        .help("Delete Skilled Agent")
       }
     }
   }
@@ -997,7 +997,7 @@ private struct MacBotAgentEditor: View {
               .frame(width: 320)
           }
           LabeledContent("Description (Optional)") {
-            TextField("What this Agent is for", text: $draft.description)
+            TextField("What this Skilled Agent is for", text: $draft.description)
               .frame(width: 320)
           }
         }
@@ -1037,7 +1037,7 @@ private struct MacBotAgentEditor: View {
         } header: {
           Text("Specialization")
         } footer: {
-          Text("Choose a skill, add instructions, use both, or leave both empty. A name-only Agent receives a minimal specialization instruction.")
+          Text("Choose a skill, add instructions, use both, or leave both empty. A name-only Skilled Agent receives a minimal specialization instruction.")
         }
       }
       .formStyle(.grouped)

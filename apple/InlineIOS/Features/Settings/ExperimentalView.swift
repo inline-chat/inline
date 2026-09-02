@@ -34,13 +34,13 @@ struct ExperimentalView: View {
         SettingsItem(
           icon: "at",
           iconColor: .purple,
-          title: "Mentionable Agents"
+          title: "Skilled Agents"
         ) {
-          Toggle("Mentionable Agents", isOn: $mentionableAgentsEnabled)
+          Toggle("Skilled Agents", isOn: $mentionableAgentsEnabled)
             .labelsHidden()
         }
       } footer: {
-        Text("Show Agent creation, profiles, and @mention autocomplete. Server and Bot API support remain available when this is off.")
+        Text("Show Skilled Agent creation, profiles, and @mention autocomplete. Server and Bot API support remain available when this is off.")
       }
 
       Section {
