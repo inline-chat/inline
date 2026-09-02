@@ -15,15 +15,43 @@ use super::{
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const PLUGIN_PACKAGE_NAME: &str = "@inline-openclaw/inline";
-const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.57";
+const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.64";
+const LEGACY_SETUP_PLUGIN_VERSION: &str = "0.0.63";
 const SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline";
+const LEGACY_SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline@0.0.63";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SetupPluginCompatibility {
+    minimum_plugin_version: &'static str,
+    install_spec: &'static str,
+    accept_capabilities: bool,
+}
+
+impl SetupPluginCompatibility {
+    fn install_args(self) -> Vec<String> {
+        let mut args = vec![
+            "plugins".to_string(),
+            "install".to_string(),
+            self.install_spec.to_string(),
+            "--force".to_string(),
+        ];
+        if self.accept_capabilities {
+            args.push("--accept-capabilities".to_string());
+        }
+        args
+    }
+
+    fn inspect_args(self) -> Vec<&'static str> {
+        vec!["plugins", "inspect", "inline", "--json"]
+    }
+}
 
 pub(super) async fn preflight(
     installed: &InstalledTarget,
     args: &AgentsSetupArgs,
 ) -> Result<GatewayPreflight, Box<dyn std::error::Error>> {
     let prefix = profile_prefix(args.profile.as_deref());
-    require_success(
+    let host_version = require_success(
         &installed.executable,
         &[],
         &["--version"],
@@ -31,15 +59,17 @@ pub(super) async fn preflight(
         COMMAND_TIMEOUT,
     )
     .await?;
+    let compatibility = setup_plugin_compatibility(&host_version);
+    let inspect_args = compatibility.inspect_args();
     let inspected = run(
         &installed.executable,
         &prefix,
-        &["plugins", "inspect", "inline", "--json"],
+        &inspect_args,
         None,
         COMMAND_TIMEOUT,
     )
     .await?;
-    let plugin_state = inspect_plugin(&inspected)?;
+    let plugin_state = inspect_plugin(&inspected, compatibility)?;
     let plugin_can_probe = matches!(
         &plugin_state,
         PluginState::Healthy { .. } | PluginState::Outdated
@@ -211,7 +241,7 @@ pub(super) async fn setup(
 ) -> Result<GatewaySetupOutcome, Box<dyn std::error::Error>> {
     progress.started("integration");
     let prefix = profile_prefix(args.profile.as_deref());
-    let _host_version = require_success(
+    let host_version = require_success(
         &installed.executable,
         &[],
         &["--version"],
@@ -219,30 +249,32 @@ pub(super) async fn setup(
         COMMAND_TIMEOUT,
     )
     .await?;
+    let compatibility = setup_plugin_compatibility(&host_version);
+    let inspect_args = compatibility.inspect_args();
     let inspected = run(
         &installed.executable,
         &prefix,
-        &["plugins", "inspect", "inline", "--json"],
+        &inspect_args,
         None,
         COMMAND_TIMEOUT,
     )
     .await?;
-    let plugin_state = inspect_plugin(&inspected)?;
+    let plugin_state = inspect_plugin(&inspected, compatibility)?;
     let (integration_action, verify_install) = match plugin_state {
         PluginState::Healthy { .. } => ("kept", false),
         PluginState::Outdated => {
             require_plugin_install_allowed(args, "must be updated for unified setup")?;
-            install_latest_plugin(installed, &prefix).await?;
+            install_setup_plugin(installed, &prefix, compatibility).await?;
             ("updated", true)
         }
         PluginState::Missing => {
             require_plugin_install_allowed(args, "is not installed")?;
-            install_latest_plugin(installed, &prefix).await?;
+            install_setup_plugin(installed, &prefix, compatibility).await?;
             ("installed", true)
         }
         PluginState::ManagedBroken => {
             require_plugin_install_allowed(args, "is installed but unusable")?;
-            install_latest_plugin(installed, &prefix).await?;
+            install_setup_plugin(installed, &prefix, compatibility).await?;
             ("repaired", true)
         }
         PluginState::Foreign => {
@@ -254,22 +286,22 @@ pub(super) async fn setup(
                 )
                 .into());
             }
-            install_latest_plugin(installed, &prefix).await?;
+            install_setup_plugin(installed, &prefix, compatibility).await?;
             ("replaced", true)
         }
     };
     let plugin = require_success(
         &installed.executable,
         &prefix,
-        &["plugins", "inspect", "inline", "--json"],
+        &inspect_args,
         None,
         COMMAND_TIMEOUT,
     )
     .await?;
     let version = if verify_install {
-        verify_managed_plugin_install(&plugin)?
+        verify_managed_plugin_install(&plugin, compatibility)?
     } else {
-        let PluginState::Healthy { version } = inspect_plugin_json(&plugin) else {
+        let PluginState::Healthy { version } = inspect_plugin_json(&plugin, compatibility) else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "the Inline OpenClaw plugin is still unusable after setup",
@@ -399,23 +431,20 @@ enum PluginState {
     Foreign,
 }
 
-async fn install_latest_plugin(
+async fn install_setup_plugin(
     installed: &InstalledTarget,
     prefix: &[OsString],
+    compatibility: SetupPluginCompatibility,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    require_success(
-        &installed.executable,
-        prefix,
-        &["plugins", "install", SETUP_PLUGIN_SPEC, "--force"],
-        None,
-        INSTALL_TIMEOUT,
-    )
-    .await?;
+    let args = compatibility.install_args();
+    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    require_success(&installed.executable, prefix, &refs, None, INSTALL_TIMEOUT).await?;
     Ok(())
 }
 
 fn inspect_plugin(
     output: &super::process::CommandOutput,
+    compatibility: SetupPluginCompatibility,
 ) -> Result<PluginState, Box<dyn std::error::Error>> {
     if !output.success {
         // The host reports an actual lookup miss as exit 1, even with --json.
@@ -454,10 +483,10 @@ fn inspect_plugin(
         )
         .into());
     }
-    Ok(inspect_plugin_json(&output.stdout))
+    Ok(inspect_plugin_json(&output.stdout, compatibility))
 }
 
-fn inspect_plugin_json(output: &str) -> PluginState {
+fn inspect_plugin_json(output: &str, compatibility: SetupPluginCompatibility) -> PluginState {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
         return PluginState::Foreign;
     };
@@ -492,7 +521,7 @@ fn inspect_plugin_json(output: &str) -> PluginState {
         == Some(true);
     let version_ready = semver::Version::parse(&version).is_ok_and(|version| {
         version
-            >= semver::Version::parse(MINIMUM_SETUP_PLUGIN_VERSION)
+            >= semver::Version::parse(compatibility.minimum_plugin_version)
                 .expect("OpenClaw setup plugin minimum must be valid semver")
     });
     if !loaded || !dependencies_ready {
@@ -504,14 +533,17 @@ fn inspect_plugin_json(output: &str) -> PluginState {
     }
 }
 
-fn verify_managed_plugin_install(output: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn verify_managed_plugin_install(
+    output: &str,
+    compatibility: SetupPluginCompatibility,
+) -> Result<String, Box<dyn std::error::Error>> {
     let value: serde_json::Value = serde_json::from_str(output).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             "OpenClaw returned unreadable Inline plugin metadata after installation",
         )
     })?;
-    let PluginState::Healthy { version } = inspect_plugin_json(output) else {
+    let PluginState::Healthy { version } = inspect_plugin_json(output, compatibility) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "the Inline OpenClaw plugin is still unusable after installation",
@@ -535,7 +567,7 @@ fn verify_managed_plugin_install(output: &str) -> Result<String, Box<dyn std::er
         && install
             .and_then(|value| value.get("spec"))
             .and_then(serde_json::Value::as_str)
-            == Some(SETUP_PLUGIN_SPEC)
+            == Some(compatibility.install_spec)
         && install
             .and_then(|value| value.get("resolvedSpec"))
             .and_then(serde_json::Value::as_str)
@@ -544,12 +576,41 @@ fn verify_managed_plugin_install(output: &str) -> Result<String, Box<dyn std::er
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "OpenClaw did not record a managed Inline plugin install from {SETUP_PLUGIN_SPEC}"
+                "OpenClaw did not record the expected managed Inline plugin install from {}",
+                compatibility.install_spec
             ),
         )
         .into());
     }
     Ok(version)
+}
+
+fn setup_plugin_compatibility(output: &str) -> SetupPluginCompatibility {
+    let version = output
+        .split_whitespace()
+        .filter_map(|token| {
+            let token = token.trim_matches(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '.' && character != '-'
+            });
+            semver::Version::parse(token.strip_prefix('v').unwrap_or(token)).ok()
+        })
+        .next();
+    if version.is_some_and(|version| version.major == 2026 && matches!(version.minor, 6 | 7)) {
+        SetupPluginCompatibility {
+            minimum_plugin_version: LEGACY_SETUP_PLUGIN_VERSION,
+            install_spec: LEGACY_SETUP_PLUGIN_SPEC,
+            accept_capabilities: false,
+        }
+    } else {
+        // Let current/future OpenClaw releases own package compatibility and
+        // command success. An unfamiliar version string should not become a
+        // new Inline-only setup blocker.
+        SetupPluginCompatibility {
+            minimum_plugin_version: MINIMUM_SETUP_PLUGIN_VERSION,
+            install_spec: SETUP_PLUGIN_SPEC,
+            accept_capabilities: true,
+        }
+    }
 }
 
 fn require_plugin_install_allowed(
@@ -931,6 +992,10 @@ fn set_dir_mode(_path: &Path, _mode: u32) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    fn current_compatibility() -> SetupPluginCompatibility {
+        setup_plugin_compatibility("OpenClaw 2026.8.2 (0965053)")
+    }
+
     #[test]
     fn absent_gateway_service_requires_install_even_when_status_exits_successfully() {
         let mut status = super::super::process::CommandOutput {
@@ -1080,57 +1145,71 @@ mod tests {
                     .into(),
         };
         assert!(matches!(
-            inspect_plugin(&output).unwrap(),
+            inspect_plugin(&output, current_compatibility()).unwrap(),
             PluginState::Missing
         ));
         output.stderr = "config load failed: permission denied".into();
-        assert!(inspect_plugin(&output).is_err());
+        assert!(inspect_plugin(&output, current_compatibility()).is_err());
         output.success = true;
         output.stdout = "{}".into();
-        assert!(inspect_plugin(&output).is_err());
+        assert!(inspect_plugin(&output, current_compatibility()).is_err());
     }
 
     #[test]
     fn plugin_inspection_distinguishes_healthy_and_foreign_sources() {
+        let compatibility = current_compatibility();
         let healthy = inspect_plugin_json(
-            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.57","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
+            r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.65","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
+            compatibility,
         );
         assert!(matches!(
             healthy,
-            PluginState::Healthy { version } if version == "0.0.57"
+            PluginState::Healthy { version } if version == "0.0.65"
         ));
         assert!(matches!(
             inspect_plugin_json(
-                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.55","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#
+                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.63","status":"loaded","dependencyStatus":{"requiredInstalled":true}}}"#,
+                compatibility,
             ),
             PluginState::Outdated
         ));
         assert!(matches!(
             inspect_plugin_json(
-                r#"{"plugin":{"packageName":"other-inline-plugin","status":"loaded"}}"#
+                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.66","status":"loaded","dependencyStatus":{"requiredInstalled":true}},"diagnostics":[{"level":"error","message":"host-owned diagnostic"}]}"#,
+                compatibility,
+            ),
+            PluginState::Healthy { .. }
+        ));
+        assert!(matches!(
+            inspect_plugin_json(
+                r#"{"plugin":{"packageName":"other-inline-plugin","status":"loaded"}}"#,
+                compatibility,
             ),
             PluginState::Foreign
         ));
         assert!(matches!(
             inspect_plugin_json(
-                r#"{"plugin":{"packageName":"@inline-openclaw/inline","status":"error"}}"#
+                r#"{"plugin":{"packageName":"@inline-openclaw/inline","status":"error"}}"#,
+                compatibility,
             ),
             PluginState::ManagedBroken
         ));
         assert!(matches!(
             inspect_plugin_json(
-                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.57","status":"loaded"}}"#
+                r#"{"plugin":{"packageName":"@inline-openclaw/inline","version":"0.0.65","status":"loaded"}}"#,
+                compatibility,
             ),
             PluginState::ManagedBroken
         ));
     }
 
     #[test]
-    fn latest_install_metadata_must_match_the_managed_external_package() {
+    fn managed_install_metadata_accepts_the_host_resolved_package() {
+        let compatibility = current_compatibility();
         let inspected = r#"{
             "plugin": {
                 "packageName": "@inline-openclaw/inline",
-                "version": "0.0.58",
+                "version": "0.0.65",
                 "status": "loaded",
                 "dependencyStatus": { "requiredInstalled": true }
             },
@@ -1138,25 +1217,66 @@ mod tests {
                 "source": "npm",
                 "spec": "@inline-openclaw/inline",
                 "resolvedName": "@inline-openclaw/inline",
-                "resolvedVersion": "0.0.58",
-                "resolvedSpec": "@inline-openclaw/inline@0.0.58"
+                "resolvedVersion": "0.0.65",
+                "resolvedSpec": "@inline-openclaw/inline@0.0.65"
             }
         }"#;
-        assert_eq!(verify_managed_plugin_install(inspected).unwrap(), "0.0.58");
-
-        let pinned = inspected.replace(
-            "\"spec\": \"@inline-openclaw/inline\"",
-            "\"spec\": \"@inline-openclaw/inline@0.0.58\"",
-        );
-        assert!(verify_managed_plugin_install(&pinned).is_err());
-        let mismatched_resolution = inspected.replace(
-            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.58\"",
-            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.57\"",
-        );
-        assert!(verify_managed_plugin_install(&mismatched_resolution).is_err());
         assert_eq!(
-            ["plugins", "install", SETUP_PLUGIN_SPEC, "--force"],
-            ["plugins", "install", "@inline-openclaw/inline", "--force"]
+            verify_managed_plugin_install(inspected, compatibility).unwrap(),
+            "0.0.65"
         );
+
+        let mismatched_resolution = inspected.replace(
+            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.65\"",
+            "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.63\"",
+        );
+        assert!(verify_managed_plugin_install(&mismatched_resolution, compatibility).is_err());
+    }
+
+    #[test]
+    fn host_version_selects_a_compatible_plugin_and_capability_policy() {
+        let current = setup_plugin_compatibility("OpenClaw 2026.8.2 (0965053)");
+        assert_eq!(current.minimum_plugin_version, "0.0.64");
+        assert_eq!(
+            current.install_args(),
+            [
+                "plugins",
+                "install",
+                "@inline-openclaw/inline",
+                "--force",
+                "--accept-capabilities",
+            ]
+        );
+        assert_eq!(
+            setup_plugin_compatibility("OpenClaw 2026.9.1-beta.1").install_spec,
+            SETUP_PLUGIN_SPEC
+        );
+
+        for output in ["OpenClaw 2026.7.1-2", "openclaw v2026.6.34"] {
+            let legacy = setup_plugin_compatibility(output);
+            assert_eq!(legacy.minimum_plugin_version, "0.0.63");
+            assert_eq!(
+                legacy.install_args(),
+                [
+                    "plugins",
+                    "install",
+                    "@inline-openclaw/inline@0.0.63",
+                    "--force",
+                ]
+            );
+            assert_eq!(
+                legacy.inspect_args(),
+                ["plugins", "inspect", "inline", "--json"]
+            );
+        }
+    }
+
+    #[test]
+    fn unfamiliar_host_versions_defer_to_openclaw_package_resolution() {
+        for output in ["OpenClaw 2026.8.1", "OpenClaw development build"] {
+            let compatibility = setup_plugin_compatibility(output);
+            assert_eq!(compatibility.install_spec, SETUP_PLUGIN_SPEC);
+            assert!(compatibility.accept_capabilities);
+        }
     }
 }

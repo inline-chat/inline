@@ -1224,7 +1224,9 @@ assert "Create a bot in Inline and paste its token" in setup_text
 assert "Settings → Bots → Create a new bot" in setup_text
 assert "https://inline.chat/docs/creating-a-bot" in setup_text
 assert "Inline bot token saved securely" in setup_text
-assert "Inline is configured" in setup_text
+assert "Inline configuration saved" in setup_text
+assert "setup is not ready until that restart succeeds" in setup_text
+assert "hermes inline status --json --probe" in setup_text
 assert "inline-hermes doctor" not in setup_text
 assert setup_saved_env["INLINE_TOKEN"] == "existing-bot-token"
 assert setup_saved_env["INLINE_ALLOWED_USERS"] == "101,202"
@@ -1270,7 +1272,7 @@ assert json.loads(machine_output) == {
     "ok": True,
     "action": "inline.setup",
     "setupProtocolVersion": 1,
-    "pluginVersion": "0.0.14",
+    "pluginVersion": "0.0.15",
     "configured": True,
     "access": "allowlist",
     "ownerUserId": "42",
@@ -1320,7 +1322,7 @@ probe_output = probe_stdout.getvalue()
 assert machine_token not in probe_output
 probe_payload = json.loads(probe_output)
 assert probe_payload["setupProtocolVersion"] == 1
-assert probe_payload["pluginVersion"] == "0.0.14"
+assert probe_payload["pluginVersion"] == "0.0.15"
 assert probe_payload["ready"] is True
 assert probe_payload["runtimeUsable"] is True
 assert probe_payload["node"]["ok"] is True
@@ -1335,7 +1337,7 @@ credential_request = probe_requests[0]
 assert credential_request.full_url == "https://api.inline.chat/v1/getMe"
 assert credential_request.get_method() == "GET"
 assert credential_request.get_header("Authorization") == f"Bearer {machine_token}"
-assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.14"
+assert credential_request.get_header("User-agent") == "inline-hermes-agent-adapter/0.0.15"
 assert all(call[0][-2:] != ["auth", "me"] for call in probe_calls)
 
 setup_saved_env.clear()
@@ -1368,7 +1370,7 @@ assert config_probe_payload["probe"]["ok"] is True
 assert len(config_probe_requests) == 1
 assert config_probe_requests[0].full_url == "https://inline.example/v1/getMe"
 assert config_probe_requests[0].get_header("Authorization") == "Bearer yaml-config-secret"
-assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.14"
+assert config_probe_requests[0].get_header("User-agent") == "inline-hermes-agent-adapter/0.0.15"
 assert "yaml-config-secret" not in config_probe_stdout.getvalue()
 
 setup_saved_env.clear()

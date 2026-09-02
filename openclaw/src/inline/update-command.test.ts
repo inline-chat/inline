@@ -78,7 +78,7 @@ describe("inline/update-command", () => {
   it("delegates to the canonical OpenClaw plugin updater without credential env vars", async () => {
     const runner = vi.fn(async () => ({
       exitCode: 0,
-      stdout: "Updated inline -> 0.0.56",
+      stdout: "Updated inline -> 0.0.65",
       stderr: "",
     }))
     const result = await runInlineOpenClawUpdate({
@@ -99,6 +99,7 @@ describe("inline/update-command", () => {
         "plugins",
         "update",
         "inline",
+        "--accept-capabilities",
       ],
       env: {
         OPENCLAW_CLI_PATH: "/opt/openclaw/openclaw.mjs",
@@ -116,7 +117,7 @@ describe("inline/update-command", () => {
 
     expect(runner).toHaveBeenCalledWith(expect.objectContaining({
       command: "openclaw",
-      args: ["plugins", "update", "inline"],
+      args: ["plugins", "update", "inline", "--accept-capabilities"],
       env: { PATH: "/usr/bin" },
     }))
   })

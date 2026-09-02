@@ -39,9 +39,9 @@ the plugin version for your OpenClaw release line:
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.8.x` (`>=2026.8.2`) | `0.0.64` | `openclaw plugins install --force @inline-openclaw/inline@0.0.64` |
-| `2026.7.x` | `0.0.63` | `openclaw plugins install --force @inline-openclaw/inline@0.0.63` |
-| `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install --force @inline-openclaw/inline@0.0.63` |
+| `2026.8.x` (`>=2026.8.2`) | `0.0.65` | `openclaw plugins install @inline-openclaw/inline --force --accept-capabilities` |
+| `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
+| `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 
 `@latest` follows the newest supported OpenClaw line; it is not a compatibility
 alias for older host APIs.
@@ -50,35 +50,37 @@ alias for older host APIs.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.64` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Current | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
+| `0.0.65` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Current | Makes chat-triggered updates noninteractive by explicitly accepting the trusted Inline capability surface. |
+| `0.0.64` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Previous | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
 | `0.0.63` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Applies live-safe settings writes without restarting the Inline channel before it can answer. |
 | `0.0.62` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Keeps the thread-only Following control out of direct-message agent settings, where the server does not support it. |
 | `0.0.61` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Bounds model discovery through provider authentication so agent settings return a fallback instead of hanging indefinitely. |
 | `0.0.60` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Uses the plugin index's supported force-install path for exact updates on current OpenClaw hosts. |
-| `0.0.59` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Adds mentionable Agent specialization, exact Agent activation, and fail-closed bot-message provenance. |
 
 From npm:
 
 ```sh
-openclaw plugins install @inline-openclaw/inline
+openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
 ```
 
 If the plugin is already installed, update in place:
 
 ```sh
-openclaw plugins install --force @inline-openclaw/inline@latest
+openclaw plugins update inline --accept-capabilities
 openclaw gateway restart
 openclaw plugins list
-openclaw channels status
+openclaw plugins inspect inline --json
+openclaw channels status --channel inline --probe --json
 openclaw message send --channel inline --target chat:123 --message "Inline smoke test" --dry-run
 ```
 
 After initial installation, an OpenClaw owner can run `/inline_update` from
-Inline. The command delegates to OpenClaw's tracked-plugin updater, strips
-credential variables from the updater process, and asks for `/restart` after a
-successful update. Other authorized chat members cannot update host plugins.
+Inline. The command delegates to OpenClaw's tracked-plugin updater with explicit
+capability consent, strips credential variables from the updater process, and
+asks for `/restart` after OpenClaw reports a successful update. Other authorized
+chat members cannot update host plugins.
 
-After updating, verify that `openclaw plugins list` shows `inline`, `openclaw channels status` reports Inline configured/running, and `openclaw plugins inspect inline --json` reports the expected package version.
+After updating, verify that `openclaw plugins list` shows `inline`, `openclaw channels status --channel inline --probe --json` reports Inline configured/running, and `openclaw plugins inspect inline --json` reports the expected package version.
 
 From a local checkout (dev):
 
@@ -86,7 +88,7 @@ From a local checkout (dev):
 cd /path/to/inline/openclaw
 bun run build
 npm pack --ignore-scripts --pack-destination /tmp
-openclaw plugins install --force npm-pack:/tmp/inline-openclaw-inline-<version>.tgz
+openclaw plugins install npm-pack:/tmp/inline-openclaw-inline-<version>.tgz --force --accept-capabilities
 ```
 
 ## Configure

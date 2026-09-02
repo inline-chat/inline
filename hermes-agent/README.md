@@ -107,7 +107,8 @@ Check an installation:
 
 ```sh
 inline-hermes doctor --json
-hermes inline status
+hermes inline status --json --probe
+hermes gateway status
 inline-hermes --version
 ```
 
@@ -147,7 +148,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.14   inline-platform
+enabled      user     0.0.15   inline-platform
 ```
 
 ## Update Or Reinstall
@@ -169,7 +170,7 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 ## Compatibility
 
 - Hermes Agent: requires the external user plugin registry and native platform
-  plugin loader available in Hermes Agent `0.17.x`. This package was validated
+  plugin loader available in Hermes Agent `>=0.17.0`. This package was validated
   against Hermes Agent `0.21.0` from source commit `29112bef` (tag
   `v2026.8.31`).
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,

@@ -85,6 +85,15 @@ for (const entry of packages) {
   if (/include_(?:bytes|str)!\s*\([^)]*(?:openclaw|hermes-agent|plugin\/inline|adapter\.py|sidecar\/index\.mjs)/i.test(source)) {
     throw new Error("Inline CLI must install external agent packages and must not embed plugin payload files")
   }
+  if (entry.directory === "openclaw") {
+    if (!source.includes("--accept-capabilities")) {
+      throw new Error("OpenClaw setup must explicitly accept trusted Inline capabilities")
+    }
+    const updater = readFileSync(path.join(root, "openclaw/src/inline/update-command.ts"), "utf8")
+    if (!updater.includes("--accept-capabilities")) {
+      throw new Error("OpenClaw chat updater must explicitly accept trusted Inline capabilities")
+    }
+  }
 
   if (!sourceOnly) {
     const publishedRelease = JSON.parse(

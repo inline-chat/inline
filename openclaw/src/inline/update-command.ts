@@ -112,7 +112,7 @@ function resolveOpenClawUpdateInvocation(env: NodeJS.ProcessEnv): {
   args: string[]
 } {
   const cliPath = env.OPENCLAW_CLI_PATH?.trim()
-  const args = ["plugins", "update", INLINE_PLUGIN_ID]
+  const args = ["plugins", "update", INLINE_PLUGIN_ID, "--accept-capabilities"]
   return cliPath
     ? { command: process.execPath, args: [cliPath, ...args] }
     : { command: "openclaw", args }

@@ -27,7 +27,7 @@ _CLI_INSTALL_URL = "https://inline.chat/cli/install.sh"
 _MAX_TOKEN_BYTES = 16 * 1024
 _MAX_PROBE_RESPONSE_BYTES = 64 * 1024
 _MACHINE_SETUP_PROTOCOL_VERSION = 1
-_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.14"
+_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.15"
 _ENV_REFERENCE_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
@@ -94,8 +94,10 @@ def gateway_setup() -> None:
     hermes_gateway.write_platform_config_field("inline", "enabled", True, raw=True)
 
     print()
-    hermes_setup.print_success("💬 Inline is configured!")
-    hermes_setup.print_info("Restart the gateway when prompted, then message your bot in Inline.")
+    hermes_setup.print_success("💬 Inline configuration saved.")
+    hermes_setup.print_info("Restart the gateway when prompted; setup is not ready until that restart succeeds.")
+    hermes_setup.print_info("Then run `hermes inline status --json --probe` to verify the bot credential.")
+    hermes_setup.print_info("After it reports ready, message your bot in Inline.")
     hermes_setup.print_info("Send /sethome in that chat to use it for cron results and notifications.")
 
 

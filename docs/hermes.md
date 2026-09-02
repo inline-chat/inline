@@ -4,7 +4,7 @@ Install the official Inline platform adapter for Hermes Agent.
 
 ## Requirements
 
-- Hermes Agent `0.17.x`
+- Hermes Agent `>=0.17.0` (validated against `0.21.0`)
 - Node.js `20` or newer
 - The Inline CLI for guided bot creation, or an existing Inline bot/user token
 
@@ -36,14 +36,14 @@ Set up the Inline Hermes Agent adapter on this machine.
 Constraints:
 - Do not read, print, or edit .env files.
 - Do not print Inline tokens or other secrets.
-- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN; if neither is present, stop and point me to https://inline.chat/docs/creating-a-bot.
+- Use an Inline token from INLINE_TOKEN or INLINE_BOT_TOKEN when already available; otherwise use Hermes's guided setup without exposing the token.
 
 Tasks:
 1. Verify Node.js is version 20 or newer and Hermes Agent is installed.
 2. Install or upgrade @inline-chat/hermes-agent-adapter globally.
 3. Run inline-hermes install and hermes plugins enable inline-platform.
 4. Run hermes gateway setup and select Inline. Prefer its guided bot-creation path; if no Inline token is available, let this interactive wizard ask the user to sign in or paste one.
-5. Run inline-hermes doctor --json and inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json.
+5. Run inline-hermes doctor --json, hermes inline status --json --probe, and inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json.
 6. Report the exact commands run and any remaining manual steps, without revealing secrets.
 ```
 
@@ -94,7 +94,8 @@ platforms:
 
 ```bash
 inline-hermes doctor --json
-hermes inline status
+hermes inline status --json --probe
+hermes gateway status
 inline-hermes --version
 inline-hermes test-send --dry-run --to chat:123 --text "Inline Hermes dry-run" --json
 ```

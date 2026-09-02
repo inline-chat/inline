@@ -55,7 +55,8 @@ Install and verify the Hermes plugin:
 inline-hermes install --force
 hermes plugins enable inline-platform
 inline-hermes doctor --json
-hermes inline status
+hermes inline status --json --probe
+hermes gateway status
 ```
 
 Set a valid Inline token in your shell or process manager, then test live sends:
@@ -93,7 +94,7 @@ the trusted-publishing workflow through the repository wrapper:
 
 ```sh
 cd ..
-bun run release:npm hermes-agent --version 0.0.14 --tag latest
+bun run release:npm hermes-agent --version 0.0.15 --tag latest
 npm view @inline-chat/hermes-agent-adapter version
 npm view @inline-chat/hermes-agent-adapter dist-tags --json
 ```
