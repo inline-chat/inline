@@ -254,6 +254,7 @@ public actor UpdatesEngine: Sendable {
       return true
     } catch {
       let kind = RealtimeUpdateDiagnostics.kind(of: update.update)
+      let reportedError = durableUpdateFailure(error, updateKind: kind)
       #if DEBUG || DEBUG_BUILD
       let batchIndexDescription = batchIndex.map(String.init) ?? "unknown"
       let sequenceDescription = update.hasSeq ? String(update.seq) : "none"
@@ -264,12 +265,12 @@ public actor UpdatesEngine: Sendable {
           "seq=\(sequenceDescription) date=\(dateDescription) " +
           "payload=\(String(reflecting: update.update)) " +
           "error_debug=\(String(reflecting: error))",
-        error: error
+        error: reportedError
       )
       #else
       log.error(
         "Failed to apply update kind=\(kind) source=\(source.traceLabel)",
-        error: error
+        error: reportedError
       )
       #endif
       return false
@@ -303,7 +304,10 @@ public actor UpdatesEngine: Sendable {
 
     if let bucketCommit, validatedBucketCoordinates(bucketCommit.key) == nil {
       let failedCount = max(updates.count, 1)
-      log.error("Refusing update batch with an invalid bucket")
+      log.error(
+        "Refusing update batch with an invalid bucket",
+        error: DurableUpdateApplyError.invalidBucket(bucketCommit.key)
+      )
       batchSpan.end(
         "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
       )
@@ -320,7 +324,10 @@ public actor UpdatesEngine: Sendable {
        !bucketSettingsUpdates.isEmpty,
        (bucketCommit.key != .user || bucketSettingsUpdates.contains(where: { !$0.hasSettings })) {
       let failedCount = max(updates.count, 1)
-      log.error("Refusing malformed or non-user bucket settings apply")
+      log.error(
+        "Refusing malformed or non-user bucket settings apply",
+        error: DurableUpdateFailure(phase: "batch_settings", cause: .invalidData)
+      )
       batchSpan.end(
         "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
       )
@@ -331,7 +338,10 @@ public actor UpdatesEngine: Sendable {
     let touchesUserProjection = isUserBucket || !bucketSettings.isEmpty
     if touchesUserProjection, userBucketCriticalSectionOwned {
       let failedCount = max(updates.count, 1)
-      log.error("Refusing reentrant user-bucket apply during settings repair")
+      log.error(
+        "Refusing reentrant user-bucket apply during settings repair",
+        error: DurableUpdateFailure(phase: "batch_settings_reentrant", cause: .invalidData)
+      )
       batchSpan.end(
         "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
       )
@@ -349,7 +359,10 @@ public actor UpdatesEngine: Sendable {
     if !bucketSettings.isEmpty {
       guard let mutationToken, let receivingUserID, receivingUserID == mutationToken.userID else {
         let failedCount = max(updates.count, 1)
-        log.error("Refusing bucket settings apply without an account mutation token")
+        log.error(
+          "Refusing bucket settings apply without an account mutation token",
+          error: DurableUpdateFailure(phase: "batch_settings_auth", cause: .invalidData)
+        )
         batchSpan.end(
           "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
         )
@@ -362,7 +375,10 @@ public actor UpdatesEngine: Sendable {
         }
       } catch {
         let failedCount = max(updates.count, 1)
-        log.error("Refusing bucket settings apply for a stale account generation", error: error)
+        log.error(
+          "Refusing bucket settings apply for a stale account generation",
+          error: privacySafeDurableApplyError(error, phase: "batch_settings_auth")
+        )
         batchSpan.end(
           "source=\(source.traceLabel) updates=\(updates.count) chunks=0 applied=0 failed=\(failedCount) reload_peers=0 duration_ms=0"
         )
@@ -376,6 +392,22 @@ public actor UpdatesEngine: Sendable {
     let chunkSize = bucketCommit != nil
       ? max(updates.count, 1)
       : source == .syncCatchup ? 200 : max(updates.count, 1)
+    let userAuthorizedChats = userAuthorizedChatOpenSnapshots(
+      in: updates,
+      bucketCommit: bucketCommit
+    )
+    let userAuthorizedChatIDs = userAuthorizedDirectChatIDs(
+      in: updates,
+      bucketCommit: bucketCommit
+    )
+    let userAuthorizedDialogPeers = userAuthorizedDialogDependencyPeers(
+      in: updates,
+      bucketCommit: bucketCommit
+    )
+    let userAuthorizedSpaceIDs = userAuthorizedJoinSpaceIDs(
+      in: updates,
+      bucketCommit: bucketCommit
+    )
     var reloadPeers = Set<Peer>()
     var appliedCount = 0
     var failedCount = 0
@@ -435,7 +467,21 @@ public actor UpdatesEngine: Sendable {
                 "users=\(sidecars.users.count) chats=\(sidecars.chats.count) dialogs=\(sidecars.dialogs.count) spaces=\(sidecars.spaces.count) user_groups=\(sidecars.userGroups.count)"
               )
             }
-            try self.apply(sidecars: sidecars, db: db, source: source, reloadPeers: &chunkReloadPeers)
+            do {
+              try self.apply(
+                sidecars: sidecars,
+                db: db,
+                source: source,
+                reloadPeers: &chunkReloadPeers,
+                bucketKey: bucketCommit?.key,
+                userAuthorizedChats: userAuthorizedChats,
+                userAuthorizedChatIDs: userAuthorizedChatIDs,
+                userAuthorizedDialogPeers: userAuthorizedDialogPeers,
+                userAuthorizedSpaceIDs: userAuthorizedSpaceIDs
+              )
+            } catch {
+              throw privacySafeDurableApplyError(error, phase: "sidecars")
+            }
           }
 
           var writeApplied = 0
@@ -468,7 +514,11 @@ public actor UpdatesEngine: Sendable {
             // A User read reducer can reach the frontier that rejected this
             // count before apply. Recheck only counts in this same writer;
             // structural sidecars and User-owned fields must not replay.
-            try self.applyDialogSidecarCounts(sidecars, db: db)
+            do {
+              try self.applyDialogSidecarCounts(sidecars, db: db)
+            } catch {
+              throw privacySafeDurableApplyError(error, phase: "dialog_counts")
+            }
           }
           let committedState: BucketState?
           if isFinalChunk,
@@ -512,7 +562,10 @@ public actor UpdatesEngine: Sendable {
           }
         }
       } catch {
-        log.error("Failed to apply updates chunk", error: error)
+        log.error(
+          "Failed to apply updates chunk",
+          error: privacySafeDurableApplyError(error, phase: "batch")
+        )
         chunkFailed = chunk.count
         failedCount += chunkFailed
       }
@@ -561,12 +614,17 @@ public actor UpdatesEngine: Sendable {
           )
           var emptyReloadPeers = Set<Peer>()
           if let sidecars, hasSidecars(sidecars) {
-            try self.apply(
-              sidecars: sidecars,
-              db: db,
-              source: source,
-              reloadPeers: &emptyReloadPeers
-            )
+            do {
+              try self.apply(
+                sidecars: sidecars,
+                db: db,
+                source: source,
+                reloadPeers: &emptyReloadPeers,
+                bucketKey: bucketCommit.key
+              )
+            } catch {
+              throw privacySafeDurableApplyError(error, phase: "sidecars")
+            }
           }
           let state = try GRDBSyncStorage.advanceBucketState(
             for: bucketCommit.key,
@@ -578,7 +636,10 @@ public actor UpdatesEngine: Sendable {
         reloadPeers.formUnion(result.0)
         committedBucketState = result.1
       } catch {
-        log.error("Failed to atomically apply empty update batch sidecars and cursor", error: error)
+        log.error(
+          "Failed to atomically apply empty update batch sidecars and cursor",
+          error: privacySafeDurableApplyError(error, phase: "empty_batch")
+        )
         failedCount += 1
       }
     }
@@ -646,7 +707,10 @@ public actor UpdatesEngine: Sendable {
           snapshot.mutationToken.userID == expectedUserID,
           let peer = validatedPeer(snapshot.peer)
     else {
-      log.error("Chat repair missing chat or dialog")
+      log.error(
+        "Chat repair missing chat or dialog",
+        error: DurableUpdateFailure(phase: "chat_repair", cause: .invalidData)
+      )
       return nil
     }
     let bucketKey = BucketKey.chat(peer: snapshot.peer)
@@ -659,20 +723,25 @@ public actor UpdatesEngine: Sendable {
           snapshot.chat.dialog.hasChatID,
           snapshot.chat.dialog.chatID == snapshot.chat.chat.id
     else {
-      log.error("Chat repair snapshot peer does not match the requested bucket")
+      log.error(
+        "Chat repair snapshot peer does not match the requested bucket",
+        error: DurableUpdateFailure(phase: "chat_repair", cause: .invalidData)
+      )
       return nil
     }
     guard snapshot.chat.chat.hasSeq,
           Int64(snapshot.chat.chat.seq) >= snapshot.targetState.seq
     else {
-      log.error("Chat repair snapshot sequence is below the frozen recovery target")
+      log.error(
+        "Chat repair snapshot sequence is below the frozen recovery target",
+        error: DurableUpdateFailure(phase: "chat_repair", cause: .invalidData)
+      )
       return nil
     }
     let pinnedIDs = snapshot.chat.pinnedMessageIds
     let hydratedPinnedIDs = snapshot.pinnedMessages.map(\.id)
     let recentMessages = snapshot.chat.messages
-    guard pinnedIDs.count <= 100,
-          pinnedIDs.allSatisfy({ $0 > 0 }),
+    guard pinnedIDs.allSatisfy({ $0 > 0 }),
           Set(pinnedIDs).count == pinnedIDs.count,
           Set(hydratedPinnedIDs).count == hydratedPinnedIDs.count,
           Set(hydratedPinnedIDs).isSubset(of: Set(pinnedIDs)),
@@ -681,9 +750,6 @@ public actor UpdatesEngine: Sendable {
               $0.chatID == snapshot.chat.chat.id &&
               validatedPeer($0.peerID) == peer
           }),
-          snapshot.chat.dialog.hasUnreadCount,
-          snapshot.chat.dialog.unreadCount >= 0,
-          !snapshot.chat.dialog.hasReadMaxID || snapshot.chat.dialog.readMaxID >= 0,
           recentMessages.count <= 100,
           Set(recentMessages.map(\.id)).count == recentMessages.count,
           recentMessages.allSatisfy({
@@ -696,7 +762,10 @@ public actor UpdatesEngine: Sendable {
             ? recentMessages.first?.id == snapshot.chat.chat.lastMsgID
             : recentMessages.isEmpty
     else {
-      log.error("Chat repair snapshot is invalid")
+      log.error(
+        "Chat repair snapshot is invalid",
+        error: DurableUpdateFailure(phase: "chat_repair", cause: .invalidData)
+      )
       return nil
     }
 
@@ -764,28 +833,7 @@ public actor UpdatesEngine: Sendable {
         try Acknowledgement.save(db, cursors: snapshot.chat.chat.acknowledgements.cursors, chatId: chat.id)
 
         let dialogID = Dialog.getDialogId(peerId: peer)
-        if var existingDialog = try Dialog.fetchOne(db, id: dialogID) {
-          if let expectedUserState = snapshot.expectedUserStateForMissingChild {
-            let currentUserRecord = try DbBucketState
-              .filter(
-                DbBucketState.Columns.bucketType == BucketKey.user.getBucket()
-                  && DbBucketState.Columns.entityId == BucketKey.user.getEntityId()
-              )
-              .fetchOne(db)
-            let currentUserState = BucketState(
-              date: currentUserRecord?.date ?? 0,
-              seq: currentUserRecord?.seq ?? 0
-            )
-            if currentUserState.date == expectedUserState.date,
-               currentUserState.seq == expectedUserState.seq {
-              existingDialog.readInboxMaxId = snapshot.chat.dialog.hasReadMaxID
-                ? snapshot.chat.dialog.readMaxID
-                : nil
-              existingDialog.unreadCount = Int(snapshot.chat.dialog.unreadCount)
-              try existingDialog.update(db)
-            }
-          }
-        } else {
+        if try Dialog.fetchOne(db, id: dialogID) == nil {
           _ = try snapshot.chat.dialog.saveFull(db)
         }
 
@@ -882,7 +930,10 @@ public actor UpdatesEngine: Sendable {
     } catch {
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
       span.end("success=false duration_ms=\(durationMs)")
-      log.error("Failed to apply chat repair", error: error)
+      log.error(
+        "Failed to apply chat repair",
+        error: privacySafeDurableApplyError(error, phase: "chat_repair")
+      )
       return nil
     }
   }
@@ -903,7 +954,10 @@ public actor UpdatesEngine: Sendable {
           snapshot.space.hasSeq,
           Int64(snapshot.space.seq) >= repair.targetState.seq
     else {
-      log.error("Space repair snapshot is incomplete or below the frozen recovery target")
+      log.error(
+        "Space repair snapshot is incomplete or below the frozen recovery target",
+        error: DurableUpdateFailure(phase: "space_repair", cause: .invalidData)
+      )
       return nil
     }
 
@@ -939,6 +993,7 @@ public actor UpdatesEngine: Sendable {
         space.memberRosterComplete = false
         try space.save(db)
         try Member(from: snapshot.membership).save(db)
+        try SpaceCatalogStore.include(spaceID: repair.spaceID, in: db)
         if snapshot.hasSettings {
           try SpaceRecoverySettings(spaceId: repair.spaceID, settings: snapshot.settings).save(db)
         }
@@ -953,26 +1008,44 @@ public actor UpdatesEngine: Sendable {
         )
       }
     } catch {
-      log.error("Failed to apply space repair", error: error)
+      log.error(
+        "Failed to apply space repair",
+        error: privacySafeDurableApplyError(error, phase: "space_repair")
+      )
       return nil
     }
   }
 
   @discardableResult
   public func applyUserRepair(_ repair: UserRepairSnapshot) async -> UserRepairOutcome? {
+    let replayWindowIsValid: Bool
+    if repair.replacesActiveCatalog {
+      replayWindowIsValid = repair.replayThroughState.map {
+        $0.date > 0 && $0.seq >= repair.checkpointState.seq
+      } ?? false
+    } else {
+      replayWindowIsValid = repair.replayThroughState == nil
+    }
     guard repair.me.hasUser,
           let expectedUserID = authenticatedUserID(),
           expectedUserID > 0,
           repair.me.user.id == expectedUserID,
           repair.mutationToken.userID == expectedUserID,
           repair.checkpointState.date > 0,
-          repair.checkpointState.seq >= repair.targetState.seq
+          repair.checkpointState.seq >= repair.targetState.seq,
+          replayWindowIsValid
     else {
-      log.error("User repair snapshot identity or checkpoint is invalid")
+      log.error(
+        "User repair snapshot identity or checkpoint is invalid",
+        error: DurableUpdateFailure(phase: "user_repair", cause: .invalidData)
+      )
       return nil
     }
     guard !userBucketCriticalSectionOwned else {
-      log.error("Refusing reentrant user repair during a user-bucket apply")
+      log.error(
+        "Refusing reentrant user repair during a user-bucket apply",
+        error: DurableUpdateFailure(phase: "user_repair_reentrant", cause: .invalidData)
+      )
       return nil
     }
     userBucketCriticalSectionOwned = true
@@ -993,12 +1066,18 @@ public actor UpdatesEngine: Sendable {
       }
       let checkpointAlreadyReached = expectedCursor.state.seq >= repair.checkpointState.seq
       if checkpointAlreadyReached, !repair.requiresProjectionAudit {
-        return .superseded(currentState: expectedCursor.state)
+        return .superseded(
+          currentState: expectedCursor.state,
+          replayThroughState: repair.replayThroughState
+        )
       }
 
       if !checkpointAlreadyReached {
         guard repair.settings.hasUserSettings else {
-          log.error("User repair snapshot is missing required settings")
+          log.error(
+            "User repair snapshot is missing required settings",
+            error: DurableUpdateFailure(phase: "user_repair_settings", cause: .invalidData)
+          )
           return nil
         }
         try await applyUserSettings(
@@ -1017,7 +1096,10 @@ public actor UpdatesEngine: Sendable {
           )
           .fetchOne(db))
         guard currentCursor == expectedCursor else {
-          return .superseded(currentState: currentCursor.state)
+          return .superseded(
+            currentState: currentCursor.state,
+            replayThroughState: repair.replayThroughState
+          )
         }
 
         // A regression audit may finish after live user events passed the
@@ -1027,6 +1109,7 @@ public actor UpdatesEngine: Sendable {
         let imported = try GetChatsTransaction.applySnapshot(
           repair.chats,
           userProjectionAdmission: userProjectionIsCurrent ? .alreadyValidated : .missingOnly,
+          replacesActiveCatalog: repair.replacesActiveCatalog && userProjectionIsCurrent,
           in: db
         )
         guard imported.failures.isEmpty else {
@@ -1051,7 +1134,9 @@ public actor UpdatesEngine: Sendable {
           }
           return .applied(
             state: state,
-            seededStates: imported.seededStates
+            seededStates: imported.seededStates,
+            replayThroughState: repair.replayThroughState,
+            retiredBucketKeys: imported.retiredBucketKeys
           )
         }
         return .pending(
@@ -1059,14 +1144,19 @@ public actor UpdatesEngine: Sendable {
             expectedUserState: expectedCursor.state,
             expectedUserStateExists: expectedCursor.exists,
             proposedUserState: proposedUserState,
+            replayThroughState: repair.replayThroughState,
             catchUpTargets: imported.catchUpTargets,
+            retiredBucketKeys: imported.retiredBucketKeys,
             mutationToken: repair.mutationToken
           ),
           seededStates: imported.seededStates
         )
       }
     } catch {
-      log.error("Failed to apply user repair", error: error)
+      log.error(
+        "Failed to apply user repair",
+        error: privacySafeDurableApplyError(error, phase: "user_repair")
+      )
       return nil
     }
   }
@@ -1095,11 +1185,17 @@ public actor UpdatesEngine: Sendable {
               : resolution.state.seq >= requestedSequence
           })
     else {
-      log.error("Refusing invalid user repair finalization")
+      log.error(
+        "Refusing invalid user repair finalization",
+        error: DurableUpdateFailure(phase: "user_repair_finalize", cause: .invalidData)
+      )
       return nil
     }
     guard !userBucketCriticalSectionOwned else {
-      log.error("Refusing reentrant user repair finalization")
+      log.error(
+        "Refusing reentrant user repair finalization",
+        error: DurableUpdateFailure(phase: "user_repair_finalize_reentrant", cause: .invalidData)
+      )
       return nil
     }
     userBucketCriticalSectionOwned = true
@@ -1163,7 +1259,10 @@ public actor UpdatesEngine: Sendable {
         )
       }
     } catch {
-      log.error("Failed to finalize user repair", error: error)
+      log.error(
+        "Failed to finalize user repair",
+        error: privacySafeDurableApplyError(error, phase: "user_repair_finalize")
+      )
       return nil
     }
   }
@@ -1172,27 +1271,67 @@ public actor UpdatesEngine: Sendable {
     sidecars: InlineProtocol.UpdateSidecars,
     db: Database,
     source: UpdateApplySource,
-    reloadPeers: inout Set<Peer>
+    reloadPeers: inout Set<Peer>,
+    bucketKey: BucketKey? = nil,
+    userAuthorizedChats: [Int64: InlineProtocol.Chat] = [:],
+    userAuthorizedChatIDs: Set<Int64> = [],
+    userAuthorizedDialogPeers: Set<Peer> = [],
+    userAuthorizedSpaceIDs: Set<Int64> = []
   ) throws {
     for user in sidecars.users {
       _ = try User.save(db, user: user)
     }
 
+    let chatSnapshots = Dictionary(sidecars.chats.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+    var exactChatRoots = userAuthorizedChats
+    if case let .chat(bucketPeer) = bucketKey,
+       let ownerPeer = validatedPeer(bucketPeer),
+       let snapshot = sidecars.chats.last(where: { validatedPeer($0.peerID) == ownerPeer }) {
+      exactChatRoots[snapshot.id] = snapshot
+    }
+    var directChatRoots = userAuthorizedChatIDs
+    directChatRoots.formUnion(userAuthorizedDialogSidecarChatIDs(
+      sidecars: sidecars,
+      authorizedPeers: userAuthorizedDialogPeers
+    ))
+    let authorizedChatIDs = userAuthorizedSidecarChatIDs(
+      sidecars: sidecars.chats,
+      exactRoots: exactChatRoots,
+      idRoots: directChatRoots
+    )
+    let authorizedSpaceDependencies = Set(sidecars.chats.compactMap { chat in
+      authorizedChatIDs.contains(chat.id) && chat.hasSpaceID ? chat.spaceID : nil
+    })
+    var authorizedSpaceIDs = userAuthorizedSpaceIDs
+    if case let .space(id) = bucketKey {
+      authorizedSpaceIDs.insert(id)
+    }
     for protoSpace in sidecars.spaces {
-      try saveMissingSidecarSpace(protoSpace, db: db)
+      try saveMissingSidecarSpace(
+        protoSpace,
+        db: db,
+        allowBehindRetainedCursor: authorizedSpaceIDs.contains(protoSpace.id) ||
+          authorizedSpaceDependencies.contains(protoSpace.id)
+      )
     }
 
     for userGroup in sidecars.userGroups {
+      guard try sidecarUserGroupDependenciesExist(userGroup, db: db) else { continue }
       try UserGroup.save(db, from: userGroup)
     }
 
-    let chatSnapshots = Dictionary(sidecars.chats.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     for chat in try preparedSidecarChats(sidecars.chats, db: db) {
       guard let snapshot = chatSnapshots[chat.id] else { continue }
-      try saveMissingSidecarChat(snapshot, preparedChat: chat, db: db)
+      try saveMissingSidecarChat(
+        snapshot,
+        preparedChat: chat,
+        db: db,
+        allowBehindRetainedCursor: authorizedChatIDs.contains(snapshot.id)
+      )
     }
 
     for chat in sidecars.chats {
+      guard try Chat.fetchOne(db, id: chat.id) != nil else { continue }
       let affected = try Acknowledgement.save(
         db, cursors: chat.acknowledgements.cursors, chatId: chat.id,
         publishChanges: source != .syncCatchup
@@ -1206,7 +1345,8 @@ public actor UpdatesEngine: Sendable {
       guard let peer = validatedPeer(dialog.peer) else {
         throw DurableUpdateApplyError.invalidBucket(.chat(peer: dialog.peer))
       }
-      if try Dialog.get(peerId: peer).fetchOne(db) == nil {
+      if try Dialog.get(peerId: peer).fetchOne(db) == nil,
+         try sidecarDialogDependenciesExist(dialog, db: db) {
         _ = try dialog.saveFull(db)
       }
     }
@@ -1348,7 +1488,194 @@ private func hasSidecars(_ sidecars: InlineProtocol.UpdateSidecars) -> Bool {
     !sidecars.userGroups.isEmpty
 }
 
-private enum DurableUpdateApplyError: Error {
+private func userAuthorizedChatOpenSnapshots(
+  in updates: [InlineProtocol.Update],
+  bucketCommit: UpdateBucketCommit?
+) -> [Int64: InlineProtocol.Chat] {
+  guard bucketCommit?.key == .user else { return [:] }
+
+  var chats: [Int64: InlineProtocol.Chat] = [:]
+  for update in updates {
+    guard case let .chatOpen(chatOpen) = update.update,
+          chatOpen.chat.id > 0,
+          let peer = validatedPeer(chatOpen.chat.peerID)
+    else { continue }
+    if case let .thread(id) = peer, id != chatOpen.chat.id { continue }
+    chats[chatOpen.chat.id] = chatOpen.chat
+  }
+  return chats
+}
+
+private func userAuthorizedDirectChatIDs(
+  in updates: [InlineProtocol.Update],
+  bucketCommit: UpdateBucketCommit?
+) -> Set<Int64> {
+  guard bucketCommit?.key == .user else { return [] }
+  return Set(updates.compactMap { update in
+    let chatID: Int64? = switch update.update {
+      case let .userAddedToChat(access): access.chatID
+      case let .participantAdd(participant): participant.chatID
+      case let .participantGroupAdd(participant): participant.chatID
+      case let .chatPermissions(permissions): permissions.chatID
+      default: nil
+    }
+    guard let chatID, chatID > 0 else { return nil }
+    return chatID
+  })
+}
+
+private func userAuthorizedDialogDependencyPeers(
+  in updates: [InlineProtocol.Update],
+  bucketCommit: UpdateBucketCommit?
+) -> Set<Peer> {
+  guard bucketCommit?.key == .user else { return [] }
+  var peers = Set<Peer>()
+  for update in updates {
+    switch update.update {
+      case let .dialogArchived(value):
+        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+      case let .updateReadMaxID(value):
+        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+      case let .markAsUnread(value):
+        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+      case let .dialogNotificationSettings(value):
+        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+      case let .dialogFollowMode(value):
+        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+      case let .dialogCollapsedMaxID(value):
+        if let peer = validatedPeer(value.peerID) { peers.insert(peer) }
+      case let .dialogFolder(value):
+        for dialog in value.dialogs {
+          if let peer = validatedPeer(dialog.peer) { peers.insert(peer) }
+        }
+      default:
+        break
+    }
+  }
+  return peers
+}
+
+private func userAuthorizedDialogSidecarChatIDs(
+  sidecars: InlineProtocol.UpdateSidecars,
+  authorizedPeers: Set<Peer>
+) -> Set<Int64> {
+  guard !authorizedPeers.isEmpty else { return [] }
+  let chats = Dictionary(sidecars.chats.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+  return Set(sidecars.dialogs.compactMap { dialog in
+    guard dialog.hasChatID, dialog.chatID > 0,
+          let peer = validatedPeer(dialog.peer), authorizedPeers.contains(peer),
+          let chat = chats[dialog.chatID], validatedPeer(chat.peerID) == peer
+    else { return nil }
+    return dialog.chatID
+  })
+}
+
+private func userAuthorizedJoinSpaceIDs(
+  in updates: [InlineProtocol.Update],
+  bucketCommit: UpdateBucketCommit?
+) -> Set<Int64> {
+  guard bucketCommit?.key == .user else { return [] }
+  return Set(updates.compactMap { update in
+    guard case let .joinSpace(join) = update.update,
+          join.space.id > 0,
+          join.member.spaceID == join.space.id
+    else { return nil }
+    return join.space.id
+  })
+}
+
+private func userAuthorizedSidecarChatIDs(
+  sidecars: [InlineProtocol.Chat],
+  exactRoots: [Int64: InlineProtocol.Chat],
+  idRoots: Set<Int64>
+) -> Set<Int64> {
+  guard !exactRoots.isEmpty || !idRoots.isEmpty else { return [] }
+  let snapshots = Dictionary(sidecars.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+  var admitted = Set<Int64>()
+
+  for (id, root) in exactRoots {
+    guard let snapshot = snapshots[id],
+          validatedPeer(snapshot.peerID) == validatedPeer(root.peerID)
+    else { continue }
+    admitted.insert(id)
+  }
+  for id in idRoots {
+    guard let snapshot = snapshots[id], validatedPeer(snapshot.peerID) != nil else { continue }
+    admitted.insert(id)
+  }
+
+  var pending = Array(admitted)
+  while let id = pending.popLast(),
+        let snapshot = snapshots[id],
+        snapshot.hasParentChatID,
+        snapshot.parentChatID > 0,
+        let parent = snapshots[snapshot.parentChatID],
+        validatedPeer(parent.peerID) == .thread(id: parent.id),
+        admitted.insert(parent.id).inserted {
+    pending.append(parent.id)
+  }
+  return admitted
+}
+
+enum DurableUpdateFailureCause: String, Sendable {
+  case missingEntity = "missing_entity"
+  case foreignKey = "foreign_key"
+  case uniqueConstraint = "unique_constraint"
+  case notNullConstraint = "not_null_constraint"
+  case checkConstraint = "check_constraint"
+  case otherConstraint = "other_constraint"
+  case databaseBusy = "database_busy"
+  case databaseCorrupt = "database_corrupt"
+  case invalidData = "invalid_data"
+  case other = "other"
+}
+
+struct DurableUpdateFailure: Error, Sendable, PrivacySafeErrorCategoryProviding {
+  let phase: String
+  let cause: DurableUpdateFailureCause
+
+  var privacySafeErrorCategory: String {
+    "sync_apply:\(phase):\(cause.rawValue)"
+  }
+}
+
+func durableUpdateFailure(_ error: Error, updateKind: String) -> DurableUpdateFailure {
+  DurableUpdateFailure(phase: updateKind, cause: durableUpdateFailureCause(error))
+}
+
+private func privacySafeDurableApplyError(_ error: Error, phase: String) -> Error {
+  if error is any PrivacySafeErrorCategoryProviding {
+    return error
+  }
+  return DurableUpdateFailure(phase: phase, cause: durableUpdateFailureCause(error))
+}
+
+private func durableUpdateFailureCause(_ error: Error) -> DurableUpdateFailureCause {
+  if error is RealtimeUpdateApplyError || error is AcknowledgementPersistenceError {
+    return .missingEntity
+  }
+  guard let databaseError = error as? DatabaseError else { return .other }
+  switch databaseError.extendedResultCode {
+    case .SQLITE_CONSTRAINT_FOREIGNKEY:
+      return .foreignKey
+    case .SQLITE_CONSTRAINT_UNIQUE, .SQLITE_CONSTRAINT_PRIMARYKEY:
+      return .uniqueConstraint
+    case .SQLITE_CONSTRAINT_NOTNULL:
+      return .notNullConstraint
+    case .SQLITE_CONSTRAINT_CHECK:
+      return .checkConstraint
+    case .SQLITE_BUSY, .SQLITE_LOCKED:
+      return .databaseBusy
+    case .SQLITE_CORRUPT, .SQLITE_NOTADB:
+      return .databaseCorrupt
+    case .SQLITE_MISMATCH:
+      return .invalidData
+    default:
+      return databaseError.resultCode == .SQLITE_CONSTRAINT ? .otherConstraint : .other
+  }
+}
+
+enum DurableUpdateApplyError: Error, PrivacySafeErrorCategoryProviding {
   case reducerFailed(kind: String, batchIndex: Int)
   case invalidBucket(BucketKey)
   case cursorChanged(bucket: BucketKey, expected: BucketState, actual: BucketState)
@@ -1360,6 +1687,33 @@ private enum DurableUpdateApplyError: Error {
   case invalidParentReference(chatID: Int64)
   case unresolvedUserRepairAccount(Int64)
   case unresolvedUserRepairTarget(BucketKey)
+
+  var privacySafeErrorCategory: String {
+    switch self {
+      case let .reducerFailed(kind, _):
+        "sync_apply:reducer_failed:\(kind)"
+      case .invalidBucket:
+        "sync_apply:invalid_bucket"
+      case .cursorChanged:
+        "sync_apply:cursor_changed"
+      case .cursorRegression:
+        "sync_apply:cursor_regression"
+      case .unresolvedSpace:
+        "sync_apply:unresolved_space"
+      case .unresolvedCreator:
+        "sync_apply:unresolved_creator"
+      case .unresolvedParentChat:
+        "sync_apply:unresolved_parent_chat"
+      case .unresolvedParentMessage:
+        "sync_apply:unresolved_parent_message"
+      case .invalidParentReference:
+        "sync_apply:invalid_parent_reference"
+      case .unresolvedUserRepairAccount:
+        "sync_apply:unresolved_user_repair_account"
+      case .unresolvedUserRepairTarget:
+        "sync_apply:unresolved_user_repair_target"
+    }
+  }
 }
 
 enum DeferredUpdateEffect: Sendable {
@@ -1501,31 +1855,68 @@ private func admitsSidecarSnapshot(sequence: Int64?, for key: BucketKey, db: Dat
   return sequence.map { $0 >= cursor.seq } ?? false
 }
 
-private func saveMissingSidecarSpace(_ snapshot: InlineProtocol.Space, db: Database) throws {
+private func saveMissingSidecarSpace(
+  _ snapshot: InlineProtocol.Space,
+  db: Database,
+  allowBehindRetainedCursor: Bool = false
+) throws {
   guard try Space.fetchOne(db, id: snapshot.id) == nil,
-        try admitsSidecarSnapshot(
+        try (allowBehindRetainedCursor || admitsSidecarSnapshot(
           sequence: snapshot.hasSeq ? Int64(snapshot.seq) : nil,
           for: .space(id: snapshot.id),
           db: db
-        ) else { return }
+        )) else { return }
   try Space(from: snapshot).save(db)
 }
 
 private func saveMissingSidecarChat(
   _ snapshot: InlineProtocol.Chat,
   preparedChat: Chat,
-  db: Database
+  db: Database,
+  allowBehindRetainedCursor: Bool = false
 ) throws {
   guard snapshot.id > 0, let peer = validatedPeer(snapshot.peerID),
         peer == validatedPeer(preparedChat.peerId),
         try Chat.fetchOne(db, id: snapshot.id) == nil,
-        try admitsSidecarSnapshot(
+        try (allowBehindRetainedCursor || admitsSidecarSnapshot(
           sequence: snapshot.hasSeq ? Int64(snapshot.seq) : nil,
           for: .chat(peer: snapshot.peerID),
           db: db
-        ) else { return }
+        )) else { return }
   var chat = preparedChat
   try chat.saveWithValidLastMsg(db)
+}
+
+private func sidecarUserGroupDependenciesExist(
+  _ group: InlineProtocol.UserGroup,
+  db: Database
+) throws -> Bool {
+  guard group.id > 0, group.spaceID > 0,
+        try Space.fetchOne(db, id: group.spaceID) != nil
+  else { return false }
+  for userID in group.userIds {
+    if try (userID <= 0 || User.fetchOne(db, id: userID) == nil) {
+      return false
+    }
+  }
+  return true
+}
+
+private func sidecarDialogDependenciesExist(
+  _ dialog: InlineProtocol.Dialog,
+  db: Database
+) throws -> Bool {
+  guard let peer = validatedPeer(dialog.peer) else { return false }
+  switch peer {
+    case let .user(id):
+      guard try User.fetchOne(db, id: id) != nil else { return false }
+    case let .thread(id):
+      guard try Chat.fetchOne(db, id: id) != nil else { return false }
+  }
+  if dialog.hasChatID, try Chat.fetchOne(db, id: dialog.chatID) == nil {
+    return false
+  }
+  return true
 }
 
 func preparedSidecarChats(_ protoChats: [InlineProtocol.Chat], db: Database) throws -> [Chat] {
@@ -1589,7 +1980,7 @@ private extension InlineProtocol.UpdateSidecars {
   }
 }
 
-private enum RealtimeUpdateApplyError: Error {
+enum RealtimeUpdateApplyError: Error {
   case missingChat(Peer)
 }
 
@@ -2115,6 +2506,7 @@ extension InlineProtocol.UpdateNewChat {
     dialog.spaceId = chat.spaceId
     Log.shared.debug("saving dialog \(dialog)")
     try dialog.save(db, onConflict: .replace)
+    try DialogCatalogStore.include(dialogID: dialog.id, in: db)
   }
 }
 
@@ -2141,6 +2533,9 @@ extension InlineProtocol.UpdateSpaceMemberAdd {
     _ = try User.save(db, user: user)
     let member = Member(from: member)
     try member.save(db)
+    if member.userId == Auth.shared.getCurrentUserId() {
+      try SpaceCatalogStore.include(spaceID: member.spaceId, in: db)
+    }
   }
 }
 
@@ -2232,15 +2627,17 @@ extension InlineProtocol.UpdateSpaceMemberUpdate {
 
 extension InlineProtocol.UpdateJoinSpace {
   func apply(_ db: Database) throws {
-    try saveMissingSidecarSpace(space, db: db)
+    try saveMissingSidecarSpace(space, db: db, allowBehindRetainedCursor: true)
     // The User journal embeds the membership at join time. Its role/access may
-    // already have advanced through the independent Space journal.
-    guard try admitsSidecarSnapshot(
-      sequence: space.hasSeq ? Int64(space.seq) : nil,
-      for: .space(id: space.id),
-      db: db
-    ) else { return }
+    // already have advanced through the independent Space journal. Preserve an
+    // existing row, but a sequenced access gain must restore a missing one even
+    // when the retained Space cursor is ahead of this historical payload.
     let member = Member(from: member)
+    guard try Member
+      .filter(Member.Columns.userId == member.userId)
+      .filter(Member.Columns.spaceId == member.spaceId)
+      .fetchOne(db) == nil
+    else { return }
     try member.save(db)
   }
 }
@@ -2487,10 +2884,19 @@ extension InlineProtocol.UpdateChatOpen {
     }
 
     for preparedChat in try preparedSidecarChats([chat], db: db) {
-      try saveMissingSidecarChat(chat, preparedChat: preparedChat, db: db)
+      try saveMissingSidecarChat(
+        chat,
+        preparedChat: preparedChat,
+        db: db,
+        allowBehindRetainedCursor: true
+      )
     }
     try Acknowledgement.save(db, cursors: chat.acknowledgements.cursors, chatId: chat.id, publishChanges: true)
     _ = try dialog.saveFull(db)
+    try DialogCatalogStore.include(
+      dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+      in: db
+    )
   }
 }
 
@@ -2501,16 +2907,28 @@ extension InlineProtocol.UpdateDialogFolder {
       try folder.saveFull(db)
       for dialog in dialogs {
         try dialog.saveFull(db)
+        try DialogCatalogStore.include(
+          dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+          in: db
+        )
       }
     case let .deletedFolderID(folderID):
       for dialog in dialogs {
         try dialog.saveFull(db)
+        try DialogCatalogStore.include(
+          dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+          in: db
+        )
       }
       try DialogFolder.deleteOne(db, key: folderID)
     case .none:
       // Membership-only moves still carry complete changed dialogs.
       for dialog in dialogs {
         try dialog.saveFull(db)
+        try DialogCatalogStore.include(
+          dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+          in: db
+        )
       }
     }
   }

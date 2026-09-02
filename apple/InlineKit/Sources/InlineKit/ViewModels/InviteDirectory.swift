@@ -8,6 +8,7 @@ public enum InviteDirectory {
   public static func spaces(database: AppDatabase = .shared) async throws -> [Space] {
     try await database.dbWriter.read { db in
       try Space
+        .catalogActive()
         .order(Space.Columns.name.collating(.localizedCaseInsensitiveCompare))
         .fetchAll(db)
     }

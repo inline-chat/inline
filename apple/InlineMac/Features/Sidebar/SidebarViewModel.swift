@@ -463,6 +463,7 @@ final class SidebarViewModel {
     spacesCancellable = ValueObservation
       .tracking { db in
         try Space
+          .catalogActive()
           .including(all: Space.members)
           .order(Space.Columns.id)
           .asRequest(of: HomeSpaceItem.self)

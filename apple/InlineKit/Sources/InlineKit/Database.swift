@@ -1098,6 +1098,19 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("space active catalog exclusions") { db in
+      try db.create(table: "spaceCatalogExclusion") { table in
+        table.column("spaceId", .integer)
+          .primaryKey()
+          .references("space", column: "id", onDelete: .cascade)
+      }
+      try db.create(table: "dialogCatalogExclusion") { table in
+        // Keep this marker independent from Dialog lifecycle: a later
+        // authoritative dialog update can re-create and re-include the peer.
+        table.column("dialogId", .integer).primaryKey()
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

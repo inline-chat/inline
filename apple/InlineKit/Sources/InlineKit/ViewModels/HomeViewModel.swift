@@ -287,6 +287,7 @@ public final class HomeViewModel: ObservableObject {
     spacesCancellable = ValueObservation
       .tracking { db in
         try Space
+          .catalogActive()
           .including(all: Space.members)
           // Don't rely on SQLite's undefined row ordering. This keeps space lists (and Cmd+1...9 mapping)
           // deterministic across observation updates.

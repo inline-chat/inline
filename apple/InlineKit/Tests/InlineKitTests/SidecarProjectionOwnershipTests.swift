@@ -12,6 +12,43 @@ struct SidecarProjectionOwnershipTests {
   private let chatID: Int64 = 700
   private let spaceID: Int64 = 70
 
+  @Test("durable apply failures expose bounded privacy-safe Sentry categories")
+  func durableApplyFailureCategories() {
+    let foreignKey = durableUpdateFailure(
+      DatabaseError(resultCode: .SQLITE_CONSTRAINT_FOREIGNKEY),
+      updateKind: "chatOpen"
+    )
+    #expect(foreignKey.privacySafeErrorCategory == "sync_apply:chatOpen:foreign_key")
+
+    let busy = durableUpdateFailure(
+      DatabaseError(resultCode: .SQLITE_BUSY_SNAPSHOT),
+      updateKind: "sidecars"
+    )
+    #expect(busy.privacySafeErrorCategory == "sync_apply:sidecars:database_busy")
+    let corrupt = durableUpdateFailure(
+      DatabaseError(resultCode: .SQLITE_CORRUPT_VTAB),
+      updateKind: "batch"
+    )
+    #expect(corrupt.privacySafeErrorCategory == "sync_apply:batch:database_corrupt")
+    let missing = durableUpdateFailure(
+      RealtimeUpdateApplyError.missingChat(.thread(id: 7)),
+      updateKind: "deleteMessages"
+    )
+    #expect(missing.privacySafeErrorCategory == "sync_apply:deleteMessages:missing_entity")
+    let missingAcknowledgementChat = durableUpdateFailure(
+      AcknowledgementPersistenceError.missingChat(7),
+      updateKind: "acknowledgement"
+    )
+    #expect(
+      missingAcknowledgementChat.privacySafeErrorCategory ==
+        "sync_apply:acknowledgement:missing_entity"
+    )
+    #expect(
+      DurableUpdateApplyError.reducerFailed(kind: "chatOpen", batchIndex: 16)
+        .privacySafeErrorCategory == "sync_apply:reducer_failed:chatOpen"
+    )
+  }
+
   @Test("a delayed Chat sidecar cannot undo a newer User projection")
   func delayedChatSidecarPreservesUserProjection() async throws {
     let (queue, engine) = try makeEngine()
@@ -232,10 +269,8 @@ struct SidecarProjectionOwnershipTests {
       _ = try GRDBSyncStorage.advanceBucketState(for: .space(id: spaceID), state: .init(date: 9, seq: 9), in: db)
       _ = try GRDBSyncStorage.advanceBucketState(for: .chat(peer: chatPeer()), state: .init(date: 9, seq: 9), in: db)
     }
-    var sidecars = makeSidecars(dialog: makeDialog())
-    sidecars.dialogs = []
     let result = await engine.applyBatch(
-      updates: [], source: .syncCatchup, sidecars: sidecars,
+      updates: [], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
       bucketCommit: UpdateBucketCommit(key: .user, state: .init(date: 1, seq: 1))
     )
 
@@ -243,8 +278,189 @@ struct SidecarProjectionOwnershipTests {
     try await queue.read { (db: Database) throws in
       #expect(try Space.fetchOne(db, id: spaceID) == nil)
       #expect(try Chat.fetchOne(db, id: chatID) == nil)
+      #expect(try Dialog.get(peerId: .thread(id: chatID)).fetchOne(db) == nil)
       #expect(try cursor(.space(id: spaceID), db: db)?.seq == 9)
       #expect(try cursor(.chat(peer: chatPeer()), db: db)?.seq == 9)
+    }
+  }
+
+  @Test("a sequenced User chatOpen restores its exact missing dependency closure")
+  func chatOpenRestoresCursorOnlyChildProjection() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { (db: Database) throws in
+      _ = try GRDBSyncStorage.advanceBucketState(for: .space(id: spaceID), state: .init(date: 9, seq: 9), in: db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .chat(peer: chatPeer()), state: .init(date: 9, seq: 9), in: db)
+    }
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 1
+    update.update = .chatOpen(.with {
+      $0.chat = makeChat()
+      $0.dialog = makeDialog()
+    })
+
+    let result = await engine.applyBatch(
+      updates: [update],
+      source: .syncCatchup,
+      sidecars: makeSidecars(dialog: makeDialog()),
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 1, seq: 1),
+        expectedStartState: .init(date: 0, seq: 0)
+      )
+    )
+
+    #expect(result.succeeded)
+    try await queue.read { (db: Database) throws in
+      #expect(try Space.fetchOne(db, id: spaceID)?.name == "Sidecar space")
+      #expect(try Chat.fetchOne(db, id: chatID)?.spaceId == spaceID)
+      #expect(try Dialog.get(peerId: .thread(id: chatID)).fetchOne(db)?.chatId == chatID)
+      #expect(try cursor(.user, db: db)?.seq == 1)
+      #expect(try cursor(.space(id: spaceID), db: db)?.seq == 9)
+      #expect(try cursor(.chat(peer: chatPeer()), db: db)?.seq == 9)
+    }
+  }
+
+  @Test("an embedded User chatOpen can restore a missing home Chat without sidecars")
+  func chatOpenEmbeddedSnapshotRestoresHomeChat() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { (db: Database) throws in
+      _ = try GRDBSyncStorage.advanceBucketState(for: .chat(peer: chatPeer()), state: .init(date: 9, seq: 9), in: db)
+    }
+    var chat = makeChat()
+    chat.clearSpaceID()
+    var dialog = makeDialog()
+    dialog.clearSpaceID()
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 1
+    update.update = .chatOpen(.with {
+      $0.chat = chat
+      $0.dialog = dialog
+    })
+
+    let result = await engine.applyBatch(
+      updates: [update],
+      source: .syncCatchup,
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 1, seq: 1),
+        expectedStartState: .init(date: 0, seq: 0)
+      )
+    )
+
+    #expect(result.succeeded)
+    try await queue.read { (db: Database) throws in
+      #expect(try Chat.fetchOne(db, id: chatID)?.spaceId == nil)
+      #expect(try Dialog.get(peerId: .thread(id: chatID)).fetchOne(db)?.chatId == chatID)
+      #expect(try cursor(.chat(peer: chatPeer()), db: db)?.seq == 9)
+      #expect(try cursor(.user, db: db)?.seq == 1)
+    }
+  }
+
+  @Test("a sequenced User dialog update restores its exact missing projection")
+  func dialogUpdateRestoresCursorOnlyProjection() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { (db: Database) throws in
+      _ = try GRDBSyncStorage.advanceBucketState(for: .space(id: spaceID), state: .init(date: 9, seq: 9), in: db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .chat(peer: chatPeer()), state: .init(date: 9, seq: 9), in: db)
+    }
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 1
+    update.update = .dialogArchived(.with {
+      $0.peerID = chatPeer()
+      $0.archived = true
+    })
+
+    let result = await engine.applyBatch(
+      updates: [update],
+      source: .syncCatchup,
+      sidecars: makeSidecars(dialog: makeDialog()),
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 1, seq: 1),
+        expectedStartState: .init(date: 0, seq: 0)
+      )
+    )
+
+    #expect(result.succeeded)
+    try await queue.read { (db: Database) throws in
+      #expect(try Chat.fetchOne(db, id: chatID)?.spaceId == spaceID)
+      #expect(try Dialog.get(peerId: .thread(id: chatID)).fetchOne(db)?.archived == true)
+      #expect(try cursor(.chat(peer: chatPeer()), db: db)?.seq == 9)
+      #expect(try cursor(.user, db: db)?.seq == 1)
+    }
+  }
+
+  @Test("a sequenced User access grant restores its missing Chat sidecar")
+  func userAccessGrantRestoresCursorOnlyChat() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { (db: Database) throws in
+      try Space(from: makeSpace()).save(db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .chat(peer: chatPeer()), state: .init(date: 9, seq: 9), in: db)
+    }
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 1
+    update.update = .userAddedToChat(.with { $0.chatID = chatID })
+
+    let result = await engine.applyBatch(
+      updates: [update],
+      source: .syncCatchup,
+      sidecars: makeSidecars(dialog: makeDialog()),
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 1, seq: 1),
+        expectedStartState: .init(date: 0, seq: 0)
+      )
+    )
+
+    #expect(result.succeeded)
+    try await queue.read { (db: Database) throws in
+      #expect(try Chat.fetchOne(db, id: chatID)?.spaceId == spaceID)
+      #expect(try cursor(.chat(peer: chatPeer()), db: db)?.seq == 9)
+      #expect(try cursor(.user, db: db)?.seq == 1)
+    }
+  }
+
+  @Test("a sequenced User join restores missing Space and membership behind its cursor")
+  func joinSpaceRestoresCursorOnlySpace() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { (db: Database) throws in
+      try User(id: 42, email: nil, firstName: "Member").save(db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .space(id: spaceID), state: .init(date: 9, seq: 9), in: db)
+    }
+    var update = InlineProtocol.Update()
+    update.seq = 1
+    update.date = 1
+    update.update = .joinSpace(.with {
+      $0.space = makeSpace()
+      $0.member = .with {
+        $0.id = 420
+        $0.userID = 42
+        $0.spaceID = spaceID
+        $0.role = .member
+        $0.canAccessPublicChats = true
+      }
+    })
+
+    let result = await engine.applyBatch(
+      updates: [update],
+      source: .syncCatchup,
+      bucketCommit: UpdateBucketCommit(
+        key: .user,
+        state: .init(date: 1, seq: 1),
+        expectedStartState: .init(date: 0, seq: 0)
+      )
+    )
+
+    #expect(result.succeeded)
+    try await queue.read { (db: Database) throws in
+      #expect(try Space.fetchOne(db, id: spaceID)?.name == "Sidecar space")
+      #expect(try Member.fetchOne(db, id: 420)?.spaceId == spaceID)
+      #expect(try cursor(.space(id: spaceID), db: db)?.seq == 9)
+      #expect(try cursor(.user, db: db)?.seq == 1)
     }
   }
 
@@ -271,6 +487,79 @@ struct SidecarProjectionOwnershipTests {
     try await queue.read { (db: Database) throws in
       #expect(try Chat.fetchOne(db, id: chatID)?.title == "Owned update")
       #expect(try cursor(.chat(peer: chatPeer()), db: db)?.seq == 8)
+    }
+  }
+
+  @Test("the owning Chat page restores a missing root behind its retained cursor")
+  func owningChatPageRestoresCursorOnlyRoot() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { (db: Database) throws in
+      try Space(from: makeSpace()).save(db)
+      _ = try GRDBSyncStorage.advanceBucketState(for: .chat(peer: chatPeer()), state: .init(date: 9, seq: 9), in: db)
+    }
+    var update = InlineProtocol.Update()
+    update.seq = 10
+    update.date = 10
+    update.update = .chatInfo(.with {
+      $0.chatID = chatID
+      $0.title = "Owned recovery"
+    })
+
+    let result = await engine.applyBatch(
+      updates: [update], source: .syncCatchup, sidecars: makeSidecars(dialog: makeDialog()),
+      bucketCommit: UpdateBucketCommit(
+        key: .chat(peer: chatPeer()), state: .init(date: 10, seq: 10),
+        expectedStartState: .init(date: 9, seq: 9)
+      )
+    )
+
+    #expect(result.succeeded)
+    try await queue.read { (db: Database) throws in
+      #expect(try Chat.fetchOne(db, id: chatID)?.title == "Owned recovery")
+      #expect(try cursor(.chat(peer: chatPeer()), db: db)?.seq == 10)
+    }
+  }
+
+  @Test("the owning Space page restores a missing root behind its retained cursor")
+  func owningSpacePageRestoresCursorOnlyRoot() async throws {
+    let (queue, engine) = try makeEngine()
+    try await queue.write { (db: Database) throws in
+      _ = try GRDBSyncStorage.advanceBucketState(for: .space(id: spaceID), state: .init(date: 9, seq: 9), in: db)
+    }
+    let memberUser = InlineProtocol.User.with {
+      $0.id = 42
+      $0.firstName = "Member"
+    }
+    var update = InlineProtocol.Update()
+    update.seq = 10
+    update.date = 10
+    update.update = .spaceMemberAdd(.with {
+      $0.user = memberUser
+      $0.member = .with {
+        $0.id = 420
+        $0.userID = 42
+        $0.spaceID = spaceID
+        $0.role = .member
+        $0.canAccessPublicChats = true
+      }
+    })
+    var sidecars = InlineProtocol.UpdateSidecars()
+    sidecars.spaces = [makeSpace()]
+    sidecars.users = [memberUser]
+
+    let result = await engine.applyBatch(
+      updates: [update], source: .syncCatchup, sidecars: sidecars,
+      bucketCommit: UpdateBucketCommit(
+        key: .space(id: spaceID), state: .init(date: 10, seq: 10),
+        expectedStartState: .init(date: 9, seq: 9)
+      )
+    )
+
+    #expect(result.succeeded)
+    try await queue.read { (db: Database) throws in
+      #expect(try Space.fetchOne(db, id: spaceID)?.name == "Sidecar space")
+      #expect(try Member.fetchOne(db, id: 420)?.spaceId == spaceID)
+      #expect(try cursor(.space(id: spaceID), db: db)?.seq == 10)
     }
   }
 

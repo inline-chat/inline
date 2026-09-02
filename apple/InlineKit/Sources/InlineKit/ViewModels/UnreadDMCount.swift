@@ -11,6 +11,7 @@ public enum UnreadDMCount {
       FROM dialog
       WHERE peerUserId IS NOT NULL
       AND (archived IS NULL OR archived = 0)
+      AND \(Dialog.catalogActiveSQL)
       """
     )
     return try request.fetchOne(db) ?? 0

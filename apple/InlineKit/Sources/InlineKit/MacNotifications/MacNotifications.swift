@@ -67,6 +67,7 @@ struct MacIncomingNotificationContext: Sendable {
         ON replyThreadAnchor.chatId = notificationChat.parentChatId
        AND replyThreadAnchor.messageId = notificationChat.parentMessageId
       WHERE dialog.id = ?
+        AND \(Dialog.catalogActiveSQL)
       LIMIT 1
       """,
       arguments: [

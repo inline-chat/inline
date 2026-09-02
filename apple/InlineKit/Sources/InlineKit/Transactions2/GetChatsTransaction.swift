@@ -100,6 +100,7 @@ public struct GetChatsTransaction: Transaction2 {
   static func applySnapshot(
     _ result: InlineProtocol.GetChatsResult,
     userProjectionAdmission: UserProjectionAdmission = .missingOnly,
+    replacesActiveCatalog: Bool = false,
     in db: Database
   ) throws -> SnapshotImportResult {
     var seededStates: [BucketKey: BucketState] = [:]
@@ -144,6 +145,28 @@ public struct GetChatsTransaction: Transaction2 {
         continue
       }
       if admission.isPristine && !allowsPristineChildren { continue }
+
+      if replacesActiveCatalog {
+        guard let sequence else {
+          failures.record(.spaceCursors)
+          continue
+        }
+        guard sequence >= (admission.cursorSequence ?? 0) else {
+          if !admission.modelExists { failures.record(.spaces) }
+          continue
+        }
+        if let state = try attempt(.spaces, in: db, failures: &failures, {
+          try Space(from: space).save(db)
+          return try GRDBSyncStorage.seedSnapshotBucketState(
+            for: admission.bucketKey,
+            seq: sequence,
+            in: db
+          )
+        }) {
+          seededStates[admission.bucketKey] = state
+        }
+        continue
+      }
 
       let canReconstructMissingModel = !admission.modelExists
         && allowsUserProjectionReplacements
@@ -206,6 +229,30 @@ public struct GetChatsTransaction: Transaction2 {
       }
       if admission.isPristine && !allowsPristineChildren { continue }
 
+      if replacesActiveCatalog {
+        guard let sequence else {
+          failures.record(.chatCursors)
+          continue
+        }
+        guard sequence >= (admission.cursorSequence ?? 0) else {
+          if !admission.modelExists { failures.record(.chats) }
+          continue
+        }
+
+        var chat = Chat(from: protocolChat)
+        let lastMsgId = chat.lastMsgId
+        chat.lastMsgId = nil
+        pendingChats.append(PendingChat(
+          protocolChat: protocolChat,
+          chat: chat,
+          lastMsgId: lastMsgId,
+          bucketKey: admission.bucketKey,
+          bucketSequence: sequence,
+          publishesState: true
+        ))
+        continue
+      }
+
       let canReconstructMissingModel = !admission.modelExists
         && allowsUserProjectionReplacements
         && sequence != nil && sequence == admission.cursorSequence
@@ -246,11 +293,11 @@ public struct GetChatsTransaction: Transaction2 {
         lastMsgId: lastMsgId,
         bucketKey: admission.bucketKey,
         bucketSequence: sequence,
-        isPristine: admission.isPristine
+        publishesState: admission.isPristine
       ))
     }
 
-    let pristineChatIDs = Set(pendingChats.map { $0.chat.id })
+    let snapshotChatIDs = Set(pendingChats.map { $0.chat.id })
     let messagesByChatID = Dictionary(grouping: result.messages, by: \.chatID)
     while !pendingChats.isEmpty {
       var deferredChats: [PendingChat] = []
@@ -270,7 +317,7 @@ public struct GetChatsTransaction: Transaction2 {
           in: db,
           failures: &failures
         ) {
-          if pending.isPristine { seededStates[pending.bucketKey] = state }
+          if pending.publishesState { seededStates[pending.bucketKey] = state }
         }
       }
 
@@ -290,7 +337,7 @@ public struct GetChatsTransaction: Transaction2 {
             Int64(chats[index].seq) >= (admission.cursorSequence ?? 0) else { return nil }
       return chats[index].id
     })
-    for message in result.messages where !pristineChatIDs.contains(message.chatID)
+    for message in result.messages where !snapshotChatIDs.contains(message.chatID)
       && !suppressedPristineChatIDs.contains(message.chatID) {
       guard message.id > 0, message.chatID > 0 else {
         failures.record(.messages)
@@ -336,14 +383,39 @@ public struct GetChatsTransaction: Transaction2 {
           continue
         }
         _ = try attempt(.dialogs, in: db, failures: &failures, {
-          try dialog.saveFull(db)
+          try dialog.saveFull(
+            db,
+            preservingExistingReadState: replacesActiveCatalog
+          )
+          try DialogCatalogStore.include(
+            dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),
+            in: db
+          )
         })
+      }
+    }
+
+    var retiredBucketKeys: Set<BucketKey> = []
+    if allowsUserProjectionReplacements {
+      for space in spaces {
+        try SpaceCatalogStore.include(spaceID: space.id, in: db)
+      }
+      if replacesActiveCatalog, failures.reports.isEmpty {
+        retiredBucketKeys = try rebuildActiveCatalog(
+          spaces: spaces,
+          chats: chats,
+          dialogs: result.dialogs,
+          folders: result.folders,
+          messages: result.messages,
+          in: db
+        )
       }
     }
 
     return SnapshotImportResult(
       seededStates: seededStates,
       catchUpTargets: catchUpTargets,
+      retiredBucketKeys: retiredBucketKeys,
       userProjectionDisposition: userProjectionDisposition,
       failures: failures.reports
     )
@@ -423,6 +495,75 @@ public struct GetChatsTransaction: Transaction2 {
       }
     }
     return seededState
+  }
+
+  /// Telegram-style reset semantics: rebuild active catalog inclusion while
+  /// retaining cached Space, Dialog read state, Chat, Message, and File rows.
+  private static func rebuildActiveCatalog(
+    spaces: [InlineProtocol.Space],
+    chats: [InlineProtocol.Chat],
+    dialogs: [InlineProtocol.Dialog],
+    folders: [InlineProtocol.DialogFolder],
+    messages: [InlineProtocol.Message],
+    in db: Database
+  ) throws -> Set<BucketKey> {
+    var retiredBucketKeys = Set<BucketKey>()
+
+    let activeSpaceIDs = Set(spaces.map(\.id))
+    for spaceID in try SpaceCatalogStore.replaceActiveSpaceIDs(activeSpaceIDs, in: db) {
+      retiredBucketKeys.insert(.space(id: spaceID))
+    }
+
+    let activeDialogIDs = Set(dialogs.compactMap { dialog -> Int64? in
+      switch dialog.peer.type {
+        case let .user(user) where user.userID > 0:
+          return Dialog.getDialogId(peerUserId: user.userID)
+        case let .chat(chat) where chat.chatID > 0:
+          return Dialog.getDialogId(peerThreadId: chat.chatID)
+        default:
+          return nil
+      }
+    })
+    let activeDialogs = try Dialog.catalogActive().fetchAll(db)
+    for dialog in activeDialogs where !activeDialogIDs.contains(dialog.id) {
+      if let key = bucketKey(for: dialog) {
+        retiredBucketKeys.insert(key)
+      }
+      try DialogCatalogStore.exclude(dialogID: dialog.id, in: db)
+    }
+
+    let activeFolderIDs = Set(folders.map(\.id))
+    let cachedFolders = try DialogFolder.fetchAll(db)
+    for folder in cachedFolders where !activeFolderIDs.contains(folder.id) {
+      try folder.delete(db)
+    }
+
+    let messagesByChatID = Dictionary(grouping: messages, by: \.chatID)
+    for chat in chats {
+      try MessageHistoryCoverageStore.invalidate(db, chatId: chat.id)
+      guard let lastMessageID = chat.hasLastMsgID ? Optional(chat.lastMsgID) : nil,
+            lastMessageID > 0,
+            messagesByChatID[chat.id]?.contains(where: { $0.id == lastMessageID }) == true
+      else { continue }
+      try MessageHistoryCoverageStore.subtract(
+        db,
+        chatId: chat.id,
+        lowerId: lastMessageID,
+        upperId: MessageHistoryHole.positiveMessageIDMax
+      )
+    }
+
+    return retiredBucketKeys
+  }
+
+  private static func bucketKey(for dialog: Dialog) -> BucketKey? {
+    if let userID = dialog.peerUserId, userID > 0 {
+      return .chat(peer: .with { $0.user = .with { $0.userID = userID } })
+    }
+    if let chatID = dialog.peerThreadId, chatID > 0 {
+      return .chat(peer: .with { $0.chat = .with { $0.chatID = chatID } })
+    }
+    return nil
   }
 
   private static func deduplicatedSpaces(
@@ -781,6 +922,7 @@ public struct GetChatsTransaction: Transaction2 {
     var seededStates: [BucketKey: BucketState]
     /// A value of zero requests the exceptional repair caller's latest state.
     var catchUpTargets: [BucketKey: Int64]
+    var retiredBucketKeys: Set<BucketKey>
     var userProjectionDisposition: UserProjectionDisposition
     var failures: [SnapshotImportFailure]
 
@@ -813,12 +955,18 @@ public struct GetChatsTransaction: Transaction2 {
     }
   }
 
-  struct SnapshotImportFailure: Error, Hashable, LocalizedError, Sendable {
+  struct SnapshotImportFailure:
+    Error, Hashable, LocalizedError, PrivacySafeErrorCategoryProviding, Sendable
+  {
     var phase: SnapshotImportPhase
     var count: Int
 
     var errorDescription: String? {
       "getChats skipped \(count) invalid \(phase.rawValue) record(s)"
+    }
+
+    var privacySafeErrorCategory: String {
+      "snapshot_import:\(phase.rawValue)"
     }
   }
 
@@ -858,7 +1006,7 @@ public struct GetChatsTransaction: Transaction2 {
     var lastMsgId: Int64?
     var bucketKey: BucketKey
     var bucketSequence: Int64?
-    var isPristine: Bool
+    var publishesState: Bool
   }
 
   private struct ChildSnapshotAdmission {

@@ -13,6 +13,12 @@ struct GetChatsSnapshotTests {
     return queue
   }
 
+  @Test("snapshot import failures expose stable Sentry categories")
+  func snapshotFailureCategory() {
+    let failure = GetChatsTransaction.SnapshotImportFailure(phase: .dialogs, count: 3)
+    #expect(failure.privacySafeErrorCategory == "snapshot_import:dialogs")
+  }
+
   @Test("child chats import even when they precede their parents")
   func unorderedParentChatsImportDependencyFirst() throws {
     let queue = try makeInMemoryDB()
@@ -835,6 +841,115 @@ struct GetChatsSnapshotTests {
       #expect(try Chat.fetchOne(db, key: 20) == nil)
       #expect(try bucketState(for: childKey, in: db) == nil)
       #expect(imported.seededStates.isEmpty)
+    }
+  }
+
+  @Test("typed account catalog replacement hides omissions without deleting cached history")
+  func accountCatalogReplacementPreservesCachedRows() throws {
+    let queue = try makeInMemoryDB()
+    try queue.write { (db: Database) throws in
+      _ = try User.save(db, user: makeUser(id: 1))
+      for id: Int64 in [1, 2] {
+        try Space(from: makeSpace(id: id, seq: 5)).save(db)
+        try Chat(from: makeChat(id: id * 10, spaceID: id, seq: 5)).saveFull(db)
+        _ = try GRDBSyncStorage.seedSnapshotBucketState(
+          for: .space(id: id),
+          seq: 5,
+          in: db
+        )
+        _ = try GRDBSyncStorage.seedSnapshotBucketState(
+          for: .chat(peer: makeChatPeer(id: id * 10)),
+          seq: 5,
+          in: db
+        )
+        _ = try Message.save(
+          db,
+          protocolMessage: makeMessage(id: 5, chatID: id * 10, fromID: 1),
+          publishChanges: false
+        )
+        var dialog = makeDialog(chatID: id * 10)
+        if id == 1 {
+          dialog.readMaxID = 4
+          dialog.unreadCount = 8
+          dialog.unreadMark = true
+        } else {
+          dialog.readMaxID = 3
+          dialog.unreadCount = 7
+        }
+        try dialog.saveFull(db)
+      }
+      try makeFolder(id: 1, title: "Active").saveFull(db)
+      try makeFolder(id: 2, title: "Omitted").saveFull(db)
+      try DialogCatalogStore.exclude(dialogID: 10, in: db)
+
+      var activeChat = makeChat(id: 10, spaceID: 1, seq: 6, title: "Rebased Chat")
+      activeChat.lastMsgID = 5
+      var result = InlineProtocol.GetChatsResult()
+      result.spaces = [makeSpace(id: 1, seq: 6, name: "Rebased Space")]
+      result.chats = [activeChat]
+      result.messages = [makeMessage(id: 5, chatID: 10, fromID: 1)]
+      result.dialogs = [makeDialog(chatID: 10, folderID: 1)]
+      result.folders = [makeFolder(id: 1, title: "Active")]
+
+      let imported = try GetChatsTransaction.applySnapshot(
+        result,
+        userProjectionAdmission: .alreadyValidated,
+        replacesActiveCatalog: true,
+        in: db
+      )
+
+      #expect(imported.failures.isEmpty)
+      #expect(imported.catchUpTargets.isEmpty)
+      #expect(imported.seededStates[.space(id: 1)]?.seq == 6)
+      #expect(imported.seededStates[.chat(peer: makeChatPeer(id: 10))]?.seq == 6)
+      #expect(imported.retiredBucketKeys == Set([
+        .space(id: 2),
+        .chat(peer: makeChatPeer(id: 20)),
+      ]))
+      #expect(try Space.fetchCount(db) == 2)
+      #expect(try Chat.fetchCount(db) == 2)
+      #expect(try Message.fetchCount(db) == 2)
+      #expect(try Space.fetchOne(db, key: 1)?.name == "Rebased Space")
+      #expect(try Chat.fetchOne(db, key: 10)?.title == "Rebased Chat")
+      #expect(try bucketState(for: .space(id: 1), in: db)?.seq == 6)
+      #expect(try bucketState(for: .chat(peer: makeChatPeer(id: 10)), in: db)?.seq == 6)
+      #expect(try bucketState(for: .space(id: 2), in: db)?.seq == 5)
+      #expect(try bucketState(for: .chat(peer: makeChatPeer(id: 20)), in: db)?.seq == 5)
+      #expect(try Space.catalogActive().fetchAll(db).map(\.id) == [1])
+      let activeDialog = try #require(try Dialog.fetchOne(db, key: 10))
+      #expect(activeDialog.readInboxMaxId == 4)
+      #expect(activeDialog.unreadCount == 8)
+      #expect(activeDialog.unreadMark == true)
+      let retainedDialog = try #require(try Dialog.fetchOne(db, key: 20))
+      #expect(retainedDialog.readInboxMaxId == 3)
+      #expect(retainedDialog.unreadCount == 7)
+      #expect(try Dialog.catalogActive().fetchAll(db).map(\.id) == [10])
+      #expect(try DialogCatalogExclusion.fetchOne(db, key: 10) == nil)
+      #expect(try DialogCatalogExclusion.fetchOne(db, key: 20) != nil)
+      #expect(try DialogFolder.fetchOne(db, key: 1) != nil)
+      #expect(try DialogFolder.fetchOne(db, key: 2) == nil)
+      #expect(try MessageHistoryCoverageStore.holes(db, chatId: 10) == [
+        MessageHistoryHole(chatId: 10, lowerId: 1, upperId: 4),
+      ])
+    }
+  }
+
+  @Test("ordinary catalog application never treats omission as deletion")
+  func ordinaryCatalogOmissionIsInert() throws {
+    let queue = try makeInMemoryDB()
+    try queue.write { (db: Database) throws in
+      try Space(from: makeSpace(id: 1, seq: 5)).save(db)
+      try Chat(from: makeChat(id: 10, spaceID: 1, seq: 5)).saveFull(db)
+      try makeDialog(chatID: 10).saveFull(db)
+
+      _ = try GetChatsTransaction.applySnapshot(
+        .init(),
+        userProjectionAdmission: .alreadyValidated,
+        in: db
+      )
+
+      #expect(try Space.catalogActive().fetchCount(db) == 1)
+      #expect(try Dialog.fetchOne(db, key: 10) != nil)
     }
   }
 

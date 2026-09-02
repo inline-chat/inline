@@ -240,9 +240,11 @@ actor CommandBarCatalogService {
 
     let region = DatabaseRegionObservation(tracking: [
       Table("dialog"),
+      Table("dialogCatalogExclusion"),
       Table("chat"),
       Table("user"),
       Table("space"),
+      Table("spaceCatalogExclusion"),
       Table("message"),
     ])
     observation = region.start(

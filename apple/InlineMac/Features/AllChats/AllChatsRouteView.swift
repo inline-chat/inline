@@ -641,7 +641,7 @@ final class AllChatsViewModel: ObservableObject {
   private func observeSpaces() {
     spacesCancellable = ValueObservation
       .tracking { db in
-        try Space.fetchAll(db)
+        try Space.catalogActive().fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(

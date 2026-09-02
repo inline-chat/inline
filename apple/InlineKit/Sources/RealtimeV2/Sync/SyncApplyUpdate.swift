@@ -55,8 +55,8 @@ public struct UpdateBucketCommit: Sendable {
 public struct ChatRepairSnapshot: Sendable {
   public let peer: InlineProtocol.Peer
   public let chat: InlineProtocol.GetChatResult
-  /// Exact hydration for `chat.pinnedMessageIds`. These rows do not prove any
-  /// contiguous history coverage.
+  /// Optional hydration for a subset of `chat.pinnedMessageIds`. Pin identity
+  /// remains authoritative even while a body is unavailable.
   public let pinnedMessages: [InlineProtocol.Message]
   public let targetState: BucketState
   public let mutationToken: AuthAccountMutationToken
@@ -112,8 +112,15 @@ public struct UserRepairSnapshot: Sendable {
   public let me: InlineProtocol.GetMeResult
   public let settings: InlineProtocol.GetUserSettingsResult
   public let checkpointState: BucketState
+  /// User state captured after the ordinary account projections were fetched.
+  /// A typed User TOO_LONG replays this bounded suffix after installing the
+  /// projection at `checkpointState`; ordinary audits leave it nil.
+  public let replayThroughState: BucketState?
   public let targetState: BucketState
   public let mutationToken: AuthAccountMutationToken
+  /// Only a server-typed User TOO_LONG may replace active catalog inclusion.
+  /// Projection audits and other scoped repairs must leave omissions inert.
+  public let replacesActiveCatalog: Bool
   /// Forces a snapshot projection audit even when the durable user cursor has
   /// already reached the checkpoint. This is reserved for exceptional global
   /// watermark regression recovery and must never rewind the user cursor.
@@ -125,8 +132,10 @@ public struct UserRepairSnapshot: Sendable {
     me: InlineProtocol.GetMeResult,
     settings: InlineProtocol.GetUserSettingsResult,
     checkpointState: BucketState,
+    replayThroughState: BucketState? = nil,
     targetState: BucketState,
     mutationToken: AuthAccountMutationToken,
+    replacesActiveCatalog: Bool = false,
     requiresProjectionAudit: Bool = false,
     reason: String
   ) {
@@ -134,8 +143,10 @@ public struct UserRepairSnapshot: Sendable {
     self.me = me
     self.settings = settings
     self.checkpointState = checkpointState
+    self.replayThroughState = replayThroughState
     self.targetState = targetState
     self.mutationToken = mutationToken
+    self.replacesActiveCatalog = replacesActiveCatalog
     self.requiresProjectionAudit = requiresProjectionAudit
     self.reason = reason
   }
@@ -147,20 +158,26 @@ public struct UserRepairFinalization: Sendable {
   public let expectedUserState: BucketState
   public let expectedUserStateExists: Bool
   public let proposedUserState: BucketState
+  public let replayThroughState: BucketState?
   public let catchUpTargets: [BucketKey: Int64]
+  public let retiredBucketKeys: Set<BucketKey>
   public let mutationToken: AuthAccountMutationToken
 
   public init(
     expectedUserState: BucketState,
     expectedUserStateExists: Bool,
     proposedUserState: BucketState,
+    replayThroughState: BucketState? = nil,
     catchUpTargets: [BucketKey: Int64],
+    retiredBucketKeys: Set<BucketKey> = [],
     mutationToken: AuthAccountMutationToken
   ) {
     self.expectedUserState = expectedUserState
     self.expectedUserStateExists = expectedUserStateExists
     self.proposedUserState = proposedUserState
+    self.replayThroughState = replayThroughState
     self.catchUpTargets = catchUpTargets
+    self.retiredBucketKeys = retiredBucketKeys
     self.mutationToken = mutationToken
   }
 }
@@ -179,12 +196,17 @@ public struct UserRepairTargetResolution: Sendable {
 }
 
 public enum UserRepairOutcome: Sendable {
-  case applied(state: BucketState, seededStates: [BucketKey: BucketState])
+  case applied(
+    state: BucketState,
+    seededStates: [BucketKey: BucketState],
+    replayThroughState: BucketState?,
+    retiredBucketKeys: Set<BucketKey>
+  )
   case pending(
     finalization: UserRepairFinalization,
     seededStates: [BucketKey: BucketState]
   )
-  case superseded(currentState: BucketState)
+  case superseded(currentState: BucketState, replayThroughState: BucketState?)
 }
 
 /// Protocol for applying updates within the Sync actor context

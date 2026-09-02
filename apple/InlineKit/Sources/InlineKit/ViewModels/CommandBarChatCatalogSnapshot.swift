@@ -20,7 +20,7 @@ public extension AppDatabase {
       CommandBarCatalogSnapshot(
         chats: try ChatDestinationCatalogSnapshotQuery.fetchAll(db),
         knownUsers: try ChatDestinationUserQuery.fetchAll(db),
-        spaces: try Space.fetchAll(db)
+        spaces: try Space.catalogActive().fetchAll(db)
       )
     }
   }

@@ -22,7 +22,7 @@ public final class CompactSpaceList: ObservableObject, @unchecked Sendable {
     let log = log
     ValueObservation
       .tracking { db in
-        try Space.fetchAll(db)
+        try Space.catalogActive().fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(

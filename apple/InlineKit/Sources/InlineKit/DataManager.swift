@@ -183,7 +183,7 @@ public class DataManager: ObservableObject {
     let auth = self.auth
     let spaces = try await database.reader.read { db in
       try auth.validateAccountMutation(mutationToken)
-      return try Space.fetchAll(db)
+      return try Space.catalogActive().fetchAll(db)
     }
     try auth.validateAccountMutation(mutationToken)
     return spaces

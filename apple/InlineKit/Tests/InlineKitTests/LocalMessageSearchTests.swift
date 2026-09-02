@@ -117,6 +117,76 @@ struct LocalMessageSearchTests {
     #expect(spaceResults.map(\.chatId) == [chatId])
   }
 
+  @Test("search excludes retained cache outside the active account catalog")
+  func searchExcludesInactiveCatalogCache() async throws {
+    let (queue, appDatabase) = try makeInMemoryDB()
+
+    try await queue.write { db in
+      try seedBase(db)
+      try seedMessage(db, chatId: chatId, messageId: 1, text: "retained hidden keyword")
+      try SpaceCatalogExclusion(spaceId: spaceId).save(db)
+    }
+
+    let results = try await LocalMessageSearch.search(
+      db: appDatabase,
+      query: "hidden",
+      options: LocalMessageSearchOptions(limit: 10)
+    )
+
+    #expect(results.isEmpty)
+    try await queue.read { (db: Database) throws -> Void in
+      #expect(try Message.fetchCount(db) == 1)
+      #expect(try Chat.fetchCount(db) == 1)
+      #expect(try Space.fetchCount(db) == 1)
+    }
+  }
+
+  @Test("search preserves ordinary cached history without a dialog")
+  func searchPreservesOrdinaryHistoryWithoutDialog() async throws {
+    let (queue, appDatabase) = try makeInMemoryDB()
+
+    try await queue.write { db in
+      try seedUser(db)
+      try seedChat(db, id: otherChatId, title: "Cached Thread", spaceId: nil)
+      try seedMessage(db, chatId: otherChatId, messageId: 1, text: "ordinary cached keyword")
+    }
+
+    let results = try await LocalMessageSearch.search(
+      db: appDatabase,
+      query: "cached",
+      options: LocalMessageSearchOptions(limit: 10)
+    )
+
+    #expect(results.map(\.chatId) == [otherChatId])
+  }
+
+  @Test("search excludes only an exact omitted dialog while preserving its cache")
+  func searchExcludesExactOmittedDialog() async throws {
+    let (queue, appDatabase) = try makeInMemoryDB()
+
+    try await queue.write { db in
+      try seedUser(db)
+      try seedChat(db, id: otherChatId, title: "Omitted Thread", spaceId: nil)
+      try seedMessage(db, chatId: otherChatId, messageId: 1, text: "omitted cached keyword")
+      try DialogCatalogStore.exclude(
+        dialogID: Dialog.getDialogId(peerThreadId: otherChatId),
+        in: db
+      )
+    }
+
+    let results = try await LocalMessageSearch.search(
+      db: appDatabase,
+      query: "omitted",
+      options: LocalMessageSearchOptions(limit: 10)
+    )
+
+    #expect(results.isEmpty)
+    try await queue.read { (db: Database) throws -> Void in
+      #expect(try Message.fetchCount(db) == 1)
+      #expect(try Chat.fetchCount(db) == 1)
+    }
+  }
+
   @Test("clear tables leaves fts usable")
   func clearTablesLeavesFtsUsable() async throws {
     let (queue, appDatabase) = try makeInMemoryDB()

@@ -407,7 +407,8 @@ public extension ApiDialog {
 public extension InlineProtocol.Dialog {
   @discardableResult
   func saveFull(
-    _ db: Database
+    _ db: Database,
+    preservingExistingReadState: Bool = false
   )
     throws -> Dialog
   {
@@ -439,6 +440,12 @@ public extension InlineProtocol.Dialog {
       }
       if !hasFollowMode {
         newDialog.followMode = existing.followMode
+      }
+      if preservingExistingReadState {
+        newDialog.unreadCount = existing.unreadCount
+        newDialog.readInboxMaxId = existing.readInboxMaxId
+        newDialog.readOutboxMaxId = existing.readOutboxMaxId
+        newDialog.unreadMark = existing.unreadMark
       }
       try newDialog.save(db, onConflict: .replace)
       Dialog.logUnreadDropFromServer(before: existing, after: newDialog)
@@ -494,8 +501,15 @@ public extension Dialog {
     return sidebarVisible ? nil : true
   }
 
+  static let catalogActiveSQL = """
+  NOT EXISTS (
+    SELECT 1
+    FROM "dialogCatalogExclusion"
+    WHERE "dialogCatalogExclusion"."dialogId" = "dialog"."id"
+  )
+  """
   static let chatListVisibilitySQL =
-    "(\"dialog\".\"chatListHidden\" IS NULL OR \"dialog\".\"chatListHidden\" = 0)"
+    "((\"dialog\".\"chatListHidden\" IS NULL OR \"dialog\".\"chatListHidden\" = 0) AND \(catalogActiveSQL))"
   static let sidebarInboxVisibilitySQL =
     "(\(chatListVisibilitySQL) AND (\"dialog\".\"open\" = 1 OR \"dialog\".\"pinned\" = 1))"
   /// SQL predicate for accent/prominent unread state. Queries must join `chat` as `"chat"`.
@@ -565,6 +579,10 @@ public extension Dialog {
 
   static func applyingChatListVisibilityFilter<T: DerivableRequest>(_ request: T) -> T {
     request.filter(sql: chatListVisibilitySQL)
+  }
+
+  static func catalogActive() -> QueryInterfaceRequest<Dialog> {
+    filter(sql: catalogActiveSQL)
   }
 
   static func get(peerId: Peer) -> QueryInterfaceRequest<Dialog> {

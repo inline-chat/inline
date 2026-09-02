@@ -550,6 +550,21 @@ actor Sync {
     buckets.removeValue(forKey: key)
   }
 
+  /// Retires only actors made inactive by an admitted account catalog rebase.
+  /// Durable cursors and cached rows remain available if access returns.
+  func retireCatalogBucketActors(_ keys: Set<BucketKey>) async {
+    for key in keys where key != .user {
+      if let loadRetry = bucketLoadRetries.removeValue(forKey: key) {
+        loadRetry.task.cancel()
+      }
+      if let actor = buckets.removeValue(forKey: key) {
+        await actor.invalidate()
+        await actor.waitUntilIdle()
+      }
+      await resolveInaccessibleBucket(key: key)
+    }
+  }
+
   /// Apply updates from bucket actor
   func userStateForMissingChildAdmission() async throws -> BucketState {
     guard acceptsWork, !isResetting else { throw CancellationError() }
@@ -635,18 +650,14 @@ actor Sync {
             chat.hasDialog,
             chat.chat.id > 0,
             chat.dialog.chatID == chat.chat.id,
-            chat.chat.peerID == peer,
-            chat.dialog.hasUnreadCount,
-            chat.dialog.unreadCount >= 0,
-            !chat.dialog.hasReadMaxID || chat.dialog.readMaxID >= 0
+            chat.chat.peerID == peer
       else {
         log.error("getChat result did not match the requested chat during chat repair")
         return nil
       }
 
       let pinnedIDs = chat.pinnedMessageIds
-      guard pinnedIDs.count <= Int(Self.chatRepairHistoryLimit),
-            pinnedIDs.allSatisfy({ $0 > 0 }),
+      guard pinnedIDs.allSatisfy({ $0 > 0 }),
             Set(pinnedIDs).count == pinnedIDs.count,
             validateChatRepairMessages(chat)
       else {
@@ -757,6 +768,7 @@ actor Sync {
   func repairUserBucket(
     targetState: BucketState,
     reason: String,
+    replacesActiveCatalog: Bool = false,
     requiresProjectionAudit: Bool = false
   ) async -> UserRepairOutcome? {
     guard let client else {
@@ -812,13 +824,38 @@ actor Sync {
         log.error("failed to parse account snapshot during user repair")
         return nil
       }
+
+      let replayThroughState: BucketState?
+      if replacesActiveCatalog {
+        guard let rawReplayThrough = try await callRepairRpc(
+          client: client,
+          method: .getUpdatesState,
+          input: .getUpdatesState(.init()),
+          timeout: Self.getUpdatesStateTimeout
+        ), case let .getUpdatesState(replayThrough) = rawReplayThrough,
+          replayThrough.hasSeq,
+          replayThrough.date > 0,
+          Int64(replayThrough.seq) >= checkpointState.seq
+        else {
+          log.error("failed to capture a valid post-snapshot user checkpoint during account rebase")
+          return nil
+        }
+        replayThroughState = BucketState(
+          date: replayThrough.date,
+          seq: Int64(replayThrough.seq)
+        )
+      } else {
+        replayThroughState = nil
+      }
       return await applyUpdates.repairUser(UserRepairSnapshot(
         chats: chats,
         me: me,
         settings: settings,
         checkpointState: checkpointState,
+        replayThroughState: replayThroughState,
         targetState: targetState,
         mutationToken: accountMutationToken,
+        replacesActiveCatalog: replacesActiveCatalog,
         requiresProjectionAudit: requiresProjectionAudit,
         reason: reason
       ))
@@ -1250,8 +1287,8 @@ actor Sync {
   /// RPC, then replays only (B,C]. Concurrent catalog snapshots are guarded by
   /// their expected user cursor, so they either land before this replay or retry.
   private func probeFreshUserBucket(afterCheckpointSeq checkpointSeq: Int64) {
-    guard checkpointSeq > 0 else {
-      log.warning("refusing a fresh user probe without a checkpoint sequence")
+    guard checkpointSeq >= 0 else {
+      log.warning("refusing a fresh user probe with a negative checkpoint sequence")
       return
     }
     registerDiscoveryTarget(key: .user, seq: 0)
@@ -1505,6 +1542,9 @@ actor Sync {
           guard payload.hasSeq else {
             throw StateFetchAttemptError.missingUserSequence
           }
+          guard payload.seq >= 0 else {
+            throw StateFetchAttemptError.invalidResponse
+          }
           let existingUser = try await syncStorage.getBucketState(for: .user)
           guard isCurrent(expectedGeneration), !Task.isCancelled else { return }
           if existingUser.seq > 0 || existingUser.date > 0 {
@@ -1522,7 +1562,7 @@ actor Sync {
             try await stageDiscoveryCheckpoint(
               payload.date, updatesFound: false, round: round, generation: expectedGeneration
             )
-            if payload.seq > 0 { probeFreshUserBucket(afterCheckpointSeq: Int64(payload.seq)) }
+            probeFreshUserBucket(afterCheckpointSeq: Int64(payload.seq))
           } else {
             let seed = BucketState(date: payload.date, seq: Int64(payload.seq))
             let appliedSeed = await applyUpdates.apply(
@@ -1551,9 +1591,7 @@ actor Sync {
               throw StateFetchAttemptError.globalCheckpointWriteFailed
             }
             stats.lastSyncDate = payload.date
-            if payload.seq > 0 {
-              probeFreshUserBucket(afterCheckpointSeq: Int64(payload.seq))
-            }
+            probeFreshUserBucket(afterCheckpointSeq: Int64(payload.seq))
           }
           // A fresh bootstrap captures the account cursor first, then performs
           // exactly one bounded post-capture user probe. It never enumerates
@@ -1561,6 +1599,9 @@ actor Sync {
         } else {
           guard payload.hasSeq else {
             throw StateFetchAttemptError.missingUserSequence
+          }
+          guard payload.seq >= 0 else {
+            throw StateFetchAttemptError.invalidResponse
           }
           if payload.date < state.lastSyncDate {
             // A server-regressed checkpoint is exceptional: monotonic-ignore
@@ -2411,6 +2452,7 @@ actor BucketActor {
   private static let maxTotalUpdates: Int64 = 10_000
   private static let maxBufferedRealtimeUpdates = 4_096
   private static let maxBufferedRealtimeBytes = 16 * 1024 * 1024
+  private static let maxReportedInvalidEnvelopeFingerprints = 16
   private static let getUpdatesTimeout: Duration = .seconds(30)
 
   // Strong ref for the same reason as Sync.client.
@@ -2439,6 +2481,8 @@ actor BucketActor {
   private var retryTask: Task<Void, Never>?
   private var retryAttempt: Int = 0
   private var retryUsesRateLimitDelay = false
+  private var reportedInvalidEnvelopeFingerprints: Set<String> = []
+  private var reportedInvalidEnvelopeOverflow = false
   private var isInvalidated: Bool = false
   private var holdsActivityLease = false
   private var activeOperations = 0
@@ -3205,6 +3249,7 @@ actor BucketActor {
             targetSeq: serverSeq,
             targetDate: payload.date,
             reason: "too_long",
+            replacesUserCatalog: key == .user,
             latestDemand: passLatestGeneration
           ) {
             resultLabel = "repaired_too_long"
@@ -3227,7 +3272,7 @@ actor BucketActor {
           // A malformed lossless page is a server/protocol defect, not evidence
           // that journal history expired. Keep the cursor and exact target;
           // only an explicit server classification may enter snapshot repair.
-          log.error("rejecting malformed getUpdates page for bucket \(key): \(fingerprint)")
+          reportInvalidEnvelopeOnce(fingerprint)
           resultLabel = "invalid_page_envelope"
           return false
         }
@@ -3236,6 +3281,11 @@ actor BucketActor {
         // response contract. Reject it before sidecars, rows, or the cursor
         // date are committed; valid non-final pages still commit individually.
         guard !payload.final || payload.seq >= hardEndSeq else {
+          reportInvalidEnvelopeOnce(invalidEnvelopeFingerprint(
+            payload,
+            startSeq: currentSeq,
+            targetSeq: hardEndSeq
+          ))
           resultLabel = "target_not_reached"
           return false
         }
@@ -3259,7 +3309,11 @@ actor BucketActor {
           return false
         }
         guard payload.final || payload.seq > currentSeq else {
-          log.error("non-progress getUpdates response for bucket \(key)")
+          reportInvalidEnvelopeOnce(invalidEnvelopeFingerprint(
+            payload,
+            startSeq: currentSeq,
+            targetSeq: hardEndSeq
+          ))
           resultLabel = "non_progress"
           return false
         }
@@ -3468,6 +3522,8 @@ actor BucketActor {
   private func resetRetryState() {
     retryAttempt = 0
     retryUsesRateLimitDelay = false
+    reportedInvalidEnvelopeFingerprints.removeAll(keepingCapacity: true)
+    reportedInvalidEnvelopeOverflow = false
     retryTask?.cancel()
     retryTask = nil
   }
@@ -3619,7 +3675,11 @@ actor BucketActor {
     }
     guard !isInvalidated else { return }
     pendingUserRepair = nil
-    _ = await commitUserRepairState(saved, sync: sync)
+    _ = await commitUserRepairState(
+      saved,
+      replayThroughState: pending.finalization.replayThroughState,
+      sync: sync
+    )
   }
 
   func pendingUserRepairTargetBecameInaccessible(key: BucketKey) async {
@@ -3641,11 +3701,17 @@ actor BucketActor {
   func applyUserRepairOutcome(_ outcome: UserRepairOutcome) async -> BucketState? {
     guard !isInvalidated, let sync else { return nil }
     switch outcome {
-      case let .applied(state, seededStates):
+      case let .applied(state, seededStates, replayThroughState, retiredBucketKeys):
+        await sync.retireCatalogBucketActors(retiredBucketKeys)
         await sync.installSnapshotBucketStates(seededStates)
         pendingUserRepair = nil
-        return await commitUserRepairState(state, sync: sync)
+        return await commitUserRepairState(
+          state,
+          replayThroughState: replayThroughState,
+          sync: sync
+        )
       case let .pending(finalization, seededStates):
+        await sync.retireCatalogBucketActors(finalization.retiredBucketKeys)
         await sync.installSnapshotBucketStates(seededStates)
         pendingUserRepair = PendingUserRepair(finalization: finalization)
         // Register all exact child demands before the user cursor advances. A
@@ -3661,15 +3727,23 @@ actor BucketActor {
         // Keep the old cursor visible until every child is durable and the
         // apply owner accepts the exact finalization CAS.
         return BucketState(date: date, seq: seq)
-      case let .superseded(currentState):
+      case let .superseded(currentState, replayThroughState):
         // Another repair already committed this checkpoint. It has no child
         // seeds or target demands for this invocation to apply.
         pendingUserRepair = nil
-        return await commitUserRepairState(currentState, sync: sync)
+        return await commitUserRepairState(
+          currentState,
+          replayThroughState: replayThroughState,
+          sync: sync
+        )
     }
   }
 
-  private func commitUserRepairState(_ saved: BucketState, sync: Sync) async -> BucketState? {
+  private func commitUserRepairState(
+    _ saved: BucketState,
+    replayThroughState: BucketState? = nil,
+    sync: Sync
+  ) async -> BucketState? {
     guard saved.seq >= seq else {
       // The durable owner may have observed a newer realtime cursor while the
       // repair was in flight. Keep the actor at that newer state; treating the
@@ -3681,6 +3755,10 @@ actor BucketActor {
     date = max(date, saved.date)
     retainBufferedRealtimeUpdates(after: saved.seq)
     if let fetchSeqEnd, saved.seq >= fetchSeqEnd { self.fetchSeqEnd = nil }
+    if let replayThroughState, replayThroughState.seq > seq {
+      setFetchTarget(upToSeq: replayThroughState.seq)
+      needsFetch = true
+    }
     await sync.bucketDidAdvance(key: key, state: saved, authoritative: true)
     if !isFetching, needsFetch || !bufferedRealtimeUpdates.isEmpty || fetchSeqEnd != nil {
       Task { await self.fetchNewUpdates() }
@@ -3697,6 +3775,7 @@ actor BucketActor {
     targetSeq: Int64,
     targetDate: Int64,
     reason: String,
+    replacesUserCatalog: Bool = false,
     latestDemand: UInt64? = nil
   ) async -> Bool {
     guard targetSeq > seq, let sync else { return false }
@@ -3731,7 +3810,8 @@ actor BucketActor {
       case .user:
         guard let outcome = await sync.repairUserBucket(
           targetState: targetState,
-          reason: reason
+          reason: reason,
+          replacesActiveCatalog: replacesUserCatalog
         ) else { return false }
         return await applyUserRepairOutcome(outcome) != nil
     }
@@ -3764,17 +3844,31 @@ actor BucketActor {
     ].joined(separator: "|")
   }
 
+  /// Reports each unchanged malformed-page shape once until durable progress.
+  /// This is telemetry suppression only; retries remain cursor-safe and never
+  /// infer snapshot repair from an attempt count.
+  private func reportInvalidEnvelopeOnce(_ fingerprint: String) {
+    guard !reportedInvalidEnvelopeFingerprints.contains(fingerprint) else { return }
+    guard reportedInvalidEnvelopeFingerprints.count < Self.maxReportedInvalidEnvelopeFingerprints else {
+      if !reportedInvalidEnvelopeOverflow {
+        reportedInvalidEnvelopeOverflow = true
+        log.error("rejecting additional malformed getUpdates page shapes for bucket \(key)")
+      }
+      return
+    }
+    reportedInvalidEnvelopeFingerprints.insert(fingerprint)
+    log.error("rejecting malformed getUpdates page for bucket \(key): \(fingerprint)")
+  }
+
   private func validatePageEnvelope(
     _ payload: InlineProtocol.GetUpdatesResult,
     startSeq: Int64,
     targetSeq: Int64
   ) -> Bool? {
     guard payload.resultType == .slice || payload.resultType == .empty else {
-      log.error("invalid getUpdates result type \(payload.resultType) for bucket \(key)")
       return nil
     }
     guard payload.seq >= startSeq else {
-      log.error("getUpdates page moved backwards for bucket \(key): start=\(startSeq), end=\(payload.seq)")
       return nil
     }
     // An equal-bound request has no journal row from which the server can
@@ -3784,23 +3878,19 @@ actor BucketActor {
       payload.seq == startSeq && startSeq == targetSeq && payload.date == 0 &&
       payload.updates.isEmpty && payload.skippedSequences.isEmpty && !payload.hasSidecars
     guard payload.date > 0 || isEmptyCompletion else {
-      log.error("getUpdates page omitted a valid date for bucket \(key)")
       return nil
     }
     if payload.resultType == .empty, !payload.updates.isEmpty {
-      log.error("empty getUpdates page included updates for bucket \(key)")
       return nil
     }
 
     var accounted = Set<Int64>()
     for update in payload.updates {
       guard update.hasSeq else {
-        log.error("getUpdates page included an unsequenced update for bucket \(key)")
         return nil
       }
       let updateSeq = Int64(update.seq)
       guard updateSeq > startSeq, updateSeq <= payload.seq, accounted.insert(updateSeq).inserted else {
-        log.error("getUpdates page included an invalid or duplicate sequence \(updateSeq) for bucket \(key)")
         return nil
       }
     }
@@ -3808,7 +3898,6 @@ actor BucketActor {
     var requiresSnapshotRepair = false
     for skipped in payload.skippedSequences {
       guard skipped.seq > startSeq, skipped.seq <= payload.seq, accounted.insert(skipped.seq).inserted else {
-        log.error("getUpdates page included an invalid or duplicate skipped sequence \(skipped.seq) for bucket \(key)")
         return nil
       }
       switch skipped.reason {
@@ -3817,15 +3906,11 @@ actor BucketActor {
         case .snapshotRepairRequired:
           requiresSnapshotRepair = true
         case .unspecified, .UNRECOGNIZED:
-          log.error("getUpdates page included an unknown skipped-sequence reason for bucket \(key)")
           return nil
       }
     }
 
     guard Int64(accounted.count) == payload.seq - startSeq else {
-      log.error(
-        "getUpdates page did not account for every sequence for bucket \(key): start=\(startSeq), end=\(payload.seq), accounted=\(accounted.count)"
-      )
       return nil
     }
     return requiresSnapshotRepair

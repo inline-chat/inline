@@ -64,9 +64,11 @@ struct ChatRepairReplacementTests {
     }
 
     let target = BucketState(date: 20, seq: 5)
+    var repairSnapshot = repairedChatResult()
+    repairSnapshot.pinnedMessageIds = (1 ... 101).map(Int64.init)
     let committed = await engine.applyChatRepair(ChatRepairSnapshot(
       peer: chatPeer(7),
-      chat: repairedChatResult(),
+      chat: repairSnapshot,
       pinnedMessages: [],
       targetState: target,
       mutationToken: accountToken(),
@@ -90,6 +92,7 @@ struct ChatRepairReplacementTests {
       ])
       #expect(try Chat.fetchOne(db, id: 7)?.participantRosterComplete == false)
       #expect(try ChatParticipant.fetchAll(db).map(\.userId) == [1])
+      #expect(try PinnedMessage.fetchCount(db) == 101)
       let dialog = try #require(try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: .thread(id: 7))))
       #expect(dialog.open)
       #expect(dialog.order == "local-order")
@@ -128,8 +131,8 @@ struct ChatRepairReplacementTests {
     }
   }
 
-  @Test("installs the newest ordinary-message window and matching read projection")
-  func installsRecentWindowAndReadProjection() async throws {
+  @Test("installs the newest ordinary-message window without changing the existing read projection")
+  func installsRecentWindowWithoutChangingReadProjection() async throws {
     let (queue, engine) = try makeRepairDatabase(cursor: 1, title: "Stale")
     let expectedUserState = BucketState(date: 50, seq: 7)
     try await queue.write { (db: Database) throws in
@@ -174,8 +177,8 @@ struct ChatRepairReplacementTests {
         .map(\.messageId) == [12, 11])
       #expect(try Chat.fetchOne(db, id: 7)?.lastMsgId == 12)
       let dialog = try #require(try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: .thread(id: 7))))
-      #expect(dialog.readInboxMaxId == 10)
-      #expect(dialog.unreadCount == 2)
+      #expect(dialog.readInboxMaxId == 3)
+      #expect(dialog.unreadCount == 9)
       #expect(dialog.open)
       #expect(try MessageHistoryCoverageStore.holes(db, chatId: 7) == [
         MessageHistoryHole(chatId: 7, lowerId: 1, upperId: 10),

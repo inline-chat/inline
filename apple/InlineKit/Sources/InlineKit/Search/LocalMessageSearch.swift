@@ -186,6 +186,27 @@ public enum LocalMessageSearch {
       filters.append("(dialog.archived IS NULL OR dialog.archived = 0)")
     }
 
+    // Retained cache remains available for repair, but account-rebase
+    // omissions are not active search destinations.
+    filters.append("""
+      NOT EXISTS (
+        SELECT 1
+        FROM spaceCatalogExclusion
+        WHERE spaceCatalogExclusion.spaceId = COALESCE(dialog.spaceId, chat.spaceId)
+      )
+      """)
+    filters.append("""
+      NOT EXISTS (
+        SELECT 1
+        FROM dialogCatalogExclusion
+        WHERE dialogCatalogExclusion.dialogId = CASE
+          WHEN message.peerUserId IS NOT NULL THEN message.peerUserId
+          WHEN message.peerThreadId < 500 THEN message.peerThreadId
+          ELSE -message.peerThreadId
+        END
+      )
+      """)
+
     arguments += StatementArguments([limit, offset])
 
     let orderSQL = switch options.sort {

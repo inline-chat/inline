@@ -56,9 +56,14 @@ final class MacScriptingAdapter {
     case let .spaces(limit, offset):
       result = try await database.reader.read { db in
         try auth.validateAccountMutation(token)
-        return .list(try Space.order(Space.Columns.id).limit(limit, offset: offset).fetchAll(db).map {
-          .record([.spaceID: .text(String($0.id)), .title: .text($0.name)])
-        })
+        return .list(try Space
+          .catalogActive()
+          .order(Space.Columns.id)
+          .limit(limit, offset: offset)
+          .fetchAll(db)
+          .map {
+            .record([.spaceID: .text(String($0.id)), .title: .text($0.name)])
+          })
       }
     case let .users(query, spaceID, limit, offset):
       result = try await database.reader.read { db in
@@ -276,6 +281,7 @@ final class MacScriptingAdapter {
       u.firstName AS scriptingFirstName, u.lastName AS scriptingLastName, u.username AS scriptingUsername
     FROM chat c JOIN dialog d ON coalesce(d.chatId, d.peerThreadId) = c.id LEFT JOIN user u ON u.id = c.peerUserId
     WHERE c.id > 0 AND c.createState IS NULL
+      AND NOT EXISTS (SELECT 1 FROM dialogCatalogExclusion x WHERE x.dialogId = d.id)
     """
 
   // Explicitly selecting an open reply may reveal its metadata, but general queries stay filtered.
@@ -294,7 +300,8 @@ final class MacScriptingAdapter {
     WHERE u.id > 0 AND coalesce(u.pendingSetup, 0) = 0 AND (
       u.id = ? OR EXISTS (
         SELECT 1 FROM chat c JOIN dialog d ON coalesce(d.chatId, d.peerThreadId) = c.id
-        WHERE c.id > 0 AND c.createState IS NULL AND coalesce(d.chatListHidden, 0) = 0 AND (
+        WHERE c.id > 0 AND c.createState IS NULL AND coalesce(d.chatListHidden, 0) = 0
+          AND NOT EXISTS (SELECT 1 FROM dialogCatalogExclusion x WHERE x.dialogId = d.id) AND (
           c.peerUserId = u.id OR EXISTS (
             SELECT 1 FROM chatParticipant p WHERE p.chatId = c.id AND p.userId = u.id
           )
@@ -302,6 +309,9 @@ final class MacScriptingAdapter {
       ) OR EXISTS (
         SELECT 1 FROM member m JOIN member mine ON mine.spaceId = m.spaceId
         WHERE m.userId = u.id AND mine.userId = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM spaceCatalogExclusion x WHERE x.spaceId = m.spaceId
+          )
       )
     )
     """
@@ -317,8 +327,9 @@ final class MacScriptingAdapter {
       sql += """
          AND EXISTS (SELECT 1 FROM member m WHERE m.userId = u.id AND m.spaceId = ?)
          AND EXISTS (SELECT 1 FROM member mine WHERE mine.userId = ? AND mine.spaceId = ?)
+         AND NOT EXISTS (SELECT 1 FROM spaceCatalogExclusion x WHERE x.spaceId = ?)
         """
-      arguments += [spaceID, accountID, spaceID]
+      arguments += [spaceID, accountID, spaceID, spaceID]
     }
     if let query {
       let pattern = "%" + query.replacingOccurrences(of: "\\", with: "\\\\")

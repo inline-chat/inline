@@ -78,6 +78,7 @@ struct MoveThreadToSpaceSheet: View {
     do {
       let loaded = try await AppDatabase.shared.reader.read { db in
         try Space
+          .catalogActive()
           .joining(required: Space.members.filter(Member.Columns.userId == currentUserId))
           .order(Space.Columns.name)
           .fetchAll(db)

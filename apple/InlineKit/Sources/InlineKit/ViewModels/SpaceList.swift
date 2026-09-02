@@ -39,7 +39,7 @@ public final class SpaceListViewModel: ObservableObject {
     db.warnIfInMemoryDatabaseForObservation("SpaceListViewModel.spaces")
     ValueObservation
       .tracking { db in
-        try Space.fetchAll(db)
+        try Space.catalogActive().fetchAll(db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(

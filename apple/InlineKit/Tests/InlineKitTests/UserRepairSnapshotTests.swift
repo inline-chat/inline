@@ -39,7 +39,7 @@ struct UserRepairSnapshotTests {
     ))
 
     guard let committed,
-          case let .applied(state, seededStates) = committed
+          case let .applied(state, seededStates, replayThroughState, retiredBucketKeys) = committed
     else {
       Issue.record("Expected the user repair to win admission")
       return
@@ -47,6 +47,8 @@ struct UserRepairSnapshotTests {
     #expect(state.seq == 55)
     #expect(state.date == 220)
     #expect(seededStates.isEmpty)
+    #expect(replayThroughState == nil)
+    #expect(retiredBucketKeys.isEmpty)
     try await queue.read { (db: Database) throws in
       let recoveredUser = try User.fetchOne(db, id: 42)
       #expect(recoveredUser?.firstName == "Recovered")
@@ -57,6 +59,52 @@ struct UserRepairSnapshotTests {
       #expect(state.seq == 55)
       #expect(state.date == 220)
     }
+  }
+
+  @Test("catalog replacement requires and preserves its post-projection replay bound")
+  func catalogReplacementCarriesReplayBound() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let appDatabase = try AppDatabase(queue)
+    let engine = UpdatesEngine(
+      database: appDatabase,
+      authenticatedUserID: { 42 },
+      validateAccountMutation: { _ in },
+      applyUserSettings: { _, _, _ in }
+    )
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 42 }
+
+    let missingBound = await engine.applyUserRepair(UserRepairSnapshot(
+      chats: .init(),
+      me: me,
+      settings: userSettingsResult(),
+      checkpointState: BucketState(date: 220, seq: 55),
+      targetState: BucketState(date: 200, seq: 50),
+      mutationToken: accountToken(),
+      replacesActiveCatalog: true,
+      reason: "missing-replay-bound"
+    ))
+    #expect(missingBound == nil)
+
+    let outcome = await engine.applyUserRepair(UserRepairSnapshot(
+      chats: .init(),
+      me: me,
+      settings: userSettingsResult(),
+      checkpointState: BucketState(date: 220, seq: 55),
+      replayThroughState: BucketState(date: 230, seq: 57),
+      targetState: BucketState(date: 200, seq: 50),
+      mutationToken: accountToken(),
+      replacesActiveCatalog: true,
+      reason: "bounded-account-rebase"
+    ))
+    guard case let .applied(state, _, replayThroughState, retiredBucketKeys)? = outcome else {
+      Issue.record("Expected the bounded account rebase to apply")
+      return
+    }
+    #expect(state.seq == 55)
+    #expect(replayThroughState?.date == 230)
+    #expect(replayThroughState?.seq == 57)
+    #expect(retiredBucketKeys.isEmpty)
   }
 
   @Test("child catch-up targets keep the user cursor pending until they are durable")
@@ -345,12 +393,13 @@ struct UserRepairSnapshotTests {
       reason: "stale-test"
     ))
 
-    guard let committed, case let .superseded(currentState) = committed else {
+    guard let committed, case let .superseded(currentState, replayThroughState) = committed else {
       Issue.record("Expected the stale repair to lose admission")
       return
     }
     #expect(currentState.seq == 75)
     #expect(currentState.date == 300)
+    #expect(replayThroughState == nil)
     #expect(settingsRecorder.applyCount == 0)
     try await queue.read { (db: Database) throws in
       let staleUser = try User.fetchOne(db, id: 42)
@@ -388,11 +437,13 @@ struct UserRepairSnapshotTests {
       requiresProjectionAudit: true,
       reason: "delayed-regression-audit"
     ))
-    guard case let .applied(state, _)? = outcome else {
+    guard case let .applied(state, _, replayThroughState, retiredBucketKeys)? = outcome else {
       Issue.record("Expected a child-only audit to finish without rewriting the user projection")
       return
     }
     #expect(state.seq == 56)
+    #expect(replayThroughState == nil)
+    #expect(retiredBucketKeys.isEmpty)
     try await queue.read { (db: Database) throws -> Void in
       #expect(try User.fetchOne(db, id: 42)?.firstName == "Current")
       #expect(try DialogFolder.fetchOne(db, id: 7)?.title == "Current folder")
