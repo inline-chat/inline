@@ -440,22 +440,29 @@ private struct AgentThreadConfigurationSubmenu: View {
       selectionButton(label: "Provider default", id: nil)
       if !options.isEmpty { Divider() }
       ForEach(options) { option in
-        selectionButton(label: option.label, id: option.id)
-          .help(option.description ?? option.label)
+        selectionButton(
+          label: option.label,
+          description: option.description,
+          id: option.id
+        )
       }
     }
     .disabled(isDisabled)
   }
 
-  private func selectionButton(label: String, id: String?) -> some View {
+  private func selectionButton(
+    label: String,
+    description: String? = nil,
+    id: String?
+  ) -> some View {
     Button {
       select(id)
     } label: {
-      if selectedID == id {
-        Label(label, systemImage: "checkmark")
-      } else {
-        Text(label)
-      }
+      AgentThreadConfigurationOptionLabel(
+        title: label,
+        description: description,
+        isSelected: selectedID == id
+      )
     }
   }
 }
@@ -472,21 +479,57 @@ private struct AgentThreadModelSubmenu: View {
       selectionButton(label: "Provider default", id: nil)
       if !options.isEmpty { Divider() }
       ForEach(options) { option in
-        selectionButton(label: option.label, id: option.id)
-          .help(option.description ?? option.label)
+        selectionButton(
+          label: option.label,
+          description: option.description,
+          id: option.id
+        )
       }
     }
     .disabled(isDisabled)
   }
 
-  private func selectionButton(label: String, id: String?) -> some View {
+  private func selectionButton(
+    label: String,
+    description: String? = nil,
+    id: String?
+  ) -> some View {
     Button {
       select(id)
     } label: {
-      if selectedID == id {
-        Label(label, systemImage: "checkmark")
-      } else {
-        Text(label)
+      AgentThreadConfigurationOptionLabel(
+        title: label,
+        description: description,
+        isSelected: selectedID == id
+      )
+    }
+  }
+}
+
+private struct AgentThreadConfigurationOptionLabel: View {
+  let title: String
+  let description: String?
+  let isSelected: Bool
+
+  var body: some View {
+    if isSelected {
+      Label {
+        content
+      } icon: {
+        Image(systemName: "checkmark")
+      }
+    } else {
+      content
+    }
+  }
+
+  private var content: some View {
+    VStack(alignment: .leading, spacing: 1) {
+      Text(title)
+      if let description, !description.isEmpty {
+        Text(description)
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
     }
   }

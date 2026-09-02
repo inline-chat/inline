@@ -1204,6 +1204,8 @@ private struct AllChatsComposeAccessoryView: View {
         )
       }
 
+      Spacer(minLength: 0)
+
       if let models = model.agentCatalog?.models {
         AgentModelConfigurationMenu(
           title: model.modelTitle,
@@ -1228,8 +1230,6 @@ private struct AllChatsComposeAccessoryView: View {
           select: model.selectReasoning
         )
       }
-
-      Spacer(minLength: 0)
 
       if model.isSubmitting {
         ProgressView()
@@ -1261,13 +1261,12 @@ private struct AgentConfigurationMenu: View {
         Button {
           select(option.id)
         } label: {
-          if selection == option.id {
-            Label(option.label, systemImage: "checkmark")
-          } else {
-            Text(option.label)
-          }
+          AgentConfigurationOptionMenuLabel(
+            title: option.label,
+            description: option.description,
+            isSelected: selection == option.id
+          )
         }
-        .help(option.description ?? option.label)
       }
     } label: {
       AllChatsComposePillLabel(title: title)
@@ -1301,13 +1300,12 @@ private struct AgentModelConfigurationMenu: View {
         Button {
           select(option.id)
         } label: {
-          if selection == option.id {
-            Label(option.label, systemImage: "checkmark")
-          } else {
-            Text(option.label)
-          }
+          AgentConfigurationOptionMenuLabel(
+            title: option.label,
+            description: option.description,
+            isSelected: selection == option.id
+          )
         }
-        .help(option.description ?? option.label)
       }
     } label: {
       AllChatsComposePillLabel(title: title)
@@ -1321,6 +1319,36 @@ private struct AgentModelConfigurationMenu: View {
       description: "Choose the provider model for this thread only.",
       placement: tooltipPlacement
     )
+  }
+}
+
+@available(macOS 26.0, *)
+private struct AgentConfigurationOptionMenuLabel: View {
+  let title: String
+  let description: String?
+  let isSelected: Bool
+
+  var body: some View {
+    if isSelected {
+      Label {
+        content
+      } icon: {
+        Image(systemName: "checkmark")
+      }
+    } else {
+      content
+    }
+  }
+
+  private var content: some View {
+    VStack(alignment: .leading, spacing: 1) {
+      Text(title)
+      if let description, !description.isEmpty {
+        Text(description)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
   }
 }
 
