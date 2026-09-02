@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 
-const HERMES_SENTRY_DSN =
-  "https://0d0eca8210b21c950e3ca2743725d2a7@o124360.ingest.us.sentry.io/4512015952576513"
 const TELEMETRY_TIMEOUT_MS = 2_000
 const TELEMETRY_DEDUP_MS = 5 * 60_000
 const MAX_ERROR_MESSAGE_LENGTH = 8_000
@@ -52,11 +50,7 @@ function telemetryDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
 
 function resolveDsn(env: NodeJS.ProcessEnv = process.env): string {
   if (telemetryDisabled(env)) return ""
-  if (env.INLINE_HERMES_SENTRY_DSN !== undefined) {
-    return env.INLINE_HERMES_SENTRY_DSN.trim()
-  }
-  if (env.NODE_ENV === "test" || env.VITEST === "true") return ""
-  return HERMES_SENTRY_DSN
+  return env.INLINE_HERMES_SENTRY_DSN?.trim() ?? ""
 }
 
 function sensitiveValues(env: NodeJS.ProcessEnv = process.env): string[] {

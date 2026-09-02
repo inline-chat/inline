@@ -314,7 +314,8 @@ Access control follows Hermes' native platform model:
 | `INLINE_CONNECT_RETRY_MAX_MS` | Maximum sidecar retry delay after repeated realtime startup failures. Defaults to `15000`. |
 | `INLINE_SIDECAR_PORT` | Fixed loopback port for the sidecar. Must be `1` through `65535`. Defaults to `8794`; `test-send` uses a random free port. |
 | `INLINE_SIDECAR_BIND` | Sidecar bind host. Must be loopback: `127.0.0.1`, `localhost`, or `::1`. Defaults to `127.0.0.1`. |
-| `INLINE_PLUGIN_TELEMETRY` | Set to `off`, `0`, or `false` to disable Inline plugin error reporting. `DO_NOT_TRACK=1` is also honored. |
+| `INLINE_HERMES_SENTRY_DSN` | Explicitly enables adapter and sidecar error reporting to the configured collector. Reporting is disabled when unset. |
+| `INLINE_PLUGIN_TELEMETRY` | Set to `off`, `0`, or `false` to disable explicitly configured plugin error reporting. `DO_NOT_TRACK=1` is also honored. |
 | `platforms.inline.typing_indicator` | Hermes-native toggle for Inline typing/presence while a turn is running. Defaults to `true`; set to `false` to keep busy threads visually quiet. |
 | `platforms.inline.gateway_restart_notification` | Hermes-native toggle for gateway online/restarted notices. Defaults to `true`. |
 
@@ -403,9 +404,10 @@ bundled Hermes adapter should use.
 
 ## Error Reporting And Privacy
 
-The Inline adapter and its supervised sidecar report unexpected plugin failures
-to Inline's Sentry project by default. Reports include the raw exception type
-and message, traceback paths, line/function locations, plugin release,
+The Inline adapter and its supervised sidecar keep error reporting disabled
+unless the operator sets `INLINE_HERMES_SENTRY_DSN` to an explicit collector.
+When enabled, reports include the raw exception type and message, traceback
+paths, line/function locations, plugin release,
 operation name, runtime, OS, and architecture so maintainers can diagnose
 failures in subsequent releases.
 
@@ -417,10 +419,10 @@ server-side data scrubbing and IP-address scrubbing. Because dependency
 exception messages are preserved for diagnosis, they can still contain values
 the dependency itself chose to place in an error.
 
-Set `INLINE_PLUGIN_TELEMETRY=off` or `DO_NOT_TRACK=1` in the Hermes environment
-to disable both adapter and sidecar reporting. Reporting is best-effort, has a
-two-second network deadline, and never changes plugin success or failure
-behavior.
+Remove `INLINE_HERMES_SENTRY_DSN`, set `INLINE_PLUGIN_TELEMETRY=off`, or set
+`DO_NOT_TRACK=1` to disable both adapter and sidecar reporting. Reporting is
+best-effort, has a two-second network deadline, and never changes plugin success
+or failure behavior.
 
 ## Troubleshooting
 

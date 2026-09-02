@@ -121,8 +121,9 @@ Expected:
 
 ## Error Reporting And Privacy
 
-The Inline plugin reports unexpected plugin failures to Inline's Sentry project
-by default. Reports include the raw exception type and message, stack paths,
+The Inline plugin's error reporter is disabled unless the gateway operator sets
+`INLINE_OPENCLAW_SENTRY_DSN` to an explicit collector. When enabled, reports
+include the raw exception type and message, stack paths,
 line/function locations, plugin release, operation name, runtime, OS, and
 architecture so maintainers can diagnose failures in subsequent releases.
 
@@ -134,10 +135,9 @@ scrubbing and IP-address scrubbing. Because dependency exception messages are
 preserved for diagnosis, they can still contain values the dependency itself
 chose to place in an error.
 
-Set `INLINE_PLUGIN_TELEMETRY=off` or `DO_NOT_TRACK=1` in the gateway environment
-to disable all Inline plugin error reporting. Reporting is best-effort, has a
-two-second network deadline, and never changes plugin success or failure
-behavior.
+Remove `INLINE_OPENCLAW_SENTRY_DSN`, set `INLINE_PLUGIN_TELEMETRY=off`, or set
+`DO_NOT_TRACK=1` to disable reporting. Reporting is best-effort, has a two-second
+network deadline, and never changes plugin success or failure behavior.
 
 ## 5) Common Fixes
 

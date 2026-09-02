@@ -49,9 +49,16 @@ except Exception as error:
         sender.join(3)
 thread.join(3)
 server.server_close()
+os.environ.pop("INLINE_HERMES_SENTRY_DSN", None)
+default_disabled = capture_plugin_error("adapter.inbound", RuntimeError("not sent"))
+os.environ["INLINE_HERMES_SENTRY_DSN"] = "http://fixture@127.0.0.1:1/123"
 os.environ["INLINE_PLUGIN_TELEMETRY"] = "off"
 disabled = capture_plugin_error("adapter.inbound", RuntimeError("not sent"))
-print(json.dumps({"received": received, "disabled": disabled is None}))
+print(json.dumps({
+    "received": received,
+    "default_disabled": default_disabled is None,
+    "disabled": disabled is None,
+}))
 `
     const result = spawnSync(python, ["-c", script], {
       cwd: packageRoot,
@@ -59,8 +66,13 @@ print(json.dumps({"received": received, "disabled": disabled is None}))
       env: { ...process.env, NODE_ENV: "test" },
     })
     expect(result.status, result.stderr).toBe(0)
-    const output = JSON.parse(result.stdout) as { received: string[]; disabled: boolean }
+    const output = JSON.parse(result.stdout) as {
+      received: string[]
+      default_disabled: boolean
+      disabled: boolean
+    }
     const { received } = output
+    expect(output.default_disabled).toBe(true)
     expect(output.disabled).toBe(true)
     expect(received).toHaveLength(1)
     const lines = received[0]!.split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)

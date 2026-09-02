@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 
-const OPENCLAW_SENTRY_DSN =
-  "https://6db685760644bedf5ce289f031a14f73@o124360.ingest.us.sentry.io/4512015952576512"
 const TELEMETRY_TIMEOUT_MS = 2_000
 const TELEMETRY_DEDUP_MS = 5 * 60_000
 const MAX_ERROR_MESSAGE_LENGTH = 8_000
@@ -50,13 +48,7 @@ function telemetryDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
 
 function resolveDsn(env: NodeJS.ProcessEnv = process.env): string {
   if (telemetryDisabled(env)) return ""
-  if (env.INLINE_OPENCLAW_SENTRY_DSN !== undefined) {
-    return env.INLINE_OPENCLAW_SENTRY_DSN.trim()
-  }
-  // Unit tests must never emit to Inline's production project. A local test
-  // collector can still opt in through INLINE_OPENCLAW_SENTRY_DSN.
-  if (env.NODE_ENV === "test" || env.VITEST === "true") return ""
-  return OPENCLAW_SENTRY_DSN
+  return env.INLINE_OPENCLAW_SENTRY_DSN?.trim() ?? ""
 }
 
 function sensitiveValues(env: NodeJS.ProcessEnv = process.env): string[] {

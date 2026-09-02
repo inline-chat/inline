@@ -46376,7 +46376,6 @@ function readUsers(result, kind) {
 // src/sidecar/telemetry.ts
 import { randomUUID } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
-var HERMES_SENTRY_DSN = "https://0d0eca8210b21c950e3ca2743725d2a7@o124360.ingest.us.sentry.io/4512015952576513";
 var TELEMETRY_TIMEOUT_MS = 2000;
 var TELEMETRY_DEDUP_MS = 5 * 60000;
 var MAX_ERROR_MESSAGE_LENGTH = 8000;
@@ -46393,12 +46392,7 @@ function telemetryDisabled(env = process.env) {
 function resolveDsn(env = process.env) {
   if (telemetryDisabled(env))
     return "";
-  if (env.INLINE_HERMES_SENTRY_DSN !== undefined) {
-    return env.INLINE_HERMES_SENTRY_DSN.trim();
-  }
-  if (env.NODE_ENV === "test" || env.VITEST === "true")
-    return "";
-  return HERMES_SENTRY_DSN;
+  return env.INLINE_HERMES_SENTRY_DSN?.trim() ?? "";
 }
 function sensitiveValues(env = process.env) {
   return Object.entries(env).filter(([name, value]) => SENSITIVE_ENV_NAME.test(name) && (value?.length ?? 0) >= 8).map(([, value]) => value);

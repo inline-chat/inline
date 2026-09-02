@@ -9,6 +9,12 @@ import {
 } from "./telemetry.js"
 
 describe("OpenClaw plugin error telemetry", () => {
+  it("stays disabled unless an operator configures a collector", async () => {
+    await expect(sendOpenClawPluginError("gateway.start", new Error("not sent"), {
+      env: { NODE_ENV: "production" },
+    })).resolves.toBe(false)
+  })
+
   it("preserves raw errors and paths while excluding credentials and unrelated context", () => {
     const secret = "private-inline-token"
     const error = new Error(

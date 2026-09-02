@@ -1,8 +1,9 @@
-"""Privacy-bounded Sentry error reporting for the Inline Hermes plugin.
+"""Opt-in, privacy-bounded Sentry error reporting for the Inline Hermes plugin.
 
-The plugin sends only exception type/message, traceback paths/lines/functions,
-release, and fixed runtime tags. It never sends Hermes events, messages,
-request bodies, user/chat/account identifiers, breadcrumbs, or stack locals.
+When an operator configures a collector, the plugin sends only exception
+type/message, traceback paths/lines/functions, release, and fixed runtime tags.
+It never sends Hermes events, messages, request bodies, user/chat/account
+identifiers, breadcrumbs, or stack locals.
 """
 from __future__ import annotations
 
@@ -19,9 +20,6 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 from urllib.parse import urlparse
 
-_HERMES_SENTRY_DSN = (
-    "https://0d0eca8210b21c950e3ca2743725d2a7@o124360.ingest.us.sentry.io/4512015952576513"
-)
 _TELEMETRY_TIMEOUT_SECONDS = 2.0
 _TELEMETRY_DEDUP_SECONDS = 5 * 60
 _MAX_ERROR_MESSAGE_LENGTH = 8_000
@@ -41,11 +39,7 @@ def _telemetry_disabled(env: Mapping[str, str]) -> bool:
 def _resolve_dsn(env: Mapping[str, str]) -> str:
     if _telemetry_disabled(env):
         return ""
-    if "INLINE_HERMES_SENTRY_DSN" in env:
-        return str(env.get("INLINE_HERMES_SENTRY_DSN") or "").strip()
-    if env.get("NODE_ENV") == "test" or env.get("VITEST") == "true":
-        return ""
-    return _HERMES_SENTRY_DSN
+    return str(env.get("INLINE_HERMES_SENTRY_DSN") or "").strip()
 
 
 def _sensitive_values(env: Mapping[str, str], secrets: Sequence[str]) -> list[str]:

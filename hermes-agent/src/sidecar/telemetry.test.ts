@@ -4,6 +4,12 @@ import { describe, expect, it } from "vitest"
 import { buildHermesTelemetryEvent, sendHermesPluginError } from "./telemetry.js"
 
 describe("Hermes sidecar error telemetry", () => {
+  it("stays disabled unless an operator configures a collector", async () => {
+    await expect(sendHermesPluginError("endpoint.request", new Error("not sent"), {
+      env: { NODE_ENV: "production" },
+    })).resolves.toBe(false)
+  })
+
   it("preserves raw errors and paths while excluding credentials and user context", () => {
     const secret = "private-sidecar-token"
     const error = new Error(`connect https://user:password@example.com?token=${secret}`)
