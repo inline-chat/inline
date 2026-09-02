@@ -24,6 +24,8 @@
     "dist/vectors.js",
     "dist/uploads.d.ts",
     "dist/uploads.js",
+    "dist/transfers.d.ts",
+    "dist/transfers.js",
     "dist/index.d.ts",
     "dist/index.js",
     "vectors/inline-protocol-v1.json",
@@ -70,6 +72,10 @@
     "./uploads": {
       "types": "./dist/uploads.d.ts",
       "default": "./dist/uploads.js"
+    },
+    "./transfers": {
+      "types": "./dist/transfers.d.ts",
+      "default": "./dist/transfers.js"
     },
     "./vectors/inline-protocol-v1.json": "./vectors/inline-protocol-v1.json",
     "./trust-roots/inline-protocol-production.json": "./trust-roots/inline-protocol-production.json"

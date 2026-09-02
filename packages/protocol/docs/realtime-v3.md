@@ -71,6 +71,7 @@ The deprecated HTTP-upload request/result constructors are reserved wire history
 
 - Sources are immutable and committed by whole-file SHA-256.
 - The server negotiates 512 KiB parts. Non-final parts are exact-sized and up to 1,000 parts cover the current 500 MiB outer limit.
+- Admission also enforces the existing media limits before reserving quota: photos 40,000,000 bytes, videos/documents 200,000,000 bytes, and voice 20,000,000 bytes.
 - Parts may arrive out of order. Identical retries succeed; conflicting bytes at an accepted index fail. Progress is server-accepted bytes.
 - Clients reconcile accepted indices after lost responses, reconnects, restarts, or temporary-key rotation.
 - Apple clients first copy each source into an owner-scoped immutable app-group/Application Support staging file and durably record server-accepted progress. The server remains authoritative after restart; local progress is never trusted to skip a part.
@@ -79,7 +80,7 @@ The deprecated HTTP-upload request/result constructors are reserved wire history
 - Jobs bind to user, account session, and permanent key. Revocation/logout prevents further access. Idle expiry is 24 hours and hard expiry is seven days.
 - Client scheduling permits at most three globally and two per upload in flight with fair round-robin selection. A carrier may apply a lower bound while preserving the same RPC/state semantics; these are private tuning values, not feature API.
 
-Feature code sees only a high-level media upload operation with progress, cancellation, and typed completion. Realtime V2 may temporarily carry the same typed RPCs behind the transport adapter; user HTTP upload APIs are not the fallback. CDN downloads and Bot API uploads remain outside this contract.
+Feature code sees only a high-level media upload operation with progress, cancellation, and typed completion. Realtime V2 may temporarily carry the same typed RPCs behind the transport adapter; user HTTP upload APIs are not the fallback. Existing CDN downloads and Bot API uploads retain their existing paths.
 
 Client edge behavior is normative: iOS suspension pauses transfer; a killed Share Extension does not silently send later; logout/account switch invalidates owner-scoped staging; lost responses reconcile from server state; an immutable staged source cannot be replaced beneath an upload; and cancellation racing finalization resolves to one server-authoritative terminal state.
 
