@@ -8,15 +8,16 @@
     --landing-muted: #9b9b9b;
     --landing-subtle: #a0a0a0;
     --landing-primary-background: #2f2f2f;
-    --landing-primary-hover: #171717;
     --landing-primary-foreground: #ffffff;
+    --landing-secondary-hover-background: #f1f1f1;
+    --landing-secondary-foreground: #151515;
     --landing-frame-background: #e6e6ec;
     --landing-frame-border: rgba(24, 24, 24, 0.06);
     --landing-frame-shadow: rgba(16, 16, 24, 0.04);
     --landing-dot: #d5d5d5;
     --landing-dot-hover: #8e8e8e;
-    --landing-selection-background: #f1f1f1;
-    --landing-selection-foreground: #000000;
+    --landing-selection-background: #000000;
+    --landing-selection-foreground: #ffffff;
     --landing-logo-filter: none;
     --landing-footer-brand: rgba(15, 15, 15, 0.78);
     --landing-footer-heading: rgba(15, 15, 15, 0.64);
@@ -34,15 +35,16 @@
       --landing-muted: #9a9a9a;
       --landing-subtle: #858585;
       --landing-primary-background: #eeeeee;
-      --landing-primary-hover: #ffffff;
       --landing-primary-foreground: #111111;
+      --landing-secondary-hover-background: rgba(255, 255, 255, 0.1);
+      --landing-secondary-foreground: #f3f3f3;
       --landing-frame-background: #25252a;
       --landing-frame-border: rgba(255, 255, 255, 0.11);
       --landing-frame-shadow: rgba(0, 0, 0, 0.28);
       --landing-dot: #484848;
       --landing-dot-hover: #a8a8a8;
-      --landing-selection-background: rgba(255, 255, 255, 0.2);
-      --landing-selection-foreground: #ffffff;
+      --landing-selection-background: #ffffff;
+      --landing-selection-foreground: #000000;
       --landing-logo-filter: invert(1);
       --landing-footer-brand: rgba(255, 255, 255, 0.72);
       --landing-footer-heading: rgba(255, 255, 255, 0.64);
@@ -107,11 +109,6 @@
   align-items: center;
   justify-content: center;
   border-radius: 9px;
-  transition: opacity 120ms ease-out;
-}
-
-.landing-redesign__brand:hover {
-  opacity: 0.64;
 }
 
 .landing-redesign__brand:focus-visible,
@@ -129,7 +126,7 @@
 
 .landing-redesign__intro {
   max-width: 460px;
-  margin: 48px 0 0 var(--landing-indent);
+  margin: 38px 0 0 var(--landing-indent);
 }
 
 .landing-redesign__intro h1 {
@@ -167,7 +164,7 @@
   font-weight: 500;
   line-height: 1;
   text-decoration: none;
-  transition: transform 120ms ease-out;
+  transition: opacity 120ms ease-out;
 }
 
 .landing-redesign__primary-action {
@@ -177,27 +174,25 @@
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
 }
 
-.landing-redesign__primary-action:hover {
-  transform: translateY(-1px);
-}
-
-.landing-redesign__primary-action:active {
-  transform: translateY(0);
-}
-
 .landing-redesign__secondary-action {
   gap: 4px;
-  padding: 0 12px;
-  margin-left: -12px;
-  color: var(--landing-foreground);
+  padding: 0 17px;
+  background-color: transparent;
+  color: var(--landing-secondary-foreground);
+  transition: background-color 120ms ease-out, opacity 120ms ease-out;
+}
+
+.landing-redesign__primary-action:hover {
+  opacity: 0.72;
 }
 
 .landing-redesign__secondary-action:hover {
-  transform: translateY(-1px);
+  background-color: var(--landing-secondary-hover-background);
 }
 
+.landing-redesign__primary-action:active,
 .landing-redesign__secondary-action:active {
-  transform: translateY(0);
+  opacity: 0.56;
 }
 
 .landing-redesign__availability {
@@ -225,20 +220,25 @@
 }
 
 .landing-redesign__product-track {
-  display: flex;
+  position: relative;
   width: 100%;
   height: 100%;
-  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
 }
 
 .landing-redesign__product-slide {
-  position: relative;
-  flex: 0 0 100%;
+  position: absolute;
+  inset: 0;
   height: 100%;
   margin: 0;
   overflow: hidden;
   background: var(--landing-frame-background);
+  opacity: 0;
+  transition: opacity 420ms ease-out;
+}
+
+.landing-redesign__product-slide--active {
+  z-index: 1;
+  opacity: 1;
 }
 
 .landing-redesign__product-image {
@@ -462,7 +462,7 @@
   }
 
   .landing-redesign__intro {
-    margin-top: 42px;
+    margin-top: 38px;
   }
 
   .landing-redesign__product {
@@ -519,13 +519,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-redesign__brand,
   .landing-redesign__primary-action,
   .landing-redesign__secondary-action,
   .landing-redesign__footer-brand,
   .landing-redesign__footer-group a,
   .landing-redesign__pagination-dot::before,
-  .landing-redesign__product-track {
+  .landing-redesign__product-slide {
     transition: none;
   }
 }

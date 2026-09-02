@@ -1,20 +1,31 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { createServerFn } from "@tanstack/react-start"
+import { getRequestHeader } from "@tanstack/react-start/server"
 import { Landing } from "../landing"
 import redesignCssUrl from "../landing/styles/redesign.css?url"
 import siteChromeCssUrl from "../landing/styles/site-chrome.css?url"
 
+const getIsIOSRequest = createServerFn({ method: "GET" }).handler(() => {
+  const userAgent = getRequestHeader("user-agent") ?? ""
+  const isIOSDevice = /\b(?:iPad|iPhone|iPod)\b/i.test(userAgent)
+  const isIPadUsingDesktopUserAgent = /\bMacintosh\b/i.test(userAgent) && /\bMobile\//i.test(userAgent)
+  return isIOSDevice || isIPadUsingDesktopUserAgent
+})
+
 function Home() {
-  return <Landing />
+  const isIOS = Route.useLoaderData()
+  return <Landing isIOS={isIOS} />
 }
 
 export const Route = createFileRoute("/")({
   component: Home,
+  loader: () => getIsIOSRequest(),
 
   head: () => ({
     links: [
       {
         rel: "preload",
-        href: "/inline-macos-codex.webp",
+        href: "/inline-macos-message-style.webp",
         as: "image",
       },
       { rel: "stylesheet", href: redesignCssUrl },

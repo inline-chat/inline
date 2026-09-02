@@ -9,10 +9,10 @@ const FOOTER_GROUPS = [
   {
     title: "Connect",
     links: [
-      { label: "X", href: "https://x.com/inline_chat", external: true, icon: "external" },
+      { label: "X / Twitter", href: "https://x.com/inline_chat", external: true, icon: "external" },
       { label: "GitHub", href: "https://github.com/inline-chat", external: true, icon: "external" },
       {
-        label: "Youtube",
+        label: "YouTube",
         href: "https://www.youtube.com/@inlinechat",
         external: true,
         icon: "external",
@@ -23,7 +23,7 @@ const FOOTER_GROUPS = [
   {
     title: "Apps",
     links: [
-      { label: "IOS TestFlight", href: "https://testflight.apple.com/join/FkC3f7fz", external: true },
+      { label: "iOS TestFlight", href: "https://testflight.apple.com/join/FkC3f7fz", external: true },
       { label: "macOS", href: "/download/mac/beta" },
       { label: "CLI", href: "/docs/cli" },
     ],

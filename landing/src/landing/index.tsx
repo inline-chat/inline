@@ -6,11 +6,11 @@ import { SiteFooter, SiteHeader } from "./SiteChrome"
 
 const GALLERY_SLIDES = [
   {
-    id: "workspace",
-    label: "Workspace overview",
-    src: "/inline-macos-codex.webp",
-    width: 2265,
-    height: 1542,
+    id: "message-style",
+    label: "Discussing message styles",
+    src: "/inline-macos-message-style.webp",
+    width: 2169,
+    height: 1537,
     imageClassName: "landing-redesign__product-image--workspace",
   },
   {
@@ -22,18 +22,27 @@ const GALLERY_SLIDES = [
     imageClassName: "landing-redesign__product-image--screenshot",
   },
   {
-    id: "agent-settings",
-    label: "Agent settings",
-    src: "/inline-macos-agent-settings.webp",
-    width: 2465,
-    height: 1534,
-    imageClassName: "landing-redesign__product-image--screenshot",
+    id: "workspace",
+    label: "Workspace overview",
+    src: "/inline-macos-codex.webp",
+    width: 2265,
+    height: 1542,
+    imageClassName: "landing-redesign__product-image--workspace",
+  },
+  {
+    id: "sentry-report",
+    label: "Reviewing a Sentry report",
+    src: "/inline-macos-sentry-report.webp",
+    width: 1123,
+    height: 768,
+    imageClassName: "landing-redesign__product-image--workspace",
   },
 ] as const
 
 const IS_PRODUCT_GALLERY_ENABLED = true
+const IOS_TESTFLIGHT_URL = "https://testflight.apple.com/join/FkC3f7fz"
 
-export function Landing() {
+export function Landing({ isIOS }: { isIOS: boolean }) {
   const [activeSlide, setActiveSlide] = useState(0)
   const [isGalleryHovered, setIsGalleryHovered] = useState(false)
 
@@ -61,8 +70,13 @@ export function Landing() {
           </p>
 
           <div className="landing-redesign__actions" aria-label="Download Inline">
-            <a className="landing-redesign__primary-action" href="/download/mac/beta">
-              Download for macOS
+            <a
+              className="landing-redesign__primary-action"
+              href={isIOS ? IOS_TESTFLIGHT_URL : "/download/mac/beta"}
+              target={isIOS ? "_blank" : undefined}
+              rel={isIOS ? "noopener noreferrer" : undefined}
+            >
+              {isIOS ? "Join iOS TestFlight" : "Download for macOS"}
             </a>
             <a className="landing-redesign__secondary-action" href="/download">
               More downloads <span aria-hidden="true">→</span>
@@ -84,13 +98,12 @@ export function Landing() {
           onMouseLeave={() => setIsGalleryHovered(false)}
         >
           <div className="landing-redesign__product-frame">
-            <div
-              className="landing-redesign__product-track"
-              style={{ transform: `translate3d(-${IS_PRODUCT_GALLERY_ENABLED ? activeSlide * 100 : 0}%, 0, 0)` }}
-            >
+            <div className="landing-redesign__product-track">
               {(IS_PRODUCT_GALLERY_ENABLED ? GALLERY_SLIDES : GALLERY_SLIDES.slice(0, 1)).map((slide, index) => (
                 <figure
-                  className="landing-redesign__product-slide"
+                  className={`landing-redesign__product-slide${
+                    activeSlide === index ? " landing-redesign__product-slide--active" : ""
+                  }`}
                   key={slide.id}
                   aria-hidden={activeSlide !== index}
                 >
