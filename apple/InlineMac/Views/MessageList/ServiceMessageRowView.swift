@@ -72,6 +72,7 @@ enum ServiceMessageRowLayout {
       reactionsOutsideBubble: false,
       reactionsOutsideBubbleTopInset: 0,
       timeInContentFlow: false,
+      hasAcknowledgement: false,
       time: nil,
       singleLine: plan.singleLine,
       emojiMessage: false,

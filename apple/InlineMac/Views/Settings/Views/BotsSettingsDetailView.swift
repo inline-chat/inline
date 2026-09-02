@@ -901,7 +901,7 @@ private struct MacBotAgentRowView: View {
   let onEdit: () -> Void
   let onDelete: () -> Void
 
-  private var botUser: User { User(from: bot) }
+  private var botUser: InlineKit.User { InlineKit.User(from: bot) }
 
   var body: some View {
     HStack(spacing: 10) {
