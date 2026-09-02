@@ -5,6 +5,7 @@ import { basename, dirname, resolve } from "path";
 import { createInterface } from "node:readline";
 import { readBuiltAppMetadata, readDmgAppMetadata, metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
 import {
+  macosReleaseSourceStatusLines,
   macosSourceSnapshotPathsFromManifest,
   macosSourceSnapshotSha256,
   macosSourceSnapshotSha256ForPaths,
@@ -1446,16 +1447,16 @@ async function main() {
     if (!ctx.rollback && !ctx.dropBuild) {
       if (buildWillRun(ctx)) {
         if (!ctx.experimentalTip) assertFrozenSource(ctx);
-        const dirty = gitLines(ctx.rootDir, ["status", "--porcelain"]);
+        const dirty = macosReleaseSourceStatusLines(ctx.rootDir);
         const willPublish = publicMutationEnabled(ctx);
         if (dirty.length && willPublish && !ctx.experimentalTip) {
           const sample = dirty.slice(0, 12).join("\n");
           const extra = dirty.length > 12 ? `\n... and ${dirty.length - 12} more` : "";
-          const message = `Public macOS releases require a clean frozen source on every channel. Dirty source cannot upload a DMG/appcast or move a GitHub tag.\n${sample}${extra}`;
+          const message = `Public macOS releases require clean frozen release inputs on every channel. Apple or macOS release-tool changes cannot upload a DMG/appcast or move a GitHub tag.\n${sample}${extra}`;
           if (ctx.dryRun) ui.info(`Warning: ${message}`);
           else throw new Error(message);
         } else if (dirty.length && !ctx.allowDirty && !ctx.experimentalTip) {
-          const message = "Dirty source is allowed only for an explicitly local, non-publishing run with --allow-dirty and all public mutation steps skipped.";
+          const message = "Dirty macOS release inputs are allowed only for an explicitly local, non-publishing run with --allow-dirty and all public mutation steps skipped.";
           if (ctx.dryRun) ui.info(`Warning: ${message}`);
           else throw new Error(message);
         } else if (dirty.length && ctx.experimentalTip) {

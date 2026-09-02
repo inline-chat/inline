@@ -49,8 +49,12 @@ case "${CHANNEL}" in
     ;;
 esac
 
+release_source_status() {
+  bun run "${ROOT_DIR}/scripts/macos/macos-source-snapshot.ts" --root "${ROOT_DIR}" --status
+}
+
 verify_frozen_source() {
-  local current_commit current_build current_snapshot
+  local current_commit current_build current_snapshot current_source_status
   if [[ -n "${EXPECTED_SOURCE_SNAPSHOT}" ]]; then
     if [[ -z "${SOURCE_SNAPSHOT_MANIFEST}" || ! -f "${SOURCE_SNAPSHOT_MANIFEST}" ]]; then
       echo "SOURCE_SNAPSHOT_MANIFEST is required for an experimental tip build." >&2
@@ -73,15 +77,19 @@ verify_frozen_source() {
       echo "Source build changed during release: expected ${EXPECTED_SOURCE_BUILD}, found ${current_build}" >&2
       exit 1
     fi
-    if [[ "${REQUIRE_CLEAN_SOURCE}" == "1" && -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
-      echo "Source became dirty during a public release; refusing to label or publish the artifact." >&2
-      exit 1
+    if [[ "${REQUIRE_CLEAN_SOURCE}" == "1" ]]; then
+      current_source_status=$(release_source_status)
+      if [[ -n "${current_source_status}" ]]; then
+        echo "macOS release inputs became dirty during a public release; refusing to label or publish the artifact." >&2
+        echo "${current_source_status}" >&2
+        exit 1
+      fi
     fi
   fi
 }
 
 SOURCE_WAS_CLEAN=0
-if [[ "${EXPERIMENTAL_TIP}" != "1" && -z "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
+if [[ "${EXPERIMENTAL_TIP}" != "1" && -z "$(release_source_status)" ]]; then
   SOURCE_WAS_CLEAN=1
 elif [[ "${EXPERIMENTAL_TIP}" != "1" ]]; then
   SOURCE_WAS_CLEAN=0

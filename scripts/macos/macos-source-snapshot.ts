@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-const sourcePathspecs = ["apple", "scripts/apple", "scripts/macos", "bun.lock"];
+export const macosReleaseSourcePathspecs = ["apple", "scripts/apple", "scripts/macos", "bun.lock"];
 
 function isEnvironmentFile(relativePath: string): boolean {
   return relativePath.split("/").some((component) => component === ".env" || component.startsWith(".env."));
@@ -31,7 +31,7 @@ function gitSourcePaths(rootDir: string): string[] {
       "--others",
       "--exclude-standard",
       "--",
-      ...sourcePathspecs,
+      ...macosReleaseSourcePathspecs,
     ],
     stdout: "pipe",
     stderr: "pipe",
@@ -44,6 +44,46 @@ function gitSourcePaths(rootDir: string): string[] {
     .split("\0")
     .filter((relativePath) => relativePath && !isEnvironmentFile(relativePath))
     .sort();
+}
+
+export function macosReleaseSourceStatusLines(rootDir: string): string[] {
+  const result = spawnSync({
+    cmd: [
+      "git",
+      "-C",
+      rootDir,
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=all",
+      "--",
+      ...macosReleaseSourcePathspecs,
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`Unable to inspect macOS release source: ${new TextDecoder().decode(result.stderr).trim()}`);
+  }
+
+  const records = new TextDecoder().decode(result.stdout).split("\0");
+  const lines: string[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    const status = record.slice(0, 2);
+    const paths = [record.slice(3)];
+    if (/[RC]/.test(status)) {
+      const sourcePath = records[index + 1];
+      if (sourcePath) {
+        paths.push(sourcePath);
+        index += 1;
+      }
+    }
+    if (paths.every(isEnvironmentFile)) continue;
+    lines.push(`${status} ${paths.join(" -> ")}`);
+  }
+  return lines;
 }
 
 function assertSafeRelativePath(relativePath: string): void {
@@ -173,13 +213,19 @@ export function stageMacosSourceSnapshot(
 function cli(argv: string[]): number {
   const rootIndex = argv.indexOf("--root");
   const manifestIndex = argv.indexOf("--manifest");
+  const statusOnly = argv.includes("--status");
   const rootDir = rootIndex === -1 ? resolve(import.meta.dir, "../..") : resolve(argv[rootIndex + 1] ?? "");
   const manifestPath = manifestIndex === -1 ? "" : resolve(argv[manifestIndex + 1] ?? "");
   if (!rootDir || (rootIndex !== -1 && !argv[rootIndex + 1]) || (manifestIndex !== -1 && !argv[manifestIndex + 1])) {
-    console.error("Usage: bun run macos-source-snapshot.ts [--root <repo>] [--manifest <nul-path-list>]");
+    console.error("Usage: bun run macos-source-snapshot.ts [--root <repo>] [--manifest <nul-path-list>] [--status]");
     return 2;
   }
   try {
+    if (statusOnly) {
+      const lines = macosReleaseSourceStatusLines(rootDir);
+      if (lines.length) console.log(lines.join("\n"));
+      return 0;
+    }
     const sha256 = manifestPath
       ? macosSourceSnapshotSha256ForPaths(rootDir, macosSourceSnapshotPathsFromManifest(manifestPath))
       : macosSourceSnapshotSha256(rootDir);

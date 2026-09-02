@@ -1,7 +1,10 @@
+import { spawnSync } from "bun";
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
+import { macosReleaseSourceStatusLines } from "./macos-source-snapshot";
 import {
   appcastXmlForBuildAllocation,
   decideAppcastFetch,
@@ -14,6 +17,13 @@ const releaseAppSource = readFileSync(resolve(import.meta.dir, "release-app.ts")
 const buildDirectSource = readFileSync(resolve(import.meta.dir, "build-direct.sh"), "utf8");
 const sourceSnapshotSource = readFileSync(resolve(import.meta.dir, "macos-source-snapshot.ts"), "utf8");
 const updateAppcastSource = readFileSync(resolve(import.meta.dir, "update_appcast.py"), "utf8");
+
+function gitFixture(rootDir: string, args: string[]): void {
+  const result = spawnSync({ cmd: ["git", "-C", rootDir, ...args], stdout: "pipe", stderr: "pipe" });
+  if (result.exitCode !== 0) {
+    throw new Error(new TextDecoder().decode(result.stderr).trim());
+  }
+}
 
 function metadata(overrides: Partial<BuiltAppMetadata> = {}): BuiltAppMetadata {
   return {
@@ -112,7 +122,8 @@ describe("release integrity helpers", () => {
     expect(releaseAppSource).toContain("Artifact provenance not found");
     expect(releaseAppSource).toContain("provenance.appExecutableSha256 === executableSha256");
     expect(releaseAppSource).toContain('"Latest Sparkle release", ctx.sourceCommit');
-    expect(releaseAppSource).toContain("Public macOS releases require a clean frozen source on every channel");
+    expect(releaseAppSource).toContain("Public macOS releases require clean frozen release inputs on every channel");
+    expect(releaseAppSource).toContain("macosReleaseSourceStatusLines(ctx.rootDir)");
     expect(releaseAppSource).toContain('ctx.experimentalTip ? "1" : "0"');
     expect(releaseAppSource).toContain('provenance.sourceState === "experimental-tip"');
     expect(releaseAppSource).toContain('experimental-${ctx.sourceSnapshot.slice(0, 12)}');
@@ -122,6 +133,7 @@ describe("release integrity helpers", () => {
     expect(buildDirectSource).toContain('"sourceClean": source_clean == "1"');
     expect(buildDirectSource).toContain('"sourceSnapshotSha256": source_snapshot');
     expect(buildDirectSource).toContain('bun run "${ROOT_DIR}/scripts/macos/macos-source-snapshot.ts"');
+    expect(buildDirectSource).toContain('--root "${ROOT_DIR}" --status');
     expect(buildDirectSource).toContain('--manifest "${SOURCE_SNAPSHOT_MANIFEST}"');
     expect(buildDirectSource).toContain('RELEASE_CONFIG_ROOT=${RELEASE_CONFIG_ROOT:-"${ROOT_DIR}"}');
     expect(sourceSnapshotSource).toContain('["apple", "scripts/apple", "scripts/macos", "bun.lock"]');
@@ -130,6 +142,40 @@ describe("release integrity helpers", () => {
     expect(sourceSnapshotSource).toContain("copiedPaths.length !== finalPaths.length");
     expect(sourceSnapshotSource).toContain('sourceSha256 !== stagedSha256 || sourceSha256 !== sourceSha256AfterVerification');
     expect(buildDirectSource).toContain('Artifact provenance: ${ARTIFACT_PROVENANCE_PATH}');
+  });
+
+  test("source cleanliness ignores unrelated work and catches every macOS release input", () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "inline-macos-release-status-"));
+    for (const directory of ["apple", "landing", "scripts/apple", "scripts/macos"]) {
+      mkdirSync(resolve(rootDir, directory), { recursive: true });
+    }
+    const fixtures = {
+      "apple/App.swift": "let releaseFixture = 1\n",
+      "landing/index.ts": "export const landingFixture = 1;\n",
+      "scripts/apple/helper.ts": "export const appleHelper = 1;\n",
+      "scripts/macos/release-app.ts": "export const releaseHelper = 1;\n",
+      "bun.lock": "fixture\n",
+    };
+    for (const [path, contents] of Object.entries(fixtures)) {
+      writeFileSync(resolve(rootDir, path), contents);
+    }
+    gitFixture(rootDir, ["init", "--quiet"]);
+    gitFixture(rootDir, ["config", "user.name", "Inline Test"]);
+    gitFixture(rootDir, ["config", "user.email", "inline-test@example.invalid"]);
+    gitFixture(rootDir, ["add", "."]);
+    gitFixture(rootDir, ["commit", "--quiet", "--no-gpg-sign", "-m", "fixture"]);
+
+    writeFileSync(resolve(rootDir, "landing/index.ts"), "export const landingFixture = 2;\n");
+    expect(macosReleaseSourceStatusLines(rootDir)).toEqual([]);
+
+    for (const path of ["apple/App.swift", "scripts/apple/helper.ts", "scripts/macos/release-app.ts", "bun.lock"] as const) {
+      writeFileSync(resolve(rootDir, path), `${fixtures[path]}// changed\n`);
+      expect(macosReleaseSourceStatusLines(rootDir).some((line) => line.endsWith(path))).toBe(true);
+      writeFileSync(resolve(rootDir, path), fixtures[path]);
+    }
+
+    writeFileSync(resolve(rootDir, "apple/Untracked.swift"), "let untracked = true\n");
+    expect(macosReleaseSourceStatusLines(rootDir)).toContain("?? apple/Untracked.swift");
   });
 
   test("experimental mode is tip-only and never enables GitHub", () => {
