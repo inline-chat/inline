@@ -333,30 +333,13 @@ export async function resolveMentionedGroupUserIds(input: {
   currentUserId: number
   groupIds: number[]
 }): Promise<number[]> {
-  const groupIds = uniquePositiveIds(input.groupIds)
-  if (groupIds.length === 0) {
-    return []
-  }
-
-  if (input.chat.spaceId == null) {
-    throw RealtimeRpcError.PeerIdInvalid()
-  }
-
-  const privacy = await getSpacePrivacyContext(input.chat.spaceId, input.currentUserId)
-  const groups = await db
-    .select({ id: userGroups.id })
-    .from(userGroups)
-    .where(and(eq(userGroups.spaceId, input.chat.spaceId), inArray(userGroups.id, groupIds)))
-
-  if (groups.length !== groupIds.length) {
-    throw RealtimeRpcError.PeerIdInvalid()
-  }
-
+  const { groupIds, requiresOwnMembership } = await mentionedGroupScope(input)
+  if (groupIds.length === 0) return []
   const memberRows = await loadActiveMemberRowsForGroups(groupIds)
 
   // Public spaces intentionally expose only groups regular members belong to by default.
   // Admins/owners need full visibility for group management and can already manage members.
-  if (privacy.isPublicSpace && !privacy.canManageMembers) {
+  if (requiresOwnMembership) {
     for (const groupId of groupIds) {
       const canSeeGroup = memberRows.some((row) => row.groupId === groupId && row.userId === input.currentUserId)
       if (!canSeeGroup) {
@@ -366,6 +349,49 @@ export async function resolveMentionedGroupUserIds(input: {
   }
 
   return uniquePositiveIds(memberRows.map((row) => row.userId)).filter((userId) => userId !== input.currentUserId)
+}
+
+/** Validate mention visibility without materializing every recipient. Edits use
+ * this path because they must preserve authorization but create no dialog or
+ * notification recipient side effects. */
+export async function validateMentionedGroups(input: {
+  chat: DbChat
+  currentUserId: number
+  groupIds: number[]
+}): Promise<void> {
+  const { groupIds, requiresOwnMembership } = await mentionedGroupScope(input)
+  if (!requiresOwnMembership || groupIds.length === 0) return
+  const rows = await db
+    .select({ groupId: userGroupMembers.groupId })
+    .from(userGroupMembers)
+    .where(and(
+      eq(userGroupMembers.userId, input.currentUserId),
+      inArray(userGroupMembers.groupId, groupIds),
+    ))
+  if (new Set(rows.map((row) => row.groupId)).size !== groupIds.length) {
+    throw RealtimeRpcError.PeerIdInvalid()
+  }
+}
+
+async function mentionedGroupScope(input: {
+  chat: DbChat
+  currentUserId: number
+  groupIds: number[]
+}): Promise<{ groupIds: number[]; requiresOwnMembership: boolean }> {
+  const groupIds = uniquePositiveIds(input.groupIds)
+  if (groupIds.length === 0) return { groupIds, requiresOwnMembership: false }
+  if (input.chat.spaceId == null) throw RealtimeRpcError.PeerIdInvalid()
+
+  const privacy = await getSpacePrivacyContext(input.chat.spaceId, input.currentUserId)
+  const groups = await db
+    .select({ id: userGroups.id })
+    .from(userGroups)
+    .where(and(eq(userGroups.spaceId, input.chat.spaceId), inArray(userGroups.id, groupIds)))
+  if (groups.length !== groupIds.length) throw RealtimeRpcError.PeerIdInvalid()
+  return {
+    groupIds,
+    requiresOwnMembership: privacy.isPublicSpace && !privacy.canManageMembers,
+  }
 }
 
 async function loadSpaceGroupsForUser(
