@@ -16,6 +16,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
+import { validateGroupMentions } from "@in/server/modules/message/resolveGroupMentions"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
@@ -88,6 +89,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
       chat,
       currentUserId,
     })
+    entities = await validateGroupMentions({ text: outgoingText.text, entities, chat, currentUserId })
   }
 
   let preparedBlockContent: PreparedBlockContent | null | undefined =

@@ -4,6 +4,7 @@ import { cleanPreLanguage, codeDelimiter, preFence } from "./code"
 import { escapeLinkUrl, escapeMdText } from "./escape"
 import { italicMd } from "./italic"
 import { mentionMdUrl } from "./mention"
+import { groupMentionMdUrl } from "./groupMention"
 import { contains, toRange } from "./offsets"
 import { prepareMarkdownInlineSyntax } from "../../message/markdownDocument"
 import { policyFor } from "./registry"
@@ -491,6 +492,11 @@ const toMarkdownEntity = (text: string, entity: MessageEntity): MarkdownEntity |
         entity,
         mentionMdUrl(entity.entity.mention.userId, entity.entity.mention.agentId),
       )
+    case MessageEntity_Type.GROUP_MENTION: {
+      if (entity.entity.oneofKind !== "groupMention") return null
+      const url = groupMentionMdUrl(entity.entity.groupMention.groupId)
+      return url ? linkEntity(range, entity, url) : null
+    }
     case MessageEntity_Type.THREAD:
       if (entity.entity.oneofKind !== "thread") {
         return null
@@ -571,6 +577,9 @@ const sameSemanticTarget = (expected: MessageEntity, parsed: MessageEntity): boo
       return parsed.entity.oneofKind === "mention"
         && expected.entity.mention.userId === parsed.entity.mention.userId
         && expected.entity.mention.agentId === parsed.entity.mention.agentId
+    case "groupMention":
+      return parsed.entity.oneofKind === "groupMention"
+        && expected.entity.groupMention.groupId === parsed.entity.groupMention.groupId
     case "thread":
       return parsed.entity.oneofKind === "thread"
         && expected.entity.thread.chatId === parsed.entity.thread.chatId
@@ -587,6 +596,7 @@ const priority = (entity: MarkdownEntity): number => {
   switch (entity.entity.type) {
     case MessageEntity_Type.TEXT_URL:
     case MessageEntity_Type.MENTION:
+    case MessageEntity_Type.GROUP_MENTION:
     case MessageEntity_Type.THREAD:
     case MessageEntity_Type.THREAD_TITLE:
       return 0

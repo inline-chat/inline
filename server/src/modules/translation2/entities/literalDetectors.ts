@@ -13,6 +13,7 @@ const protectedTypes = new Set<MessageEntity_Type>([
   MessageEntity_Type.MATH,
   MessageEntity_Type.TEXT_URL,
   MessageEntity_Type.MENTION,
+  MessageEntity_Type.GROUP_MENTION,
   MessageEntity_Type.THREAD,
   MessageEntity_Type.THREAD_TITLE,
 ])

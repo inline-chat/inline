@@ -29,6 +29,25 @@ describe("Translation2.translateMessages", () => {
     ])
   })
 
+  test("translated group mentions retain group identity and never become user mentions", async () => {
+    const translateMarkdowns = mock(async (input) => {
+      expect(input.messages[0]?.markdown).toBe("hello [@eng](inline://group/44)")
+      return [{ messageId: 741, markdown: "سلام [@تیم](inline://group/44)" }]
+    })
+    const { createTranslationModule } = await import("./translation")
+    const result = await createTranslationModule({ translateMarkdowns }).translateMessages({
+      messages: [{
+        id: 1, chatId: 10, messageId: 741, fromId: 5, date: new Date(), text: "hello @eng",
+        entities: { entities: [{ type: MessageEntity_Type.GROUP_MENTION, offset: 6n, length: 4n,
+          entity: { oneofKind: "groupMention", groupMention: { groupId: 44n } } }] },
+      } as any],
+      language: "fa", chat: { id: 10, title: "Test chat", type: "thread" } as any, actorId: 5,
+    })
+    expect(result[0]?.translation).toBe("سلام @تیم")
+    expect(result[0]?.entities?.entities).toEqual([{ type: MessageEntity_Type.GROUP_MENTION, offset: 5n, length: 4n,
+      entity: { oneofKind: "groupMention", groupMention: { groupId: 44n } } }])
+  })
+
   test("crossing native styles retain an intact Agent target after translation shifts offsets", async () => {
     const translateMarkdowns = mock(async (input) => {
       expect(input.messages[0]?.markdown).toContain("inline://user?id=42&agent_id=7")

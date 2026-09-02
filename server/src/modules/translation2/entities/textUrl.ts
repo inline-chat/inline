@@ -1,5 +1,6 @@
 import { MessageEntity_Type, type MessageEntity } from "@inline-chat/protocol/core"
 import { parseMentionMdUrl } from "./mention"
+import { parseGroupMentionMdUrl } from "./groupMention"
 import { parseThreadMdUrl } from "./thread"
 import { parseThreadTitleMdUrl } from "./threadTitle"
 
@@ -27,6 +28,12 @@ export const textUrlEntity = (input: {
         mention,
       },
     }
+  }
+
+  const groupId = parseGroupMentionMdUrl(input.url)
+  if (groupId !== null) {
+    return { ...base, type: MessageEntity_Type.GROUP_MENTION,
+      entity: { oneofKind: "groupMention", groupMention: { groupId } } }
   }
 
   const chatId = parseThreadMdUrl(input.url)

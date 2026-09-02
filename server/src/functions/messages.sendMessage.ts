@@ -26,7 +26,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
-import { getMentionedGroupIds, getMentionedUserIds, isUserMentioned } from "@in/server/modules/message/helpers"
+import { getMentionedUserIds, isUserMentioned } from "@in/server/modules/message/helpers"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { decideNotification } from "@in/server/modules/notifications/decision"
 import {
@@ -77,7 +77,7 @@ import {
 } from "@in/server/modules/dialogFollow"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
-import { resolveMentionedGroupUserIds } from "@in/server/modules/userGroups"
+import { resolveGroupMentions } from "@in/server/modules/message/resolveGroupMentions"
 import { resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
@@ -189,14 +189,16 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     isUrgentNudge: input.nudge === true && text?.trim() === URGENT_NUDGE_TEXT,
   })
 
-  const groupMentionedUserIds = await resolveMentionedGroupUserIds({
+  const groupMentions = await resolveGroupMentions({
+    text: text ?? "",
+    entities,
     chat,
     currentUserId,
-    groupIds: getMentionedGroupIds(entities),
   })
+  entities = groupMentions.entities
   const mentionedUserIds = new Set<number>([
     ...getMentionedUserIds(entities),
-    ...groupMentionedUserIds,
+    ...groupMentions.mentionedUserIds,
   ])
 
   let preparedBlockContent: PreparedBlockContent | undefined
