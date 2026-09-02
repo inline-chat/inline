@@ -4153,6 +4153,7 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::DialogFolder(_) => "dialog_folder",
         Update::UserAddedToChat(_) => "user_added_to_chat",
         Update::UserRemovedFromChat(_) => "user_removed_from_chat",
+        Update::Acknowledgement(_) => "acknowledgement",
     }
 }
 
@@ -4373,13 +4374,11 @@ fn validate_chat_repair_messages(
     messages: &[proto::Message],
 ) -> BackendResult<()> {
     let valid_window = messages.len() <= CHAT_REPAIR_MESSAGE_LIMIT
-        && messages
-            .iter()
-            .all(|message| {
-                message.id > 0
-                    && message.chat_id == chat.id
-                    && message.peer_id.as_ref() == Some(expected_peer)
-            })
+        && messages.iter().all(|message| {
+            message.id > 0
+                && message.chat_id == chat.id
+                && message.peer_id.as_ref() == Some(expected_peer)
+        })
         && messages
             .iter()
             .map(|message| message.id)
@@ -5136,16 +5135,12 @@ fn input_peer_for_sync_bucket_peer(peer: crate::SyncBucketPeer) -> proto::InputP
 
 fn peer_for_sync_bucket_peer(peer: crate::SyncBucketPeer) -> proto::Peer {
     let r#type = match peer {
-        crate::SyncBucketPeer::User { user_id } => {
-            proto::peer::Type::User(proto::PeerUser {
-                user_id: user_id.get(),
-            })
-        }
-        crate::SyncBucketPeer::Chat { chat_id } => {
-            proto::peer::Type::Chat(proto::PeerChat {
-                chat_id: chat_id.get(),
-            })
-        }
+        crate::SyncBucketPeer::User { user_id } => proto::peer::Type::User(proto::PeerUser {
+            user_id: user_id.get(),
+        }),
+        crate::SyncBucketPeer::Chat { chat_id } => proto::peer::Type::Chat(proto::PeerChat {
+            chat_id: chat_id.get(),
+        }),
     };
     proto::Peer {
         r#type: Some(r#type),
@@ -9425,6 +9420,7 @@ mod tests {
                         service_message: None,
                         block_content: None,
                         agent_session: None,
+                        subthread: None,
                     }),
                 })),
             }],

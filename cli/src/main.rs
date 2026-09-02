@@ -3002,6 +3002,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         connect_authenticated_realtime(&config, &auth_store).await?;
                     let input = proto::GetChatInput {
                         peer_id: Some(peer),
+                        include_recent_messages: false,
                     };
                     let payload = realtime.call(input).await?;
                     if cli.json {
@@ -4122,7 +4123,11 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let input = proto::DeleteMemberInput { space_id, user_id };
+                    let input = proto::DeleteMemberInput {
+                        space_id,
+                        user_id,
+                        block_join: false,
+                    };
                     let payload = realtime.call(input).await?;
                     if cli.json {
                         output::print_json(&payload, json_format)?;
@@ -4222,6 +4227,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let payload = realtime
                         .call(proto::GetChatInput {
                             peer_id: Some(peer),
+                            include_recent_messages: false,
                         })
                         .await?;
                     if cli.json {
@@ -4271,6 +4277,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         None => realtime
                             .call(proto::GetChatInput {
                                 peer_id: Some(peer.clone()),
+                                include_recent_messages: false,
                             })
                             .await?
                             .chat
@@ -6787,6 +6794,7 @@ mod cli_parsing_tests {
                     message: Some("hello".to_string()),
                     ..Default::default()
                 }],
+                acknowledgements: None,
             },
             translations: vec![proto::MessageTranslation {
                 message_id: 7,
