@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { lower, spaces, users } from "@in/server/db/schema"
+import { lower, reservedUsernames, spaces, users } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { isReservedUsername } from "@in/server/modules/users/reservedUsernames"
 import { normalizeUsername } from "@in/server/utils/normalize"
@@ -22,7 +22,7 @@ export type PublicHandleOwner = {
   spaceId?: number
 }
 
-export type PublicHandleAvailability = "available" | "current" | "taken"
+export type PublicHandleAvailability = "available" | "current" | "reserved" | "taken"
 
 /** Serializes server-mediated claims across the user and space handle tables. */
 export async function lockPublicHandleNamespace(tx: Transaction, value: string): Promise<void> {
@@ -53,6 +53,20 @@ export async function getPublicHandleAvailability(
   if (user || space) {
     return "current"
   }
+
+  if (isReservedUsername(handle)) {
+    return "reserved"
+  }
+
+  const [reservation] = await query
+    .select({ username: reservedUsernames.username })
+    .from(reservedUsernames)
+    .where(eq(reservedUsernames.username, handle))
+    .limit(1)
+  if (reservation) {
+    return "reserved"
+  }
+
   return "available"
 }
 

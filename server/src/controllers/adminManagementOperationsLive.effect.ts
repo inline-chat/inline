@@ -3,6 +3,7 @@ import {
 } from "effect"
 import {
   and,
+  asc,
   desc,
   eq,
   gte,
@@ -22,6 +23,7 @@ import {
   inviteCodes,
   members,
   messages,
+  reservedUsernames as reservedUsernameTable,
   sessions,
   spaces,
   superadminUsers,
@@ -94,7 +96,14 @@ import {
 } from "@in/server/utils/log"
 import {
   normalizeEmail,
+  normalizeUsername,
 } from "@in/server/utils/normalize"
+import {
+  isReservedUsername,
+} from "@in/server/modules/users/reservedUsernames"
+import {
+  lockPublicHandleNamespace,
+} from "@in/server/modules/spaces/spaceHandle"
 import type {
   AdminOperationsShape,
 } from "./adminOperations.effect"
@@ -112,6 +121,9 @@ import {
 
 type ManagementOperationName =
   | "waitlist"
+  | "reservedUsernames"
+  | "reserveUsername"
+  | "unreserveUsername"
   | "emailCampaigns"
   | "serverConfig"
   | "updateServerConfig"
@@ -206,6 +218,79 @@ const waitlistOperation: AdminOperationsShape["waitlist"] =
           date: row.date?.toISOString() ?? null,
         })),
       })
+    })
+
+const normalizeReservation = (value: string): string | null => {
+  const username = normalizeUsername(value).toLowerCase()
+  return username.length >= 2 && username.length <= 256
+    ? username
+    : null
+}
+
+type ReservedUsernameQuery = Pick<typeof db, "select">
+
+const listReservedUsernames = async (query: ReservedUsernameQuery = db) =>
+  (
+    await query
+      .select({
+        username: reservedUsernameTable.username,
+        createdAt: reservedUsernameTable.createdAt,
+      })
+      .from(reservedUsernameTable)
+      .orderBy(asc(reservedUsernameTable.username))
+  ).map((row) => ({
+    username: row.username,
+    createdAt: row.createdAt.toISOString(),
+  }))
+
+const reservedUsernamesResult = async (query: ReservedUsernameQuery = db) =>
+  jsonResult({
+    ok: true as const,
+    usernames: await listReservedUsernames(query),
+  })
+
+const reservedUsernamesOperation: AdminOperationsShape["reservedUsernames"] =
+  () => attempt("admin.reserved-usernames.list", reservedUsernamesResult)
+
+const reserveUsernameOperation: AdminOperationsShape["reserveUsername"] =
+  (input) =>
+    Effect.gen(function* () {
+      const username = normalizeReservation(input.username)
+      if (!username) return yield* reject(400, "invalid_username")
+      if (isReservedUsername(username)) {
+        return yield* reject(400, "built_in_reservation")
+      }
+
+      return yield* attempt("admin.reserved-usernames.reserve", () =>
+        db.transaction(async (tx) => {
+          await lockPublicHandleNamespace(tx, username)
+          await tx
+            .insert(reservedUsernameTable)
+            .values({ username })
+            .onConflictDoNothing()
+          return reservedUsernamesResult(tx)
+        }),
+      )
+    })
+
+const unreserveUsernameOperation: AdminOperationsShape["unreserveUsername"] =
+  (input) =>
+    Effect.gen(function* () {
+      const username = normalizeReservation(input.username)
+      if (!username) return yield* reject(400, "invalid_username")
+      if (isReservedUsername(username)) {
+        return yield* reject(400, "built_in_reservation")
+      }
+
+      return yield* attempt("admin.reserved-usernames.unreserve", () =>
+        db.transaction(async (tx) => {
+          await lockPublicHandleNamespace(tx, username)
+          await tx
+            .delete(reservedUsernameTable)
+            .where(eq(reservedUsernameTable.username, username))
+          return reservedUsernamesResult(tx)
+        }),
+      )
     })
 
 const campaignSummary = async (campaignId?: number) => {
@@ -1412,6 +1497,9 @@ export const makeAdminManagementOperations = (
   } = {},
 ): AdminManagementOperations => ({
     waitlist: waitlistOperation,
+    reservedUsernames: reservedUsernamesOperation,
+    reserveUsername: reserveUsernameOperation,
+    unreserveUsername: unreserveUsernameOperation,
     emailCampaigns: emailCampaignsOperation,
     serverConfig: serverConfigOperation,
     updateServerConfig: updateServerConfigOperation,

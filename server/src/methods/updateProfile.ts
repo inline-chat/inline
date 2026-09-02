@@ -130,7 +130,7 @@ async function updateUserAndDetectSignupCompletion(
     if (typeof props.username === "string") {
       await lockPublicHandleNamespace(tx, props.username)
       const availability = await getPublicHandleAvailability(tx, props.username, { userId })
-      if (availability === "taken") {
+      if (availability === "taken" || availability === "reserved") {
         throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
       }
     }

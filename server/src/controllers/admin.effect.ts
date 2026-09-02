@@ -54,6 +54,7 @@ import {
   AdminLoginTooManyRequests,
   AdminLoginUnauthorized,
   AdminNotFound,
+  AdminReservedUsernameBadRequest,
   AdminSendEmailCodeBadRequest,
   AdminSendEmailCodeForbidden,
   AdminSendEmailCodeInternal,
@@ -100,6 +101,8 @@ import {
   AdminLoginInput,
   AdminMeResult,
   AdminOverviewMetricsResult,
+  AdminReservedUsernameInput,
+  AdminReservedUsernamesResult,
   AdminRevokeSessionParams,
   AdminRevokeSessionResult,
   AdminSearchQuery,
@@ -503,6 +506,48 @@ const waitlistEndpoint = setupEndpoint(
   ),
 )
 
+const reservedUsernamesEndpoint = setupEndpoint(
+  HttpApiEndpoint.get(
+    "adminReservedUsernames",
+    "/admin/reserved-usernames",
+    {
+      success: AdminReservedUsernamesResult,
+    },
+  ),
+)
+
+const reserveUsernameEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminReserveUsername",
+    "/admin/reserved-usernames",
+    {
+      payload: AdminReservedUsernameInput,
+      success: AdminReservedUsernamesResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminReservedUsernameBadRequest,
+      ],
+    },
+  ),
+)
+
+const unreserveUsernameEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.delete(
+    "adminUnreserveUsername",
+    "/admin/reserved-usernames",
+    {
+      payload: AdminReservedUsernameInput,
+      success: AdminReservedUsernamesResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminReservedUsernameBadRequest,
+      ],
+    },
+  ),
+)
+
 const emailCampaignsEndpoint = setupEndpoint(
   HttpApiEndpoint.get(
     "adminEmailCampaigns",
@@ -775,6 +820,9 @@ export const AdminApiGroup = HttpApiGroup.make(
   overviewMetricsEndpoint,
   activeUsersEndpoint,
   waitlistEndpoint,
+  reservedUsernamesEndpoint,
+  reserveUsernameEndpoint,
+  unreserveUsernameEndpoint,
   emailCampaignsEndpoint,
   serverConfigEndpoint,
   updateServerConfigEndpoint,
@@ -1093,6 +1141,53 @@ export const makeAdminRouteGroup = () => {
                           input,
                           session,
                         ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminReservedUsernames",
+            () =>
+              run(
+                complete(
+                  "admin.reserved-usernames.list",
+                  AdminReservedUsernamesResult,
+                  withSession((session) =>
+                    operations.reservedUsernames(session),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminReserveUsername",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.reserved-usernames.reserve",
+                  AdminReservedUsernamesResult,
+                  decodeBody(request, AdminReservedUsernameInput).pipe(
+                    Effect.flatMap(({ input, info }) =>
+                      withSession((session) =>
+                        operations.reserveUsername(input, session, info),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          )
+          .handleRaw(
+            "adminUnreserveUsername",
+            ({ request }) =>
+              run(
+                complete(
+                  "admin.reserved-usernames.unreserve",
+                  AdminReservedUsernamesResult,
+                  decodeBody(request, AdminReservedUsernameInput).pipe(
+                    Effect.flatMap(({ input, info }) =>
+                      withSession((session) =>
+                        operations.unreserveUsername(input, session, info),
                       ),
                     ),
                   ),

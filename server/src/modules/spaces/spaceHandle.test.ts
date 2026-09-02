@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { db } from "@in/server/db"
-import { spaces, users } from "@in/server/db/schema"
+import { reservedUsernames, spaces, users } from "@in/server/db/schema"
 import { createBot } from "@in/server/functions/createBot"
 import { handler as createSpace } from "@in/server/methods/createSpace"
 import { handler as updateProfile } from "@in/server/methods/updateProfile"
@@ -57,6 +57,36 @@ describe("public handle namespace", () => {
     await expect(
       createBot({ name: "Shared Bot", username: "SharedBot" }, functionContext(owner.id)),
     ).rejects.toThrow()
+  })
+
+  test("blocks Admin-reserved terms across the public handle namespace", async () => {
+    const user = await testUtils.createUser("namespace-reserved-user@example.com")
+    await db.insert(reservedUsernames).values({ username: "futurebot" })
+
+    expect(await checkUsernameAvailable("@FutureBot", { userId: user.id })).toBe(false)
+    expect((await checkUsernameHandler({ username: "futurebot" }, realtimeContext(user.id))).availability).toBe(
+      UsernameAvailability.USERNAME_RESERVED,
+    )
+    await expect(updateProfile({ username: "futurebot" }, legacyContext(user.id))).rejects.toMatchObject({
+      type: "USERNAME_TAKEN",
+    })
+    await expect(
+      createSpace({ name: "Reserved Space", handle: "futurebot" }, legacyContext(user.id)),
+    ).rejects.toMatchObject({ type: "USERNAME_TAKEN" })
+    await expect(
+      createBot({ name: "Reserved Bot", username: "FutureBot" }, functionContext(user.id)),
+    ).rejects.toThrow()
+  })
+
+  test("keeps an existing owner current when its term is reserved later", async () => {
+    const user = await testUtils.createUser("namespace-reserved-owner@example.com")
+    await updateProfile({ username: "grandfathered" }, legacyContext(user.id))
+    await db.insert(reservedUsernames).values({ username: "grandfathered" })
+
+    expect(await checkUsernameAvailable("grandfathered", { userId: user.id })).toBe(true)
+    expect((await checkUsernameHandler({ username: "GRANDFATHERED" }, realtimeContext(user.id))).availability).toBe(
+      UsernameAvailability.USERNAME_CURRENT,
+    )
   })
 
   test("serializes concurrent user and space claims to one winner", async () => {

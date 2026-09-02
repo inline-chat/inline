@@ -15,6 +15,7 @@ import type {
   AdminInviteCountInput,
   AdminInvitesQuery,
   AdminLoginInput,
+  AdminReservedUsernameInput,
   AdminSearchQuery,
   AdminSendEmailCodeInput,
   AdminSetPasswordInput,
@@ -149,6 +150,19 @@ export interface AdminOperationsShape {
   readonly waitlist: (
     query: BodyOf<typeof AdminSearchQuery>,
     session: AdminSessionValue,
+  ) => AdminOperation
+  readonly reservedUsernames: (
+    session: AdminSessionValue,
+  ) => AdminOperation
+  readonly reserveUsername: (
+    input: BodyOf<typeof AdminReservedUsernameInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly unreserveUsername: (
+    input: BodyOf<typeof AdminReservedUsernameInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
   ) => AdminOperation
   readonly emailCampaigns: (
     session: AdminSessionValue,

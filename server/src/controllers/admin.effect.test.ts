@@ -151,6 +151,15 @@ const makeOperations = (
         },
       })
     },
+    reservedUsernames: () => {
+      probe.calls.push("reservedUsernames")
+      return Effect.succeed({
+        kind: "json",
+        body: { ok: true, usernames: [] },
+      })
+    },
+    reserveUsername: () => called("reserveUsername"),
+    unreserveUsername: () => called("unreserveUsername"),
     emailCampaigns: () => {
       probe.calls.push("emailCampaigns")
       return Effect.succeed({
@@ -415,6 +424,7 @@ describe("AdminRouteGroup", () => {
 
     expect(routes).toEqual(
       [
+        "DELETE /admin/reserved-usernames",
         "GET /admin/auth/totp/setup",
         "GET /admin/email-campaigns",
         "GET /admin/email-provider-status",
@@ -424,6 +434,7 @@ describe("AdminRouteGroup", () => {
         "GET /admin/metrics/app",
         "GET /admin/metrics/overview",
         "GET /admin/metrics/technical",
+        "GET /admin/reserved-usernames",
         "GET /admin/server-config",
         "GET /admin/spaces",
         "GET /admin/users",
@@ -445,6 +456,7 @@ describe("AdminRouteGroup", () => {
         "POST /admin/email-campaigns/{id}/test",
         "POST /admin/email-provider-test",
         "POST /admin/invites/generate",
+        "POST /admin/reserved-usernames",
         "POST /admin/users/{id}/invites",
         "POST /admin/users/{id}/sessions/{sessionId}/revoke",
         "POST /admin/users/{id}/update",

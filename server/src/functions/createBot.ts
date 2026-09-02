@@ -66,7 +66,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   const bot = await db.transaction(async (tx) => {
     await lockPublicHandleNamespace(tx, normalizedUsername)
     const availability = await getPublicHandleAvailability(tx, normalizedUsername)
-    if (availability === "taken") {
+    if (availability !== "available") {
       throw RealtimeRpcError.BadRequest()
     }
 

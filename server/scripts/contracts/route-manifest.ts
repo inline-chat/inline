@@ -206,9 +206,11 @@ const comparableLegacyRoutes =
 
 const intentionalCandidateOnly =
   new Set([
+    "DELETE\t/admin/reserved-usernames",
     "GET\t/",
     "GET\t/admin/email-campaigns",
     "GET\t/admin/email-provider-status",
+    "GET\t/admin/reserved-usernames",
     "GET\t/admin/server-config",
     "GET\t/email/unsubscribe/{token}",
     "GET\t/health",
@@ -222,6 +224,7 @@ const intentionalCandidateOnly =
     "POST\t/admin/email-campaigns/{id}/send",
     "POST\t/admin/email-campaigns/{id}/test",
     "POST\t/admin/email-provider-test",
+    "POST\t/admin/reserved-usernames",
     "POST\t/bot/deleteMessages",
     "POST\t/bot/editMessageActions",
     "POST\t/bot/forwardMessages",

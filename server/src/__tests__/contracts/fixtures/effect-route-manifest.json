@@ -1,14 +1,19 @@
 {
   "version": 1,
-  "count": 309,
+  "count": 312,
   "methodCounts": {
-    "GET": 152,
-    "POST": 155,
+    "DELETE": 1,
+    "GET": 153,
+    "POST": 156,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "b01abbc34f3b068422406fe08b19ca74f118cc534081aeff62a4663ef8e4c1c3",
+  "sha256": "890f2deb0431b64383308b1c358ab11b6492eda4bdfbb3238286ab9d2fd7734f",
   "routes": [
+    {
+      "method": "DELETE",
+      "path": "/admin/reserved-usernames"
+    },
     {
       "method": "GET",
       "path": "/"
@@ -56,6 +61,10 @@
     {
       "method": "GET",
       "path": "/admin/metrics/technical"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/reserved-usernames"
     },
     {
       "method": "GET",
@@ -676,6 +685,10 @@
     {
       "method": "POST",
       "path": "/admin/invites/generate"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/reserved-usernames"
     },
     {
       "method": "POST",

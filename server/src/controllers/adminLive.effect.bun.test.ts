@@ -347,5 +347,74 @@ describe("AdminSessionStoreLive", () => {
         databaseVersion: 1,
       },
     })
+
+    const reserve = await handle(
+      request("/admin/reserved-usernames", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ username: " @LaunchWord " }),
+      }),
+    )
+    expect(reserve.status).toBe(200)
+    expect(await reserve.json()).toEqual({
+      ok: true,
+      usernames: [{
+        username: "launchword",
+        createdAt: expect.any(String),
+      }],
+    })
+
+    const duplicateReserve = await handle(
+      request("/admin/reserved-usernames", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ username: "LAUNCHWORD" }),
+      }),
+    )
+    expect(duplicateReserve.status).toBe(200)
+    expect((await duplicateReserve.json()).usernames).toHaveLength(1)
+
+    const builtInReserve = await handle(
+      request("/admin/reserved-usernames", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ username: "inline" }),
+      }),
+    )
+    expect(builtInReserve.status).toBe(400)
+    expect(await builtInReserve.json()).toEqual({
+      ok: false,
+      error: "built_in_reservation",
+    })
+
+    const reservedList = await handle(
+      request("/admin/reserved-usernames"),
+    )
+    expect(reservedList.status).toBe(200)
+    expect(await reservedList.json()).toMatchObject({
+      ok: true,
+      usernames: [{ username: "launchword" }],
+    })
+
+    const unreserve = await handle(
+      request("/admin/reserved-usernames", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ username: "@LaunchWord" }),
+      }),
+    )
+    expect(unreserve.status).toBe(200)
+    expect(await unreserve.json()).toEqual({
+      ok: true,
+      usernames: [],
+    })
   })
 })

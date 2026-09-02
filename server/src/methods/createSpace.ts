@@ -63,7 +63,7 @@ export const handler = async (
       if (handle) {
         await lockPublicHandleNamespace(tx, handle)
         const availability = await getPublicHandleAvailability(tx, handle)
-        if (availability === "taken") {
+        if (availability !== "available") {
           throw new InlineError(InlineError.ApiError.USERNAME_TAKEN)
         }
       }

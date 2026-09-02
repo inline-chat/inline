@@ -25,7 +25,6 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { isReservedUsername } from "@in/server/modules/users/reservedUsernames"
 import { normalizeUsername } from "@in/server/utils/normalize"
 import {
   externalProfilePhotoResolver,
@@ -182,10 +181,7 @@ async function usernameAvailability(username: string, currentUserId: number): Pr
   const availability = await getPublicHandleAvailability(db, normalized, { userId: currentUserId })
   if (availability === "current") return UsernameAvailability.USERNAME_CURRENT
   if (availability === "taken") return UsernameAvailability.USERNAME_TAKEN
-
-  if (isReservedUsername(normalized)) {
-    return UsernameAvailability.USERNAME_RESERVED
-  }
+  if (availability === "reserved") return UsernameAvailability.USERNAME_RESERVED
 
   return UsernameAvailability.USERNAME_AVAILABLE
 }
@@ -198,7 +194,7 @@ async function updateUserAndPush(
     if (typeof props.username === "string") {
       await lockPublicHandleNamespace(tx, props.username)
       const availability = await getPublicHandleAvailability(tx, props.username, { userId: context.userId })
-      if (availability === "taken") {
+      if (availability === "taken" || availability === "reserved") {
         throw RealtimeRpcError.UsernameTaken()
       }
     }

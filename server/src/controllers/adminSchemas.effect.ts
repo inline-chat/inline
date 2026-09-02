@@ -328,6 +328,24 @@ export const AdminWaitlistResult = Schema.Struct({
   identifier: "AdminWaitlistResult",
 })
 
+export const AdminReservedUsernameInput = Schema.Struct({
+  username: Schema.String,
+}).annotate({
+  identifier: "AdminReservedUsernameInput",
+})
+
+export const AdminReservedUsernamesResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  usernames: Schema.Array(
+    Schema.Struct({
+      username: Schema.String,
+      createdAt: Schema.String,
+    }),
+  ),
+}).annotate({
+  identifier: "AdminReservedUsernamesResult",
+})
+
 export const AdminServerConfigKey = Schema.Literals([
   "auth.signup_mode",
   "email.default_provider",

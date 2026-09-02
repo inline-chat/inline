@@ -295,6 +295,12 @@ export const AdminServerConfigConflict = jsonError(
   ["config_conflict"],
 )
 
+export const AdminReservedUsernameBadRequest = jsonError(
+  "AdminReservedUsernameBadRequest",
+  400,
+  ["invalid_username", "built_in_reservation"],
+)
+
 export const AdminNotFound = jsonError(
   "AdminNotFound",
   404,

@@ -3,7 +3,6 @@ import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import { isReservedUsername } from "@in/server/modules/users/reservedUsernames"
 import { normalizeUsername } from "@in/server/utils/normalize"
 import { getPublicHandleAvailability } from "@in/server/modules/spaces/spaceHandle"
 
@@ -32,6 +31,5 @@ export const handler = async (
 export const checkUsernameAvailable = async (username: string, context: { userId?: number }) => {
   const normalizedUsername = normalizeUsername(username).toLowerCase()
   const availability = await getPublicHandleAvailability(db, normalizedUsername, { userId: context.userId })
-  return availability === "current" ||
-    (availability === "available" && !isReservedUsername(normalizedUsername))
+  return availability === "current" || availability === "available"
 }

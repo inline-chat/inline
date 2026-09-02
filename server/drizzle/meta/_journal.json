@@ -1009,6 +1009,13 @@
       "when": 1788360303292,
       "tag": "0143_agent-thread-context",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1788381481413,
+      "tag": "0144_reserved-usernames",
+      "breakpoints": true
     }
   ]
 }
