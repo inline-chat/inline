@@ -24,6 +24,7 @@ import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
 import { deleteFromBucket } from "@in/server/modules/files/uploadToBucket"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
+import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -1113,6 +1114,13 @@ async function pushPublishedEdits(edits: PublishedEdit[]): Promise<void> {
       const senderPeer = encodePeerFromChat(chat, { currentUserId: edit.senderId })
       const updateGroup = await getUpdateGroupFromInputPeer(senderPeer, { currentUserId: edit.senderId })
       for (const userId of updateGroup.userIds) {
+        const threadProjection = (
+          await getMessageThreadProjectionsMap({
+            parentChatId: chat.id,
+            parentMessageIds: [message.messageId],
+            userId,
+          })
+        ).get(message.messageId)
         const update: Update = {
           seq: edit.update.seq,
           date: encodeDateStrict(edit.update.date),
@@ -1123,6 +1131,8 @@ async function pushPublishedEdits(edits: PublishedEdit[]): Promise<void> {
                 message,
                 encodingForUserId: userId,
                 encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId: userId }) },
+                replies: threadProjection?.replies,
+                subthread: threadProjection?.subthread,
               }),
             },
           },

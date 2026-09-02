@@ -38,7 +38,7 @@ import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMess
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or } from "drizzle-orm"
-import { getMessageRepliesMap } from "@in/server/modules/subthreads"
+import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 
@@ -374,7 +374,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       ? [attachment]
       : []
   })
-  const repliesMap = await getMessageRepliesMap({
+  const threadProjections = await getMessageThreadProjectionsMap({
     parentChatId: chatId,
     parentMessageIds: dbMessages.map((message) => message.messageId),
     userId,
@@ -382,11 +382,13 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
   // Store encoded messages in a map
   const msgs = new Map<bigint, Message>()
   for (const message of dbMessages) {
+    const threadProjection = threadProjections.get(message.messageId)
     const encoded = Encoders.fullMessage({
       message,
       encodingForUserId: userId,
       encodingForPeer: { peer: peerId },
-      replies: repliesMap.get(message.messageId),
+      replies: threadProjection?.replies,
+      subthread: threadProjection?.subthread,
     })
     msgs.set(encoded.id, encoded)
   }

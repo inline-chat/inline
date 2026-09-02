@@ -8,7 +8,12 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import {
+  emitMessageSubthreadUpdateIfNeeded,
+  isLinkedSubthread,
+  isReplyThread,
+  queueSubthreadParentUpdate,
+} from "@in/server/modules/subthreads"
 import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 
@@ -103,10 +108,18 @@ export const markAsUnread = async (input: Input, context: FunctionContext): Prom
   // Mark-as-unread is per-user; push to all sessions for this user (skip the initiating session).
   RealtimeUpdates.pushToUser(context.currentUserId, updates, { skipSessionId: context.currentSessionId })
 
-  await emitReplyThreadParentRepliesUpdateIfNeeded({
-    chatId,
-    currentUserId: context.currentUserId,
-  })
+  if (isReplyThread(chat)) {
+    await emitMessageSubthreadUpdateIfNeeded({
+      chatId,
+      currentUserId: context.currentUserId,
+    })
+  } else if (isLinkedSubthread(chat)) {
+    queueSubthreadParentUpdate({
+      chatId,
+      currentUserId: context.currentUserId,
+      reason: "mark unread",
+    })
+  }
 
   return { updates }
 } 

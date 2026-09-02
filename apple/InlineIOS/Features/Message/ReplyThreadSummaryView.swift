@@ -97,7 +97,8 @@ final class ReplyThreadSummaryView: UIControl {
   }
 
   func configure(
-    replyCount: Int,
+    kind: MessageThreadCard.Kind,
+    messageCount: Int,
     recentAuthors: [UserInfo],
     hasUnread: Bool,
     outgoing: Bool,
@@ -105,13 +106,19 @@ final class ReplyThreadSummaryView: UIControl {
   ) {
     self.outgoing = outgoing
     updateTitle(title)
-    replyCountLabel.text = replyCount == 1 ? "1 reply" : "\(replyCount) replies"
+    switch kind {
+    case .reply:
+      replyCountLabel.text = messageCount == 1 ? "1 reply" : "\(messageCount) replies"
+    case .subthread:
+      let count = messageCount == 1 ? "1 message" : "\(messageCount) messages"
+      replyCountLabel.text = "Subthread · \(count)"
+    }
     unreadDotView.isHidden = !hasUnread
     unreadDotLeadingConstraint?.constant = hasUnread ? Constants.contentSpacing : 0
     unreadDotWidthConstraint?.constant = hasUnread ? Constants.unreadDotSize : 0
     updateAvatars(authors: recentAuthors)
     accessibilityLabel = hasUnread ? "\(replyCountLabel.text ?? ""), unread" : replyCountLabel.text
-    accessibilityHint = "Opens thread"
+    accessibilityHint = kind == .subthread ? "Opens subthread" : "Opens reply thread"
     applyStyle()
   }
 

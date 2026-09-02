@@ -113,9 +113,22 @@ final class ReplyThreadSummaryView: NSView {
     applyStyle()
   }
 
-  func update(replyCount: Int, recentAuthors: [UserInfo], hasUnread: Bool, title: String?) {
+  func update(
+    kind: MessageThreadCard.Kind,
+    messageCount: Int,
+    recentAuthors: [UserInfo],
+    hasUnread: Bool,
+    title: String?
+  ) {
     updateTitle(title)
-    let countText = replyCount == 1 ? "1 reply" : "\(replyCount) replies"
+    let countText: String
+    switch kind {
+    case .reply:
+      countText = messageCount == 1 ? "1 reply" : "\(messageCount) replies"
+    case .subthread:
+      let count = messageCount == 1 ? "1 message" : "\(messageCount) messages"
+      countText = "Subthread · \(count)"
+    }
     replyCountLabel.stringValue = countText
     unreadDotView.isHidden = !hasUnread
     unreadDotLeadingConstraint?.constant = hasUnread ? Constants.contentSpacing : 0
@@ -413,5 +426,38 @@ final class ReplyThreadSummaryView: NSView {
     }
 
     NSMenu.popUpContextMenu(menu, with: event, for: self)
+  }
+
+  override var acceptsFirstResponder: Bool {
+    onTap != nil
+  }
+
+  override func keyDown(with event: NSEvent) {
+    if event.keyCode == 36 || event.keyCode == 49, let onTap {
+      onTap(event.modifierFlags)
+      return
+    }
+    super.keyDown(with: event)
+  }
+
+  override func isAccessibilityElement() -> Bool {
+    true
+  }
+
+  override func accessibilityRole() -> NSAccessibility.Role? {
+    .button
+  }
+
+  override func accessibilityLabel() -> String? {
+    [titleLabel.stringValue, replyCountLabel.stringValue, unreadDotView.isHidden ? nil : "Unread"]
+      .compactMap { $0 }
+      .filter { !$0.isEmpty }
+      .joined(separator: ", ")
+  }
+
+  override func accessibilityPerformPress() -> Bool {
+    guard let onTap else { return false }
+    onTap([])
+    return true
   }
 }

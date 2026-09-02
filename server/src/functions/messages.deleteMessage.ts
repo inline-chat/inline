@@ -1,5 +1,6 @@
 import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
+import { ModelError } from "@in/server/db/models/_errors"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -10,7 +11,13 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { Notifications } from "@in/server/modules/notifications/notifications"
-import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import {
+  emitMessageSubthreadUpdateIfNeeded,
+  getSubthreadParentMessageRef,
+  isLinkedSubthread,
+  isReplyThread,
+  queueSubthreadParentUpdate,
+} from "@in/server/modules/subthreads"
 import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePush"
 import { deleteBacklinkMessages, getBacklinkMessagesForSourceMessages } from "@in/server/modules/threadGraph"
 import { db } from "@in/server/db"
@@ -30,8 +37,45 @@ type Output = {
 }
 
 export const deleteMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
+  return deleteMessageWithOptions(input, context)
+}
+
+export async function deleteSubthreadParentPlacement(
+  childChatId: number,
+  context: FunctionContext,
+): Promise<void> {
+  const parentMessage = await getSubthreadParentMessageRef(childChatId)
+  if (!parentMessage) {
+    return
+  }
+
+  try {
+    await deleteMessageWithOptions({
+      peer: {
+        type: {
+          oneofKind: "chat",
+          chat: { chatId: BigInt(parentMessage.parentChatId) },
+        },
+      },
+      messageIds: [BigInt(parentMessage.parentMessageId)],
+    }, context, { trustedPlacementCleanup: true })
+  } catch (error) {
+    if (error instanceof ModelError && error.code === ModelError.Codes.MESSAGE_INVALID) {
+      return
+    }
+    throw error
+  }
+}
+
+async function deleteMessageWithOptions(
+  input: Input,
+  context: FunctionContext,
+  options: { trustedPlacementCleanup?: boolean } = {},
+): Promise<Output> {
   const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
-  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  if (!options.trustedPlacementCleanup) {
+    await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  }
 
   const numericMessageIds = input.messageIds
     .map(Number)
@@ -40,19 +84,25 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     throw RealtimeRpcError.AgentSessionMessageImmutable()
   }
 
-  await ensureDeleteAllowed({
-    chat,
-    messageIds: input.messageIds,
-    currentUserId: context.currentUserId,
-  })
+  if (!options.trustedPlacementCleanup) {
+    await ensureDeleteAllowed({
+      chat,
+      messageIds: input.messageIds,
+      currentUserId: context.currentUserId,
+    })
+  }
 
-  const backlinkMessages = await getBacklinkMessagesForSourceMessages({
-    chatId: chat.id,
-    messageIds: input.messageIds,
-  })
+  const backlinkMessages = options.trustedPlacementCleanup
+    ? []
+    : await getBacklinkMessagesForSourceMessages({
+        chatId: chat.id,
+        messageIds: input.messageIds,
+      })
 
   let { update, metadataChatUpdates } = await MessageModel.deleteMessages(input.messageIds, chat.id)
-  BotUpdateProjector.messageRoutesDeleted({ chatId: chat.id, messageIds: input.messageIds })
+  if (!options.trustedPlacementCleanup) {
+    BotUpdateProjector.messageRoutesDeleted({ chatId: chat.id, messageIds: input.messageIds })
+  }
   const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
     currentUserId: context.currentUserId,
   })
@@ -69,23 +119,33 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     chatUpdates: metadataChatUpdates,
   })
 
-  await emitReplyThreadParentRepliesUpdateIfNeeded({
-    chatId: chat.id,
-    currentUserId: context.currentUserId,
-  })
+  if (isReplyThread(chat)) {
+    await emitMessageSubthreadUpdateIfNeeded({
+      chatId: chat.id,
+      currentUserId: context.currentUserId,
+    })
+  } else if (isLinkedSubthread(chat)) {
+    queueSubthreadParentUpdate({
+      chatId: chat.id,
+      currentUserId: context.currentUserId,
+      reason: "message deletion",
+    })
+  }
 
-  await Promise.all(
-    updateGroup.userIds.map(async (userId) => {
-      await Notifications.sendToUser({
-        userId,
-        payload: {
-          kind: "message_deleted",
-          threadId: `chat_${chat.id}`,
-          messageIds: input.messageIds.map((id) => id.toString()),
-        },
-      })
-    }),
-  )
+  if (!options.trustedPlacementCleanup) {
+    await Promise.all(
+      updateGroup.userIds.map(async (userId) => {
+        await Notifications.sendToUser({
+          userId,
+          payload: {
+            kind: "message_deleted",
+            threadId: `chat_${chat.id}`,
+            messageIds: input.messageIds.map((id) => id.toString()),
+          },
+        })
+      }),
+    )
+  }
 
   return { updates: [...selfUpdates, ...metadataSelfUpdates, ...backlinkSelfUpdates] }
 }

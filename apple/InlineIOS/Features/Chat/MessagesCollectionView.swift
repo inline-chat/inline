@@ -4206,19 +4206,21 @@ private extension MessagesCollectionView {
         actions.append(replyAction)
 
         let replyThreadAction = UIAction(
-          title: "Reply in Thread",
+          title: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread",
           image: UIImage(systemName: "arrowshape.turn.up.left.circle")
         ) { _ in
           ReplyThreadNavigator.open(message: message, source: .menu)
         }
         actions.append(replyThreadAction)
 
-        let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
-          [weak self] _ in
-          guard let self else { return }
-          presentForwardSheet(fullMessage)
+        if !message.isSubthreadPlacement {
+          let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
+            [weak self] _ in
+            guard let self else { return }
+            presentForwardSheet(fullMessage)
+          }
+          actions.append(forwardAction)
         }
-        actions.append(forwardAction)
 
         if let acknowledgementAction = fullMessage.acknowledgementAction(
           currentUserId: Auth.shared.getCurrentUserId()

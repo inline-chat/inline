@@ -137,7 +137,7 @@ export function maybeScheduleThreadTitleGeneration(input: MaybeScheduleInput) {
   // checking the assigned message id also protects against concurrent sends
   // that both observed the initial zero counter.
   if (
-    input.chat.parentChatId == null &&
+    input.chat.parentMessageId == null &&
     titleGuard.kind === "untitledExact" &&
     input.message.messageId !== 1
   ) {
@@ -235,6 +235,14 @@ function titleGuardForScheduling(chat: ThreadTitleChat): ThreadTitleGuard | unde
       return { kind: "untitledExact", currentTitle: chat.title }
     }
     return undefined
+  }
+
+  if (
+    chat.parentMessageId == null &&
+    chat.isUntitled === true &&
+    chat.messageIdCounter === 1
+  ) {
+    return { kind: "untitledExact", currentTitle: chat.title }
   }
 
   if (chat.parentMessageId != null && chat.isUntitled === true) {

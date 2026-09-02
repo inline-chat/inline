@@ -9,6 +9,7 @@ extension Client_MessageContentPayload: Codable {
     case actions
     case replies
     case serviceMessage
+    case subthread
   }
 
   public init(from decoder: Decoder) throws {
@@ -17,6 +18,7 @@ extension Client_MessageContentPayload: Codable {
     let actions = try container.decodeIfPresent(MessageActions.self, forKey: .actions)
     let replies = try container.decodeIfPresent(MessageReplies.self, forKey: .replies)
     let serviceMessage = try container.decodeIfPresent(MessageService.self, forKey: .serviceMessage)
+    let subthread = try container.decodeIfPresent(MessageSubthread.self, forKey: .subthread)
 
     self.init()
     if let voice {
@@ -30,6 +32,9 @@ extension Client_MessageContentPayload: Codable {
     }
     if let serviceMessage {
       self.serviceMessage = serviceMessage
+    }
+    if let subthread {
+      self.subthread = subthread
     }
   }
 
@@ -46,6 +51,9 @@ extension Client_MessageContentPayload: Codable {
     }
     if hasServiceMessage {
       try container.encode(serviceMessage, forKey: .serviceMessage)
+    }
+    if hasSubthread {
+      try container.encode(subthread, forKey: .subthread)
     }
   }
 }
@@ -174,6 +182,43 @@ extension MessageReplies: Codable {
     try container.encode(replyCount, forKey: .replyCount)
     try container.encode(hasUnread_p, forKey: .hasUnread_p)
     try container.encode(recentReplierUserIds, forKey: .recentReplierUserIds)
+  }
+}
+
+extension MessageSubthread: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case chatID
+    case kind
+    case title
+    case messageCount
+    case hasUnread_p
+    case recentAuthorUserIds
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+
+    self.init()
+    chatID = try container.decodeIfPresent(Int64.self, forKey: .chatID) ?? 0
+    kind = Kind(rawValue: try container.decodeIfPresent(Int.self, forKey: .kind) ?? 0) ?? .unspecified
+    if let title = try container.decodeIfPresent(String.self, forKey: .title) {
+      self.title = title
+    }
+    messageCount = try container.decodeIfPresent(Int32.self, forKey: .messageCount) ?? 0
+    hasUnread_p = try container.decodeIfPresent(Bool.self, forKey: .hasUnread_p) ?? false
+    recentAuthorUserIds = try container.decodeIfPresent([Int64].self, forKey: .recentAuthorUserIds) ?? []
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(chatID, forKey: .chatID)
+    try container.encode(kind.rawValue, forKey: .kind)
+    if hasTitle {
+      try container.encode(title, forKey: .title)
+    }
+    try container.encode(messageCount, forKey: .messageCount)
+    try container.encode(hasUnread_p, forKey: .hasUnread_p)
+    try container.encode(recentAuthorUserIds, forKey: .recentAuthorUserIds)
   }
 }
 

@@ -11,7 +11,12 @@ import { persistChatMetadataUpdates, type ChatMetadataUpdate } from "@in/server/
 import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePush"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import {
+  emitMessageSubthreadUpdateIfNeeded,
+  isLinkedSubthread,
+  isReplyThread,
+  queueSubthreadParentUpdate,
+} from "@in/server/modules/subthreads"
 import {
   deleteBacklinkMessages,
   getBacklinkMessagesForClearedChatMessages,
@@ -228,10 +233,18 @@ async function clearPeerHistory(input: {
     chatUpdates: removedAccessUpdates,
   })
 
-  await emitReplyThreadParentRepliesUpdateIfNeeded({
-    chatId: chat.id,
-    currentUserId: input.context.currentUserId,
-  })
+  if (isReplyThread(chat)) {
+    await emitMessageSubthreadUpdateIfNeeded({
+      chatId: chat.id,
+      currentUserId: input.context.currentUserId,
+    })
+  } else if (isLinkedSubthread(chat)) {
+    queueSubthreadParentUpdate({
+      chatId: chat.id,
+      currentUserId: input.context.currentUserId,
+      reason: "history clear",
+    })
+  }
 
   const backlinkSelfUpdates = await deleteBacklinkMessages(backlinkMessages, {
     currentUserId: input.context.currentUserId,

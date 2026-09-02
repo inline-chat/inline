@@ -19,6 +19,7 @@ import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { collectReadyBlockPhotoIds, projectReadyBlockPhotos } from "@in/server/modules/message/blockContent"
 import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
 import { eq } from "drizzle-orm"
+import { isSubthreadParentMessage } from "@in/server/modules/subthreads"
 
 const log = new Log("functions.forwardMessages")
 
@@ -191,6 +192,10 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
     } catch (error) {
       log.error("forwardMessages failed to fetch source message", { messageId, sourceChatId: sourceChat.id, error })
       throw RealtimeRpcError.MessageIdInvalid()
+    }
+
+    if (await isSubthreadParentMessage(sourceMessage.globalId)) {
+      throw RealtimeRpcError.BadRequest()
     }
 
     let forwardHeader: { fromPeerId: InputPeer; fromId: number; fromMessageId: number } | undefined

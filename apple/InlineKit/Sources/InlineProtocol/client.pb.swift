@@ -25,55 +25,61 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
-public nonisolated struct Client_MessageContentPayload: Sendable {
+public nonisolated struct Client_MessageContentPayload: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   public var voice: Client_MessageVoiceContent {
-    get {_voice ?? Client_MessageVoiceContent()}
-    set {_voice = newValue}
+    get {_storage._voice ?? Client_MessageVoiceContent()}
+    set {_uniqueStorage()._voice = newValue}
   }
   /// Returns true if `voice` has been explicitly set.
-  public var hasVoice: Bool {self._voice != nil}
+  public var hasVoice: Bool {_storage._voice != nil}
   /// Clears the value of `voice`. Subsequent reads from it will return its default value.
-  public mutating func clearVoice() {self._voice = nil}
+  public mutating func clearVoice() {_uniqueStorage()._voice = nil}
 
   public var actions: MessageActions {
-    get {_actions ?? MessageActions()}
-    set {_actions = newValue}
+    get {_storage._actions ?? MessageActions()}
+    set {_uniqueStorage()._actions = newValue}
   }
   /// Returns true if `actions` has been explicitly set.
-  public var hasActions: Bool {self._actions != nil}
+  public var hasActions: Bool {_storage._actions != nil}
   /// Clears the value of `actions`. Subsequent reads from it will return its default value.
-  public mutating func clearActions() {self._actions = nil}
+  public mutating func clearActions() {_uniqueStorage()._actions = nil}
 
   public var replies: MessageReplies {
-    get {_replies ?? MessageReplies()}
-    set {_replies = newValue}
+    get {_storage._replies ?? MessageReplies()}
+    set {_uniqueStorage()._replies = newValue}
   }
   /// Returns true if `replies` has been explicitly set.
-  public var hasReplies: Bool {self._replies != nil}
+  public var hasReplies: Bool {_storage._replies != nil}
   /// Clears the value of `replies`. Subsequent reads from it will return its default value.
-  public mutating func clearReplies() {self._replies = nil}
+  public mutating func clearReplies() {_uniqueStorage()._replies = nil}
 
   public var serviceMessage: MessageService {
-    get {_serviceMessage ?? MessageService()}
-    set {_serviceMessage = newValue}
+    get {_storage._serviceMessage ?? MessageService()}
+    set {_uniqueStorage()._serviceMessage = newValue}
   }
   /// Returns true if `serviceMessage` has been explicitly set.
-  public var hasServiceMessage: Bool {self._serviceMessage != nil}
+  public var hasServiceMessage: Bool {_storage._serviceMessage != nil}
   /// Clears the value of `serviceMessage`. Subsequent reads from it will return its default value.
-  public mutating func clearServiceMessage() {self._serviceMessage = nil}
+  public mutating func clearServiceMessage() {_uniqueStorage()._serviceMessage = nil}
+
+  public var subthread: MessageSubthread {
+    get {_storage._subthread ?? MessageSubthread()}
+    set {_uniqueStorage()._subthread = newValue}
+  }
+  /// Returns true if `subthread` has been explicitly set.
+  public var hasSubthread: Bool {_storage._subthread != nil}
+  /// Clears the value of `subthread`. Subsequent reads from it will return its default value.
+  public mutating func clearSubthread() {_uniqueStorage()._subthread = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
-  fileprivate var _voice: Client_MessageVoiceContent? = nil
-  fileprivate var _actions: MessageActions? = nil
-  fileprivate var _replies: MessageReplies? = nil
-  fileprivate var _serviceMessage: MessageService? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct Client_MessageVoiceContent: Sendable {
@@ -133,48 +139,97 @@ fileprivate nonisolated let _protobuf_package = "client"
 
 nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MessageContentPayload"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}voice\0\u{1}actions\0\u{1}replies\0\u{3}service_message\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}voice\0\u{1}actions\0\u{1}replies\0\u{3}service_message\0\u{1}subthread\0")
+
+  fileprivate class _StorageClass {
+    var _voice: Client_MessageVoiceContent? = nil
+    var _actions: MessageActions? = nil
+    var _replies: MessageReplies? = nil
+    var _serviceMessage: MessageService? = nil
+    var _subthread: MessageSubthread? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _voice = source._voice
+      _actions = source._actions
+      _replies = source._replies
+      _serviceMessage = source._serviceMessage
+      _subthread = source._subthread
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularMessageField(value: &self._voice) }()
-      case 2: try { try decoder.decodeSingularMessageField(value: &self._actions) }()
-      case 3: try { try decoder.decodeSingularMessageField(value: &self._replies) }()
-      case 4: try { try decoder.decodeSingularMessageField(value: &self._serviceMessage) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._voice) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._actions) }()
+        case 3: try { try decoder.decodeSingularMessageField(value: &_storage._replies) }()
+        case 4: try { try decoder.decodeSingularMessageField(value: &_storage._serviceMessage) }()
+        case 5: try { try decoder.decodeSingularMessageField(value: &_storage._subthread) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    try { if let v = self._voice {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-    } }()
-    try { if let v = self._actions {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-    } }()
-    try { if let v = self._replies {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    } }()
-    try { if let v = self._serviceMessage {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    } }()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._voice {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._actions {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._replies {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      } }()
+      try { if let v = _storage._serviceMessage {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      } }()
+      try { if let v = _storage._subthread {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      } }()
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Client_MessageContentPayload, rhs: Client_MessageContentPayload) -> Bool {
-    if lhs._voice != rhs._voice {return false}
-    if lhs._actions != rhs._actions {return false}
-    if lhs._replies != rhs._replies {return false}
-    if lhs._serviceMessage != rhs._serviceMessage {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._voice != rhs_storage._voice {return false}
+        if _storage._actions != rhs_storage._actions {return false}
+        if _storage._replies != rhs_storage._replies {return false}
+        if _storage._serviceMessage != rhs_storage._serviceMessage {return false}
+        if _storage._subthread != rhs_storage._subthread {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

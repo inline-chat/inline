@@ -9,6 +9,7 @@ message MessageContentPayload {
   MessageActions actions = 2;
   MessageReplies replies = 3;
   MessageService service_message = 4;
+  MessageSubthread subthread = 5;
 }
 
 message MessageVoiceContent {

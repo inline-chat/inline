@@ -10,8 +10,17 @@ export class DialogsModel {
   }
 
   // TODO: AI - generated, Optimize
-  static async getBatchUnreadCounts({ userId, chatIds }: { userId: number; chatIds: number[] }) {
-    const unreadCounts = await db
+  static async getBatchUnreadCounts({
+    userId,
+    chatIds,
+    tx,
+  }: {
+    userId: number
+    chatIds: number[]
+    tx?: Transaction
+  }) {
+    const query = tx ?? db
+    const unreadCounts = await query
       .select({
         chatId: messages.chatId,
         unreadCount: sql<number>`count(*)::int`,

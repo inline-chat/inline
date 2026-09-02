@@ -27,6 +27,7 @@ import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { getDialogFolders } from "@in/server/modules/dialogFolders"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
+import { getMessageThreadProjectionsByParent } from "@in/server/modules/subthreads"
 
 type Input = {}
 
@@ -414,6 +415,13 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
   const processedLastMessagesByGlobalId = new Map(
     processedLastMessages.map((message) => [message.globalId, message]),
   )
+  const threadProjectionsByParent = await getMessageThreadProjectionsByParent({
+    parentMessages: chats.flatMap((chat) => chat.lastMsgId == null ? [] : [{
+      chatId: chat.id,
+      messageId: chat.lastMsgId,
+    }]),
+    userId: currentUserId,
+  })
 
   // Add chats to results
   const messagesByKey = new Map<string, Message>()
@@ -426,10 +434,13 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     if (chat.lastMsg) {
       const processedMsg = processedLastMessagesByGlobalId.get(chat.lastMsg.globalId)
       if (processedMsg) {
+        const threadProjection = threadProjectionsByParent.get(chat.id)?.get(processedMsg.messageId)
         const encodedMsg = Encoders.fullMessage({
           message: processedMsg,
           encodingForUserId: currentUserId,
           encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
+          replies: threadProjection?.replies,
+          subthread: threadProjection?.subthread,
         })
         messagesByKey.set(`${chat.id}:${processedMsg.messageId}`, encodedMsg)
       } else if (chat.lastMsgId) {
@@ -477,10 +488,13 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
 
       const recovered = await MessageModel.getMessagesByIds(chatId, messageIds)
       for (const msg of recovered) {
+        const threadProjection = threadProjectionsByParent.get(chatId)?.get(msg.messageId)
         const encodedMsg = Encoders.fullMessage({
           message: msg,
           encodingForUserId: currentUserId,
           encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
+          replies: threadProjection?.replies,
+          subthread: threadProjection?.subthread,
         })
         messagesByKey.set(`${chat.id}:${msg.messageId}`, encodedMsg)
         usersList.push(msg.from)

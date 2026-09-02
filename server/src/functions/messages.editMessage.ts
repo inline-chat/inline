@@ -18,6 +18,11 @@ import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThrea
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
+import {
+  getMessageThreadProjectionsMap,
+  isSubthreadParentMessage,
+  type MessageThreadProjection,
+} from "@in/server/modules/subthreads"
 
 type Input = {
   messageId: bigint
@@ -38,6 +43,9 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const chatId = chat.id
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
+  if (fullMessage && await isSubthreadParentMessage(fullMessage.globalId)) {
+    throw RealtimeRpcError.BadRequest()
+  }
   if (await isImportedAgentMessage(chatId, Number(input.messageId))) {
     throw RealtimeRpcError.AgentSessionMessageImmutable()
   }
@@ -137,6 +145,13 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     document: fullMessage.document ?? undefined,
     voice: fullMessage.voice ?? undefined,
   }
+  const threadProjection = (
+    await getMessageThreadProjectionsMap({
+      parentChatId: chatId,
+      parentMessageIds: [message.messageId],
+      userId: currentUserId,
+    })
+  ).get(message.messageId)
 
   let { selfUpdates } = await pushUpdates({
     inputPeer: input.peer,
@@ -144,6 +159,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     update,
     actionsOverride: normalizedActions,
+    threadProjection,
   })
 
   BotUpdateProjector.messageEdited({
@@ -172,26 +188,44 @@ const pushUpdates = async ({
   currentUserId,
   update,
   actionsOverride,
+  threadProjection,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
   currentUserId: number
   update: UpdateSeqAndDate
   actionsOverride?: MessageActions
+  threadProjection?: MessageThreadProjection
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+
+  const projectionForUser = async (userId: number): Promise<MessageThreadProjection | undefined> => {
+    if (!threadProjection || userId === currentUserId) {
+      return threadProjection
+    }
+    return (
+      await getMessageThreadProjectionsMap({
+        parentChatId: messageInfo.message.chatId,
+        parentMessageIds: [messageInfo.message.messageId],
+        userId,
+      })
+    ).get(messageInfo.message.messageId)
+  }
 
   let selfUpdates: Update[] = []
 
   if (updateGroup.type === "dmUsers") {
-    updateGroup.userIds.forEach((userId) => {
+    for (const userId of updateGroup.userIds) {
       const encodingForUserId = userId
       const encodingForInputPeer: InputPeer =
         userId === currentUserId ? inputPeer : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
+      const projection = await projectionForUser(userId)
       const encodedMessage = Encoders.message({
         ...messageInfo,
         encodingForPeer: { inputPeer: encodingForInputPeer },
         encodingForUserId,
+        replies: projection?.replies,
+        subthread: projection?.subthread,
       })
       if (actionsOverride !== undefined) {
         encodedMessage.actions = actionsOverride
@@ -223,13 +257,16 @@ const pushUpdates = async ({
         // other users get the message only
         RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
       }
-    })
+    }
   } else if (updateGroup.type === "threadUsers") {
-    updateGroup.userIds.forEach((userId) => {
+    for (const userId of updateGroup.userIds) {
+      const projection = await projectionForUser(userId)
       const encodedMessage = Encoders.message({
         ...messageInfo,
         encodingForPeer: { inputPeer },
         encodingForUserId: userId,
+        replies: projection?.replies,
+        subthread: projection?.subthread,
       })
       if (actionsOverride !== undefined) {
         encodedMessage.actions = actionsOverride
@@ -262,7 +299,7 @@ const pushUpdates = async ({
         // other users get the message only
         RealtimeUpdates.pushToUser(userId, [editMessageUpdate])
       }
-    })
+    }
   }
 
   return { selfUpdates, updateGroup }

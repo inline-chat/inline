@@ -732,15 +732,16 @@ class MinimalMessageViewAppKit: NSView {
       replyThreadSummaryView.clear()
       return
     }
-    guard let summary = message.replyThreadSummary else {
+    guard let summary = message.threadCard else {
       replyThreadSummaryView.clear()
       return
     }
 
     replyThreadSummaryView.update(
-      replyCount: Int(summary.replyCount),
+      kind: summary.kind,
+      messageCount: summary.messageCount,
       recentAuthors: recentReplyThreadAuthors(),
-      hasUnread: summary.hasUnread_p,
+      hasUnread: summary.hasUnread,
       title: props.replyThreadTitle
     )
     replyThreadSummaryView.isHidden = false
@@ -3428,13 +3429,15 @@ class MinimalMessageViewAppKit: NSView {
 
   private func makeReplyThreadSummaryMenu() -> NSMenu {
     let menu = NSMenu()
+    if !message.isSubthreadPlacement {
+      menu.addItem(replyThreadMenuItem(
+        title: "Open in Side Pane",
+        systemSymbolName: "arrow.turn.down.right",
+        action: #selector(openReplyThreadInSidePaneFromSummaryMenu)
+      ))
+    }
     menu.addItem(replyThreadMenuItem(
-      title: "Open in Side Pane",
-      systemSymbolName: "arrow.turn.down.right",
-      action: #selector(openReplyThreadInSidePaneFromSummaryMenu)
-    ))
-    menu.addItem(replyThreadMenuItem(
-      title: "Open as Chat",
+      title: message.isSubthreadPlacement ? "Open Subthread" : "Open as Chat",
       systemSymbolName: "arrow.up.left.and.arrow.down.right",
       action: #selector(openReplyThreadAsChatFromSummaryMenu)
     ))
@@ -3448,6 +3451,14 @@ class MinimalMessageViewAppKit: NSView {
       systemSymbolName: "sidebar.left",
       action: #selector(addReplyThreadToInboxFromSummaryMenu)
     ))
+    if message.isSubthreadPlacement {
+      menu.addItem(.separator())
+      menu.addItem(replyThreadMenuItem(
+        title: "Delete",
+        systemSymbolName: "trash",
+        action: #selector(deleteMessage)
+      ))
+    }
     return menu
   }
 
@@ -3561,6 +3572,7 @@ class MinimalMessageViewAppKit: NSView {
     action: ReplyThreadOpenAction
   ) {
     guard !isAnchorMessage else { return }
+    let action = message.isSubthreadPlacement ? ReplyThreadOpenAction.current : action
     if action.usesCurrentWindowPresentation {
       focusWindowIfNeeded()
     }
@@ -4915,23 +4927,25 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
       menu.addItem(replyItem)
 
       let replyInThreadItem = NSMenuItem(
-        title: "Reply in Thread",
+        title: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread",
         action: #selector(replyInThread),
         keyEquivalent: ""
       )
       replyInThreadItem.image = NSImage(
         systemSymbolName: "arrowshape.turn.up.left.circle",
-        accessibilityDescription: "Reply in Thread"
+        accessibilityDescription: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread"
       )
       menu.addItem(replyInThreadItem)
 
-      let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
-      forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
-      menu.addItem(forwardItem)
+      if !message.isSubthreadPlacement {
+        let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
+        forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
+        menu.addItem(forwardItem)
+      }
     }
 
     // Edit
-    if !isAnchorMessage, message.out == true, message.status == .sent {
+    if !isAnchorMessage, !message.isSubthreadPlacement, message.out == true, message.status == .sent {
       let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
       editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
       menu.addItem(editItem)

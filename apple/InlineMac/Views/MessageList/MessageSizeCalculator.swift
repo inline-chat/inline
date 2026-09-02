@@ -789,7 +789,7 @@ class MessageSizeCalculator {
     let start = CFAbsoluteTimeGetCurrent()
     #endif
 
-    let hasText = message.message.text != nil
+    let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
     let hasMedia = message.hasMedia
@@ -1748,7 +1748,7 @@ class MessageSizeCalculator {
     tableWidth width: CGFloat,
     richContentRendererEnabled: Bool
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
-    let hasText = message.message.text != nil
+    let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
     let hasMedia = message.hasMedia

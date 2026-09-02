@@ -9,6 +9,7 @@ import {
   getDialogForUser,
   buildDefaultReplyThreadTitle,
   ensureLinkedSubthreadDialogs,
+  isSubthreadParentMessage,
   isLinkedSubthread,
   persistMessageRepliesUpdate,
   pushMessageRepliesUpdate,
@@ -74,6 +75,9 @@ export async function createSubthread(input: Input, context: FunctionContext): P
 
   if (parentMessageId !== undefined && !anchorMessage) {
     throw RealtimeRpcError.MessageIdInvalid()
+  }
+  if (anchorMessage && await isSubthreadParentMessage(anchorMessage.globalId)) {
+    throw RealtimeRpcError.BadRequest()
   }
 
   const directParticipantUserIds = uniquePositiveUserIds(input.participants ?? [])

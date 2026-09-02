@@ -11,7 +11,11 @@ import { db } from "@in/server/db"
 import { and, desc, eq, isNull, not } from "drizzle-orm"
 import { chats, dialogs, messages, users, type DbChat, type DbDialog, type DbNewDialog } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
-import { ensureLinkedSubthreadDialogs, isLinkedSubthread } from "@in/server/modules/subthreads"
+import {
+  ensureLinkedSubthreadDialogs,
+  getMessageThreadProjectionsMap,
+  isLinkedSubthread,
+} from "@in/server/modules/subthreads"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 type Input = {
@@ -267,6 +271,16 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
           )
         : []
       const anchorMessage = anchorRows[0]
+      const anchorThreadProjection = anchorMessage && snapshotChat.parentChatId != null
+        ? (
+            await getMessageThreadProjectionsMap({
+              parentChatId: snapshotChat.parentChatId,
+              parentMessageIds: [anchorMessage.messageId],
+              userId: currentUserId,
+              tx,
+            })
+          ).get(anchorMessage.messageId)
+        : undefined
       const encodedAnchorMessage = anchorMessage
         ? Encoders.fullMessage({
             message: anchorMessage,
@@ -279,6 +293,8 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
                 },
               },
             },
+            replies: anchorThreadProjection?.replies,
+            subthread: anchorThreadProjection?.subthread,
           })
         : undefined
 
@@ -291,13 +307,22 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
       const recentMessages = input.includeRecentMessages
         ? await MessageModel.getLatestMessagesForChat(snapshotChat.id, CHAT_REPAIR_MESSAGE_LIMIT, tx)
         : []
-      const encodedMessages = recentMessages.map((message) =>
-        Encoders.fullMessage({
+      const recentThreadProjections = await getMessageThreadProjectionsMap({
+        parentChatId: snapshotChat.id,
+        parentMessageIds: recentMessages.map((message) => message.messageId),
+        userId: currentUserId,
+        tx,
+      })
+      const encodedMessages = recentMessages.map((message) => {
+        const threadProjection = recentThreadProjections.get(message.messageId)
+        return Encoders.fullMessage({
           message,
           encodingForUserId: currentUserId,
           encodingForPeer: { inputPeer },
-        }),
-      )
+          replies: threadProjection?.replies,
+          subthread: threadProjection?.subthread,
+        })
+      })
 
       const [peerUser] = peerUserId
         ? await tx.select().from(users).where(eq(users.id, peerUserId)).limit(1)

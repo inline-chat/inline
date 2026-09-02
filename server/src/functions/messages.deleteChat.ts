@@ -22,6 +22,7 @@ import {
   getRootChatIdsForAccessEvents,
   getEffectiveChatAccessUserIds,
 } from "@in/server/modules/authorization/chatAccessProjection"
+import { deleteSubthreadParentPlacement } from "@in/server/functions/messages.deleteMessage"
 
 const log = new Log("functions.deleteChat")
 /**
@@ -136,9 +137,10 @@ async function deleteChatWithOptions(
     let recipientIds: number[] = []
     let peerId: Peer | undefined
     const backlinkMessages = await getBacklinkMessagesForSourceChat({ chatId: chat.id })
-
     // Delete chat, participants, dialogs in a transaction
     try {
+      await deleteSubthreadParentPlacement(chat.id, context)
+
       const didDelete = await db.transaction(async (tx) => {
         const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
         if (!lockedChat) {

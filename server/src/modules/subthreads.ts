@@ -3,8 +3,17 @@ import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
-import { chats, dialogs, messages, users, type DbChat, type DbDialog } from "@in/server/db/schema"
+import {
+  chats,
+  dialogs,
+  messages,
+  subthreadParentMessages,
+  users,
+  type DbChat,
+  type DbDialog,
+} from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
+import type { Transaction } from "@in/server/db/types"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -12,9 +21,15 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { Log } from "@in/server/utils/log"
 import type { ServerUpdate } from "@in/server/protocol/server"
-import type { MessageReplies, Update } from "@inline-chat/protocol/core"
-import { and, eq, inArray, sql } from "drizzle-orm"
+import {
+  MessageSubthread_Kind,
+  type MessageReplies,
+  type MessageSubthread,
+  type Update,
+} from "@inline-chat/protocol/core"
+import { and, eq, inArray, or, sql } from "drizzle-orm"
 import { dialogOpenDefaultsForChat, setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 import {
   getDirectParticipantUserIds as resolveDirectParticipantUserIds,
@@ -23,11 +38,13 @@ import {
   getTopLevelAccessUserIds as resolveTopLevelAccessUserIds,
 } from "@in/server/modules/authorization/threadAccess"
 
+const log = new Log("modules.subthreads")
+
 export const isLinkedSubthread = (chat: Pick<DbChat, "parentChatId">): boolean => chat.parentChatId != null
 
 export const isReplyThread = (chat: Pick<DbChat, "parentMessageId">): boolean => chat.parentMessageId != null
 
-const RECENT_REPLIER_LIMIT = 3
+const RECENT_AUTHOR_LIMIT = 3
 const REPLY_THREAD_TITLE_EXCERPT_LENGTH = 60
 const LEGACY_REPLY_THREAD_TITLE_EXCERPT_LENGTH = 72
 const GENERIC_REPLY_THREAD_TITLE = "Message"
@@ -237,38 +254,199 @@ export async function showAndOpenLinkedSubthreadDialogs(input: {
   }
 }
 
+export type MessageThreadProjection = {
+  subthread: MessageSubthread
+  replies?: MessageReplies
+}
+
+type ChildThreadProjection = {
+  chatId: number
+  parentChatId: number
+  parentMessageId: number
+  kind: MessageSubthread_Kind.REPLY | MessageSubthread_Kind.SUBTHREAD
+  title: string | null
+  isUntitled: boolean | null
+}
+
+type ThreadActivity = {
+  messageCount: number
+  hasUnread: boolean
+  recentAuthorUserIds: bigint[]
+}
+
+export async function getMessageThreadProjectionsMap(input: {
+  parentChatId: number
+  parentMessageIds: number[]
+  userId: number
+  tx?: Transaction
+}): Promise<Map<number, MessageThreadProjection>> {
+  const uniqueParentMessageIds = Array.from(new Set(input.parentMessageIds.filter((messageId) => messageId > 0)))
+  if (uniqueParentMessageIds.length === 0) {
+    return new Map()
+  }
+
+  const projections = await getMessageThreadProjectionsByParent({
+    parentMessages: uniqueParentMessageIds.map((messageId) => ({
+      chatId: input.parentChatId,
+      messageId,
+    })),
+    userId: input.userId,
+    tx: input.tx,
+  })
+
+  return projections.get(input.parentChatId) ?? new Map()
+}
+
+export async function getMessageThreadProjectionsByParent(input: {
+  parentMessages: { chatId: number; messageId: number }[]
+  userId: number
+  tx?: Transaction
+}): Promise<Map<number, Map<number, MessageThreadProjection>>> {
+  const parentMessages = Array.from(
+    new Map(
+      input.parentMessages
+        .filter(({ chatId, messageId }) => chatId > 0 && messageId > 0)
+        .map((message) => [`${message.chatId}:${message.messageId}`, message]),
+    ).values(),
+  )
+  const projectionsByParent = new Map<number, Map<number, MessageThreadProjection>>()
+  if (parentMessages.length === 0) {
+    return projectionsByParent
+  }
+
+  const query = input.tx ?? db
+  const replyParentFilter = or(...parentMessages.map(({ chatId, messageId }) => and(
+    eq(chats.parentChatId, chatId),
+    eq(chats.parentMessageId, messageId),
+  )))
+  const placedParentFilter = or(...parentMessages.map(({ chatId, messageId }) => and(
+    eq(messages.chatId, chatId),
+    eq(messages.messageId, messageId),
+  )))
+
+  const replyThreads = await query
+    .select({
+      chatId: chats.id,
+      parentChatId: chats.parentChatId,
+      parentMessageId: chats.parentMessageId,
+      title: chats.title,
+      isUntitled: chats.isUntitled,
+    })
+    .from(chats)
+    .where(replyParentFilter)
+
+  const placedSubthreads = await query
+    .select({
+      chatId: chats.id,
+      parentChatId: messages.chatId,
+      parentMessageId: messages.messageId,
+      title: chats.title,
+      isUntitled: chats.isUntitled,
+    })
+    .from(subthreadParentMessages)
+    .innerJoin(messages, eq(messages.globalId, subthreadParentMessages.parentMessageGlobalId))
+    .innerJoin(chats, eq(chats.id, subthreadParentMessages.childChatId))
+    .where(placedParentFilter)
+
+  const childThreads: ChildThreadProjection[] = [
+    ...replyThreads.flatMap((thread): ChildThreadProjection[] =>
+      thread.parentChatId == null || thread.parentMessageId == null ? [] : [{
+        ...thread,
+        parentChatId: thread.parentChatId,
+        parentMessageId: thread.parentMessageId,
+        kind: MessageSubthread_Kind.REPLY,
+      }]),
+    ...placedSubthreads.map((thread): ChildThreadProjection => ({
+      ...thread,
+      kind: MessageSubthread_Kind.SUBTHREAD,
+    })),
+  ]
+
+  if (childThreads.length === 0) {
+    return projectionsByParent
+  }
+
+  const activityByChatId = await getThreadActivityByChatId({
+    chatIds: childThreads.map((thread) => thread.chatId),
+    userId: input.userId,
+    tx: input.tx,
+  })
+
+  for (const childThread of childThreads) {
+    const activity = activityByChatId.get(childThread.chatId) ?? emptyThreadActivity
+    const title = normalizedTitle(childThread.title)
+    const subthread: MessageSubthread = {
+      chatId: BigInt(childThread.chatId),
+      kind: childThread.kind,
+      title: childThread.kind === MessageSubthread_Kind.SUBTHREAD
+        ? title ?? GENERIC_SUBTHREAD_TITLE
+        : childThread.isUntitled === true
+          ? undefined
+          : title,
+      messageCount: activity.messageCount,
+      hasUnread: activity.hasUnread,
+      recentAuthorUserIds: activity.recentAuthorUserIds,
+    }
+
+    let parentProjections = projectionsByParent.get(childThread.parentChatId)
+    if (!parentProjections) {
+      parentProjections = new Map()
+      projectionsByParent.set(childThread.parentChatId, parentProjections)
+    }
+    parentProjections.set(childThread.parentMessageId, {
+      subthread,
+      replies: childThread.kind === MessageSubthread_Kind.REPLY
+        ? {
+            chatId: subthread.chatId,
+            replyCount: subthread.messageCount,
+            hasUnread: subthread.hasUnread,
+            recentReplierUserIds: subthread.recentAuthorUserIds,
+          }
+        : undefined,
+    })
+  }
+
+  return projectionsByParent
+}
+
 export async function getMessageRepliesMap(input: {
   parentChatId: number
   parentMessageIds: number[]
   userId: number
 }): Promise<Map<number, MessageReplies>> {
-  const uniqueParentMessageIds = Array.from(new Set(input.parentMessageIds.filter((messageId) => messageId > 0)))
-  const repliesMap = new Map<number, MessageReplies>()
+  const projections = await getMessageThreadProjectionsMap(input)
+  return new Map(
+    Array.from(projections.entries()).flatMap(([messageId, projection]) =>
+      projection.replies ? [[messageId, projection.replies] as const] : []
+    ),
+  )
+}
 
-  if (uniqueParentMessageIds.length === 0) {
-    return repliesMap
+const GENERIC_SUBTHREAD_TITLE = "New subthread"
+const emptyThreadActivity: ThreadActivity = {
+  messageCount: 0,
+  hasUnread: false,
+  recentAuthorUserIds: [],
+}
+
+const normalizedTitle = (title: string | null): string | undefined => {
+  const normalized = title?.trim()
+  return normalized ? normalized : undefined
+}
+
+async function getThreadActivityByChatId(input: {
+  chatIds: number[]
+  userId: number
+  tx?: Transaction
+}): Promise<Map<number, ThreadActivity>> {
+  const chatIds = Array.from(new Set(input.chatIds))
+  const activityByChatId = new Map<number, ThreadActivity>()
+  if (chatIds.length === 0) {
+    return activityByChatId
   }
 
-  const childThreads = await db
-    .select({
-      chatId: chats.id,
-      parentMessageId: chats.parentMessageId,
-    })
-    .from(chats)
-    .where(
-      and(
-        eq(chats.parentChatId, input.parentChatId),
-        inArray(chats.parentMessageId, uniqueParentMessageIds),
-      ),
-    )
-
-  if (childThreads.length === 0) {
-    return repliesMap
-  }
-
-  const chatIds = childThreads.map((thread) => thread.chatId)
-
-  const replyCounts = await db
+  const query = input.tx ?? db
+  const replyCounts = await query
     .select({
       chatId: messages.chatId,
       replyCount: sql<number>`count(*)::int`,
@@ -282,10 +460,11 @@ export async function getMessageRepliesMap(input: {
   const unreadCounts = await DialogsModel.getBatchUnreadCounts({
     userId: input.userId,
     chatIds,
+    tx: input.tx,
   })
   const unreadCountByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount]))
 
-  const unreadMarks = await db
+  const unreadMarks = await query
     .select({
       chatId: dialogs.chatId,
       unreadMark: dialogs.unreadMark,
@@ -295,7 +474,7 @@ export async function getMessageRepliesMap(input: {
 
   const unreadMarkByChatId = new Map(unreadMarks.map((row) => [row.chatId, row.unreadMark === true]))
 
-  const recentReplierRows = await db.execute<{ chatId: number; fromId: number }>(sql`
+  const recentReplierRows = await query.execute<{ chatId: number; fromId: number }>(sql`
     with distinct_recent_repliers as (
       select distinct on (${messages.chatId}, ${messages.fromId})
         ${messages.chatId} as "chatId",
@@ -316,36 +495,31 @@ export async function getMessageRepliesMap(input: {
       "chatId",
       "fromId"
     from ranked_recent_repliers
-    where "rank" <= ${RECENT_REPLIER_LIMIT}
+    where "rank" <= ${RECENT_AUTHOR_LIMIT}
     order by "chatId", "rank"
   `)
 
   const recentReplierIdsByChatId = new Map<number, bigint[]>()
   for (const row of recentReplierRows) {
     const existing = recentReplierIdsByChatId.get(row.chatId) ?? []
-    if (existing.length >= RECENT_REPLIER_LIMIT) {
+    if (existing.length >= RECENT_AUTHOR_LIMIT) {
       continue
     }
     existing.push(BigInt(row.fromId))
     recentReplierIdsByChatId.set(row.chatId, existing)
   }
 
-  for (const childThread of childThreads) {
-    if (childThread.parentMessageId == null) {
-      continue
-    }
-
-    repliesMap.set(childThread.parentMessageId, {
-      chatId: BigInt(childThread.chatId),
-      replyCount: replyCountByChatId.get(childThread.chatId) ?? 0,
+  for (const chatId of chatIds) {
+    activityByChatId.set(chatId, {
+      messageCount: replyCountByChatId.get(chatId) ?? 0,
       hasUnread:
-        (unreadCountByChatId.get(childThread.chatId) ?? 0) > 0 ||
-        unreadMarkByChatId.get(childThread.chatId) === true,
-      recentReplierUserIds: recentReplierIdsByChatId.get(childThread.chatId) ?? [],
+        (unreadCountByChatId.get(chatId) ?? 0) > 0 ||
+        unreadMarkByChatId.get(chatId) === true,
+      recentAuthorUserIds: recentReplierIdsByChatId.get(chatId) ?? [],
     })
   }
 
-  return repliesMap
+  return activityByChatId
 }
 
 export async function getDirectParticipantUserIds(chatId: number): Promise<number[]> {
@@ -419,8 +593,8 @@ export async function pushMessageRepliesUpdate(input: {
   const updateGroup = await getUpdateGroup({ threadId: input.parentChatId }, { currentUserId: input.currentUserId })
 
   for (const userId of updateGroup.userIds) {
-    const replies = (
-      await getMessageRepliesMap({
+    const threadProjection = (
+      await getMessageThreadProjectionsMap({
         parentChatId: input.parentChatId,
         parentMessageIds: [input.parentMessageId],
         userId,
@@ -439,7 +613,8 @@ export async function pushMessageRepliesUpdate(input: {
             encodingForPeer: {
               inputPeer: encodePeerFromChat(parentChat, { currentUserId: userId }),
             },
-            replies,
+            replies: threadProjection?.replies,
+            subthread: threadProjection?.subthread,
           }),
         },
       },
@@ -449,27 +624,83 @@ export async function pushMessageRepliesUpdate(input: {
   }
 }
 
-export async function emitReplyThreadParentRepliesUpdateIfNeeded(input: {
+export type SubthreadParentMessageRef = {
+  parentChatId: number
+  parentMessageId: number
+}
+
+export async function getSubthreadParentMessageRef(
+  childChatId: number,
+): Promise<SubthreadParentMessageRef | undefined> {
+  const [row] = await db
+    .select({
+      parentChatId: messages.chatId,
+      parentMessageId: messages.messageId,
+    })
+    .from(subthreadParentMessages)
+    .innerJoin(messages, eq(messages.globalId, subthreadParentMessages.parentMessageGlobalId))
+    .where(eq(subthreadParentMessages.childChatId, childChatId))
+    .limit(1)
+
+  return row
+}
+
+export async function isSubthreadParentMessage(globalId: bigint): Promise<boolean> {
+  const [row] = await db
+    .select({ childChatId: subthreadParentMessages.childChatId })
+    .from(subthreadParentMessages)
+    .where(eq(subthreadParentMessages.parentMessageGlobalId, globalId))
+    .limit(1)
+  return row != null
+}
+
+export async function emitMessageSubthreadUpdateIfNeeded(input: {
   chatId: number
   currentUserId: number
 }): Promise<void> {
   const chat = await getChatById(input.chatId)
-  if (!chat || chat.parentChatId == null || chat.parentMessageId == null) {
+  if (!chat || chat.parentChatId == null) {
+    return
+  }
+
+  const parentMessage = chat.parentMessageId != null
+    ? { parentChatId: chat.parentChatId, parentMessageId: chat.parentMessageId }
+    : await getSubthreadParentMessageRef(chat.id)
+
+  if (!parentMessage) {
     return
   }
 
   const update = await persistMessageRepliesUpdate({
-    parentChatId: chat.parentChatId,
-    parentMessageId: chat.parentMessageId,
+    parentChatId: parentMessage.parentChatId,
+    parentMessageId: parentMessage.parentMessageId,
   })
 
   await pushMessageRepliesUpdate({
-    parentChatId: chat.parentChatId,
-    parentMessageId: chat.parentMessageId,
+    parentChatId: parentMessage.parentChatId,
+    parentMessageId: parentMessage.parentMessageId,
     currentUserId: input.currentUserId,
     update,
   })
 }
+
+export function queueSubthreadParentUpdate(input: {
+  chatId: number
+  currentUserId: number
+  reason: string
+}): void {
+  queueMicrotask(() => {
+    void emitMessageSubthreadUpdateIfNeeded(input).catch((error) => {
+      log.warn("Failed to refresh subthread parent card", {
+        chatId: input.chatId,
+        reason: input.reason,
+        error,
+      })
+    })
+  })
+}
+
+export const emitReplyThreadParentRepliesUpdateIfNeeded = emitMessageSubthreadUpdateIfNeeded
 
 export async function emitChatListOpenUpdates(input: {
   chat: DbChat

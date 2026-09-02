@@ -347,6 +347,32 @@ message MessageReplies {
   repeated int64 recent_replier_user_ids = 4;
 }
 
+message MessageSubthread {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_REPLY = 1;
+    KIND_SUBTHREAD = 2;
+  }
+
+  // Child chat ID for the reply or subthread.
+  int64 chat_id = 1;
+
+  // Whether this card represents an anchored reply thread or a subthread.
+  Kind kind = 2;
+
+  // Current card title. Always present for KIND_SUBTHREAD.
+  optional string title = 3;
+
+  // Number of messages currently in the child chat.
+  int32 message_count = 4;
+
+  // True when the viewer has durable unread state in the child chat.
+  bool has_unread = 5;
+
+  // Recent distinct authors in newest-first order. Limited server-side.
+  repeated int64 recent_author_user_ids = 6;
+}
+
 message MessageActions { repeated MessageActionRow rows = 1; }
 
 message MessageActionRow { repeated MessageAction actions = 1; }
@@ -608,6 +634,9 @@ message Message {
   // Present only when this row is durably associated with an external agent
   // session. Raw provider identifiers remain server-private.
   optional AgentSessionMessageInfo agent_session = 24;
+
+  // Canonical card projection for anchored replies and materialized subthreads.
+  optional MessageSubthread subthread = 25;
 }
 
 // Agent providers that implement Inline's session continuity contract. The

@@ -52,13 +52,14 @@ import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modu
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
   emitChatListOpenUpdates,
+  emitMessageSubthreadUpdateIfNeeded,
   getReplyThreadAnchorSenderId,
   isReplyThread,
   isLinkedSubthread,
-  persistMessageRepliesUpdate,
-  pushMessageRepliesUpdate,
+  queueSubthreadParentUpdate,
   showAndOpenLinkedSubthreadDialogs,
 } from "@in/server/modules/subthreads"
+import { queueFirstMessageExperience } from "@in/server/modules/subthreadParentMaterialization"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 import {
   documentTitleContext,
@@ -525,6 +526,15 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
   }
 
+  queueFirstMessageExperience({
+    chat,
+    message: newMessage,
+    text,
+    entities,
+    attachments: titleAttachments,
+    currentUserId,
+  })
+
   if (input.messageAttachments && input.messageAttachments.length > 0) {
     try {
       const attachmentUpdates = await buildAttachmentUpdates({
@@ -546,17 +556,13 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
   }
 
-  if (isReplyThread(chat) && chat.parentChatId != null && chat.parentMessageId != null) {
-    const parentSummaryUpdate = await persistMessageRepliesUpdate({
-      parentChatId: chat.parentChatId,
-      parentMessageId: chat.parentMessageId,
-    })
-
-    await pushMessageRepliesUpdate({
-      parentChatId: chat.parentChatId,
-      parentMessageId: chat.parentMessageId,
+  if (isReplyThread(chat)) {
+    await emitMessageSubthreadUpdateIfNeeded({ chatId: chat.id, currentUserId })
+  } else if (isLinkedSubthread(chat)) {
+    queueSubthreadParentUpdate({
+      chatId: chat.id,
       currentUserId,
-      update: parentSummaryUpdate,
+      reason: "message send",
     })
   }
 

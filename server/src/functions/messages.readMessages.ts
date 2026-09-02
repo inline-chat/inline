@@ -11,7 +11,12 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { ChatModel, getLastMessageId } from "@in/server/db/models/chats"
 import { InlineError } from "@in/server/types/errors"
-import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
+import {
+  emitMessageSubthreadUpdateIfNeeded,
+  isLinkedSubthread,
+  isReplyThread,
+  queueSubthreadParentUpdate,
+} from "@in/server/modules/subthreads"
 import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -241,10 +246,18 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
   }
 
   if (chatId) {
-    await emitReplyThreadParentRepliesUpdateIfNeeded({
-      chatId,
-      currentUserId: context.currentUserId,
-    })
+    if (isReplyThread(chat)) {
+      await emitMessageSubthreadUpdateIfNeeded({
+        chatId,
+        currentUserId: context.currentUserId,
+      })
+    } else if (isLinkedSubthread(chat)) {
+      queueSubthreadParentUpdate({
+        chatId,
+        currentUserId: context.currentUserId,
+        reason: "read state",
+      })
+    }
   }
 
   if (chatId && didAdvanceReadMaxId && effectiveMaxId !== undefined) {

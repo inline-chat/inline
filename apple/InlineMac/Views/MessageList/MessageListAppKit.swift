@@ -3188,7 +3188,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func replyThreadTitle(for message: FullMessage?) -> String? {
-    message?.replyThreadCustomTitle
+    message?.threadCardTitle
   }
 
   private func calculateSize(

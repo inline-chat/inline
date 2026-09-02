@@ -941,6 +941,64 @@ export interface MessageReplies {
     recentReplierUserIds: bigint[];
 }
 /**
+ * @generated from protobuf message MessageSubthread
+ */
+export interface MessageSubthread {
+    /**
+     * Child chat ID for the reply or subthread.
+     *
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * Whether this card represents an anchored reply thread or a subthread.
+     *
+     * @generated from protobuf field: MessageSubthread.Kind kind = 2;
+     */
+    kind: MessageSubthread_Kind;
+    /**
+     * Current card title. Always present for KIND_SUBTHREAD.
+     *
+     * @generated from protobuf field: optional string title = 3;
+     */
+    title?: string;
+    /**
+     * Number of messages currently in the child chat.
+     *
+     * @generated from protobuf field: int32 message_count = 4;
+     */
+    messageCount: number;
+    /**
+     * True when the viewer has durable unread state in the child chat.
+     *
+     * @generated from protobuf field: bool has_unread = 5;
+     */
+    hasUnread: boolean;
+    /**
+     * Recent distinct authors in newest-first order. Limited server-side.
+     *
+     * @generated from protobuf field: repeated int64 recent_author_user_ids = 6;
+     */
+    recentAuthorUserIds: bigint[];
+}
+/**
+ * @generated from protobuf enum MessageSubthread.Kind
+ */
+export enum MessageSubthread_Kind {
+    /**
+     * @generated from protobuf enum value: KIND_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: KIND_REPLY = 1;
+     */
+    REPLY = 1,
+    /**
+     * @generated from protobuf enum value: KIND_SUBTHREAD = 2;
+     */
+    SUBTHREAD = 2
+}
+/**
  * @generated from protobuf message MessageActions
  */
 export interface MessageActions {
@@ -1636,6 +1694,12 @@ export interface Message {
      * @generated from protobuf field: optional AgentSessionMessageInfo agent_session = 24;
      */
     agentSession?: AgentSessionMessageInfo;
+    /**
+     * Canonical card projection for anchored replies and materialized subthreads.
+     *
+     * @generated from protobuf field: optional MessageSubthread subthread = 25;
+     */
+    subthread?: MessageSubthread;
 }
 /**
  * @generated from protobuf message AgentSessionMessageInfo
@@ -15951,6 +16015,100 @@ class MessageReplies$Type extends MessageType<MessageReplies> {
  */
 export const MessageReplies = new MessageReplies$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class MessageSubthread$Type extends MessageType<MessageSubthread> {
+    constructor() {
+        super("MessageSubthread", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "kind", kind: "enum", T: () => ["MessageSubthread.Kind", MessageSubthread_Kind, "KIND_"] },
+            { no: 3, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "message_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "has_unread", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "recent_author_user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageSubthread>): MessageSubthread {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.kind = 0;
+        message.messageCount = 0;
+        message.hasUnread = false;
+        message.recentAuthorUserIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<MessageSubthread>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageSubthread): MessageSubthread {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* MessageSubthread.Kind kind */ 2:
+                    message.kind = reader.int32();
+                    break;
+                case /* optional string title */ 3:
+                    message.title = reader.string();
+                    break;
+                case /* int32 message_count */ 4:
+                    message.messageCount = reader.int32();
+                    break;
+                case /* bool has_unread */ 5:
+                    message.hasUnread = reader.bool();
+                    break;
+                case /* repeated int64 recent_author_user_ids */ 6:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.recentAuthorUserIds.push(reader.int64().toBigInt());
+                    else
+                        message.recentAuthorUserIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageSubthread, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* MessageSubthread.Kind kind = 2; */
+        if (message.kind !== 0)
+            writer.tag(2, WireType.Varint).int32(message.kind);
+        /* optional string title = 3; */
+        if (message.title !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.title);
+        /* int32 message_count = 4; */
+        if (message.messageCount !== 0)
+            writer.tag(4, WireType.Varint).int32(message.messageCount);
+        /* bool has_unread = 5; */
+        if (message.hasUnread !== false)
+            writer.tag(5, WireType.Varint).bool(message.hasUnread);
+        /* repeated int64 recent_author_user_ids = 6; */
+        if (message.recentAuthorUserIds.length) {
+            writer.tag(6, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.recentAuthorUserIds.length; i++)
+                writer.int64(message.recentAuthorUserIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageSubthread
+ */
+export const MessageSubthread = new MessageSubthread$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class MessageActions$Type extends MessageType<MessageActions> {
     constructor() {
         super("MessageActions", [
@@ -17547,7 +17705,8 @@ class Message$Type extends MessageType<Message> {
             { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 22, name: "service_message", kind: "message", T: () => MessageService },
             { no: 23, name: "block_content", kind: "message", T: () => BlockContent },
-            { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo }
+            { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo },
+            { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -17641,6 +17800,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional AgentSessionMessageInfo agent_session */ 24:
                     message.agentSession = AgentSessionMessageInfo.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
                     break;
+                case /* optional MessageSubthread subthread */ 25:
+                    message.subthread = MessageSubthread.internalBinaryRead(reader, reader.uint32(), options, message.subthread);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -17728,6 +17890,9 @@ class Message$Type extends MessageType<Message> {
         /* optional AgentSessionMessageInfo agent_session = 24; */
         if (message.agentSession)
             AgentSessionMessageInfo.internalBinaryWrite(message.agentSession, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageSubthread subthread = 25; */
+        if (message.subthread)
+            MessageSubthread.internalBinaryWrite(message.subthread, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -1240,14 +1240,15 @@ class UIMessageView: UIView {
   }
 
   func setupReplyThreadSummaryIfNeeded() {
-    guard shouldShowReplyThreadSummary, let summary = message.replyThreadSummary else { return }
+    guard shouldShowReplyThreadSummary, let summary = message.threadCard else { return }
 
     replyThreadSummaryView.configure(
-      replyCount: Int(summary.replyCount),
+      kind: summary.kind,
+      messageCount: summary.messageCount,
       recentAuthors: recentReplyThreadAuthors(),
-      hasUnread: summary.hasUnread_p,
+      hasUnread: summary.hasUnread,
       outgoing: shouldUseWhiteReplyThreadSummary,
-      title: fullMessage.replyThreadCustomTitle
+      title: fullMessage.threadCardTitle
     )
     replyThreadSummaryView.onTap = { [weak self] in
       guard let self else { return }
@@ -1267,7 +1268,7 @@ class UIMessageView: UIView {
     let attributes: UIMenuElement.Attributes = isDisabled ? [.disabled] : []
 
     let openAction = UIAction(
-      title: "Open Thread",
+      title: message.isSubthreadPlacement ? "Open Subthread" : "Open Thread",
       image: UIImage(systemName: "arrow.turn.down.right"),
       attributes: attributes
     ) { [weak self] _ in
@@ -1294,7 +1295,18 @@ class UIMessageView: UIView {
       ReplyThreadNavigator.addToInbox(message: message)
     }
 
-    return UIMenu(children: [openAction, copyLinkAction, addToInboxAction])
+    var actions: [UIMenuElement] = [openAction, copyLinkAction, addToInboxAction]
+    if message.isSubthreadPlacement {
+      actions.append(UIAction(
+        title: "Delete",
+        image: UIImage(systemName: "trash"),
+        attributes: .destructive
+      ) { [weak self] _ in
+        self?.showDeleteConfirmation()
+      })
+    }
+
+    return UIMenu(children: actions)
   }
 
   func recentReplyThreadAuthors() -> [UserInfo] {

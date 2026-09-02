@@ -674,11 +674,11 @@ type InsertMessageOutput = {
 async function insertMessage(
   message: Omit<DbNewMessage, "messageId">,
   preparedBlockContent?: PreparedBlockContent,
+  transaction?: Transaction,
 ): Promise<InsertMessageOutput> {
-  let chatId = message.chatId
+  const chatId = message.chatId
 
-  // Insert new message with nested select for messageId sequence
-  const { message: newMessage, update } = await db.transaction(async (tx) => {
+  const insert = async (tx: Transaction): Promise<InsertMessageOutput> => {
     // First lock the specific chat row
     const [chat] = await tx
       .select()
@@ -742,12 +742,9 @@ async function insertMessage(
       },
       update,
     }
-  })
-
-  return {
-    message: newMessage,
-    update,
   }
+
+  return transaction ? insert(transaction) : db.transaction(insert)
 }
 
 // /** Deletes a message from a chat */

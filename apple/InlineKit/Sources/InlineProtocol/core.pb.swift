@@ -3118,6 +3118,81 @@ public nonisolated struct MessageReplies: Sendable {
   public init() {}
 }
 
+public nonisolated struct MessageSubthread: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Child chat ID for the reply or subthread.
+  public var chatID: Int64 = 0
+
+  /// Whether this card represents an anchored reply thread or a subthread.
+  public var kind: MessageSubthread.Kind = .unspecified
+
+  /// Current card title. Always present for KIND_SUBTHREAD.
+  public var title: String {
+    get {_title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  /// Number of messages currently in the child chat.
+  public var messageCount: Int32 = 0
+
+  /// True when the viewer has durable unread state in the child chat.
+  public var hasUnread_p: Bool = false
+
+  /// Recent distinct authors in newest-first order. Limited server-side.
+  public var recentAuthorUserIds: [Int64] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case reply // = 1
+    case subthread // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .reply
+      case 2: self = .subthread
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .reply: return 1
+      case .subthread: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [MessageSubthread.Kind] = [
+      .unspecified,
+      .reply,
+      .subthread,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _title: String? = nil
+}
+
 public nonisolated struct MessageActions: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -4228,6 +4303,16 @@ public nonisolated struct Message: @unchecked Sendable {
   public var hasAgentSession: Bool {_storage._agentSession != nil}
   /// Clears the value of `agentSession`. Subsequent reads from it will return its default value.
   public mutating func clearAgentSession() {_uniqueStorage()._agentSession = nil}
+
+  /// Canonical card projection for anchored replies and materialized subthreads.
+  public var subthread: MessageSubthread {
+    get {_storage._subthread ?? MessageSubthread()}
+    set {_uniqueStorage()._subthread = newValue}
+  }
+  /// Returns true if `subthread` has been explicitly set.
+  public var hasSubthread: Bool {_storage._subthread != nil}
+  /// Clears the value of `subthread`. Subsequent reads from it will return its default value.
+  public mutating func clearSubthread() {_uniqueStorage()._subthread = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -22772,6 +22857,69 @@ nonisolated extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
+nonisolated extension MessageSubthread: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageSubthread"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}kind\0\u{1}title\0\u{3}message_count\0\u{3}has_unread\0\u{3}recent_author_user_ids\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.messageCount) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.hasUnread_p) }()
+      case 6: try { try decoder.decodeRepeatedInt64Field(value: &self.recentAuthorUserIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 2)
+    }
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    if self.messageCount != 0 {
+      try visitor.visitSingularInt32Field(value: self.messageCount, fieldNumber: 4)
+    }
+    if self.hasUnread_p != false {
+      try visitor.visitSingularBoolField(value: self.hasUnread_p, fieldNumber: 5)
+    }
+    if !self.recentAuthorUserIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.recentAuthorUserIds, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageSubthread, rhs: MessageSubthread) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs.messageCount != rhs.messageCount {return false}
+    if lhs.hasUnread_p != rhs.hasUnread_p {return false}
+    if lhs.recentAuthorUserIds != rhs.recentAuthorUserIds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageSubthread.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_UNSPECIFIED\0\u{1}KIND_REPLY\0\u{1}KIND_SUBTHREAD\0")
+}
+
 nonisolated extension MessageActions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageActions"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}rows\0")
@@ -24089,7 +24237,7 @@ nonisolated extension BlockTableRow: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{4}X]\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{4}W]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -24117,6 +24265,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _serviceMessage: MessageService? = nil
     var _blockContent: BlockContent? = nil
     var _agentSession: AgentSessionMessageInfo? = nil
+    var _subthread: MessageSubthread? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -24152,6 +24301,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       _serviceMessage = source._serviceMessage
       _blockContent = source._blockContent
       _agentSession = source._agentSession
+      _subthread = source._subthread
     }
   }
 
@@ -24194,6 +24344,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         case 22: try { try decoder.decodeSingularMessageField(value: &_storage._serviceMessage) }()
         case 23: try { try decoder.decodeSingularMessageField(value: &_storage._blockContent) }()
         case 24: try { try decoder.decodeSingularMessageField(value: &_storage._agentSession) }()
+        case 25: try { try decoder.decodeSingularMessageField(value: &_storage._subthread) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -24279,6 +24430,9 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       try { if let v = _storage._agentSession {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
       } }()
+      try { if let v = _storage._subthread {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -24316,6 +24470,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         if _storage._serviceMessage != rhs_storage._serviceMessage {return false}
         if _storage._blockContent != rhs_storage._blockContent {return false}
         if _storage._agentSession != rhs_storage._agentSession {return false}
+        if _storage._subthread != rhs_storage._subthread {return false}
         return true
       }
       if !storagesAreEqual {return false}

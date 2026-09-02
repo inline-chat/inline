@@ -5,10 +5,18 @@ import * as schema from "@in/server/db/schema"
 import { createChat } from "@in/server/functions/messages.createChat"
 import { createSubthread } from "@in/server/functions/messages.createSubthread"
 import { getChat } from "@in/server/functions/messages.getChat"
+import { getChats } from "@in/server/functions/messages.getChats"
 import { getMessages } from "@in/server/functions/messages.getMessages"
+import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
+import { deleteChat } from "@in/server/functions/messages.deleteChat"
+import { editMessage } from "@in/server/functions/messages.editMessage"
+import { updateChatInfo } from "@in/server/functions/messages.updateChatInfo"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { insertSystemMessage } from "@in/server/modules/systemMessages/insert"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { setupTestLifecycle, testUtils } from "../setup"
-import { DialogFollowMode } from "@inline-chat/protocol/core"
+import { DialogFollowMode, MessageSubthread_Kind, MessageEntity_Type } from "@inline-chat/protocol/core"
 
 describe("messages.createSubthread", () => {
   setupTestLifecycle()
@@ -130,9 +138,45 @@ describe("messages.createSubthread", () => {
       testUtils.functionContext({ userId: creator.id }),
     )
 
-    expect(parentMessages.messages[0]?.replies?.chatId).toBe(BigInt(childChatId))
-    expect(parentMessages.messages[0]?.replies?.replyCount).toBe(0)
-    expect(parentMessages.messages[0]?.replies?.recentReplierUserIds).toEqual([])
+    const legacyReplies = parentMessages.messages[0]?.replies
+    const canonicalSubthread = parentMessages.messages[0]?.subthread
+    expect(legacyReplies?.chatId).toBe(BigInt(childChatId))
+    expect(legacyReplies?.replyCount).toBe(0)
+    expect(legacyReplies?.recentReplierUserIds).toEqual([])
+    expect(canonicalSubthread).toMatchObject({
+      chatId: BigInt(childChatId),
+      kind: MessageSubthread_Kind.REPLY,
+      messageCount: 0,
+      hasUnread: false,
+      recentAuthorUserIds: [],
+    })
+    expect(canonicalSubthread?.title).toBeUndefined()
+    expect(canonicalSubthread?.chatId).toBe(legacyReplies?.chatId)
+    expect(canonicalSubthread?.messageCount).toBe(legacyReplies?.replyCount)
+    expect(canonicalSubthread?.hasUnread).toBe(legacyReplies?.hasUnread)
+    expect(canonicalSubthread?.recentAuthorUserIds).toEqual(legacyReplies?.recentReplierUserIds)
+
+    const edited = await editMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        messageId: 1n,
+        text: "edited anchor",
+      },
+      testUtils.functionContext({ userId: anchorAuthor.id }),
+    )
+    const editedAnchor = edited.updates.find(
+      (update) => update.update.oneofKind === "editMessage",
+    )?.update
+    if (editedAnchor?.oneofKind !== "editMessage") {
+      throw new Error("Edited anchor update missing")
+    }
+    expect(editedAnchor.editMessage.message?.replies?.chatId).toBe(BigInt(childChatId))
+    expect(editedAnchor.editMessage.message?.subthread?.kind).toBe(MessageSubthread_Kind.REPLY)
   })
 
   test("retries one anchored creation as the same reply thread", async () => {
@@ -422,6 +466,390 @@ describe("messages.createSubthread", () => {
     expect(childChat?.isUntitled).toBe(true)
   })
 
+  test("materializes one titled subthread card after the first message and preserves deletion", async () => {
+    const creator = await testUtils.createUser("subthread-parent-card-owner@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+    await testUtils.addParticipant(parentChat.id, creator.id)
+
+    const created = await createSubthread(
+      { parentChatId: BigInt(parentChat.id) },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const childChatId = Number(created.chat.id)
+    const childPeer = {
+      type: {
+        oneofKind: "chat" as const,
+        chat: { chatId: BigInt(childChatId) },
+      },
+    }
+
+    await sendMessage(
+      {
+        peerId: childPeer,
+        message: "Review the launch checklist tomorrow",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    const placement = await waitForSubthreadParentMessage(childChatId)
+    expect(placement).toBeDefined()
+
+    await expect(createSubthread(
+      {
+        parentChatId: BigInt(parentChat.id),
+        parentMessageId: BigInt(placement!.parentMessageId),
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+
+    const parentMessages = await getMessages(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        messageIds: [BigInt(placement!.parentMessageId)],
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const parentMessage = parentMessages.messages[0]
+    expect(parentMessage?.message).toBe("Started a subthread: Review the launch checklist tomorrow")
+    expect(parentMessage?.replies).toBeUndefined()
+    expect(parentMessage?.subthread).toMatchObject({
+      chatId: BigInt(childChatId),
+      kind: MessageSubthread_Kind.SUBTHREAD,
+      title: "Review the launch checklist tomorrow",
+      messageCount: 1,
+      recentAuthorUserIds: [BigInt(creator.id)],
+    })
+    expect(parentMessage?.entities?.entities[0]).toMatchObject({
+      type: MessageEntity_Type.THREAD,
+      entity: {
+        oneofKind: "thread",
+        thread: { chatId: BigInt(childChatId) },
+      },
+    })
+
+    const parentSnapshot = await getChat(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        includeRecentMessages: true,
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    expect(parentSnapshot.messages.find(
+      (message) => message.id === BigInt(placement!.parentMessageId),
+    )?.subthread?.kind).toBe(MessageSubthread_Kind.SUBTHREAD)
+
+    const chatsSnapshot = await getChats(
+      {},
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    expect(chatsSnapshot.messages.find(
+      (message) => message.chatId === BigInt(parentChat.id),
+    )?.subthread?.kind).toBe(MessageSubthread_Kind.SUBTHREAD)
+
+    await sendMessage(
+      { peerId: childPeer, message: "A second message" },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    await updateChatInfo(
+      { chatId: childChatId, title: "Launch checklist" },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const refreshedParentMessage = await getMessages(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        messageIds: [BigInt(placement!.parentMessageId)],
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    expect(refreshedParentMessage.messages[0]?.subthread?.title).toBe("Launch checklist")
+    expect(refreshedParentMessage.messages[0]?.subthread?.messageCount).toBe(2)
+
+    await deleteMessage(
+      {
+        peer: childPeer,
+        messageIds: [1n, 2n],
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const emptyParentMessage = await getMessages(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        messageIds: [BigInt(placement!.parentMessageId)],
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    expect(emptyParentMessage.messages[0]?.subthread?.messageCount).toBe(0)
+
+    await deleteMessage(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        messageIds: [BigInt(placement!.parentMessageId)],
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    const [tombstone] = await db
+      .select()
+      .from(schema.subthreadParentMessages)
+      .where(eq(schema.subthreadParentMessages.childChatId, childChatId))
+    expect(tombstone?.parentMessageGlobalId).toBeNull()
+
+    await sendMessage(
+      { peerId: childPeer, message: "A later message" },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    await sleep(10)
+
+    const placementRows = await db
+      .select()
+      .from(schema.subthreadParentMessages)
+      .where(eq(schema.subthreadParentMessages.childChatId, childChatId))
+    expect(placementRows).toHaveLength(1)
+    expect(placementRows[0]?.parentMessageGlobalId).toBeNull()
+  })
+
+  test("deleting a subthread removes its live parent placement", async () => {
+    const creator = await testUtils.createUser("subthread-parent-card-delete-owner@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+    await testUtils.addParticipant(parentChat.id, creator.id)
+
+    const created = await createSubthread(
+      { parentChatId: BigInt(parentChat.id), title: "Temporary work" },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const childChatId = Number(created.chat.id)
+    await sendMessage(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(childChatId) },
+          },
+        },
+        message: "First message",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const placement = await waitForSubthreadParentMessage(childChatId)
+    expect(placement).toBeDefined()
+
+    await deleteChat(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(childChatId) },
+          },
+        },
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    const [parentMessage] = await db
+      .select({ globalId: schema.messages.globalId })
+      .from(schema.messages)
+      .where(and(
+        eq(schema.messages.chatId, parentChat.id),
+        eq(schema.messages.messageId, placement!.parentMessageId),
+      ))
+    expect(parentMessage).toBeUndefined()
+  })
+
+  test("space admin cleanup does not require access to the parent placement", async () => {
+    const creator = await testUtils.createUser("subthread-parent-card-private-owner@example.com")
+    const admin = await testUtils.createUser("subthread-parent-card-private-admin@example.com")
+    const space = await testUtils.createSpace("Private Subthread Parent Card")
+    if (!space) throw new Error("Space not created")
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: creator.id, role: "member" },
+      { spaceId: space.id, userId: admin.id, role: "admin" },
+    ])
+
+    const parentChat = await testUtils.createChat(
+      space.id,
+      "Private Parent Thread",
+      "thread",
+      false,
+      creator.id,
+    )
+    if (!parentChat) throw new Error("Parent chat not created")
+    await testUtils.addParticipant(parentChat.id, creator.id)
+
+    const created = await createSubthread(
+      { parentChatId: BigInt(parentChat.id), title: "Private child" },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const childChatId = Number(created.chat.id)
+    await sendMessage(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(childChatId) },
+          },
+        },
+        message: "First message",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const placement = await waitForSubthreadParentMessage(childChatId)
+    expect(placement).toBeDefined()
+
+    await deleteChat(
+      {
+        peer: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(childChatId) },
+          },
+        },
+      },
+      testUtils.functionContext({ userId: admin.id }),
+    )
+
+    const [parentMessage] = await db
+      .select({ globalId: schema.messages.globalId })
+      .from(schema.messages)
+      .where(and(
+        eq(schema.messages.chatId, parentChat.id),
+        eq(schema.messages.messageId, placement!.parentMessageId),
+      ))
+    expect(parentMessage).toBeUndefined()
+  })
+
+  test("the first live nudge qualifies for parent placement", async () => {
+    const creator = await testUtils.createUser("subthread-parent-card-nudge-owner@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+    await testUtils.addParticipant(parentChat.id, creator.id)
+
+    const created = await createSubthread(
+      { parentChatId: BigInt(parentChat.id) },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const childChatId = Number(created.chat.id)
+    await sendMessage(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(childChatId) },
+          },
+        },
+        message: "👋",
+        nudge: true,
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    const placement = await waitForSubthreadParentMessage(childChatId)
+    expect(placement).toBeDefined()
+    const parentMessages = await getMessages(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        messageIds: [BigInt(placement!.parentMessageId)],
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    expect(parentMessages.messages[0]?.subthread).toMatchObject({
+      kind: MessageSubthread_Kind.SUBTHREAD,
+      title: "👋",
+      messageCount: 1,
+    })
+  })
+
+  test("a prior service message does not consume first-message materialization", async () => {
+    const creator = await testUtils.createUser("subthread-parent-card-service-owner@example.com")
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+    await testUtils.addParticipant(parentChat.id, creator.id)
+
+    const created = await createSubthread(
+      { parentChatId: BigInt(parentChat.id) },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    const childChatId = Number(created.chat.id)
+    await insertSystemMessage({
+      chatId: childChatId,
+      actorUserId: creator.id,
+      fallbackText: "Pinned a message",
+      payload: {
+        event: {
+          oneofKind: "pinnedMessage",
+          pinnedMessage: {
+            pinnedMessageGlobalId: 1n,
+            pinnedMessageId: 1n,
+          },
+        },
+      },
+      publish: false,
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(childChatId) },
+          },
+        },
+        message: "First authored message",
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+
+    const placement = await waitForSubthreadParentMessage(childChatId)
+    expect(placement).toBeDefined()
+    const parentMessages = await getMessages(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(parentChat.id) },
+          },
+        },
+        messageIds: [BigInt(placement!.parentMessageId)],
+      },
+      testUtils.functionContext({ userId: creator.id }),
+    )
+    expect(parentMessages.messages[0]?.subthread).toMatchObject({
+      kind: MessageSubthread_Kind.SUBTHREAD,
+      title: "First authored message",
+    })
+  })
+
   test("does not enqueue durable access updates for discoverable subthreads", async () => {
     const creator = await testUtils.createUser("subthread-initial-owner@example.com")
     const bot = await testUtils.createUser("subthread-initial-bot@example.com")
@@ -512,6 +940,28 @@ describe("messages.createSubthread", () => {
     expect(existingDialog?.chatListHidden).toBe(true)
   })
 })
+
+async function waitForSubthreadParentMessage(childChatId: number) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const [placement] = await db
+      .select({
+        parentMessageGlobalId: schema.subthreadParentMessages.parentMessageGlobalId,
+        parentMessageId: schema.messages.messageId,
+      })
+      .from(schema.subthreadParentMessages)
+      .innerJoin(
+        schema.messages,
+        eq(schema.messages.globalId, schema.subthreadParentMessages.parentMessageGlobalId),
+      )
+      .where(eq(schema.subthreadParentMessages.childChatId, childChatId))
+      .limit(1)
+    if (placement) {
+      return placement
+    }
+    await sleep(5)
+  }
+  return undefined
+}
 
 async function waitForReplyThreadGraphLink(toChatId: number) {
   for (let attempt = 0; attempt < 20; attempt += 1) {

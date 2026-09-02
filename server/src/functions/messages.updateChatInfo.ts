@@ -12,6 +12,7 @@ import { and, eq, sql } from "drizzle-orm"
 import type { Update } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
+import { emitMessageSubthreadUpdateIfNeeded } from "@in/server/modules/subthreads"
 
 const log = new Log("functions.updateChatInfo")
 
@@ -191,6 +192,17 @@ export async function updateThreadInfo(input: UpdateThreadInfoInput): Promise<Up
       updatePayload: result.updatePayload,
       currentUserId: input.currentUserId,
     })
+    if (result.chat.parentChatId != null) {
+      await emitMessageSubthreadUpdateIfNeeded({
+        chatId: result.chat.id,
+        currentUserId: input.currentUserId,
+      }).catch((error) => {
+        log.warn("Failed to refresh parent thread card after title update", {
+          chatId: result.chat.id,
+          error,
+        })
+      })
+    }
   }
 
   return result

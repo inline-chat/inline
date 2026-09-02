@@ -602,7 +602,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   private static func hasContentPayload(_ payload: Client_MessageContentPayload) -> Bool {
-    payload.hasVoice || payload.hasActions || payload.hasReplies || payload.hasServiceMessage
+    payload.hasVoice || payload.hasActions || payload.hasReplies || payload.hasServiceMessage || payload.hasSubthread
   }
 
   private static func contentPayload(from voice: InlineProtocol.Voice) -> Client_MessageContentPayload {
@@ -629,6 +629,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
     if message.hasServiceMessage {
       payload.serviceMessage = message.serviceMessage
+    }
+    if message.hasSubthread {
+      payload.subthread = message.subthread
     }
 
     return hasContentPayload(payload) ? payload : nil
@@ -726,6 +729,14 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
           merged.serviceMessage = incoming.serviceMessage
         } else if existing.hasServiceMessage {
           merged.serviceMessage = existing.serviceMessage
+        }
+      }
+
+      if incoming.hasSubthread || existing.hasSubthread {
+        if incoming.hasSubthread {
+          merged.subthread = incoming.subthread
+        } else if existing.hasSubthread {
+          merged.subthread = existing.subthread
         }
       }
 
@@ -1555,6 +1566,7 @@ public extension Message {
   }
 
   var hasText: Bool {
+    if isSubthreadPlacement { return false }
     guard let text else { return false }
     return !text.isEmpty
   }
@@ -1580,19 +1592,88 @@ public extension Message {
     return contentPayload.replies
   }
 
+  var threadCard: MessageThreadCard? {
+    if let contentPayload, contentPayload.hasSubthread {
+      let subthread = contentPayload.subthread
+      guard subthread.chatID > 0 else { return nil }
+
+      let kind: MessageThreadCard.Kind
+      switch subthread.kind {
+      case .reply:
+        kind = .reply
+      case .subthread:
+        kind = .subthread
+      case .unspecified, .UNRECOGNIZED:
+        return nil
+      }
+
+      let title = subthread.hasTitle
+        ? subthread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        : nil
+      if kind == .subthread && title?.isEmpty != false {
+        return nil
+      }
+
+      return MessageThreadCard(
+        chatId: subthread.chatID,
+        kind: kind,
+        title: title?.isEmpty == false ? title : nil,
+        messageCount: Int(subthread.messageCount),
+        hasUnread: subthread.hasUnread_p,
+        recentAuthorUserIds: subthread.recentAuthorUserIds
+      )
+    }
+
+    guard let replies = replyThreadSummary, replies.chatID > 0 else { return nil }
+    return MessageThreadCard(
+      chatId: replies.chatID,
+      kind: .reply,
+      title: nil,
+      messageCount: Int(replies.replyCount),
+      hasUnread: replies.hasUnread_p,
+      recentAuthorUserIds: replies.recentReplierUserIds
+    )
+  }
+
+  var threadCardPeer: Peer? {
+    guard let threadCard else { return nil }
+    return .thread(id: threadCard.chatId)
+  }
+
+  var hasThreadCard: Bool {
+    guard let threadCard else { return false }
+    return threadCard.kind == .subthread || threadCard.messageCount > 0
+  }
+
+  var isSubthreadPlacement: Bool {
+    threadCard?.kind == .subthread
+  }
+
   var replyThreadPeer: Peer? {
-    guard let replyThreadSummary, replyThreadSummary.chatID > 0 else { return nil }
-    return .thread(id: replyThreadSummary.chatID)
+    threadCardPeer
   }
 
   var replyThreadRecentReplierUserIds: [Int64] {
-    replyThreadSummary?.recentReplierUserIds ?? []
+    threadCard?.recentAuthorUserIds ?? []
   }
 
   var hasReplyThreadSummary: Bool {
-    guard let replyThreadSummary else { return false }
-    return replyThreadSummary.replyCount > 0
+    hasThreadCard
   }
+}
+
+public struct MessageThreadCard: Equatable, Sendable {
+  public enum Kind: Equatable, Sendable {
+    case reply
+    case subthread
+  }
+
+  public let chatId: Int64
+  public let kind: Kind
+  public let title: String?
+  public let messageCount: Int
+  public let hasUnread: Bool
+  public let recentAuthorUserIds: [Int64]
 }
 
 public extension Message {

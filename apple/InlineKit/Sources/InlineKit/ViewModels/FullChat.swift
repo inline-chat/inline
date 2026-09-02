@@ -193,6 +193,13 @@ public extension EmbeddedMessage {
 }
 
 public extension FullMessage {
+  var threadCardTitle: String? {
+    if let title = message.threadCard?.title {
+      return title
+    }
+    return replyThreadCustomTitle
+  }
+
   var replyThreadCustomTitle: String? {
     guard replyThread?.isUntitled != true,
           let title = replyThread?.title?.trimmingCharacters(in: .whitespacesAndNewlines),

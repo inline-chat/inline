@@ -11,6 +11,7 @@ import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { RpcCall } from "./core.js";
+import { MessageSubthread } from "./core.js";
 import { MessageService } from "./core.js";
 import { MessageReplies } from "./core.js";
 import { MessageActions } from "./core.js";
@@ -34,6 +35,10 @@ export interface MessageContentPayload {
      * @generated from protobuf field: MessageService service_message = 4;
      */
     serviceMessage?: MessageService;
+    /**
+     * @generated from protobuf field: MessageSubthread subthread = 5;
+     */
+    subthread?: MessageSubthread;
 }
 /**
  * @generated from protobuf message client.MessageVoiceContent
@@ -96,7 +101,8 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
             { no: 1, name: "voice", kind: "message", T: () => MessageVoiceContent },
             { no: 2, name: "actions", kind: "message", T: () => MessageActions },
             { no: 3, name: "replies", kind: "message", T: () => MessageReplies },
-            { no: 4, name: "service_message", kind: "message", T: () => MessageService }
+            { no: 4, name: "service_message", kind: "message", T: () => MessageService },
+            { no: 5, name: "subthread", kind: "message", T: () => MessageSubthread }
         ]);
     }
     create(value?: PartialMessage<MessageContentPayload>): MessageContentPayload {
@@ -122,6 +128,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
                 case /* MessageService service_message */ 4:
                     message.serviceMessage = MessageService.internalBinaryRead(reader, reader.uint32(), options, message.serviceMessage);
                     break;
+                case /* MessageSubthread subthread */ 5:
+                    message.subthread = MessageSubthread.internalBinaryRead(reader, reader.uint32(), options, message.subthread);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -146,6 +155,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
         /* MessageService service_message = 4; */
         if (message.serviceMessage)
             MessageService.internalBinaryWrite(message.serviceMessage, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* MessageSubthread subthread = 5; */
+        if (message.subthread)
+            MessageSubthread.internalBinaryWrite(message.subthread, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -14,6 +14,7 @@ import {
   type MessageMedia,
   type MessageReplies,
   type MessageService,
+  type MessageSubthread,
   type Peer,
   type Photo,
 } from "@inline-chat/protocol/core"
@@ -80,6 +81,7 @@ export const encodeMessage = ({
   encodingForPeer,
   sendMode,
   replies,
+  subthread,
   mentionedUserIds,
 }: {
   message: EncodableMessage
@@ -92,6 +94,7 @@ export const encodeMessage = ({
   voice?: DbFullVoice | undefined
   sendMode?: MessageSendMode
   replies?: MessageReplies
+  subthread?: MessageSubthread
   mentionedUserIds?: ReadonlySet<number>
 }): Message => {
   // Decrypt
@@ -231,6 +234,7 @@ export const encodeMessage = ({
     sendMode: sendMode ?? undefined,
     fwdFrom: fwdFrom,
     replies,
+    subthread,
     actions,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: message.blockContent ?? undefined,
@@ -245,11 +249,13 @@ export const encodeFullMessage = ({
   encodingForUserId,
   encodingForPeer,
   replies,
+  subthread,
 }: {
   message: DbFullMessage
   encodingForUserId: number
   encodingForPeer: { peer: Peer } | { inputPeer: InputPeer }
   replies?: MessageReplies
+  subthread?: MessageSubthread
 }): Message => {
   let peerId: Peer
 
@@ -378,6 +384,7 @@ export const encodeFullMessage = ({
     entities: message.entities ?? undefined,
     fwdFrom: fwdFrom,
     replies,
+    subthread,
     actions: message.actions ?? undefined,
     serviceMessage: encodeServiceMessage(message.systemMessage),
     blockContent: blockContent ?? undefined,

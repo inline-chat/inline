@@ -779,7 +779,7 @@ final class UIMessageView2: UIMessageView {
     }
     reactionsFlowView.configure(with: fullMessage.groupedReactions)
 
-    if shouldShowReplyThreadSummary, message.replyThreadSummary != nil {
+    if shouldShowReplyThreadSummary, message.threadCard != nil {
       registerBubbleNode(replyThreadSummaryView, id: NodeID.replyThreadSummary)
       configureReplyThreadSummaryV2()
     }
@@ -1547,13 +1547,14 @@ final class UIMessageView2: UIMessageView {
   }
 
   private func updateReplyThreadSummaryContent() {
-    guard let summary = message.replyThreadSummary else { return }
+    guard let summary = message.threadCard else { return }
     replyThreadSummaryView.configure(
-      replyCount: Int(summary.replyCount),
+      kind: summary.kind,
+      messageCount: summary.messageCount,
       recentAuthors: recentReplyThreadAuthors(),
-      hasUnread: summary.hasUnread_p,
+      hasUnread: summary.hasUnread,
       outgoing: shouldUseWhiteReplyThreadSummary,
-      title: fullMessage.replyThreadCustomTitle
+      title: fullMessage.threadCardTitle
     )
   }
 
@@ -1650,7 +1651,7 @@ final class UIMessageView2: UIMessageView {
   }
 
   private func replyThreadProjectionChanged(from previous: FullMessage, to updated: FullMessage) -> Bool {
-    previous.message.replyThreadSummary != updated.message.replyThreadSummary
+    previous.message.threadCard != updated.message.threadCard
       || previous.replyThread != updated.replyThread
   }
 
@@ -1741,7 +1742,7 @@ final class UIMessageView2: UIMessageView {
       markAppearing(appearing, scale: 0.96)
     }
 
-    let wantsThreadSummary = shouldShowReplyThreadSummary && message.replyThreadSummary != nil
+    let wantsThreadSummary = shouldShowReplyThreadSummary && message.threadCard != nil
     let hasThreadSummary = bubbleNodeViews[NodeID.replyThreadSummary] === replyThreadSummaryView
     if wantsThreadSummary != hasThreadSummary {
       if wantsThreadSummary {
