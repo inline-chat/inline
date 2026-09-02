@@ -20,6 +20,7 @@ import { parseMarkdown } from "@in/server/modules/message/parseMarkdown"
 import { encodeFullMessage } from "@in/server/realtime/encoders/encodeMessage"
 import { and, eq } from "drizzle-orm"
 import {
+  BlockTable_Alignment,
   MessageEntities,
   Photo_Format,
   type BlockContent,
@@ -38,6 +39,38 @@ describe("message block content storage", () => {
     chatId = chat.id
   })
   afterAll(teardownTestDatabase)
+
+  test("ordinary message reads preserve tables written under the historical cell limit", async () => {
+    const blockContent: BlockContent = {
+      blocks: [{
+        kind: {
+          oneofKind: "table",
+          table: {
+            alignments: Array.from({ length: 16 }, () => BlockTable_Alignment.LEFT),
+            rows: Array.from({ length: 256 }, () => ({
+              cells: Array.from({ length: 16 }, () => ({ offset: 0n, length: 1n })),
+            })),
+          },
+        },
+      }],
+    }
+    // Insert the persisted shape directly: new Markdown is still limited to 256 cells.
+    const rich = prepareBlockContent({
+      text: "x",
+      parsed: { blockContent, imageSources: [] },
+    })
+    if (!rich) throw new Error("Expected prepared historical content")
+    const inserted = await MessageModel.insertMessage({
+      chatId,
+      fromId: userId,
+      date: new Date(),
+      ...encryptedFields("x", undefined),
+    }, rich)
+    expect(inserted.message.blockContent).toEqual(blockContent)
+
+    const fetched = await MessageModel.getMessage(inserted.message.messageId, chatId)
+    expect(fetched.blockContent).toEqual(blockContent)
+  })
 
   test("atomically inserts, decodes, reuses, replaces, and clears canonical content", async () => {
     const first = prepared("# Result\n\n![one](https://example.com/one.png){width=640 height=480}")
@@ -114,6 +147,84 @@ describe("message block content storage", () => {
     expect(await db.select().from(blockContents).where(eq(blockContents.id, contentId!))).toHaveLength(0)
     expect(await db.select().from(blockContentImageJobs).where(eq(blockContentImageJobs.contentId, contentId!)))
       .toHaveLength(0)
+  })
+
+  test("reuses uniquely moved image jobs but fails closed for ambiguous duplicates", async () => {
+    const one = "https://example.com/stream-one.png"
+    const two = "https://example.com/stream-two.png"
+    const initial = prepared(`![one](${one})\n\n![two](${two})`)
+    const inserted = await MessageModel.insertMessage({
+      chatId,
+      fromId: userId,
+      date: new Date(),
+      ...encryptedFields(initial.text, initial.prepared.entities),
+    }, initial.prepared)
+    const contentId = inserted.message.blockContentId!
+    let jobs = await db.select().from(blockContentImageJobs).where(eq(blockContentImageJobs.contentId, contentId))
+    expect(jobs).toHaveLength(2)
+    const firstId = jobs.find((job) => job.blockPath.join(".") === "0.0")?.id
+    const secondId = jobs.find((job) => job.blockPath.join(".") === "0.1")?.id
+    expect(firstId).toBeTruthy()
+    expect(secondId).toBeTruthy()
+
+    await db.update(blockContentImageJobs).set({
+      state: "processing",
+      leaseToken: "moving-image",
+      leaseUntil: new Date(Date.now() + 60_000),
+    }).where(eq(blockContentImageJobs.id, firstId!))
+
+    const insertedPrefix = prepared(`Introduction\n\n![one](${one})\n\n![two](${two})`)
+    await MessageModel.editMessage({
+      messageId: inserted.message.messageId,
+      chatId,
+      text: insertedPrefix.text,
+      entities: insertedPrefix.prepared.entities,
+      blockContent: insertedPrefix.prepared,
+    })
+    jobs = await db.select().from(blockContentImageJobs).where(eq(blockContentImageJobs.contentId, contentId))
+    expect(jobs).toHaveLength(2)
+    expect(jobs.find((job) => job.id === firstId)).toMatchObject({
+      blockPath: [1, 0], expectedRevision: 1, state: "processing", leaseToken: "moving-image",
+    })
+    expect(jobs.find((job) => job.id === secondId)).toMatchObject({
+      blockPath: [1, 1], expectedRevision: 1, state: "pending",
+    })
+
+    const reordered = prepared(`Introduction\n\n![two](${two})\n\n![one](${one})`)
+    await MessageModel.editMessage({
+      messageId: inserted.message.messageId,
+      chatId,
+      text: reordered.text,
+      entities: reordered.prepared.entities,
+      blockContent: reordered.prepared,
+    })
+    jobs = await db.select().from(blockContentImageJobs).where(eq(blockContentImageJobs.contentId, contentId))
+    expect(jobs).toHaveLength(2)
+    expect(jobs.find((job) => job.id === firstId)).toMatchObject({ blockPath: [1, 1], expectedRevision: 2 })
+    expect(jobs.find((job) => job.id === secondId)).toMatchObject({ blockPath: [1, 0], expectedRevision: 2 })
+
+    const duplicateUrl = "https://example.com/duplicate.png"
+    const duplicate = prepared(`![first](${duplicateUrl})\n\nbetween\n\n![second](${duplicateUrl})`)
+    const duplicateMessage = await MessageModel.insertMessage({
+      chatId,
+      fromId: userId,
+      date: new Date(),
+      ...encryptedFields(duplicate.text, duplicate.prepared.entities),
+    }, duplicate.prepared)
+    const duplicateContentId = duplicateMessage.message.blockContentId!
+    const shiftedDuplicate = prepared(`prefix\n\n![first](${duplicateUrl})\n\nbetween\n\n![second](${duplicateUrl})`)
+    await MessageModel.editMessage({
+      messageId: duplicateMessage.message.messageId,
+      chatId,
+      text: shiftedDuplicate.text,
+      entities: shiftedDuplicate.prepared.entities,
+      blockContent: shiftedDuplicate.prepared,
+    })
+    const duplicateJobs = await db.select().from(blockContentImageJobs)
+      .where(eq(blockContentImageJobs.contentId, duplicateContentId))
+    expect(duplicateJobs).toHaveLength(4)
+    expect(duplicateJobs.filter((job) => job.state === "canceled")).toHaveLength(2)
+    expect(duplicateJobs.filter((job) => job.state === "pending" && job.expectedRevision === 1)).toHaveLength(2)
   })
 
   test("retains a shared content row until its last wrapper is deleted", async () => {

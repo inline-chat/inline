@@ -142,7 +142,10 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const messageInfo: MessageInfo = {
     message: {
       ...message,
-      blockContent: message.blockContent ?? fullMessage.blockContent,
+      blockContent:
+        message.blockContent === undefined
+          ? fullMessage.blockContent
+          : message.blockContent,
     },
     photo: fullMessage.photo ?? undefined,
     video: fullMessage.video ?? undefined,

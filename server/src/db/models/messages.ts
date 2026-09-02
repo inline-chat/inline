@@ -644,8 +644,19 @@ function decodeBlockContentProjection(
       authTag: row.payloadTag,
     })
 
-    if (stored.text !== text || !equalMessageEntities(stored.entities, entities)) {
-      log.error("block content mirror mismatch", { contentId: row.id.toString() })
+    const textMatches = stored.text === text
+    const entitiesMatch = equalMessageEntities(stored.entities, entities)
+    if (!textMatches || !entitiesMatch) {
+      const mismatchKind = !textMatches && !entitiesMatch
+        ? "text_and_entities"
+        : textMatches
+          ? "entities"
+          : "text"
+      log.error("block content mirror mismatch", {
+        mismatchKind,
+        contentSchemaVersion: row.schemaVersion,
+        contentRevision: row.revision,
+      })
       return null
     }
 
@@ -653,7 +664,8 @@ function decodeBlockContentProjection(
     return stored.blockContent
   } catch (error) {
     log.error("invalid block content projection", {
-      contentId: row.id.toString(),
+      contentSchemaVersion: row.schemaVersion,
+      contentRevision: row.revision,
       errorType: error instanceof Error ? error.name : "UnknownError",
     })
     return null
@@ -888,11 +900,11 @@ async function editMessage(input: EditMessageInput): Promise<{
 }> {
   let { messageId, chatId, text, entities, actions } = input
 
-  const encryptedMessage = text ? encryptMessage(text) : undefined
-  const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
-  const encryptedEntities = binaryEntities && binaryEntities?.length > 0
+  const encryptedMessage = text ? encryptMessage(text) : null
+  const binaryEntities = entities ? MessageEntities.toBinary(entities) : null
+  const encryptedEntities = binaryEntities && binaryEntities.length > 0
     ? encryptMessageEntities(binaryEntities)
-    : undefined
+    : null
   const binaryActions = actions ? MessageActions.toBinary(actions) : undefined
   const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
   const hasLink = detectHasLink({ entities })
@@ -951,13 +963,14 @@ async function editMessage(input: EditMessageInput): Promise<{
       editDate: input.suppressEditDate ? null : new Date(),
       rev: sql`${messages.rev} + 1`,
       // text
-      textEncrypted: encryptedMessage?.encrypted,
-      textIv: encryptedMessage?.iv,
-      textTag: encryptedMessage?.authTag,
+      text: null,
+      textEncrypted: encryptedMessage?.encrypted ?? null,
+      textIv: encryptedMessage?.iv ?? null,
+      textTag: encryptedMessage?.authTag ?? null,
       // entities
-      entitiesEncrypted: encryptedEntities?.encrypted,
-      entitiesIv: encryptedEntities?.iv,
-      entitiesTag: encryptedEntities?.authTag,
+      entitiesEncrypted: encryptedEntities?.encrypted ?? null,
+      entitiesIv: encryptedEntities?.iv ?? null,
+      entitiesTag: encryptedEntities?.authTag ?? null,
       hasLink: hasLink,
       blockContentId: nextBlockContentId,
     }
@@ -994,12 +1007,7 @@ async function editMessage(input: EditMessageInput): Promise<{
     }
 
     if (input.blockContent === null && currentMessage.blockContentId) {
-      await tx.delete(blockContents).where(
-        and(
-          eq(blockContents.id, currentMessage.blockContentId),
-          sql`not exists (select 1 from ${messages} where ${messages.blockContentId} = ${currentMessage.blockContentId})`,
-        ),
-      )
+      await deleteUnreferencedBlockContents(tx, [currentMessage.blockContentId])
     }
 
     const update = await UpdatesModel.insertUpdate(tx, {

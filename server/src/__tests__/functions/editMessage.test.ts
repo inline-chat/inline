@@ -29,6 +29,8 @@ import { replaceMessageThreadLinks } from "@in/server/modules/threadGraph/links"
 import { getOutlinks } from "@in/server/modules/threadGraph/queries"
 import { publishClaimedBlockImageJobForTests } from "@in/server/modules/message/blockContentImageWorker"
 import { decryptStoredBlockContent, encryptStoredBlockContent } from "@in/server/modules/message/blockContentPayload"
+import { deleteUnreferencedBlockContents } from "@in/server/modules/message/blockContentStorage"
+import { encryptBinary } from "@in/server/modules/encryption/encryption"
 
 let currentUser: DbUser
 let privateChat: DbChat
@@ -310,6 +312,139 @@ describe("editMessage function", () => {
     expect(afterJobs[0]?.id).toBe(beforeJobs[0]?.id)
     expect(afterJobs[0]?.expectedRevision).toBe(1)
     expect(afterJobs[0]?.state).toBe("pending")
+  })
+
+  test("clears rich content from the immediate update when editing to plain text", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "# Rich draft",
+        parseMarkdown: true,
+      },
+      context,
+    )
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+    const [before] = await db
+      .select({ blockContentId: messages.blockContentId })
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    const contentId = before?.blockContentId
+    if (!contentId) throw new Error("Expected stored rich content")
+
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: "plain result",
+        parseMarkdown: false,
+      },
+      context,
+    )
+
+    const message = extractEditedMessage(result)
+    expect(message?.message).toBe("plain result")
+    expect(message?.blockContent).toBeUndefined()
+
+    const [stored] = await db
+      .select({ blockContentId: messages.blockContentId })
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    expect(stored?.blockContentId).toBeNull()
+    expect(await db.select().from(blockContents).where(eq(blockContents.id, contentId))).toHaveLength(0)
+  })
+
+  test("retains an active staged image upload when editing rich content to plain text", async () => {
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: [
+          "![staged](https://example.com/edit-staged.png)",
+          "![ordinary](https://example.com/edit-ordinary.png)",
+        ].join("\n\n"),
+        parseMarkdown: true,
+      },
+      context,
+    )
+    const messageId = extractSentMessageId(sent)
+    expect(messageId).toBeTruthy()
+
+    const [before] = await db
+      .select({ blockContentId: messages.blockContentId })
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    const contentId = before?.blockContentId
+    if (!contentId) throw new Error("Expected rich image content")
+    const initialJobs = await db
+      .select()
+      .from(blockContentImageJobs)
+      .where(eq(blockContentImageJobs.contentId, contentId))
+    expect(initialJobs).toHaveLength(2)
+    const stagedJob = initialJobs[0]
+    if (!stagedJob) throw new Error("Expected staged image job")
+
+    const staged = encryptBinary(Buffer.from("INP000000000000000000000/edit-staged.png"))
+    const leaseUntil = new Date(Date.now() + 60_000)
+    await db
+      .update(blockContentImageJobs)
+      .set({
+        state: "processing",
+        leaseToken: "edit-staged-owner",
+        leaseUntil,
+        stagedObjectPathEncrypted: staged.encrypted,
+        stagedObjectPathIv: staged.iv,
+        stagedObjectPathTag: staged.authTag,
+      })
+      .where(eq(blockContentImageJobs.id, stagedJob.id))
+
+    const result = await editMessage(
+      {
+        messageId: messageId!,
+        peer: privateChatPeerId,
+        text: "plain after staged upload",
+        parseMarkdown: false,
+      },
+      context,
+    )
+    expect(extractEditedMessage(result)?.blockContent).toBeUndefined()
+
+    const [edited] = await db
+      .select({ blockContentId: messages.blockContentId })
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(messageId))))
+      .limit(1)
+    expect(edited?.blockContentId).toBeNull()
+    expect(await db.select().from(blockContents).where(eq(blockContents.id, contentId))).toHaveLength(1)
+    const retainedJobs = await db
+      .select()
+      .from(blockContentImageJobs)
+      .where(eq(blockContentImageJobs.contentId, contentId))
+    const retainedJob = retainedJobs.find((job) => job.id === stagedJob.id)
+    const ordinaryJob = retainedJobs.find((job) => job.id !== stagedJob.id)
+    expect(retainedJob?.state).toBe("processing")
+    expect(retainedJob?.leaseToken).toBe("edit-staged-owner")
+    expect(retainedJob?.leaseUntil?.getTime()).toBe(leaseUntil.getTime())
+    expect(retainedJob?.stagedObjectPathEncrypted?.equals(staged.encrypted)).toBe(true)
+    expect(retainedJob?.stagedObjectPathIv?.equals(staged.iv)).toBe(true)
+    expect(retainedJob?.stagedObjectPathTag?.equals(staged.authTag)).toBe(true)
+    expect(ordinaryJob?.state).toBe("canceled")
+    expect(ordinaryJob?.leaseToken).toBeNull()
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(blockContentImageJobs)
+        .set({
+          stagedObjectPathEncrypted: null,
+          stagedObjectPathIv: null,
+          stagedObjectPathTag: null,
+        })
+        .where(eq(blockContentImageJobs.contentId, contentId))
+      await deleteUnreferencedBlockContents(tx, [contentId])
+    })
+    expect(await db.select().from(blockContents).where(eq(blockContents.id, contentId))).toHaveLength(0)
   })
 
   test("keeps thread links current when image enrichment advances the message revision", async () => {

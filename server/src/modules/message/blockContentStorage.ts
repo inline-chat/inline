@@ -96,23 +96,65 @@ export async function replacePreparedBlockContent(input: {
     .from(blockContentImageJobs)
     .where(eqContent(input.contentId))
 
-  const reusableJobs = new Map(
-    currentJobs
-      .filter((job) => job.state !== "canceled" && job.expectedRevision === input.currentRevision)
-      .map((job) => [imageJobKey(job.blockPath, job.sourceHash), job]),
-  )
+  const activeJobs = currentJobs
+    .filter((job) => job.state !== "canceled" && job.expectedRevision === input.currentRevision)
+  const exactJobs = new Map<string, (typeof activeJobs)[number][]>()
+  for (const job of activeJobs) {
+    const key = imageJobKey(job.blockPath, job.sourceHash)
+    const values = exactJobs.get(key) ?? []
+    values.push(job)
+    exactJobs.set(key, values)
+  }
   const newJobs: PreparedBlockImageJob[] = []
-  const reusedJobIds: bigint[] = []
+  const reusedJobs: { id: bigint; oldPath: number[]; nextPath: number[] }[] = []
+  const reusedJobIds = new Set<bigint>()
+  const matchedPrepared = new Set<PreparedBlockImageJob>()
 
-  for (const job of input.prepared.imageJobs) {
-    const reusable = reusableJobs.get(imageJobKey(job.path, job.sourceHash))
-    const priorImage = reusable ? getBlockImageAtPath(oldSnapshot, reusable.blockPath) : undefined
+  const tryReuse = (job: PreparedBlockImageJob, reusable: (typeof activeJobs)[number]): boolean => {
+    if (reusedJobIds.has(reusable.id)) return false
+    const priorImage = getBlockImageAtPath(oldSnapshot, reusable.blockPath)
     const nextImage = getBlockImageAtPath(input.prepared.blockContent, job.path)
-    if (reusable && priorImage && nextImage && reuseBlockImageState(nextImage, priorImage)) {
-      reusedJobIds.push(reusable.id)
-    } else {
-      newJobs.push(job)
+    if (!priorImage || !nextImage || !reuseBlockImageState(nextImage, priorImage)) return false
+    reusedJobIds.add(reusable.id)
+    reusedJobs.push({ id: reusable.id, oldPath: reusable.blockPath, nextPath: job.path })
+    matchedPrepared.add(job)
+    return true
+  }
+
+  // Preserve exact occurrences first, including duplicate URLs in an album.
+  for (const job of input.prepared.imageJobs) {
+    for (const reusable of exactJobs.get(imageJobKey(job.path, job.sourceHash)) ?? []) {
+      if (tryReuse(job, reusable)) break
     }
+  }
+
+  // A streamed prefix insertion changes every later block path. Reconcile a
+  // moved occurrence only when its source is unique on both sides; duplicate
+  // sources are intentionally ambiguous and receive fresh jobs.
+  const remainingPreparedByHash = new Map<string, PreparedBlockImageJob[]>()
+  for (const job of input.prepared.imageJobs) {
+    if (matchedPrepared.has(job)) continue
+    const key = sourceHashKey(job.sourceHash)
+    const values = remainingPreparedByHash.get(key) ?? []
+    values.push(job)
+    remainingPreparedByHash.set(key, values)
+  }
+  const remainingCurrentByHash = new Map<string, (typeof activeJobs)[number][]>()
+  for (const job of activeJobs) {
+    if (reusedJobIds.has(job.id)) continue
+    const key = sourceHashKey(job.sourceHash)
+    const values = remainingCurrentByHash.get(key) ?? []
+    values.push(job)
+    remainingCurrentByHash.set(key, values)
+  }
+  for (const [hash, preparedJobs] of remainingPreparedByHash) {
+    const reusable = remainingCurrentByHash.get(hash)
+    if (preparedJobs.length === 1 && reusable?.length === 1) {
+      tryReuse(preparedJobs[0]!, reusable[0]!)
+    }
+  }
+  for (const job of input.prepared.imageJobs) {
+    if (!matchedPrepared.has(job)) newJobs.push(job)
   }
 
   const payload = encryptStoredBlockContent({
@@ -146,15 +188,22 @@ export async function replacePreparedBlockContent(input: {
     .where(
       and(
         eqContent(input.contentId),
-        reusedJobIds.length > 0 ? notInArray(blockContentImageJobs.id, reusedJobIds) : undefined,
+        reusedJobIds.size > 0 ? notInArray(blockContentImageJobs.id, [...reusedJobIds]) : undefined,
         not(activeStagedUpload()),
       ),
     )
-  if (reusedJobIds.length > 0) {
+  if (reusedJobIds.size > 0) {
     await input.tx
       .update(blockContentImageJobs)
       .set({ expectedRevision: nextRevision, updatedAt: new Date() })
-      .where(inArray(blockContentImageJobs.id, reusedJobIds))
+      .where(inArray(blockContentImageJobs.id, [...reusedJobIds]))
+    for (const job of reusedJobs) {
+      if (sameBlockPath(job.oldPath, job.nextPath)) continue
+      await input.tx
+        .update(blockContentImageJobs)
+        .set({ blockPath: job.nextPath, updatedAt: new Date() })
+        .where(eq(blockContentImageJobs.id, job.id))
+    }
   }
   await insertImageJobs(input.tx, input.contentId, nextRevision, newJobs)
   return nextRevision
@@ -246,7 +295,15 @@ const activeStagedUpload = () => and(
 )!
 
 function imageJobKey(path: number[], sourceHash: Uint8Array): string {
-  return `${path.join(".")}:${Buffer.from(sourceHash).toString("hex")}`
+  return `${path.join(".")}:${sourceHashKey(sourceHash)}`
+}
+
+function sourceHashKey(sourceHash: Uint8Array): string {
+  return Buffer.from(sourceHash).toString("hex")
+}
+
+function sameBlockPath(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
 /**

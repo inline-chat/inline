@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
 import { MessageModel } from "@in/server/db/models/messages"
 import { db } from "@in/server/db"
-import { chats, updates, UpdateBucket } from "@in/server/db/schema"
+import { chats, messages, updates, UpdateBucket } from "@in/server/db/schema"
 import { decrypt, decryptBinary } from "@in/server/modules/encryption/encryption"
 import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
 import { and, eq } from "drizzle-orm"
@@ -158,21 +158,42 @@ describe("editMessage", () => {
     expect(entities.entities[0]?.length).toBe(3n)
   })
 
-  test("it should not fail when entities are cleared", async () => {
+  test("clears stale entity ciphertext when entities are removed", async () => {
     await testUtils.createTestMessage({
       messageId: 3,
       fromId: userId,
       chatId: chatId,
-      text: "test",
+      text: "@mo",
+      entities: testUtils.mentionEntities(0, 3),
     })
 
-    let edited = (await MessageModel.editMessage({
+    const { message: edited } = await MessageModel.editMessage({
       messageId: 3,
       chatId: chatId,
       text: "edited",
       entities: undefined,
-    }))!
+    })
+
+    const [stored] = await db
+      .select({
+        text: messages.text,
+        entitiesEncrypted: messages.entitiesEncrypted,
+        entitiesIv: messages.entitiesIv,
+        entitiesTag: messages.entitiesTag,
+      })
+      .from(messages)
+      .where(and(eq(messages.chatId, chatId), eq(messages.messageId, 3)))
+      .limit(1)
 
     expect(edited).toBeTruthy()
+    expect(edited.entitiesEncrypted).toBeNull()
+    expect(edited.entitiesIv).toBeNull()
+    expect(edited.entitiesTag).toBeNull()
+    expect(stored).toEqual({
+      text: null,
+      entitiesEncrypted: null,
+      entitiesIv: null,
+      entitiesTag: null,
+    })
   })
 })
