@@ -313,6 +313,20 @@ final class SidebarCollectionBodyItem: NSCollectionViewItem, NSGestureRecognizer
     }
   }
 
+  func setHovered(_ hovered: Bool) {
+    nativeView?.setHovered(hovered)
+  }
+
+  /// Hit-test against the pixels AppKit is currently presenting, not a row's
+  /// destination frame while collection or reorder motion is still settling.
+  func hoverPresentationFrame(in collectionView: NSCollectionView) -> CGRect? {
+    guard acceptsPointerInteraction,
+          let superview = view.superview
+    else { return nil }
+    let frame = view.layer?.presentation()?.frame ?? view.frame
+    return collectionView.convert(frame, from: superview)
+  }
+
   func clearDisclosurePresentation() {
     #if DEBUG
     traceTransitionState(event: "clear-presentation-before")

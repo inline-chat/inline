@@ -472,6 +472,12 @@ final class SidebarCollectionBodyController: NSViewController {
   private var unreadViewportEntries: [
     SidebarUnreadViewportEntry<SidebarCollectionNodeID>
   ]?
+  // A single semantic owner prevents independently moving row tracking areas
+  // from retaining stale hover state when AppKit reorders their presentation.
+  private var hoverTrackingArea: NSTrackingArea?
+  private var hoveredRowID: SidebarCollectionRow.ID?
+  private weak var hoveredItem: SidebarCollectionBodyItem?
+  private var hoverRefreshScheduled = false
   private var boundsObserver: NSObjectProtocol?
   private var frameObserver: NSObjectProtocol?
   private var lastViewportSize: CGSize?
@@ -534,6 +540,13 @@ final class SidebarCollectionBodyController: NSViewController {
     // Add native selection only with an explicit multi-selection product model.
     collectionView.isSelectable = false
     collectionView.register(SidebarCollectionBodyItem.self, forItemWithIdentifier: itemIdentifier)
+    let hoverTrackingArea = NSTrackingArea(
+      rect: .zero,
+      options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
+      owner: self
+    )
+    collectionView.addTrackingArea(hoverTrackingArea)
+    self.hoverTrackingArea = hoverTrackingArea
     collectionView.registerForDraggedTypes(InlinePasteboard.draggedTypes)
     collectionView.draggingUpdatedHandler = { [weak self] sender in
       self?.updateExternalDrop(sender) ?? []
@@ -618,6 +631,7 @@ final class SidebarCollectionBodyController: NSViewController {
           )
         }
       )
+      item.setHovered(self.renderer == .appKit && self.hoveredRowID == rowID)
       return item
     }
 
@@ -659,6 +673,7 @@ final class SidebarCollectionBodyController: NSViewController {
     clearPendingMoves()
     localSettle = nil
     endExternalDrop(sequence: nil)
+    clearHoveredRow()
     reorderSession = nil
     cancelDisclosureTransition()
     if let presentation {
@@ -668,7 +683,10 @@ final class SidebarCollectionBodyController: NSViewController {
     finishLocalPresentation()
   }
 
-  deinit {
+  isolated deinit {
+    if let hoverTrackingArea {
+      collectionView.removeTrackingArea(hoverTrackingArea)
+    }
     if let boundsObserver {
       NotificationCenter.default.removeObserver(boundsObserver)
     }
@@ -698,11 +716,132 @@ final class SidebarCollectionBodyController: NSViewController {
     collectionView.displayIfNeeded()
     layoutScrollEdgeViews()
     updateScrollEdges(animated: false)
+    scheduleHoverRefresh()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    updateHoveredRow(from: event)
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    super.mouseMoved(with: event)
+    updateHoveredRow(from: event)
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    clearHoveredRow()
+  }
+
+  // MARK: - Row hover
+
+  private var suppressesRowHover: Bool {
+    renderer != .appKit
+      || reorderSession != nil
+      || localSettle != nil
+      || externalDropState.sequenceID != nil
+  }
+
+  private func updateHoveredRow(from event: NSEvent) {
+    let point = collectionView.convert(event.locationInWindow, from: nil)
+    updateHoveredRow(at: point)
+  }
+
+  private func updateHoveredRowFromCurrentMouseLocation(force: Bool = false) {
+    guard let window = collectionView.window,
+          window.isKeyWindow
+    else {
+      clearHoveredRow()
+      return
+    }
+    let point = collectionView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    updateHoveredRow(at: point, force: force)
+  }
+
+  private func updateHoveredRow(at point: NSPoint, force: Bool = false) {
+    guard suppressesRowHover == false,
+          let target = hoverTarget(at: point)
+    else {
+      clearHoveredRow()
+      return
+    }
+    setHoveredRow(target.rowID, item: target.item, force: force)
+  }
+
+  private func hoverTarget(
+    at point: NSPoint
+  ) -> (rowID: SidebarCollectionRow.ID, item: SidebarCollectionBodyItem)? {
+    guard collectionView.visibleRect.contains(point),
+          let window = collectionView.window,
+          let contentView = window.contentView
+    else { return nil }
+
+    let windowPoint = collectionView.convert(point, to: nil)
+    let contentPoint = contentView.convert(windowPoint, from: nil)
+    guard let hitView = contentView.hitTest(contentPoint),
+          hitView === collectionView || hitView.isDescendant(of: collectionView)
+    else { return nil }
+
+    let candidates: [(
+      rowID: SidebarCollectionRow.ID,
+      item: SidebarCollectionBodyItem,
+      distance: CGFloat
+    )] = collectionView.visibleItems().compactMap { rawItem in
+      guard let item = rawItem as? SidebarCollectionBodyItem,
+            let rowID = item.representedRowID,
+            let frame = item.hoverPresentationFrame(in: collectionView),
+            frame.contains(point)
+      else { return nil }
+      return (rowID: rowID, item: item, distance: abs(frame.midY - point.y))
+    }
+    return candidates.min { lhs, rhs in
+      lhs.distance < rhs.distance
+    }.map { target in
+      (rowID: target.rowID, item: target.item)
+    }
+  }
+
+  private func setHoveredRow(
+    _ rowID: SidebarCollectionRow.ID?,
+    item: SidebarCollectionBodyItem?,
+    force: Bool = false
+  ) {
+    guard force || hoveredRowID != rowID || hoveredItem !== item else { return }
+    let previousItem = hoveredItem
+    hoveredRowID = rowID
+    hoveredItem = item
+    if previousItem !== item {
+      previousItem?.setHovered(false)
+    }
+    item?.setHovered(true)
+  }
+
+  private func clearHoveredRow() {
+    setHoveredRow(nil, item: nil)
+  }
+
+  private func scheduleHoverRefresh(after delay: TimeInterval = 0) {
+    guard isViewLoaded else { return }
+    if delay > 0 {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        self?.scheduleHoverRefresh()
+      }
+      return
+    }
+    guard hoverRefreshScheduled == false else { return }
+    hoverRefreshScheduled = true
+    DispatchQueue.main.async(qos: .userInteractive) { [weak self] in
+      guard let self else { return }
+      hoverRefreshScheduled = false
+      updateHoveredRowFromCurrentMouseLocation(force: true)
+    }
   }
 
   // MARK: - Viewport geometry
 
   private func viewportBoundsDidChange() {
+    scheduleHoverRefresh()
     updateUnreadViewportButtons()
     updateScrollEdges(animated: !isSidebarLiveResizeActive)
   }
@@ -722,6 +861,7 @@ final class SidebarCollectionBodyController: NSViewController {
     layoutScrollEdgeViews()
     updateScrollEdges(animated: false)
     updateUnreadViewportButtons(force: true)
+    scheduleHoverRefresh()
     traceViewport(event: "frame")
     schedulePresentationVerification()
   }
@@ -860,10 +1000,15 @@ final class SidebarCollectionBodyController: NSViewController {
   ) {
     self.content = content
     self.nativeContent = nativeContent
+    let rendererChanged = renderer != input.renderer
     self.renderer = input.renderer
     self.dragPreviewContent = dragPreviewContent
     self.actions = actions
     currentScrollRequest = scrollRequest
+    if rendererChanged {
+      clearHoveredRow()
+      scheduleHoverRefresh()
+    }
 
     if input.isContentReady == false {
       if isAwaitingContent == false {
@@ -1639,6 +1784,7 @@ final class SidebarCollectionBodyController: NSViewController {
       reason: "settled",
       animated: false
     )
+    scheduleHoverRefresh()
   }
 
   private func abortDisclosureTransition(for update: SidebarBodyDisplayUpdate) {
@@ -1910,6 +2056,7 @@ final class SidebarCollectionBodyController: NSViewController {
       )
       schedulePresentationVerification(generation: generation)
     }
+    scheduleHoverRefresh()
   }
 
   private func performPendingDisplayUpdateIfNeeded() {
@@ -2196,6 +2343,7 @@ final class SidebarCollectionBodyController: NSViewController {
           )
         }
       )
+      item.setHovered(renderer == .appKit && hoveredRowID == rowID)
     }
   }
 
@@ -2523,6 +2671,7 @@ final class SidebarCollectionBodyController: NSViewController {
       actions?.externalDropTargetChanged(target.rowID)
       log.debug("external-drop target changed sequence=\(sender.draggingSequenceNumber)")
     }
+    clearHoveredRow()
     return .copy
   }
 
@@ -2541,6 +2690,7 @@ final class SidebarCollectionBodyController: NSViewController {
     )
     if acceptsActiveSequence {
       actions?.externalDropTargetChanged(nil)
+      scheduleHoverRefresh()
     }
     guard let target else {
       log.info(
@@ -2560,6 +2710,7 @@ final class SidebarCollectionBodyController: NSViewController {
   private func endExternalDrop(sequence: Int?) {
     guard externalDropState.end(sequenceID: sequence) else { return }
     actions?.externalDropTargetChanged(nil)
+    scheduleHoverRefresh()
   }
 
   private func externalDropTarget(at windowPoint: CGPoint) -> ChatListItem.Identifier? {
@@ -2760,6 +2911,7 @@ final class SidebarCollectionBodyController: NSViewController {
     session.proposal = originalProposal
     _ = updateEmptyPinnedSectionVisibility(session: &session)
     reorderSession = session
+    clearHoveredRow()
     if let folderID = session.proposal?.slot.parentID?.folderID {
       refreshVisibleContent(.rowIDs([.folder(folderID)]))
     }
@@ -3068,6 +3220,7 @@ final class SidebarCollectionBodyController: NSViewController {
       else { return }
       localSettle = nil
       updateLayoutForReorder(animated: true)
+      scheduleHoverRefresh(after: 0.16)
     }
   }
 
@@ -3121,6 +3274,7 @@ final class SidebarCollectionBodyController: NSViewController {
     if localSettle?.id == id {
       localSettle = nil
       previewPanel.hide()
+      scheduleHoverRefresh()
     }
     if reorderSession?.id == id {
       cancelReorder(animated: false, reason: "persistence-failed")
@@ -3175,6 +3329,7 @@ final class SidebarCollectionBodyController: NSViewController {
        reconciliation.cancelledMoveIDs.contains(settle.id) {
       localSettle = nil
       previewPanel.hide()
+      scheduleHoverRefresh()
     }
     return reconciliation
   }
@@ -3433,6 +3588,7 @@ final class SidebarCollectionBodyController: NSViewController {
   }
 
   private func updateLayoutForReorder(animated: Bool) {
+    clearHoveredRow()
     guard let presentation else { return }
     let oldPresentations = visiblePresentations()
     configureLayout(for: presentation)
@@ -3523,6 +3679,7 @@ final class SidebarCollectionBodyController: NSViewController {
       CATransaction.commit()
     }
     previewPanel.hide()
+    scheduleHoverRefresh()
   }
 
   private func captureViewportAnchor(

@@ -344,6 +344,7 @@ final class SidebarNativeRowView: NSView {
   private var contentKind: ContentKind?
   private(set) var representedRowID: SidebarCollectionRow.ID?
   private var isLayoutVisible = true
+  private var isHovered = false
   private var suppressesNextConfigurationAnimations = false
 
   override var isFlipped: Bool { true }
@@ -432,6 +433,7 @@ final class SidebarNativeRowView: NSView {
     }
 
     configuredContentView.setLayoutVisibility(isLayoutVisible)
+    configuredContentView.setHovered(isLayoutVisible && isHovered)
     suppressesNextConfigurationAnimations = false
     needsLayout = true
   }
@@ -439,10 +441,18 @@ final class SidebarNativeRowView: NSView {
   func setLayoutVisibility(_ isVisible: Bool) {
     isLayoutVisible = isVisible
     contentView?.setLayoutVisibility(isVisible)
+    contentView?.setHovered(isVisible && isHovered)
+  }
+
+  /// The collection projects its one semantic hover target into each row.
+  func setHovered(_ hovered: Bool) {
+    guard isHovered != hovered else { return }
+    isHovered = hovered
+    contentView?.setHovered(isLayoutVisible && hovered)
   }
 
   /// One explicit mechanics seam for collection-owned selection and drag
-  /// presentation. Rows retain their own physical hover/press lifecycle.
+  /// presentation. Rows retain their local press and accessory lifecycle.
   func setInteractionPresentation(
     _ presentation: SidebarNativeRowConfiguration.InteractionPresentation
   ) {
@@ -458,6 +468,7 @@ final class SidebarNativeRowView: NSView {
     super.prepareForReuse()
     representedRowID = nil
     isLayoutVisible = false
+    isHovered = false
     suppressesNextConfigurationAnimations = true
     // Reuse is the hot scrolling path. Keep the same-kind native subtree and
     // its narrow SwiftUI visual hosts attached to the window; the next
@@ -470,7 +481,6 @@ final class SidebarNativeRowView: NSView {
   override func layout() {
     super.layout()
     contentView?.frame = bounds
-    contentView?.recomputePointerLocation()
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
@@ -505,6 +515,7 @@ final class SidebarNativeRowView: NSView {
     next.frame = bounds
     next.autoresizingMask = [.width, .height]
     addSubview(next)
+    next.setHovered(isLayoutVisible && isHovered)
     contentView = next
     contentKind = kind
     setAccessibilityHidden(false)
@@ -549,7 +560,7 @@ private class SidebarNativeContentView: NSView {
     interactionPresentation = presentation
   }
 
-  func recomputePointerLocation() {}
+  func setHovered(_: Bool) {}
   func blocksReorder(at _: NSPoint) -> Bool { false }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
@@ -567,7 +578,6 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
 
   var primaryAction: (() -> Void)?
   var doubleClickAction: (() -> Void)?
-  private var trackingArea: NSTrackingArea?
   private var mouseDownPoint: NSPoint?
   private var capturedInteractionTarget: InteractionTarget?
   private(set) var isHovered = false
@@ -595,44 +605,11 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
     interactionPresentationDidChange()
   }
 
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let trackingArea {
-      removeTrackingArea(trackingArea)
-    }
-    let trackingArea = NSTrackingArea(
-      rect: .zero,
-      options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
-      owner: self
-    )
-    addTrackingArea(trackingArea)
-    self.trackingArea = trackingArea
-    recomputePointerLocation()
-  }
-
-  override func viewDidMoveToWindow() {
-    super.viewDidMoveToWindow()
-    recomputePointerLocation()
-  }
-
   override func viewWillMove(toWindow newWindow: NSWindow?) {
     if newWindow == nil {
       cancelPointerInteraction()
     }
     super.viewWillMove(toWindow: newWindow)
-  }
-
-  override func mouseEntered(with _: NSEvent) {
-    recomputePointerLocation()
-  }
-
-  override func mouseExited(with _: NSEvent) {
-    setHovered(false)
-  }
-
-  override func mouseMoved(with event: NSEvent) {
-    let point = convert(event.locationInWindow, from: nil)
-    setHovered(bounds.contains(point))
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -660,7 +637,6 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
       mouseDownPoint = nil
       capturedInteractionTarget = nil
       setPressedInteractionTarget(nil)
-      recomputePointerLocation()
     }
     let point = convert(event.locationInWindow, from: nil)
     guard let capturedInteractionTarget,
@@ -707,22 +683,7 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
     super.setLayoutVisibility(isVisible)
     if !isVisible {
       cancelPointerInteraction()
-    } else {
-      recomputePointerLocation()
     }
-  }
-
-  override func recomputePointerLocation() {
-    guard isLayoutVisible,
-          let window,
-          window.isKeyWindow
-    else {
-      setHovered(false)
-      return
-    }
-    let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-    let containsPointer = bounds.contains(point)
-    setHovered(containsPointer)
   }
 
   func interactionTarget(at _: NSPoint) -> InteractionTarget {
@@ -747,7 +708,8 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
     setHovered(false)
   }
 
-  private func setHovered(_ hovered: Bool) {
+  override func setHovered(_ hovered: Bool) {
+    let hovered = isLayoutVisible && hovered
     guard isHovered != hovered else { return }
     isHovered = hovered
     hoverDidChange()
@@ -823,7 +785,6 @@ private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveCont
     setAccessibilitySelected(interactionPresentation.selected)
     updateBackground()
     needsLayout = true
-    recomputePointerLocation()
   }
 
   override func layout() {
@@ -1070,7 +1031,6 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
       setAccessibilityCustomActions([])
     }
     needsLayout = true
-    recomputePointerLocation()
   }
 
   override func setLayoutVisibility(_ isVisible: Bool) {
@@ -1631,7 +1591,6 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     updateBackground()
     updateAccessibility()
     needsLayout = true
-    recomputePointerLocation()
   }
 
   override func layout() {
@@ -2151,7 +2110,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         previousIdentityOpacity: previousIdentityOpacity
       )
     }
-    recomputePointerLocation()
   }
 
   override func layout() {
@@ -2649,7 +2607,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       disclosureView.alphaValue = disclosureOpacity
     }
     needsLayout = true
-    recomputePointerLocation()
   }
 
   private func closeButtonRect(in painted: CGRect) -> CGRect {
