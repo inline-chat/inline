@@ -211,9 +211,6 @@ export function Landing({ isIOS }: { isIOS: boolean }) {
 
         {/* Temporarily hidden until the replacement story copy is ready.
         <section className="landing-redesign__story" aria-labelledby="landing-story-title">
-          <h2 id="landing-story-title" className="landing-redesign__visually-hidden">
-            Why we built Inline
-          </h2>
           <p>We started building chat apps for ourselves when we could not stand the decade-old, bloated Slack.</p>
           <p>
             While using the app, we started asking ourselves questions like “why not make reply threads also be like normal
