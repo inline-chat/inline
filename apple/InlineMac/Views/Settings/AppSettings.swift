@@ -534,7 +534,7 @@ final class AppSettings: ObservableObject {
       sidebarItemSize = itemSize
       UserDefaults.standard.set(itemSize.rawValue, forKey: Self.sidebarItemSizeKey)
     } else {
-      let storedShowPreview = persistentDefaults?["showSidebarMessagePreview"] as? Bool ?? true
+      let storedShowPreview = persistentDefaults?["showSidebarMessagePreview"] as? Bool ?? false
       let itemSize: SidebarItemSize = storedShowPreview ? .standard : .compact
       sidebarItemSize = itemSize
       UserDefaults.standard.set(itemSize.rawValue, forKey: Self.sidebarItemSizeKey)
