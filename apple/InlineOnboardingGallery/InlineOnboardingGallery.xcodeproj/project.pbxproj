@@ -7,14 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		831F269F2AC244C0AB779C01 /* OnboardingProfilePhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831F269F2AC244C0AB779C02 /* OnboardingProfilePhoto.swift */; };
-		831F269F2AC244C0AB779C03 /* CircularCropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831F269F2AC244C0AB779C04 /* CircularCropView.swift */; };
 		1028923892C9F70BC0E4AA37 /* OnboardingNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6362E9137FFC8FFC0CE1B72 /* OnboardingNavigation.swift */; };
+		123A14FE983E59416E110B9C /* CircularCropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7B58198247500705FB58CE5 /* CircularCropView.swift */; };
 		13AD8FB1C7A7E43AA7F5C1AF /* GetStarted.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4426D5977187DC95F791CFEC /* GetStarted.swift */; };
 		38504EA8A1937209199BE423 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80492AB402DAE178A0526C72 /* OnboardingView.swift */; };
 		3F20944D51EAB67D621DF3FE /* OnboardingGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F764465503A1C08B48986B7 /* OnboardingGalleryView.swift */; };
 		43082A10191AE71CFBB43C95 /* NativeAppleSignInProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5ADBF3F32195C0296FFC0C2 /* NativeAppleSignInProgress.swift */; };
 		4A373F3A81F666D028740269 /* Code.swift in Sources */ = {isa = PBXBuildFile; fileRef = D68F72483AF2301A1A02A283 /* Code.swift */; };
+		4F7749DCD109D8CF5CAC7DB0 /* ImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DFE59A06AE214B88C77D65 /* ImagePicker.swift */; };
 		50E4B879AFBB39EC28B6F65D /* InviteCode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD4634E9ACB81025D5A49D1 /* InviteCode.swift */; };
 		529DFC6BF81D3CA6E5D76F1A /* NativeAppleSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E510D8E1312282977AAB1E74 /* NativeAppleSignInButton.swift */; };
 		5C4CABE62470832E9A0B7EEB /* OnboardingGalleryPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A03AC7F03D65F3F0F80095FF /* OnboardingGalleryPage.swift */; };
@@ -26,6 +26,7 @@
 		8684E0C042E24093BCFB7035 /* FormState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 798A3DEA2F5F19BBB579519B /* FormState.swift */; };
 		94C750C61F04464B42DA630A /* Countries.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFCA86F1F898A1DF42B803D4 /* Countries.swift */; };
 		9EE5F04D9A71D3D9E45A332C /* Email.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043A0F387DE8945082079642 /* Email.swift */; };
+		AD541D06A6318349266430CA /* OnboardingProfilePhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEF59CE06DD4280FF34348DF /* OnboardingProfilePhoto.swift */; };
 		B6D7F14DFE3F29DBDE03A430 /* OnboardingPlatform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F8CB1799FADD77EA32ECD61 /* OnboardingPlatform.swift */; };
 		C28257FE7C8993E4F943E75D /* OnboardingUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184BE89D1841F6F24CFDC5BA /* OnboardingUtils.swift */; };
 		C8B03832C72627B1C8D0E842 /* OnboardingFormComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF456A0DA851C2A94B0F0EF /* OnboardingFormComponents.swift */; };
@@ -39,8 +40,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		831F269F2AC244C0AB779C02 /* OnboardingProfilePhoto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingProfilePhoto.swift; sourceTree = "<group>"; };
-		831F269F2AC244C0AB779C04 /* CircularCropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularCropView.swift; sourceTree = "<group>"; };
 		043A0F387DE8945082079642 /* Email.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Email.swift; sourceTree = "<group>"; };
 		1520CA548AC43ED2C9579758 /* ProviderSignInProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSignInProgress.swift; sourceTree = "<group>"; };
 		184BE89D1841F6F24CFDC5BA /* OnboardingUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingUtils.swift; sourceTree = "<group>"; };
@@ -61,8 +60,11 @@
 		80492AB402DAE178A0526C72 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A03AC7F03D65F3F0F80095FF /* OnboardingGalleryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGalleryPage.swift; sourceTree = "<group>"; };
 		A03E853329AE1449DE0A987B /* OnboardingGalleryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGalleryApp.swift; sourceTree = "<group>"; };
+		B5DFE59A06AE214B88C77D65 /* ImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePicker.swift; sourceTree = "<group>"; };
 		B6362E9137FFC8FFC0CE1B72 /* OnboardingNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingNavigation.swift; sourceTree = "<group>"; };
+		BEF59CE06DD4280FF34348DF /* OnboardingProfilePhoto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingProfilePhoto.swift; sourceTree = "<group>"; };
 		BFCA86F1F898A1DF42B803D4 /* Countries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Countries.swift; sourceTree = "<group>"; };
+		C7B58198247500705FB58CE5 /* CircularCropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CircularCropView.swift; sourceTree = "<group>"; };
 		CA70B08E4D91990EB55EC32E /* PhoneNumberCode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneNumberCode.swift; sourceTree = "<group>"; };
 		CCC02B4BCC659187361A1231 /* OnboardingGallerySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingGallerySession.swift; sourceTree = "<group>"; };
 		D68F72483AF2301A1A02A283 /* Code.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Code.swift; sourceTree = "<group>"; };
@@ -110,7 +112,7 @@
 				E510D8E1312282977AAB1E74 /* NativeAppleSignInButton.swift */,
 				E5ADBF3F32195C0296FFC0C2 /* NativeAppleSignInProgress.swift */,
 				5FF456A0DA851C2A94B0F0EF /* OnboardingFormComponents.swift */,
-				831F269F2AC244C0AB779C02 /* OnboardingProfilePhoto.swift */,
+				BEF59CE06DD4280FF34348DF /* OnboardingProfilePhoto.swift */,
 				80492AB402DAE178A0526C72 /* OnboardingView.swift */,
 				79D6BB39EF78DFA65EEE100F /* PhoneNumber.swift */,
 				CA70B08E4D91990EB55EC32E /* PhoneNumberCode.swift */,
@@ -148,6 +150,7 @@
 		85EC6CDE84B59B7E7674739B /* Utils */ = {
 			isa = PBXGroup;
 			children = (
+				B5DFE59A06AE214B88C77D65 /* ImagePicker.swift */,
 				B6362E9137FFC8FFC0CE1B72 /* OnboardingNavigation.swift */,
 			);
 			path = Utils;
@@ -178,7 +181,7 @@
 			isa = PBXGroup;
 			children = (
 				4A95070A6E70C9BCE528E41B /* ButtonStyles.swift */,
-				831F269F2AC244C0AB779C04 /* CircularCropView.swift */,
+				C7B58198247500705FB58CE5 /* CircularCropView.swift */,
 				BFCA86F1F898A1DF42B803D4 /* Countries.swift */,
 				1F8CB1799FADD77EA32ECD61 /* OnboardingPlatform.swift */,
 				184BE89D1841F6F24CFDC5BA /* OnboardingUtils.swift */,
@@ -268,17 +271,17 @@
 			buildActionMask = 2147483647;
 			files = (
 				7EEA37332D72EF7A4D7E654E /* ButtonStyles.swift in Sources */,
+				123A14FE983E59416E110B9C /* CircularCropView.swift in Sources */,
 				4A373F3A81F666D028740269 /* Code.swift in Sources */,
 				94C750C61F04464B42DA630A /* Countries.swift in Sources */,
 				9EE5F04D9A71D3D9E45A332C /* Email.swift in Sources */,
 				8684E0C042E24093BCFB7035 /* FormState.swift in Sources */,
 				13AD8FB1C7A7E43AA7F5C1AF /* GetStarted.swift in Sources */,
+				4F7749DCD109D8CF5CAC7DB0 /* ImagePicker.swift in Sources */,
 				50E4B879AFBB39EC28B6F65D /* InviteCode.swift in Sources */,
 				529DFC6BF81D3CA6E5D76F1A /* NativeAppleSignInButton.swift in Sources */,
 				43082A10191AE71CFBB43C95 /* NativeAppleSignInProgress.swift in Sources */,
 				C8B03832C72627B1C8D0E842 /* OnboardingFormComponents.swift in Sources */,
-				831F269F2AC244C0AB779C01 /* OnboardingProfilePhoto.swift in Sources */,
-				831F269F2AC244C0AB779C03 /* CircularCropView.swift in Sources */,
 				CDF83903BC83E3C91B9A2BE3 /* OnboardingGalleryApp.swift in Sources */,
 				5C4CABE62470832E9A0B7EEB /* OnboardingGalleryPage.swift in Sources */,
 				F9CE8C5BA3206D28939FC37C /* OnboardingGalleryPreview.swift in Sources */,
@@ -286,6 +289,7 @@
 				3F20944D51EAB67D621DF3FE /* OnboardingGalleryView.swift in Sources */,
 				1028923892C9F70BC0E4AA37 /* OnboardingNavigation.swift in Sources */,
 				B6D7F14DFE3F29DBDE03A430 /* OnboardingPlatform.swift in Sources */,
+				AD541D06A6318349266430CA /* OnboardingProfilePhoto.swift in Sources */,
 				C28257FE7C8993E4F943E75D /* OnboardingUtils.swift in Sources */,
 				38504EA8A1937209199BE423 /* OnboardingView.swift in Sources */,
 				67F38E2749A1D6DC7D4E18E2 /* PhoneNumber.swift in Sources */,
@@ -383,6 +387,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose a profile photo for this local onboarding preview.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -472,6 +477,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose a profile photo for this local onboarding preview.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -1,9 +1,5 @@
-import InlineKit
-import InlineUI
-import Logger
-import MultipartFormDataKit
 import SwiftUI
-import UniformTypeIdentifiers
+import UIKit
 
 struct ImagePicker: UIViewControllerRepresentable {
   var sourceType: UIImagePickerController.SourceType
@@ -36,6 +32,10 @@ struct ImagePicker: UIViewControllerRepresentable {
       if let image = info[.originalImage] as? UIImage {
         parent.completion(image)
       }
+      picker.dismiss(animated: true)
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
       picker.dismiss(animated: true)
     }
   }

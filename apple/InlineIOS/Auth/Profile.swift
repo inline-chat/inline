@@ -37,7 +37,8 @@ struct Profile: View {
   #endif
   @FormState private var formState
 
-  private let placeHolder = "Name"
+  private let placeHolder = "Enter your name"
+  private let profilePhotoSize: CGFloat = 160
 
   var body: some View {
     Group {
@@ -46,24 +47,19 @@ struct Profile: View {
           focus: $isFocused,
           autofocus: nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         ) {
-          Text(NSLocalizedString("Set up your profile", comment: "Profile setup title"))
-            .font(.onboardingIOSTitle.bold())
-            .foregroundStyle(.primary)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityAddTraits(.isHeader)
-
           OnboardingProfilePhotoPicker(
             photo: $nav.profilePhoto,
             isLoading: $isLoadingPhoto,
             errorMessage: $errorMsg,
+            size: profilePhotoSize,
             hasExistingPhoto: hasExistingPhoto,
             isSaving: formState.isLoading,
             lookupPhoto: lookupXPhoto,
-            savePhoto: saveXPhoto
+            savePhoto: saveSelectedPhoto
           ) {
-            profileAvatar
+            existingProfileAvatar
           }
+          .padding(.bottom, 16)
 
           VStack(spacing: 8) {
             nameSection
@@ -173,9 +169,11 @@ extension Profile {
     #endif
   }
 
-  private func saveXPhoto(_ photo: OnboardingProfilePhoto) async throws -> OnboardingProfilePhoto {
+  private func saveSelectedPhoto(_ photo: OnboardingProfilePhoto) async throws -> OnboardingProfilePhoto {
     #if IOS_ONBOARDING_GALLERY_APP
-    throw OnboardingProfilePhotoError.previewUnavailable
+    var savedPhoto = photo
+    savedPhoto.isUploaded = true
+    return savedPhoto
     #else
     let mutationToken = try Auth.shared.handle.beginAccountMutation()
     return try await saveProfilePhoto(photo, mutationToken: mutationToken)
@@ -192,11 +190,15 @@ extension Profile {
     try Task.checkCancellation()
     guard !photo.isUploaded else { return photo }
 
+    let (filename, mimeType) = switch photo.fileFormat {
+    case .jpeg: ("profile-photo.jpg", MIMEType.imageJpeg)
+    case .png: ("profile-photo.png", MIMEType.imagePng)
+    }
     let upload = try await ApiClient.shared.uploadFile(
       type: .photo,
       data: photo.data,
-      filename: "profile-photo.png",
-      mimeType: .imagePng,
+      filename: filename,
+      mimeType: mimeType,
       progress: { _ in }
     )
     try Auth.shared.handle.validateAccountMutation(mutationToken)
@@ -265,6 +267,12 @@ extension Profile {
 // MARK: - Views
 
 extension Profile {
+  private var canContinue: Bool {
+    !nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && !formState.isLoading
+      && !isLoadingPhoto
+  }
+
   private var hasExistingPhoto: Bool {
     #if IOS_ONBOARDING_GALLERY_APP
     false
@@ -276,22 +284,9 @@ extension Profile {
   }
 
   @ViewBuilder
-  private var profileAvatar: some View {
+  private var existingProfileAvatar: some View {
     #if IOS_ONBOARDING_GALLERY_APP
-    Circle()
-      .fill(Color.accentColor.gradient)
-      .overlay {
-        let name = nav.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let initial = name.first {
-          Text(String(initial).uppercased())
-            .font(.system(size: 42, weight: .medium))
-            .foregroundStyle(.white)
-        } else {
-          Image(systemName: "person.fill")
-            .font(.system(size: 42))
-            .foregroundStyle(.white)
-        }
-      }
+    Color.clear
     #else
     if let user = persistedUser {
       UserAvatar(
@@ -303,10 +298,10 @@ extension Profile {
         stableAvatarIdentity: user.stableAvatarIdentity,
         remoteURL: user.getRemoteURL(),
         localURL: avatarLocalURL,
-        size: 104
+        size: profilePhotoSize
       )
     } else {
-      Circle().fill(Color(uiColor: .secondarySystemBackground))
+      Color.clear
     }
     #endif
   }
@@ -319,6 +314,7 @@ extension Profile {
       .textInputAutocapitalization(.words)
       .multilineTextAlignment(.center)
       .onboardingFormField()
+      .frame(maxWidth: 320)
       .submitLabel(.continue)
       .disabled(formState.isLoading)
       .onSubmit { submitName() }
@@ -326,11 +322,20 @@ extension Profile {
 
   @ViewBuilder
   private var bottomButton: some View {
-    Button(formState.isLoading ? "Saving..." : "Continue") {
+    Button {
       submitName()
+    } label: {
+      HStack(spacing: 8) {
+        if formState.isLoading || isLoadingPhoto {
+          ProgressView()
+            .tint(.secondary)
+        }
+        Text("Continue")
+      }
     }
     .buttonStyle(OnboardingFormButtonStyle())
-    .disabled(formState.isLoading || isLoadingPhoto)
+    .frame(maxWidth: 320)
+    .disabled(!canContinue)
   }
 }
 

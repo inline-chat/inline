@@ -25,6 +25,7 @@ final class OnboardingGalleryProviderState: ObservableObject {
 @MainActor
 final class OnboardingGallerySession: ObservableObject {
   nonisolated static let userID: Int64 = 1
+  nonisolated static let name = "Alex Morgan"
   nonisolated static let email = "alex@example.com"
   nonisolated static let phone = "+14155550100"
 
@@ -37,6 +38,7 @@ final class OnboardingGallerySession: ObservableObject {
   init() {
     // Seed the identity scope before constructing any profile view.
     navigation.prepareProfileDraft(for: Self.userID)
+    navigation.profileName = Self.name
   }
 
   func show(_ page: OnboardingGalleryPage) {
@@ -44,6 +46,7 @@ final class OnboardingGallerySession: ObservableObject {
     didFinish = false
     navigation.reset()
     navigation.prepareProfileDraft(for: Self.userID)
+    navigation.profileName = Self.name
     selectedPage = page
     navigation.path = page.path
     previewID = UUID()

@@ -1,19 +1,25 @@
 import ImageIO
-import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct OnboardingProfilePhoto {
+  enum FileFormat {
+    case jpeg
+    case png
+  }
+
   let data: Data
   let image: UIImage
   let xHandle: String?
+  let fileFormat: FileFormat
   var isUploaded = false
 
-  init(data: Data, xHandle: String? = nil) throws {
+  init(data: Data, xHandle: String? = nil, fileFormat: FileFormat = .png) throws {
     guard let image = UIImage(data: data) else { throw OnboardingProfilePhotoError.invalidImage }
     self.data = data
     self.image = image
     self.xHandle = xHandle
+    self.fileFormat = fileFormat
   }
 }
 
@@ -76,47 +82,67 @@ enum OnboardingProfilePhotoProcessor {
 }
 
 struct OnboardingProfilePhotoPicker<Avatar: View>: View {
-  private enum Sheet: Identifiable {
-    case x
-    case crop(UIImage)
-
-    var id: String {
-      switch self {
-      case .x: "x"
-      case .crop: "crop"
-      }
-    }
-  }
-
   @Binding var photo: OnboardingProfilePhoto?
   @Binding var isLoading: Bool
   @Binding var errorMessage: String
+  let size: CGFloat
   let hasExistingPhoto: Bool
   let isSaving: Bool
   let lookupPhoto: @MainActor (String) async throws -> Data
   let savePhoto: @MainActor (OnboardingProfilePhoto) async throws -> OnboardingProfilePhoto
   @ViewBuilder var avatar: Avatar
 
-  @State private var showsPhotosPicker = false
-  @State private var selection: PhotosPickerItem?
-  @State private var photoLoadID: UUID?
-  @State private var pendingCrop: UIImage?
-  @State private var sheet: Sheet?
+  @State private var showsImagePicker = false
+  @State private var showsCropper = false
+  @State private var showsPhotoSourceDialog = false
+  @State private var showsXPicker = false
+  @State private var pickedImage: UIImage?
+  @State private var uploadID: UUID?
+  @State private var uploadTask: Task<Void, Never>?
 
   private var hasPhoto: Bool { photo != nil || hasExistingPhoto }
 
   var body: some View {
-    Menu {
+    Button {
+      dismissKeyboard()
+      showsPhotoSourceDialog = true
+    } label: {
+      Group {
+        if let photo {
+          Image(uiImage: photo.image)
+            .resizable()
+            .scaledToFill()
+        } else if hasExistingPhoto {
+          avatar
+        } else {
+          Circle()
+            .fill(Color.accentColor.opacity(0.1))
+            .overlay {
+              Image(systemName: "camera.fill")
+                .font(.system(size: size * 0.29, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+      }
+      .frame(width: size, height: size)
+      .clipShape(Circle())
+      .contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .disabled(isLoading || isSaving)
+    .accessibilityLabel(isLoading ? "Loading profile photo" : hasPhoto ? "Edit profile photo" : "Add profile photo")
+    .confirmationDialog(
+      "",
+      isPresented: $showsPhotoSourceDialog,
+      titleVisibility: .hidden
+    ) {
       Button {
-        dismissKeyboard()
-        selection = nil
-        showsPhotosPicker = true
+        showsImagePicker = true
       } label: {
         Label("Choose Photo…", systemImage: "photo.on.rectangle")
       }
       Button {
-        dismissKeyboard()
-        sheet = .x
+        showsXPicker = true
       } label: {
         Label("From X…", systemImage: "at")
       }
@@ -128,105 +154,88 @@ struct OnboardingProfilePhotoPicker<Avatar: View>: View {
           Label("Undo Photo Change", systemImage: "arrow.uturn.backward")
         }
       }
-    } label: {
-      VStack(spacing: 10) {
-        Group {
-          if let photo {
-            Image(uiImage: photo.image)
-              .resizable()
-              .scaledToFill()
-          } else {
-            avatar
-          }
-        }
-        .frame(width: 104, height: 104)
-        .clipShape(Circle())
-        .overlay(alignment: .bottomTrailing) {
-          Image(systemName: "camera.fill")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Color.accentColor)
-            .frame(width: 30, height: 30)
-            .background(Color(uiColor: .systemBackground), in: Circle())
-            .overlay { Circle().strokeBorder(.primary.opacity(0.08)) }
-        }
-
-        HStack(spacing: 6) {
-          if isLoading { ProgressView().controlSize(.small) }
-          Text(isLoading ? "Loading Photo…" : hasPhoto ? "Edit Photo" : "Add Photo")
-        }
-        .font(.subheadline)
-        .foregroundStyle(Color.accentColor)
+      Button("Cancel", role: .cancel) {}
+    }
+    .sheet(isPresented: $showsImagePicker) {
+      ImagePicker(sourceType: .photoLibrary) { image in
+        pickedImage = image
+        showsCropper = true
       }
-      .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
-    .disabled(isLoading || isSaving)
-    .accessibilityLabel(hasPhoto ? "Edit profile photo" : "Add profile photo")
-    .accessibilityHint("Choose a photo from your library or from X")
-    .photosPicker(isPresented: $showsPhotosPicker, selection: $selection, matching: .images)
-    .task(id: selection) { await loadSelection() }
-    .onChange(of: showsPhotosPicker) { _, isPresented in
-      if !isPresented { presentCropIfReady() }
-    }
-    .sheet(item: $sheet) { destination in
-      switch destination {
-      case .x:
-        OnboardingXPhotoPicker(initialPhoto: photo, lookupPhoto: lookupPhoto) { selectedPhoto in
-          let savedPhoto = try await savePhoto(selectedPhoto)
-          try Task.checkCancellation()
-          photo = savedPhoto
-          errorMessage = ""
-        }
-      case let .crop(image):
-        CircularCropView(image: image) { croppedImage in
-          do {
-            guard let data = croppedImage.pngData() else { throw OnboardingProfilePhotoError.invalidImage }
-            photo = try OnboardingProfilePhoto(data: data)
-            errorMessage = ""
-          } catch {
-            errorMessage = error.localizedDescription
+    .sheet(
+      isPresented: $showsCropper,
+      onDismiss: { pickedImage = nil },
+      content: {
+        if let pickedImage {
+          CircularCropView(image: pickedImage) { croppedImage in
+            accept(croppedImage)
           }
         }
       }
+    )
+    .sheet(isPresented: $showsXPicker) {
+      OnboardingXPhotoPicker(initialPhoto: photo, lookupPhoto: lookupPhoto) { selectedPhoto in
+        let savedPhoto = try await savePhoto(selectedPhoto)
+        try Task.checkCancellation()
+        photo = savedPhoto
+        errorMessage = ""
+      }
     }
+    .onDisappear { resetTransientPresentation() }
   }
 
-  private func loadSelection() async {
-    guard let selection else {
-      photoLoadID = nil
-      isLoading = false
-      return
-    }
-    let loadID = UUID()
-    photoLoadID = loadID
-    isLoading = true
-    pendingCrop = nil
-    errorMessage = ""
-    defer {
-      if photoLoadID == loadID {
-        photoLoadID = nil
-        isLoading = false
-      }
-    }
+  private func accept(_ croppedImage: UIImage) {
     do {
-      guard let data = try await selection.loadTransferable(type: Data.self) else {
+      guard let data = croppedImage.jpegData(compressionQuality: 0.86) else {
         throw OnboardingProfilePhotoError.invalidImage
       }
-      let prepared = try await OnboardingProfilePhotoProcessor.prepare(data, cropToSquare: false)
-      try Task.checkCancellation()
-      guard photoLoadID == loadID else { return }
-      pendingCrop = try OnboardingProfilePhoto(data: prepared).image
-      presentCropIfReady()
+      let selectedPhoto = try OnboardingProfilePhoto(data: data, fileFormat: .jpeg)
+      photo = selectedPhoto
+      errorMessage = ""
+      upload(selectedPhoto)
     } catch {
-      guard !Task.isCancelled, photoLoadID == loadID else { return }
       errorMessage = error.localizedDescription
     }
   }
 
-  private func presentCropIfReady() {
-    guard !showsPhotosPicker, let image = pendingCrop else { return }
-    pendingCrop = nil
-    sheet = .crop(image)
+  private func upload(_ selectedPhoto: OnboardingProfilePhoto) {
+    uploadTask?.cancel()
+    let id = UUID()
+    uploadID = id
+    isLoading = true
+    uploadTask = Task { @MainActor in
+      defer {
+        if uploadID == id {
+          uploadID = nil
+          uploadTask = nil
+          isLoading = false
+        }
+      }
+      do {
+        let savedPhoto = try await savePhoto(selectedPhoto)
+        try Task.checkCancellation()
+        guard uploadID == id else { return }
+        photo = savedPhoto
+        errorMessage = ""
+      } catch is CancellationError {
+        return
+      } catch {
+        guard uploadID == id else { return }
+        errorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func resetTransientPresentation() {
+    uploadTask?.cancel()
+    uploadTask = nil
+    uploadID = nil
+    showsPhotoSourceDialog = false
+    showsImagePicker = false
+    showsCropper = false
+    showsXPicker = false
+    pickedImage = nil
+    isLoading = false
   }
 
   private func dismissKeyboard() {
@@ -279,39 +288,24 @@ private struct OnboardingXPhotoPicker: View {
   var body: some View {
     NavigationStack {
       OnboardingFormPage(focus: $isFocused, autofocus: state.photo == nil) {
-        VStack(spacing: 16) {
-          Group {
-            if let photo = state.photo {
-              Image(uiImage: photo.image)
-                .resizable()
-                .scaledToFill()
-            } else {
-              Circle()
-                .fill(Color(uiColor: .secondarySystemBackground))
-                .overlay {
-                  Image(systemName: "person.crop.circle")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.secondary)
-                }
-            }
+        Group {
+          if let photo = state.photo {
+            Image(uiImage: photo.image)
+              .resizable()
+              .scaledToFill()
+          } else {
+            Circle()
+              .fill(Color(uiColor: .secondarySystemBackground))
+              .overlay {
+                Image(systemName: "person.crop.circle")
+                  .font(.system(size: 44))
+                  .foregroundStyle(.secondary)
+              }
           }
-          .frame(width: 104, height: 104)
-          .clipShape(Circle())
-          .accessibilityLabel(state.photo == nil ? "No X photo selected" : "X profile photo preview")
-
-          Text("Enter your X username to find your public profile photo.")
-            .font(.onboardingIOSBody)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-
-          #if IOS_ONBOARDING_GALLERY_APP
-          Text("X lookup requires the Inline app and is unavailable in this offline preview.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-          #endif
         }
+        .frame(width: 104, height: 104)
+        .clipShape(Circle())
+        .accessibilityLabel(state.photo == nil ? "No X photo selected" : "X profile photo preview")
 
         VStack(spacing: 8) {
           TextField("X username", text: $handle)
