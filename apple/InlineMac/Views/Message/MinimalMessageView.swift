@@ -998,7 +998,11 @@ class MinimalMessageViewAppKit: NSView {
     acknowledgementView.isHidden = false
     let content = contentView.convert(contentView.bounds, to: self)
     let width = min(fullMessage.acknowledgementPillWidth, max(fullMessage.acknowledgementMinimumPillWidth, content.width))
-    let x = content.maxX - width
+    // Minimal rows already span the table width. Project Ack to that row's
+    // existing safe edge without widening or remeasuring message content.
+    let trailingInset = MessageSizeCalculator.minimalHoverSideInset
+      + MessageSizeCalculator.minimalHoverContentInset
+    let x = max(content.minX, bounds.maxX - trailingInset - width)
     let y: CGFloat
     if let reactionsView {
       let reactions = reactionsView.convert(reactionsView.bounds, to: self)
