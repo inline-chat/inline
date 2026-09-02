@@ -218,7 +218,7 @@ pub(super) async fn advertise_settings_with_catalog(
         },
     ];
     let accepted = bot.set_bot_capabilities(capabilities.clone()).await?;
-    if accepted != capabilities {
+    if !same_capabilities(&accepted, &capabilities) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Inline did not preserve the bridge Agent configuration catalog",
@@ -226,6 +226,12 @@ pub(super) async fn advertise_settings_with_catalog(
         .into());
     }
     Ok(())
+}
+
+fn same_capabilities(left: &[BotCapability], right: &[BotCapability]) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|capability| right.contains(capability))
+        && right.iter().all(|capability| left.contains(capability))
 }
 
 pub(super) async fn published_agent_configuration_catalog(

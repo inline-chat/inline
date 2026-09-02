@@ -10,6 +10,36 @@ use inline_agent_bridge::{
 use super::*;
 
 #[test]
+fn capability_comparison_is_order_independent_and_exact() {
+    let chat_settings = BotCapability {
+        kind: BotCapabilityKind::ChatSettings,
+        version: SETTINGS_VERSION,
+        agent_configuration: None,
+    };
+    let agent_configuration = BotCapability {
+        kind: BotCapabilityKind::AgentConfiguration,
+        version: AGENT_CONFIGURATION_VERSION,
+        agent_configuration: Some(AgentConfigurationCatalog::default()),
+    };
+
+    assert!(same_capabilities(
+        &[chat_settings.clone(), agent_configuration.clone()],
+        &[agent_configuration.clone(), chat_settings.clone()],
+    ));
+    assert!(!same_capabilities(
+        &[chat_settings.clone(), agent_configuration],
+        &[chat_settings.clone()],
+    ));
+    assert!(!same_capabilities(
+        &[chat_settings.clone()],
+        &[BotCapability {
+            version: SETTINGS_VERSION + 1,
+            ..chat_settings
+        }],
+    ));
+}
+
+#[test]
 fn bound_agent_context_owns_project_model_and_reasoning_settings() {
     for item in [
         ITEM_MODEL,
