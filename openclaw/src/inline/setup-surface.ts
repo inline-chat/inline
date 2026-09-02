@@ -1,17 +1,18 @@
 import type { ChannelSetupWizard } from "openclaw/plugin-sdk/setup"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
+  addWildcardAllowFrom,
   createAllowFromSection,
-  createAccountScopedGroupAccessSection,
-  createLegacyCompatChannelDmPolicy,
+  createPromptParsedAllowFromForAccount,
   createStandardChannelSetupStatus,
   DEFAULT_ACCOUNT_ID,
   formatCliCommand,
+  parseSetupEntriesWithParser,
   patchChannelConfigForAccount,
-  promptResolvedAllowFrom,
   setSetupChannelEnabled,
   splitSetupEntries,
 } from "openclaw/plugin-sdk/setup"
+import { createAccountScopedGroupAccessSection } from "openclaw/plugin-sdk/setup-runtime"
 import { inspectInlineAccount, listInlineAccountIds, resolveInlineAccount } from "./accounts.js"
 import {
   INLINE_DEFAULT_GROUP_POLICY,
@@ -151,43 +152,32 @@ function formatInlineConfigBase(accountId: string): string {
   return accountId === DEFAULT_ACCOUNT_ID ? "channels.inline" : `channels.inline.accounts.${accountId}`
 }
 
-async function promptInlineAllowFromForAccount(params: {
-  cfg: OpenClawConfig
-  prompter: Parameters<NonNullable<ChannelSetupWizard["finalize"]>>[0]["prompter"]
-  accountId?: string
-}) {
-  const accountId = params.accountId ?? DEFAULT_ACCOUNT_ID
-  const resolved = resolveInlineAccount({ cfg: params.cfg, accountId })
-  await params.prompter.note(INLINE_USER_ID_HELP_LINES.join("\n"), "Inline allowlist")
-  const allowFrom = await promptResolvedAllowFrom({
-    prompter: params.prompter,
-    existing: resolved.config.allowFrom ?? [],
-    message: "Inline allowFrom (user ids)",
-    placeholder: "123456789, user:234567890",
-    label: "Inline allowlist",
-    parseInputs: splitSetupEntries,
-    parseId: parseInlineAllowFromId,
-    invalidWithoutTokenNote: "Inline token missing; use numeric user ids.",
-    resolveEntries: async ({ entries }) =>
-      entries.map((entry) => {
-        const id = parseInlineAllowFromId(entry)
-        return {
-          input: entry,
-          resolved: Boolean(id),
-          id,
-        }
-      }),
-  })
-  return patchChannelConfigForAccount({
-    cfg: params.cfg,
-    channel,
-    accountId,
-    patch: {
-      dmPolicy: "allowlist",
-      allowFrom,
-    },
-  })
-}
+const promptInlineAllowFromForAccount = createPromptParsedAllowFromForAccount({
+  defaultAccountId: DEFAULT_ACCOUNT_ID,
+  noteTitle: "Inline allowlist",
+  noteLines: INLINE_USER_ID_HELP_LINES,
+  message: "Inline allowFrom (user ids)",
+  placeholder: "123456789, user:234567890",
+  parseEntries: (raw) =>
+    parseSetupEntriesWithParser(raw, (entry) => {
+      const id = parseInlineAllowFromId(entry)
+      return id
+        ? { value: id }
+        : { error: "Inline user id must be numeric, user:<id>, or inline:user:<id>." }
+    }),
+  getExistingAllowFrom: ({ cfg, accountId }) =>
+    resolveInlineAccount({ cfg, accountId }).config.allowFrom ?? [],
+  applyAllowFrom: ({ cfg, accountId, allowFrom }) =>
+    patchChannelConfigForAccount({
+      cfg,
+      channel,
+      accountId,
+      patch: {
+        dmPolicy: "allowlist",
+        allowFrom,
+      },
+    }),
+})
 
 function shouldShowInlineDmAccessWarning(params: {
   cfg: OpenClawConfig
@@ -247,11 +237,40 @@ function buildInlineGroupAccessWarningLines(params: {
   return []
 }
 
-const inlineDmPolicy = createLegacyCompatChannelDmPolicy({
+const inlineDmPolicy: NonNullable<ChannelSetupWizard["dmPolicy"]> = {
   label: "Inline",
   channel,
+  policyKey: "channels.inline.dmPolicy",
+  allowFromKey: "channels.inline.allowFrom",
+  resolveConfigKeys: (_cfg, accountId) => {
+    const base = accountId && accountId !== DEFAULT_ACCOUNT_ID
+      ? `channels.inline.accounts.${accountId}`
+      : "channels.inline"
+    return {
+      policyKey: `${base}.dmPolicy`,
+      allowFromKey: `${base}.allowFrom`,
+    }
+  },
+  getCurrent: (cfg, accountId) =>
+    resolveInlineAccount({ cfg, accountId: accountId ?? DEFAULT_ACCOUNT_ID }).config.dmPolicy ??
+    "pairing",
+  setPolicy: (cfg, policy, accountId) => {
+    const resolvedAccountId = accountId ?? DEFAULT_ACCOUNT_ID
+    const account = resolveInlineAccount({ cfg, accountId: resolvedAccountId })
+    return patchChannelConfigForAccount({
+      cfg,
+      channel,
+      accountId: resolvedAccountId,
+      patch: {
+        dmPolicy: policy,
+        ...(policy === "open"
+          ? { allowFrom: addWildcardAllowFrom(account.config.allowFrom) }
+          : {}),
+      },
+    })
+  },
   promptAllowFrom: promptInlineAllowFromForAccount,
-})
+}
 
 export const inlineSetupWizard: ChannelSetupWizard = {
   channel,

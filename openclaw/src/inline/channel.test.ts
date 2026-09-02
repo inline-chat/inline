@@ -142,6 +142,9 @@ describe("inline/channel", () => {
         },
       } as OpenClawConfig,
     }) ?? []).join("\n")
+    expect(messageToolHints).toContain("your normal response replaces that message")
+    expect(messageToolHints).toContain("omitting buttons clears them")
+    expect(messageToolHints).toContain("returning buttons replaces them")
     expect(messageToolHints).toContain("Inline markdown links")
     expect(messageToolHints).toContain("inline://thread")
     expect(messageToolHints).toContain("Use `target` values only for tool calls.")
@@ -474,17 +477,13 @@ describe("inline/channel", () => {
     })
   })
 
-  it("provides explicit target parsing + chat-type inference for messaging", async () => {
+  it("provides target normalization + chat-type inference for messaging", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")
 
-    const user = inlineChannelPlugin.messaging?.parseExplicitTarget?.({ raw: "user:42" })
-    const group = inlineChannelPlugin.messaging?.parseExplicitTarget?.({ raw: "inline:7" })
-    const invalid = inlineChannelPlugin.messaging?.parseExplicitTarget?.({ raw: "bad-target" })
-
-    expect(user).toEqual({ to: "user:42", chatType: "direct" })
-    expect(group).toEqual({ to: "chat:7", chatType: "group" })
-    expect(invalid).toBeNull()
+    expect(inlineChannelPlugin.messaging?.normalizeTarget?.("inline:user:42")).toBe("user:42")
+    expect(inlineChannelPlugin.messaging?.normalizeTarget?.("inline:7")).toBe("7")
+    expect(inlineChannelPlugin.messaging?.normalizeTarget?.("bad-target")).toBe("bad-target")
 
     expect(inlineChannelPlugin.messaging?.inferTargetChatType?.({ to: "user:42" })).toBe("direct")
     expect(inlineChannelPlugin.messaging?.inferTargetChatType?.({ to: "chat:7" })).toBe("group")

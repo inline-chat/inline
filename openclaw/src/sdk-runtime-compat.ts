@@ -256,8 +256,8 @@ export async function createChannelReplyPipelineCompat(params: {
   typingCallbacks?: InlineTypingCallbacks
 }): Promise<InlineChannelReplyPipeline> {
   try {
-    const sdk = await import("openclaw/plugin-sdk/channel-reply-pipeline")
-    return sdk.createChannelReplyPipeline(params as never) as InlineChannelReplyPipeline
+    const sdk = await import("openclaw/plugin-sdk/channel-outbound")
+    return sdk.createChannelMessageReplyPipeline(params as never) as InlineChannelReplyPipeline
   } catch {
     return {
       onModelSelected: () => {},

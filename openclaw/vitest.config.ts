@@ -13,12 +13,12 @@ export default defineConfig({
     environment: "node",
     maxWorkers: 2,
     testTimeout: 90_000,
-    include: ["src/index.test.ts", "src/runtime.test.ts", "src/manifest.test.ts", "src/inline/**/*.test.ts"],
+    include: ["src/index.test.ts", "src/runtime.test.ts", "src/manifest.test.ts", "src/telemetry.test.ts", "src/inline/**/*.test.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text"],
       all: false,
-      include: ["src/index.ts", "src/runtime.ts", "src/inline/**/*.ts"],
+      include: ["src/index.ts", "src/runtime.ts", "src/telemetry.ts", "src/inline/**/*.ts"],
       exclude: ["src/**/*.test.ts"],
       thresholds: {
         // This package is primarily integration code; unit tests cover the key pure helpers

@@ -27,14 +27,11 @@ import {
   createChannelInboundDebouncer,
   resolveUnmentionedGroupInboundPolicy,
   shouldDebounceTextInbound,
+  toInboundMediaFacts,
 } from "openclaw/plugin-sdk/channel-inbound"
 import {
   buildConfiguredModelCatalog,
-  hasAvailableAuthForProvider,
-  loadModelCatalog,
   resolveAgentConfig,
-  resolveAgentDir,
-  resolveAgentWorkspaceDir,
   resolveDefaultModelForAgent,
   resolveThinkingDefault,
 } from "openclaw/plugin-sdk/agent-runtime"
@@ -56,8 +53,9 @@ import {
   mergeChannelProgressDraftLine,
   resolveChannelProgressDraftMaxLines,
   resolveChannelStreamingPreviewToolProgress,
+  type AgentPlanStep,
   type ChannelProgressDraftLine,
-} from "openclaw/plugin-sdk/channel-streaming"
+} from "openclaw/plugin-sdk/channel-outbound"
 import {
   findCodeRegions,
   isInsideCode,
@@ -168,6 +166,7 @@ import {
   resolveChannelMediaMaxBytes,
   resolveControlCommandGate,
   resolveMentionGatingWithBypass,
+  resolveUseAccessGroups,
 } from "../openclaw-compat.js"
 import {
   shouldSyncInlineNativeCommandsForAccount,
@@ -373,7 +372,7 @@ type InlinePendingHistoryEntry = {
   messageId?: string
 }
 
-type InlineUntrustedStructuredContextEntry = {
+type InlineChannelStructuredContextEntry = {
   label: string
   source: typeof CHANNEL_ID
   type: string
@@ -411,12 +410,12 @@ type InlineReplyDeliveryResult = {
 }
 
 type InlineReplyPayload = {
-  text?: string
-  mediaUrl?: string
-  mediaUrls?: string[]
-  replyToId?: string
-  channelData?: Record<string, unknown>
-  isReasoning?: boolean
+  text?: string | undefined
+  mediaUrl?: string | undefined
+  mediaUrls?: string[] | undefined
+  replyToId?: string | undefined
+  channelData?: Record<string, unknown> | undefined
+  isReasoning?: boolean | undefined
 }
 
 function normalizeInlineDispatchResult(value: unknown): InlineDispatchResult {
@@ -1090,7 +1089,10 @@ function splitInlineReasoningText(text?: string, isReasoning?: boolean): InlineR
 
 function resolveInlineChatVisibleReplyPayload<T extends InlineReplyPayload>(payload: T): T | null {
   const mediaUrls = resolveInlinePayloadMediaUrls(payload)
-  if (isReasoningReplyPayload(payload)) {
+  if (isReasoningReplyPayload({
+    ...(typeof payload.text === "string" ? { text: payload.text } : {}),
+    ...(payload.isReasoning !== undefined ? { isReasoning: payload.isReasoning } : {}),
+  })) {
     return mediaUrls.length > 0 ? { ...payload, text: undefined } : null
   }
 
@@ -1804,7 +1806,10 @@ function resolveInlineParentSessionKeyCandidate(
   return undefined
 }
 
-type InlineSessionModelEntry = NonNullable<ReturnType<typeof getSessionEntry>>
+type InlineSessionModelEntry = NonNullable<ReturnType<typeof getSessionEntry>> & {
+  fallbackNoticeSelectedModel?: string
+  fallbackNoticeActiveModel?: string
+}
 
 type InlineProviderModelRef = {
   provider: string
@@ -2855,15 +2860,15 @@ function prependInlineParentHistoryContext(params: {
   }
 }
 
-function buildInlineUntrustedStructuredContext(params: {
+function buildInlineChannelStructuredContext(params: {
   currentAttachmentText: string | null
   currentEntityText: string | null
   currentBody: string
   historyAttachmentText: string | null
   historyEntityText: string | null
-  actionContext?: InlineUntrustedStructuredContextEntry
-}): InlineUntrustedStructuredContextEntry[] {
-  const entries: InlineUntrustedStructuredContextEntry[] = []
+  actionContext?: InlineChannelStructuredContextEntry
+}): InlineChannelStructuredContextEntry[] {
+  const entries: InlineChannelStructuredContextEntry[] = []
   const append = (label: string, type: string, summary: string | null) => {
     if (!summary) return
     const normalized = normalizeHistoryText(summary)
@@ -2900,27 +2905,11 @@ function resolveInlineMediaMaxBytes(params: {
   )
 }
 
-function buildInlineInboundMediaPayload(media: InlineInboundMediaInfo[]): {
-  MediaPath?: string
-  MediaType?: string
-  MediaUrl?: string
-  MediaPaths?: string[]
-  MediaUrls?: string[]
-  MediaTypes?: string[]
-} {
-  const first = media[0]
-  const mediaPaths = media.map((item) => item.path)
-  const firstMediaType = first?.contentType?.trim()
-  const mediaTypes = media
-    .map((item) => item.contentType?.trim())
-    .filter((item): item is string => Boolean(item))
-
-  return {
-    ...(first?.path ? { MediaPath: first.path, MediaUrl: first.path } : {}),
-    ...(firstMediaType ? { MediaType: firstMediaType } : {}),
-    ...(mediaPaths.length > 0 ? { MediaPaths: mediaPaths, MediaUrls: mediaPaths } : {}),
-    ...(mediaTypes.length > 0 ? { MediaTypes: mediaTypes } : {}),
-  }
+function buildInlineInboundMediaFacts(media: InlineInboundMediaInfo[]) {
+  return toInboundMediaFacts(media.map((item) => ({
+    path: item.path,
+    ...(item.contentType?.trim() ? { contentType: item.contentType.trim() } : {}),
+  })))
 }
 
 function buildInlineAttachmentPlaceholder(content: ReturnType<typeof summarizeInlineMessageContent>): string {
@@ -3267,32 +3256,6 @@ async function buildHistoryContext(params: {
     replyToSenderId,
     hasBotMessage,
   }
-}
-
-const OPENAI_CODEX_RESPONSES_API = "openai-chatgpt-responses"
-// Mirrors OpenClaw's model-catalog visibility rule. The plugin SDK does not
-// export that predicate, so keep this union compatible with supported hosts.
-const OPENAI_CODEX_ROUTABLE_MODEL_IDS = new Set([
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-  "gpt-5.5",
-  "gpt-5.5-pro",
-  "gpt-5.4",
-  "gpt-5.4-codex",
-  "gpt-5.4-pro",
-  "gpt-5.4-mini",
-])
-
-function isCodexRoutableOpenAIModel(params: {
-  provider: string
-  model: string
-  modelApi: string | undefined
-}): boolean {
-  return params.provider.trim().toLowerCase() === "openai"
-    && params.modelApi !== undefined
-    && params.modelApi !== OPENAI_CODEX_RESPONSES_API
-    && OPENAI_CODEX_ROUTABLE_MODEL_IDS.has(params.model.trim().toLowerCase())
 }
 
 export async function monitorInlineProvider(params: {
@@ -4203,7 +4166,7 @@ export async function monitorInlineProvider(params: {
       surface: CHANNEL_ID,
       ...(commandSource ? { commandSource } : {}),
     })
-    const useAccessGroups = cfg.commands?.useAccessGroups !== false
+    const useAccessGroups = resolveUseAccessGroups(cfg)
     const allowForCommands = isGroup ? effectiveGroupCommandAllowFrom : effectiveAllowFrom
     const senderAllowedForCommands = allowlistMatch({ allowFrom: allowForCommands, senderId })
     const commandGate = resolveControlCommandGate({
@@ -5095,7 +5058,7 @@ export async function monitorInlineProvider(params: {
     const actionCallbackDataUtf8 = callbackActionEvent
       ? callbackDataToUtf8(callbackActionEvent.data)
       : undefined
-    const untrustedStructuredContext = buildInlineUntrustedStructuredContext({
+    const channelStructuredContext = buildInlineChannelStructuredContext({
       currentAttachmentText,
       currentEntityText: currentEntityTextForAgent,
       currentBody,
@@ -5192,8 +5155,8 @@ export async function monitorInlineProvider(params: {
       ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
       ...(effectiveHistoryContext.replyToSenderId != null ? { ReplyToSenderId: effectiveHistoryContext.replyToSenderId } : {}),
       ...(msg.replyToMsgId != null ? { ReplyToWasBot: effectiveHistoryContext.repliedToBot } : {}),
-      ...(untrustedStructuredContext.length > 0
-        ? { UntrustedStructuredContext: untrustedStructuredContext }
+      ...(channelStructuredContext.length > 0
+        ? { ChannelStructuredContext: channelStructuredContext }
         : {}),
       ...(callbackActionEvent
         ? {
@@ -5205,7 +5168,7 @@ export async function monitorInlineProvider(params: {
               : {}),
           }
         : {}),
-      ...buildInlineInboundMediaPayload(inboundMedia),
+      ...(inboundMedia.length > 0 ? { media: buildInlineInboundMediaFacts(inboundMedia) } : {}),
       Timestamp: timestamp || Date.now(),
       ...(isGroup ? { WasMentioned: mentionGate.effectiveWasMentioned } : {}),
       ...(isGroup
@@ -6042,10 +6005,11 @@ export async function monitorInlineProvider(params: {
               )
             },
             onPlanUpdate: async (payload: {
-              phase?: string
-              title?: string
-              explanation?: string
-              steps?: string[]
+              phase?: string | undefined
+              title?: string | undefined
+              explanation?: string | undefined
+              steps?: AgentPlanStep[] | undefined
+              source?: string | undefined
             }) => {
               if (payload.phase !== "update") return
               await pushInlineProgressPlaceholder(
@@ -6614,37 +6578,37 @@ export async function monitorInlineProvider(params: {
         ...(botUsername ? { commandOptions: { botUsername } } : {}),
       })
     },
-    onFlush: async (entries) => {
-      const last = entries.at(-1)
-      if (!last) return
+    onFlush: (entries, createFlush) => createFlush({
+      dispatch: async () => {
+        const last = entries.at(-1)
+        if (!last) return
 
-      if (entries.length === 1) {
+        if (entries.length === 1) {
+          await handleInboundNow({
+            chatId: last.chatId,
+            msg: last.msg,
+          })
+          return
+        }
+
+        const combinedText = entries
+          .map((entry) => buildInlineInboundBodyText(summarizeInlineMessageContent(entry.msg)))
+          .filter(Boolean)
+          .join("\n")
+        if (!combinedText.trim()) return
+
         await handleInboundNow({
           chatId: last.chatId,
-          msg: last.msg,
+          msg: buildSyntheticInlineTextMessage({
+            base: last.msg,
+            text: combinedText,
+            mentioned: entries.some((entry) => entry.msg.mentioned === true),
+          }),
+          messageIds: entries.map((entry) => String(entry.msg.id)),
+          rawBodyOverride: combinedText,
         })
-        return
-      }
-
-      const combinedText = entries
-        .map((entry) => buildInlineInboundBodyText(summarizeInlineMessageContent(entry.msg)))
-        .filter(Boolean)
-        .join("\n")
-      if (!combinedText.trim()) {
-        return
-      }
-
-      await handleInboundNow({
-        chatId: last.chatId,
-        msg: buildSyntheticInlineTextMessage({
-          base: last.msg,
-          text: combinedText,
-          mentioned: entries.some((entry) => entry.msg.mentioned === true),
-        }),
-        messageIds: entries.map((entry) => String(entry.msg.id)),
-        rawBodyOverride: combinedText,
-      })
-    },
+      },
+    }),
     onError: (err, items) => {
       runtime.error?.(`inline debounce flush failed: ${String(err)}`)
       const chatId = items[0]?.chatId
@@ -6774,7 +6738,7 @@ export async function monitorInlineProvider(params: {
       senderId,
     })
     const commandGate = resolveControlCommandGate({
-      useAccessGroups: cfg.commands?.useAccessGroups !== false,
+      useAccessGroups: resolveUseAccessGroups(cfg),
       authorizers: [
         {
           configured: effectiveGroupCommandAllowFrom.length > 0,
@@ -6827,49 +6791,15 @@ export async function monitorInlineProvider(params: {
   }): Promise<OpenClawBotSettingsModelCatalog> => {
     const loadCatalog = async (): Promise<OpenClawBotSettingsModelCatalog> => {
       const options = new Map<string, OpenClawBotChatSettingsOption>()
-      const [{ byProvider, providers }, catalog] = await Promise.all([
-        buildModelsProviderData(params.cfg, params.agentId),
-        loadModelCatalog({ config: params.cfg, readOnly: true }),
-      ])
-      const modelApiByRef = new Map<string, string | undefined>(
-        catalog.map((entry) => [`${entry.provider}/${entry.id}`, entry.api] as const),
+      // OpenClaw 2026.8 owns auth-aware catalog visibility, route compatibility,
+      // aliases, and configured-model projection in this SDK helper.
+      const { byProvider, providers } = await buildModelsProviderData(
+        params.cfg,
+        params.agentId,
       )
-      const agentDir = resolveAgentDir(params.cfg, params.agentId)
-      const workspaceDir = resolveAgentWorkspaceDir(params.cfg, params.agentId)
-      const authAvailability = new Map<string, Promise<boolean>>()
       for (const provider of [...providers].sort()) {
         for (const model of [...(byProvider.get(provider) ?? [])].sort()) {
           const value = `${provider}/${model}`
-          const modelApi = modelApiByRef.get(value)
-          const authKey = `${provider}\u0000${modelApi ?? ""}`
-          let hasAuth = authAvailability.get(authKey)
-          if (!hasAuth) {
-            hasAuth = hasAvailableAuthForProvider({
-              provider,
-              cfg: params.cfg,
-              agentDir,
-              workspaceDir,
-              ...(modelApi ? { modelApi } : {}),
-            })
-            authAvailability.set(authKey, hasAuth)
-          }
-          let isAvailable = await hasAuth
-          if (!isAvailable && isCodexRoutableOpenAIModel({ provider, model, modelApi })) {
-            const codexAuthKey = `${provider}\u0000${OPENAI_CODEX_RESPONSES_API}`
-            let hasCodexAuth = authAvailability.get(codexAuthKey)
-            if (!hasCodexAuth) {
-              hasCodexAuth = hasAvailableAuthForProvider({
-                provider,
-                cfg: params.cfg,
-                agentDir,
-                workspaceDir,
-                modelApi: OPENAI_CODEX_RESPONSES_API,
-              })
-              authAvailability.set(codexAuthKey, hasCodexAuth)
-            }
-            isAvailable = await hasCodexAuth
-          }
-          if (!isAvailable) continue
           options.set(value, { value, label: value })
           if (options.size >= 100) {
             return { options: [...options.values()], didLoad: true }

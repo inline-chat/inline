@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.63",
+  "version": "0.0.64",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -35,11 +35,11 @@
     "check": "bun run typecheck && bun run lint && bun run test && bun run build"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "0.0.16",
+    "@inline-chat/realtime-sdk": "0.0.17",
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.6.11 || >=2026.7.1-0"
+    "openclaw": ">=2026.8.2 <2026.9.0"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -49,7 +49,7 @@
   "devDependencies": {
     "@types/node": "20.17.19",
     "@vitest/coverage-v8": "4.1.10",
-    "openclaw": "2026.7.1-2",
+    "openclaw": "2026.8.2",
     "typescript": "5.8.3",
     "vitest": "4.1.10"
   },
@@ -99,13 +99,13 @@
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "openclaw",
       "defaultChoice": "clawhub",
-      "minHostVersion": ">=2026.6.11"
+      "minHostVersion": ">=2026.8.2"
     },
     "compat": {
-      "pluginApi": ">=2026.6.11"
+      "pluginApi": ">=2026.8.2 <2026.9.0"
     },
     "build": {
-      "openclawVersion": "2026.7.1-2"
+      "openclawVersion": "2026.8.2"
     },
     "release": {
       "publishToClawHub": true,

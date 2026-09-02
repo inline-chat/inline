@@ -71,7 +71,7 @@ function isSupportedVideo(params: { mime?: string; ext?: string }): boolean {
 }
 
 function chooseUploadType(params: {
-  kind: "image" | "audio" | "video" | "document" | "unknown"
+  kind: "image" | "audio" | "video" | "document" | "sticker" | "unknown"
   mime?: string
   ext?: string
 }): InlineUploadType {

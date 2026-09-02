@@ -3,13 +3,22 @@ import {
   loadBundledEntryExportSync,
   type OpenClawPluginApi,
 } from "openclaw/plugin-sdk/channel-entry-contract"
+import {
+  instrumentOpenClawPluginApi,
+  reportOpenClawRegistrationError,
+} from "./telemetry.js"
 
 function registerInlinePluginFull(api: OpenClawPluginApi): void {
   const register = loadBundledEntryExportSync<(api: OpenClawPluginApi) => void>(import.meta.url, {
     specifier: "./runtime-register-api.js",
     exportName: "registerInlinePluginFull",
   })
-  register(api)
+  try {
+    register(instrumentOpenClawPluginApi(api))
+  } catch (error) {
+    reportOpenClawRegistrationError(error)
+    throw error
+  }
 }
 
 export default defineBundledChannelEntry({

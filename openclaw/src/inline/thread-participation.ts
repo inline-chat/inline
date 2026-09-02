@@ -1,4 +1,3 @@
-import path from "node:path"
 import { resolveGlobalDedupeCache } from "openclaw/plugin-sdk/dedupe-runtime"
 import { createPersistentDedupe, type PersistentDedupe } from "openclaw/plugin-sdk/persistent-dedupe"
 import { getOptionalInlineRuntime } from "../runtime.js"
@@ -35,10 +34,6 @@ let persistentDedupe: PersistentDedupe | undefined
 
 function makeKey(accountId: string, parentChatId: bigint, threadId: bigint): string {
   return `${accountId}:${String(parentChatId)}:${String(threadId)}`
-}
-
-function safePathSegment(value: string): string {
-  return value.trim().replace(/[^a-z0-9._-]+/gi, "_").slice(0, 80) || "global"
 }
 
 function isExpectedOpenKeyedStoreUnavailable(error: unknown): boolean {
@@ -95,14 +90,10 @@ function getPersistentThreadParticipationDedupe(): PersistentDedupe | undefined 
     persistentDedupe = createPersistentDedupe({
       ttlMs: TTL_MS,
       memoryMaxSize: MAX_ENTRIES,
-      fileMaxEntries: PERSISTENT_MAX_ENTRIES,
-      resolveFilePath: (namespace) =>
-        path.join(
-          stateDir,
-          "inline",
-          "thread-participation",
-          `${safePathSegment(namespace)}.json`,
-        ),
+      pluginId: "inline",
+      namespacePrefix: "thread-participation",
+      stateMaxEntries: PERSISTENT_MAX_ENTRIES,
+      env: { OPENCLAW_STATE_DIR: stateDir },
       onDiskError: reportPersistentThreadParticipationError,
     })
     return persistentDedupe

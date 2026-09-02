@@ -199,14 +199,15 @@ describe("inline/members-tool", () => {
       25,
       expect.objectContaining({
         oneofKind: "getChat",
-        getChat: {
+        getChat: expect.objectContaining({
+          includeRecentMessages: false,
           peerId: {
             type: {
               oneofKind: "chat",
               chat: { chatId: 77n },
             },
           },
-        },
+        }),
       }),
     )
   })

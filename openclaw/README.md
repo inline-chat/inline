@@ -34,18 +34,28 @@ Reply-thread behavior:
 
 ## Install
 
-Requires OpenClaw `2026.6.11` or newer.
+The current Inline plugin targets OpenClaw `2026.8.x` from `2026.8.2`. Install
+the plugin version for your OpenClaw release line:
+
+| OpenClaw line | Inline plugin | Exact install |
+| --- | --- | --- |
+| `2026.8.x` (`>=2026.8.2`) | `0.0.64` | `openclaw plugins install --force @inline-openclaw/inline@0.0.64` |
+| `2026.7.x` | `0.0.63` | `openclaw plugins install --force @inline-openclaw/inline@0.0.63` |
+| `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install --force @inline-openclaw/inline@0.0.63` |
+
+`@latest` follows the newest supported OpenClaw line; it is not a compatibility
+alias for older host APIs.
 
 ## Compatibility
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.63` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Current | Applies live-safe settings writes without restarting the Inline channel before it can answer. |
+| `0.0.64` | `>=2026.8.2 <2026.9.0` | `0.0.17` | Current | Supports the stable 2026.8 plugin SDK and preserves DM/group reply-thread routing. |
+| `0.0.63` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Applies live-safe settings writes without restarting the Inline channel before it can answer. |
 | `0.0.62` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Keeps the thread-only Following control out of direct-message agent settings, where the server does not support it. |
 | `0.0.61` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Bounds model discovery through provider authentication so agent settings return a fallback instead of hanging indefinitely. |
 | `0.0.60` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Uses the plugin index's supported force-install path for exact updates on current OpenClaw hosts. |
 | `0.0.59` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.16` | Previous | Adds mentionable Agent specialization, exact Agent activation, and fail-closed bot-message provenance. |
-| `0.0.57` | `>=2026.6.11 || >=2026.7.1-0` | `0.0.14` | Previous | Hardens exact CLI-managed upgrades, deterministic channel listing, default/help consistency, and packed-artifact validation. |
 
 From npm:
 

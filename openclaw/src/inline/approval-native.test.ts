@@ -18,8 +18,8 @@ function buildExecRequest(overrides?: Partial<ExecApprovalRequest["request"]>): 
     request: {
       command: "pwd",
       agentId: "main",
-      sessionKey: "main:inline:chat:7",
       turnSourceChannel: "inline",
+      turnSourceAccountId: "default",
       turnSourceTo: "chat:7",
       ...overrides,
     },

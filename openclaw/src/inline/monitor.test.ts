@@ -8,8 +8,6 @@ import {
 
 const modelRuntimeMocks = vi.hoisted(() => ({
   buildModelsProviderData: vi.fn(),
-  hasAvailableAuthForProvider: vi.fn(),
-  loadModelCatalog: vi.fn(),
   resolveDefaultModelForAgent: vi.fn(),
   getSessionEntry: vi.fn(),
   patchSessionEntry: vi.fn(),
@@ -43,8 +41,6 @@ vi.mock("openclaw/plugin-sdk/agent-runtime", async () => {
   )
   return {
     ...actual,
-    hasAvailableAuthForProvider: modelRuntimeMocks.hasAvailableAuthForProvider,
-    loadModelCatalog: modelRuntimeMocks.loadModelCatalog,
     resolveDefaultModelForAgent: modelRuntimeMocks.resolveDefaultModelForAgent,
   }
 })
@@ -482,8 +478,6 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       resolvedDefault: ref,
     }
   })
-  modelRuntimeMocks.hasAvailableAuthForProvider.mockReset().mockResolvedValue(true)
-  modelRuntimeMocks.loadModelCatalog.mockReset().mockResolvedValue([])
   modelRuntimeMocks.resolveDefaultModelForAgent.mockReset().mockImplementation(({ cfg }: any) => resolveMockModelRef(cfg))
   modelRuntimeMocks.getSessionEntry.mockReset().mockReturnValue(undefined)
   modelRuntimeMocks.patchSessionEntry.mockReset().mockImplementation(async ({ fallbackEntry, update }: any) => {
@@ -1033,54 +1027,22 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
   })
 
-  vi.doMock("openclaw/plugin-sdk", async () => {
-    const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
+  vi.doMock("../openclaw-compat.js", async () => {
+    const actual = await vi.importActual<Record<string, unknown>>("../openclaw-compat.js")
     return {
       ...actual,
-      createReplyPrefixOptions: vi.fn(() => ({ onModelSelected: vi.fn() })),
-      createTypingCallbacks: vi.fn(() => ({})),
-      loadWebMedia: vi.fn(async () => ({
-        buffer: Buffer.from([1, 2, 3]),
-        contentType: "image/png",
-        kind: "image",
-        fileName: "image.png",
-      })),
-      detectMime: vi.fn(async () => "image/png"),
-      logInboundDrop: vi.fn(),
       resolveControlCommandGate: vi.fn(
-        setup.resolveControlCommandGate ?? (() => ({ shouldBlock: false, commandAuthorized: true })),
+        setup.resolveControlCommandGate ?? actual.resolveControlCommandGate as (params: any) => unknown,
       ),
-      resolveMentionGatingWithBypass: vi.fn((params: any) => {
-        const shouldBypassMention = Boolean(
-          params.isGroup &&
-            params.requireMention &&
-            !params.wasMentioned &&
-            !params.implicitMention &&
-            params.allowTextCommands &&
-            params.commandAuthorized &&
-            params.hasControlCommand,
-        )
-        return {
-          shouldSkip: Boolean(
-            params.isGroup &&
-              params.requireMention &&
-              !params.wasMentioned &&
-              !params.implicitMention &&
-              !shouldBypassMention,
-          ),
-          effectiveWasMentioned: Boolean(params.wasMentioned || params.implicitMention || shouldBypassMention),
-          shouldBypassMention,
-        }
-      }),
     }
   })
-  vi.doMock("openclaw/plugin-sdk/channel-reply-pipeline", async () => {
+  vi.doMock("openclaw/plugin-sdk/channel-outbound", async () => {
     const actual = await vi.importActual<Record<string, unknown>>(
-      "openclaw/plugin-sdk/channel-reply-pipeline",
+      "openclaw/plugin-sdk/channel-outbound",
     )
     return {
       ...actual,
-      createChannelReplyPipeline: vi.fn((params: any) => {
+      createChannelMessageReplyPipeline: vi.fn((params: any) => {
         const typingCallbacks =
           setup.replyPipeline?.typingCallbacks ??
           (params.typing
@@ -1437,7 +1399,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("omits model choices whose OpenClaw provider authentication is unavailable", async () => {
+  it("uses OpenClaw's auth-filtered model catalog for settings choices", async () => {
     const harness = await setupMonitorHarness({
       events: [{
         kind: "bot.chatSettings.request",
@@ -1454,24 +1416,9 @@ describe("inline/monitor", () => {
       },
     })
     modelRuntimeMocks.buildModelsProviderData.mockResolvedValue({
-      byProvider: new Map([
-        ["openai", new Set(["gpt-5.5"])],
-        ["openai-codex", new Set(["gpt-5.5"])],
-      ]),
-      providers: ["openai", "openai-codex"],
+      byProvider: new Map([["openai", new Set(["gpt-5.5"])]]),
+      providers: ["openai"],
     })
-    modelRuntimeMocks.loadModelCatalog.mockResolvedValue([
-      { provider: "openai", id: "gpt-5.5", name: "gpt-5.5", api: "openai-responses" },
-      {
-        provider: "openai-codex",
-        id: "gpt-5.5",
-        name: "gpt-5.5",
-        api: "openai-chatgpt-responses",
-      },
-    ])
-    modelRuntimeMocks.hasAvailableAuthForProvider.mockImplementation(
-      async ({ provider }: { provider: string }) => provider !== "openai-codex",
-    )
 
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
@@ -1493,7 +1440,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("bounds provider authentication checks inside the settings model-list deadline", async () => {
+  it("bounds OpenClaw model discovery inside the settings model-list deadline", async () => {
     vi.useFakeTimers()
     let handle: Awaited<ReturnType<MonitorHarness["monitorInlineProvider"]>> | undefined
     try {
@@ -1512,8 +1459,8 @@ describe("inline/monitor", () => {
           agents: { defaults: { model: "openai/gpt-5.5" } },
         },
       })
-      modelRuntimeMocks.hasAvailableAuthForProvider.mockImplementation(
-        () => new Promise<boolean>(() => {}),
+      modelRuntimeMocks.buildModelsProviderData.mockImplementation(
+        () => new Promise(() => {}),
       )
       const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 
@@ -1525,10 +1472,10 @@ describe("inline/monitor", () => {
         log,
       })
 
-      for (let attempt = 0; attempt < 20 && modelRuntimeMocks.hasAvailableAuthForProvider.mock.calls.length === 0; attempt += 1) {
+      for (let attempt = 0; attempt < 20 && modelRuntimeMocks.buildModelsProviderData.mock.calls.length === 0; attempt += 1) {
         await Promise.resolve()
       }
-      expect(modelRuntimeMocks.hasAvailableAuthForProvider).toHaveBeenCalled()
+      expect(modelRuntimeMocks.buildModelsProviderData).toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(5_000)
       expect(harness.calls.answerBotChatSettings).toHaveBeenCalledTimes(1)
@@ -1539,7 +1486,7 @@ describe("inline/monitor", () => {
     }
   })
 
-  it("includes Codex-routable OpenAI models when OAuth is available through Codex", async () => {
+  it("includes OpenClaw-routed Codex models returned by the host catalog", async () => {
     const harness = await setupMonitorHarness({
       events: [{
         kind: "bot.chatSettings.request",
@@ -1561,15 +1508,6 @@ describe("inline/monitor", () => {
       ]),
       providers: ["openai"],
     })
-    modelRuntimeMocks.loadModelCatalog.mockResolvedValue([
-      { provider: "openai", id: "gpt-5.5", api: "openai-responses" },
-      { provider: "openai", id: "gpt-5.6-sol", api: "openai-responses" },
-      { provider: "openai", id: "gpt-5.4-mini", api: "openai-responses" },
-      { provider: "openai", id: "gpt-4.1", api: "openai-responses" },
-    ])
-    modelRuntimeMocks.hasAvailableAuthForProvider.mockImplementation(
-      async ({ modelApi }: { modelApi?: string }) => modelApi === "openai-chatgpt-responses",
-    )
 
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
@@ -1586,16 +1524,10 @@ describe("inline/monitor", () => {
     const options = response?.result.document.sections[0]?.items[0]?.control.select.options
     expect(options).toEqual([
       expect.objectContaining({ value: "openai/gpt-5.5", disabled: false }),
+      expect.objectContaining({ value: "openai/gpt-4.1", disabled: false }),
       expect.objectContaining({ value: "openai/gpt-5.4-mini", disabled: false }),
       expect.objectContaining({ value: "openai/gpt-5.6-sol", disabled: false }),
     ])
-    expect(modelRuntimeMocks.hasAvailableAuthForProvider).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "openai",
-        modelApi: "openai-chatgpt-responses",
-      }),
-    )
-
     await handle.stop()
   })
 
@@ -4766,7 +4698,7 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           Body: "what about this image?",
           BodyForAgent: "what about this image?",
-          UntrustedStructuredContext: expect.arrayContaining([
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "recent_media_attachments",
               payload: {
@@ -4778,10 +4710,7 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.not.objectContaining({
-          MediaPath: expect.anything(),
-          MediaUrl: expect.anything(),
-          MediaPaths: expect.anything(),
-          MediaUrls: expect.anything(),
+          media: expect.anything(),
         }),
       )
     })
@@ -6489,7 +6418,7 @@ describe("inline/monitor", () => {
           interactionId: 22n,
           messageId: 1001n,
           actorUserId: 42n,
-          actionId: "pick",
+          actionId: "agent:1:1",
           data: new Uint8Array([123, 34, 107, 34, 58, 49, 125]), // {"k":1}
         },
       ],
@@ -6522,6 +6451,7 @@ describe("inline/monitor", () => {
             messageId: 1001n,
             text: "received",
             parseMarkdown: true,
+            actions: { rows: [] },
           }),
         }),
       )
@@ -6535,11 +6465,11 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           MessageActionInteractionId: "22",
-          MessageActionId: "pick",
+          MessageActionId: "agent:1:1",
           MessageActionDataBase64: "eyJrIjoxfQ==",
           Body: "Inline action button pressed on message #1001 by Alice.",
           BodyForAgent: "Inline action button pressed on message #1001 by Alice.",
-          UntrustedStructuredContext: expect.arrayContaining([
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               label: "Inline action button press",
               source: "inline",
@@ -6550,7 +6480,7 @@ describe("inline/monitor", () => {
                 chat_id: "7",
                 target_message_id: "1001",
                 interaction_id: "22",
-                action_id: "pick",
+                action_id: "agent:1:1",
                 callback_data_base64: "eyJrIjoxfQ==",
                 callback_data_utf8: '{"k":1}',
               },
@@ -6589,7 +6519,7 @@ describe("inline/monitor", () => {
           interactionId: 23n,
           messageId: 1002n,
           actorUserId: 42n,
-          actionId: "save",
+          actionId: "agent:1:2",
           data: new TextEncoder().encode(
             JSON.stringify({ value: "draft-1", callbackToast: "Saved" }),
           ),
@@ -6603,6 +6533,11 @@ describe("inline/monitor", () => {
       },
       dispatchReplyPayload: {
         text: "saved",
+        channelData: {
+          inline: {
+            buttons: [[{ text: "Revise", callback_data: '{"next":"revise"}' }]],
+          },
+        },
       },
     })
 
@@ -6633,6 +6568,14 @@ describe("inline/monitor", () => {
             messageId: 1002n,
             text: "saved",
             parseMarkdown: true,
+            actions: {
+              rows: [{
+                actions: [expect.objectContaining({
+                  actionId: "agent:1:1",
+                  text: "Revise",
+                })],
+              }],
+            },
           }),
         }),
       )
@@ -8548,7 +8491,7 @@ describe("inline/monitor", () => {
           oneofKind: "editMessage",
           editMessage: expect.objectContaining({
             messageId: 1n,
-            text: expect.stringContaining("listed files"),
+            text: expect.stringContaining("Exec: done"),
             parseMarkdown: false,
           }),
         }),
@@ -12798,7 +12741,7 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          UntrustedStructuredContext: expect.arrayContaining([
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "recent_media_attachments",
               payload: {
@@ -12811,13 +12754,13 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           BodyForAgent: "<media:image>",
-          MediaPath: "/tmp/current-photo.jpg",
-          MediaType: "image/jpeg",
-          MediaUrl: "/tmp/current-photo.jpg",
-          MediaPaths: ["/tmp/current-photo.jpg"],
-          MediaUrls: ["/tmp/current-photo.jpg"],
-          MediaTypes: ["image/jpeg"],
-          UntrustedStructuredContext: expect.arrayContaining([
+          media: [{
+            path: "/tmp/current-photo.jpg",
+            contentType: "image/jpeg",
+            kind: "image",
+            transcribed: false,
+          }],
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
               payload: { summary: "image attachment: https://cdn.inline.chat/current-photo.jpg" },
@@ -12901,7 +12844,7 @@ describe("inline/monitor", () => {
               body: `image attachment: ${longMediaUrl}`,
             }),
           ]),
-          UntrustedStructuredContext: expect.arrayContaining([
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "recent_media_attachments",
               payload: {
@@ -12991,13 +12934,13 @@ describe("inline/monitor", () => {
           BodyForAgent: "<media:document>",
           RawBody: "<media:document>",
           CommandBody: "<media:document>",
-          MediaPath: "/tmp/spec.pdf",
-          MediaType: "application/pdf",
-          MediaUrl: "/tmp/spec.pdf",
-          MediaPaths: ["/tmp/spec.pdf"],
-          MediaUrls: ["/tmp/spec.pdf"],
-          MediaTypes: ["application/pdf"],
-          UntrustedStructuredContext: expect.arrayContaining([
+          media: [{
+            path: "/tmp/spec.pdf",
+            contentType: "application/pdf",
+            kind: "document",
+            transcribed: false,
+          }],
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
               payload: { summary: "document attachment (spec.pdf): https://cdn.inline.chat/spec.pdf" },
@@ -13075,13 +13018,13 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           Body: "<media:document>",
           BodyForAgent: "<media:document>",
-          MediaPath: "/tmp/image-document.png",
-          MediaType: "image/png",
-          MediaUrl: "/tmp/image-document.png",
-          MediaPaths: ["/tmp/image-document.png"],
-          MediaUrls: ["/tmp/image-document.png"],
-          MediaTypes: ["image/png"],
-          UntrustedStructuredContext: expect.arrayContaining([
+          media: [{
+            path: "/tmp/image-document.png",
+            contentType: "image/png",
+            kind: "image",
+            transcribed: false,
+          }],
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
               payload: { summary: "document attachment (image-document.png): https://cdn.inline.chat/image-document" },
@@ -13157,13 +13100,13 @@ describe("inline/monitor", () => {
           BodyForAgent: "<media:image>",
           RawBody: "<media:image>",
           CommandBody: "<media:image>",
-          MediaPath: "/tmp/flattened-photo.jpg",
-          MediaType: "image/jpeg",
-          MediaUrl: "/tmp/flattened-photo.jpg",
-          MediaPaths: ["/tmp/flattened-photo.jpg"],
-          MediaUrls: ["/tmp/flattened-photo.jpg"],
-          MediaTypes: ["image/jpeg"],
-          UntrustedStructuredContext: expect.arrayContaining([
+          media: [{
+            path: "/tmp/flattened-photo.jpg",
+            contentType: "image/jpeg",
+            kind: "image",
+            transcribed: false,
+          }],
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
               payload: { summary: "image attachment: https://cdn.inline.chat/flattened-photo.jpg" },
@@ -13318,12 +13261,12 @@ describe("inline/monitor", () => {
           Body: "<media:audio>",
           BodyForAgent: "<media:audio>",
           RawBody: "<media:audio>",
-          MediaPath: "/tmp/fallback-voice.ogg",
-          MediaType: "audio/ogg",
-          MediaUrl: "/tmp/fallback-voice.ogg",
-          MediaPaths: ["/tmp/fallback-voice.ogg"],
-          MediaUrls: ["/tmp/fallback-voice.ogg"],
-          MediaTypes: ["audio/ogg"],
+          media: [{
+            path: "/tmp/fallback-voice.ogg",
+            contentType: "audio/ogg",
+            kind: "audio",
+            transcribed: false,
+          }],
         }),
       )
     })
@@ -13385,14 +13328,14 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.not.objectContaining({
-          MediaPath: expect.anything(),
+          media: expect.anything(),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: "<media:document>",
           BodyForAgent: "<media:document>",
-          UntrustedStructuredContext: expect.arrayContaining([
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
               payload: { summary: "document attachment (broken-spec.pdf): https://cdn.inline.chat/broken-spec.pdf" },
@@ -13470,7 +13413,7 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.not.objectContaining({
-          MediaPath: expect.anything(),
+          media: expect.anything(),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -13478,7 +13421,7 @@ describe("inline/monitor", () => {
           RawBody: "<media:document>",
           Body: "<media:document>",
           BodyForAgent: "<media:document>",
-          UntrustedStructuredContext: expect.arrayContaining([
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "current_media_attachments",
               payload: { summary: "document attachment (huge-spec.pdf): https://cdn.inline.chat/huge-spec.pdf" },
@@ -13577,7 +13520,7 @@ describe("inline/monitor", () => {
           InboundHistory: expect.arrayContaining([
             expect.objectContaining({ body: "Review portal" }),
           ]),
-          UntrustedStructuredContext: expect.arrayContaining([
+          ChannelStructuredContext: expect.arrayContaining([
             expect.objectContaining({
               type: "recent_message_entities",
               payload: {

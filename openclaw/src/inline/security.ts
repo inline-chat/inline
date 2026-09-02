@@ -1,7 +1,11 @@
 import { resolveNativeSkillsEnabled } from "openclaw/plugin-sdk/native-command-config-runtime"
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { parseAccessGroupAllowFromEntry } from "openclaw/plugin-sdk/security-runtime"
-import { DEFAULT_ACCOUNT_ID, formatPairingApproveHint } from "../openclaw-compat.js"
+import {
+  DEFAULT_ACCOUNT_ID,
+  formatPairingApproveHint,
+  resolveUseAccessGroups,
+} from "../openclaw-compat.js"
 import type { ResolvedInlineAccount } from "./accounts.js"
 import {
   INLINE_DEFAULT_GROUP_POLICY,
@@ -182,7 +186,7 @@ export const inlineSecurityAdapter: InlineSecurityAdapter = {
       groupPolicy === "open" || (groupPolicy === "allowlist" && (groupsConfigured || groupSendersConfigured))
     if (!groupAccessEnabled) return findings
 
-    if (cfg.commands?.useAccessGroups === false) {
+    if (!resolveUseAccessGroups(cfg)) {
       findings.push({
         checkId: "channels.inline.groups.commands.access_groups_disabled",
         severity: "critical",

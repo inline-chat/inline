@@ -6,6 +6,14 @@ Need a bot token first? See `docs/create-inline-bot.md`.
 
 ## 1) Install Plugin
 
+Choose the Inline plugin version that matches the installed OpenClaw line:
+
+- OpenClaw `2026.8.x` (`>=2026.8.2`): Inline plugin `0.0.64` — `openclaw plugins install --force @inline-openclaw/inline@0.0.64`
+- OpenClaw `2026.7.x`: Inline plugin `0.0.63` — `openclaw plugins install --force @inline-openclaw/inline@0.0.63`
+- OpenClaw `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`): Inline plugin `0.0.63` — `openclaw plugins install --force @inline-openclaw/inline@0.0.63`
+
+The unversioned install follows the newest supported OpenClaw line:
+
 ```sh
 openclaw plugins install @inline-openclaw/inline
 ```
@@ -110,6 +118,26 @@ openclaw status --deep
 Expected:
 - Plugin `inline` is loaded.
 - Channel `Inline` is configured and running/connected.
+
+## Error Reporting And Privacy
+
+The Inline plugin reports unexpected plugin failures to Inline's Sentry project
+by default. Reports include the raw exception type and message, stack paths,
+line/function locations, plugin release, operation name, runtime, OS, and
+architecture so maintainers can diagnose failures in subsequent releases.
+
+Reports do not attach Inline or OpenClaw message events, request bodies,
+user/chat/account identifiers, breadcrumbs, source context, or stack locals.
+Known token, password, authorization, and secret-shaped values are redacted
+before upload. Inline's Sentry project also enables default server-side data
+scrubbing and IP-address scrubbing. Because dependency exception messages are
+preserved for diagnosis, they can still contain values the dependency itself
+chose to place in an error.
+
+Set `INLINE_PLUGIN_TELEMETRY=off` or `DO_NOT_TRACK=1` in the gateway environment
+to disable all Inline plugin error reporting. Reporting is best-effort, has a
+two-second network deadline, and never changes plugin success or failure
+behavior.
 
 ## 5) Common Fixes
 

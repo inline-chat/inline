@@ -5567,14 +5567,15 @@ describe("inline/actions", () => {
     expect(invokeRaw).toHaveBeenCalledWith(
       25,
       expect.objectContaining({
-        getChat: {
+        getChat: expect.objectContaining({
+          includeRecentMessages: false,
           peerId: {
             type: {
               oneofKind: "chat",
               chat: { chatId: 710n },
             },
           },
-        },
+        }),
       }),
     )
   })

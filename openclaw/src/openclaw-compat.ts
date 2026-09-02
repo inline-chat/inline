@@ -166,6 +166,14 @@ export function resolveControlCommandGate(params: {
   }
 }
 
+export function resolveUseAccessGroups(cfg: OpenClawConfig): boolean {
+  const commands = cfg.commands as unknown
+  if (!commands || typeof commands !== "object" || Array.isArray(commands)) {
+    return true
+  }
+  return (commands as { useAccessGroups?: unknown }).useAccessGroups !== false
+}
+
 export function resolveMentionGatingWithBypass(params: {
   isGroup: boolean
   requireMention: boolean

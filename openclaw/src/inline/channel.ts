@@ -1375,9 +1375,41 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
   },
 }
 
+function toInlineMessageBridgeResult(
+  result: Awaited<ReturnType<NonNullable<typeof inlineOutbound.sendText>>>,
+) {
+  return {
+    ...(result.outcome === "not_sent" ? { outcome: result.outcome } : {}),
+    channel: result.channel,
+    messageId: result.messageId,
+    ...(result.target ? { target: result.target } : {}),
+    ...(result.timestamp !== undefined ? { timestamp: result.timestamp } : {}),
+    ...(result.toJid !== undefined ? { toJid: result.toJid } : {}),
+    ...(result.pollId !== undefined ? { pollId: result.pollId } : {}),
+    ...(result.receipt !== undefined ? { receipt: result.receipt } : {}),
+    ...(result.meta !== undefined ? { meta: result.meta } : {}),
+  }
+}
+
 const inlineMessageAdapter = createChannelMessageAdapterFromOutbound<OpenClawConfig>({
   id: "inline",
-  outbound: inlineOutbound,
+  outbound: {
+    sendText: async ({ onDeliveryResult, ...ctx }) => {
+      const result = toInlineMessageBridgeResult(await inlineOutbound.sendText!(ctx))
+      await onDeliveryResult?.(result)
+      return result
+    },
+    sendMedia: async ({ onDeliveryResult, ...ctx }) => {
+      const result = toInlineMessageBridgeResult(await inlineOutbound.sendMedia!(ctx))
+      await onDeliveryResult?.(result)
+      return result
+    },
+    sendPayload: async ({ onDeliveryResult, ...ctx }) => {
+      const result = toInlineMessageBridgeResult(await inlineOutbound.sendPayload!(ctx))
+      await onDeliveryResult?.(result)
+      return result
+    },
+  },
   live: {
     capabilities: {
       draftPreview: true,
@@ -1653,15 +1685,6 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     resolveSessionConversation: ({ rawId }) => resolveInlineSessionConversation({ rawId }),
     resolveSessionTarget: ({ id }) => resolveInlineSessionTarget({ id }),
     preserveHeartbeatThreadIdForGroupRoute: true,
-    parseExplicitTarget: ({ raw }) => {
-      try {
-        const parsed = parseInlineExplicitTarget(raw)
-        if (!parsed) return null
-        return { to: parsed.to, chatType: parsed.chatType }
-      } catch {
-        return null
-      }
-    },
     inferTargetChatType: ({ to }) => {
       try {
         const parsed = parseInlineExplicitTarget(to)

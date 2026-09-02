@@ -1,5 +1,7 @@
-import type { ChannelSetupAdapter } from "openclaw/plugin-sdk/setup"
-import { createEnvPatchedAccountSetupAdapter } from "openclaw/plugin-sdk/setup"
+import {
+  createEnvPatchedAccountSetupAdapter,
+  type ChannelSetupAdapter,
+} from "openclaw/plugin-sdk/setup-runtime"
 import { resolveInlineEnvToken } from "./accounts.js"
 
 const channel = "inline" as const

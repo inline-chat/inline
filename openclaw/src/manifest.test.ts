@@ -49,6 +49,7 @@ describe("plugin manifest", () => {
     expect(json.channels).toEqual(["inline"])
     expect(json.contracts?.tools).toEqual(
       expect.arrayContaining([
+        "inline_agents",
         "inline_members",
         "inline_update_profile",
         "inline_bot_avatar",
@@ -317,11 +318,11 @@ describe("plugin manifest", () => {
 
     expect(json.openclaw?.install?.clawhubSpec).toBe("clawhub:@inline-openclaw/inline")
     expect(json.openclaw?.install?.defaultChoice).toBe("clawhub")
-    expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.6.11")
-    expect(json.peerDependencies?.openclaw).toBe(">=2026.6.11 || >=2026.7.1-0")
+    expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.8.2")
+    expect(json.peerDependencies?.openclaw).toBe(">=2026.8.2 <2026.9.0")
     expect(json.peerDependenciesMeta?.openclaw?.optional).toBe(true)
-    expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.6.11")
-    expect(json.devDependencies?.openclaw).toBe("2026.7.1-2")
+    expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.8.2 <2026.9.0")
+    expect(json.devDependencies?.openclaw).toBe("2026.8.2")
     expect(json.openclaw?.build?.openclawVersion).toBe(json.devDependencies?.openclaw)
     expect(json.openclaw?.release?.publishToClawHub).toBe(true)
     expect(json.openclaw?.release?.publishToNpm).toBe(true)

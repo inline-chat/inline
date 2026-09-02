@@ -76,8 +76,8 @@ describe("inline/bot-commands-sync", () => {
       /subagent/i,
     )
     expect(setBody.commands).toContainEqual({
-      command: "focus",
-      description: "Bind this Inline conversation to a session target.",
+      command: "session",
+      description: "Manage conversation bindings and session lifecycle settings.",
     })
   }, 30_000)
 

@@ -5,6 +5,7 @@
   "channels": ["inline"],
   "contracts": {
     "tools": [
+      "inline_agents",
       "inline_members",
       "inline_update_profile",
       "inline_bot_avatar",
