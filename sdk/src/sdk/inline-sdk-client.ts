@@ -328,7 +328,9 @@ export class InlineSdkClient {
       defaultRpcTimeoutMs: options.rpcTimeoutMs,
     })
     this.uploads = new NativeUploadClient(rpcUploadTransport(
-      (method, input) => this.invokeUncheckedRaw(method, input),
+      (method, input, signal) => this.invokeUncheckedRaw(method, input, { signal }),
+      (error) => error instanceof ProtocolClientError &&
+        (error.code === "commit-outcome-unknown" || error.code === "timeout"),
     ))
 
     void this.startListeners()

@@ -520,6 +520,31 @@ describe("InlineProtocolV3Connection", () => {
     await connection.close()
   })
 
+  it("releases low-level pending capacity when an upload RPC is aborted", async () => {
+    const socket = new OpenWebSocketStub()
+    const connection = await InlineProtocolV3Connection.connect({
+      url: "ws://inline.test/realtime/v3",
+      rsaPublicKeys: [],
+      authorization: testAuthorization(),
+      maxPendingRequests: 1,
+      maxPendingRequestBytes: 4 * 1024,
+      webSocketFactory: () => socket as unknown as WebSocket,
+    })
+    const request = { method: Method.GET_ME, input: { oneofKind: undefined } } as const
+    const controller = new AbortController()
+    const aborted = connection.callRpc(request, controller.signal)
+    controller.abort()
+    await expect(aborted).rejects.toMatchObject({ name: "AbortError" })
+
+    const admitted = connection.callRpc(request)
+    await expect(Promise.race([
+      admitted.then(() => "settled", () => "settled"),
+      new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 1)),
+    ])).resolves.toBe("pending")
+    await connection.close()
+    await expect(admitted).rejects.toMatchObject({ code: "closed" })
+  })
+
   it("keeps the low-level cap effective after ProtocolClient deadlines", async () => {
     const socket = new OpenWebSocketStub()
     const connection = await InlineProtocolV3Connection.connect({

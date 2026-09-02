@@ -1978,6 +1978,46 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it("replays a timed-out create once with the same stable upload identity", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      token: "test-token",
+      baseUrl: "https://api.inline.chat",
+      transport,
+      rpcTimeoutMs: 10,
+    })
+    await connectAndOpen(client, transport)
+
+    const upload = client.uploadFile({
+      type: "document",
+      file: new Uint8Array([1, 2, 3]),
+      fileName: "timeout.bin",
+      contentType: "application/octet-stream",
+    })
+    const outcome = upload.catch((error: unknown) => error)
+    await waitFor(() => transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      message.body.rpcCall.method === Method.CREATE_UPLOAD).length === 2)
+    const creates = transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      message.body.rpcCall.method === Method.CREATE_UPLOAD)
+    if (creates.some((message) => message.body.oneofKind !== "rpcCall" ||
+      message.body.rpcCall.input.oneofKind !== "createUpload")) {
+      throw new Error("missing createUpload")
+    }
+    const first = creates[0]!.body
+    const second = creates[1]!.body
+    if (first.oneofKind !== "rpcCall" || first.rpcCall.input.oneofKind !== "createUpload" ||
+        second.oneofKind !== "rpcCall" || second.rpcCall.input.oneofKind !== "createUpload") {
+      throw new Error("missing createUpload")
+    }
+    expect(second.rpcCall.input.createUpload.clientUploadId)
+      .toEqual(first.rpcCall.input.createUpload.clientUploadId)
+
+    await client.close()
+    await outcome
+  })
+
   it("keeps an upload-scoped unauthenticated error from poisoning the session", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({

@@ -573,6 +573,39 @@ describe("ProtocolClient", () => {
     expect(transport.sent.filter((message) => message.body.oneofKind === "rpcCall")).toHaveLength(1)
   })
 
+  it("removes an aborted RPC from reconnect and capacity ownership", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 1n,
+      body: { oneofKind: "connectionOpen", connectionOpen: {} },
+    }))
+    await waitForOpen(client)
+
+    const controller = new AbortController()
+    const pending = client.callRpc(
+      Method.GET_ME,
+      { oneofKind: "getMe", getMe: {} },
+      { timeoutMs: 10_000, reconnectPolicy: "replay-safe", signal: controller.signal },
+    )
+    await waitFor(() => client.getDiagnostics().pendingRpcCount === 1)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(client.getDiagnostics().pendingRpcCount).toBe(0)
+
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 2n,
+      body: { oneofKind: "connectionError", connectionError: {} },
+    }))
+    await waitFor(() => transport.state === "connecting", 1_500)
+    expect(client.getDiagnostics().pendingRpcCount).toBe(0)
+  })
+
   it("replays a non-replayable RPC rejected before transport admission", async () => {
     const transport = new MockTransport()
     const send = transport.send.bind(transport)

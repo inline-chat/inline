@@ -33,6 +33,7 @@ export type RpcReconnectPolicy = "never-replay" | "replay-safe"
 export type RpcCallOptions = {
   timeoutMs?: number | null
   reconnectPolicy?: RpcReconnectPolicy
+  signal?: AbortSignal
 }
 
 type PendingRpcRequest = {
@@ -40,6 +41,7 @@ type PendingRpcRequest = {
   resolve: (value: RpcResult["result"]) => void
   reject: (error: Error) => void
   timeout?: ReturnType<typeof setTimeout>
+  removeAbortListener?: () => void
   timeoutMs: number | null
   reconnectPolicy: RpcReconnectPolicy
   attempted: boolean
@@ -172,6 +174,7 @@ export class ProtocolClient {
     options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
     if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
+    options?.signal?.throwIfAborted()
     assertValidRpcMethod(method)
     if (this.pendingRpcRequests.size >= this.maxPendingRpcRequests) {
       throw new ProtocolClientError("capacity-exceeded", {
@@ -195,6 +198,17 @@ export class ProtocolClient {
       }
 
       this.pendingRpcRequests.set(message.id, pending)
+
+      const onAbort = () => {
+        const reason = options?.signal?.reason
+        this.failPendingRpcRequest(
+          message.id,
+          reason instanceof Error ? reason : new DOMException("The operation was aborted", "AbortError"),
+        )
+      }
+      options?.signal?.addEventListener("abort", onAbort, { once: true })
+      pending.removeAbortListener = () => options?.signal?.removeEventListener("abort", onAbort)
+      if (options?.signal?.aborted) onAbort()
 
       if (pending.timeoutMs !== null) {
         pending.timeout = setTimeout(() => {
@@ -473,6 +487,7 @@ export class ProtocolClient {
     const pending = this.pendingRpcRequests.get(msgId)
     if (!pending) return null
     if (pending.timeout) clearTimeout(pending.timeout)
+    pending.removeAbortListener?.()
     this.pendingRpcRequests.delete(msgId)
     return pending
   }
@@ -481,6 +496,7 @@ export class ProtocolClient {
     for (const pending of this.pendingRpcRequests.values()) {
       pending.reject(error)
       if (pending.timeout) clearTimeout(pending.timeout)
+      pending.removeAbortListener?.()
     }
     this.pendingRpcRequests.clear()
   }

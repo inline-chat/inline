@@ -127,6 +127,32 @@ describe("InlineProtocolV3Transport", () => {
     await transport.stop()
   })
 
+  it("regenerates after a cached temporary-key close without invalidating the transport", async () => {
+    const cached = fakeConnection()
+    const replacement = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(cached)
+      .mockResolvedValueOnce(replacement)
+    cached.probeTemporaryAuthorization = vi.fn(async () => {
+      const rejected = new InlineProtocolV3Error("unauthorized", "cached key was forgotten")
+      connect.mock.calls[0]?.[0].onClose?.(rejected)
+      throw rejected
+    })
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+
+    await transport.start()
+
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(cached.close).toHaveBeenCalledOnce()
+    expect(replacement.bindTemporary).toHaveBeenCalledOnce()
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected", connected: true })
+    await transport.stop()
+  })
+
   it("stops admission at the rotation boundary and drains the admitted RPC before reconnecting", async () => {
     const first = fakeConnection()
     const response = deferred<Awaited<ReturnType<InlineProtocolV3Connection["invoke"]>>>()

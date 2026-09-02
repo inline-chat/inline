@@ -285,6 +285,7 @@ type PendingContent = {
   resolve: (value: { messageId: bigint; result: Uint8Array }) => void
   reject: (error: Error) => void
   timeout: ReturnType<typeof setTimeout>
+  removeAbortListener?: () => void
 }
 
 type PendingProbe = {
@@ -337,7 +338,8 @@ export class InlineProtocolV3Connection {
     this.#authorization = options.authorization ? cloneAuthorization(options.authorization) : undefined
     this.#rsaKeys = options.authorization ? [] : decodePublicKeys(options.rsaPublicKeys)
     this.#uploads = new NativeUploadClient(rpcUploadTransport(
-      (method, input) => this.callRpc({ method, input }),
+      (method, input, signal) => this.callRpc({ method, input }, signal),
+      (error) => error instanceof InlineProtocolV3Error && error.code === "commit-outcome-unknown",
     ))
   }
 
@@ -396,9 +398,10 @@ export class InlineProtocolV3Connection {
   async #invoke(
     request: RealtimeV3Request,
     onDispatched?: () => void,
+    signal?: AbortSignal,
   ): Promise<RealtimeV3Response> {
     const payload = RealtimeV3Request.toBinary(request)
-    const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched)
+    const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched, signal)
     let application
     try {
       application = decodeInlineApplicationObject(result)
@@ -434,16 +437,20 @@ export class InlineProtocolV3Connection {
     return response.body.authComplete
   }
 
-  async callRpc(rpc: RpcCall): Promise<RpcResult["result"]> {
+  async callRpc(rpc: RpcCall, signal?: AbortSignal): Promise<RpcResult["result"]> {
     const request = { body: { oneofKind: "rpc" as const, rpc } }
     const response = readOnlyRpcMethods.has(rpc.method)
-      ? await this.#invoke(request)
-      : await this.#invokeMutation(request)
+      ? await this.#invoke(request, undefined, signal)
+      : await this.#invokeMutation(request, signal)
     if (response.body.oneofKind === "rpcError") throw new InlineProtocolV3Error("protocol", response.body.rpcError.message)
     if (response.body.oneofKind !== "rpcResult") throw new InlineProtocolV3Error("protocol", "Unexpected RPC response")
     return response.body.rpcResult.result
   }
 
+  /**
+   * Resumes within this live connection. After reconnect, the connection owner
+   * must call upload again with the same persisted clientUploadId.
+   */
   async upload(input: NativeUploadInput) {
     return await this.#uploads.upload(input)
   }
@@ -553,10 +560,10 @@ export class InlineProtocolV3Connection {
     return response.body.finishHttpUpload
   }
 
-  async #invokeMutation(request: RealtimeV3Request): Promise<RealtimeV3Response> {
+  async #invokeMutation(request: RealtimeV3Request, signal?: AbortSignal): Promise<RealtimeV3Response> {
     let dispatched = false
     try {
-      return await this.#invoke(request, () => { dispatched = true })
+      return await this.#invoke(request, () => { dispatched = true }, signal)
     } catch (error) {
       if (dispatched && error instanceof InlineProtocolV3Error &&
           ["closed", "protocol", "timeout", "unauthorized"].includes(error.code)) {
@@ -654,10 +661,14 @@ export class InlineProtocolV3Connection {
     }
   }
 
-  async #sendContent(body: Uint8Array, onDispatched?: () => void): Promise<Uint8Array> {
+  async #sendContent(
+    body: Uint8Array,
+    onDispatched?: () => void,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
     const messageId = this.#nextClientMessageId()
     const sequenceNumber = this.#sequenceNumbers.next(true)
-    return (await this.#sendPreparedContent(messageId, sequenceNumber, body, onDispatched)).result
+    return (await this.#sendPreparedContent(messageId, sequenceNumber, body, onDispatched, signal)).result
   }
 
   async #sendPreparedContent(
@@ -665,7 +676,9 @@ export class InlineProtocolV3Connection {
     sequenceNumber: number,
     body: Uint8Array,
     onDispatched?: () => void,
+    signal?: AbortSignal,
   ): Promise<{ messageId: bigint; result: Uint8Array }> {
+    signal?.throwIfAborted()
     this.#admitPending(body)
     return await new Promise((resolve, reject) => {
       let pending: PendingContent
@@ -673,6 +686,7 @@ export class InlineProtocolV3Connection {
         if (this.#pendingContent.get(pending.messageId) !== pending) return
         this.#pendingContent.delete(pending.messageId)
         this.#releasePending(body)
+        pending.removeAbortListener?.()
         reject(new InlineProtocolV3Error(
           "timeout",
           `Inline Protocol response timed out after ${this.#options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS}ms`,
@@ -687,6 +701,19 @@ export class InlineProtocolV3Connection {
         timeout,
       }
       this.#pendingContent.set(initialMessageId, pending)
+      const onAbort = () => {
+        if (this.#pendingContent.get(pending.messageId) !== pending) return
+        this.#pendingContent.delete(pending.messageId)
+        this.#releasePending(body)
+        clearTimeout(pending.timeout)
+        pending.removeAbortListener?.()
+        const reason = signal?.reason
+        reject(reason instanceof Error ? reason : new DOMException("The operation was aborted", "AbortError"))
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
+      pending.removeAbortListener = () => signal?.removeEventListener("abort", onAbort)
+      if (signal?.aborted) onAbort()
+      if (this.#pendingContent.get(initialMessageId) !== pending) return
       try {
         this.#sendEncrypted(initialMessageId, sequenceNumber, body, true)
         onDispatched?.()
@@ -694,6 +721,7 @@ export class InlineProtocolV3Connection {
         this.#pendingContent.delete(initialMessageId)
         this.#releasePending(body)
         clearTimeout(pending.timeout)
+        pending.removeAbortListener?.()
         reject(error instanceof Error ? error : new Error(String(error)))
       }
     })
@@ -737,6 +765,7 @@ export class InlineProtocolV3Connection {
         this.#pendingContent.delete(result.requestMessageId)
         this.#releasePending(pending.body)
         clearTimeout(pending.timeout)
+        pending.removeAbortListener?.()
         pending.resolve({ messageId: result.requestMessageId, result: result.result })
         continue
       }
@@ -782,6 +811,7 @@ export class InlineProtocolV3Connection {
       const rejected = pending ?? probeEntry![1]
       this.#releasePending(rejected.body)
       clearTimeout(rejected.timeout)
+      if ("removeAbortListener" in rejected) rejected.removeAbortListener?.()
       rejected.reject(new InlineProtocolV3Error("protocol", `Server rejected the outgoing message (${bad.errorCode})`))
       return
     }
@@ -797,6 +827,7 @@ export class InlineProtocolV3Connection {
     this.#pendingContent.clear()
     for (const item of pending) {
       clearTimeout(item.timeout)
+      item.removeAbortListener?.()
       item.reject(error)
     }
     const probes = [...this.#pendingProbes.values()]

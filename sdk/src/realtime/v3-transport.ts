@@ -277,6 +277,7 @@ export class InlineProtocolV3Transport implements Transport {
       throw new Error("Inline Protocol connection attempt was superseded")
     }
     let connection: InlineProtocolV3Connection | undefined
+    let openingCloseError: Error | undefined
     const temporary = this.#credentials.temporary
     if (temporary?.expiresAt !== undefined) {
       try {
@@ -291,7 +292,13 @@ export class InlineProtocolV3Transport implements Transport {
               this.#connectionFailed(generation, error instanceof Error ? error : new Error(String(error)))
             })
           },
-          onClose: (error) => this.#connectionFailed(generation, error),
+          onClose: (error) => {
+            if (cachedSource && this.#connection === cachedSource) {
+              this.#connectionFailed(generation, error)
+            } else {
+              openingCloseError ??= error
+            }
+          },
           // Let the authenticated message that crossed the boundary finish delivery first.
           onRotationDue: () => {
             setTimeout(() => {
@@ -301,17 +308,20 @@ export class InlineProtocolV3Transport implements Transport {
         })
         cachedSource = connection
         await connection.probeTemporaryAuthorization()
+        if (openingCloseError) throw openingCloseError
         this.#requireCurrent(generation)
         if (connection.temporaryAuthorizationNeedsRotation()) {
           this.#log.info?.("Stored Inline Protocol temporary authorization reached its rotation boundary")
           await connection.close()
           connection = undefined
+          openingCloseError = undefined
         }
       } catch (error) {
         await connection?.close()
         connection = undefined
         if (!isAuthenticationInvalidated(error)) throw error
         this.#log.warn?.("Stored Inline Protocol temporary authorization was rejected; regenerating once", error)
+        openingCloseError = undefined
       }
     }
 
@@ -333,7 +343,13 @@ export class InlineProtocolV3Transport implements Transport {
             this.#connectionFailed(generation, error instanceof Error ? error : new Error(String(error)))
           })
         },
-        onClose: (error) => this.#connectionFailed(generation, error),
+        onClose: (error) => {
+          if (replacementSource && this.#connection === replacementSource) {
+            this.#connectionFailed(generation, error)
+          } else {
+            openingCloseError ??= error
+          }
+        },
         // Let the authenticated message that crossed the boundary finish delivery first.
         onRotationDue: () => {
           setTimeout(() => {
@@ -345,6 +361,7 @@ export class InlineProtocolV3Transport implements Transport {
       try {
         await replacement.bindTemporary(this.#credentials.permanent)
         await replacement.ping()
+        if (openingCloseError) throw openingCloseError
         this.#requireCurrent(generation)
         connection = replacement
       } catch (error) {
@@ -357,6 +374,7 @@ export class InlineProtocolV3Transport implements Transport {
     nextCredentials.temporary = connection.authorization
     try {
       await this.#options.onCredentials?.(cloneCredentials(nextCredentials))
+      if (openingCloseError) throw openingCloseError
       this.#requireCurrent(generation)
     } catch (error) {
       await connection.close()
