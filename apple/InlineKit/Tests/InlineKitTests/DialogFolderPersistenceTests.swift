@@ -28,7 +28,11 @@ struct DialogFolderPersistenceTests {
     result.dialogs = [makeDialog(chatID: 10, folderID: 7, order: "b")]
 
     try queue.write { db in
-      let imported = try GetChatsTransaction.applySnapshot(result, in: db)
+      let imported = try GetChatsTransaction.applySnapshot(
+        result,
+        userProjectionAdmission: .alreadyValidated,
+        in: db
+      )
 
       #expect(imported.failures.isEmpty)
       #expect(try DialogFolder.fetchOne(db, key: 7)?.title == "Favorites")
