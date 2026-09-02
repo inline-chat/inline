@@ -474,6 +474,7 @@ public actor UpdatesEngine: Sendable {
                 source: source,
                 reloadPeers: &chunkReloadPeers,
                 bucketKey: bucketCommit?.key,
+                bucketCommit: bucketCommit,
                 userAuthorizedChats: userAuthorizedChats,
                 userAuthorizedChatIDs: userAuthorizedChatIDs,
                 userAuthorizedDialogPeers: userAuthorizedDialogPeers,
@@ -515,7 +516,11 @@ public actor UpdatesEngine: Sendable {
             // count before apply. Recheck only counts in this same writer;
             // structural sidecars and User-owned fields must not replay.
             do {
-              try self.applyDialogSidecarCounts(sidecars, db: db)
+              try self.applyDialogSidecarCounts(
+                sidecars,
+                bucketCommit: bucketCommit,
+                db: db
+              )
             } catch {
               throw privacySafeDurableApplyError(error, phase: "dialog_counts")
             }
@@ -620,7 +625,8 @@ public actor UpdatesEngine: Sendable {
                 db: db,
                 source: source,
                 reloadPeers: &emptyReloadPeers,
-                bucketKey: bucketCommit.key
+                bucketKey: bucketCommit.key,
+                bucketCommit: bucketCommit
               )
             } catch {
               throw privacySafeDurableApplyError(error, phase: "sidecars")
@@ -1273,6 +1279,7 @@ public actor UpdatesEngine: Sendable {
     source: UpdateApplySource,
     reloadPeers: inout Set<Peer>,
     bucketKey: BucketKey? = nil,
+    bucketCommit: UpdateBucketCommit? = nil,
     userAuthorizedChats: [Int64: InlineProtocol.Chat] = [:],
     userAuthorizedChatIDs: Set<Int64> = [],
     userAuthorizedDialogPeers: Set<Peer> = [],
@@ -1350,11 +1357,12 @@ public actor UpdatesEngine: Sendable {
         _ = try dialog.saveFull(db)
       }
     }
-    try applyDialogSidecarCounts(sidecars, db: db)
+    try applyDialogSidecarCounts(sidecars, bucketCommit: bucketCommit, db: db)
   }
 
   private nonisolated func applyDialogSidecarCounts(
     _ sidecars: InlineProtocol.UpdateSidecars,
+    bucketCommit: UpdateBucketCommit?,
     db: Database
   ) throws {
     let chatSnapshots = Dictionary(sidecars.chats.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
@@ -1363,8 +1371,9 @@ public actor UpdatesEngine: Sendable {
             var existing = try Dialog.get(peerId: peer).fetchOne(db) else { continue }
       // Enrichment has no User-bucket sequence. Never let a delayed Chat page
       // undo newer archive/read/open/folder state owned by that bucket. Its
-      // count is usable only for the same read frontier and a matching Chat
-      // snapshot which is not behind the durable Chat cursor.
+      // count is usable only for the same read frontier and exact Chat
+      // sequence covered by this page. A future count would include messages
+      // that are still buffered and would be counted again on live delivery.
       guard dialog.hasUnreadCount, dialog.unreadCount >= 0,
             dialog.hasReadMaxID, dialog.readMaxID >= 0,
             dialog.readMaxID == max(0, existing.readInboxMaxId ?? 0),
@@ -1374,11 +1383,12 @@ public actor UpdatesEngine: Sendable {
             let chat = try Chat.fetchOne(db, id: dialog.chatID),
             validatedPeer(chat.peerId) == peer,
             snapshot.hasSeq, snapshot.seq >= 0,
-            try admitsSidecarSnapshot(
-              sequence: Int64(snapshot.seq),
-              for: .chat(peer: snapshot.peerID),
+            let coveredSequence = try dialogCountCoveredSequence(
+              for: snapshot.peerID,
+              bucketCommit: bucketCommit,
               db: db
-            ) else { continue }
+            ),
+            Int64(snapshot.seq) == coveredSequence else { continue }
       existing.unreadCount = Int(dialog.unreadCount)
       try existing.update(db)
     }
@@ -1853,6 +1863,28 @@ private func admitsSidecarSnapshot(sequence: Int64?, for key: BucketKey, db: Dat
     .fetchOne(db)
   guard let cursor, cursor.seq > 0 else { return true }
   return sequence.map { $0 >= cursor.seq } ?? false
+}
+
+private func dialogCountCoveredSequence(
+  for snapshotPeer: InlineProtocol.Peer,
+  bucketCommit: UpdateBucketCommit?,
+  db: Database
+) throws -> Int64? {
+  if let bucketCommit,
+     case let .chat(bucketPeer) = bucketCommit.key,
+     validatedPeer(bucketPeer) == validatedPeer(snapshotPeer) {
+    return bucketCommit.state.seq
+  }
+  guard let coordinates = validatedBucketCoordinates(.chat(peer: snapshotPeer)) else {
+    return nil
+  }
+  return try DbBucketState
+    .filter(
+      DbBucketState.Columns.bucketType == coordinates.bucket
+        && DbBucketState.Columns.entityId == coordinates.entityID
+    )
+    .fetchOne(db)?
+    .seq
 }
 
 private func saveMissingSidecarSpace(

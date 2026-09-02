@@ -95,6 +95,7 @@ struct SidecarProjectionOwnershipTests {
     sidecars.dialogs[0].unreadCount = 99
     switch scenario {
       case .olderChatSequence: sidecars.chats[0].seq = 6
+      case .newerChatSequence: sidecars.chats[0].seq = 9
       case .missingChatSequence: sidecars.chats[0].clearSeq()
       case .differentPeer: sidecars.chats[0].peerID = .with { $0.user.userID = 99 }
       case .differentChat: sidecars.dialogs[0].chatID = chatID + 1
@@ -111,8 +112,14 @@ struct SidecarProjectionOwnershipTests {
     }
   }
 
-  @Test("User reducers recheck sidecar counts only at their resulting read frontier", arguments: [10, 20])
-  func userReadReducerAdmitsMatchingSidecarCount(readMaxID: Int64) async throws {
+  @Test(
+    "User reducers recheck sidecar counts only at their resulting read and covered Chat frontiers",
+    arguments: [10, 20], [7, 8]
+  )
+  func userReadReducerAdmitsMatchingSidecarCount(
+    readMaxID: Int64,
+    chatSnapshotSequence: Int32
+  ) async throws {
     let (queue, engine) = try makeEngine()
     try await queue.write { (db: Database) throws in
       try seedExistingProjection(db)
@@ -121,9 +128,12 @@ struct SidecarProjectionOwnershipTests {
       dialog.unreadCount = 0
       try dialog.update(db)
     }
-    var sidecarDialog = makeDialog()
+    var sidecars = makeSidecars(dialog: makeDialog())
+    sidecars.chats[0].seq = chatSnapshotSequence
+    var sidecarDialog = sidecars.dialogs[0]
     sidecarDialog.readMaxID = 10
     sidecarDialog.unreadCount = 2
+    sidecars.dialogs[0] = sidecarDialog
     var update = InlineProtocol.Update()
     update.seq = 1
     update.date = 1
@@ -134,7 +144,7 @@ struct SidecarProjectionOwnershipTests {
     })
     let result = await engine.applyBatch(
       updates: [update], source: .syncCatchup,
-      sidecars: makeSidecars(dialog: sidecarDialog),
+      sidecars: sidecars,
       bucketCommit: UpdateBucketCommit(
         key: .user, state: .init(date: 1, seq: 1), expectedStartState: .init(date: 0, seq: 0)
       )
@@ -144,7 +154,7 @@ struct SidecarProjectionOwnershipTests {
     try await queue.read { (db: Database) throws in
       let dialog = try #require(try Dialog.get(peerId: .thread(id: chatID)).fetchOne(db))
       #expect(dialog.readInboxMaxId == readMaxID)
-      #expect(dialog.unreadCount == (readMaxID == 10 ? 2 : 0))
+      #expect(dialog.unreadCount == (readMaxID == 10 && chatSnapshotSequence == 7 ? 2 : 0))
       #expect(dialog.unreadMark == false)
       #expect(dialog.readOutboxMaxId == 12)
       #expect(dialog.archived == true)
@@ -203,8 +213,10 @@ struct SidecarProjectionOwnershipTests {
       $0.readMaxID = 10
       $0.unreadCount = 0
     })
+    var sidecars = makeSidecars(dialog: sidecarDialog)
+    sidecars.chats[0].seq = 7
     let result = await engine.applyBatch(
-      updates: [update], source: .syncCatchup, sidecars: makeSidecars(dialog: sidecarDialog),
+      updates: [update], source: .syncCatchup, sidecars: sidecars,
       bucketCommit: UpdateBucketCommit(
         key: .user, state: .init(date: 1, seq: 1), expectedStartState: .init(date: 0, seq: 0)
       )
@@ -953,6 +965,6 @@ struct SidecarProjectionOwnershipTests {
   }
 
   enum CountAdmissionScenario: CaseIterable, Sendable {
-    case olderChatSequence, missingChatSequence, differentPeer, differentChat, missingReadFrontier, differentReadFrontier
+    case olderChatSequence, newerChatSequence, missingChatSequence, differentPeer, differentChat, missingReadFrontier, differentReadFrontier
   }
 }
