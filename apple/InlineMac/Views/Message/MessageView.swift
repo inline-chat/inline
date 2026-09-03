@@ -4809,11 +4809,15 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
        replyThreadSummaryView.superview != nil,
        !replyThreadSummaryView.isHidden {
       let pointInSummary = replyThreadSummaryView.convert(point, from: self)
-      if let hit = replyThreadSummaryView.hitTest(pointInSummary) {
+      // The summary is one control: its title, avatars, reply count, and padding
+      // should all open the thread. `pointInSummary` is already in local
+      // coordinates, so test it against bounds instead of passing it to AppKit's
+      // `hitTest`, which expects a point in the receiver's superview.
+      if replyThreadSummaryView.bounds.contains(pointInSummary) {
         MessageGestureTrace.trace(
-          "MessageView.interactiveHitTest messageId=\(message.messageId) target=replyThreadSummary point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInSummary)) hit=\(type(of: hit))"
+          "MessageView.interactiveHitTest messageId=\(message.messageId) target=replyThreadSummary point=\(MessageGestureTrace.point(point)) local=\(MessageGestureTrace.point(pointInSummary)) hit=\(type(of: replyThreadSummaryView))"
         )
-        return InteractiveHitResult(name: "replyThreadSummary", view: hit)
+        return InteractiveHitResult(name: "replyThreadSummary", view: replyThreadSummaryView)
       }
     }
 
