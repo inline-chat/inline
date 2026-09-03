@@ -2182,3 +2182,82 @@ async fn recovery_sends_pending_final_results_in_ingest_order() {
     assert_eq!(pending_links[0].agent_session_id, 77);
     assert_eq!(pending_links[0].message_id, 100);
 }
+
+#[tokio::test]
+async fn recovery_progress_failure_does_not_suppress_the_staged_final() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let installation_id = InstallationId::new("codex").expect("installation");
+    let event_id = "event-progress-failed";
+    store
+        .accept_inbound(&InboundRecord {
+            event_id: event_id.to_string(),
+            binding: BindingKey {
+                installation_id: installation_id.clone(),
+                chat_id: 42,
+                workspace_id: WorkspaceId::new("workspace").expect("workspace"),
+            },
+            message_id: 10,
+            delivery_chat_id: 42,
+            sender_user_id: 1,
+            direction: Direction::new(
+                DirectionId::new("direction-progress-failed").expect("direction"),
+                "work",
+            ),
+            state: InboundState::Accepted,
+            accepted_at: 1,
+            started_at: None,
+            lease_expires_at: None,
+            attempt_count: 0,
+            provider_turn_id: None,
+            stream_message_id: None,
+            failure: None,
+        })
+        .expect("accept");
+    assert!(store.start_inbound(event_id, 2).expect("start"));
+    assert!(
+        store
+            .attach_inbound_turn(
+                event_id,
+                &inline_agent_bridge::TurnId::new("turn-progress-failed").expect("turn"),
+                None,
+            )
+            .expect("attach")
+    );
+    assert!(
+        store
+            .stage_inbound_final_send(
+                event_id,
+                InboundState::Completed,
+                "Authoritative final result.",
+                None,
+            )
+            .expect("stage")
+    );
+
+    // The three silent progress attempts fail. The following normal final send
+    // succeeds and remains authoritative.
+    let transport = FaultingStreamTransport::new(0, 3, 99);
+    recover_pending_final_sends_with_transport(&transport, &store, &installation_id, |_| {
+        Duration::ZERO
+    })
+    .await
+    .expect("recover final after progress failure");
+
+    assert_eq!(transport.sends.load(Ordering::Relaxed), 4);
+    assert_eq!(transport.silent_sends.load(Ordering::Relaxed), 3);
+    let requests = transport.send_requests.lock().expect("send requests");
+    let final_request = requests.last().expect("final request");
+    assert_eq!(final_request.text, "Authoritative final result.");
+    assert_eq!(
+        final_request.notification_mode,
+        SendNotificationMode::Normal
+    );
+    assert_eq!(
+        store
+            .get_inbound(event_id)
+            .expect("load")
+            .expect("record")
+            .state,
+        InboundState::Completed
+    );
+}

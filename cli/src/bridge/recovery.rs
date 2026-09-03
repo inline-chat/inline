@@ -257,7 +257,7 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
                 .unwrap_or(message_id);
             progress_message_ids.push(stored);
         }
-        sync_progress_with_transport(
+        if let Err(error) = sync_progress_with_transport(
             transport,
             store,
             &pending.event_id,
@@ -267,7 +267,13 @@ pub(super) async fn recover_pending_final_sends_with_transport<T: StreamMessageT
             "Continued",
             retry_delay,
         )
-        .await?;
+        .await
+        {
+            eprintln!(
+                "Inline recovery progress could not be synchronized; sending the final anyway: {}",
+                safe_diagnostic(&error.to_string())
+            );
+        }
         let progress_message_id = progress_message_ids.first().copied();
         if pending.stream_message_id.is_none()
             && let Some(message_id) = progress_message_id
