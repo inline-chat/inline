@@ -1631,7 +1631,11 @@ struct SidebarView: View {
       collapsedFolderIDs: collapsedAppKitFolderIDs,
       detachedReplyIDs: detachedAppKitReplyIDs,
       nestingPolicy: sidebarPresentationConfiguration.nesting,
-      sortMode: effectiveSidebarSort
+      sortMode: effectiveSidebarSort,
+      temporaryOpen: (
+        chatIDs: Set(visibleTemporaryItems.map(\.id)),
+        placement: openChatPlacement
+      )
     )
   }
 

@@ -226,7 +226,8 @@ enum SidebarCollectionProjection {
       collapsedFolderIDs: [],
       detachedReplyIDs: detachedReplyIDs,
       nestingPolicy: .replyThreads,
-      sortMode: nil
+      sortMode: nil,
+      temporaryOpen: nil
     ).projectedItems()
   }
 
@@ -260,7 +261,11 @@ enum SidebarCollectionProjection {
     collapsedFolderIDs: Set<Int64> = [],
     detachedReplyIDs: Set<ChatListItem.Identifier> = [],
     nestingPolicy: SidebarCollectionNestingPolicy = .replyThreads,
-    sortMode: SidebarSortMode = .openedOrder
+    sortMode: SidebarSortMode = .openedOrder,
+    temporaryOpen: (
+      chatIDs: Set<ChatListItem.Identifier>,
+      placement: DialogOpenPlacement
+    )? = nil
   ) -> SidebarCollectionTree {
     let presentedFolders = nestingPolicy.presentsFolders ? folders : []
     let inputs = chatInputs(pinnedItems, lane: .pinned)
@@ -283,7 +288,8 @@ enum SidebarCollectionProjection {
       collapsedFolderIDs: collapsedFolderIDs,
       detachedReplyIDs: detachedReplyIDs,
       nestingPolicy: nestingPolicy,
-      sortMode: sortMode
+      sortMode: sortMode,
+      temporaryOpen: temporaryOpen
     )
   }
 
@@ -310,7 +316,11 @@ enum SidebarCollectionProjection {
     collapsedFolderIDs: Set<Int64>,
     detachedReplyIDs: Set<ChatListItem.Identifier>,
     nestingPolicy: SidebarCollectionNestingPolicy,
-    sortMode: SidebarSortMode?
+    sortMode: SidebarSortMode?,
+    temporaryOpen: (
+      chatIDs: Set<ChatListItem.Identifier>,
+      placement: DialogOpenPlacement
+    )?
   ) -> SidebarCollectionTree {
     // Corrupt or duplicated source rows must not reach Dictionary's trapping
     // initializer or make the entire sidebar disappear. Preserve the first
@@ -398,6 +408,15 @@ enum SidebarCollectionProjection {
         roots.sort {
           ordered($0, before: $1, inputs: inputByID, byActivity: false)
         }
+      }
+      if sortMode == .openedOrder,
+         sectionID == .normal,
+         let temporaryOpen {
+        roots = SidebarCollectionRootOrdering.anchoring(
+          Set(temporaryOpen.chatIDs.map(SidebarCollectionNodeID.chat)),
+          atStart: temporaryOpen.placement == .top,
+          in: roots
+        )
       }
       return SidebarCollectionSection(id: sectionID, rootIDs: roots)
     }
