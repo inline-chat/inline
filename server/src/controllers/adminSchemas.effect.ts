@@ -348,12 +348,15 @@ export const AdminReservedUsernamesResult = Schema.Struct({
 
 export const AdminServerConfigKey = Schema.Literals([
   "auth.signup_mode",
+  "auth.phone_code_mode",
   "email.default_provider",
 ])
 export const AdminServerConfigValue = Schema.Literals([
   "open",
   "invite_only",
   "disabled",
+  "prelude",
+  "custom",
   "ses",
   "resend",
 ])

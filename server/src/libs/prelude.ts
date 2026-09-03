@@ -8,6 +8,7 @@ const client = new Prelude({
 export async function sendCode(phoneNumber: string) {
   const verification = await client.verification.create({
     target: { type: "phone_number", value: phoneNumber },
+    options: { code_size: 6 },
   })
 
   return verification

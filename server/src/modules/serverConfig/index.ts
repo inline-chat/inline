@@ -5,14 +5,17 @@ import { Log } from "@in/server/utils/log"
 
 export const SERVER_CONFIG_KEYS = [
   "auth.signup_mode",
+  "auth.phone_code_mode",
   "email.default_provider",
 ] as const
 
 export type ServerConfigKey = (typeof SERVER_CONFIG_KEYS)[number]
 export type SignupMode = "open" | "invite_only" | "disabled"
+export type PhoneCodeMode = "prelude" | "custom"
 export type EmailProvider = "ses" | "resend"
 export interface ServerConfigValueByKey {
   readonly "auth.signup_mode": SignupMode
+  readonly "auth.phone_code_mode": PhoneCodeMode
   readonly "email.default_provider": EmailProvider
 }
 export type ServerConfigValue<K extends ServerConfigKey = ServerConfigKey> =
@@ -60,6 +63,7 @@ const CACHE_TTL_MS = 5_000
 const warnedInvalidLayers = new Set<string>()
 
 const signupModes: readonly SignupMode[] = ["open", "invite_only", "disabled"]
+const phoneCodeModes: readonly PhoneCodeMode[] = ["prelude", "custom"]
 const emailProviders: readonly EmailProvider[] = ["ses", "resend"]
 
 const legacySignupMode = (): SignupMode | null => {
@@ -84,6 +88,15 @@ const definitions: { readonly [K in ServerConfigKey]: ServerConfigDefinition<K> 
     allowedValues: signupModes,
     defaultValue: "open",
     legacyEnvironmentValue: legacySignupMode,
+  },
+  "auth.phone_code_mode": {
+    key: "auth.phone_code_mode",
+    label: "Phone verification codes",
+    description: "Use Prelude-generated codes, or Inline-generated custom codes after Prelude enables the account capability.",
+    environmentName: "INLINE_CONFIG_AUTH_PHONE_CODE_MODE",
+    allowedValues: phoneCodeModes,
+    defaultValue: "prelude",
+    legacyEnvironmentValue: () => null,
   },
   "email.default_provider": {
     key: "email.default_provider",

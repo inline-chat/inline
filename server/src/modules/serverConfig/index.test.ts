@@ -35,6 +35,16 @@ describe("server configuration precedence", () => {
       value: "open",
       source: "default",
     })
+
+    expect(resolveServerConfigValue("auth.phone_code_mode", {})).toEqual({
+      value: "prelude",
+      source: "default",
+    })
+
+    expect(resolveServerConfigValue("auth.phone_code_mode", {
+      environmentOverride: "custom",
+      databaseValue: "prelude",
+    })).toEqual({ value: "custom", source: "environment" })
   })
 
   it("ignores malformed higher-precedence values", () => {
@@ -50,6 +60,11 @@ describe("server configuration precedence", () => {
       environmentOverride: "closed",
       legacyEnvironmentValue: "typo",
     })).toEqual({ value: "open", source: "default" })
+
+    expect(resolveServerConfigValue("auth.phone_code_mode", {
+      environmentOverride: "enabled",
+      databaseValue: "prelude",
+    })).toEqual({ value: "prelude", source: "database" })
   })
 
   it("keeps the deprecated legacy helper opt-in instead of restrictive by default", () => {

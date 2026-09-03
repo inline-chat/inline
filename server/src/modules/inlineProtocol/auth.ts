@@ -22,9 +22,11 @@ import { lockGridMutations } from "@in/server/modules/grid/roomLifecycle"
 import { normalizeEmail } from "@in/server/utils/normalize"
 import { sendEmail } from "@in/server/utils/email"
 import { prelude } from "@in/server/libs/prelude"
+import { getServerConfig, type PhoneCodeMode } from "@in/server/modules/serverConfig"
 import parsePhoneNumber from "libphonenumber-js"
 import { isValidEmail } from "@in/server/utils/validate"
 import { InlineError } from "@in/server/types/errors"
+import { Log } from "@in/server/utils/log"
 import type { InlineProtocolApplicationContext } from "./application"
 import {
   inlineProtocolAuthCodeMac,
@@ -53,6 +55,7 @@ const MAX_VERSION_BYTES = 64
 const MAX_DEVICE_NAME_BYTES = 256
 const MAX_INVITE_CODE_BYTES = 256
 const MAX_TIME_ZONE_BYTES = 64
+const log = new Log("InlineProtocol.Auth")
 
 const configuredDemoCode = (email: string): string | undefined => {
   if (email === DEMO_EMAIL && DEMO_CODE && /^\d{6}$/.test(DEMO_CODE)) return DEMO_CODE
@@ -98,6 +101,25 @@ type NormalizedIdentifier = {
   value: string
   delivery: "email" | "sms"
 }
+
+type StoredChallengeDelivery = "email" | "sms" | "sms_custom" | "sms_prelude" | "sms_verified"
+
+const storedChallengeDelivery = (
+  delivery: NormalizedIdentifier["delivery"],
+  phoneCodeMode: PhoneCodeMode | undefined,
+): StoredChallengeDelivery => {
+  if (delivery === "email") return "email"
+  return phoneCodeMode === "custom" ? "sms_custom" : "sms_prelude"
+}
+
+const isStoredChallengeDelivery = (delivery: string): delivery is StoredChallengeDelivery =>
+  delivery === "email" || delivery === "sms" || delivery === "sms_custom" ||
+  delivery === "sms_prelude" || delivery === "sms_verified"
+
+const isSmsChallenge = (delivery: StoredChallengeDelivery): boolean => delivery !== "email"
+const usesLocalCodeProof = (delivery: StoredChallengeDelivery): boolean => delivery !== "sms_prelude"
+const usesPreludeCodeProof = (delivery: StoredChallengeDelivery): boolean =>
+  delivery === "sms" || delivery === "sms_custom" || delivery === "sms_prelude"
 
 const normalizeIdentifier = (request: AuthBeginRequest): NormalizedIdentifier => {
   if (request.identifier.oneofKind === "email" &&
@@ -178,6 +200,11 @@ export class InlineProtocolAuthOperations {
   async begin(request: AuthBeginRequest, context: InlineProtocolApplicationContext): Promise<AuthBeginResult> {
     const authKeyId = requirePermanentUnauthorised(context)
     const identifier = normalizeIdentifier(request)
+    const phoneCodeConfig = identifier.delivery === "sms"
+      ? await getServerConfig("auth.phone_code_mode")
+      : undefined
+    const phoneCodeMode = phoneCodeConfig?.value
+    const delivery = storedChallengeDelivery(identifier.delivery, phoneCodeMode)
     const client = clientRecord(request)
     const challengeId = randomBytes(32)
     const code = identifier.delivery === "email"
@@ -240,13 +267,14 @@ export class InlineProtocolAuthOperations {
         identifierHash,
         codeMac: inlineProtocolAuthCodeMac(pepper, challengeId, identifier.value, code),
         pepperKeyId: encryptedIdentifier.keyId,
-        delivery: identifier.delivery,
+        delivery,
         client,
         networkHash,
         deviceHash,
         expiresAt,
       })
     })
+    let providerStatus: "success" | "retry" | "blocked" | undefined
     try {
       if (identifier.delivery === "email") {
         await sendEmail({
@@ -256,10 +284,25 @@ export class InlineProtocolAuthOperations {
             variables: { code, firstName: undefined, isExistingUser: true },
           },
         })
+      } else if (phoneCodeMode === "custom") {
+        providerStatus = (await prelude.sendCustomCode(identifier.value, code)).status
       } else {
-        await prelude.sendCustomCode(identifier.value, code)
+        providerStatus = (await prelude.sendCode(identifier.value)).status
+      }
+      if (providerStatus === "blocked") {
+        throw new Error("Phone verification provider blocked code delivery")
       }
     } catch (error) {
+      if (identifier.delivery === "sms") {
+        log.warn("Phone verification provider request failed", {
+          provider: "prelude",
+          operation: "create",
+          codeMode: phoneCodeMode,
+          configSource: phoneCodeConfig?.source,
+          providerStatus: providerStatus ?? "request_error",
+          error,
+        })
+      }
       await db.update(inlineProtocolAuthChallenges).set({ consumedAt: new Date() })
         .where(eq(inlineProtocolAuthChallenges.challengeId, challengeId))
       throw error
@@ -295,6 +338,10 @@ export class InlineProtocolAuthOperations {
     if (!challenge) {
       throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
     }
+    if (!isStoredChallengeDelivery(challenge.delivery)) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+    const challengeDelivery = challenge.delivery
     const identifier = this.challengeCipher.decrypt(
       request.challengeId,
       challenge.pepperKeyId,
@@ -303,8 +350,57 @@ export class InlineProtocolAuthOperations {
     const pepper = this.pepperRing.keys.get(challenge.pepperKeyId)
     if (!pepper) throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
     const expected = inlineProtocolAuthCodeMac(pepper, request.challengeId, identifier, request.code)
-    if (challenge.codeMac.length !== expected.length || !timingSafeEqual(challenge.codeMac, expected)) {
-      throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
+    const invalidCode = () => new InlineError(
+      isSmsChallenge(challengeDelivery)
+        ? InlineError.ApiError.SMS_CODE_INVALID
+        : InlineError.ApiError.EMAIL_CODE_INVALID,
+    )
+    const localCodeMatches = challenge.codeMac.length === expected.length &&
+      timingSafeEqual(challenge.codeMac, expected)
+    const requiresPreludeProof = usesPreludeCodeProof(challengeDelivery)
+    if (requiresPreludeProof) {
+      let providerStatus: "success" | "failure" | "expired_or_not_found"
+      try {
+        providerStatus = (await prelude.checkCode(identifier, request.code)).status
+      } catch (error) {
+        log.warn("Phone verification provider request failed", {
+          provider: "prelude",
+          operation: "check",
+          codeMode: challengeDelivery === "sms_prelude" ? "prelude" : "custom",
+          providerStatus: "request_error",
+          error,
+        })
+        await db.update(inlineProtocolAuthChallenges)
+          .set({ attempts: sql`greatest(${inlineProtocolAuthChallenges.attempts} - 1, 0)` })
+          .where(and(
+            eq(inlineProtocolAuthChallenges.challengeId, Buffer.from(request.challengeId)),
+            isNull(inlineProtocolAuthChallenges.consumedAt),
+          ))
+        throw error
+      }
+      if (providerStatus === "expired_or_not_found") {
+        log.warn("Phone verification provider could not find the challenge", {
+          provider: "prelude",
+          operation: "check",
+          codeMode: challengeDelivery === "sms_prelude" ? "prelude" : "custom",
+          providerStatus,
+        })
+      }
+      if (providerStatus !== "success") throw invalidCode()
+    }
+    if (usesLocalCodeProof(challengeDelivery) && !localCodeMatches) {
+      throw invalidCode()
+    }
+    if (requiresPreludeProof) {
+      // Prelude verification may be one-shot, while a valid contact proof must
+      // survive invite-code retries. Freeze the verified code locally before
+      // continuing so later attempts no longer depend on the provider.
+      await db.update(inlineProtocolAuthChallenges)
+        .set({ codeMac: expected, delivery: "sms_verified" })
+        .where(and(
+          eq(inlineProtocolAuthChallenges.challengeId, Buffer.from(request.challengeId)),
+          isNull(inlineProtocolAuthChallenges.consumedAt),
+        ))
     }
 
     // A valid proof may be retried while entering an invite code. Only wrong
@@ -330,7 +426,7 @@ export class InlineProtocolAuthOperations {
         )).returning({ challengeId: inlineProtocolAuthChallenges.challengeId })
         if (consumed.length !== 1) throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
 
-        const user = challenge.delivery === "sms"
+        const user = isSmsChallenge(challengeDelivery)
           ? (await getOrCreateUserByPhoneForSignup(identifier, request.inviteCode, tx)).user
           : (await getOrCreateUserByEmailForSignup(identifier, request.inviteCode, tx)).user
         const { accountSessionId, replacement } = await authorizeInlineProtocolKey({

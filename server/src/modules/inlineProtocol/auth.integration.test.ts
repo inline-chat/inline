@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { eq } from "drizzle-orm"
 import { authKeyId } from "@inline-chat/protocol/secure"
 import { db, schema } from "@in/server/db"
@@ -9,6 +9,12 @@ import { SessionsModel } from "@in/server/db/models/sessions"
 import { resetServerConfigCacheForTests } from "@in/server/modules/serverConfig"
 
 let deliveredCode: string | undefined
+let preludeGeneratedSends = 0
+let preludeCustomSends = 0
+let preludeChecks = 0
+let preludeCreateStatus: "success" | "retry" | "blocked" = "success"
+const preludeGeneratedCode = "654321"
+const priorPhoneCodeMode = process.env["INLINE_CONFIG_AUTH_PHONE_CODE_MODE"]
 
 mock.module("@in/server/utils/email", () => ({
   sendEmail: async (input: { content: { variables: { code: string } } }) => {
@@ -16,7 +22,22 @@ mock.module("@in/server/utils/email", () => ({
   },
 }))
 mock.module("@in/server/libs/prelude", () => ({
-  prelude: { sendCustomCode: async (_phone: string, code: string) => { deliveredCode = code } },
+  prelude: {
+    sendCode: async () => {
+      preludeGeneratedSends += 1
+      deliveredCode = preludeGeneratedCode
+      return { status: preludeCreateStatus }
+    },
+    sendCustomCode: async (_phone: string, code: string) => {
+      preludeCustomSends += 1
+      deliveredCode = code
+      return { status: preludeCreateStatus }
+    },
+    checkCode: async (_phone: string, code: string) => {
+      preludeChecks += 1
+      return { status: code === deliveredCode ? "success" : "failure" }
+    },
+  },
 }))
 
 const { InlineProtocolAuthOperations } = await import("./auth")
@@ -36,6 +57,12 @@ describe("Inline Protocol native authentication lifecycle", () => {
 
   beforeEach(async () => {
     deliveredCode = undefined
+    preludeGeneratedSends = 0
+    preludeCustomSends = 0
+    preludeChecks = 0
+    preludeCreateStatus = "success"
+    delete process.env["INLINE_CONFIG_AUTH_PHONE_CODE_MODE"]
+    resetServerConfigCacheForTests()
     const permanentKey = Uint8Array.from({ length: 256 }, (_, index) => 255 - index)
     permanentKeyId = authKeyId(permanentKey)
     const repository = new PermanentAuthorizationKeyRepository(makeAuthorizationKeyCipher({
@@ -56,6 +83,12 @@ describe("Inline Protocol native authentication lifecycle", () => {
       },
       metadata: { ip: "203.0.113.10", userAgent: "Inline Protocol test" },
     }
+  })
+
+  afterEach(() => {
+    if (priorPhoneCodeMode === undefined) delete process.env["INLINE_CONFIG_AUTH_PHONE_CODE_MODE"]
+    else process.env["INLINE_CONFIG_AUTH_PHONE_CODE_MODE"] = priorPhoneCodeMode
+    resetServerConfigCacheForTests()
   })
 
   test("delivers and consumes a challenge, creates a normal session, and binds it to the permanent key", async () => {
@@ -95,6 +128,104 @@ describe("Inline Protocol native authentication lifecycle", () => {
       challengeId: begun.challengeId,
       code: deliveredCode!,
     }, context)).rejects.toThrow()
+  })
+
+  test("uses Prelude-generated phone codes by default and freezes the challenge mode", async () => {
+    const phoneNumber = "+12025550101"
+    const begun = await operations.begin({
+      identifier: { oneofKind: "phoneNumber", phoneNumber },
+    }, context)
+
+    expect(deliveredCode).toBe(preludeGeneratedCode)
+    expect(preludeGeneratedSends).toBe(1)
+    expect(preludeCustomSends).toBe(0)
+    const [issued] = await db.select().from(schema.inlineProtocolAuthChallenges)
+      .where(eq(schema.inlineProtocolAuthChallenges.challengeId, Buffer.from(begun.challengeId)))
+    expect(issued?.delivery).toBe("sms_prelude")
+
+    process.env["INLINE_CONFIG_AUTH_PHONE_CODE_MODE"] = "custom"
+    resetServerConfigCacheForTests()
+    const completed = await operations.complete({
+      challengeId: begun.challengeId,
+      code: deliveredCode!,
+    }, context)
+
+    expect(completed.state.oneofKind).toBe("authorized")
+    expect(preludeChecks).toBe(1)
+    const [verified] = await db.select().from(schema.inlineProtocolAuthChallenges)
+      .where(eq(schema.inlineProtocolAuthChallenges.challengeId, Buffer.from(begun.challengeId)))
+    expect(verified?.delivery).toBe("sms_verified")
+  })
+
+  test("reuses a Prelude-verified phone proof while an invite is entered", async () => {
+    const priorSignupMode = process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
+    process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = "invite_only"
+    resetServerConfigCacheForTests()
+    try {
+      await db.insert(schema.inviteCodes).values({ code: "PHONE123" })
+      const begun = await operations.begin({
+        identifier: { oneofKind: "phoneNumber", phoneNumber: "+12025550103" },
+      }, context)
+      const code = deliveredCode!
+
+      expect((await operations.complete({ challengeId: begun.challengeId, code }, context)).state.oneofKind)
+        .toBe("inviteRequired")
+      expect(preludeChecks).toBe(1)
+      const [verified] = await db.select().from(schema.inlineProtocolAuthChallenges)
+        .where(eq(schema.inlineProtocolAuthChallenges.challengeId, Buffer.from(begun.challengeId)))
+      expect(verified?.delivery).toBe("sms_verified")
+
+      expect((await operations.complete({
+        challengeId: begun.challengeId,
+        code,
+        inviteCode: "PHONE123",
+      }, context)).state.oneofKind).toBe("authorized")
+      expect(preludeChecks).toBe(1)
+    } finally {
+      if (priorSignupMode === undefined) delete process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"]
+      else process.env["INLINE_CONFIG_AUTH_SIGNUP_MODE"] = priorSignupMode
+      resetServerConfigCacheForTests()
+    }
+  })
+
+  test("uses Inline-generated custom phone codes only when enabled", async () => {
+    process.env["INLINE_CONFIG_AUTH_PHONE_CODE_MODE"] = "custom"
+    resetServerConfigCacheForTests()
+    const begun = await operations.begin({
+      identifier: { oneofKind: "phoneNumber", phoneNumber: "+12025550102" },
+    }, context)
+
+    expect(deliveredCode).toMatch(/^\d{6}$/)
+    expect(preludeGeneratedSends).toBe(0)
+    expect(preludeCustomSends).toBe(1)
+    const [issued] = await db.select().from(schema.inlineProtocolAuthChallenges)
+      .where(eq(schema.inlineProtocolAuthChallenges.challengeId, Buffer.from(begun.challengeId)))
+    expect(issued?.delivery).toBe("sms_custom")
+
+    const wrongCode = deliveredCode === "123456" ? "654321" : "123456"
+    await expect(operations.complete({
+      challengeId: begun.challengeId,
+      code: wrongCode,
+    }, context)).rejects.toMatchObject({ type: "SMS_CODE_INVALID" })
+    expect(preludeChecks).toBe(1)
+
+    const completed = await operations.complete({
+      challengeId: begun.challengeId,
+      code: deliveredCode!,
+    }, context)
+    expect(completed.state.oneofKind).toBe("authorized")
+    expect(preludeChecks).toBe(2)
+  })
+
+  test("rejects and consumes a provider-blocked phone challenge", async () => {
+    preludeCreateStatus = "blocked"
+    await expect(operations.begin({
+      identifier: { oneofKind: "phoneNumber", phoneNumber: "+12025550104" },
+    }, context)).rejects.toThrow("Phone verification provider blocked code delivery")
+
+    const [challenge] = await db.select().from(schema.inlineProtocolAuthChallenges)
+    expect(challenge?.delivery).toBe("sms_prelude")
+    expect(challenge?.consumedAt).toBeInstanceOf(Date)
   })
 
   test("keeps an outstanding challenge verifiable under its predecessor pepper", async () => {
