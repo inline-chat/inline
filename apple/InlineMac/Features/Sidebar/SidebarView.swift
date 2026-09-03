@@ -2071,7 +2071,7 @@ struct SidebarView: View {
     guard settings.sidebarAsInbox == false else { return false }
     guard !isArchiveVisible else { return false }
 
-    return dependencies?.session.isFetchingSidebarChats == true
+    return realtimeState.connectionState == .updating
   }
 
   private var sidebarConnectionState: SidebarConnectionDisplayState? {
@@ -2096,21 +2096,21 @@ struct SidebarView: View {
   private var cleanupPreconditionSnapshot: SidebarCleanupPreconditionSnapshot {
     SidebarCleanupPreconditionSnapshot(
       connectionStateKey: cleanupConnectionStateKey,
-      hasFetchedServerState: dependencies?.session.hasFetchedSidebarChats == true,
+      hasFetchedServerState: realtimeState.connectionState == .connected,
       isFetchingServerState: isFetchingSidebarServerState
     )
   }
 
   private var sidebarCleanupPreconditions: SidebarCleanup.Preconditions {
     SidebarCleanup.Preconditions(
-      hasFetchedServerState: dependencies?.session.hasFetchedSidebarChats == true,
+      hasFetchedServerState: realtimeState.connectionState == .connected,
       isFetchingServerState: isFetchingSidebarServerState,
       realtimeConnectionState: realtimeState.connectionState
     )
   }
 
   private var isFetchingSidebarServerState: Bool {
-    dependencies?.session.isFetchingSidebarChats == true
+    realtimeState.connectionState == .updating
   }
 
   private var cleanupConnectionStateKey: Int {

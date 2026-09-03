@@ -151,26 +151,6 @@ struct HomeView: View {
 
   private func initialFetch() {
     notificationHandler.setAuthenticated(value: true)
-
-    Task {
-      do {
-        try await realtimeV2.send(.getMe())
-      } catch {
-        Log.shared.error("Error fetching getMe info", error: error)
-      }
-
-      do {
-        try await realtimeV2.send(.getChats())
-      } catch {
-        Log.shared.error("Error fetching getChats", error: error)
-      }
-
-      do {
-        try await dataManager.getSpaces()
-      } catch {
-        Log.shared.error("Failed to getSpaces", error: error)
-      }
-    }
   }
 
   private var searchResultsView: some View {

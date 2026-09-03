@@ -72,7 +72,7 @@ struct ExperimentalRootView: View {
       case .onboarding:
         OnboardingView()
       case .loading:
-        loadingView
+        IOSStartupLoadingView(router: mainViewRouter)
       }
     }
     .environment(router)
@@ -118,18 +118,6 @@ struct ExperimentalRootView: View {
     .toastView()
   }
 
-  private var loadingView: some View {
-    VStack(spacing: 12) {
-      ProgressView()
-      Text(Auth.shared.getHasPendingAccountTransition()
-        ? "Finishing account recovery… Restart Inline if this does not complete."
-        : "Unlocking...")
-        .font(.headline)
-        .foregroundStyle(.secondary)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
-  }
 }
 
 private struct ExperimentalAuthedRootView: View {
@@ -151,8 +139,6 @@ private struct ExperimentalAuthedRootView: View {
   @State private var homeBootstrapRetryTask: Task<Void, Never>?
   @State private var homeBootstrapGeneration: UInt64 = 0
   @State private var homeBootstrapRetryAttempt = 0
-  @State private var didFetchBootstrapUser = false
-  @State private var didFetchBootstrapCatalog = false
   @State private var didRestoreSceneHomeState = false
   @SceneStorage("ios.home.activeSpaceID.v1")
   private var sceneActiveSpaceIDRaw = ""
@@ -856,35 +842,6 @@ private struct ExperimentalAuthedRootView: View {
   private func performHomeBootstrap(generation: UInt64) async -> HomeBootstrapOutcome {
     guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
     notificationHandler.setAuthenticated(value: true)
-    var remoteFailure = false
-
-    if !didFetchBootstrapUser {
-      let result = await performHomeLoadRequest(stage: .getMe) {
-        try await realtimeV2.send(.getMe())
-      }
-      guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
-      if result.succeeded {
-        didFetchBootstrapUser = true
-      } else {
-        remoteFailure = true
-      }
-    }
-
-    if !remoteFailure, !didFetchBootstrapCatalog {
-      let result = await performHomeLoadRequest(stage: .getChats) {
-        let expectedUserState = try await GRDBSyncStorage(db: compactSpaceList.db)
-          .getBucketState(for: .user)
-        try await realtimeV2.send(
-          GetChatsTransaction(expectedUserBucketState: expectedUserState)
-        )
-      }
-      guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
-      if result.succeeded {
-        didFetchBootstrapCatalog = true
-      } else {
-        remoteFailure = true
-      }
-    }
 
     guard generation == homeBootstrapGeneration, !Task.isCancelled else { return .cancelled }
     let localSpaces = await performHomeLoadRequest(
@@ -895,7 +852,7 @@ private struct ExperimentalAuthedRootView: View {
     guard localSpaces.succeeded, let spaces = localSpaces.value else { return .failure }
     nav.pruneDialogFetchState(validSpaceIds: Set(spaces.map(\.id)))
     reconcileActiveSpace(with: spaces)
-    return remoteFailure ? .failure : .success
+    return .success
   }
 
   private func reconcileActiveSpace(with spaces: [Space]) {
@@ -1282,8 +1239,6 @@ private struct ExperimentalAuthedRootView: View {
     homeBootstrapRetryTask?.cancel()
     homeBootstrapRetryTask = nil
     if resetProgress {
-      didFetchBootstrapUser = false
-      didFetchBootstrapCatalog = false
       homeBootstrapRetryAttempt = 0
     }
     return previousTask

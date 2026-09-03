@@ -2,7 +2,6 @@ import Auth
 import InlineKit
 import InlineUI
 import Invite
-import Logger
 import SwiftUI
 
 struct ContentView2: View {
@@ -71,16 +70,7 @@ struct ContentView2: View {
   var content: some View {
     switch mainViewRouter.route {
     case .loading:
-      VStack(spacing: 12) {
-        ProgressView()
-        Text(Auth.shared.getHasPendingAccountTransition()
-          ? "Finishing account recovery… Restart Inline if this does not complete."
-          : "Unlocking...")
-          .font(.headline)
-          .foregroundStyle(.secondary)
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(Color(.systemBackground))
+      IOSStartupLoadingView(router: mainViewRouter)
     case .main:
       AuthedAppRoot(database: AppDatabase.shared)
         .appDatabase(AppDatabase.shared)
@@ -94,8 +84,6 @@ private struct AuthedAppRoot: View {
   private let legacyRootTabs: [AppTab] = [.archived, .chats, .spaces]
 
   @Environment(Router.self) private var router
-  @Environment(\.realtimeV2) private var realtimeV2
-
   private let database: AppDatabase
 
   @StateObject private var data: DataManager
@@ -138,11 +126,6 @@ private struct AuthedAppRoot: View {
     }
     .onChange(of: bindableRouter.selectedTab) { _, newValue in
       normalizeSelectedTabIfNeeded(selectedTab: newValue)
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
-      Task {
-        await refetchCoreDataAfterLocalDataCleared()
-      }
     }
   }
 
@@ -249,26 +232,6 @@ private struct AuthedAppRoot: View {
         ChatInfoView(chatItem: chatItem)
       }
       .presentationDetents([.medium, .large])
-    }
-  }
-
-  private func refetchCoreDataAfterLocalDataCleared() async {
-    do {
-      _ = try await realtimeV2.send(.getMe())
-    } catch {
-      Log.shared.error("Failed to reload current user after clearing local data", error: error)
-    }
-
-    do {
-      _ = try await realtimeV2.send(.getChats())
-    } catch {
-      Log.shared.error("Failed to reload chats after clearing local data", error: error)
-    }
-
-    do {
-      _ = try await data.getSpaces()
-    } catch {
-      Log.shared.error("Failed to reload spaces after clearing local data", error: error)
     }
   }
 

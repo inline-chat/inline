@@ -5,12 +5,13 @@ import InlineKit
 import Logger
 import Sentry
 
-enum TopLevelRoute {
+enum TopLevelRoute: Equatable {
   case loading
   case onboarding
   case main
 
-  static func initial(for status: AuthStatus) -> TopLevelRoute {
+  static func initial(for status: AuthStatus, persistentStorage: Bool) -> TopLevelRoute {
+    guard persistentStorage else { return .loading }
     switch status {
     case .authenticated, .authenticatedV3:
       return .main
@@ -39,8 +40,8 @@ enum StartupLoadingReason: String, Sendable {
     }
   }
 
-  var allowsCredentialRetry: Bool {
-    self == .credentials || self == .keychain
+  var allowsRetry: Bool {
+    self == .credentials || self == .keychain || self == .database
   }
 }
 
@@ -50,6 +51,8 @@ struct StartupLoadingDiagnostics: Sendable {
   let reason: StartupLoadingReason
   let authState: String
   let persistentStorage: Bool
+  let storageAdmission: String
+  let storageFailureReason: String
   let pendingAccountTransition: Bool
   let elapsedSeconds: Int
   let appVersion: String
@@ -73,6 +76,8 @@ struct StartupLoadingDiagnostics: Sendable {
       "Startup phase: \(reason.rawValue)",
       "Authentication: \(authState)",
       "Local storage: \(persistentStorage ? "persistent" : "temporary")",
+      "Storage admission: \(storageAdmission)",
+      "Storage failure: \(storageFailureReason)",
       "Account recovery pending: \(pendingAccountTransition ? "yes" : "no")",
       "Snapshot captured after: \(elapsedSeconds)s",
       "App: \(appVersion) (\(appBuild))",
@@ -93,6 +98,8 @@ struct StartupLoadingDiagnostics: Sendable {
         scope.setTag(value: reason.rawValue, key: "startup.phase")
         scope.setTag(value: authState, key: "startup.auth_state")
         scope.setTag(value: persistentStorage ? "persistent" : "temporary", key: "startup.storage")
+        scope.setTag(value: storageAdmission, key: "startup.storage_admission")
+        scope.setTag(value: storageFailureReason, key: "startup.storage_failure_reason")
         scope.setTag(value: pendingAccountTransition ? "true" : "false", key: "startup.account_recovery")
         scope.setExtra(value: elapsedSeconds, key: "startup.elapsed_seconds")
         scope.setTag(value: appVersion, key: "app_version")
@@ -118,7 +125,10 @@ class MainWindowViewModel: ObservableObject {
   private var startupRetryTask: Task<Void, Never>?
 
   init() {
-    topLevelRoute = TopLevelRoute.initial(for: Auth.shared.getStatus())
+    topLevelRoute = TopLevelRoute.initial(
+      for: Auth.shared.getStatus(),
+      persistentStorage: AppDatabase.shared.isPersistent
+    )
     startupLoadingReason = Self.currentStartupLoadingReason()
 
     // `Auth.status` is main actor-isolated; set up the subscription on the main actor.
@@ -141,11 +151,14 @@ class MainWindowViewModel: ObservableObject {
   @MainActor func reportStartupLoadingDelay(elapsedSeconds: Int) {
     guard startupLoadingDiagnostics == nil else { return }
     let reason = topLevelRoute == .loading ? Self.currentStartupLoadingReason() : .presentation
+    let storage = Self.currentStorageDiagnostics()
     startupLoadingReason = reason
     let diagnostics = StartupLoadingDiagnostics(
       reason: reason,
       authState: StartupLoadingDiagnostics.authStateName(Auth.shared.getStatus()),
       persistentStorage: AppDatabase.shared.isPersistent,
+      storageAdmission: storage.admission,
+      storageFailureReason: storage.failureReason,
       pendingAccountTransition: Auth.shared.getHasPendingAccountTransition(),
       elapsedSeconds: max(0, elapsedSeconds),
       appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
@@ -156,11 +169,11 @@ class MainWindowViewModel: ObservableObject {
     diagnostics.report()
   }
 
-  @MainActor func retryStartupCredentials() {
+  @MainActor func retryStartup() {
     // Read current authority at invocation; the visible explanation can predate an account change.
     guard topLevelRoute == .loading,
           startupRetryTask == nil,
-          Self.currentStartupLoadingReason().allowsCredentialRetry
+          Self.currentStartupLoadingReason().allowsRetry
     else { return }
 
     isRetryingStartup = true
@@ -170,9 +183,25 @@ class MainWindowViewModel: ObservableObject {
         self?.startupRetryTask = nil
       }
       guard !Task.isCancelled else { return }
-      // The existing AuthStore serializes Keychain access and publishes the resulting state.
-      // Do not cancel/restart database promotion or bypass pending account cleanup here.
-      await Auth.shared.refreshFromStorage()
+      let reason = Self.currentStartupLoadingReason()
+      if reason == .credentials || reason == .keychain {
+        // The existing AuthStore serializes Keychain access and publishes the resulting state.
+        await Auth.shared.refreshFromStorage()
+      }
+      guard !Task.isCancelled,
+            Auth.shared.getHasPendingAccountTransition() == false
+      else { return }
+      _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+      guard !Task.isCancelled, AppDatabase.shared.isPersistent else { return }
+      switch Auth.shared.getStatus() {
+      case .authenticated, .authenticatedV3:
+        guard await Api.admitPersistentStorage() else { return }
+        self?.topLevelRoute = .main
+      case .unauthenticated, .reauthRequired:
+        self?.topLevelRoute = .onboarding
+      case .hydrating, .locked, .loggingOut:
+        return
+      }
     }
   }
 
@@ -183,11 +212,25 @@ class MainWindowViewModel: ObservableObject {
     )
   }
 
+  private static func currentStorageDiagnostics() -> (admission: String, failureReason: String) {
+    switch AppDatabase.shared.persistentStoreAdmission {
+    case .ready:
+      ("ready", "none")
+    case .retryable(let failure):
+      ("retryable", failure.reason.rawValue)
+    case .terminal(let failure):
+      ("terminal", failure.reason.rawValue)
+    }
+  }
+
   func navigate(_ route: TopLevelRoute) {
     transitionTask?.cancel()
     transitionTask = nil
     onboardingInitialRoute = .welcome
-    topLevelRoute = Auth.shared.getHasPendingAccountTransition() ? .loading : route
+    topLevelRoute = Auth.shared.getHasPendingAccountTransition()
+      || (route != .loading && AppDatabase.shared.isPersistent == false)
+      ? .loading
+      : route
   }
 
 #if DEBUG || DEBUG_BUILD
@@ -225,7 +268,10 @@ class MainWindowViewModel: ObservableObject {
         transitionTask?.cancel()
         transitionTask = Task { @MainActor [weak self] in
           _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          let realtimeAdmitted = await Api.admitPersistentStorage()
           guard !Task.isCancelled,
+                AppDatabase.shared.isPersistent,
+                realtimeAdmitted,
                 Auth.shared.getHasPendingAccountTransition() == false,
                 Auth.shared.getStatus().isAuthenticated
           else { return }
@@ -237,6 +283,7 @@ class MainWindowViewModel: ObservableObject {
         transitionTask = Task { @MainActor [weak self] in
           _ = await AppDatabase.promoteSharedToPersistentIfPossible()
           guard !Task.isCancelled,
+                AppDatabase.shared.isPersistent,
                 Auth.shared.getHasPendingAccountTransition() == false
           else { return }
           switch Auth.shared.getStatus() {

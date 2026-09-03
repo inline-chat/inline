@@ -34,11 +34,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    Analytics.start()
-
     // One-time refresh attempt on launch (covers normal unlocked launches).
     Task {
       await Auth.shared.refreshFromStorage()
+      await Analytics.identify()
     }
 
     // Keychain reads can return `nil` during background/early launch (e.g. notification tap while device locked).

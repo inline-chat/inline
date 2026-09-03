@@ -10,6 +10,9 @@ struct InlineApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
   init() {
+    // SwiftUI can construct the root database before UIApplicationDelegate did-finish-launching.
+    // Enable crash reporting first and identify only after persistent storage is admitted.
+    Analytics.start(identifyAuthenticatedUser: false)
     InlineShortcuts.registerNavigation(routerRegistry: appDelegate.sceneRouterRegistry)
     InlineShortcuts.updateAppShortcutParameters()
   }

@@ -170,6 +170,12 @@ final class SidebarCleanup {
     else {
       return .unavailable
     }
+    // `.connected` means sync activity is idle, not necessarily that a fresh
+    // account snapshot succeeded. Keep destructive cleanup disabled until the
+    // shared sync owner has committed a durable non-zero checkpoint.
+    guard await realtimeV2.getSyncStats().lastSyncDate > 0 else {
+      return .unavailable
+    }
 
     let now = Date()
 

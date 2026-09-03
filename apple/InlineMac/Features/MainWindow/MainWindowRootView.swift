@@ -184,9 +184,6 @@ struct MainWindowRootView: View {
         mode: sidebarMode,
         sortMode: sidebarSort
       )
-      if let dependencies {
-        dependencies.session.fetchInitialDataIfNeeded(dependencies: dependencies)
-      }
     }
 
     guard topLevelRoute != route else { return }
@@ -340,9 +337,9 @@ private struct MainWindowLoadingView: View {
           .frame(maxWidth: 360)
 
         HStack(spacing: 12) {
-          if viewModel.startupLoadingReason.allowsCredentialRetry {
+          if viewModel.startupLoadingReason.allowsRetry {
             Button("Try Again") {
-              viewModel.retryStartupCredentials()
+              viewModel.retryStartup()
             }
             .disabled(viewModel.isRetryingStartup)
           }

@@ -52,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private var globalHotkeyController: GlobalHotkeyController?
   @MainActor private lazy var scriptingAdapter = MacScriptingAdapter(delegate: self)
+  @MainActor private var didStartPersistentAccountObservers = false
   @MainActor private var accountOperationAdmissionIsOpen: Bool {
     !isLoggingOut && !isResettingLocalData && terminationTask == nil
   }
@@ -81,6 +82,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var notificationNavigationTask: Task<Void, Never>?
 
   func applicationWillFinishLaunching(_: Notification) {
+    // Start crash reporting before AppDependencies opens and migrates the account database.
+    // User identification is deferred until after that storage boundary is admitted.
+    Analytics.start(identifyAuthenticatedUser: false)
     InlineMacIntents.register { [weak self] in
       self?.scriptingAccountIsReady == true
     }
@@ -147,6 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       .sink { [weak self] route in
         guard route == .main else { return }
         Task { @MainActor in
+          self?.startPersistentAccountObserversIfNeeded()
           self?.resumePendingSpaceJoin()
         }
       }
@@ -160,10 +165,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       dependencies.updates.start()
     }
 #endif
-    Task { @MainActor in
-      self.dependencies.unreadCounts.start()
-      self.dockBadgeService.start()
-    }
     Task { @MainActor [weak self] in
       guard await Auth.shared.hasPendingLogout() else { return }
       await self?.performLogOut(notifyServer: false)
@@ -713,7 +714,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
     }
     Auth.shared.invalidateLoginAttemptsSynchronously()
-    let restoreRoute = TopLevelRoute.initial(for: Auth.shared.getStatus())
+    let restoreRoute = TopLevelRoute.initial(
+      for: Auth.shared.getStatus(),
+      persistentStorage: dependencies.database.isPersistent
+    )
 
     await dependencies.session.resetAndWait()
     try requireLocalDataResetMayContinue()
@@ -789,11 +793,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func initializeServices() {
-    // Setup Sentry
-    Analytics.start()
+    Task {
+      await Analytics.identify()
+    }
 
     // Register for notifications
     // notifications.setup()
+  }
+
+  @MainActor
+  private func startPersistentAccountObserversIfNeeded() {
+    guard didStartPersistentAccountObservers == false,
+          dependencies.database.isPersistent,
+          dependencies.viewModel.topLevelRoute == .main
+    else { return }
+    didStartPersistentAccountObservers = true
+    dependencies.unreadCounts.start()
+    dockBadgeService.start()
   }
 
   private func setupRealtimeConnectionFailureObserver() {
