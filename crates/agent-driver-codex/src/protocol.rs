@@ -1269,6 +1269,7 @@ fn codex_item_activity(
         ),
         "reasoning" => {
             let summaries = string_array(item.get("summary"));
+            let content = string_array(item.get("content"));
             let title = summaries
                 .first()
                 .map(String::as_str)
@@ -1280,8 +1281,11 @@ fn codex_item_activity(
                 .skip(1)
                 .map(|value| ActivityDetail::text("Summary", value))
                 .collect::<Vec<_>>();
-            ActivityUpsert::new(id, ActivitySemanticKind::Think, status, title)
-                .map(|activity| activity.with_details(details))
+            ActivityUpsert::new(id, ActivitySemanticKind::Think, status, title).map(|activity| {
+                activity
+                    .with_details(details)
+                    .with_reasoning_content(content)
+            })
         }
         "hookPrompt" => {
             let mut details = Vec::new();
@@ -1997,6 +2001,7 @@ mod tests {
             [AgentEvent::ActivityUpsert { activity, .. }]
                 if activity.kind == ActivitySemanticKind::Think
                     && activity.title == "Mapping source references"
+                    && activity.reasoning_content == ["private reasoning"]
                     && activity.verbose_payload.as_deref().is_some_and(|payload| payload.contains("private reasoning"))
         ));
     }

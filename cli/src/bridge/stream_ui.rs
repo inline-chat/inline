@@ -1107,6 +1107,7 @@ impl ActivityTracker {
                 title,
                 detail: existing_detail,
                 details,
+                content_parts,
                 verbose_payload,
                 paths: existing_paths,
                 exit_code,
@@ -1121,6 +1122,9 @@ impl ActivityTracker {
                 }
                 if !activity.details.is_empty() {
                     details.clone_from(&activity.details);
+                }
+                if !activity.reasoning_content.is_empty() {
+                    content_parts.clone_from(&activity.reasoning_content);
                 }
                 if activity.verbose_payload.is_some() {
                     verbose_payload.clone_from(&activity.verbose_payload);
@@ -1150,7 +1154,7 @@ impl ActivityTracker {
                 paths,
                 exit_code: activity.exit_code,
                 summary_parts: Vec::new(),
-                content_parts: Vec::new(),
+                content_parts: activity.reasoning_content.clone(),
                 output: activity.output_snapshot.clone().unwrap_or_default(),
                 input: String::new(),
                 progress: String::new(),
@@ -1396,6 +1400,9 @@ impl ActivityTracker {
             .collect::<Vec<_>>();
         let blocks = render_progress_entries(&entries, mode, terminal);
         let footer = self.workspace_line.as_deref().unwrap_or("");
+        if terminal && blocks.is_empty() {
+            return vec![render_terminal_status(header, footer)];
+        }
         if matches!(mode, VisibilityMode::Normal) {
             let mut included = Vec::new();
             let mut omitted = self.omitted;
@@ -1515,6 +1522,9 @@ fn render_progress_entries(
             index += 1;
         }
     }
+    if matches!(mode, VisibilityMode::Verbose) {
+        blocks.extend(render_provider_appendix(entries));
+    }
     blocks
         .into_iter()
         .filter(|block| !block.trim().is_empty())
@@ -1532,133 +1542,213 @@ fn render_activity_group(
             activity
         }) if activity.semantic_kind == ActivitySemanticKind::Think
     );
-    if entries.len() == 1 && !starts_with_reasoning {
-        return render_progress_entry(entries[0], mode, terminal);
+    if !starts_with_reasoning {
+        return render_tool_sequence(entries, mode, terminal);
     }
-    let title = if starts_with_reasoning {
-        activity_effective_title(entries[0])
-            .unwrap_or("Thinking")
-            .to_string()
-    } else {
-        aggregate_activity_group_title(entries)
-    };
-    let mut children = Vec::new();
-    for (position, entry) in entries.iter().enumerate() {
-        if position == 0 && starts_with_reasoning && matches!(mode, VisibilityMode::Normal) {
-            continue;
-        }
-        if matches!(mode, VisibilityMode::Normal) {
-            children.extend(render_normal_activity_rows(entry, terminal));
-        } else {
-            children.extend(render_progress_entry(entry, mode, terminal));
-        }
-    }
-    if children.is_empty() {
-        children.push(if terminal {
-            "Completed".to_string()
-        } else {
-            "Thinking".to_string()
-        });
-    }
-    let open = !terminal
-        && entries.iter().any(|entry| {
-            matches!(
-                entry,
-                ProgressEntry::Activity {
-                    activity
-                } if matches!(activity.status, ActivityStatus::Pending | ActivityStatus::InProgress)
-            )
-        });
-    pack_activity_body(
-        &progress_literal(disclosure_summary_text(&title)),
-        &children,
-        open,
-    )
-}
 
-fn render_normal_activity_rows(entry: &ProgressEntry, terminal: bool) -> Vec<String> {
-    let ProgressEntry::Activity { activity } = entry else {
+    let Some(ProgressEntry::Activity {
+        activity: reasoning,
+    }) = entries.first()
+    else {
         return Vec::new();
     };
-    let ProgressActivity {
-        status,
-        title,
-        details,
-        exit_code,
-        ..
-    } = activity.as_ref();
-    let mut rows = details
+    let (summaries, content) = reasoning_projection(reasoning);
+    let abnormal_state = activity_state(reasoning, terminal);
+    let mut children = summaries
         .iter()
-        .flat_map(render_activity_detail)
+        .skip(1)
+        .map(|summary| progress_commentary(summary))
+        .chain(content.iter().map(|part| progress_commentary(part)))
         .collect::<Vec<_>>();
-    if rows.is_empty() {
-        rows.push(progress_literal(title));
+    children.extend(
+        reasoning
+            .details
+            .iter()
+            .filter(|detail| {
+                !detail.label.eq_ignore_ascii_case("summary")
+                    && !detail.label.eq_ignore_ascii_case("reasoning")
+                    && !detail.label.eq_ignore_ascii_case("reasoning content")
+            })
+            .flat_map(render_activity_detail),
+    );
+    if let Some(detail) = reasoning
+        .detail
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        children.extend(render_labeled_text("Detail", detail));
     }
-    let state = match status {
-        ActivityStatus::Failed => Some("failed".to_string()),
-        ActivityStatus::Completed if exit_code.is_some_and(|code| code != 0) => {
-            Some(format!("exit {}", exit_code.unwrap()))
+    if !reasoning.progress.trim().is_empty() {
+        children.push(progress_commentary(&reasoning.progress));
+    }
+    if matches!(mode, VisibilityMode::Verbose) {
+        for path in &reasoning.paths {
+            children.extend(render_labeled_code("Path", path));
         }
-        ActivityStatus::Declined => Some("declined".to_string()),
-        ActivityStatus::Cancelled => Some("cancelled".to_string()),
-        ActivityStatus::Pending | ActivityStatus::InProgress if terminal => {
-            Some("completion unconfirmed".to_string())
-        }
-        _ => None,
+        children.extend(render_labeled_payload(
+            "Command output",
+            "text",
+            &reasoning.output,
+        ));
+        children.extend(render_labeled_payload(
+            "Terminal input",
+            "text",
+            &reasoning.input,
+        ));
+    }
+    let tool_blocks = render_tool_sequence(&entries[1..], mode, terminal);
+
+    let meaningful_reasoning = !summaries.is_empty()
+        || !content.is_empty()
+        || abnormal_state.is_some()
+        || !children.is_empty();
+    if !meaningful_reasoning {
+        return tool_blocks;
+    }
+    let title = summaries.first().map(String::as_str).unwrap_or("Reasoning");
+    let summary = activity_summary(title, abnormal_state.as_deref());
+    let mut blocks = if children.is_empty() {
+        vec![summary]
+    } else {
+        pack_activity_body(
+            &summary,
+            &children,
+            activity_is_running(reasoning, terminal),
+            "reasoning",
+        )
     };
-    if let Some(state) = state {
-        rows.push(progress_literal(&state));
-    }
-    rows
+    blocks.extend(tool_blocks);
+    blocks
 }
 
-fn activity_effective_title(entry: &ProgressEntry) -> Option<&str> {
-    let ProgressEntry::Activity { activity } = entry else {
-        return None;
-    };
-    let ProgressActivity {
-        title,
-        summary_parts,
-        ..
-    } = activity.as_ref();
-    Some(
-        summary_parts
-            .iter()
-            .find(|part| !part.trim().is_empty())
-            .map(String::as_str)
-            .unwrap_or(title),
+fn reasoning_projection(activity: &ProgressActivity) -> (Vec<String>, Vec<String>) {
+    let mut summaries = Vec::new();
+    if !is_reasoning_lifecycle_title(&activity.title) {
+        push_unique_nonempty(&mut summaries, &activity.title);
+    }
+    for summary in &activity.summary_parts {
+        push_unique_nonempty(&mut summaries, summary);
+    }
+    for detail in &activity.details {
+        if detail.label.eq_ignore_ascii_case("summary") {
+            push_unique_nonempty(&mut summaries, &detail.value);
+        }
+    }
+
+    let mut content = Vec::new();
+    for part in &activity.content_parts {
+        push_unique_nonempty(&mut content, part);
+    }
+    for detail in &activity.details {
+        if detail.label.eq_ignore_ascii_case("reasoning")
+            || detail.label.eq_ignore_ascii_case("reasoning content")
+        {
+            push_unique_nonempty(&mut content, &detail.value);
+        }
+    }
+    (summaries, content)
+}
+
+fn is_reasoning_lifecycle_title(value: &str) -> bool {
+    matches!(
+        value.trim().trim_end_matches(['.', '…']),
+        "Thinking" | "Reasoning"
     )
 }
 
-fn aggregate_activity_group_title(entries: &[&ProgressEntry]) -> String {
-    let mut phrases = Vec::new();
-    for entry in entries {
-        let ProgressEntry::Activity { activity } = entry else {
+fn push_unique_nonempty(values: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if !value.is_empty() && !values.iter().any(|existing| existing == value) {
+        values.push(value.to_string());
+    }
+}
+
+fn render_tool_sequence(
+    entries: &[&ProgressEntry],
+    mode: VisibilityMode,
+    terminal: bool,
+) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut index = 0;
+    while index < entries.len() {
+        let exploration_start = index;
+        while index < entries.len() && entry_is_exploration(entries[index]) {
+            index += 1;
+        }
+        if index > exploration_start {
+            let exploration = &entries[exploration_start..index];
+            let children = exploration
+                .iter()
+                .flat_map(|entry| render_progress_entry(entry, mode, terminal))
+                .collect::<Vec<_>>();
+            if exploration.len() > 1 && !children.is_empty() {
+                let open = exploration
+                    .iter()
+                    .any(|entry| entry_is_running(entry, terminal));
+                blocks.extend(pack_activity_body(
+                    &activity_summary("Explored", None),
+                    &children,
+                    open,
+                    "explore",
+                ));
+            } else {
+                blocks.extend(children);
+            }
             continue;
-        };
-        let phrase = match activity.semantic_kind {
-            ActivitySemanticKind::Read => "read files",
-            ActivitySemanticKind::Edit => "updated files",
-            ActivitySemanticKind::Delete => "deleted files",
-            ActivitySemanticKind::Move => "moved files",
-            ActivitySemanticKind::Search => "searched",
-            ActivitySemanticKind::Execute => "ran commands",
-            ActivitySemanticKind::Fetch => "fetched content",
-            ActivitySemanticKind::Think => continue,
-            ActivitySemanticKind::Other => "used tools",
-        };
-        if !phrases.contains(&phrase) {
-            phrases.push(phrase);
+        }
+        blocks.extend(render_progress_entry(entries[index], mode, terminal));
+        index += 1;
+    }
+    blocks
+}
+
+fn entry_is_exploration(entry: &ProgressEntry) -> bool {
+    matches!(
+        entry,
+        ProgressEntry::Activity { activity }
+            if matches!(activity.semantic_kind, ActivitySemanticKind::Read | ActivitySemanticKind::Search)
+    )
+}
+
+fn entry_is_running(entry: &ProgressEntry, terminal: bool) -> bool {
+    matches!(entry, ProgressEntry::Activity { activity } if activity_is_running(activity, terminal))
+}
+
+fn render_provider_appendix(entries: &[&ProgressEntry]) -> Vec<String> {
+    let payloads = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            ProgressEntry::Activity { activity } => activity
+                .verbose_payload
+                .as_deref()
+                .filter(|payload| !payload.is_empty())
+                .map(|payload| (activity.title.as_str(), payload)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if payloads.is_empty() {
+        return Vec::new();
+    }
+    let mut items = Vec::new();
+    for (title, payload) in &payloads {
+        for segment in split_segments(payload, MAX_PROGRESS_BLOCK_BYTES / 2) {
+            items.push(activity_disclosure(
+                &activity_summary(
+                    &format!("Provider item · {}", disclosure_summary_text(title)),
+                    None,
+                ),
+                &markdown_fenced_block("json", &segment),
+                false,
+                "tool",
+            ));
         }
     }
-    if phrases.is_empty() {
-        return "Worked".to_string();
-    }
-    let mut title = phrases.join(", ");
-    if let Some(first) = title.get_mut(0..1) {
-        first.make_ascii_uppercase();
-    }
-    title
+    pack_activity_body(
+        &activity_summary(&format!("Provider data · {} items", payloads.len()), None),
+        &items,
+        false,
+        "tool",
+    )
 }
 
 fn render_progress_chunk(header: &str, blocks: &[String], terminal: bool, footer: &str) -> String {
@@ -1681,6 +1771,19 @@ fn render_progress_chunk(header: &str, blocks: &[String], terminal: bool, footer
     text
 }
 
+fn render_terminal_status(header: &str, footer: &str) -> String {
+    let mut text = format!(
+        "<footer>{}",
+        progress_literal(header.trim_end_matches(['.', '…']))
+    );
+    if !footer.is_empty() {
+        text.push_str(" · ");
+        text.push_str(footer);
+    }
+    text.push_str("</footer>");
+    text
+}
+
 fn render_progress_entry(
     entry: &ProgressEntry,
     mode: VisibilityMode,
@@ -1697,7 +1800,6 @@ fn render_progress_entry(
             title: &activity.title,
             detail: activity.detail.as_deref(),
             details: &activity.details,
-            verbose_payload: activity.verbose_payload.as_deref(),
             paths: &activity.paths,
             exit_code: activity.exit_code,
             summary_parts: &activity.summary_parts,
@@ -1728,7 +1830,6 @@ struct ActivityRenderInput<'a> {
     title: &'a str,
     detail: Option<&'a str>,
     details: &'a [ActivityDetail],
-    verbose_payload: Option<&'a str>,
     paths: &'a [String],
     exit_code: Option<i32>,
     summary_parts: &'a [String],
@@ -1747,7 +1848,6 @@ fn render_activity_blocks(input: ActivityRenderInput<'_>) -> Vec<String> {
         title,
         detail,
         details,
-        verbose_payload,
         paths,
         exit_code,
         summary_parts,
@@ -1758,41 +1858,62 @@ fn render_activity_blocks(input: ActivityRenderInput<'_>) -> Vec<String> {
         mode,
         terminal,
     } = input;
-    let state = match status {
-        ActivityStatus::Failed => " · failed".to_string(),
-        ActivityStatus::Completed if exit_code.is_some_and(|code| code != 0) => {
-            format!(" · exit {}", exit_code.unwrap())
-        }
-        ActivityStatus::Completed => String::new(),
-        ActivityStatus::Declined => " · declined".to_string(),
-        ActivityStatus::Cancelled => " · cancelled".to_string(),
-        ActivityStatus::Pending | ActivityStatus::InProgress if terminal => {
-            " · completion unconfirmed".to_string()
-        }
-        ActivityStatus::Pending | ActivityStatus::InProgress => " · running".to_string(),
-    };
-    let effective_title = summary_parts
-        .iter()
-        .find(|part| !part.trim().is_empty())
-        .map(String::as_str)
-        .unwrap_or(title)
-        .trim_end_matches('…');
-    let summary = format!(
-        "{}{}",
-        progress_literal(disclosure_summary_text(effective_title)),
-        if state == " · running" { "" } else { &state }
-    );
+    if semantic_kind == ActivitySemanticKind::Think {
+        let activity = ProgressActivity {
+            key: String::new(),
+            semantic_kind,
+            status,
+            title: title.to_string(),
+            detail: detail.map(str::to_string),
+            details: details.to_vec(),
+            verbose_payload: None,
+            paths: paths.to_vec(),
+            exit_code,
+            summary_parts: summary_parts.to_vec(),
+            content_parts: content_parts.to_vec(),
+            output: output.to_string(),
+            input: input.to_string(),
+            progress: progress.to_string(),
+        };
+        let entry = ProgressEntry::Activity {
+            activity: Box::new(activity),
+        };
+        return render_activity_group(&[&entry], mode, terminal);
+    }
+
+    let state = activity_state_values(status, exit_code, terminal);
+    let (effective_title, promoted_detail) = promoted_activity_title(semantic_kind, title, details);
+    let summary = activity_summary(effective_title.trim_end_matches('…'), state.as_deref());
     let disclosure_open =
         !terminal && matches!(status, ActivityStatus::Pending | ActivityStatus::InProgress);
 
     let mut body_parts = details
         .iter()
+        .enumerate()
+        .filter(|(index, _)| {
+            matches!(mode, VisibilityMode::Verbose) || Some(*index) != promoted_detail
+        })
+        .map(|(_, detail)| detail)
         .flat_map(render_activity_detail)
         .collect::<Vec<_>>();
+    let detail_duplicates_promoted_title = detail.is_some_and(|detail| {
+        promoted_detail
+            .and_then(|index| details.get(index))
+            .is_some_and(|promoted| promoted.value.trim() == detail.trim())
+    });
+    if let Some(detail) = detail.filter(|detail| {
+        !detail.is_empty()
+            && (matches!(mode, VisibilityMode::Verbose) || !detail_duplicates_promoted_title)
+    }) {
+        body_parts.extend(render_labeled_code("Detail", detail));
+    }
+    for content in content_parts.iter().filter(|part| !part.trim().is_empty()) {
+        body_parts.push(progress_commentary(content));
+    }
+    if !progress.trim().is_empty() {
+        body_parts.push(progress_commentary(progress));
+    }
     if matches!(mode, VisibilityMode::Verbose) {
-        if let Some(detail) = detail.filter(|detail| !detail.is_empty()) {
-            body_parts.extend(render_labeled_code("Detail", detail));
-        }
         for path in paths {
             body_parts.extend(render_labeled_code("Path", path));
         }
@@ -1800,57 +1921,100 @@ fn render_activity_blocks(input: ActivityRenderInput<'_>) -> Vec<String> {
             body_parts.extend(render_labeled_text(&format!("Summary {}", index + 1), part));
         }
     }
-    if body_parts.is_empty() {
-        body_parts.push(if state.is_empty() {
-            "Completed".to_string()
-        } else if state.contains("unconfirmed") {
-            "No terminal event was received for this tool.".to_string()
-        } else {
-            state.trim_start_matches(" ·").to_string()
-        });
-    }
-
-    let mut blocks = pack_activity_body(&summary, &body_parts, disclosure_open);
     if matches!(mode, VisibilityMode::Verbose) {
-        for (index, content) in content_parts.iter().enumerate() {
-            blocks.extend(render_verbose_section(
-                &summary,
-                &format!("Reasoning content {}", index + 1),
-                "text",
-                content,
-            ));
-        }
-        blocks.extend(render_verbose_section(
-            &summary,
-            "Provider progress",
-            "text",
-            progress,
-        ));
-        blocks.extend(render_verbose_section(
-            &summary,
-            "Command output",
-            "text",
-            output,
-        ));
-        blocks.extend(render_verbose_section(
-            &summary,
-            "Terminal input",
-            "text",
-            input,
-        ));
-        if let Some(payload) = verbose_payload {
-            blocks.extend(render_verbose_section(
-                &summary,
-                "Provider payload",
-                "json",
-                payload,
-            ));
-        }
+        body_parts.extend(render_labeled_payload("Command output", "text", output));
+        body_parts.extend(render_labeled_payload("Terminal input", "text", input));
     }
-    if semantic_kind == ActivitySemanticKind::Think && blocks.is_empty() {
-        blocks.push(activity_disclosure(&summary, "Thinking", disclosure_open));
+    if body_parts.is_empty() {
+        return vec![summary];
     }
-    blocks
+    pack_activity_body(
+        &summary,
+        &body_parts,
+        disclosure_open,
+        activity_kind(semantic_kind),
+    )
+}
+
+fn promoted_activity_title<'a>(
+    kind: ActivitySemanticKind,
+    fallback: &'a str,
+    details: &'a [ActivityDetail],
+) -> (String, Option<usize>) {
+    let expected_label = match kind {
+        ActivitySemanticKind::Execute => Some("Ran"),
+        _ => None,
+    };
+    let Some(expected_label) = expected_label else {
+        return (fallback.to_string(), None);
+    };
+    let Some((index, detail)) = details.iter().enumerate().find(|(_, detail)| {
+        detail.label.eq_ignore_ascii_case(expected_label)
+            && !detail.value.contains('\n')
+            && !detail.value.contains('\r')
+            && detail.value.chars().count() <= 160
+            && !detail.value.trim().is_empty()
+    }) else {
+        return (fallback.to_string(), None);
+    };
+    (
+        format!("{} {}", detail.label.trim(), detail.value.trim()),
+        Some(index),
+    )
+}
+
+fn activity_state(activity: &ProgressActivity, terminal: bool) -> Option<String> {
+    activity_state_values(activity.status, activity.exit_code, terminal)
+}
+
+fn activity_state_values(
+    status: ActivityStatus,
+    exit_code: Option<i32>,
+    terminal: bool,
+) -> Option<String> {
+    match status {
+        ActivityStatus::Failed => Some("failed".to_string()),
+        ActivityStatus::Completed if exit_code.is_some_and(|code| code != 0) => {
+            Some(format!("exit {}", exit_code.unwrap()))
+        }
+        ActivityStatus::Declined => Some("declined".to_string()),
+        ActivityStatus::Cancelled => Some("cancelled".to_string()),
+        ActivityStatus::Pending | ActivityStatus::InProgress if terminal => {
+            Some("completion unconfirmed".to_string())
+        }
+        _ => None,
+    }
+}
+
+fn activity_is_running(activity: &ProgressActivity, terminal: bool) -> bool {
+    !terminal
+        && matches!(
+            activity.status,
+            ActivityStatus::Pending | ActivityStatus::InProgress
+        )
+}
+
+fn activity_summary(title: &str, state: Option<&str>) -> String {
+    let mut summary = progress_literal(disclosure_summary_text(title));
+    if let Some(state) = state {
+        summary.push_str(" · ");
+        summary.push_str(&progress_literal(state));
+    }
+    summary
+}
+
+fn activity_kind(kind: ActivitySemanticKind) -> &'static str {
+    match kind {
+        ActivitySemanticKind::Read => "read",
+        ActivitySemanticKind::Edit => "edit",
+        ActivitySemanticKind::Delete => "delete",
+        ActivitySemanticKind::Move => "move",
+        ActivitySemanticKind::Search => "search",
+        ActivitySemanticKind::Execute => "command",
+        ActivitySemanticKind::Fetch => "web",
+        ActivitySemanticKind::Think => "reasoning",
+        ActivitySemanticKind::Other => "tool",
+    }
 }
 
 fn render_activity_detail(detail: &ActivityDetail) -> Vec<String> {
@@ -1888,20 +2052,30 @@ fn render_labeled_code(label: &str, value: &str) -> Vec<String> {
         .collect()
 }
 
-fn pack_activity_body(summary: &str, parts: &[String], open: bool) -> Vec<String> {
+fn pack_activity_body(summary: &str, parts: &[String], open: bool, activity: &str) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut current = Vec::new();
     for part in parts {
         let mut candidate = current.clone();
         candidate.push(part.clone());
         if !current.is_empty() && candidate.join("\n\n").len() > MAX_PROGRESS_BLOCK_BYTES {
-            blocks.push(activity_disclosure(summary, &current.join("\n\n"), open));
+            blocks.push(activity_disclosure(
+                summary,
+                &current.join("\n\n"),
+                open,
+                activity,
+            ));
             current.clear();
         }
         current.push(part.clone());
     }
     if !current.is_empty() {
-        blocks.push(activity_disclosure(summary, &current.join("\n\n"), open));
+        blocks.push(activity_disclosure(
+            summary,
+            &current.join("\n\n"),
+            open,
+            activity,
+        ));
     }
     blocks
 }
@@ -1934,29 +2108,21 @@ fn disclosure_summary_text(mut value: &str) -> &str {
     }
 }
 
-fn activity_disclosure(summary: &str, body: &str, open: bool) -> String {
+fn activity_disclosure(summary: &str, body: &str, open: bool, activity: &str) -> String {
     format!(
-        "<details{}>\n<summary>{summary}</summary>\n\n{body}\n</details>",
+        "<details{}>\n<summary activity=\"{activity}\">{summary}</summary>\n\n{body}\n</details>",
         if open { " open" } else { "" }
     )
 }
 
-fn render_verbose_section(summary: &str, label: &str, language: &str, value: &str) -> Vec<String> {
-    let segments = split_segments(value, MAX_PROGRESS_BLOCK_BYTES);
-    let count = segments.len();
-    segments
+fn render_labeled_payload(label: &str, language: &str, value: &str) -> Vec<String> {
+    split_segments(value, MAX_PROGRESS_BLOCK_BYTES / 2)
         .into_iter()
-        .enumerate()
-        .map(|(index, segment)| {
-            let section = if count > 1 {
-                format!("{label} {}/{}", index + 1, count)
-            } else {
-                label.to_string()
-            };
-            activity_disclosure(
-                &format!("{summary} · {}", progress_literal(&section)),
-                &markdown_fenced_block(language, &segment),
-                false,
+        .map(|segment| {
+            format!(
+                "{}\n\n{}",
+                progress_literal(label),
+                markdown_fenced_block(language, &segment)
             )
         })
         .collect()
@@ -2476,8 +2642,9 @@ mod disclosure_tests {
             &progress_literal(disclosure_summary_text("**Planning inspection**")),
             "Thinking",
             true,
+            "reasoning",
         );
-        assert!(rendered.contains("<summary>Planning inspection</summary>"));
+        assert!(rendered.contains("<summary activity=\"reasoning\">Planning inspection</summary>"));
         assert!(!rendered.contains("\\*\\*Planning"));
     }
 
@@ -2521,6 +2688,7 @@ mod disclosure_tests {
                 "Thinking",
             )
             .unwrap()
+            .with_reasoning_content(vec!["private chain".to_string()])
             .with_verbose_payload(r#"{"type":"reasoning","content":["private chain"]}"#),
             VisibilityMode::Normal,
             workspace,
@@ -2580,19 +2748,40 @@ mod disclosure_tests {
             "StateManager.cpp",
             "Account.swift",
             "NetworkStatusManager.swift",
-            "UP_DELAY",
+            "UP\\_DELAY",
         ] {
             assert!(
                 normal.contains(expected),
                 "missing normal detail: {expected}"
             );
         }
-        assert!(!normal.contains("private chain"));
+        assert!(normal.contains("private chain"));
         assert!(!normal.contains("Provider payload"));
+        assert_eq!(normal.matches("activity=\"explore\"").count(), 1);
+        assert!(normal.contains("Ran rg"));
+        assert_eq!(
+            normal.matches("UP\\_DELAY").count(),
+            1,
+            "a promoted command should not be repeated as its own detail"
+        );
+        let reasoning_start = normal
+            .find("<summary activity=\"reasoning\">")
+            .expect("reasoning summary");
+        let reasoning_end = reasoning_start
+            + normal[reasoning_start..]
+                .find("</details>")
+                .expect("reasoning close");
+        let exploration_start = normal
+            .find("<summary activity=\"explore\">Explored</summary>")
+            .expect("exploration summary");
+        assert!(
+            reasoning_end < exploration_start,
+            "tools must be siblings after reasoning"
+        );
     }
 
     #[test]
-    fn later_reasoning_item_starts_a_new_codex_activity_group() {
+    fn later_reasoning_item_starts_a_new_codex_phase() {
         let workspace = Path::new("/workspace");
         let mut tracker = ActivityTracker::default();
         for (id, title) in [
@@ -2627,10 +2816,50 @@ mod disclosure_tests {
         let normal = tracker
             .render_chunks(VisibilityMode::Normal, WORKING_STATUS, None)
             .remove(0);
-        assert!(normal.contains("<summary>Mapping state references</summary>"));
-        assert!(normal.contains("<summary>Checking retry timing</summary>"));
+        assert!(normal.contains("Mapping state references"));
+        assert!(normal.contains("Checking retry timing"));
+        assert!(!normal.contains("<summary activity=\"reasoning\">Mapping state references"));
+        assert!(!normal.contains("<summary activity=\"reasoning\">Checking retry timing"));
         assert!(normal.find("reasoning-1.swift").unwrap() < normal.find("Checking retry").unwrap());
         assert!(normal.find("Checking retry").unwrap() < normal.find("reasoning-2.swift").unwrap());
+    }
+
+    #[test]
+    fn empty_reasoning_is_hidden_without_synthetic_disclosure_content() {
+        let workspace = Path::new("/workspace");
+        let mut tracker = ActivityTracker::default();
+        tracker.apply(
+            ActivityUpsert::new(
+                "reasoning-empty",
+                ActivitySemanticKind::Think,
+                ActivityStatus::Completed,
+                "Thinking",
+            )
+            .unwrap()
+            .with_verbose_payload(r#"{"type":"reasoning","summary":[],"content":[]}"#),
+            VisibilityMode::Normal,
+            workspace,
+        );
+        tracker.workspace_line = Some("Working directory: `project`".to_string());
+        tracker.set_terminal_header("Worked for 2m 05s");
+
+        let normal = tracker
+            .render_chunks(VisibilityMode::Normal, "Worked for 2m 05s", None)
+            .remove(0);
+        assert_eq!(
+            normal,
+            "<footer>Worked for 2m 05s · Working directory: `project`</footer>"
+        );
+        assert!(!normal.contains("Thinking"));
+        assert!(!normal.contains("Completed"));
+
+        let verbose = tracker
+            .render_chunks(VisibilityMode::Verbose, "Worked for 2m 05s", None)
+            .join("\n");
+        assert!(verbose.contains("Provider data"));
+        assert!(verbose.contains("activity=\"tool\""));
+        assert!(verbose.contains(r#""summary":[]"#));
+        assert!(!verbose.contains("<summary activity=\"reasoning\">Thinking"));
     }
 
     #[test]
@@ -2688,12 +2917,12 @@ mod disclosure_tests {
         let normal = restored
             .render_chunks(VisibilityMode::Normal, WORKING_STATUS, None)
             .join("\n");
-        assert!(normal.contains("visible-in-normal"));
+        assert!(normal.contains("visible\\-in\\-normal"));
+        assert!(normal.contains("reasoning-content-exact"));
+        assert!(normal.contains("provider-progress-exact"));
         for verbose_only in [
             "raw-secret",
             "/Users/alice/private",
-            "reasoning-content-exact",
-            "provider-progress-exact",
             "output-before",
             "terminal-input-exact",
         ] {
@@ -2846,7 +3075,7 @@ mod disclosure_tests {
     }
 
     #[test]
-    fn completion_does_not_fabricate_tool_success_and_normal_hides_details() {
+    fn completion_does_not_fabricate_tool_success_and_normal_keeps_structured_details() {
         let mut tracker = ActivityTracker::default();
         for (id, status) in [
             ("done", ActivityStatus::Completed),
@@ -2866,7 +3095,7 @@ mod disclosure_tests {
         let normal = tracker
             .render_chunks(VisibilityMode::Normal, "Failed after 4s", None)
             .remove(0);
-        assert!(!normal.contains("private verbose detail"));
+        assert!(normal.contains("private verbose detail"));
         assert!(!normal.contains("exit 0"));
         assert_eq!(normal.matches("completion unconfirmed").count(), 1);
         assert!(normal.contains("done"));

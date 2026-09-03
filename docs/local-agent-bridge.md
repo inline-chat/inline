@@ -231,17 +231,22 @@ after a retry or restart; the retained status plus final answer are an intention
 two-message beta design. A failed progress edit never creates another progress
 message or prevents the final answer; after a crash the bridge resolves the
 original progress send by its stable local transaction identity before recovery.
-Normal mode keeps the Codex presentation hierarchy and usually exposes 90–95%
-of a turn: exact commentary, reasoning summaries, action rows, searches, file
-reads, commands, tool metadata, provider plan steps, compaction notices, and
-other structured activity inside that disclosure. Assistant item identity and
-phase preserve first-seen ordering, while the final answer remains outside
-progress. Normal mode stays within one bounded progress message and explicitly
-marks the unusual turn that does not fit.
+Normal mode keeps the Codex presentation hierarchy: exact commentary, reasoning
+summaries and content, provider progress, action rows, searches, file reads,
+commands, tool metadata, provider plan steps, compaction notices, and other
+structured activity. Reasoning and later tools are ordered sibling phases;
+adjacent read/search work is coalesced under one `Explored` disclosure, while
+commands and mutations remain distinct. Empty provider lifecycle envelopes
+create no visible row. Assistant
+item identity and phase preserve first-seen ordering, while the final answer
+remains outside progress. Normal mode stays within one bounded progress message
+and explicitly marks the unusual turn that does not fit.
 
-`/verbose` exposes the complete textual provider record retained by the bridge,
-including reasoning content, command output, tool progress, exact commands and
-paths, arguments, results, and raw Codex item payloads. It fills the existing
+`/verbose` adds the privacy-sensitive diagnostic material: complete command
+output and terminal input, exact local paths and provider detail, plus one
+collapsed ordered `Provider data` appendix containing the raw Codex item
+payloads. Reasoning, summaries, and readable tool calls do not require verbose
+mode. The bridge fills the existing
 Working message to Inline's text limit of 100,000 UTF-16 units before adding a
 densely packed silent continuation, so a command or provider item never creates a new message
 by itself and no textual field is omitted. Binary generated

@@ -699,8 +699,8 @@ pub enum ActivitySemanticKind {
     Execute,
     /// Fetching an external resource.
     Fetch,
-    /// A reasoning state. Normal presentation uses its summary; verbose
-    /// presentation can include provider-supplied reasoning content.
+    /// A reasoning state. Normal and verbose presentation include the
+    /// provider-supplied summary and reasoning content.
     Think,
     /// A provider activity that does not have a more precise stable category.
     Other,
@@ -805,6 +805,10 @@ pub struct ActivityUpsert {
     /// Structured details shown in normal and verbose progress output.
     #[serde(default)]
     pub details: Vec<ActivityDetail>,
+    /// Authoritative provider-authored reasoning content. Streaming content
+    /// deltas remain append-only until a completed snapshot replaces them.
+    #[serde(default)]
+    pub reasoning_content: Vec<String>,
     /// Complete provider item payload for explicit lossless verbose output.
     #[serde(default)]
     pub verbose_payload: Option<String>,
@@ -842,6 +846,7 @@ impl ActivityUpsert {
             title,
             detail: None,
             details: Vec::new(),
+            reasoning_content: Vec::new(),
             verbose_payload: None,
             output_snapshot: None,
             paths: Vec::new(),
@@ -860,6 +865,13 @@ impl ActivityUpsert {
     #[must_use]
     pub fn with_details(mut self, details: impl IntoIterator<Item = ActivityDetail>) -> Self {
         self.details = details.into_iter().collect();
+        self
+    }
+
+    /// Retains authoritative provider-authored reasoning content.
+    #[must_use]
+    pub fn with_reasoning_content(mut self, content: impl IntoIterator<Item = String>) -> Self {
+        self.reasoning_content = content.into_iter().collect();
         self
     }
 

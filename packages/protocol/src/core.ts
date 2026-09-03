@@ -1508,6 +1508,10 @@ export interface BlockDisclosure {
      * @generated from protobuf field: optional bool is_rtl = 5;
      */
     isRtl?: boolean;
+    /**
+     * @generated from protobuf field: BlockDisclosure.ActivityKind activity_kind = 6;
+     */
+    activityKind: BlockDisclosure_ActivityKind;
 }
 /**
  * @generated from protobuf enum BlockDisclosure.Kind
@@ -1521,6 +1525,55 @@ export enum BlockDisclosure_Kind {
      * @generated from protobuf enum value: KIND_PROGRESS = 1;
      */
     PROGRESS = 1
+}
+/**
+ * @generated from protobuf enum BlockDisclosure.ActivityKind
+ */
+export enum BlockDisclosure_ActivityKind {
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_REASONING = 1;
+     */
+    REASONING = 1,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_EXPLORE = 2;
+     */
+    EXPLORE = 2,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_READ = 3;
+     */
+    READ = 3,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_SEARCH = 4;
+     */
+    SEARCH = 4,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_EDIT = 5;
+     */
+    EDIT = 5,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_DELETE = 6;
+     */
+    DELETE = 6,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_MOVE = 7;
+     */
+    MOVE = 7,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_COMMAND = 8;
+     */
+    COMMAND = 8,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_WEB = 9;
+     */
+    WEB = 9,
+    /**
+     * @generated from protobuf enum value: ACTIVITY_KIND_TOOL = 10;
+     */
+    TOOL = 10
 }
 /**
  * @generated from protobuf message BlockQuote
@@ -12887,8 +12940,8 @@ export interface GetFilePartResult {
     sha256: Uint8Array;
 }
 /**
- * One explicit cursor state per chat and actor. max_id remains a monotonic
- * high-water mark; cleared hides its marker without rewinding that boundary.
+ * One explicit target state per chat and actor. max_id is the exact message
+ * carrying the marker; its legacy field name is retained for wire compatibility.
  *
  * @generated from protobuf message ChatAcknowledgement
  */
@@ -12924,7 +12977,7 @@ export interface ChatAcknowledgement {
      */
     revision: bigint;
     /**
-     * A durable tombstone. The high-water max_id remains available for fencing.
+     * A durable tombstone. max_id retains the hidden target for idempotent retry.
      *
      * @generated from protobuf field: bool cleared = 7;
      */
@@ -12949,7 +13002,7 @@ export interface AcknowledgeMessagesInput {
      */
     clear: boolean;
     /**
-     * State observed by the actor; fences delayed clear and same-target replay.
+     * State observed by the actor; fences delayed clear and target movement.
      *
      * @generated from protobuf field: int64 expected_revision = 4;
      */
@@ -17844,13 +17897,15 @@ class BlockDisclosure$Type extends MessageType<BlockDisclosure> {
             { no: 2, name: "kind", kind: "enum", T: () => ["BlockDisclosure.Kind", BlockDisclosure_Kind, "KIND_"] },
             { no: 3, name: "initially_open", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
-            { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "activity_kind", kind: "enum", T: () => ["BlockDisclosure.ActivityKind", BlockDisclosure_ActivityKind, "ACTIVITY_KIND_"] }
         ]);
     }
     create(value?: PartialMessage<BlockDisclosure>): BlockDisclosure {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.kind = 0;
         message.children = [];
+        message.activityKind = 0;
         if (value !== undefined)
             reflectionMergePartial<BlockDisclosure>(this, message, value);
         return message;
@@ -17874,6 +17929,9 @@ class BlockDisclosure$Type extends MessageType<BlockDisclosure> {
                     break;
                 case /* optional bool is_rtl */ 5:
                     message.isRtl = reader.bool();
+                    break;
+                case /* BlockDisclosure.ActivityKind activity_kind */ 6:
+                    message.activityKind = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -17902,6 +17960,9 @@ class BlockDisclosure$Type extends MessageType<BlockDisclosure> {
         /* optional bool is_rtl = 5; */
         if (message.isRtl !== undefined)
             writer.tag(5, WireType.Varint).bool(message.isRtl);
+        /* BlockDisclosure.ActivityKind activity_kind = 6; */
+        if (message.activityKind !== 0)
+            writer.tag(6, WireType.Varint).int32(message.activityKind);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

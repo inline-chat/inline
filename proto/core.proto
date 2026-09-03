@@ -546,12 +546,26 @@ message BlockDisclosure {
     KIND_DEFAULT = 0;
     KIND_PROGRESS = 1;
   }
+  enum ActivityKind {
+    ACTIVITY_KIND_UNSPECIFIED = 0;
+    ACTIVITY_KIND_REASONING = 1;
+    ACTIVITY_KIND_EXPLORE = 2;
+    ACTIVITY_KIND_READ = 3;
+    ACTIVITY_KIND_SEARCH = 4;
+    ACTIVITY_KIND_EDIT = 5;
+    ACTIVITY_KIND_DELETE = 6;
+    ACTIVITY_KIND_MOVE = 7;
+    ACTIVITY_KIND_COMMAND = 8;
+    ACTIVITY_KIND_WEB = 9;
+    ACTIVITY_KIND_TOOL = 10;
+  }
 
   BlockText summary = 1;
   Kind kind = 2;
   optional bool initially_open = 3;
   repeated Block children = 4;
   optional bool is_rtl = 5;
+  ActivityKind activity_kind = 6;
 }
 
 message BlockQuote {
@@ -4680,8 +4694,8 @@ message GetFilePartResult {
   bytes sha256 = 4;
 }
 
-// One explicit cursor state per chat and actor. max_id remains a monotonic
-// high-water mark; cleared hides its marker without rewinding that boundary.
+// One explicit target state per chat and actor. max_id is the exact message
+// carrying the marker; its legacy field name is retained for wire compatibility.
 message ChatAcknowledgement {
   int64 chat_id = 1;
   int64 user_id = 2;
@@ -4692,7 +4706,7 @@ message ChatAcknowledgement {
   optional Peer peer_id = 5;
   // Chat update sequence that orders snapshots, live updates and replay.
   int64 revision = 6;
-  // A durable tombstone. The high-water max_id remains available for fencing.
+  // A durable tombstone. max_id retains the hidden target for idempotent retry.
   bool cleared = 7;
 }
 
@@ -4701,7 +4715,7 @@ message AcknowledgeMessagesInput {
   // Set target, or expected current target when clear is true.
   int64 max_id = 2;
   bool clear = 3;
-  // State observed by the actor; fences delayed clear and same-target replay.
+  // State observed by the actor; fences delayed clear and target movement.
   int64 expected_revision = 4;
 }
 message AcknowledgeMessagesResult { repeated Update updates = 1; }

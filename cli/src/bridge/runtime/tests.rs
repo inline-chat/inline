@@ -1455,7 +1455,12 @@ fn verbose_activity_ledger_keeps_order_and_updates_rows_in_place() {
         .apply(completed, VisibilityMode::Verbose, workspace)
         .status
         .expect("verbose ledger");
-    assert_eq!(rendered.matches("<summary>cargo test</summary>").count(), 1);
+    assert_eq!(
+        rendered
+            .matches("<summary activity=\"command\">cargo test</summary>")
+            .count(),
+        1
+    );
     assert!(rendered.find("cargo test").unwrap() < rendered.find("Reading runtime\\.rs").unwrap());
 }
 
