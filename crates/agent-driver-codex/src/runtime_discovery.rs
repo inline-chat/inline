@@ -10,6 +10,11 @@ use crate::{CodexLaunchConfig, CodexVersionProbe, probe_codex_version};
 const FIRST_STABLE_CATALOG_VERSION: (u64, u64, u64) = (0, 146, 0);
 #[cfg(target_os = "macos")]
 const OPENAI_TEAM_IDENTIFIER: &str = "2DC432GLL2";
+// Leave headroom inside the 30-second provider probe while tolerating transient
+// security-service contention. Verification still fails closed on timeout.
+#[cfg(target_os = "macos")]
+const OPENAI_SIGNATURE_VERIFICATION_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(15);
 const CHATGPT_CODEX_RELATIVE_PATH: &str = "ChatGPT.app/Contents/Resources/codex";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -390,7 +395,6 @@ fn runtime_capabilities(version: &Version) -> CodexRuntimeCapabilities {
 #[cfg(target_os = "macos")]
 async fn verify_chatgpt_codex_signature(executable: &Path) -> Result<(), String> {
     use std::process::Stdio;
-    use std::time::Duration;
 
     use tokio::process::Command;
     use tokio::time::timeout;
@@ -416,7 +420,7 @@ async fn verify_chatgpt_codex_signature(executable: &Path) -> Result<(), String>
         .stderr
         .take()
         .ok_or_else(|| "codesign stderr unavailable".to_string())?;
-    let (diagnostic, verified) = timeout(Duration::from_secs(5), async {
+    let (diagnostic, verified) = timeout(OPENAI_SIGNATURE_VERIFICATION_TIMEOUT, async {
         tokio::join!(
             async {
                 let mut tail = Vec::new();
