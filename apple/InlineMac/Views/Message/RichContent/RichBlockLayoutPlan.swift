@@ -1,12 +1,47 @@
 import AppKit
 import InlineKit
+import InlineProtocol
 import TextProcessing
+
+enum RichBlockActivityKind: String, Codable, Hashable {
+  case reasoning, explore, read, search, edit, delete, move, command, web, tool
+
+  init?(_ value: InlineProtocol.BlockDisclosure.ActivityKind) {
+    switch value {
+    case .reasoning: self = .reasoning
+    case .explore: self = .explore
+    case .read: self = .read
+    case .search: self = .search
+    case .edit: self = .edit
+    case .delete: self = .delete
+    case .move: self = .move
+    case .command: self = .command
+    case .web: self = .web
+    case .tool: self = .tool
+    case .unspecified, .UNRECOGNIZED: return nil
+    }
+  }
+
+  var symbolName: String {
+    switch self {
+    case .reasoning: "brain"
+    case .explore, .search: "magnifyingglass"
+    case .read: "doc.text"
+    case .edit: "square.and.pencil"
+    case .delete: "trash"
+    case .move: "folder"
+    case .command: "terminal"
+    case .web: "globe"
+    case .tool: "wrench.and.screwdriver"
+    }
+  }
+}
 
 enum RichBlockTextRole: Codable, Hashable {
   case paragraph
   case heading(level: Int)
   case footer
-  case disclosureSummary(progress: Bool, expanded: Bool)
+  case disclosureSummary(progress: Bool, expanded: Bool, activity: RichBlockActivityKind?)
   case listMarker
 }
 

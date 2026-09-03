@@ -264,7 +264,11 @@ final class RichBlockLayoutPlanner {
       case .paragraph: nativeRole = .paragraph
       case let .heading(level): nativeRole = .heading(level: level)
       case .footer: nativeRole = .footer
-      case let .disclosure(progress): nativeRole = .disclosureSummary(progress: progress, expanded: false)
+      case let .disclosure(progress): nativeRole = .disclosureSummary(
+          progress: progress,
+          expanded: false,
+          activity: nil
+        )
       case let .table(header):
         return styledTableText(text, offset: range.location, length: range.length, baseFontSize: fontSize,
                                isRTL: false, alignment: .left, isHeader: header)
@@ -531,7 +535,11 @@ final class RichBlockLayoutPlanner {
         let expanded = disclosureOverrides[path] ?? (disclosure.hasInitiallyOpen && disclosure.initiallyOpen)
         guard appendText(
           disclosure.summary,
-          role: .disclosureSummary(progress: disclosure.kind == .progress, expanded: expanded),
+          role: .disclosureSummary(
+            progress: disclosure.kind == .progress,
+            expanded: expanded,
+            activity: RichBlockActivityKind(disclosure.activityKind)
+          ),
           path: path,
           x: x,
           width: width,
@@ -968,8 +976,16 @@ final class RichBlockLayoutPlanner {
       capturesTrailingLine: Bool = false
     ) -> Bool {
       let isRTL = text.hasIsRtl ? text.isRtl : (inheritedDirection ?? false)
+      let disclosureActivity: RichBlockActivityKind? = if case let .disclosureSummary(_, _, activity) = role {
+        activity
+      } else {
+        nil
+      }
       let renderedTextWidth: CGFloat = if case .disclosureSummary = role {
-        RichBlockDisclosureMetrics.titleViewportWidth(containerWidth: width)
+        RichBlockDisclosureMetrics.titleViewportWidth(
+          containerWidth: width,
+          hasActivityIcon: disclosureActivity != nil
+        )
       } else {
         width
       }
@@ -989,6 +1005,10 @@ final class RichBlockLayoutPlanner {
       let accessoryWidth: CGFloat = if case .disclosureSummary = role {
         RichBlockDisclosureMetrics.preferredChevronSide
           + RichBlockDisclosureMetrics.titleChevronGap
+          + (disclosureActivity == nil
+            ? 0
+            : RichBlockDisclosureMetrics.activityIconSide
+              + RichBlockDisclosureMetrics.activityTitleGap)
       } else {
         0
       }

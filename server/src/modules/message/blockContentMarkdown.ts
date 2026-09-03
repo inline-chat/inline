@@ -1,4 +1,5 @@
 import {
+  BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   BlockList_Kind,
   BlockTable_Alignment,
@@ -16,6 +17,19 @@ import { mathMarkdown } from "../translation2/entities/math"
 import { escapeLinkUrl, escapeMarkdownLineStarts } from "../translation2/entities/escape"
 import { toRange } from "../translation2/entities/offsets"
 import { validateBlockContent } from "./blockContent"
+
+const disclosureActivityNames: Partial<Record<BlockDisclosure_ActivityKind, string>> = {
+  [BlockDisclosure_ActivityKind.REASONING]: "reasoning",
+  [BlockDisclosure_ActivityKind.EXPLORE]: "explore",
+  [BlockDisclosure_ActivityKind.READ]: "read",
+  [BlockDisclosure_ActivityKind.SEARCH]: "search",
+  [BlockDisclosure_ActivityKind.EDIT]: "edit",
+  [BlockDisclosure_ActivityKind.DELETE]: "delete",
+  [BlockDisclosure_ActivityKind.MOVE]: "move",
+  [BlockDisclosure_ActivityKind.COMMAND]: "command",
+  [BlockDisclosure_ActivityKind.WEB]: "web",
+  [BlockDisclosure_ActivityKind.TOOL]: "tool",
+}
 
 export type BlockContentMarkdownEncoderOptions = {
   imageURL?: (path: number[], image: BlockImage) => string | undefined
@@ -71,9 +85,11 @@ function encodeBlock(block: Block, path: number[], input: EncoderInput): string 
     case "disclosure": {
       const open = block.kind.disclosure.initiallyOpen ? " open" : ""
       const progress = block.kind.disclosure.kind === BlockDisclosure_Kind.PROGRESS ? ' kind="progress"' : ""
+      const activityName = disclosureActivityNames[block.kind.disclosure.activityKind]
+      const activity = activityName ? ` activity="${activityName}"` : ""
       const summary = encodeText(block.kind.disclosure.summary!, input)
       const children = encodeBlocks(block.kind.disclosure.children, path, input).join("\n\n")
-      return `<details${open}>\n<summary${progress}>${summary}</summary>${children ? `\n${children}` : ""}\n</details>`
+      return `<details${open}>\n<summary${progress}${activity}>${summary}</summary>${children ? `\n${children}` : ""}\n</details>`
     }
     case "footer":
       return `<footer>${encodeText(block.kind.footer, input)}</footer>`

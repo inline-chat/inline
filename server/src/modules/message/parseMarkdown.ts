@@ -337,7 +337,7 @@ function findBlockExtensionSyntax(text: string, matches: Match[]): void {
     if (/^<details(?: open)?>$/.test(line.value)) {
       const summaryLine = line.next < text.length ? readLine(text, line.next) : undefined
       const hasCompleteSummary = summaryLine
-        ? /^<summary(?: kind="progress")?>.*<\/summary>$/.test(summaryLine.value)
+        ? /^<summary(?: kind="progress")?(?: activity="(?:reasoning|explore|read|search|edit|delete|move|command|web|tool)")?>.*<\/summary>$/.test(summaryLine.value)
         : false
       if (!hasCompleteSummary) {
         cursor = line.next
@@ -356,7 +356,7 @@ function findBlockExtensionSyntax(text: string, matches: Match[]): void {
       continue
     }
 
-    const summary = /^<summary(?: kind="progress")?>(.*)<\/summary>$/.exec(line.value)
+    const summary = /^<summary(?: kind="progress")?(?: activity="(?:reasoning|explore|read|search|edit|delete|move|command|web|tool)")?>(.*)<\/summary>$/.exec(line.value)
     if (summary && detailsDepth > 0) {
       const openingEnd = line.start + line.value.indexOf(">") + 1
       const closingStart = line.contentEnd - "</summary>".length

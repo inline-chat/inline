@@ -4,6 +4,7 @@ import type { DbFullMessage } from "@in/server/db/models/messages"
 import type { DbFullPhoto, DbFullVoice } from "@in/server/db/models/files"
 import { encodeFullMessage, encodeMessage } from "@in/server/realtime/encoders/encodeMessage"
 import {
+  BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   MessageEntities,
   MessageEntity_Type,
@@ -263,6 +264,7 @@ describe("encodeFullMessage block photos", () => {
           disclosure: {
             summary: { offset: 0n, length: 0n },
             kind: BlockDisclosure_Kind.DEFAULT,
+            activityKind: BlockDisclosure_ActivityKind.UNSPECIFIED,
             children: [{
               kind: {
                 oneofKind: "album" as const,

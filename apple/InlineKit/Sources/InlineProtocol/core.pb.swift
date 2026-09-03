@@ -4015,6 +4015,8 @@ public nonisolated struct BlockDisclosure: Sendable {
   /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
   public mutating func clearIsRtl() {self._isRtl = nil}
 
+  public var activityKind: BlockDisclosure.ActivityKind = .unspecified
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
@@ -4047,6 +4049,76 @@ public nonisolated struct BlockDisclosure: Sendable {
     public static let allCases: [BlockDisclosure.Kind] = [
       .default,
       .progress,
+    ]
+
+  }
+
+  public nonisolated enum ActivityKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case reasoning // = 1
+    case explore // = 2
+    case read // = 3
+    case search // = 4
+    case edit // = 5
+    case delete // = 6
+    case move // = 7
+    case command // = 8
+    case web // = 9
+    case tool // = 10
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .reasoning
+      case 2: self = .explore
+      case 3: self = .read
+      case 4: self = .search
+      case 5: self = .edit
+      case 6: self = .delete
+      case 7: self = .move
+      case 8: self = .command
+      case 9: self = .web
+      case 10: self = .tool
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .reasoning: return 1
+      case .explore: return 2
+      case .read: return 3
+      case .search: return 4
+      case .edit: return 5
+      case .delete: return 6
+      case .move: return 7
+      case .command: return 8
+      case .web: return 9
+      case .tool: return 10
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockDisclosure.ActivityKind] = [
+      .unspecified,
+      .reasoning,
+      .explore,
+      .read,
+      .search,
+      .edit,
+      .delete,
+      .move,
+      .command,
+      .web,
+      .tool,
     ]
 
   }
@@ -24600,7 +24672,7 @@ nonisolated extension BlockAlbum: SwiftProtobuf.Message, SwiftProtobuf._MessageI
 
 nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BlockDisclosure"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}summary\0\u{1}kind\0\u{3}initially_open\0\u{1}children\0\u{3}is_rtl\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}summary\0\u{1}kind\0\u{3}initially_open\0\u{1}children\0\u{3}is_rtl\0\u{3}activity_kind\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -24613,6 +24685,7 @@ nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 3: try { try decoder.decodeSingularBoolField(value: &self._initiallyOpen) }()
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.children) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      case 6: try { try decoder.decodeSingularEnumField(value: &self.activityKind) }()
       default: break
       }
     }
@@ -24638,6 +24711,9 @@ nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._isRtl {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
     } }()
+    if self.activityKind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.activityKind, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -24647,6 +24723,7 @@ nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs._initiallyOpen != rhs._initiallyOpen {return false}
     if lhs.children != rhs.children {return false}
     if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.activityKind != rhs.activityKind {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -24654,6 +24731,10 @@ nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension BlockDisclosure.Kind: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_DEFAULT\0\u{1}KIND_PROGRESS\0")
+}
+
+nonisolated extension BlockDisclosure.ActivityKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ACTIVITY_KIND_UNSPECIFIED\0\u{1}ACTIVITY_KIND_REASONING\0\u{1}ACTIVITY_KIND_EXPLORE\0\u{1}ACTIVITY_KIND_READ\0\u{1}ACTIVITY_KIND_SEARCH\0\u{1}ACTIVITY_KIND_EDIT\0\u{1}ACTIVITY_KIND_DELETE\0\u{1}ACTIVITY_KIND_MOVE\0\u{1}ACTIVITY_KIND_COMMAND\0\u{1}ACTIVITY_KIND_WEB\0\u{1}ACTIVITY_KIND_TOOL\0")
 }
 
 nonisolated extension BlockQuote: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

@@ -1,4 +1,5 @@
 import {
+  BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   BlockList_Kind,
   BlockTable_Alignment,
@@ -21,6 +22,19 @@ import { annotateBlockContentDirections } from "./blockDirection"
 import { parseMarkdownWithSourceMap, type ParsedMarkdownWithSourceMap } from "./parseMarkdown"
 import { linkLabelEnd } from "../translation2/entities/linkSyntax"
 import type { MarkdownReference } from "./markdownDocument"
+
+const disclosureActivityKinds: Record<string, BlockDisclosure_ActivityKind> = {
+  reasoning: BlockDisclosure_ActivityKind.REASONING,
+  explore: BlockDisclosure_ActivityKind.EXPLORE,
+  read: BlockDisclosure_ActivityKind.READ,
+  search: BlockDisclosure_ActivityKind.SEARCH,
+  edit: BlockDisclosure_ActivityKind.EDIT,
+  delete: BlockDisclosure_ActivityKind.DELETE,
+  move: BlockDisclosure_ActivityKind.MOVE,
+  command: BlockDisclosure_ActivityKind.COMMAND,
+  web: BlockDisclosure_ActivityKind.WEB,
+  tool: BlockDisclosure_ActivityKind.TOOL,
+}
 
 export const blockContentLimits = {
   maxBlocks: 1_024,
@@ -261,7 +275,7 @@ function parseRegion(
     if (details) {
       const summaryLine = line.next < end ? readLine(markdown, line.next, end) : undefined
       const summary = summaryLine
-        ? /^<summary(?: kind="(progress)")?>(.*)<\/summary>$/.exec(summaryLine.value)
+        ? /^<summary(?: kind="(progress)")?(?: activity="(reasoning|explore|read|search|edit|delete|move|command|web|tool)")?>(.*)<\/summary>$/.exec(summaryLine.value)
         : undefined
 
       if (summaryLine && summary) {
@@ -270,7 +284,7 @@ function parseRegion(
         const childrenEnd = close?.start ?? end
         const summaryPrefixLength = summaryLine.value.indexOf(">") + 1
         const summaryStart = summaryLine.start + summaryPrefixLength
-        const summaryEnd = summaryStart + (summary[2]?.length ?? 0)
+        const summaryEnd = summaryStart + (summary[3]?.length ?? 0)
         blocks.push({
           kind: {
             oneofKind: "disclosure",
@@ -278,6 +292,8 @@ function parseRegion(
               summary: mapText(legacy, summaryStart, summaryEnd),
               kind:
                 summary[1] === "progress" ? BlockDisclosure_Kind.PROGRESS : BlockDisclosure_Kind.DEFAULT,
+              activityKind:
+                disclosureActivityKinds[summary[2] ?? ""] ?? BlockDisclosure_ActivityKind.UNSPECIFIED,
               initiallyOpen: details[1] !== undefined,
               children: coalesceImages(
                 parseRegion(markdown, legacy, summaryLine.next, childrenEnd, context),

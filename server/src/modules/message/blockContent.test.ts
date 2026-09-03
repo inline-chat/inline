@@ -1,4 +1,5 @@
 import {
+  BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   BlockList_Kind,
   BlockTable_Alignment,
@@ -39,6 +40,7 @@ describe("block content parser", () => {
       { blocks: [{ kind: { oneofKind: "code", code: { text: range, language: "swift" } } }] },
       { blocks: [{ kind: { oneofKind: "disclosure", disclosure: {
         kind: BlockDisclosure_Kind.DEFAULT,
+        activityKind: BlockDisclosure_ActivityKind.UNSPECIFIED,
         summary: range, children: [{ kind: { oneofKind: "separator", separator: {} } }],
       } } }] },
       { blocks: [{ kind: { oneofKind: "quote", quote: {
@@ -290,6 +292,40 @@ describe("block content parser", () => {
     expect(disclosure.children.map(kind)).toEqual(["paragraph", "disclosure"])
     const nested = disclosure.children[1]
     expect(nested?.kind.oneofKind === "disclosure" ? nested.kind.disclosure.children.map(kind) : []).toEqual(["code"])
+  })
+
+  test("preserves semantic activity disclosures through parsing and encoding", () => {
+    const markdown = [
+      "<details open>",
+      '<summary activity="reasoning">Mapping the renderer</summary>',
+      "Provider reasoning content.",
+      "<details>",
+      '<summary activity="explore">Explored</summary>',
+      "Read `stream_ui.rs`",
+      "</details>",
+      "</details>",
+    ].join("\n")
+    const parsed = parseBlockContent(markdown)!
+    const reasoning = parsed.blockContent.blocks[0]
+    expect(reasoning?.kind.oneofKind).toBe("disclosure")
+    if (reasoning?.kind.oneofKind !== "disclosure") return
+    expect(reasoning.kind.disclosure.activityKind).toBe(BlockDisclosure_ActivityKind.REASONING)
+    const exploration = reasoning.kind.disclosure.children[1]
+    expect(exploration?.kind.oneofKind).toBe("disclosure")
+    if (exploration?.kind.oneofKind !== "disclosure") return
+    expect(exploration.kind.disclosure.activityKind).toBe(BlockDisclosure_ActivityKind.EXPLORE)
+
+    const encoded = encodeBlockContentToMarkdown({
+      text: parseMarkdown(markdown).text,
+      entities: { entities: parseMarkdown(markdown).entities },
+      blockContent: parsed.blockContent,
+    })
+    expect(encoded).toContain('<summary activity="reasoning">Mapping the renderer</summary>')
+    expect(encoded).toContain('<summary activity="explore">Explored</summary>')
+    const reparsed = parseBlockContent(encoded)?.blockContent.blocks[0]
+    expect(reparsed?.kind.oneofKind).toBe("disclosure")
+    if (reparsed?.kind.oneofKind !== "disclosure") return
+    expect(reparsed.kind.disclosure.activityKind).toBe(BlockDisclosure_ActivityKind.REASONING)
   })
 
   test("recognizes footer and leaves arbitrary HTML literal", () => {

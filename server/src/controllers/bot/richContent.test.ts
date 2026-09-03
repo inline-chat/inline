@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   BlockList_Kind,
   BlockTable_Alignment,
@@ -206,6 +207,7 @@ describe("Bot rich content projection", () => {
             disclosure: {
               summary: { offset: 9n, length: 7n },
               kind: BlockDisclosure_Kind.PROGRESS,
+              activityKind: BlockDisclosure_ActivityKind.UNSPECIFIED,
               initiallyOpen: true,
               children: [{
                 kind: {

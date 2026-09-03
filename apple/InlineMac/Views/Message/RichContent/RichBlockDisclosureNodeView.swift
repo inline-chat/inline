@@ -3,6 +3,12 @@ import InlineKit
 
 final class RichBlockDisclosureNodeView: RichBlockRenderableView {
   private let surface = RichBlockTextSurface(frame: .zero)
+  private let activityIcon: NSImageView = {
+    let view = NSImageView()
+    view.symbolConfiguration = .init(pointSize: 11, weight: .regular)
+    view.setAccessibilityElement(false)
+    return view
+  }()
   private let chevron: NSImageView = {
     let view = NSImageView()
     view.symbolConfiguration = .init(pointSize: 11, weight: .regular)
@@ -23,6 +29,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
   private var path = BlockContentPath()
   private var expanded = false
   private var progress = false
+  private var activity: RichBlockActivityKind?
   private var isRTL = false
   private var onToggle: ((BlockContentPath, Bool) -> Void)?
 
@@ -33,6 +40,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     toggleButton.target = self
     toggleButton.action = #selector(toggleDisclosure)
     addSubview(toggleButton)
+    addSubview(activityIcon)
     addSubview(surface)
     addSubview(chevron)
     addSubview(shimmer)
@@ -45,15 +53,27 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
 
   override func apply(node: RichBlockLayoutPlan.Node, context: RichBlockRenderContext) {
     guard case let .text(text) = node.kind,
-          case let .disclosureSummary(progress, expanded) = text.role
+          case let .disclosureSummary(progress, expanded, activity) = text.role
     else { return }
-    let attributed = context.text(for: text, maximumWidth: RichBlockDisclosureMetrics.titleViewportWidth(containerWidth: node.frame.width))
+    let attributed = context.text(
+      for: text,
+      maximumWidth: RichBlockDisclosureMetrics.titleViewportWidth(
+        containerWidth: node.frame.width,
+        hasActivityIcon: activity != nil
+      )
+    )
     self.path = node.path
     self.progress = progress
+    self.activity = activity
     self.expanded = expanded
     isRTL = text.isRTL
     onToggle = context.interactions.onDisclosureToggle
     chevron.contentTintColor = context.palette.secondary
+    activityIcon.contentTintColor = context.palette.secondary
+    activityIcon.image = activity.flatMap {
+      NSImage(systemSymbolName: $0.symbolName, accessibilityDescription: nil)
+    }
+    activityIcon.isHidden = activity == nil
     updateChevron()
     surface.apply(
       text: attributed,
@@ -88,6 +108,9 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     super.prepareForReuse()
     surface.configurePlainSingleClick(nil)
     onToggle = nil
+    activity = nil
+    activityIcon.image = nil
+    activityIcon.isHidden = true
   }
 
   override func layout() {
@@ -96,10 +119,12 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     let horizontalLayout = RichBlockDisclosureMetrics.horizontalLayout(
       bounds: bounds,
       intrinsicTitleWidth: surface.measuredWidth,
-      isRTL: isRTL
+      isRTL: isRTL,
+      hasActivityIcon: activity != nil
     )
     surface.frame = horizontalLayout.titleFrame
     chevron.frame = horizontalLayout.chevronFrame
+    activityIcon.frame = horizontalLayout.activityIconFrame ?? .zero
     shimmer.frame = surface.frame
     surface.layoutSubtreeIfNeeded()
     shimmer.updateMask(from: surface)

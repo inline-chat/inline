@@ -27,6 +27,7 @@ type InlineStyle = { open: string; close: string }
 const literalHTMLToken = /<\/?[A-Za-z][A-Za-z0-9:-]*(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>/y
 const literalHTMLDelimiters = [["<!--", "-->"], ["<?", "?>"], ["<![CDATA[", "]]>"]] as const
 const structuralTags = new Set(["<details>", "<details open>", "</details>", "<summary>", '<summary kind="progress">', "</summary>", "<footer>", "</footer>"])
+const disclosureSummaryTag = /^<summary(?: kind="progress")?(?: activity="(?:reasoning|explore|read|search|edit|delete|move|command|web|tool)")?>$/
 
 /** Keep unsupported HTML tokens literal, including known-looking style tags
  * inside quoted attributes/comments. Only the explicit style/block vocabulary
@@ -46,7 +47,7 @@ export function literalHTMLTokenEnd(text: string, start: number, sourceEnd = tex
   }
   literalHTMLToken.lastIndex = start
   const match = literalHTMLToken.exec(text)
-  if (!match || start + match[0].length > sourceEnd || structuralTags.has(match[0])
+  if (!match || start + match[0].length > sourceEnd || structuralTags.has(match[0]) || disclosureSummaryTag.test(match[0])
     || inlineStyleTags.some((style) => style.open === match[0] || style.close === match[0])) return undefined
   return start + match[0].length
 }
