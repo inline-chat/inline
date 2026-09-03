@@ -22,6 +22,11 @@ struct DeveloperPlaygroundView: View {
           )
           .tag(DeveloperPlaygroundScope.notifications)
           Label(
+            DeveloperPlaygroundScope.agentSetupFailures.title,
+            systemImage: DeveloperPlaygroundScope.agentSetupFailures.iconName
+          )
+          .tag(DeveloperPlaygroundScope.agentSetupFailures)
+          Label(
             DeveloperPlaygroundScope.messageViews.title,
             systemImage: DeveloperPlaygroundScope.messageViews.iconName
           )
@@ -51,6 +56,8 @@ struct DeveloperPlaygroundView: View {
         DeveloperPlaygroundAvatarView()
       case .notifications:
         DeveloperPlaygroundNotificationView()
+      case .agentSetupFailures:
+        DeveloperPlaygroundAgentSetupView()
       case .messageViews:
         DeveloperPlaygroundMessageView(configuration: $messageConfiguration)
       case .sidebarRows:
@@ -81,6 +88,7 @@ struct DeveloperPlaygroundView: View {
 private enum DeveloperPlaygroundScope: String, CaseIterable, Identifiable {
   case avatars
   case notifications
+  case agentSetupFailures
   case messageViews
   case sidebarRows
   case invitePageExperiment
@@ -93,6 +101,8 @@ private enum DeveloperPlaygroundScope: String, CaseIterable, Identifiable {
       "Avatars"
     case .notifications:
       "Notifications"
+    case .agentSetupFailures:
+      "Agent Setup Errors"
     case .messageViews:
       "Message Views"
     case .sidebarRows:
@@ -108,6 +118,8 @@ private enum DeveloperPlaygroundScope: String, CaseIterable, Identifiable {
       "person.crop.circle"
     case .notifications:
       "bell.badge"
+    case .agentSetupFailures:
+      "exclamationmark.triangle"
     case .messageViews:
       "bubble.left.and.bubble.right"
     case .sidebarRows:

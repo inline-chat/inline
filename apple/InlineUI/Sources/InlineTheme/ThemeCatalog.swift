@@ -2,6 +2,7 @@ import Foundation
 
 public enum AppThemePreset: String, CaseIterable, Codable, Identifiable, Sendable {
   case system
+  case pink
   case sunset
   case midnight
   case ash
@@ -14,6 +15,7 @@ public enum AppThemePreset: String, CaseIterable, Codable, Identifiable, Sendabl
   public var title: String {
     switch self {
     case .system: "System"
+    case .pink: "Pink"
     case .sunset: "Sunset"
     case .midnight: "Midnight"
     case .ash: "Ash"
@@ -201,6 +203,10 @@ public enum ThemeCatalog {
       ThemePalette(primary: .init(rgb: 0x00A7F8), canvas: systemCanvas)
     case (.system, .dark):
       ThemePalette(primary: .init(rgb: 0x0A84FF), canvas: systemCanvas)
+    case (.pink, .light):
+      ThemePalette(primary: .init(rgb: 0xFD4F7E), canvas: .init(rgb: 0xFFF5F7))
+    case (.pink, .dark):
+      ThemePalette(primary: .init(rgb: 0xFD4F7E), canvas: .init(rgb: 0x241116))
     case (.sunset, .light):
       ThemePalette(primary: .init(rgb: 0xC94D24), canvas: .init(rgb: 0xFFF5F0))
     case (.sunset, .dark):

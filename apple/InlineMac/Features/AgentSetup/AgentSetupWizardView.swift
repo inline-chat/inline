@@ -1,3 +1,4 @@
+import InlineCLIInstaller
 import SwiftUI
 
 struct AgentSetupWizardView: View {
@@ -25,19 +26,33 @@ struct AgentSetupWizardView: View {
         onBack: model.goBack
       )
     }
-    .alert(
-      "Replace Existing Harness Setup?",
-      isPresented: $showsReplacementConfirmation
+    .agentSetupReplacementConfirmation(
+      isPresented: $showsReplacementConfirmation,
+      presentation: model.failure?.presentation,
+      onConfirm: model.retryWithReplacement
+    )
+  }
+}
+
+extension View {
+  func agentSetupReplacementConfirmation(
+    isPresented: Binding<Bool>,
+    presentation: AgentSetupFailurePresentation?,
+    onConfirm: @escaping () -> Void
+  ) -> some View {
+    let title = presentation?.replacementConfirmationTitle ?? "Replace Existing Harness Setup?"
+    let message = presentation?.replacementConfirmationMessage
+      ?? "This may replace the selected harness’s existing Inline plugin or credential and bot mapping. It will not delete bots or change other harnesses. Continue?"
+    let actionLabel = presentation?.replacementConfirmationActionLabel ?? "Replace and Retry"
+
+    return alert(
+      Text(verbatim: title),
+      isPresented: isPresented
     ) {
-      Button("Replace and Retry", role: .destructive) {
-        model.retryWithReplacement()
-      }
+      Button(actionLabel, role: .destructive, action: onConfirm)
       Button("Cancel", role: .cancel) {}
     } message: {
-      Text(
-        "This may replace the selected harness’s existing Inline plugin or credential and bot mapping. "
-          + "It will not delete bots or change other harnesses. Continue?"
-      )
+      Text(verbatim: message)
     }
   }
 }

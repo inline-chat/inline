@@ -21,10 +21,6 @@ import { validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server
 import { InlineError } from "@in/server/types/errors"
 import { providerAuthConfig, type ProviderAuthConfig } from "./config"
 import { verifyAppleIdToken, verifyGoogleIdToken, type ProviderClaims } from "./claims"
-import { fetchBinary } from "@inline-chat/url-preview"
-import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
-import { getFileByUniqueId } from "@in/server/db/models/files"
-import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 import { Log } from "@in/server/utils/log"
 import { createAppCodeChallenge, isValidAppCodeVerifier } from "./appHandoff"
 import { applyAppleAuthorizationParameters } from "./authorizationUrl"
@@ -283,7 +279,7 @@ export async function attachProviderAfterEmailProof(input: {
     userId: input.userId,
   })
   if (userId !== input.userId) throw new Error("Provider identity belongs to another Inline account")
-  await applyProviderProfile(userId, decryptClaims(input.attempt))
+  await applyProviderNames(userId, decryptClaims(input.attempt))
   const result = await createProviderResult(input.attempt, userId)
   const attempt = await storeCompletedAttempt(input.attempt, result)
   return { attempt, result }
@@ -405,7 +401,7 @@ async function completeProviderClaims(
   const existingUserId = await ProviderAuthModel.findIdentity(claims.provider, subjectHash)
   if (existingUserId) {
     if (claims.provider === "apple") {
-      await applyProviderProfile(existingUserId, claims)
+      await applyProviderNames(existingUserId, claims)
     }
     const result = await createProviderResult(attempt, existingUserId)
     const updated = await storeCompletedAttempt(attempt, result)
@@ -435,7 +431,7 @@ async function resolveTrustedClaims(
   try {
     const { user } = await getOrCreateUserByEmailForSignup(claims.email!, inviteCode)
     const ownerId = await ProviderAuthModel.attachIdentity({ provider: claims.provider, subjectHash, userId: user.id })
-    await applyProviderProfile(ownerId, claims)
+    await applyProviderNames(ownerId, claims)
     const result = await createProviderResult(attempt, ownerId)
     const updated = await storeCompletedAttempt(attempt, result)
     return { kind: "login", attempt: updated, result }
@@ -489,7 +485,7 @@ async function createProviderResult(
   return { userId, user: encodeFullUserInfo(user) }
 }
 
-async function applyProviderProfile(userId: number, claims: ProviderClaims): Promise<void> {
+async function applyProviderNames(userId: number, claims: ProviderClaims): Promise<void> {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!user) throw new Error("Provider user does not exist")
   const values = {
@@ -498,35 +494,6 @@ async function applyProviderProfile(userId: number, claims: ProviderClaims): Pro
   }
   if (values.firstName !== user.firstName || values.lastName !== user.lastName) {
     await db.update(users).set(values).where(eq(users.id, userId))
-  }
-  if (!user.photoFileId && claims.photoUrl) {
-    await importProviderPhoto(userId, claims.photoUrl).catch((cause) => {
-      log.warn("Provider profile photo import failed", { userId, provider: claims.provider, cause })
-    })
-  }
-}
-
-async function importProviderPhoto(userId: number, photoUrl: string): Promise<void> {
-  const image = await fetchBinary(photoUrl, {
-    timeoutMs: 7_500,
-    maxRedirects: 1,
-    maxBytes: 1 * 1024 * 1024,
-    allowedContentTypes: ["image/jpeg", "image/png", "image/webp"],
-  })
-  if (!image) return
-  const finalUrl = new URL(image.finalUrl)
-  if (
-    finalUrl.protocol !== "https:" ||
-    !(finalUrl.hostname === "googleusercontent.com" || finalUrl.hostname.endsWith(".googleusercontent.com"))
-  ) return
-  const extension = image.contentType === "image/png" ? "png" : image.contentType === "image/webp" ? "webp" : "jpg"
-  const file = new File([toArrayBufferBackedBytes(image.bytes)], `provider-profile.${extension}`, {
-    type: image.contentType,
-  })
-  const uploaded = await uploadPhoto(file, { userId })
-  const dbFile = await getFileByUniqueId(uploaded.fileUniqueId)
-  if (dbFile) {
-    await db.update(users).set({ photoFileId: dbFile.id }).where(eq(users.id, userId))
   }
 }
 

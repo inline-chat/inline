@@ -259,6 +259,110 @@ struct CLIAgentSetupRunnerTests {
     #expect(CLIAgentSetupRunner.safeStructuredText(prose, maximumScalars: 1_000) == prose)
   }
 
+  @Test("turns an incompatible OpenClaw probe into an update message")
+  func presentsOutdatedOpenClaw() {
+    let failure = AgentSetupFailure(
+      code: "plugin_probe_failed",
+      message: "could not inspect the OpenClaw Inline plugin: Invalid config; error: unknown command 'inspect'",
+      recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+
+    #expect(failure.presentation.title == "OpenClaw Needs an Update")
+    #expect(failure.presentation.detail.contains("too old"))
+    #expect(failure.presentation.message.contains("installed more than once"))
+    #expect(!failure.presentation.message.contains("unknown command"))
+    #expect(failure.presentation.actionLabel == "Open Update Instructions")
+    #expect(failure.presentation.actionURL?.host == "docs.openclaw.ai")
+  }
+
+  @Test("explains a broken OpenClaw plugin without hiding the diagnostic")
+  func presentsBrokenOpenClawPlugin() {
+    let rawMessage = "OpenClaw Inline plugin failed to load: Cannot find module '/local/plugin.js'"
+    let failure = AgentSetupFailure(
+      code: "plugin_probe_failed",
+      message: rawMessage,
+      recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+
+    #expect(failure.presentation.title == "OpenClaw Plugin Couldn’t Load")
+    #expect(failure.presentation.message.contains("Update OpenClaw and its Inline plugin"))
+    #expect(failure.message == rawMessage)
+  }
+
+  @Test("explains rejected OpenClaw configuration")
+  func presentsInvalidOpenClawConfiguration() {
+    let failure = AgentSetupFailure(
+      code: "plugin_probe_failed",
+      message: "OpenClaw returned Invalid config for channels.inline",
+      recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+
+    #expect(failure.presentation.title == "OpenClaw Configuration Needs Attention")
+    #expect(failure.presentation.message.contains("Technical Details"))
+  }
+
+  @Test("turns an incompatible Amp provider probe into an update message")
+  func presentsOutdatedAmp() {
+    let failure = AgentSetupFailure(
+      code: "amp_cli_incompatible",
+      message: "The pinned Amp ACP adapter is incompatible with the installed Amp CLI; update Amp or Inline, then rerun setup",
+      recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+
+    #expect(failure.presentation.title == "Amp Needs an Update")
+    #expect(failure.presentation.detail.contains("too old"))
+    #expect(failure.presentation.message.contains("selecting an older copy"))
+    #expect(failure.presentation.actionLabel == "Open Update Instructions")
+    #expect(failure.presentation.actionURL?.host == "ampcode.com")
+  }
+
+  @Test("distinguishes a verified Hermes adapter update from replacement")
+  func presentsHermesAdapterUpdate() {
+    let failure = AgentSetupFailure(
+      code: "plugin_update_required",
+      message: "The existing Hermes Inline bot identity was verified and will be preserved, but its legacy adapter must be updated.",
+      recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+
+    #expect(failure.presentation.title == "Hermes Adapter Needs an Update")
+    #expect(failure.presentation.message.contains("bot identity will be preserved"))
+    #expect(failure.presentation.actionURL?.path == "/docs/hermes")
+  }
+
+  @Test("warns when a Hermes credential cannot be identified")
+  func presentsHermesReplacementConfirmation() {
+    let failure = AgentSetupFailure(
+      code: "setup_conflict",
+      message: "Hermes cannot verify whether an existing Inline credential needs to be preserved; install or update the Inline Hermes adapter, or rerun with --replace to explicitly allow replacement.",
+      recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+
+    #expect(failure.presentation.title == "Hermes Found an Existing Connection")
+    #expect(failure.presentation.detail.contains("stopped before changing"))
+    #expect(failure.presentation.message.contains("Recommended: update"))
+    #expect(failure.presentation.actionLabel == "Open Update Steps (Recommended)")
+    #expect(failure.presentation.replacementActionLabel == "Replace Existing Connection…")
+    #expect(failure.presentation.replacementConfirmationTitle == "Replace Existing Hermes Connection?")
+    #expect(failure.presentation.replacementConfirmationMessage?.contains("previous bot will not be deleted") == true)
+    #expect(failure.presentation.replacementConfirmationActionLabel == "Replace and Continue")
+    #expect(failure.supportsConfirmedReplacement)
+  }
+
+  @Test("keeps unknown setup failures generic")
+  func presentsGenericFailure() {
+    let failure = AgentSetupFailure(
+      code: "unexpected_failure",
+      message: "The provider closed the connection.",
+      recoveryURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+
+    #expect(failure.presentation.title == "Setup Couldn’t Finish")
+    #expect(failure.presentation.message == failure.message)
+    #expect(failure.presentation.label == "What Happened")
+    #expect(failure.presentation.actionLabel == nil)
+    #expect(failure.presentation.actionURL == nil)
+  }
+
   @Test("accepts versionless released errors and rejects future error protocols")
   func validatesStructuredErrorProtocol() throws {
     let released = Data(

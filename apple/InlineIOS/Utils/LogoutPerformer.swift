@@ -87,7 +87,9 @@ enum LogoutPerformer {
 
     navigation.reset()
     onboardingNavigation.reset()
-    router.reset()
+    // The scene registry also resets on account changes; preserve here too in case
+    // logout completes before that auth observation is delivered.
+    router.reset(preservingSelectedTab: true)
     mainRouter.setRoute(route: .onboarding)
   }
 
