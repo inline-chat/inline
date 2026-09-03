@@ -255,7 +255,9 @@ actor InlineProtocolOutboundWriter {
   }
 }
 
-public enum InlineProtocolV3ConnectionError: Error, Equatable, Sendable {
+public enum InlineProtocolV3ConnectionError:
+  Error, Equatable, PrivacySafeErrorCategoryProviding, Sendable
+{
   case authorizationInvalidated
   case closed
   case commitOutcomeUnknown
@@ -271,6 +273,37 @@ public enum InlineProtocolV3ConnectionError: Error, Equatable, Sendable {
   case timeout
   case unexpectedResponse
   case updateBufferOverflow
+
+  public var privacySafeErrorCategory: String {
+    switch self {
+    case .authorizationInvalidated:
+      "realtime_v3:authorization_invalidated"
+    case .closed:
+      "realtime_v3:closed"
+    case .commitOutcomeUnknown:
+      "realtime_v3:commit_outcome_unknown"
+    case .invalidKey:
+      "realtime_v3:invalid_key"
+    case .outboundBufferOverflow:
+      "realtime_v3:outbound_buffer_overflow"
+    case .protocolFailure:
+      "realtime_v3:protocol_failure"
+    case .rejectedBeforeExecution:
+      "realtime_v3:rejected_before_execution"
+    case .requestCapacityExceeded:
+      "realtime_v3:request_capacity_exceeded"
+    case .temporaryAuthorizationRotationDue:
+      "realtime_v3:temporary_authorization_rotation_due"
+    case .rpc(let error):
+      "realtime_v3:rpc:\(error.errorCode.rawValue):\(error.code)"
+    case .timeout:
+      "realtime_v3:timeout"
+    case .unexpectedResponse:
+      "realtime_v3:unexpected_response"
+    case .updateBufferOverflow:
+      "realtime_v3:update_buffer_overflow"
+    }
+  }
 }
 
 public struct InlineProtocolV3Options: Sendable {

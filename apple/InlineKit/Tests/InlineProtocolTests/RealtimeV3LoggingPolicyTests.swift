@@ -61,4 +61,28 @@ struct RealtimeV3LoggingPolicyTests {
       ) == .error
     )
   }
+
+  @Test("connection failures expose bounded privacy-safe categories")
+  func connectionFailuresExposePrivacySafeCategories() {
+    #expect(
+      InlineProtocolV3ConnectionError.invalidKey.privacySafeErrorCategory
+        == "realtime_v3:invalid_key"
+    )
+    #expect(
+      InlineProtocolV3ConnectionError.protocolFailure.privacySafeErrorCategory
+        == "realtime_v3:protocol_failure"
+    )
+    #expect(
+      InlineProtocolV3ConnectionError.unexpectedResponse.privacySafeErrorCategory
+        == "realtime_v3:unexpected_response"
+    )
+
+    var rpcError = RpcError()
+    rpcError.errorCode = .peerIDInvalid
+    rpcError.code = 400
+    rpcError.message = "private-message-sentinel"
+    let rpcCategory = InlineProtocolV3ConnectionError.rpc(rpcError).privacySafeErrorCategory
+    #expect(rpcCategory == "realtime_v3:rpc:5:400")
+    #expect(!rpcCategory.contains(rpcError.message))
+  }
 }
