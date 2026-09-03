@@ -10,6 +10,7 @@
   --site-chrome-docs-logo-filter: invert(1);
   --site-chrome-wordmark-filter: invert(1);
   --site-chrome-beta-filter: none;
+  --site-chrome-brand-opacity: 0.56;
   color-scheme: light dark;
 }
 
@@ -85,7 +86,7 @@
 
 .site-footer__content {
   width: min(100%, 976px);
-  padding: 28px 0 32px;
+  padding: 28px 0 42px;
   box-sizing: border-box;
 }
 
@@ -116,7 +117,7 @@
   max-width: none;
   height: auto;
   filter: var(--site-chrome-wordmark-filter);
-  opacity: 0.64;
+  opacity: var(--site-chrome-brand-opacity);
 }
 
 .site-footer__beta {
@@ -125,6 +126,7 @@
   height: 13px;
   flex: none;
   filter: var(--site-chrome-beta-filter);
+  opacity: var(--site-chrome-brand-opacity);
   transform: translateY(1px);
 }
 
@@ -219,6 +221,7 @@
     --site-chrome-docs-logo-filter: none;
     --site-chrome-wordmark-filter: none;
     --site-chrome-beta-filter: invert(1);
+    --site-chrome-brand-opacity: 0.7;
   }
 }
 
@@ -260,12 +263,12 @@
   }
 
   .site-footer__content {
-    padding: 24px 0 28px;
+    padding: 24px 0 38px;
   }
 
   .site-footer__grid {
-    grid-template-columns: 1fr;
-    gap: 28px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 22px;
   }
 }
 

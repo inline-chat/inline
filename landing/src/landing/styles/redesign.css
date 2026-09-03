@@ -185,7 +185,7 @@
 }
 
 .landing-redesign__primary-action:hover {
-  opacity: 0.72;
+  opacity: 0.9;
 }
 
 .landing-redesign__secondary-action:hover {
@@ -194,7 +194,7 @@
 
 .landing-redesign__primary-action:active,
 .landing-redesign__secondary-action:active {
-  opacity: 0.56;
+  opacity: 0.76;
 }
 
 .landing-redesign__availability {
@@ -654,9 +654,17 @@
 
   .landing-redesign__actions {
     align-items: flex-start;
-    flex-direction: column;
-    gap: 11px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 9px;
     margin-top: 38px;
+  }
+
+  .landing-redesign__primary-action,
+  .landing-redesign__secondary-action {
+    padding-right: 10px;
+    padding-left: 10px;
+    font-size: 14px;
   }
 
   .landing-redesign__story {

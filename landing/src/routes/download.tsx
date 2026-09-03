@@ -101,6 +101,10 @@ const styles = stylex.create({
     minHeight: "100vh",
     display: "flex",
     flexDirection: "column",
+    backgroundColor: {
+      default: "#fff",
+      "@media (prefers-color-scheme: dark)": "#111",
+    },
     color: {
       default: "#000",
       "@media (prefers-color-scheme: dark)": "rgba(255,255,255,0.9)",
@@ -233,10 +237,13 @@ const styles = stylex.create({
   },
   actions: {
     display: "flex",
-    flexDirection: "column",
+    flexDirection: "row",
     alignItems: "stretch",
-    gap: 10,
-    width: 331,
+    gap: {
+      default: 10,
+      "@media (max-width: 380px)": 6,
+    },
+    width: "min(430px, calc(100vw - 32px))",
     maxWidth: "100%",
     marginBottom: 34,
   },
@@ -246,10 +253,13 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 10,
-    padding: "0 18px",
+    padding: {
+      default: "0 14px",
+      "@media (max-width: 560px)": "0 10px",
+      "@media (max-width: 380px)": "0 8px",
+    },
     backgroundColor: {
       default: "#000",
-      ":hover": "rgba(0, 0, 0, 0.82)",
       "@media (prefers-color-scheme: dark)": "rgba(255, 255, 255, 0.92)",
     },
     color: {
@@ -258,10 +268,20 @@ const styles = stylex.create({
     },
     textDecoration: "none",
     fontFamily: '"Days One", "DaysOne-Regular", system-ui, sans-serif',
-    fontSize: 18,
+    fontSize: {
+      default: 14,
+      "@media (max-width: 560px)": 13,
+      "@media (max-width: 380px)": 12,
+    },
     lineHeight: "22px",
     fontWeight: 400,
-    transition: "background-color 0.15s ease-out, transform 0.15s ease-out",
+    whiteSpace: "nowrap",
+    flex: "1 1 0",
+    opacity: {
+      default: 1,
+      ":hover": 0.9,
+    },
+    transition: "opacity 0.12s ease-out, transform 0.15s ease-out",
     transform: {
       default: "scale(1)",
       ":active": "scale(0.98)",
@@ -273,7 +293,11 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 10,
-    padding: "0 18px",
+    padding: {
+      default: "0 14px",
+      "@media (max-width: 560px)": "0 10px",
+      "@media (max-width: 380px)": "0 8px",
+    },
     borderWidth: 2,
     borderStyle: "solid",
     borderColor: {
@@ -287,9 +311,15 @@ const styles = stylex.create({
     color: "inherit",
     textDecoration: "none",
     fontFamily: '"Days One", "DaysOne-Regular", system-ui, sans-serif',
-    fontSize: 18,
+    fontSize: {
+      default: 14,
+      "@media (max-width: 560px)": 13,
+      "@media (max-width: 380px)": 12,
+    },
     lineHeight: "22px",
     fontWeight: 400,
+    whiteSpace: "nowrap",
+    flex: "1 1 0",
     transition: "background-color 0.15s ease-out, transform 0.15s ease-out",
     transform: {
       default: "scale(1)",

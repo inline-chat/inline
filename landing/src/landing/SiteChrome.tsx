@@ -56,7 +56,7 @@ const FOOTER_GROUPS = [
     links: [
       { label: "Privacy", href: "/legal/privacy" },
       { label: "Terms", href: "/legal/terms" },
-      { label: "Legal overview", href: "/legal" },
+      { label: "Legal overview", href: "/legal", icon: "arrow" },
     ],
   },
 ] as const
@@ -71,6 +71,14 @@ function FooterPlayIcon() {
     >
       <circle cx="7" cy="7" r="5.75" stroke="currentColor" strokeWidth="1.25" />
       <path d="M5.8 4.65 9.15 7 5.8 9.35Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function FooterExternalArrowIcon() {
+  return (
+    <svg className="site-footer__link-icon" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path d="M3 9 9 3M4 3h5v5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
     </svg>
   )
 }
@@ -141,7 +149,7 @@ export function SiteFooter({ ariaLabel = "Inline footer" }: { ariaLabel?: string
                       rel={"external" in link && link.external ? "noopener noreferrer" : undefined}
                     >
                       <span>{link.label}</span>
-                      {"icon" in link ? <FooterPlayIcon /> : null}
+                      {"icon" in link ? link.icon === "play" ? <FooterPlayIcon /> : <FooterExternalArrowIcon /> : null}
                     </a>
                   ))}
                   {group.title === "Connect" ? <span className="site-footer__copyright">© 2026</span> : null}
