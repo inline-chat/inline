@@ -10,8 +10,8 @@ description: "Local bridge ownership and security."
 - Existing chat bindings override the default workspace.
 - `--folder` selects a narrower workspace.
 - Codex is the primary local-bridge alpha path.
-- Claude, OpenCode, and Amp are experimental.
-- OpenClaw and Hermes are experimental gateway integrations.
+- Claude and OpenCode are beta; Amp is experimental.
+- Hermes is beta; OpenClaw is experimental.
 
 ## Security
 

@@ -65,10 +65,10 @@ inline agents setup --target codex
 Support status:
 
 - Codex: alpha.
-- Claude Code: experimental.
-- OpenCode: experimental.
+- Claude Code: beta.
+- OpenCode: beta.
 - Amp: experimental.
-- Hermes Agent: experimental.
+- Hermes Agent: beta.
 - OpenClaw: experimental.
 
 ## Verify
