@@ -4,40 +4,33 @@ import Testing
 
 @Suite("Getting-started visibility")
 struct GettingStartedVisibilityTests {
-  @Test("New signup remains visible until dismissal")
-  func newSignupPersists() throws {
+  @Test("The page is visible by default")
+  func startsVisible() throws {
     try withUserDefaults { defaults in
-      let userID: Int64 = 42
-
-      GettingStartedVisibility.prepare(for: userID, isNewSignup: true, defaults: defaults)
-      GettingStartedVisibility.prepare(for: userID, isNewSignup: false, defaults: defaults)
-
-      #expect(GettingStartedVisibility.shouldShow(for: userID, defaults: defaults))
+      #expect(GettingStartedVisibility.shouldShow(defaults: defaults))
     }
   }
 
-  @Test("Existing user is never shown the page")
-  func existingUserStaysHidden() throws {
-    try withUserDefaults { defaults in
-      let userID: Int64 = 43
-
-      GettingStartedVisibility.prepare(for: userID, isNewSignup: false, defaults: defaults)
-      GettingStartedVisibility.prepare(for: userID, isNewSignup: true, defaults: defaults)
-
-      #expect(!GettingStartedVisibility.shouldShow(for: userID, defaults: defaults))
-    }
-  }
-
-  @Test("Dismissal cannot be undone by a later login")
-  func dismissalIsPermanent() throws {
+  @Test("Legacy existing-user classification does not suppress the page")
+  func legacyClassificationIsIgnored() throws {
     try withUserDefaults { defaults in
       let userID: Int64 = 44
 
-      GettingStartedVisibility.prepare(for: userID, isNewSignup: true, defaults: defaults)
-      GettingStartedVisibility.dismiss(for: userID, defaults: defaults)
-      GettingStartedVisibility.prepare(for: userID, isNewSignup: true, defaults: defaults)
+      defaults.set(false, forKey: "gettingStarted.isVisible.\(userID)")
 
-      #expect(!GettingStartedVisibility.shouldShow(for: userID, defaults: defaults))
+      #expect(GettingStartedVisibility.shouldShow(defaults: defaults))
+    }
+  }
+
+  @Test("Dismissal hides the page globally")
+  func dismissalIsGlobal() throws {
+    try withUserDefaults { defaults in
+      defaults.set(
+        true,
+        forKey: GettingStartedVisibility.dismissalPreferenceKey
+      )
+
+      #expect(!GettingStartedVisibility.shouldShow(defaults: defaults))
     }
   }
 

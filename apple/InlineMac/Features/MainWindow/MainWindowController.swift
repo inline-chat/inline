@@ -230,9 +230,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       persistsActiveSpace: true,
       restoresActiveSpace: restoresActiveSpace
     )
-    let shouldShowGettingStarted = dependencies.auth.getCurrentUserId().map {
-      GettingStartedVisibility.shouldShow(for: $0)
-    } ?? false
+    let hasValidUser = (dependencies.auth.getCurrentUserId() ?? 0) > 0
+    let shouldShowGettingStarted = hasValidUser && GettingStartedVisibility.shouldShow()
     if destination == nil,
        shouldShowGettingStarted || GettingStartedPreview.isForced
     {

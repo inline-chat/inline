@@ -15,9 +15,8 @@ struct EmptyRouteView: View {
     @Bindable var nav = nav
 
     ZStack {
-      if let userID = auth.currentUserId {
+      if let userID = auth.currentUserId, userID > 0 {
         EmptyRouteCenterContent(
-          userID: userID,
           openCommandBar: { nav.openCommandBar() },
           perform: perform
         )
@@ -110,26 +109,12 @@ struct EmptyRouteView: View {
 }
 
 private struct EmptyRouteCenterContent: View {
-  let userID: Int64
   let openCommandBar: () -> Void
   let perform: @MainActor (GettingStartedAction) async -> Void
 
-  @AppStorage private var showsGettingStarted: Bool
+  @AppStorage(GettingStartedVisibility.dismissalPreferenceKey)
+  private var isGettingStartedDismissed = false
   @State private var dismissedForcedPreview = false
-
-  init(
-    userID: Int64,
-    openCommandBar: @escaping () -> Void,
-    perform: @escaping @MainActor (GettingStartedAction) async -> Void
-  ) {
-    self.userID = userID
-    self.openCommandBar = openCommandBar
-    self.perform = perform
-    _showsGettingStarted = AppStorage(
-      wrappedValue: false,
-      GettingStartedVisibility.preferenceKey(for: userID)
-    )
-  }
 
   var body: some View {
     ZStack {
@@ -149,14 +134,13 @@ private struct EmptyRouteCenterContent: View {
   }
 
   private var shouldShowGettingStarted: Bool {
-    showsGettingStarted || (GettingStartedPreview.isForced && !dismissedForcedPreview)
+    !isGettingStartedDismissed || (GettingStartedPreview.isForced && !dismissedForcedPreview)
   }
 
   private func dismiss() {
-    GettingStartedVisibility.dismiss(for: userID)
     withAnimation(.easeOut(duration: 0.2)) {
       dismissedForcedPreview = true
-      showsGettingStarted = false
+      isGettingStartedDismissed = true
     }
   }
 }

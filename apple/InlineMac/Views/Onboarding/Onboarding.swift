@@ -1,6 +1,5 @@
 import Auth
 import InlineKit
-import InlineMacUI
 import SwiftUI
 
 struct Onboarding: View {
@@ -98,10 +97,6 @@ struct Onboarding: View {
         return
       }
       AppSettings.shared.resolveSidebarModeForAccount(createdAt: completion.userCreatedAt)
-      GettingStartedVisibility.prepare(
-        for: completion.userId,
-        isNewSignup: completion.isNewSignup
-      )
       viewModel.navigateAfterLogin(pendingSetup: completion.pendingSetup)
     }
     .onDisappear {
