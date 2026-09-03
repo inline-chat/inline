@@ -41,6 +41,7 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
                 description: None,
             }],
             can_select_folder: None,
+            default_project_id: None,
         }),
         models: Some(AgentModelCatalog {
             options: vec![AgentModelOption {
@@ -48,7 +49,9 @@ fn bound_configuration_uses_available_values_and_defaults_unavailable_values() {
                 label: "GPT Test".to_string(),
                 description: None,
                 reasoning_effort_ids: vec!["high".to_string()],
+                default_reasoning_effort_id: None,
             }],
+            default_model_id: None,
         }),
         reasoning: Some(AgentReasoningCatalog {
             options: vec![AgentReasoningEffortOption {

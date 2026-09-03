@@ -205,6 +205,7 @@ async fn unavailable_bound_configuration_defaults_and_queues_the_delivery() {
                     description: None,
                 }],
                 can_select_folder: None,
+                default_project_id: None,
             }),
             models: Some(AgentModelCatalog {
                 options: vec![AgentModelOption {
@@ -212,7 +213,9 @@ async fn unavailable_bound_configuration_defaults_and_queues_the_delivery() {
                     label: "GPT Test".to_string(),
                     description: None,
                     reasoning_effort_ids: Vec::new(),
+                    default_reasoning_effort_id: None,
                 }],
+                default_model_id: None,
             }),
             reasoning: None,
         });

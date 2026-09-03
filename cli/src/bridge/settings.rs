@@ -250,6 +250,10 @@ pub(super) fn agent_configuration_catalog(
     provider: &DriverSettingsCatalog,
     host_label: &str,
 ) -> AgentConfigurationCatalog {
+    let default_project_id = projects
+        .iter()
+        .find(|project| project.selected)
+        .map(|project| project.workspace_id.to_string());
     let projects = (!projects.is_empty()).then(|| AgentProjectCatalog {
         options: projects
             .into_iter()
@@ -262,6 +266,7 @@ pub(super) fn agent_configuration_catalog(
         // Registering arbitrary paths remains in the existing owner-only Agent
         // Settings folder flow. This cached catalog exposes stable choices only.
         can_select_folder: None,
+        default_project_id,
     });
 
     let mut reasoning = Vec::<AgentReasoningEffortOption>::new();
@@ -269,7 +274,7 @@ pub(super) fn agent_configuration_catalog(
         .models
         .iter()
         .map(|model| {
-            let reasoning_effort_ids = model
+            let reasoning_effort_ids: Vec<String> = model
                 .reasoning
                 .iter()
                 .filter(|option| !option.disabled)
@@ -284,18 +289,32 @@ pub(super) fn agent_configuration_catalog(
                     option.value.clone()
                 })
                 .collect();
+            let default_reasoning_effort_id = model
+                .default_reasoning
+                .as_ref()
+                .filter(|value| reasoning_effort_ids.contains(value))
+                .cloned();
             AgentModelOption {
                 id: model.value.clone(),
                 label: model.label.clone(),
                 description: model.description.clone(),
                 reasoning_effort_ids,
+                default_reasoning_effort_id,
             }
         })
         .collect::<Vec<_>>();
+    let default_model_id = provider
+        .models
+        .iter()
+        .find(|model| model.is_default)
+        .map(|model| model.value.clone());
 
     AgentConfigurationCatalog {
         projects,
-        models: (!models.is_empty()).then_some(AgentModelCatalog { options: models }),
+        models: (!models.is_empty()).then_some(AgentModelCatalog {
+            options: models,
+            default_model_id,
+        }),
         reasoning: (!reasoning.is_empty()).then_some(AgentReasoningCatalog { options: reasoning }),
     }
 }

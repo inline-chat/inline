@@ -40,6 +40,51 @@ fn capability_comparison_is_order_independent_and_exact() {
 }
 
 #[test]
+fn published_catalog_names_effective_project_model_and_reasoning_defaults() {
+    let projects = vec![
+        WorkspaceChoice {
+            workspace_id: WorkspaceId::new("older").expect("workspace id"),
+            display_name: "Older".to_string(),
+            parent_hint: None,
+            selected: false,
+        },
+        WorkspaceChoice {
+            workspace_id: WorkspaceId::new("inline").expect("workspace id"),
+            display_name: "Inline".to_string(),
+            parent_hint: None,
+            selected: true,
+        },
+    ];
+    let provider = DriverSettingsCatalog {
+        models: vec![DriverModelOption {
+            value: "gpt-test".to_string(),
+            label: "GPT Test".to_string(),
+            description: None,
+            reasoning: vec![DriverSettingOption {
+                value: "high".to_string(),
+                label: "High".to_string(),
+                description: None,
+                disabled: false,
+            }],
+            default_reasoning: Some("high".to_string()),
+            is_default: true,
+        }],
+        ..DriverSettingsCatalog::default()
+    };
+
+    let catalog = agent_configuration_catalog(projects, &provider, "Mo’s Mac");
+    let projects = catalog.projects.expect("projects");
+    let models = catalog.models.expect("models");
+
+    assert_eq!(projects.default_project_id.as_deref(), Some("inline"));
+    assert_eq!(models.default_model_id.as_deref(), Some("gpt-test"));
+    assert_eq!(
+        models.options[0].default_reasoning_effort_id.as_deref(),
+        Some("high")
+    );
+}
+
+#[test]
 fn bound_agent_context_owns_project_model_and_reasoning_settings() {
     for item in [
         ITEM_MODEL,

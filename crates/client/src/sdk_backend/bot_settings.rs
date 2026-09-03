@@ -64,6 +64,7 @@ fn catalog_to_proto(catalog: AgentConfigurationCatalog) -> proto::AgentConfigura
                 })
                 .collect(),
             can_select_folder: projects.can_select_folder,
+            default_project_id: projects.default_project_id,
         }),
         models: catalog.models.map(|models| proto::AgentModelCatalog {
             options: models
@@ -74,8 +75,10 @@ fn catalog_to_proto(catalog: AgentConfigurationCatalog) -> proto::AgentConfigura
                     label: option.label,
                     description: option.description,
                     reasoning_effort_ids: option.reasoning_effort_ids,
+                    default_reasoning_effort_id: option.default_reasoning_effort_id,
                 })
                 .collect(),
+            default_model_id: models.default_model_id,
         }),
         reasoning: catalog
             .reasoning
@@ -106,6 +109,7 @@ fn catalog_from_proto(catalog: proto::AgentConfigurationCatalog) -> AgentConfigu
                 })
                 .collect(),
             can_select_folder: projects.can_select_folder,
+            default_project_id: projects.default_project_id,
         }),
         models: catalog.models.map(|models| AgentModelCatalog {
             options: models
@@ -116,8 +120,10 @@ fn catalog_from_proto(catalog: proto::AgentConfigurationCatalog) -> AgentConfigu
                     label: option.label,
                     description: option.description,
                     reasoning_effort_ids: option.reasoning_effort_ids,
+                    default_reasoning_effort_id: option.default_reasoning_effort_id,
                 })
                 .collect(),
+            default_model_id: models.default_model_id,
         }),
         reasoning: catalog.reasoning.map(|reasoning| AgentReasoningCatalog {
             options: reasoning
@@ -473,6 +479,47 @@ fn protocol_mismatch(message: &'static str) -> BackendError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capability_round_trip_preserves_named_agent_defaults() {
+        let capability = BotCapability {
+            kind: BotCapabilityKind::AgentConfiguration,
+            version: 1,
+            agent_configuration: Some(AgentConfigurationCatalog {
+                projects: Some(AgentProjectCatalog {
+                    options: vec![AgentProjectOption {
+                        id: "inline".to_owned(),
+                        label: "Inline".to_owned(),
+                        description: None,
+                    }],
+                    can_select_folder: None,
+                    default_project_id: Some("inline".to_owned()),
+                }),
+                models: Some(AgentModelCatalog {
+                    options: vec![AgentModelOption {
+                        id: "gpt-test".to_owned(),
+                        label: "GPT Test".to_owned(),
+                        description: None,
+                        reasoning_effort_ids: vec!["high".to_owned()],
+                        default_reasoning_effort_id: Some("high".to_owned()),
+                    }],
+                    default_model_id: Some("gpt-test".to_owned()),
+                }),
+                reasoning: Some(AgentReasoningCatalog {
+                    options: vec![AgentReasoningEffortOption {
+                        id: "high".to_owned(),
+                        label: "High".to_owned(),
+                        description: None,
+                    }],
+                }),
+            }),
+        };
+
+        assert_eq!(
+            capability_from_proto(capability_to_proto(capability.clone())).unwrap(),
+            capability
+        );
+    }
 
     #[test]
     fn response_round_trip_preserves_folder_metadata_without_paths() {

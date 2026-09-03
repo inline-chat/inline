@@ -44,6 +44,9 @@ pub struct AgentProjectCatalog {
     pub options: Vec<AgentProjectOption>,
     /// Whether the provider has a compatible local-folder registration flow.
     pub can_select_folder: Option<bool>,
+    /// Effective project when a thread has no explicit project selection.
+    #[serde(default)]
+    pub default_project_id: Option<String>,
 }
 
 /// One provider-owned project choice.
@@ -62,6 +65,9 @@ pub struct AgentProjectOption {
 pub struct AgentModelCatalog {
     /// Available provider models.
     pub options: Vec<AgentModelOption>,
+    /// Effective model when a thread has no explicit model selection.
+    #[serde(default)]
+    pub default_model_id: Option<String>,
 }
 
 /// One provider model choice.
@@ -75,6 +81,9 @@ pub struct AgentModelOption {
     pub description: Option<String>,
     /// Reasoning-effort IDs supported by this model, or empty if unconstrained.
     pub reasoning_effort_ids: Vec<String>,
+    /// Effective reasoning effort when this model has no explicit selection.
+    #[serde(default)]
+    pub default_reasoning_effort_id: Option<String>,
 }
 
 /// Reasoning-effort choices published by an Agent harness.

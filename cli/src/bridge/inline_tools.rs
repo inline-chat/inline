@@ -1923,6 +1923,7 @@ fn project_agent_catalog(catalog: &proto::AgentConfigurationCatalog) -> serde_js
     serde_json::json!({
         "projects": catalog.projects.as_ref().map(|projects| serde_json::json!({
             "can_select_folder": projects.can_select_folder,
+            "default_project_id": projects.default_project_id,
             "options": projects.options.iter().map(|option| serde_json::json!({
                 "id": option.id,
                 "label": option.label,
@@ -1930,11 +1931,13 @@ fn project_agent_catalog(catalog: &proto::AgentConfigurationCatalog) -> serde_js
             })).collect::<Vec<_>>(),
         })),
         "models": catalog.models.as_ref().map(|models| serde_json::json!({
+            "default_model_id": models.default_model_id,
             "options": models.options.iter().map(|option| serde_json::json!({
                 "id": option.id,
                 "label": option.label,
                 "description": option.description,
                 "reasoning_effort_ids": option.reasoning_effort_ids,
+                "default_reasoning_effort_id": option.default_reasoning_effort_id,
             })).collect::<Vec<_>>(),
         })),
         "reasoning": catalog.reasoning.as_ref().map(|reasoning| serde_json::json!({
