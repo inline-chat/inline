@@ -428,6 +428,12 @@ export const AdminEmailCampaignAudience = Schema.Struct({
   limit: Schema.optionalKey(Schema.Number),
   sampleSeed: Schema.String,
   selectionOrder: Schema.optionalKey(Schema.Literals(["newest", "oldest", "random"])),
+  timeZoneGroup: Schema.optionalKey(Schema.Literals([
+    "all",
+    "americas",
+    "europe_africa",
+    "asia_oceania",
+  ])),
 }).annotate({
   identifier: "AdminEmailCampaignAudience",
 })
@@ -442,6 +448,7 @@ const AdminEmailCampaignExclusions = Schema.Struct({
   priorCampaign: WireNonNegativeInteger,
   converted: WireNonNegativeInteger,
   duplicate: WireNonNegativeInteger,
+  timeZone: WireNonNegativeInteger,
   limited: WireNonNegativeInteger,
 })
 
@@ -488,6 +495,16 @@ export const AdminEmailCampaignPreviewResult = Schema.Struct({
     }),
   ),
   excluded: AdminEmailCampaignExclusions,
+  timeZones: Schema.Struct({
+    known: WireNonNegativeInteger,
+    unknown: WireNonNegativeInteger,
+    averageUtcOffsetMinutes: NullableInteger,
+    groups: Schema.Struct({
+      americas: WireNonNegativeInteger,
+      europeAfrica: WireNonNegativeInteger,
+      asiaOceania: WireNonNegativeInteger,
+    }),
+  }),
   rendered: Schema.Struct({
     subject: Schema.String,
     html: Schema.String,

@@ -366,6 +366,10 @@ const validateAudience = (audience: EmailCampaignAudience): string | null => {
     audience.selectionOrder !== undefined &&
     !["newest", "oldest", "random"].includes(audience.selectionOrder)
   ) return "invalid_selection_order"
+  if (
+    audience.timeZoneGroup !== undefined &&
+    !["all", "americas", "europe_africa", "asia_oceania"].includes(audience.timeZoneGroup)
+  ) return "invalid_time_zone_group"
   if (audience.excludeCampaignIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) return "invalid_campaign_exclusion"
   return null
 }
@@ -462,6 +466,7 @@ const previewEmailCampaignOperation: AdminOperationsShape["previewEmailCampaign"
           joinedAt: joinedAt?.toISOString() ?? null,
         })),
         excluded: preview.excluded,
+        timeZones: preview.timeZones,
         rendered: {
           subject: rendered.subject,
           html: rendered.html,

@@ -21,6 +21,11 @@ import {
 } from "./contactCrypto"
 import { campaignEmailQuality } from "./emailQuality"
 import { orderCampaignRecipients } from "./selection"
+import {
+  createCampaignTimeZoneResolver,
+  filterCampaignRecipientsByTimeZone,
+  summarizeCampaignTimeZones,
+} from "./timeZones"
 import type {
   CampaignAudiencePreview,
   EmailCampaignAudience,
@@ -38,6 +43,7 @@ interface Candidate {
   readonly lastActive: Date | null
   readonly platforms: readonly string[]
   readonly source: EmailCampaignSource | "manual"
+  readonly timeZone: string | null
 }
 
 const dateBoundary = (value: string | undefined): Date | undefined => {
@@ -55,6 +61,7 @@ const loadInlineCandidates = async (): Promise<readonly Candidate[]> => {
       joinedAt: users.date,
       lastActive: max(sessions.lastActive),
       platforms: sql<string[]>`coalesce(array_remove(array_agg(distinct ${sessions.clientType}), null), '{}')`,
+      timeZone: users.timeZone,
     })
     .from(users)
     .leftJoin(sessions, eq(sessions.userId, users.id))
@@ -82,6 +89,7 @@ const loadInlineCandidates = async (): Promise<readonly Candidate[]> => {
           lastActive: row.lastActive,
           platforms: row.platforms,
           source: "inline" as const,
+          timeZone: row.timeZone,
         }]
       : [],
   )
@@ -94,6 +102,7 @@ const loadWaitlistCandidates = async (): Promise<readonly Candidate[]> => {
       name: waitlist.name,
       verified: waitlist.verified,
       joinedAt: waitlist.date,
+      timeZone: waitlist.timeZone,
     })
     .from(waitlist)
     .limit(MAX_SOURCE_ROWS + 1)
@@ -110,6 +119,7 @@ const loadWaitlistCandidates = async (): Promise<readonly Candidate[]> => {
     lastActive: null,
     platforms: [],
     source: "waitlist" as const,
+    timeZone: row.timeZone,
   }))
 }
 
@@ -139,6 +149,7 @@ export const resolveCampaignAudience = async (
       lastActive: null,
       platforms: [],
       source: "manual" as const,
+      timeZone: null,
     })),
   )
 
@@ -152,6 +163,7 @@ export const resolveCampaignAudience = async (
     priorCampaign: 0,
     converted: 0,
     duplicate: 0,
+    timeZone: 0,
     limited: 0,
   }
   const joinedAfter = dateBoundary(audience.joinedAfter)
@@ -160,6 +172,8 @@ export const resolveCampaignAudience = async (
     ? new Date(Date.now() - audience.activeWithinDays * 86_400_000)
     : undefined
   const byKey = new Map<string, ResolvedCampaignRecipient>()
+  const timeZoneAt = new Date()
+  const resolveTimeZone = createCampaignTimeZoneResolver(timeZoneAt)
 
   for (const candidate of candidates) {
     const quality = campaignEmailQuality(candidate.email)
@@ -168,6 +182,7 @@ export const resolveCampaignAudience = async (
       continue
     }
     const email = quality.email
+    const timeZone = resolveTimeZone(candidate.timeZone)?.timeZone ?? null
     if (audience.verifiedOnly && !candidate.verified) {
       excluded.unverified += 1
       continue
@@ -221,6 +236,7 @@ export const resolveCampaignAudience = async (
         byKey.set(emailKey, {
           ...existing,
           sources: [...existing.sources, candidate.source],
+          timeZone: existing.timeZone ?? timeZone,
         })
       }
       continue
@@ -231,6 +247,7 @@ export const resolveCampaignAudience = async (
       emailKey,
       sources: [candidate.source],
       joinedAt: candidate.joinedAt,
+      timeZone,
     })
   }
 
@@ -266,15 +283,23 @@ export const resolveCampaignAudience = async (
     }
   }
 
-  const ranked = orderCampaignRecipients(
+  const timeZoneSelection = filterCampaignRecipientsByTimeZone(
     [...byKey.values()],
+    audience.timeZoneGroup ?? "all",
+    timeZoneAt,
+  )
+  excluded.timeZone = timeZoneSelection.excluded
+  const ranked = orderCampaignRecipients(
+    timeZoneSelection.recipients,
     audience.selectionOrder ?? "random",
     audience.sampleSeed,
   )
   const limit = audience.limit ?? ranked.length
   excluded.limited = Math.max(0, ranked.length - limit)
+  const recipients = ranked.slice(0, limit)
   return {
-    recipients: ranked.slice(0, limit),
+    recipients,
     excluded,
+    timeZones: summarizeCampaignTimeZones(recipients, timeZoneAt),
   }
 }

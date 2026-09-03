@@ -11,6 +11,7 @@ const recipient = (
   emailKey,
   sources: ["waitlist"],
   joinedAt: joinedAt ? new Date(joinedAt) : null,
+  timeZone: "UTC",
 })
 
 const recipients = [

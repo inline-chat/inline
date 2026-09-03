@@ -13,6 +13,11 @@ export const EMAIL_CAMPAIGN_PLATFORMS = [
 export type EmailCampaignSource = (typeof EMAIL_CAMPAIGN_SOURCES)[number]
 export type EmailCampaignPlatform = (typeof EMAIL_CAMPAIGN_PLATFORMS)[number]
 export type EmailCampaignSelectionOrder = "newest" | "oldest" | "random"
+export type EmailCampaignTimeZoneGroup =
+  | "all"
+  | "americas"
+  | "europe_africa"
+  | "asia_oceania"
 
 export interface EmailCampaignAudience {
   readonly sources: readonly EmailCampaignSource[]
@@ -27,6 +32,7 @@ export interface EmailCampaignAudience {
   readonly limit?: number | undefined
   readonly sampleSeed: string
   readonly selectionOrder?: EmailCampaignSelectionOrder | undefined
+  readonly timeZoneGroup?: EmailCampaignTimeZoneGroup | undefined
 }
 
 export interface ResolvedCampaignRecipient {
@@ -35,6 +41,7 @@ export interface ResolvedCampaignRecipient {
   readonly emailKey: string
   readonly sources: readonly (EmailCampaignSource | "manual")[]
   readonly joinedAt: Date | null
+  readonly timeZone: string | null
 }
 
 export interface CampaignAudiencePreview {
@@ -49,6 +56,17 @@ export interface CampaignAudiencePreview {
     readonly priorCampaign: number
     readonly converted: number
     readonly duplicate: number
+    readonly timeZone: number
     readonly limited: number
+  }
+  readonly timeZones: {
+    readonly known: number
+    readonly unknown: number
+    readonly averageUtcOffsetMinutes: number | null
+    readonly groups: {
+      readonly americas: number
+      readonly europeAfrica: number
+      readonly asiaOceania: number
+    }
   }
 }
