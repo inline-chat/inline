@@ -89,7 +89,9 @@ struct ChatRouteTitleBar: View {
 
   @ViewBuilder
   private var subtitleView: some View {
-    if agentThreadToolbarModel.presentation != nil {
+    if model.status.isTyping {
+      statusView(model.status)
+    } else if agentThreadToolbarModel.presentation != nil {
       HStack(spacing: 4) {
         AgentThreadToolbarIndicator(
           model: agentThreadToolbarModel,
