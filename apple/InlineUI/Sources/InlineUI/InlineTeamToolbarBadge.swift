@@ -23,14 +23,18 @@ public enum InlineTeamToolbarBadgeVisibility {
 
 @MainActor
 public struct InlineTeamToolbarBadge: View {
-  public init() {}
+  private let size: CGFloat
+
+  public init(size: CGFloat = 10) {
+    self.size = size
+  }
 
   public var body: some View {
     Image("InlineLogoSymbol", bundle: .main)
       .resizable()
       .interpolation(.high)
       .scaledToFit()
-      .frame(width: 10, height: 10)
+      .frame(width: size, height: size)
       .fixedSize()
       .alignmentGuide(.firstTextBaseline) { dimensions in
         dimensions[.bottom] - 1
