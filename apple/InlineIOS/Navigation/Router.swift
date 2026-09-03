@@ -381,12 +381,13 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     defaults.removeObject(forKey: presentedSheetKey)
   }
 
-  /// Reset all navigation state and clear persistence
-  public func reset() {
+  /// Reset paths, history, and presentation state, optionally retaining the selected tab.
+  public func reset(preservingSelectedTab: Bool = false) {
+    let resetTab = preservingSelectedTab ? selectedTab : initialTab
     clearHistory()
     isRestoring = true
     paths = [:]
-    selectedTab = initialTab
+    selectedTab = resetTab
     presentedSheet = nil
     isRestoring = false
 

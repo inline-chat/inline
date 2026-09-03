@@ -215,7 +215,7 @@ final class IOSSceneRouterRegistry {
     accountUserID = userID
     invalidatePendingNavigation()
     for entry in entries.values {
-      entry.router?.reset()
+      entry.router?.reset(preservingSelectedTab: true)
     }
   }
 
