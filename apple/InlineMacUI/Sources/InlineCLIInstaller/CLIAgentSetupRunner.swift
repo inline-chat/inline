@@ -100,21 +100,39 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     defer { finishOperation(operationID) }
     return try await withTaskCancellationHandler {
       let output = try await Task.detached(priority: .userInitiated) { [self] in
+        let onStandardOutputLine: @Sendable (Data) -> Void = { line in
+          if let event = Self.parseProgressEvent(line) {
+            progress(event)
+          }
+        }
+        var useVerbose = true
         var output = try run(
           operationID: operationID,
           installation: installation,
           arguments: Self.setupArguments(
             targetID: target.id,
             replaceExisting: replaceExisting,
-            appProtocol: true
+            appProtocol: true,
+            verbose: useVerbose
           ),
           timeout: Self.setupTimeout,
-          onStandardOutputLine: { line in
-            if let event = Self.parseProgressEvent(line) {
-              progress(event)
-            }
-          }
+          onStandardOutputLine: onStandardOutputLine
         )
+        if Self.isUnsupportedVerbose(output) {
+          useVerbose = false
+          output = try run(
+            operationID: operationID,
+            installation: installation,
+            arguments: Self.setupArguments(
+              targetID: target.id,
+              replaceExisting: replaceExisting,
+              appProtocol: true,
+              verbose: useVerbose
+            ),
+            timeout: Self.setupTimeout,
+            onStandardOutputLine: onStandardOutputLine
+          )
+        }
         if Self.isUnsupportedAppProtocol(output) {
           progress(AgentSetupProgressEvent(
             protocolVersion: Self.protocolVersion,
@@ -127,7 +145,8 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
             arguments: Self.setupArguments(
               targetID: target.id,
               replaceExisting: replaceExisting,
-              appProtocol: false
+              appProtocol: false,
+              verbose: useVerbose
             ),
             timeout: Self.setupTimeout
           )
@@ -177,10 +196,14 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
   static func setupArguments(
     targetID: String,
     replaceExisting: Bool,
-    appProtocol: Bool = true
+    appProtocol: Bool = true,
+    verbose: Bool = true
   ) -> [String] {
-    var arguments = [
-      "--verbose",
+    var arguments: [String] = []
+    if verbose {
+      arguments.append("--verbose")
+    }
+    arguments.append(contentsOf: [
       "--json",
       "--compact",
       "agents",
@@ -188,7 +211,7 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
       "--target",
       targetID,
       "--non-interactive",
-    ]
+    ])
     if appProtocol {
       arguments.append(contentsOf: ["--app-protocol", "1"])
     }
@@ -437,9 +460,30 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
   }
 
   static func isUnsupportedAppProtocol(status: Int32, standardError: Data) -> Bool {
+    isUnsupportedArgument("--app-protocol", status: status, standardError: standardError)
+  }
+
+  private static func isUnsupportedVerbose(_ output: CommandOutput) -> Bool {
+    isUnsupportedVerbose(
+      status: output.status,
+      standardError: output.standardError
+    )
+  }
+
+  static func isUnsupportedVerbose(status: Int32, standardError: Data) -> Bool {
+    isUnsupportedArgument("--verbose", status: status, standardError: standardError)
+  }
+
+  private static func isUnsupportedArgument(
+    _ argument: String,
+    status: Int32,
+    standardError: Data
+  ) -> Bool {
     guard status == 2 else { return false }
     guard let message = String(data: standardError, encoding: .utf8) else { return false }
-    return message.contains("--app-protocol")
+    return message.split(whereSeparator: \Character.isNewline).contains { line in
+      line.contains("unexpected argument") && line.contains(argument)
+    }
   }
 
   private func beginOperation() throws -> UUID {

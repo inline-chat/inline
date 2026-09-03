@@ -49,9 +49,19 @@ struct CLIAgentSetupRunnerTests {
     #expect(CLIAgentSetupRunner.setupArguments(
       targetID: "codex",
       replaceExisting: false,
-      appProtocol: false
+      appProtocol: true,
+      verbose: false
     ) == [
-      "--verbose", "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
+      "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
+      "--app-protocol", "1",
+    ])
+    #expect(CLIAgentSetupRunner.setupArguments(
+      targetID: "codex",
+      replaceExisting: false,
+      appProtocol: false,
+      verbose: false
+    ) == [
+      "--json", "--compact", "agents", "setup", "--target", "codex", "--non-interactive",
     ])
   }
 
@@ -68,6 +78,22 @@ struct CLIAgentSetupRunnerTests {
     #expect(!CLIAgentSetupRunner.isUnsupportedAppProtocol(
       status: 2,
       standardError: Data("error: missing required argument '--target'".utf8)
+    ))
+  }
+
+  @Test("falls back when CLI 0.7.4 or 0.7.5 rejects verbose diagnostics")
+  func identifiesUnsupportedVerbose() {
+    #expect(CLIAgentSetupRunner.isUnsupportedVerbose(
+      status: 2,
+      standardError: Data("error: unexpected argument '--verbose' found".utf8)
+    ))
+    #expect(!CLIAgentSetupRunner.isUnsupportedVerbose(
+      status: 1,
+      standardError: Data("setup failed while --verbose was enabled".utf8)
+    ))
+    #expect(!CLIAgentSetupRunner.isUnsupportedVerbose(
+      status: 2,
+      standardError: Data("error: missing required argument '--target'\nUsage: inline [--verbose]".utf8)
     ))
   }
 
