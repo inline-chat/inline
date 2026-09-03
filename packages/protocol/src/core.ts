@@ -12940,8 +12940,8 @@ export interface GetFilePartResult {
     sha256: Uint8Array;
 }
 /**
- * One explicit target state per chat and actor. max_id is the exact message
- * carrying the marker; its legacy field name is retained for wire compatibility.
+ * One explicit cursor state per chat and actor. max_id remains a monotonic
+ * high-water mark; cleared hides its marker without rewinding that boundary.
  *
  * @generated from protobuf message ChatAcknowledgement
  */
@@ -12977,7 +12977,7 @@ export interface ChatAcknowledgement {
      */
     revision: bigint;
     /**
-     * A durable tombstone. max_id retains the hidden target for idempotent retry.
+     * A durable tombstone. The high-water max_id remains available for fencing.
      *
      * @generated from protobuf field: bool cleared = 7;
      */
@@ -13002,7 +13002,7 @@ export interface AcknowledgeMessagesInput {
      */
     clear: boolean;
     /**
-     * State observed by the actor; fences delayed clear and target movement.
+     * State observed by the actor; fences delayed clear and same-target replay.
      *
      * @generated from protobuf field: int64 expected_revision = 4;
      */
