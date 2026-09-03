@@ -11,7 +11,7 @@ export const LANDING_COPY = {
   },
   availabilityLines: [
     "Available in beta for macOS and iOS, other platforms",
-    "coming soon. CLI, MCP, agent plugins, available.",
+    "coming soon. CLI, MCP, and agent plugins available.",
   ],
   videos: {
     sectionLabel: "Inline videos",
