@@ -189,6 +189,37 @@ fn select_bridge_bot(
     (selected, replaces_saved_bot)
 }
 
+fn canonical_owner_dm_chat_id(
+    result: &proto::GetChatResult,
+    bot_user_id: i64,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    let chat = result.chat.as_ref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "GetChat returned no owner direct message",
+        )
+    })?;
+    let chat_is_expected_dm = matches!(
+        chat.peer_id.as_ref().and_then(|peer| peer.r#type.as_ref()),
+        Some(proto::peer::Type::User(user)) if user.user_id == bot_user_id
+    );
+    let dialog_is_expected_dm = result.dialog.as_ref().is_some_and(|dialog| {
+        dialog.chat_id == Some(chat.id)
+            && matches!(
+                dialog.peer.as_ref().and_then(|peer| peer.r#type.as_ref()),
+                Some(proto::peer::Type::User(user)) if user.user_id == bot_user_id
+            )
+    });
+    if chat.id <= 0 || !chat_is_expected_dm || !dialog_is_expected_dm {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "GetChat returned an invalid owner direct message",
+        )
+        .into());
+    }
+    Ok(chat.id)
+}
+
 pub(super) async fn provision_dev_bot(
     config: &Config,
     owner: &mut crate::owner_session::OwnerSession,
@@ -501,34 +532,20 @@ pub(super) async fn provision_dev_bot(
         bot_token,
     };
 
-    let dm_chat_id = match retained_bot_state.and_then(|saved| saved.dm_chat_id) {
-        Some(chat_id) if chat_id > 0 => chat_id,
-        _ => {
-            let result = owner
-                .call(proto::CreateChatInput {
-                    title: None,
-                    space_id: None,
-                    description: None,
-                    emoji: None,
-                    is_public: false,
-                    participants: vec![proto::InputChatParticipant {
-                        user_id: Some(bot.id),
-                        group_id: None,
-                    }],
-                    reserved_chat_id: None,
-                    placeholder_title: None,
-                    agent_context: None,
-                })
-                .await?;
-            result
-                .chat
-                .map(|chat| chat.id)
-                .filter(|chat_id| *chat_id > 0)
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "CreateChat returned no chat")
-                })?
-        }
-    };
+    let saved_dm_chat_id = retained_bot_state.and_then(|saved| saved.dm_chat_id);
+    let dm_result = owner
+        .call(proto::GetChatInput {
+            peer_id: Some(proto::InputPeer {
+                r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                    user_id: bot.id,
+                })),
+            }),
+            include_recent_messages: false,
+        })
+        .await?;
+    let dm_chat_id = canonical_owner_dm_chat_id(&dm_result, bot.id)?;
+    let owner_dm_repaired =
+        saved_dm_chat_id.is_some_and(|saved_dm_chat_id| saved_dm_chat_id != dm_chat_id);
 
     let provider_path = default_provider_path();
     let installation = ProviderInstallationConfig {
@@ -543,7 +560,8 @@ pub(super) async fn provision_dev_bot(
             .unwrap_or_else(|| bot_username.trim_start_matches('@').to_string()),
         dm_chat_id: Some(dm_chat_id),
         workspace: workspace.to_path_buf(),
-        greeting_sent: retained_bot_state.is_some_and(|saved| saved.greeting_sent),
+        greeting_sent: retained_bot_state.is_some_and(|saved| saved.greeting_sent)
+            && !owner_dm_repaired,
         accept_messages_after: retained_bot_state
             .map(|saved| saved.accept_messages_after)
             .filter(|timestamp| *timestamp > 0)
@@ -601,6 +619,18 @@ pub(super) async fn provision_dev_bot(
         selected_at,
     )?;
     persist_setup_account_files(&paths, &account, &account_secrets, account_preexisted)?;
+    if owner_dm_repaired {
+        crate::telemetry::report_bridge_owner_dm_event(
+            provider.provider_id,
+            "owner_dm_setup",
+            "owner_dm_repaired",
+        );
+        log::warn!(
+            target: "inline::bridge::trace",
+            "phase=owner_dm_repaired provider_id={:?} source=setup",
+            provider.provider_id,
+        );
+    }
     ensure_operator_user_config(&account)?;
     Ok(ProvisionedBridge {
         paths,
@@ -722,6 +752,45 @@ mod tests {
 
         assert!(selected.is_none());
         assert!(replaces_saved_bot);
+    }
+
+    #[test]
+    fn canonical_owner_dm_requires_the_requested_user_peer() {
+        let expected_peer = proto::Peer {
+            r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
+        };
+        let valid = proto::GetChatResult {
+            chat: Some(proto::Chat {
+                id: 706,
+                peer_id: Some(expected_peer.clone()),
+                ..Default::default()
+            }),
+            dialog: Some(proto::Dialog {
+                chat_id: Some(706),
+                peer: Some(expected_peer),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(canonical_owner_dm_chat_id(&valid, 42).unwrap(), 706);
+
+        let thread_peer = proto::Peer {
+            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 6865 })),
+        };
+        let thread = proto::GetChatResult {
+            chat: Some(proto::Chat {
+                id: 6865,
+                peer_id: Some(thread_peer.clone()),
+                ..Default::default()
+            }),
+            dialog: Some(proto::Dialog {
+                chat_id: Some(6865),
+                peer: Some(thread_peer),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(canonical_owner_dm_chat_id(&thread, 42).is_err());
     }
 
     #[test]

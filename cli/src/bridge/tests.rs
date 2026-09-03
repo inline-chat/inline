@@ -8,6 +8,18 @@ fn codex_and_claude_publish_initial_provider_catalogs() {
     assert!(!publishes_initial_provider_catalog("amp"));
 }
 
+#[test]
+fn canonical_owner_dm_repair_replaces_only_the_matching_provider_identity() {
+    let (mut account, _) = account_fixture();
+
+    assert!(replace_owner_dm_chat_id(&mut account, "codex", 84, 706).unwrap());
+    assert_eq!(account.providers[0].dm_chat_id, Some(706));
+    assert!(!account.providers[0].greeting_sent);
+    assert!(!replace_owner_dm_chat_id(&mut account, "codex", 84, 706).unwrap());
+    assert!(replace_owner_dm_chat_id(&mut account, "codex", 999, 800).is_err());
+    assert!(replace_owner_dm_chat_id(&mut account, "missing", 84, 800).is_err());
+}
+
 #[tokio::test]
 async fn advancing_control_epoch_cancels_detached_generation_watchers() {
     let epoch = ControlTaskEpoch::new();

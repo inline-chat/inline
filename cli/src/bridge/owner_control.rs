@@ -134,6 +134,26 @@ impl OwnerControl {
         Ok(self.store.user(InlineId::new(user_id)).await?)
     }
 
+    pub(super) async fn resolve_owner_dm_chat_id(
+        &self,
+        bot_user_id: i64,
+    ) -> Result<i64, Box<dyn std::error::Error>> {
+        let direct_message = self
+            .client
+            .create_dm(inline_client::CreateDmRequest {
+                user_id: InlineId::new(bot_user_id),
+            })
+            .await?;
+        if direct_message.chat_id.get() <= 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Inline returned an invalid owner direct message",
+            )
+            .into());
+        }
+        Ok(direct_message.chat_id.get())
+    }
+
     pub(super) async fn set_follow_mode(
         &self,
         chat_id: i64,

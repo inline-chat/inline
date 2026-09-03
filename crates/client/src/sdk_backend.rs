@@ -1661,23 +1661,15 @@ impl ClientBackend for SdkBackend {
             let result = backend
                 .call_realtime(
                     &session,
-                    proto::CreateChatInput {
-                        title: None,
-                        space_id: None,
-                        description: None,
-                        emoji: None,
-                        is_public: false,
-                        participants: vec![proto::InputChatParticipant {
-                            user_id: Some(request.user_id.get()),
-                            group_id: None,
-                        }],
-                        reserved_chat_id: None,
-                        placeholder_title: None,
-                        agent_context: None,
+                    proto::GetChatInput {
+                        peer_id: Some(input_peer_for_client_peer(PeerRef::User {
+                            user_id: request.user_id,
+                        })),
+                        include_recent_messages: false,
                     },
                 )
                 .await?;
-            let created = created_chat_from_proto(result.chat, result.dialog, None, None, None)?;
+            let created = created_dm_from_proto(result, request.user_id)?;
             backend
                 .store
                 .record_dialog(created_dialog_record(&created, Some(request.user_id)))
@@ -4732,6 +4724,36 @@ fn created_chat_from_proto(
     })
 }
 
+fn created_dm_from_proto(
+    result: proto::GetChatResult,
+    expected_user_id: InlineId,
+) -> BackendResult<CreatedChat> {
+    let chat = result.chat.as_ref().ok_or_else(|| {
+        BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "direct message result did not include a chat",
+        )
+    })?;
+    let chat_is_expected_dm = matches!(
+        chat.peer_id.as_ref().and_then(|peer| peer.r#type.as_ref()),
+        Some(proto::peer::Type::User(user)) if user.user_id == expected_user_id.get()
+    );
+    let dialog_is_expected_dm = result.dialog.as_ref().is_some_and(|dialog| {
+        dialog.chat_id == Some(chat.id)
+            && matches!(
+                dialog.peer.as_ref().and_then(|peer| peer.r#type.as_ref()),
+                Some(proto::peer::Type::User(user)) if user.user_id == expected_user_id.get()
+            )
+    });
+    if chat.id <= 0 || !chat_is_expected_dm || !dialog_is_expected_dm {
+        return Err(BackendError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "direct message result did not match the requested user peer",
+        ));
+    }
+    created_chat_from_proto(result.chat, result.dialog, None, None, None)
+}
+
 fn created_dialog_record(created: &CreatedChat, peer_user_id: Option<InlineId>) -> DialogRecord {
     DialogRecord {
         chat_id: created.chat_id,
@@ -6220,9 +6242,9 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     use crate::{
-        AuthCredential, AuthToken, ClientBackend, ClientStatus, DialogRecord, DialogsRequest,
-        ExternalId, FakeRealtimeConnector, HistoryRequest, InlineClient, InlineId, RandomId,
-        SendTextRequest, StoredTransaction,
+        AuthCredential, AuthToken, ClientBackend, ClientStatus, CreateDmRequest, DialogRecord,
+        DialogsRequest, ExternalId, FakeRealtimeConnector, HistoryRequest, InlineClient, InlineId,
+        RandomId, SendTextRequest, StoredTransaction,
     };
 
     use super::*;
@@ -7443,6 +7465,122 @@ mod tests {
                 server.await.unwrap();
             }
         }
+    }
+
+    #[tokio::test]
+    async fn sdk_backend_create_dm_resolves_the_canonical_user_peer() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = read_test_client_message(&mut ws).await;
+            send_test_server_message(
+                &mut ws,
+                proto::ServerProtocolMessage {
+                    id: 1,
+                    body: Some(proto::server_protocol_message::Body::ConnectionOpen(
+                        proto::ConnectionOpen {},
+                    )),
+                },
+            )
+            .await;
+
+            let get_chat = read_test_client_message(&mut ws).await;
+            assert!(matches!(
+                &get_chat.body,
+                Some(proto::client_message::Body::RpcCall(proto::RpcCall {
+                    method,
+                    input: Some(proto::rpc_call::Input::GetChat(proto::GetChatInput {
+                        peer_id: Some(proto::InputPeer {
+                            r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                                user_id: 42,
+                            })),
+                        }),
+                        include_recent_messages: false,
+                    })),
+                })) if *method == proto::Method::GetChat as i32
+            ));
+            let peer = proto::Peer {
+                r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
+            };
+            send_test_server_message(
+                &mut ws,
+                rpc_result_message(
+                    2,
+                    get_chat.id,
+                    proto::rpc_result::Result::GetChat(proto::GetChatResult {
+                        chat: Some(proto::Chat {
+                            id: 7,
+                            title: "Agent DM".to_string(),
+                            peer_id: Some(peer.clone()),
+                            ..Default::default()
+                        }),
+                        dialog: Some(proto::Dialog {
+                            chat_id: Some(7),
+                            peer: Some(peer),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                ),
+            )
+            .await;
+        });
+
+        let store = InMemoryStore::new();
+        store.save_session(connect_session()).await.unwrap();
+        let backend = SdkBackend::builder()
+            .store(store.clone())
+            .realtime_url(format!("ws://{addr}/realtime"))
+            .without_realtime_handshake()
+            .build()
+            .unwrap();
+
+        let created = backend
+            .create_dm(CreateDmRequest {
+                user_id: InlineId::new(42),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(created.chat_id, InlineId::new(7));
+        assert_eq!(
+            store
+                .dialog(created.chat_id)
+                .await
+                .unwrap()
+                .and_then(|dialog| dialog.peer_user_id),
+            Some(InlineId::new(42))
+        );
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn direct_message_projection_rejects_a_regular_thread() {
+        let error = created_dm_from_proto(
+            proto::GetChatResult {
+                chat: Some(proto::Chat {
+                    id: 7,
+                    peer_id: Some(proto::Peer {
+                        r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+                    }),
+                    ..Default::default()
+                }),
+                dialog: Some(proto::Dialog {
+                    chat_id: Some(7),
+                    peer: Some(proto::Peer {
+                        r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id: 7 })),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            InlineId::new(42),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
     }
 
     #[tokio::test]

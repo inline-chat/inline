@@ -165,6 +165,14 @@ pub(crate) fn report_bridge_configuration_fallback(target: &str, failure: &'stat
     capture_bridge_runtime_event(target, "agent_configuration", failure, None, None, None);
 }
 
+pub(crate) fn report_bridge_owner_dm_event(
+    target: &str,
+    phase: &'static str,
+    failure: &'static str,
+) {
+    capture_bridge_runtime_event(target, phase, failure, None, None, None);
+}
+
 pub(crate) fn bridge_error_requires_provider_restart(
     error: &(dyn std::error::Error + 'static),
 ) -> bool {
@@ -545,6 +553,41 @@ mod tests {
         );
         assert!(!encoded.contains("private"));
         assert!(!encoded.contains("session_id"));
+    }
+
+    #[test]
+    fn owner_dm_repair_events_keep_only_fixed_grouping_metadata() {
+        let mut event = sentry::protocol::Event {
+            message: Some("private chat and user identifiers".into()),
+            ..Default::default()
+        };
+        event.tags.insert("surface".into(), "bridge".into());
+        event
+            .tags
+            .insert("error_code".into(), "bridge_runtime_failure".into());
+        event.tags.insert("target".into(), "opencode".into());
+        event.tags.insert("phase".into(), "owner_dm_startup".into());
+        event
+            .tags
+            .insert("failure".into(), "owner_dm_repaired".into());
+        event.tags.insert("chat_id".into(), "7108".into());
+
+        let safe = allowlisted_event(event);
+        let encoded = serde_json::to_string(&safe).unwrap();
+        assert_eq!(
+            safe.fingerprint,
+            vec![
+                "inline-cli",
+                "bridge",
+                "bridge_runtime_failure",
+                "opencode",
+                "owner_dm_startup",
+                "owner_dm_repaired",
+            ]
+        );
+        assert!(!encoded.contains("private"));
+        assert!(!encoded.contains("7108"));
+        assert!(!encoded.contains("chat_id"));
     }
 
     #[test]

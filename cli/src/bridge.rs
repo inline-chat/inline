@@ -497,6 +497,15 @@ pub async fn run_service(
     let mut owner_authentication_invalidation = owner_control
         .as_ref()
         .map(|control| control.authentication_invalidation_receiver());
+    reconcile_owner_dm_chat_ids(
+        &paths,
+        &mut account,
+        &secrets,
+        owner_control
+            .as_deref()
+            .expect("connected service owner control"),
+    )
+    .await?;
     let health = service::RuntimeHealth::starting(
         account
             .providers
@@ -693,6 +702,109 @@ pub async fn run_service(
     run_result?;
     if let Some(error) = forced_shutdown_error {
         return Err(error.into());
+    }
+    Ok(())
+}
+
+fn replace_owner_dm_chat_id(
+    account: &mut AccountBridgeConfig,
+    installation_id: &str,
+    bot_user_id: i64,
+    dm_chat_id: i64,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if dm_chat_id <= 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Inline returned an invalid owner direct message",
+        )
+        .into());
+    }
+    let installation = account
+        .providers
+        .iter_mut()
+        .find(|installation| installation.installation_id == installation_id)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "provider installation vanished while repairing its owner direct message",
+            )
+        })?;
+    if installation.bot_user_id != bot_user_id {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "provider bot identity changed while repairing its owner direct message",
+        )
+        .into());
+    }
+    if installation.dm_chat_id == Some(dm_chat_id) {
+        return Ok(false);
+    }
+    installation.dm_chat_id = Some(dm_chat_id);
+    installation.greeting_sent = false;
+    Ok(true)
+}
+
+async fn reconcile_owner_dm_chat_ids(
+    paths: &BridgePaths,
+    account: &mut AccountBridgeConfig,
+    secrets: &AccountBridgeSecrets,
+    owner_control: &OwnerControl,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let _account_mutation_lock = acquire_account_mutation_lock(paths)?;
+    let mut latest: AccountBridgeConfig = read_required_json(&paths.config)?;
+    let mut repaired_providers = Vec::new();
+    let installations = latest.providers.clone();
+    for installation in &installations {
+        let dm_chat_id = match owner_control
+            .resolve_owner_dm_chat_id(installation.bot_user_id)
+            .await
+        {
+            Ok(dm_chat_id) => dm_chat_id,
+            Err(error) => {
+                crate::telemetry::report_bridge_owner_dm_event(
+                    &installation.provider_id,
+                    "owner_dm_startup",
+                    "owner_dm_resolution_failed",
+                );
+                return Err(error);
+            }
+        };
+        if replace_owner_dm_chat_id(
+            &mut latest,
+            &installation.installation_id,
+            installation.bot_user_id,
+            dm_chat_id,
+        )? {
+            repaired_providers.push(installation.provider_id.clone());
+        }
+    }
+    if repaired_providers.is_empty() {
+        *account = latest;
+        return Ok(());
+    }
+    if let Err(error) =
+        validate_account(&latest, secrets).and_then(|_| write_private_json(&paths.config, &latest))
+    {
+        for provider_id in &repaired_providers {
+            crate::telemetry::report_bridge_owner_dm_event(
+                provider_id,
+                "owner_dm_startup",
+                "owner_dm_persistence_failed",
+            );
+        }
+        return Err(error);
+    }
+    *account = latest;
+    for provider_id in repaired_providers {
+        crate::telemetry::report_bridge_owner_dm_event(
+            &provider_id,
+            "owner_dm_startup",
+            "owner_dm_repaired",
+        );
+        log::warn!(
+            target: "inline::bridge::trace",
+            "phase=owner_dm_repaired provider_id={provider_id:?} source=service_startup",
+        );
     }
     Ok(())
 }
@@ -1597,7 +1709,7 @@ async fn run_provider_installation(
         );
         greeting_request.external_id = Some(ExternalId::try_new(
             "agent-bridge",
-            format!("{}-greeting-v1", installation.installation_id),
+            format!("{}-greeting-v2", installation.installation_id),
         )?);
         greeting_request.notification_mode =
             BridgeNotificationClass::ImportantNotice.notification_mode();
