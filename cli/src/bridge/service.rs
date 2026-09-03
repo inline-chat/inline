@@ -381,7 +381,7 @@ pub(super) async fn start_service(
         let definition = service_definition_path(&account.service_label)?;
         if !definition.is_file() {
             install_service(paths, account)?;
-            return wait_for_account_running(paths, secrets, READY_TIMEOUT).await;
+            return wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await;
         }
     }
 
@@ -395,7 +395,7 @@ pub(super) async fn start_service(
         } else {
             run_launchctl(["kickstart", &format!("{domain}/{}", account.service_label)])?;
         }
-        wait_for_account_running(paths, secrets, READY_TIMEOUT).await
+        wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await
     }
 
     #[cfg(target_os = "linux")]
@@ -405,7 +405,7 @@ pub(super) async fn start_service(
             "start",
             &systemd_unit_name(&account.service_label),
         ])?;
-        wait_for_account_running(paths, secrets, READY_TIMEOUT).await
+        wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await
     }
 }
 
@@ -475,7 +475,7 @@ pub(super) async fn restart_service(
         let definition = service_definition_path(&account.service_label)?;
         if !definition.is_file() {
             install_service(paths, account)?;
-            return wait_for_account_running(paths, secrets, READY_TIMEOUT).await;
+            return wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await;
         }
     }
     #[cfg(target_os = "macos")]
@@ -509,7 +509,7 @@ pub(super) async fn restart_service(
         )
         .into());
     }
-    wait_for_account_running(paths, secrets, READY_TIMEOUT).await
+    wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await
 }
 
 // The command integration owns the public CLI surface; keep this API buildable while it is wired.
@@ -1030,6 +1030,7 @@ fn account_is_running(response: &ControlResponse) -> bool {
 
 async fn wait_for_account_running(
     paths: &BridgePaths,
+    account: &AccountBridgeConfig,
     secrets: &AccountBridgeSecrets,
     timeout: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1048,14 +1049,84 @@ async fn wait_for_account_running(
     Err(io::Error::new(
         io::ErrorKind::TimedOut,
         format!(
-            "bridge control plane did not start within {} seconds{}",
+            "bridge control plane did not start within {} seconds: {}",
             timeout.as_secs(),
-            last_error
-                .map(|detail| format!(": {detail}"))
-                .unwrap_or_default()
+            service_start_failure_detail(paths, account, last_error.as_deref())
         ),
     )
     .into())
+}
+
+fn service_start_failure_detail(
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+    last_control_error: Option<&str>,
+) -> String {
+    compose_service_start_failure_detail(
+        last_control_error,
+        service_loaded(account),
+        service_process_running(account),
+        recent_service_startup_diagnostics(paths).as_deref(),
+    )
+}
+
+fn compose_service_start_failure_detail(
+    last_control_error: Option<&str>,
+    loaded: bool,
+    running: bool,
+    recent_logs: Option<&str>,
+) -> String {
+    let mut details = Vec::new();
+    if let Some(error) = last_control_error.filter(|error| !error.trim().is_empty()) {
+        details.push(format!("control socket unavailable: {error}"));
+    }
+    details.push(
+        match (loaded, running) {
+            (false, _) => "background service is not loaded",
+            (true, false) => "background service is loaded but its process is not running",
+            (true, true) => {
+                "background service process is running but its control socket is unavailable"
+            }
+        }
+        .to_string(),
+    );
+    if let Some(logs) = recent_logs.filter(|logs| !logs.trim().is_empty()) {
+        details.push(format!(
+            "latest bridge logs (may predate this start attempt): {logs}"
+        ));
+    } else {
+        details.push("no bridge log output was available".to_string());
+    }
+    crate::diagnostics::safe_text(&details.join("; "))
+}
+
+fn recent_service_startup_diagnostics(paths: &BridgePaths) -> Option<String> {
+    let mut lines = Vec::new();
+    for (label, path, maximum_lines) in [
+        ("stdout", &paths.stdout_log, 2_usize),
+        ("stderr", &paths.stderr_log, 6_usize),
+    ] {
+        let Ok(tail) = read_log_tail(path) else {
+            continue;
+        };
+        let mut selected = tail
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .rev()
+            .take(maximum_lines)
+            .collect::<Vec<_>>();
+        selected.reverse();
+        lines.extend(
+            selected
+                .into_iter()
+                .map(|line| scrubbed_service_log_line(label, line)),
+        );
+    }
+    (!lines.is_empty()).then(|| crate::diagnostics::safe_text(&lines.join(" | ")))
+}
+
+fn scrubbed_service_log_line(label: &str, line: &str) -> String {
+    format!("{label}: {}", crate::diagnostics::safe_text(line.trim()))
 }
 
 #[cfg(unix)]

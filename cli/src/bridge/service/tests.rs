@@ -169,6 +169,30 @@ fn service_lifecycle_detail_preserves_existing_runtime_detail() {
     );
 }
 
+#[test]
+fn service_start_failure_keeps_lifecycle_and_scrubbed_recent_logs() {
+    let recent_logs = [
+        scrubbed_service_log_line(
+            "stderr",
+            "owner connection failed in /Users/alice/private: network timed out",
+        ),
+        scrubbed_service_log_line("stderr", "TOKEN=private-value"),
+    ]
+    .join(" | ");
+    let detail = compose_service_start_failure_detail(
+        Some("No such file or directory (os error 2)"),
+        true,
+        false,
+        Some(&recent_logs),
+    );
+    assert!(detail.contains("control socket unavailable"));
+    assert!(detail.contains("loaded but its process is not running"));
+    assert!(detail.contains("owner connection failed"));
+    assert!(detail.contains("network timed out"));
+    assert!(!detail.contains("/Users/alice"));
+    assert!(!detail.contains("private-value"));
+}
+
 #[cfg(not(target_os = "linux"))]
 #[test]
 fn non_linux_status_does_not_add_a_service_scope_detail() {

@@ -85,3 +85,43 @@ fn preflight_errors_use_the_setup_envelope_without_running_a_provider() {
     assert!(!directory.path().join("missing-auth").exists());
     assert!(!directory.path().join("missing-state").exists());
 }
+
+#[test]
+fn verbose_setup_failure_returns_a_private_diagnostic_report() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_inline"))
+        .args([
+            "--verbose",
+            "--json",
+            "--compact",
+            "agents",
+            "setup",
+            "--target",
+            "codex",
+            "--allow-user",
+            "0",
+            "--non-interactive",
+        ])
+        .env("TMPDIR", directory.path())
+        .env("INLINE_CLI_TELEMETRY", "off")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let terminal_line = output
+        .stderr
+        .split(|byte| *byte == b'\n')
+        .rev()
+        .find(|line| !line.is_empty() && serde_json::from_slice::<serde_json::Value>(line).is_ok());
+    let payload: serde_json::Value = serde_json::from_slice(terminal_line.unwrap()).unwrap();
+    let report_path = payload["diagnosticReportPath"].as_str().unwrap();
+    assert!(std::path::Path::new(report_path).starts_with(directory.path()));
+    let report = std::fs::read_to_string(report_path).unwrap();
+    assert!(report.contains("diagnostics enabled version="));
+    assert!(report.contains("agents.setup failed"));
+    assert_eq!(
+        std::fs::metadata(report_path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}

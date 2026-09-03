@@ -2371,10 +2371,11 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
             std::process::exit(1);
         }
         diagnostics::log_error(error.as_ref());
-        telemetry::report(&json_cli_error_from_error(error.as_ref()).code, None, None);
+        let error_payload = diagnostics::error_payload(error.as_ref());
+        telemetry::report(&error_payload, None, None);
         if flags.json {
             let payload = JsonErrorEnvelope {
-                error: diagnostics::error_payload(error.as_ref()),
+                error: error_payload,
             };
 
             if let Ok(text) = output::json_string(&payload, flags.json_format) {

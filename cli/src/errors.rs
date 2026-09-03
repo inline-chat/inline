@@ -80,6 +80,18 @@ pub(crate) struct CliError {
 }
 
 impl CliError {
+    pub(crate) fn provider_integration_failed(message: impl Into<String>) -> Self {
+        Self {
+            code: "provider_integration_failed",
+            message: message.into(),
+            hint: Some(
+                "Repair or update the selected local agent installation, verify that it is signed in, then retry setup."
+                    .to_string(),
+            ),
+            examples: Vec::new(),
+        }
+    }
+
     pub(crate) fn invalid_args(message: impl Into<String>) -> Self {
         Self {
             code: "invalid_args",
@@ -512,9 +524,17 @@ fn json_cli_error_from_http_error(error: &reqwest::Error) -> JsonCliError {
 }
 
 fn json_cli_error_from_io_error(error: &std::io::Error) -> JsonCliError {
-    let mut payload = JsonCliError::new("io_error", error.to_string());
-    payload.hint =
-        Some("Check file paths, directory permissions, and available disk space.".to_string());
+    let timed_out = error.kind() == std::io::ErrorKind::TimedOut;
+    let mut payload = JsonCliError::new(
+        if timed_out { "timeout" } else { "io_error" },
+        error.to_string(),
+    );
+    payload.hint = Some(if timed_out {
+        "The operation did not finish before its deadline. Inspect the command's diagnostics before retrying."
+            .to_string()
+    } else {
+        "Check file paths, directory permissions, and available disk space.".to_string()
+    });
     payload
 }
 
@@ -757,6 +777,42 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("INLINE_API_BASE_URL")
+        );
+    }
+
+    #[test]
+    fn io_timeouts_have_a_machine_readable_timeout_code() {
+        let error = io::Error::new(io::ErrorKind::TimedOut, "operation exceeded 90 seconds");
+        let payload = json_cli_error_from_error(&error);
+
+        assert_eq!(payload.code, "timeout");
+        assert!(payload.message.contains("90 seconds"));
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("deadline"))
+        );
+    }
+
+    #[test]
+    fn provider_integration_failures_do_not_collapse_into_generic_io_errors() {
+        let error = CliError::provider_integration_failed(
+            "Codex authentication probe failed: executable unavailable",
+        );
+        let payload = json_cli_error_from_error(&error);
+
+        assert_eq!(payload.code, "provider_integration_failed");
+        assert!(
+            payload
+                .message
+                .contains("Codex authentication probe failed")
+        );
+        assert!(
+            payload
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("signed in"))
         );
     }
 

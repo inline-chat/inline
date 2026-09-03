@@ -58,7 +58,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::config::Config;
-use crate::errors::ReportedCliFailure;
+use crate::errors::{CliError, ReportedCliFailure};
 use crate::identity::connect_realtime;
 use crate::output::{self, JsonFormat};
 use crate::state::LocalDb;
@@ -326,7 +326,7 @@ where
         options.allow_adapter_install,
     )
     .await
-    .map_err(io::Error::other)?;
+    .map_err(CliError::provider_integration_failed)?;
     progress(ProviderSetupProgress::Completed("integration", "ready"));
 
     progress(ProviderSetupProgress::Started("bot"));
@@ -430,6 +430,12 @@ pub async fn run_service(
     };
     service::install_runtime_logging(&paths)?;
     install_bridge_logger(trace);
+    eprintln!(
+        "Inline bridge service starting version={} os={} arch={}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
     log::info!(
         target: "inline::bridge::trace",
         "trace_schema=1 phase=service_start metadata_only=true"

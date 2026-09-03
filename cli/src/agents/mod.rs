@@ -38,6 +38,7 @@ pub(super) struct GatewayPreflight {
 
 pub(super) struct SetupProgressReporter {
     protocol_version: Option<u32>,
+    human_output: bool,
     phase: Cell<&'static str>,
     changes: RefCell<Vec<String>>,
     started_at: std::time::Instant,
@@ -45,9 +46,10 @@ pub(super) struct SetupProgressReporter {
 }
 
 impl SetupProgressReporter {
-    fn new(protocol_version: Option<u32>) -> Self {
+    fn new(protocol_version: Option<u32>, human_output: bool) -> Self {
         Self {
             protocol_version,
+            human_output,
             phase: Cell::new("preflight"),
             changes: RefCell::new(Vec::new()),
             started_at: std::time::Instant::now(),
@@ -73,13 +75,43 @@ impl SetupProgressReporter {
             outcome.unwrap_or("pending"),
             self.started_at.elapsed().as_millis()
         );
-        let Some(protocol_version) = self.protocol_version else {
-            return;
-        };
-        if let Ok(line) = app_progress_event_line(protocol_version, event, phase, outcome) {
-            println!("{line}");
-            let _ = io::stdout().flush();
+        if let Some(protocol_version) = self.protocol_version {
+            if let Ok(line) = app_progress_event_line(protocol_version, event, phase, outcome) {
+                println!("{line}");
+                let _ = io::stdout().flush();
+            }
+        } else if self.human_output {
+            eprintln!("{}", setup_progress_message(event, phase, outcome));
         }
+    }
+}
+
+fn setup_progress_message(
+    event: &'static str,
+    phase: &'static str,
+    outcome: Option<&'static str>,
+) -> &'static str {
+    match (event, phase, outcome) {
+        ("phase.started", "preflight", _) => "Checking local setup requirements...",
+        ("phase.started", "integration", _) => "Configuring the agent integration...",
+        ("phase.started", "bot", _) => "Creating or reusing the Inline bot...",
+        ("phase.started", "access", _) => "Applying bot access controls...",
+        ("phase.started", "service", _) => {
+            "Starting the local bridge service; this can take up to 90 seconds..."
+        }
+        ("phase.started", "verification", _) => "Verifying that the agent is ready...",
+        ("phase.completed", "preflight", _) => "Local setup requirements are ready.",
+        ("phase.completed", "integration", _) => "Agent integration configured.",
+        ("phase.completed", "bot", Some("reused")) => "Existing Inline bot reused.",
+        ("phase.completed", "bot", _) => "Inline bot configured.",
+        ("phase.completed", "access", _) => "Bot access controls configured.",
+        ("phase.completed", "service", Some("skipped")) => "Bridge service restart skipped.",
+        ("phase.completed", "service", _) => "Local bridge service started.",
+        ("phase.completed", "verification", Some("skipped")) => {
+            "Agent readiness verification skipped."
+        }
+        ("phase.completed", "verification", _) => "Agent is ready.",
+        _ => "Agent setup is progressing...",
     }
 }
 
@@ -95,6 +127,9 @@ fn app_progress_event_line(
         protocol_version: u32,
         event: &'static str,
         phase: &'static str,
+        message: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         outcome: Option<&'static str>,
     }
@@ -102,6 +137,8 @@ fn app_progress_event_line(
         protocol_version,
         event,
         phase,
+        message: setup_progress_message(event, phase, outcome),
+        timeout_seconds: (event == "phase.started" && phase == "service").then_some(90),
         outcome,
     })
 }
@@ -433,7 +470,7 @@ pub(crate) async fn setup(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let target = resolved.installed.descriptor.target;
     let app_protocol = resolved.args.app_protocol;
-    let mut progress = SetupProgressReporter::new(app_protocol);
+    let mut progress = SetupProgressReporter::new(app_protocol, !json);
     progress.retry = setup_retry_command(&resolved.args);
     if resolved.args.dry_run {
         let preflight = match target {
@@ -569,7 +606,7 @@ pub(crate) fn report_setup_preflight_failure(
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut progress = SetupProgressReporter::new(args.app_protocol);
+    let mut progress = SetupProgressReporter::new(args.app_protocol, !json);
     progress.retry = setup_retry_command(args);
     report_setup_failure_for_target(error, args.target, &progress, false, json, json_format)
 }
@@ -610,7 +647,11 @@ fn report_setup_failure_for_target(
         documentation_url: &'static str,
         target: Option<&'a str>,
         failed_phase: &'static str,
+        timed_out: bool,
         changes: &'a [String],
+        recovery_commands: &'a [&'static str],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        diagnostic_report_path: Option<String>,
         retry: String,
         error: JsonCliError,
     }
@@ -618,14 +659,52 @@ fn report_setup_failure_for_target(
     let phase = progress.phase.get();
     let target_id = target.map(|target| target.descriptor().id);
     let changes = progress.changes.borrow();
-    let payload = crate::diagnostics::error_payload(error.as_ref());
+    let mut payload = crate::diagnostics::error_payload(error.as_ref());
+    let timed_out = payload.code == "timeout";
+    const SERVICE_RECOVERY_COMMANDS: &[&str] = &[
+        "inline bridge status --json --pretty",
+        "inline bridge doctor --json --pretty",
+        "inline bridge logs --lines 200 --json --pretty",
+    ];
+    const CODEX_INTEGRATION_RECOVERY_COMMANDS: &[&str] = &["codex --version", "codex login status"];
+    let recovery_commands = if timed_out && phase == "service" {
+        payload.hint = Some(
+            "The local bridge did not become ready before the deadline. Its completed setup changes were kept; inspect bridge status, doctor, and logs before retrying."
+                .to_string(),
+        );
+        SERVICE_RECOVERY_COMMANDS
+    } else if payload.code == "provider_integration_failed"
+        && phase == "integration"
+        && target_id == Some("codex")
+    {
+        CODEX_INTEGRATION_RECOVERY_COMMANDS
+    } else {
+        &[]
+    };
     crate::diagnostics::log_error(error.as_ref());
     log::debug!(
         "setup failed target={} phase={phase} completed_changes={:?}",
         target_id.unwrap_or("unselected"),
         &*changes
     );
-    crate::telemetry::report(&payload.code, target_id, Some(phase));
+    let report_summary = format!(
+        "agents.setup failed target={} phase={phase} code={} completed_changes={:?}: {}",
+        target_id.unwrap_or("unselected"),
+        payload.code,
+        &*changes,
+        payload.message
+    );
+    let diagnostic_report_path = match crate::diagnostics::write_failure_report(&report_summary) {
+        Ok(path) => path.map(|path| path.display().to_string()),
+        Err(report_error) => {
+            log::debug!(
+                "could not save verbose diagnostic report: {}",
+                crate::diagnostics::safe_text(&report_error.to_string())
+            );
+            None
+        }
+    };
+    crate::telemetry::report(&payload, target_id, Some(phase));
     let retry = progress.retry.clone();
     let status = if may_have_mutated || !changes.is_empty() {
         "partial"
@@ -646,13 +725,20 @@ fn report_setup_failure_for_target(
             documentation_url: AGENTS_DOCUMENTATION_URL,
             target: target_id,
             failed_phase: phase,
+            timed_out,
             changes: &changes,
+            recovery_commands,
+            diagnostic_report_path,
             retry,
             error: payload,
         };
         eprintln!("{}", crate::output::json_string(&output, json_format)?);
     } else {
-        eprintln!("Agent setup failed during {phase}: {}", payload.message);
+        if timed_out {
+            eprintln!("Agent setup timed out during {phase}: {}", payload.message);
+        } else {
+            eprintln!("Agent setup failed during {phase}: {}", payload.message);
+        }
         eprintln!("Code: {}", payload.code);
         if let Some(status) = payload.status {
             eprintln!("Status: {status}");
@@ -663,8 +749,24 @@ fn report_setup_failure_for_target(
         for example in &payload.examples {
             eprintln!("  {example}");
         }
+        if !changes.is_empty() {
+            eprintln!("Completed changes: {}", changes.join(", "));
+        }
+        if !recovery_commands.is_empty() {
+            eprintln!("Next steps:");
+            for command in recovery_commands {
+                eprintln!("  {command}");
+            }
+        }
+        if let Some(path) = &diagnostic_report_path {
+            eprintln!("Diagnostic report: {path}");
+            eprintln!("Review this report, then attach it when contacting Inline support.");
+        } else {
+            eprintln!(
+                "Diagnostics: repeat the command with --verbose (twice for trace detail) to save a shareable failure report."
+            );
+        }
         eprintln!("Retry: {retry}");
-        eprintln!("Diagnostics: repeat the command with --verbose (twice for trace detail).");
         eprintln!("Setup guide: {AGENTS_DOCUMENTATION_URL}");
     }
     Err(ReportedCliFailure.into())
@@ -1096,7 +1198,7 @@ mod app_protocol_tests {
 
     #[test]
     fn failure_ledger_retains_actual_phase_and_completed_changes_without_app_protocol() {
-        let progress = SetupProgressReporter::new(None);
+        let progress = SetupProgressReporter::new(None, false);
         progress.started("preflight");
         progress.completed("preflight", "ready");
         assert!(progress.changes.borrow().is_empty());
@@ -1138,8 +1240,22 @@ mod app_protocol_tests {
         assert_eq!(value["event"], "phase.completed");
         assert_eq!(value["phase"], "bot");
         assert_eq!(value["outcome"], "reused");
+        assert_eq!(value["message"], "Existing Inline bot reused.");
         assert!(!line.contains("token"));
         assert!(!line.contains("/private/"));
+    }
+
+    #[test]
+    fn service_progress_exposes_the_wait_to_native_hosts() {
+        let line = app_progress_event_line(1, "phase.started", "service", None)
+            .expect("serialize progress event");
+        let value: serde_json::Value = serde_json::from_str(&line).expect("decode progress event");
+
+        assert_eq!(
+            value["message"],
+            "Starting the local bridge service; this can take up to 90 seconds..."
+        );
+        assert_eq!(value["timeoutSeconds"], 90);
     }
 
     #[test]

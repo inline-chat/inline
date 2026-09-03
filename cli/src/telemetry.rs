@@ -1,7 +1,9 @@
-//! Optional metadata-only error reporting. Never send arbitrary Error values.
+//! Optional allowlisted error reporting with bounded, scrubbed failure text.
 use std::sync::Arc;
 use std::sync::Once;
 use std::time::Duration;
+
+use crate::errors::JsonCliError;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const BRIDGE_RUNTIME_MESSAGE: &str = "Inline CLI bridge runtime failed";
@@ -57,7 +59,7 @@ pub(crate) fn init() -> Option<TelemetryGuard> {
     options.auto_session_tracking = false;
     options.max_breadcrumbs = 0;
     options.shutdown_timeout = SHUTDOWN_TIMEOUT;
-    options.before_send = Some(Arc::new(|event| Some(metadata_only(event))));
+    options.before_send = Some(Arc::new(|event| Some(allowlisted_event(event))));
     let guard = TelemetryGuard(Some(sentry::init(options)));
     install_panic_hook();
     Some(guard)
@@ -70,9 +72,9 @@ fn telemetry_disabled(value: &str) -> bool {
     )
 }
 
-pub(crate) fn report(code: &str, target: Option<&str>, phase: Option<&str>) {
+pub(crate) fn report(error: &JsonCliError, target: Option<&str>, phase: Option<&str>) {
     if matches!(
-        code,
+        error.code.as_str(),
         "invalid_args" | "not_authenticated" | "setup_cancelled" | "confirmation_required"
     ) {
         return;
@@ -82,22 +84,36 @@ pub(crate) fn report(code: &str, target: Option<&str>, phase: Option<&str>) {
         level: sentry::Level::Error,
         ..Default::default()
     };
-    event.tags.insert("error_code".into(), safe_code(code));
+    event
+        .tags
+        .insert("error_code".into(), safe_code(&error.code));
     if let Some(target) = target {
         event.tags.insert("target".into(), safe_code(target));
     }
     if let Some(phase) = phase {
         event.tags.insert("phase".into(), safe_code(phase));
     }
+    event
+        .extra
+        .insert("failure_text".into(), command_failure_text(error).into());
     sentry::capture_event(event);
 }
 
-/// Reports a recovered bridge failure using only a fixed metadata vocabulary.
-///
-/// `error` is inspected locally to choose a stable category. Its message, type,
-/// source chain, backtrace, and surrounding runtime state are never attached to
-/// the Sentry event. Repeated restart loops are sampled at attempts 1, 2, 3 and
-/// powers of two so one poisoned delivery cannot create an unbounded event flood.
+fn command_failure_text(error: &JsonCliError) -> String {
+    let mut text = error.message.clone();
+    if let Some(status) = error.status {
+        text.push_str(&format!(" Status: {status}."));
+    }
+    if let Some(hint) = &error.hint {
+        text.push_str(&format!(" Hint: {hint}"));
+    }
+    crate::diagnostics::safe_text(&text)
+}
+
+/// Reports a recovered bridge failure using fixed grouping metadata plus the
+/// bounded, scrubbed display text. Source chains, backtraces, and surrounding
+/// runtime state are not attached. Repeated restart loops are sampled at attempts
+/// 1, 2, 3 and powers of two so one poisoned delivery cannot flood Sentry.
 pub(crate) fn report_bridge_runtime_error(
     target: &str,
     phase: &str,
@@ -112,15 +128,22 @@ pub(crate) fn report_bridge_runtime_error(
         phase,
         classify_bridge_runtime_failure(error),
         attempt,
+        Some(&error.to_string()),
     );
 }
 
 pub(crate) fn report_bridge_provider_exit(target: &str) {
-    capture_bridge_runtime_event(target, "provider_process", "provider_process_exited", None);
+    capture_bridge_runtime_event(
+        target,
+        "provider_process",
+        "provider_process_exited",
+        None,
+        None,
+    );
 }
 
 pub(crate) fn report_bridge_configuration_fallback(target: &str, failure: &'static str) {
-    capture_bridge_runtime_event(target, "agent_configuration", failure, None);
+    capture_bridge_runtime_event(target, "agent_configuration", failure, None, None);
 }
 
 pub(crate) fn bridge_error_requires_provider_restart(
@@ -137,6 +160,7 @@ fn capture_bridge_runtime_event(
     phase: &str,
     failure: &'static str,
     attempt: Option<u32>,
+    failure_text: Option<&str>,
 ) {
     let mut event = sentry::protocol::Event {
         message: Some(BRIDGE_RUNTIME_MESSAGE.into()),
@@ -152,6 +176,12 @@ fn capture_bridge_runtime_event(
     event.tags.insert("failure".into(), failure.into());
     if let Some(attempt) = attempt {
         event.tags.insert("attempt".into(), attempt.to_string());
+    }
+    if let Some(failure_text) = failure_text {
+        event.extra.insert(
+            "failure_text".into(),
+            crate::diagnostics::safe_text(failure_text).into(),
+        );
     }
     sentry::capture_event(event);
 }
@@ -244,7 +274,7 @@ fn safe_code(value: &str) -> String {
     }
 }
 
-fn metadata_only(event: sentry::protocol::Event<'static>) -> sentry::protocol::Event<'static> {
+fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protocol::Event<'static> {
     // Reconstruct instead of blacklisting: future integrations/scope changes
     // cannot silently add usernames, request bodies, breadcrumbs, or stacks.
     let surface = event
@@ -279,6 +309,17 @@ fn metadata_only(event: sentry::protocol::Event<'static>) -> sentry::protocol::E
     ] {
         if let Some(value) = event.tags.get(name) {
             safe.tags.insert(name.into(), safe_code(value));
+        }
+    }
+    if let Some(failure_text) = event
+        .extra
+        .get("failure_text")
+        .and_then(|value| value.as_str())
+    {
+        let failure_text = crate::diagnostics::safe_text(failure_text);
+        if !failure_text.is_empty() {
+            safe.extra
+                .insert("failure_text".into(), failure_text.into());
         }
     }
     safe.tags.insert("os".into(), std::env::consts::OS.into());
@@ -347,7 +388,7 @@ mod tests {
         event.extra.insert("secret".into(), "private-token".into());
         event.tags.insert("phase".into(), "integration".into());
         event.tags.insert("path".into(), "/Users/private".into());
-        let encoded = serde_json::to_string(&metadata_only(event)).unwrap();
+        let encoded = serde_json::to_string(&allowlisted_event(event)).unwrap();
         assert!(encoded.contains("integration"));
         assert!(!encoded.contains("private"));
     }
@@ -373,8 +414,12 @@ mod tests {
         event
             .tags
             .insert("session_id".into(), "private-session".into());
+        event.extra.insert(
+            "failure_text".into(),
+            "Claude login failed at /Users/private/project\nTOKEN=private-value".into(),
+        );
 
-        let safe = metadata_only(event);
+        let safe = allowlisted_event(event);
         let encoded = serde_json::to_string(&safe).unwrap();
         assert_eq!(safe.message.as_deref(), Some(BRIDGE_RUNTIME_MESSAGE));
         assert_eq!(
@@ -389,6 +434,7 @@ mod tests {
             ]
         );
         assert!(encoded.contains("agent_configuration_catalog_unavailable"));
+        assert!(encoded.contains("Claude login failed"));
         assert!(!encoded.contains("private"));
         assert!(!encoded.contains("session_id"));
     }
@@ -448,7 +494,7 @@ mod tests {
             .tags
             .insert("session_id".into(), "private-session".into());
 
-        let safe = metadata_only(event);
+        let safe = allowlisted_event(event);
         let encoded = serde_json::to_string(&safe).unwrap();
         assert_eq!(safe.message.as_deref(), Some(PANIC_MESSAGE));
         assert_eq!(safe.level, sentry::Level::Fatal);

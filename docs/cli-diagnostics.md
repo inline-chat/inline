@@ -14,12 +14,42 @@ app-protocol progress stay on stdout. Verbose stderr can contain diagnostic line
 before the terminal JSON error. Without `--verbose`, JSON errors remain a single
 document. Native hosts should decode the terminal compact error line.
 
+Human-readable agent setup prints safe phase progress even without `--verbose`.
+Native app-protocol phase events include a display message, and service startup
+includes `timeoutSeconds: 90` so one-click setup can show an honest bounded wait.
+Terminal setup failures include `timedOut`, `failedPhase`, completed `changes`,
+`recoveryCommands`, and a `diagnosticReportPath` when a report was saved. These
+fields are intended to be rendered by native hosts rather than replaced with a
+generic setup error.
+
 Logs include setup phases, elapsed times, subprocess exit status, scrubbed stderr,
 and underlying error causes. Output retention is bounded. Credentials, signed URL
 parameters, terminal controls, and local paths are scrubbed from diagnostic text.
 HTTP wire logging and arbitrary dependency logs are not enabled, including by
 `RUST_LOG`. Redaction cannot recognize every possible secret: review local logs
 before sharing them. Do not share auth/config files or environment dumps.
+
+During verbose agent setup, the CLI keeps only the newest 256 scrubbed log lines
+in memory and writes them to a new owner-readable temporary report on failure. The
+failure output prints or returns that path so the person can review the file and
+attach it to support feedback. The report contains CLI version, OS, architecture,
+approximate install source, the scrubbed failure summary, and the bounded transcript.
+It does not collect argv, environment variables, request bodies, or message content.
+
+A deadline now uses the machine-readable `timeout` error code. If bridge service
+startup times out, capture these read-only diagnostics before retrying:
+
+```sh
+inline bridge status --json --pretty
+inline bridge doctor --json --pretty
+inline bridge logs --lines 200 --json --pretty
+```
+
+If status already reports the requested provider as running and healthy, setup
+recovered after the CLI deadline and no replacement bot is needed. Otherwise use
+the captured service evidence to repair the cause, then retry the exact command;
+completed setup changes are retained and the generated retry command preserves
+identity, workspace, and access options.
 
 On failure, keep the error code, failed phase, completed changes, CLI version,
 OS, and approximate time. Retry commands preserve the original setup options;
@@ -59,7 +89,7 @@ provider ownership never use these fallbacks and continue to fail closed.
 
 ## Optional Sentry reporting
 
-Official releases starting with 0.7.6 include metadata-only error reporting to
+Official releases starting with 0.7.6 include allowlisted error reporting to
 Inline's Sentry project. Set `INLINE_CLI_TELEMETRY=off` to opt out.
 
 Source builds have reporting disabled when no DSN is configured.
@@ -79,21 +109,23 @@ Exit waits at most two seconds for reporting, including SDK transport teardown.
 A stalled upload may be abandoned when the CLI exits.
 
 Command failures are sent with release, OS/architecture, error code, setup provider,
-and setup phase when available, plus an event timestamp and generated identifier.
-Recovered bridge failures additionally send the provider, lifecycle phase, a fixed
-failure category, and a sampled restart-attempt number. Attempt 1, 2, 3, and powers
-of two are reported so a poisoned-delivery loop is visible without uploading every
-retry. Panics send only a fixed panic code and fatal level. No raw error messages,
-panic messages, argv, environment,
-local logs, usernames, bot IDs, paths, request bodies, stack traces, breadcrumbs,
+and setup phase when available, plus an event timestamp, generated identifier, and
+the same bounded, scrubbed failure text shown by the CLI.
+Recovered bridge runtime errors additionally send the provider, lifecycle phase,
+a fixed failure category, a sampled restart-attempt number, and bounded scrubbed
+failure text. Attempt 1, 2, 3, and powers of two are reported so a poisoned-delivery
+loop is visible without uploading every retry. Panics send only a fixed panic code
+and fatal level. No unsanitized error or panic messages, argv,
+environment, usernames, bot IDs, paths, request bodies, stack traces, breadcrumbs,
 or session/usage tracking are sent. The codes `invalid_args`, `not_authenticated`,
 `setup_cancelled`, and `confirmation_required` are excluded. Other validation
 errors may be reported. Expected doctor/health results that print their own status
 are excluded.
 
 The SDK's default integrations are disabled. The final event hook reconstructs
-the payload from the metadata allowlist, so future scope additions cannot upload
-arbitrary context. This is deliberately more restrictive than the SDK defaults.
+the payload from an allowlist containing the stable metadata and scrubbed failure
+text, so future scope additions cannot upload arbitrary context. This is deliberately
+more restrictive than the SDK defaults.
 See the [official Rust SDK options](https://docs.rs/sentry/latest/sentry/struct.ClientOptions.html).
 
 Local process tests inspect the actual HTTP envelope and verify that opt-out,

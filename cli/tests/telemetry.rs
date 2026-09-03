@@ -71,7 +71,7 @@ fn error_code(output: &Output) -> String {
 }
 
 #[test]
-fn sentry_http_envelope_contains_only_allowed_metadata() {
+fn sentry_http_envelope_contains_allowlisted_scrubbed_failure_text() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let dsn = format!("http://fixture@{}/1", listener.local_addr().unwrap());
@@ -156,6 +156,7 @@ fn sentry_http_envelope_contains_only_allowed_metadata() {
         "timestamp",
         "release",
         "tags",
+        "extra",
     ];
     assert!(
         event
@@ -178,6 +179,10 @@ fn sentry_http_envelope_contains_only_allowed_metadata() {
         serde_json::json!({
             "error_code": "missing_peer", "os": std::env::consts::OS, "arch": std::env::consts::ARCH
         })
+    );
+    assert_eq!(
+        event["extra"]["failure_text"],
+        "Missing required argument: provide --chat-id or --user-id Hint: Use `inline chats list` to find chat IDs, or `inline users list` for DM user IDs."
     );
 }
 

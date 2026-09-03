@@ -1,15 +1,36 @@
 //! Local diagnostics are separate from the allowlisted telemetry payload.
+use std::collections::VecDeque;
 use std::error::Error;
+use std::fs::OpenOptions;
 use std::io::Write;
-use std::sync::OnceLock;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::errors::{JsonCliError, json_cli_error_from_error};
 
 const MAX_DETAIL_CHARS: usize = 4_000;
+const MAX_BUFFERED_LINES: usize = 256;
+
+#[derive(Default)]
+struct BufferedDiagnostics {
+    verbosity: u8,
+    lines: VecDeque<String>,
+}
+
+static BUFFERED_DIAGNOSTICS: OnceLock<Mutex<BufferedDiagnostics>> = OnceLock::new();
+
+fn buffered_diagnostics() -> &'static Mutex<BufferedDiagnostics> {
+    BUFFERED_DIAGNOSTICS.get_or_init(|| Mutex::new(BufferedDiagnostics::default()))
+}
 
 pub(crate) fn init(verbosity: u8) {
     if verbosity == 0 {
         return;
+    }
+    if let Ok(mut diagnostics) = buffered_diagnostics().lock() {
+        diagnostics.verbosity = verbosity;
+        diagnostics.lines.clear();
     }
     let level = if verbosity > 1 {
         log::LevelFilter::Trace
@@ -27,23 +48,121 @@ pub(crate) fn init(verbosity: u8) {
         .filter_module("inline_agent_driver_acp", level)
         .write_style(env_logger::WriteStyle::Never)
         .format(|buf, record| {
-            writeln!(
-                buf,
+            let line = format!(
                 "{} {} {}: {}",
                 buf.timestamp_millis(),
                 record.level(),
                 record.target(),
                 safe_text(&record.args().to_string())
-            )
+            );
+            record_diagnostic_line(&line);
+            writeln!(buf, "{line}")
         });
     let _ = logger.try_init();
     log::debug!(
-        "diagnostics enabled version={} os={} arch={} trace={}",
+        "diagnostics enabled version={} os={} arch={} install_source={} trace={}",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH,
+        executable_provenance(),
         verbosity > 1
     );
+}
+
+fn record_diagnostic_line(line: &str) {
+    let Ok(mut diagnostics) = buffered_diagnostics().lock() else {
+        return;
+    };
+    if diagnostics.verbosity == 0 {
+        return;
+    }
+    if diagnostics.lines.len() == MAX_BUFFERED_LINES {
+        diagnostics.lines.pop_front();
+    }
+    diagnostics.lines.push_back(safe_text(line));
+}
+
+/// Writes the bounded, already-scrubbed verbose transcript after a command failure.
+///
+/// The report is created only when verbose diagnostics were enabled. It uses a
+/// new owner-readable temporary file and never includes argv, environment
+/// variables, request bodies, message content, or credentials.
+pub(crate) fn write_failure_report(summary: &str) -> std::io::Result<Option<PathBuf>> {
+    let lines = {
+        let diagnostics = buffered_diagnostics()
+            .lock()
+            .map_err(|_| std::io::Error::other("diagnostic buffer is unavailable"))?;
+        if diagnostics.verbosity == 0 {
+            return Ok(None);
+        }
+        diagnostics.lines.iter().cloned().collect::<Vec<_>>()
+    };
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let path = std::env::temp_dir().join(format!(
+        "inline-diagnostics-{timestamp}-{}.log",
+        std::process::id()
+    ));
+    write_failure_report_to(&path, summary, &lines)?;
+    Ok(Some(path))
+}
+
+fn write_failure_report_to(
+    path: &std::path::Path,
+    summary: &str,
+    lines: &[String],
+) -> std::io::Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    writeln!(file, "Inline CLI diagnostic report")?;
+    writeln!(file, "version: {}", env!("CARGO_PKG_VERSION"))?;
+    writeln!(file, "os: {}", std::env::consts::OS)?;
+    writeln!(file, "architecture: {}", std::env::consts::ARCH)?;
+    writeln!(file, "install source: {}", executable_provenance())?;
+    writeln!(file, "summary: {}", safe_text(summary))?;
+    writeln!(file)?;
+    writeln!(file, "Recent verbose diagnostics (oldest to newest):")?;
+    for line in lines {
+        writeln!(file, "{}", safe_text(line))?;
+    }
+    Ok(())
+}
+
+fn executable_provenance() -> &'static str {
+    std::env::current_exe()
+        .ok()
+        .as_deref()
+        .map(executable_provenance_for_path)
+        .unwrap_or("unknown")
+}
+
+fn executable_provenance_for_path(path: &std::path::Path) -> &'static str {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if value.contains("/target/debug/") || value.contains("/target/release/") {
+        "source_build"
+    } else if value.contains("/.cargo/bin/") {
+        "cargo"
+    } else if value.contains("/Cellar/") || value.contains("/Caskroom/") {
+        "homebrew"
+    } else if value.contains("/.local/share/inline/bridge/") {
+        "managed_bridge_copy"
+    } else if value.starts_with("/opt/homebrew/bin/")
+        || value.starts_with("/usr/local/bin/")
+        || value.starts_with("/usr/bin/")
+    {
+        "system_prefix_unknown"
+    } else {
+        "unknown"
+    }
 }
 
 pub(crate) fn safe_text(value: &str) -> String {
@@ -182,5 +301,55 @@ mod tests {
         let rendered = crate::errors::human_cli_error_from_error(&error);
         assert!(!rendered.contains("private response body"));
         assert!(!rendered.contains("secret-value"));
+    }
+
+    #[test]
+    fn executable_provenance_is_conservative() {
+        use std::path::Path;
+
+        assert_eq!(
+            executable_provenance_for_path(Path::new(
+                "/opt/homebrew/Cellar/inline/0.7.8/bin/inline"
+            )),
+            "homebrew"
+        );
+        assert_eq!(
+            executable_provenance_for_path(Path::new("/opt/homebrew/bin/inline")),
+            "system_prefix_unknown"
+        );
+        assert_eq!(
+            executable_provenance_for_path(Path::new("/workspace/target/debug/inline")),
+            "source_build"
+        );
+    }
+
+    #[test]
+    fn failure_report_is_bounded_scrubbed_and_owner_readable() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("setup-failure.log");
+        write_failure_report_to(
+            &path,
+            "service timed out TOKEN=private-summary",
+            &[
+                "first useful line".to_string(),
+                "Authorization: Bearer private-log-value".to_string(),
+            ],
+        )
+        .unwrap();
+
+        let report = std::fs::read_to_string(&path).unwrap();
+        assert!(report.contains("Inline CLI diagnostic report"));
+        assert!(report.contains("service timed out"));
+        assert!(report.contains("first useful line"));
+        assert!(!report.contains("private-summary"));
+        assert!(!report.contains("private-log-value"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 }
