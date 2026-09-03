@@ -40,16 +40,21 @@ struct AgentSetupProgressItem: Equatable, Identifiable {
 
 private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
   let code: String
+  let phase: String
+  let target: String
 
   var privacySafeErrorCategory: String {
     let safeCode = Self.allowlistedCodes.contains(code) ? code : "other"
-    return "agent_setup:\(safeCode)"
+    let safePhase = Self.allowlistedPhases.contains(phase) ? phase : "unknown"
+    let safeTarget = Self.allowlistedTargets.contains(target) ? target : "unknown"
+    return "agent_setup:\(safeTarget):\(safePhase):\(safeCode)"
   }
 
   private static let allowlistedCodes: Set<String> = [
     "agent_setup_failed",
     "agent_setup_requires_direct_app",
     "cli_auth_failed",
+    "cli_auth_handoff_failed",
     "cli_auth_launch_failed",
     "cli_auth_protocol_mismatch",
     "cli_auth_timed_out",
@@ -73,14 +78,42 @@ private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
     "inline_not_authenticated",
     "invalid_cli_response",
     "invalid_target",
+    "io_error",
     "mapped_bot_missing",
     "not_authenticated",
     "operation_in_progress",
     "provider_integration_failed",
+    "realtime_connection_error",
+    "realtime_timeout",
     "setup_conflict",
     "setup_timed_out",
     "timeout",
     "unexpected_target",
+    "websocket_error",
+  ]
+
+  private static let allowlistedPhases: Set<String> = [
+    "access",
+    "authentication",
+    "bot",
+    "cli",
+    "configuration",
+    "discovery",
+    "integration",
+    "preflight",
+    "service",
+    "unknown",
+    "verification",
+  ]
+
+  private static let allowlistedTargets: Set<String> = [
+    "amp",
+    "claude",
+    "codex",
+    "hermes",
+    "openclaw",
+    "opencode",
+    "unknown",
   ]
 }
 
@@ -521,9 +554,14 @@ final class AgentSetupWizardModel {
     }
     let failureCode = failure?.code ?? "unknown"
     let failedPhase = failure?.failedPhase ?? "unknown"
+    let failedTarget = selectedTargetID ?? "unknown"
     log.error(
       "AGENT_SETUP phase=failed code=\(failureCode) failedPhase=\(failedPhase)",
-      error: AgentSetupTelemetryFailure(code: failureCode)
+      error: AgentSetupTelemetryFailure(
+        code: failureCode,
+        phase: failedPhase,
+        target: failedTarget
+      )
     )
     phase = .failed
   }
