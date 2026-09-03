@@ -2421,6 +2421,11 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
     // at multiple command levels; preserve all explicit verbosity requests.
     diagnostics::init(flags.verbose.max(cli.verbose));
     let telemetry = telemetry::init();
+    // Telemetry installs its own panic hook. Reinstall the broken-pipe guard
+    // outside it so successful short-pipe exits are not reported as crashes.
+    if telemetry.is_some() {
+        install_broken_pipe_handler();
+    }
     let telemetry_command = cli.command.telemetry_name();
     if let Err(error) = run_until_terminated(cli, started_at).await {
         if is_reported_cli_failure(error.as_ref()) {
