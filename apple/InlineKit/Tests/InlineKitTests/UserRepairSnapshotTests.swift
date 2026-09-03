@@ -61,6 +61,149 @@ struct UserRepairSnapshotTests {
     }
   }
 
+  @Test("zero-date bootstrap projections persist independently without committing the user cursor")
+  @MainActor
+  func bootstrapProjectionsPersistBeforeBaseline() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let appDatabase = try AppDatabase(queue)
+    let settingsRecorder = UserRepairSettingsRecorder()
+    let engine = UpdatesEngine(
+      database: appDatabase,
+      authenticatedUserID: { 42 },
+      validateAccountMutation: { _ in },
+      applyUserSettings: { _, _, _ in settingsRecorder.applyCount += 1 }
+    )
+    let checkpoint = BucketState(date: 200, seq: 50)
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 42
+      $0.firstName = "Visible before baseline"
+    }
+    var chat = InlineProtocol.Chat()
+    chat.id = 8
+    chat.date = 20
+    chat.title = "Visible chat"
+    chat.peerID = chatPeer(8)
+    chat.seq = 10
+    var chats = InlineProtocol.GetChatsResult()
+    chats.chats = [chat]
+
+    #expect(await engine.persistUserBootstrapProjection(.init(
+      projection: .me(me),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) != nil)
+    #expect(await engine.persistUserBootstrapProjection(.init(
+      projection: .chats(chats),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) != nil)
+    #expect(await engine.persistUserBootstrapProjection(.init(
+      projection: .settings(userSettingsResult()),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) != nil)
+
+    #expect(settingsRecorder.applyCount == 1)
+    try await queue.read { (db: Database) throws in
+      #expect(try User.fetchOne(db, id: 42)?.firstName == "Visible before baseline")
+      #expect(try Chat.fetchOne(db, id: 8)?.title == "Visible chat")
+      #expect(try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
+        .fetchCount(db) == 0)
+    }
+  }
+
+  @Test("final bootstrap admission consumes persisted projections without applying them twice")
+  @MainActor
+  func bootstrapProjectionsAreAppliedOnlyOnce() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let appDatabase = try AppDatabase(queue)
+    let settingsRecorder = UserRepairSettingsRecorder()
+    let engine = UpdatesEngine(
+      database: appDatabase,
+      authenticatedUserID: { 42 },
+      validateAccountMutation: { _ in },
+      applyUserSettings: { _, _, _ in settingsRecorder.applyCount += 1 }
+    )
+    let checkpoint = BucketState(date: 200, seq: 50)
+    var firstMe = InlineProtocol.GetMeResult()
+    firstMe.user = .with {
+      $0.id = 42
+      $0.firstName = "First import"
+    }
+    var firstChat = InlineProtocol.Chat()
+    firstChat.id = 8
+    firstChat.date = 20
+    firstChat.title = "First import"
+    firstChat.peerID = chatPeer(8)
+    firstChat.seq = 10
+    var firstChats = InlineProtocol.GetChatsResult()
+    firstChats.chats = [firstChat]
+
+    #expect(await engine.persistUserBootstrapProjection(.init(
+      projection: .me(firstMe),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) != nil)
+    #expect(await engine.persistUserBootstrapProjection(.init(
+      projection: .settings(userSettingsResult()),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) != nil)
+
+    guard case let .chats(persistence)? = await engine.persistUserBootstrapProjection(.init(
+      projection: .chats(firstChats),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) else {
+      Issue.record("Expected the catalog projection to persist")
+      return
+    }
+
+    var duplicateChat = firstChat
+    duplicateChat.title = "Second import"
+    var unexpectedChat = InlineProtocol.Chat()
+    unexpectedChat.id = 9
+    unexpectedChat.date = 20
+    unexpectedChat.title = "Must stay absent"
+    unexpectedChat.peerID = chatPeer(9)
+    unexpectedChat.seq = 10
+    var duplicateChats = InlineProtocol.GetChatsResult()
+    duplicateChats.chats = [duplicateChat, unexpectedChat]
+    var duplicateMe = InlineProtocol.GetMeResult()
+    duplicateMe.user = .with {
+      $0.id = 42
+      $0.firstName = "Second import"
+    }
+
+    let outcome = await engine.applyUserRepair(UserRepairSnapshot(
+      chats: duplicateChats,
+      me: duplicateMe,
+      settings: userSettingsResult(),
+      checkpointState: checkpoint,
+      replayThroughState: checkpoint,
+      targetState: .init(date: 0, seq: 0),
+      mutationToken: accountToken(),
+      bootstrapCatalogPersistence: persistence,
+      replacesActiveCatalog: true,
+      requiresProjectionAudit: true,
+      reason: "fresh_account_bootstrap"
+    ))
+
+    guard case let .applied(state, seededStates, _, _)? = outcome else {
+      Issue.record("Expected final bootstrap admission to consume the persisted catalog")
+      return
+    }
+    #expect(state.seq == 50)
+    #expect(seededStates[.chat(peer: chatPeer(8))]?.seq == 10)
+    #expect(settingsRecorder.applyCount == 1)
+    try await queue.read { (db: Database) throws in
+      #expect(try User.fetchOne(db, id: 42)?.firstName == "First import")
+      #expect(try Chat.fetchOne(db, id: 8)?.title == "First import")
+      #expect(try Chat.fetchOne(db, id: 9) == nil)
+    }
+  }
+
   @Test("catalog replacement requires and preserves its post-projection replay bound")
   func catalogReplacementCarriesReplayBound() async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
@@ -451,6 +594,194 @@ struct UserRepairSnapshotTests {
     }
   }
 
+  @Test("an interrupted bootstrap never resurrects catalog resources from a P0 behind its user cursor")
+  @MainActor
+  func interruptedBootstrapAcceptsOlderCheckpointWithoutRegression() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let appDatabase = try AppDatabase(queue)
+    let settingsRecorder = UserRepairSettingsRecorder()
+    let engine = UpdatesEngine(
+      database: appDatabase,
+      authenticatedUserID: { 42 },
+      validateAccountMutation: { _ in },
+      applyUserSettings: { _, _, _ in settingsRecorder.applyCount += 1 }
+    )
+    try await queue.write { (db: Database) throws in
+      try User(id: 42, email: "current@example.com", firstName: "Current").insert(db)
+      try DialogFolder(id: 7, title: "Current folder", order: "current").insert(db)
+      _ = try GRDBSyncStorage.advanceBucketState(
+        for: .user,
+        state: BucketState(date: 300, seq: 75),
+        in: db
+      )
+    }
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 42
+      $0.firstName = "Stale P0"
+    }
+    var space = InlineProtocol.Space()
+    space.id = 9
+    space.name = "Recovered space"
+    space.date = 20
+    space.seq = 11
+    var chat = InlineProtocol.Chat()
+    chat.id = 8
+    chat.date = 20
+    chat.title = "Recovered chat"
+    chat.spaceID = space.id
+    chat.peerID = chatPeer(chat.id)
+    chat.seq = 10
+    var dialog = InlineProtocol.Dialog()
+    dialog.peer = chat.peerID
+    dialog.chatID = chat.id
+    dialog.open = true
+    dialog.order = "dialog-8"
+    dialog.folderID = 9
+    var chats = InlineProtocol.GetChatsResult()
+    chats.users = [
+      .with { $0.id = 42
+        $0.firstName = "Stale P0"
+      },
+      .with { $0.id = 99
+        $0.firstName = "Missing dependency"
+      },
+    ]
+    chats.spaces = [space]
+    chats.chats = [chat]
+    chats.folders = [
+      .with { $0.id = 7
+        $0.title = "Stale folder"
+        $0.order = "stale"
+      },
+      .with { $0.id = 9
+        $0.title = "Recovered folder"
+        $0.order = "recovered"
+      },
+    ]
+    chats.dialogs = [dialog]
+    let checkpoint = BucketState(date: 200, seq: 50)
+
+    guard case let .chats(persistence)? = await engine.persistUserBootstrapProjection(.init(
+      projection: .chats(chats),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) else {
+      Issue.record("Expected the older P0 catalog projection to preserve its safe subset")
+      return
+    }
+    guard case .me? = await engine.persistUserBootstrapProjection(.init(
+      projection: .me(me),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) else {
+      Issue.record("Expected the existing self projection to retain its newer owner")
+      return
+    }
+    guard case .settings? = await engine.persistUserBootstrapProjection(.init(
+      projection: .settings(userSettingsResult()),
+      checkpointState: checkpoint,
+      mutationToken: accountToken()
+    )) else {
+      Issue.record("Expected settings to retain their newer owner")
+      return
+    }
+
+    let outcome = await engine.applyUserRepair(UserRepairSnapshot(
+      chats: chats,
+      me: me,
+      settings: userSettingsResult(),
+      checkpointState: checkpoint,
+      replayThroughState: BucketState(date: 220, seq: 55),
+      targetState: BucketState(date: 300, seq: 75),
+      mutationToken: accountToken(),
+      bootstrapCatalogPersistence: persistence,
+      replacesActiveCatalog: true,
+      requiresProjectionAudit: true,
+      reason: "fresh_account_bootstrap"
+    ))
+
+    guard case let .applied(state, _, replayThroughState, retiredBucketKeys)? = outcome else {
+      Issue.record("Expected interrupted bootstrap to accept the older checkpoint audit")
+      return
+    }
+    #expect(state.date == 300)
+    #expect(state.seq == 75)
+    #expect(replayThroughState?.date == 220)
+    #expect(replayThroughState?.seq == 55)
+    #expect(retiredBucketKeys.isEmpty)
+    #expect(persistence.seededStates.isEmpty)
+    #expect(settingsRecorder.applyCount == 0)
+    try await queue.read { (db: Database) throws in
+      #expect(try User.fetchOne(db, id: 42)?.firstName == "Current")
+      #expect(try User.fetchOne(db, id: 99)?.firstName == "Missing dependency")
+      #expect(try Space.fetchOne(db, id: 9) == nil)
+      #expect(try Chat.fetchOne(db, id: 8) == nil)
+      #expect(try Dialog.fetchOne(db, id: 8) == nil)
+      #expect(try DialogFolder.fetchOne(db, id: 7)?.title == "Current folder")
+      #expect(try DialogFolder.fetchOne(db, id: 9) == nil)
+      let cursor = try #require(try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
+        .filter(DbBucketState.Columns.entityId == BucketKey.user.getEntityId())
+        .fetchOne(db))
+      #expect(cursor.date == 300)
+      #expect(cursor.seq == 75)
+      let spaceCursorCount = try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == BucketKey.space(id: 9).getBucket())
+        .filter(DbBucketState.Columns.entityId == BucketKey.space(id: 9).getEntityId())
+        .fetchCount(db)
+      #expect(spaceCursorCount == 0)
+      let chatKey = BucketKey.chat(peer: chatPeer(8))
+      let chatCursorCount = try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == chatKey.getBucket())
+        .filter(DbBucketState.Columns.entityId == chatKey.getEntityId())
+        .fetchCount(db)
+      #expect(chatCursorCount == 0)
+    }
+  }
+
+  @Test("a newer user cursor fills a missing self row without overwriting present state")
+  func interruptedBootstrapFillsOnlyMissingSelfProjection() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let appDatabase = try AppDatabase(queue)
+    let engine = UpdatesEngine(
+      database: appDatabase,
+      authenticatedUserID: { 42 },
+      validateAccountMutation: { _ in },
+      applyUserSettings: { _, _, _ in }
+    )
+    try await queue.write { (db: Database) throws in
+      _ = try GRDBSyncStorage.advanceBucketState(
+        for: .user,
+        state: BucketState(date: 300, seq: 75),
+        in: db
+      )
+    }
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with {
+      $0.id = 42
+      $0.firstName = "Recovered self"
+    }
+
+    guard case .me? = await engine.persistUserBootstrapProjection(.init(
+      projection: .me(me),
+      checkpointState: BucketState(date: 200, seq: 50),
+      mutationToken: accountToken()
+    )) else {
+      Issue.record("Expected the newer cursor to retain ownership")
+      return
+    }
+
+    try await queue.read { (db: Database) throws in
+      #expect(try User.fetchOne(db, id: 42)?.firstName == "Recovered self")
+      let cursor = try #require(try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
+        .filter(DbBucketState.Columns.entityId == BucketKey.user.getEntityId())
+        .fetchOne(db))
+      #expect(cursor.date == 300)
+      #expect(cursor.seq == 75)
+    }
+  }
+
   @Test("a delayed regression audit preserves user projections newer than its checkpoint")
   func delayedProjectionAuditDoesNotClobberNewerUserState() async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
@@ -494,8 +825,8 @@ struct UserRepairSnapshotTests {
     }
   }
 
-  @Test("incomplete snapshot import retains the durable cursor")
-  func incompleteSnapshotDoesNotAdvance() async throws {
+  @Test("record-local snapshot failures preserve healthy siblings and their cursors")
+  func incompleteSnapshotPreservesHealthySiblings() async throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     let appDatabase = try AppDatabase(queue)
     let engine = UpdatesEngine(
@@ -508,8 +839,14 @@ struct UserRepairSnapshotTests {
     var invalidChat = InlineProtocol.Chat()
     invalidChat.id = 7
     invalidChat.seq = 9
+    var validChat = InlineProtocol.Chat()
+    validChat.id = 8
+    validChat.date = 20
+    validChat.title = "Healthy"
+    validChat.peerID = chatPeer(8)
+    validChat.seq = 10
     var chats = InlineProtocol.GetChatsResult()
-    chats.chats = [invalidChat]
+    chats.chats = [invalidChat, validChat]
 
     var user = InlineProtocol.User()
     user.id = 42
@@ -522,17 +859,37 @@ struct UserRepairSnapshotTests {
       me: me,
       settings: userSettingsResult(),
       checkpointState: BucketState(date: 200, seq: 50),
+      replayThroughState: BucketState(date: 200, seq: 50),
       targetState: BucketState(date: 200, seq: 50),
       mutationToken: accountToken(),
+      replacesActiveCatalog: true,
       reason: "invalid-snapshot-test"
     ))
 
-    #expect(committed == nil)
+    guard case let .applied(state, seededStates, replayThroughState, retiredBucketKeys)? = committed else {
+      Issue.record("Expected the healthy account projection to commit")
+      return
+    }
+    #expect(state.date == 200)
+    #expect(state.seq == 50)
+    #expect(seededStates[.chat(peer: chatPeer(8))]?.seq == 10)
+    #expect(replayThroughState?.seq == 50)
+    #expect(retiredBucketKeys.isEmpty)
     try await queue.read { (db: Database) throws in
-      let bucketCount = try DbBucketState.fetchCount(db)
-      #expect(bucketCount == 0)
       let importedUser = try User.fetchOne(db, id: 42)
-      #expect(importedUser == nil)
+      #expect(importedUser?.firstName == "Recovered")
+      #expect(try Chat.fetchOne(db, id: 7) == nil)
+      #expect(try Chat.fetchOne(db, id: 8)?.title == "Healthy")
+      let userCursor = try #require(try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
+        .filter(DbBucketState.Columns.entityId == BucketKey.user.getEntityId())
+        .fetchOne(db))
+      #expect(userCursor.seq == 50)
+      let invalidKey = BucketKey.chat(peer: chatPeer(7))
+      #expect(try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == invalidKey.getBucket())
+        .filter(DbBucketState.Columns.entityId == invalidKey.getEntityId())
+        .fetchCount(db) == 0)
     }
   }
 

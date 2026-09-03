@@ -3,14 +3,18 @@ import InlineProtocol
 import RealtimeV2
 
 struct InlineApplyUpdates: ApplyUpdates {
-  init() {}
+  private let engine: UpdatesEngine
+
+  init(engine: UpdatesEngine = .shared) {
+    self.engine = engine
+  }
 
   func apply(
     updates: [InlineProtocol.Update],
     source: UpdateApplySource,
     sidecars: InlineProtocol.UpdateSidecars?
   ) async -> UpdateApplyResult {
-    await UpdatesEngine.shared.applyBatch(updates: updates, source: source, sidecars: sidecars)
+    await engine.applyBatch(updates: updates, source: source, sidecars: sidecars)
   }
 
   func apply(
@@ -20,7 +24,7 @@ struct InlineApplyUpdates: ApplyUpdates {
     bucketCommit: UpdateBucketCommit?,
     mutationToken: AuthAccountMutationToken?
   ) async -> UpdateApplyResult {
-    await UpdatesEngine.shared.applyBatch(
+    await engine.applyBatch(
       updates: updates,
       source: source,
       sidecars: sidecars,
@@ -35,7 +39,7 @@ struct InlineApplyUpdates: ApplyUpdates {
     sidecars: InlineProtocol.UpdateSidecars?,
     bucketCommit: UpdateBucketCommit?
   ) async -> UpdateApplyResult {
-    await UpdatesEngine.shared.applyBatch(
+    await engine.applyBatch(
       updates: updates,
       source: source,
       sidecars: sidecars,
@@ -44,22 +48,28 @@ struct InlineApplyUpdates: ApplyUpdates {
   }
 
   func repairChat(_ snapshot: ChatRepairSnapshot) async -> BucketState? {
-    await UpdatesEngine.shared.applyChatRepair(snapshot)
+    await engine.applyChatRepair(snapshot)
   }
 
   func repairSpace(_ snapshot: SpaceRepairSnapshot) async -> BucketState? {
-    await UpdatesEngine.shared.applySpaceRepair(snapshot)
+    await engine.applySpaceRepair(snapshot)
   }
 
   func repairUser(_ snapshot: UserRepairSnapshot) async -> UserRepairOutcome? {
-    await UpdatesEngine.shared.applyUserRepair(snapshot)
+    await engine.applyUserRepair(snapshot)
+  }
+
+  func persistUserBootstrapProjection(
+    _ snapshot: UserBootstrapProjectionSnapshot
+  ) async -> UserBootstrapProjectionPersistence? {
+    await engine.persistUserBootstrapProjection(snapshot)
   }
 
   func finalizeUserRepair(
     _ finalization: UserRepairFinalization,
     resolvedTargets: [BucketKey: UserRepairTargetResolution]
   ) async -> BucketState? {
-    await UpdatesEngine.shared.finalizeUserRepair(
+    await engine.finalizeUserRepair(
       finalization,
       resolvedTargets: resolvedTargets
     )

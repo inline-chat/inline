@@ -162,6 +162,9 @@ struct GetChatsSnapshotTests {
     let foreignKey = DatabaseError(resultCode: .SQLITE_CONSTRAINT_FOREIGNKEY)
     #expect(GetChatsTransaction.isRecoverableRecordError(foreignKey))
 
+    let recordTypeMismatch = DatabaseError(resultCode: .SQLITE_MISMATCH)
+    #expect(!GetChatsTransaction.isRecoverableRecordError(recordTypeMismatch))
+
     let busy = DatabaseError(resultCode: .SQLITE_BUSY)
     #expect(!GetChatsTransaction.isRecoverableRecordError(busy))
 
@@ -931,6 +934,34 @@ struct GetChatsSnapshotTests {
       #expect(try MessageHistoryCoverageStore.holes(db, chatId: 10) == [
         MessageHistoryHole(chatId: 10, lowerId: 1, upperId: 4),
       ])
+    }
+  }
+
+  @Test("a rejected snapshot space never reactivates its excluded cached row")
+  func rejectedSpaceRemainsExcluded() throws {
+    let queue = try makeInMemoryDB()
+    try queue.write { (db: Database) throws in
+      try Space(from: makeSpace(id: 2, seq: 5, name: "Cached")).save(db)
+      try SpaceCatalogExclusion(spaceId: 2).save(db)
+      try db.execute(sql: """
+      CREATE TRIGGER reject_test_space_update BEFORE UPDATE ON space
+      WHEN NEW.id = 2 BEGIN SELECT RAISE(ABORT, 'reject test space update'); END;
+      """)
+
+      var result = InlineProtocol.GetChatsResult()
+      result.spaces = [makeSpace(id: 2, seq: 6, name: "Rejected replacement")]
+      let imported = try GetChatsTransaction.applySnapshot(
+        result,
+        userProjectionAdmission: .alreadyValidated,
+        replacesActiveCatalog: true,
+        in: db
+      )
+
+      #expect(failureCount(in: imported, phase: .spaces) == 1)
+      #expect(imported.retiredBucketKeys.isEmpty)
+      #expect(try Space.fetchOne(db, key: 2)?.name == "Cached")
+      #expect(try SpaceCatalogExclusion.fetchOne(db, key: 2) != nil)
+      #expect(try Space.catalogActive().fetchCount(db) == 0)
     }
   }
 

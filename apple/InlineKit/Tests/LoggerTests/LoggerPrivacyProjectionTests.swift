@@ -328,6 +328,22 @@ struct LoggerPrivacyProjectionTests {
     #expect(projection.data["bucket_id"] == nil)
   }
 
+  @Test("bootstrap projection breadcrumbs retain only their finite phase and duration")
+  func bootstrapProjectionBreadcrumbProjectionRetainsFinitePhase() throws {
+    for category in ["sync.bootstrap.chats", "sync.bootstrap.me", "sync.bootstrap.settings"] {
+      let projection = PerformanceTrace.privacySafeBreadcrumbProjection(
+        message: "account=secret",
+        category: category,
+        data: ["duration_ms": 5_001, "user_id": 42]
+      )
+
+      #expect(projection.message == "performance_event")
+      #expect(projection.category == category)
+      #expect(try #require(projection.data["duration_ms"] as? Double) == 5_001)
+      #expect(projection.data["user_id"] == nil)
+    }
+  }
+
   @Test("transport overflow breadcrumbs retain queue pressure without request identity")
   func transportOverflowBreadcrumbProjectionRetainsQueuePressure() throws {
     let projection = PerformanceTrace.privacySafeBreadcrumbProjection(

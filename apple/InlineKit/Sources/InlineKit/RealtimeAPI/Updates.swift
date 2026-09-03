@@ -1029,14 +1029,136 @@ public actor UpdatesEngine: Sendable {
   }
 
   @discardableResult
+  public func persistUserBootstrapProjection(
+    _ snapshot: UserBootstrapProjectionSnapshot
+  ) async -> UserBootstrapProjectionPersistence? {
+    let projectionPhase = switch snapshot.projection {
+      case .chats: "user_bootstrap_chats"
+      case .me: "user_bootstrap_me"
+      case .settings: "user_bootstrap_settings"
+    }
+    guard let expectedUserID = authenticatedUserID(),
+          expectedUserID > 0,
+          snapshot.mutationToken.userID == expectedUserID,
+          snapshot.checkpointState.date > 0,
+          snapshot.checkpointState.seq >= 0
+    else {
+      log.error(
+        "User bootstrap projection identity or checkpoint is invalid",
+        error: DurableUpdateFailure(phase: projectionPhase, cause: .invalidData)
+      )
+      return nil
+    }
+
+    let bucketKey = BucketKey.user
+    let validateAccountMutation = validateAccountMutation
+    do {
+      try validateAccountMutation(snapshot.mutationToken)
+      switch snapshot.projection {
+        case let .chats(chats):
+          let persisted = try await database.dbWriter.write { db in
+            try validateAccountMutation(snapshot.mutationToken)
+            let currentCursor = try DurableBucketAdmissionState(DbBucketState
+              .filter(
+                DbBucketState.Columns.bucketType == bucketKey.getBucket()
+                  && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+              )
+              .fetchOne(db))
+            let userProjectionIsCurrent = currentCursor.state.seq <= snapshot.checkpointState.seq
+            let imported = try GetChatsTransaction.applySnapshot(
+              chats,
+              userProjectionAdmission: userProjectionIsCurrent
+                ? .alreadyValidated
+                : .missingOnly,
+              replacesActiveCatalog: userProjectionIsCurrent,
+              in: db
+            )
+            return (currentCursor, imported)
+          }
+          GetChatsTransaction.report(persisted.1.failures)
+          return .chats(UserBootstrapCatalogPersistence(
+            checkpointState: snapshot.checkpointState,
+            userStateAtPersistence: persisted.0.state,
+            seededStates: persisted.1.seededStates,
+            catchUpTargets: persisted.1.catchUpTargets,
+            retiredBucketKeys: persisted.1.retiredBucketKeys
+          ))
+
+        case let .me(me):
+          guard me.hasUser, me.user.id == expectedUserID else {
+            throw DurableUpdateFailure(phase: "user_bootstrap_me", cause: .invalidData)
+          }
+          try await database.dbWriter.write { db in
+            try validateAccountMutation(snapshot.mutationToken)
+            let currentCursor = try DurableBucketAdmissionState(DbBucketState
+              .filter(
+                DbBucketState.Columns.bucketType == bucketKey.getBucket()
+                  && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+              )
+              .fetchOne(db))
+            guard currentCursor.state.seq <= snapshot.checkpointState.seq else {
+              // A newer user cursor owns any existing self projection. Filling
+              // an absent row is safe; overwriting a present row with the older
+              // P0 projection is not.
+              if try User.fetchOne(db, id: expectedUserID) == nil {
+                _ = try User.save(db, user: me.user)
+              }
+              return
+            }
+            _ = try User.save(db, user: me.user)
+          }
+          return .me
+
+        case let .settings(settings):
+          guard settings.hasUserSettings else {
+            throw DurableUpdateFailure(phase: "user_bootstrap_settings", cause: .invalidData)
+          }
+          guard !userBucketCriticalSectionOwned else {
+            throw DurableUpdateFailure(
+              phase: "user_bootstrap_settings_reentrant",
+              cause: .invalidData
+            )
+          }
+          userBucketCriticalSectionOwned = true
+          defer { userBucketCriticalSectionOwned = false }
+          let currentCursor = try await database.reader.read { db in
+            try DurableBucketAdmissionState(DbBucketState
+              .filter(
+                DbBucketState.Columns.bucketType == bucketKey.getBucket()
+                  && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+              )
+              .fetchOne(db))
+          }
+          guard currentCursor.state.seq <= snapshot.checkpointState.seq else {
+            // Settings have their own local-revision protection. Do not apply
+            // a P0 projection after a newer durable user update; the existing
+            // account-scoped settings (or their normal refresh) remain owner.
+            return .settings
+          }
+          try await applyUserSettings(
+            settings.userSettings,
+            expectedUserID,
+            snapshot.mutationToken
+          )
+          return .settings
+      }
+    } catch {
+      log.error(
+        "Failed to persist user bootstrap projection",
+        error: privacySafeDurableApplyError(error, phase: projectionPhase)
+      )
+      return nil
+    }
+  }
+
+  @discardableResult
   public func applyUserRepair(_ repair: UserRepairSnapshot) async -> UserRepairOutcome? {
-    let replayWindowIsValid: Bool
-    if repair.replacesActiveCatalog {
-      replayWindowIsValid = repair.replayThroughState.map {
+    let replayWindowIsValid = if repair.replacesActiveCatalog {
+      repair.replayThroughState.map {
         $0.date > 0 && $0.seq >= repair.checkpointState.seq
       } ?? false
     } else {
-      replayWindowIsValid = repair.replayThroughState == nil
+      repair.replayThroughState == nil
     }
     guard repair.me.hasUser,
           let expectedUserID = authenticatedUserID(),
@@ -1044,7 +1166,8 @@ public actor UpdatesEngine: Sendable {
           repair.me.user.id == expectedUserID,
           repair.mutationToken.userID == expectedUserID,
           repair.checkpointState.date > 0,
-          repair.checkpointState.seq >= repair.targetState.seq,
+          repair.checkpointState.seq >= repair.targetState.seq ||
+          repair.allowsCheckpointBehindTarget,
           replayWindowIsValid
     else {
       log.error(
@@ -1069,7 +1192,7 @@ public actor UpdatesEngine: Sendable {
     do {
       try validateAccountMutation(repair.mutationToken)
       let expectedCursor = try await database.reader.read { db in
-        DurableBucketAdmissionState(try DbBucketState
+        try DurableBucketAdmissionState(DbBucketState
           .filter(
             DbBucketState.Columns.bucketType == bucketKey.getBucket()
               && DbBucketState.Columns.entityId == bucketKey.getEntityId()
@@ -1084,7 +1207,10 @@ public actor UpdatesEngine: Sendable {
         )
       }
 
-      if !checkpointAlreadyReached || repair.replacesActiveCatalog {
+      let userProjectionIsCurrent = expectedCursor.state.seq <= repair.checkpointState.seq
+      if repair.bootstrapCatalogPersistence == nil,
+         !checkpointAlreadyReached || repair.replacesActiveCatalog && userProjectionIsCurrent
+      {
         guard repair.settings.hasUserSettings else {
           log.error(
             "User repair snapshot is missing required settings",
@@ -1099,71 +1225,111 @@ public actor UpdatesEngine: Sendable {
         )
       }
 
-      return try await database.dbWriter.write { db in
-        try validateAccountMutation(repair.mutationToken)
-        let currentCursor = DurableBucketAdmissionState(try DbBucketState
-          .filter(
-            DbBucketState.Columns.bucketType == bucketKey.getBucket()
-              && DbBucketState.Columns.entityId == bucketKey.getEntityId()
-          )
-          .fetchOne(db))
-        guard currentCursor == expectedCursor else {
-          return .superseded(
-            currentState: currentCursor.state,
-            replayThroughState: repair.replayThroughState
-          )
-        }
-
-        // A regression audit may finish after live user events passed the
-        // checkpoint it fetched. Audit child evidence without overwriting
-        // those newer user-owned rows at a cursor that replay already passed.
-        let userProjectionIsCurrent = currentCursor.state.seq <= repair.checkpointState.seq
-        let imported = try GetChatsTransaction.applySnapshot(
-          repair.chats,
-          userProjectionAdmission: userProjectionIsCurrent ? .alreadyValidated : .missingOnly,
-          replacesActiveCatalog: repair.replacesActiveCatalog && userProjectionIsCurrent,
-          in: db
-        )
-        guard imported.failures.isEmpty else {
-          throw TransactionExecutionError.invalid
-        }
-        if userProjectionIsCurrent {
-          _ = try User.save(db, user: repair.me.user)
-        }
-        let proposedUserState = checkpointAlreadyReached
-          ? expectedCursor.state
-          : repair.checkpointState
-        if imported.catchUpTargets.isEmpty {
-          let state: BucketState
-          if checkpointAlreadyReached {
-            state = currentCursor.state
-          } else {
-            state = try GRDBSyncStorage.advanceBucketState(
-              for: bucketKey,
-              state: repair.checkpointState,
-              in: db
+      let applied:
+        (outcome: UserRepairOutcome, failures: [GetChatsTransaction.SnapshotImportFailure]) =
+        try await database.dbWriter.write { db in
+          try validateAccountMutation(repair.mutationToken)
+          let currentCursor = try DurableBucketAdmissionState(DbBucketState
+            .filter(
+              DbBucketState.Columns.bucketType == bucketKey.getBucket()
+                && DbBucketState.Columns.entityId == bucketKey.getEntityId()
+            )
+            .fetchOne(db))
+          guard currentCursor == expectedCursor else {
+            return (
+              .superseded(
+                currentState: currentCursor.state,
+                replayThroughState: repair.replayThroughState
+              ),
+              []
             )
           }
-          return .applied(
-            state: state,
-            seededStates: imported.seededStates,
-            replayThroughState: repair.replayThroughState,
-            retiredBucketKeys: imported.retiredBucketKeys
+
+          // A regression audit may finish after live user events passed the
+          // checkpoint it fetched. Audit child evidence without overwriting
+          // those newer user-owned rows at a cursor that replay already passed.
+          let userProjectionIsCurrent = currentCursor.state.seq <= repair.checkpointState.seq
+          let seededStates: [BucketKey: BucketState]
+          let catchUpTargets: [BucketKey: Int64]
+          let retiredBucketKeys: Set<BucketKey>
+          let failures: [GetChatsTransaction.SnapshotImportFailure]
+          if let persisted = repair.bootstrapCatalogPersistence {
+            guard persisted.checkpointState.date == repair.checkpointState.date,
+                  persisted.checkpointState.seq == repair.checkpointState.seq,
+                  currentCursor.state.seq >= persisted.userStateAtPersistence.seq
+            else {
+              throw DurableUpdateFailure(
+                phase: "user_repair_bootstrap_catalog",
+                cause: .invalidData
+              )
+            }
+            seededStates = persisted.seededStates
+            catchUpTargets = persisted.catchUpTargets
+            retiredBucketKeys = currentCursor.state.date == persisted.userStateAtPersistence.date &&
+              currentCursor.state.seq == persisted.userStateAtPersistence.seq
+              ? persisted.retiredBucketKeys
+              : []
+            failures = []
+          } else {
+            let imported = try GetChatsTransaction.applySnapshot(
+              repair.chats,
+              userProjectionAdmission: userProjectionIsCurrent ? .alreadyValidated : .missingOnly,
+              replacesActiveCatalog: repair.replacesActiveCatalog && userProjectionIsCurrent,
+              in: db
+            )
+            seededStates = imported.seededStates
+            catchUpTargets = imported.catchUpTargets
+            retiredBucketKeys = imported.retiredBucketKeys
+            failures = imported.failures
+          }
+          // Record-local failures have already rolled back their savepoints,
+          // seed no child cursor, and suppress catalog retirement. They must
+          // not hold the whole account at zero forever behind one terminally
+          // malformed server resource; healthy siblings remain usable.
+          if repair.bootstrapCatalogPersistence == nil, userProjectionIsCurrent {
+            _ = try User.save(db, user: repair.me.user)
+          }
+          let proposedUserState = checkpointAlreadyReached
+            ? expectedCursor.state
+            : repair.checkpointState
+          if catchUpTargets.isEmpty {
+            let state: BucketState = if checkpointAlreadyReached {
+              currentCursor.state
+            } else {
+              try GRDBSyncStorage.advanceBucketState(
+                for: bucketKey,
+                state: repair.checkpointState,
+                in: db
+              )
+            }
+            return (
+              .applied(
+                state: state,
+                seededStates: seededStates,
+                replayThroughState: repair.replayThroughState,
+                retiredBucketKeys: retiredBucketKeys
+              ),
+              failures
+            )
+          }
+          return (
+            .pending(
+              finalization: UserRepairFinalization(
+                expectedUserState: expectedCursor.state,
+                expectedUserStateExists: expectedCursor.exists,
+                proposedUserState: proposedUserState,
+                replayThroughState: repair.replayThroughState,
+                catchUpTargets: catchUpTargets,
+                retiredBucketKeys: retiredBucketKeys,
+                mutationToken: repair.mutationToken
+              ),
+              seededStates: seededStates
+            ),
+            failures
           )
         }
-        return .pending(
-          finalization: UserRepairFinalization(
-            expectedUserState: expectedCursor.state,
-            expectedUserStateExists: expectedCursor.exists,
-            proposedUserState: proposedUserState,
-            replayThroughState: repair.replayThroughState,
-            catchUpTargets: imported.catchUpTargets,
-            retiredBucketKeys: imported.retiredBucketKeys,
-            mutationToken: repair.mutationToken
-          ),
-          seededStates: imported.seededStates
-        )
-      }
+      GetChatsTransaction.report(applied.failures)
+      return applied.outcome
     } catch {
       log.error(
         "Failed to apply user repair",

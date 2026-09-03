@@ -302,7 +302,7 @@ actor Sync {
     var pendingTargets: [BucketKey: DiscoveryTarget]
   }
 
-  private enum StateFetchAttemptError: Error {
+  private enum StateFetchAttemptError: Error, PrivacySafeErrorCategoryProviding {
     case storageReadFailed
     case invalidResponse
     case invalidDate
@@ -310,6 +310,61 @@ actor Sync {
     case missingDiscoveryTargets
     case userCheckpointWriteFailed
     case globalCheckpointWriteFailed
+    case bootstrapRepairFailed
+
+    var privacySafeErrorCategory: String {
+      switch self {
+        case .storageReadFailed: "sync_state:storage_read_failed"
+        case .invalidResponse: "sync_state:invalid_response"
+        case .invalidDate: "sync_state:invalid_date"
+        case .missingUserSequence: "sync_state:missing_user_sequence"
+        case .missingDiscoveryTargets: "sync_state:missing_discovery_targets"
+        case .userCheckpointWriteFailed: "sync_state:user_checkpoint_write_failed"
+        case .globalCheckpointWriteFailed: "sync_state:global_checkpoint_write_failed"
+        case .bootstrapRepairFailed: "sync_state:bootstrap_repair_failed"
+      }
+    }
+  }
+
+  private enum UserRepairFailurePhase: String, Sendable {
+    case preflight
+    case checkpoint
+    case chatsProjection = "chats_projection"
+    case meProjection = "me_projection"
+    case settingsProjection = "settings_projection"
+    case postSnapshotCheckpoint = "post_snapshot_checkpoint"
+    case admission
+
+    var breadcrumbCategory: String {
+      switch self {
+        case .chatsProjection: "sync.bootstrap.chats"
+        case .meProjection: "sync.bootstrap.me"
+        case .settingsProjection: "sync.bootstrap.settings"
+        default: "sync.lifecycle"
+      }
+    }
+  }
+
+  private enum UserRepairFailureCause: String, Equatable, Sendable {
+    case unavailable
+    case requestFailed = "request_failed"
+    case invalidResponse = "invalid_response"
+    case persistenceFailed = "persistence_failed"
+  }
+
+  private struct UserRepairFailure:
+    Error, LocalizedError, PrivacySafeErrorCategoryProviding, Sendable
+  {
+    let phase: UserRepairFailurePhase
+    let cause: UserRepairFailureCause
+
+    var errorDescription: String? {
+      "User repair failed during \(phase.rawValue): \(cause.rawValue)"
+    }
+
+    var privacySafeErrorCategory: String {
+      "user_repair:\(phase.rawValue):\(cause.rawValue)"
+    }
   }
 
   private enum SnapshotOutcomeError: Error {
@@ -545,6 +600,8 @@ actor Sync {
       if let actor = buckets[key] {
         await actor.installSnapshotState(state)
       }
+      guard isCurrent(expectedGeneration) else { return }
+      await bucketDidAdvance(key: key, state: state, authoritative: false)
     }
   }
 
@@ -771,28 +828,219 @@ actor Sync {
     }
   }
 
+  private func fetchUserRepairChats(
+    client: ProtocolClientType,
+    checkpointState: BucketState,
+    mutationToken: AuthAccountMutationToken,
+    persistIndependently: Bool
+  ) async -> Result<(InlineProtocol.GetChatsResult, UserBootstrapCatalogPersistence?), UserRepairFailure> {
+    let startedAt = Date()
+    let span = PerformanceTrace.begin("SyncUserRepairChats", category: .sync)
+    var succeeded = false
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("success=\(succeeded) duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "user repair projection was slow",
+        category: UserRepairFailurePhase.chatsProjection.breadcrumbCategory,
+        durationMs: durationMs,
+        thresholdMs: 5_000
+      )
+    }
+    do {
+      guard case let .getChats(chats) = try await callRepairRpc(
+        client: client,
+        method: .getChats,
+        input: .getChats(.init()),
+        timeout: Self.chatRepairTimeout
+      ) else {
+        return .failure(UserRepairFailure(
+          phase: .chatsProjection,
+          cause: .invalidResponse
+        ))
+      }
+      if persistIndependently {
+        guard case let .chats(persistence)? = await applyUpdates.persistUserBootstrapProjection(.init(
+          projection: .chats(chats),
+          checkpointState: checkpointState,
+          mutationToken: mutationToken
+        )) else {
+          return .failure(UserRepairFailure(
+            phase: .chatsProjection,
+            cause: .persistenceFailed
+          ))
+        }
+        guard acceptsWork, !isResetting, !Task.isCancelled,
+              accountMutationToken == mutationToken
+        else {
+          return .failure(UserRepairFailure(
+            phase: .chatsProjection,
+            cause: .persistenceFailed
+          ))
+        }
+        await installSnapshotBucketStates(persistence.seededStates)
+        succeeded = true
+        return .success((chats, persistence))
+      }
+      succeeded = true
+      return .success((chats, nil))
+    } catch {
+      return .failure(UserRepairFailure(
+        phase: .chatsProjection,
+        cause: .requestFailed
+      ))
+    }
+  }
+
+  private func fetchUserRepairMe(
+    client: ProtocolClientType,
+    checkpointState: BucketState,
+    mutationToken: AuthAccountMutationToken,
+    persistIndependently: Bool
+  ) async -> Result<InlineProtocol.GetMeResult, UserRepairFailure> {
+    let startedAt = Date()
+    let span = PerformanceTrace.begin("SyncUserRepairMe", category: .sync)
+    var succeeded = false
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("success=\(succeeded) duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "user repair projection was slow",
+        category: UserRepairFailurePhase.meProjection.breadcrumbCategory,
+        durationMs: durationMs,
+        thresholdMs: 5_000
+      )
+    }
+    do {
+      guard case let .getMe(me) = try await callRepairRpc(
+        client: client,
+        method: .getMe,
+        input: .getMe(.init()),
+        timeout: Self.chatRepairTimeout
+      ) else {
+        return .failure(UserRepairFailure(
+          phase: .meProjection,
+          cause: .invalidResponse
+        ))
+      }
+      if persistIndependently {
+        guard case .me? = await applyUpdates.persistUserBootstrapProjection(.init(
+          projection: .me(me),
+          checkpointState: checkpointState,
+          mutationToken: mutationToken
+        )) else {
+          return .failure(UserRepairFailure(
+            phase: .meProjection,
+            cause: .persistenceFailed
+          ))
+        }
+        succeeded = true
+        return .success(me)
+      }
+      succeeded = true
+      return .success(me)
+    } catch {
+      return .failure(UserRepairFailure(
+        phase: .meProjection,
+        cause: .requestFailed
+      ))
+    }
+  }
+
+  private func fetchUserRepairSettings(
+    client: ProtocolClientType,
+    checkpointState: BucketState,
+    mutationToken: AuthAccountMutationToken,
+    persistIndependently: Bool
+  ) async -> Result<InlineProtocol.GetUserSettingsResult, UserRepairFailure> {
+    let startedAt = Date()
+    let span = PerformanceTrace.begin("SyncUserRepairSettings", category: .sync)
+    var succeeded = false
+    defer {
+      let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
+      span.end("success=\(succeeded) duration_ms=\(durationMs)")
+      PerformanceTrace.slowBreadcrumb(
+        "user repair projection was slow",
+        category: UserRepairFailurePhase.settingsProjection.breadcrumbCategory,
+        durationMs: durationMs,
+        thresholdMs: 5_000
+      )
+    }
+    do {
+      guard case let .getUserSettings(settings) = try await callRepairRpc(
+        client: client,
+        method: .getUserSettings,
+        input: .getUserSettings(.init()),
+        timeout: Self.chatRepairTimeout
+      ) else {
+        return .failure(UserRepairFailure(
+          phase: .settingsProjection,
+          cause: .invalidResponse
+        ))
+      }
+      if persistIndependently {
+        guard case .settings? = await applyUpdates.persistUserBootstrapProjection(.init(
+          projection: .settings(settings),
+          checkpointState: checkpointState,
+          mutationToken: mutationToken
+        )) else {
+          return .failure(UserRepairFailure(
+            phase: .settingsProjection,
+            cause: .persistenceFailed
+          ))
+        }
+        succeeded = true
+        return .success(settings)
+      }
+      succeeded = true
+      return .success(settings)
+    } catch {
+      return .failure(UserRepairFailure(
+        phase: .settingsProjection,
+        cause: .requestFailed
+      ))
+    }
+  }
+
+  private func reportUserRepairFailure(
+    phase: UserRepairFailurePhase,
+    cause: UserRepairFailureCause
+  ) {
+    log.error(
+      "user repair failed",
+      error: UserRepairFailure(phase: phase, cause: cause)
+    )
+  }
+
+  private func reportUserRepairFailure(_ failure: UserRepairFailure) {
+    log.error("user repair failed", error: failure)
+  }
+
   func repairUserBucket(
     targetState: BucketState,
     reason: String,
     replacesActiveCatalog: Bool = false,
     requiresProjectionAudit: Bool = false,
-    capturedCheckpointState: BucketState? = nil
+    capturedCheckpointState: BucketState? = nil,
+    persistProjectionsIndependently: Bool = false
   ) async -> UserRepairOutcome? {
     guard let client else {
-      log.error("client is nil, cannot repair user bucket")
+      reportUserRepairFailure(phase: .preflight, cause: .unavailable)
       return nil
     }
     guard let accountMutationToken else {
-      log.error("cannot repair user bucket without an account mutation token")
+      reportUserRepairFailure(phase: .preflight, cause: .unavailable)
       return nil
     }
+    var failurePhase = UserRepairFailurePhase.checkpoint
     do {
+      let allowsCheckpointBehindTarget = replacesActiveCatalog && requiresProjectionAudit
       let checkpointState: BucketState
       if let capturedCheckpointState {
         guard capturedCheckpointState.date > 0,
-              capturedCheckpointState.seq >= targetState.seq
+              capturedCheckpointState.seq >= targetState.seq || allowsCheckpointBehindTarget
         else {
-          log.error("captured user checkpoint is invalid during user repair")
+          reportUserRepairFailure(phase: .checkpoint, cause: .invalidResponse)
           return nil
         }
         checkpointState = capturedCheckpointState
@@ -803,59 +1051,93 @@ actor Sync {
           input: .getUpdatesState(.init()),
           timeout: Self.getUpdatesStateTimeout
         ) else {
+          guard !Task.isCancelled else { return nil }
+          reportUserRepairFailure(phase: .checkpoint, cause: .requestFailed)
           return nil
         }
         guard case let .getUpdatesState(checkpoint) = rawCheckpoint,
               checkpoint.hasSeq,
               checkpoint.date > 0,
-              Int64(checkpoint.seq) >= targetState.seq
+              Int64(checkpoint.seq) >= targetState.seq || allowsCheckpointBehindTarget
         else {
-          log.error("failed to capture a valid current user checkpoint during user repair")
+          reportUserRepairFailure(phase: .checkpoint, cause: .invalidResponse)
           return nil
         }
         checkpointState = BucketState(date: checkpoint.date, seq: Int64(checkpoint.seq))
       }
 
-      async let chatsResult = callRepairRpc(
+      failurePhase = .chatsProjection
+      async let chatsResult = fetchUserRepairChats(
         client: client,
-        method: .getChats,
-        input: .getChats(.init()),
-        timeout: Self.chatRepairTimeout
+        checkpointState: checkpointState,
+        mutationToken: accountMutationToken,
+        persistIndependently: persistProjectionsIndependently
       )
-      async let meResult = callRepairRpc(
+      async let meResult = fetchUserRepairMe(
         client: client,
-        method: .getMe,
-        input: .getMe(.init()),
-        timeout: Self.chatRepairTimeout
+        checkpointState: checkpointState,
+        mutationToken: accountMutationToken,
+        persistIndependently: persistProjectionsIndependently
       )
-      async let settingsResult = callRepairRpc(
+      async let settingsResult = fetchUserRepairSettings(
         client: client,
-        method: .getUserSettings,
-        input: .getUserSettings(.init()),
-        timeout: Self.chatRepairTimeout
+        checkpointState: checkpointState,
+        mutationToken: accountMutationToken,
+        persistIndependently: persistProjectionsIndependently
       )
-      let (rawChats, rawMe, rawSettings) = try await (chatsResult, meResult, settingsResult)
-      guard case let .getChats(chats) = rawChats,
-            case let .getMe(me) = rawMe,
-            case let .getUserSettings(settings) = rawSettings
-      else {
-        log.error("failed to parse account snapshot during user repair")
+      let (chatsFetch, meFetch, settingsFetch) = await (chatsResult, meResult, settingsResult)
+      guard acceptsWork, !isResetting, !Task.isCancelled,
+            self.accountMutationToken == accountMutationToken
+      else { return nil }
+      guard case let .success(fetchedChats) = chatsFetch else {
+        if case let .failure(failure) = chatsFetch {
+          if failure.cause != .persistenceFailed {
+            reportUserRepairFailure(failure)
+          }
+        }
         return nil
+      }
+      guard case let .success(me) = meFetch else {
+        if case let .failure(failure) = meFetch {
+          if failure.cause != .persistenceFailed {
+            reportUserRepairFailure(failure)
+          }
+        }
+        return nil
+      }
+      guard case let .success(settings) = settingsFetch else {
+        if case let .failure(failure) = settingsFetch {
+          if failure.cause != .persistenceFailed {
+            reportUserRepairFailure(failure)
+          }
+        }
+        return nil
+      }
+      let (chats, bootstrapCatalogPersistence) = fetchedChats
+      let admittedBootstrapCatalog: UserBootstrapCatalogPersistence?
+      if persistProjectionsIndependently {
+        guard let bootstrapCatalogPersistence else { return nil }
+        admittedBootstrapCatalog = bootstrapCatalogPersistence
+      } else {
+        admittedBootstrapCatalog = nil
       }
 
       let replayThroughState: BucketState?
       if replacesActiveCatalog {
+        failurePhase = .postSnapshotCheckpoint
         guard let rawReplayThrough = try await callRepairRpc(
           client: client,
           method: .getUpdatesState,
           input: .getUpdatesState(.init()),
           timeout: Self.getUpdatesStateTimeout
-        ), case let .getUpdatesState(replayThrough) = rawReplayThrough,
+        ),
+          case let .getUpdatesState(replayThrough) = rawReplayThrough,
           replayThrough.hasSeq,
           replayThrough.date > 0,
           Int64(replayThrough.seq) >= checkpointState.seq
         else {
-          log.error("failed to capture a valid post-snapshot user checkpoint during account rebase")
+          guard !Task.isCancelled else { return nil }
+          reportUserRepairFailure(phase: .postSnapshotCheckpoint, cause: .invalidResponse)
           return nil
         }
         replayThroughState = BucketState(
@@ -865,7 +1147,11 @@ actor Sync {
       } else {
         replayThroughState = nil
       }
-      return await applyUpdates.repairUser(UserRepairSnapshot(
+      guard acceptsWork, !isResetting, !Task.isCancelled,
+            self.accountMutationToken == accountMutationToken
+      else { return nil }
+      failurePhase = .admission
+      let outcome = await applyUpdates.repairUser(UserRepairSnapshot(
         chats: chats,
         me: me,
         settings: settings,
@@ -873,12 +1159,16 @@ actor Sync {
         replayThroughState: replayThroughState,
         targetState: targetState,
         mutationToken: accountMutationToken,
+        bootstrapCatalogPersistence: admittedBootstrapCatalog,
         replacesActiveCatalog: replacesActiveCatalog,
         requiresProjectionAudit: requiresProjectionAudit,
         reason: reason
       ))
+      guard let outcome else { return nil }
+      return outcome
     } catch {
-      log.error("failed to repair user bucket", error: error)
+      guard !Task.isCancelled else { return nil }
+      reportUserRepairFailure(phase: failurePhase, cause: .requestFailed)
       return nil
     }
   }
@@ -1584,7 +1874,8 @@ actor Sync {
               reason: "fresh_account_bootstrap",
               replacesActiveCatalog: true,
               requiresProjectionAudit: true,
-              capturedCheckpointState: checkpoint
+              capturedCheckpointState: checkpoint,
+              persistProjectionsIndependently: true
             ) else {
               PerformanceTrace.breadcrumb(
                 "fresh account bootstrap failed",
@@ -1596,13 +1887,15 @@ actor Sync {
                   "target_seq": payload.seq,
                 ]
               )
-              throw StateFetchAttemptError.invalidResponse
+              throw StateFetchAttemptError.bootstrapRepairFailed
             }
 
             nextDiscoveryRoundGeneration &+= 1
             var round = ActiveDiscoveryRound(generation: nextDiscoveryRoundGeneration)
             round.observedTarget = true
             round.checkpointPolicy = .exactFresh
+            round.pendingTargets = queuedDiscoveryTargets
+            queuedDiscoveryTargets.removeAll()
             mergeDiscoveryTarget(.through(checkpoint.seq), for: .user, into: &round.pendingTargets)
             try await stageDiscoveryCheckpoint(
               checkpoint.date,
@@ -1611,7 +1904,8 @@ actor Sync {
               generation: expectedGeneration
             )
             guard await applyUserRepairOutcome(outcome) != nil else {
-              pendingDiscoveryRounds.removeValue(forKey: round.generation)
+              requeuePendingDiscoveryRound(round.generation)
+              reportUserRepairFailure(phase: .admission, cause: .persistenceFailed)
               PerformanceTrace.breadcrumb(
                 "fresh account bootstrap failed",
                 category: "sync.lifecycle",
@@ -1622,7 +1916,7 @@ actor Sync {
                   "target_seq": payload.seq,
                 ]
               )
-              throw StateFetchAttemptError.invalidResponse
+              throw StateFetchAttemptError.bootstrapRepairFailed
             }
             let bootstrapDurationMs = PerformanceTrace.elapsedMilliseconds(since: bootstrapStartedAt)
             PerformanceTrace.breadcrumb(
@@ -1810,7 +2104,15 @@ actor Sync {
         span.end(
           "attempt=\(attempt) success=false duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
         )
-        log.error("failed to get updates state (attempt \(attempt)): \(error)")
+        if let stateError = error as? StateFetchAttemptError,
+           case .bootstrapRepairFailed = stateError
+        {
+          // The repair owner emitted one finite, phase-specific Sentry error.
+          // Keep retries visible locally without creating a second issue group.
+          log.warning("fresh account bootstrap will retry after repair failure")
+        } else {
+          log.error("failed to get updates state", error: error)
+        }
         let delay = getUpdatesStateRetryDelay(
           attempt: retryAttempt,
           rateLimited: isRateLimitError(error)
@@ -2097,6 +2399,17 @@ actor Sync {
     requestSyncActivityRefresh()
   }
 
+  /// A failed handoff to the user actor must not discard realtime hints that
+  /// arrived after P0. Return the exact pending round to the existing queue so
+  /// the next discovery attempt owns those demands.
+  private func requeuePendingDiscoveryRound(_ generation: UInt64) {
+    guard let round = pendingDiscoveryRounds.removeValue(forKey: generation) else { return }
+    for (key, target) in round.pendingTargets {
+      mergeDiscoveryTarget(target, for: key, into: &queuedDiscoveryTargets)
+    }
+    requestSyncActivityRefresh()
+  }
+
   private func mergeDiscoveryTarget(
     _ target: DiscoveryTarget,
     for key: BucketKey,
@@ -2268,7 +2581,10 @@ actor Sync {
     do {
       currentState = try await syncStorage.getState()
     } catch {
-      log.error("failed to load global sync state before fresh checkpoint from \(source): \(error)")
+      log.error(
+        "failed to load global sync state before fresh checkpoint",
+        error: StateFetchAttemptError.storageReadFailed
+      )
       return false
     }
     if let expectedGeneration, !isCurrent(expectedGeneration) { return false }
@@ -2279,7 +2595,10 @@ actor Sync {
     let saved = await syncStorage.setState(SyncState(lastSyncDate: checkpoint))
     if let expectedGeneration, !isCurrent(expectedGeneration) { return false }
     guard saved else {
-      log.error("failed to write fresh lastSyncDate=\(checkpoint) (source=\(source))")
+      log.error(
+        "failed to write fresh global sync checkpoint",
+        error: StateFetchAttemptError.globalCheckpointWriteFailed
+      )
       return false
     }
     stats.lastSyncDate = checkpoint
@@ -3879,31 +4198,42 @@ actor BucketActor {
     replayThroughState: BucketState? = nil,
     sync: Sync
   ) async -> BucketState? {
-    guard saved.seq >= seq else {
+    let retainedNewerActorState = saved.seq < seq
+    if retainedNewerActorState {
       // The durable owner may have observed a newer realtime cursor while the
       // repair was in flight. Keep the actor at that newer state; treating the
       // owner response as a failure would discard a valid supersession.
       log.warning("user repair returned a cursor behind the actor: current=\(seq) returned=\(saved.seq)")
-      return BucketState(date: date, seq: seq)
+    } else {
+      seq = saved.seq
+      date = max(date, saved.date)
     }
-    seq = saved.seq
-    date = max(date, saved.date)
-    retainBufferedRealtimeUpdates(after: saved.seq)
-    if let fetchSeqEnd, saved.seq >= fetchSeqEnd { self.fetchSeqEnd = nil }
+    let admittedState = BucketState(date: date, seq: seq)
+    retainBufferedRealtimeUpdates(after: admittedState.seq)
+    if let fetchSeqEnd, admittedState.seq >= fetchSeqEnd { self.fetchSeqEnd = nil }
     if let replayThroughState, replayThroughState.seq > seq {
       setFetchTarget(upToSeq: replayThroughState.seq)
       needsFetch = true
     }
-    await sync.bucketDidAdvance(key: key, state: saved, authoritative: true)
+    await sync.bucketDidAdvance(
+      key: key,
+      state: admittedState,
+      authoritative: !retainedNewerActorState
+    )
     if !isFetching, needsFetch || !bufferedRealtimeUpdates.isEmpty || fetchSeqEnd != nil {
       Task { await self.fetchNewUpdates() }
     }
-    if holdsActivityLease && !isFetching && retryTask == nil &&
-       fetchSeqEnd == nil && bufferedRealtimeUpdates.isEmpty && !needsFetch {
+    if holdsActivityLease,
+       !isFetching,
+       retryTask == nil,
+       fetchSeqEnd == nil,
+       bufferedRealtimeUpdates.isEmpty,
+       !needsFetch
+    {
       holdsActivityLease = false
       await sync.bucketFetchActivityEnded(for: key)
     }
-    return saved
+    return admittedState
   }
 
   private func repairAuthoritativeSnapshotIfNeeded(

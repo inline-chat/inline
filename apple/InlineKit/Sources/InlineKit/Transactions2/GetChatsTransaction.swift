@@ -118,6 +118,7 @@ public struct GetChatsTransaction: Transaction2 {
     var seededStates: [BucketKey: BucketState] = [:]
     var catchUpTargets: [BucketKey: Int64] = [:]
     var failures = SnapshotFailureAccumulator()
+    var admittedSpaceIDs = Set<Int64>()
 
     // Freeze admission before changing any projection. An absent child is not
     // necessarily new: a newer User removal may have deleted its model/cursor.
@@ -130,8 +131,7 @@ public struct GetChatsTransaction: Transaction2 {
       .filter(DbBucketState.Columns.bucketType == BucketKey.user.getBucket())
       .filter(DbBucketState.Columns.entityId == BucketKey.user.getEntityId())
       .fetchOne(db)
-    let allowsPristineChildren = allowsUserProjectionReplacements
-      || (userCursor?.seq ?? 0) == 0
+    let allowsPristineChildren = allowsUserProjectionReplacements || (userCursor?.seq ?? 0) == 0
 
     let spaces = deduplicatedSpaces(result.spaces, failures: &failures)
     var chats = deduplicatedChats(result.chats, failures: &failures)
@@ -164,7 +164,11 @@ public struct GetChatsTransaction: Transaction2 {
           continue
         }
         guard sequence >= (admission.cursorSequence ?? 0) else {
-          if !admission.modelExists { failures.record(.spaces) }
+          if admission.modelExists {
+            admittedSpaceIDs.insert(space.id)
+          } else {
+            failures.record(.spaces)
+          }
           continue
         }
         if let state = try attempt(.spaces, in: db, failures: &failures, {
@@ -176,6 +180,7 @@ public struct GetChatsTransaction: Transaction2 {
           )
         }) {
           seededStates[admission.bucketKey] = state
+          admittedSpaceIDs.insert(space.id)
         }
         continue
       }
@@ -196,6 +201,7 @@ public struct GetChatsTransaction: Transaction2 {
         } else {
           recordLatestCatchUpTarget(for: admission.bucketKey, in: &catchUpTargets)
         }
+        admittedSpaceIDs.insert(space.id)
         continue
       }
 
@@ -210,12 +216,15 @@ public struct GetChatsTransaction: Transaction2 {
           )
         }) {
           if admission.isPristine { seededStates[admission.bucketKey] = state }
+          admittedSpaceIDs.insert(space.id)
         }
       } else {
         recordLatestCatchUpTarget(for: admission.bucketKey, in: &catchUpTargets)
-        _ = try attempt(.spaces, in: db, failures: &failures) {
+        if try attempt(.spaces, in: db, failures: &failures, {
           try Space(from: space).save(db)
           return true
+        }) != nil {
+          admittedSpaceIDs.insert(space.id)
         }
       }
     }
@@ -409,8 +418,8 @@ public struct GetChatsTransaction: Transaction2 {
 
     var retiredBucketKeys: Set<BucketKey> = []
     if allowsUserProjectionReplacements {
-      for space in spaces {
-        try SpaceCatalogStore.include(spaceID: space.id, in: db)
+      for spaceID in admittedSpaceIDs {
+        try SpaceCatalogStore.include(spaceID: spaceID, in: db)
       }
       if replacesActiveCatalog, failures.reports.isEmpty {
         retiredBucketKeys = try rebuildActiveCatalog(
@@ -895,8 +904,10 @@ public struct GetChatsTransaction: Transaction2 {
 
   static func isRecoverableRecordError(_ error: any Error) -> Bool {
     guard let databaseError = error as? DatabaseError else { return false }
-    return databaseError.resultCode == .SQLITE_CONSTRAINT ||
-      databaseError.resultCode == .SQLITE_MISMATCH
+    // These are evaluated only at the per-record savepoint boundary: relational
+    // and record-specific trigger constraints omit that record, while type,
+    // busy, I/O, corruption, and programmer errors abort the outer transaction.
+    return databaseError.resultCode == .SQLITE_CONSTRAINT
   }
 
   private static func validPeer(_ peer: InlineProtocol.Peer) -> Bool {
@@ -915,7 +926,7 @@ public struct GetChatsTransaction: Transaction2 {
     return true
   }
 
-  private static func report(_ failures: [SnapshotImportFailure]) {
+  static func report(_ failures: [SnapshotImportFailure]) {
     for failure in failures {
       Log.scoped("GetChatsSnapshot-\(failure.phase.rawValue)")
         .error("Skipped invalid getChats records", error: failure)

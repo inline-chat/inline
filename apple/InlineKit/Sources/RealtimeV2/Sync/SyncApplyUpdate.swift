@@ -107,6 +107,32 @@ public struct SpaceRepairSnapshot: Sendable {
   }
 }
 
+/// Attempt-scoped evidence returned by the durable owner after the account
+/// catalog projection has committed. It is carried with the same repair call;
+/// it is not cached and is never a substitute for the writer-local cursor and
+/// account-token checks performed during final admission.
+public struct UserBootstrapCatalogPersistence: Sendable {
+  public let checkpointState: BucketState
+  public let userStateAtPersistence: BucketState
+  public let seededStates: [BucketKey: BucketState]
+  public let catchUpTargets: [BucketKey: Int64]
+  public let retiredBucketKeys: Set<BucketKey>
+
+  public init(
+    checkpointState: BucketState,
+    userStateAtPersistence: BucketState,
+    seededStates: [BucketKey: BucketState],
+    catchUpTargets: [BucketKey: Int64],
+    retiredBucketKeys: Set<BucketKey>
+  ) {
+    self.checkpointState = checkpointState
+    self.userStateAtPersistence = userStateAtPersistence
+    self.seededStates = seededStates
+    self.catchUpTargets = catchUpTargets
+    self.retiredBucketKeys = retiredBucketKeys
+  }
+}
+
 public struct UserRepairSnapshot: Sendable {
   public let chats: InlineProtocol.GetChatsResult
   public let me: InlineProtocol.GetMeResult
@@ -118,14 +144,26 @@ public struct UserRepairSnapshot: Sendable {
   public let replayThroughState: BucketState?
   public let targetState: BucketState
   public let mutationToken: AuthAccountMutationToken
-  /// Only a server-typed User TOO_LONG may replace active catalog inclusion.
+  /// Present only when this same zero-date attempt resolved every required
+  /// projection independently. Final admission consumes the durable catalog
+  /// metadata without repeating projection writes.
+  public let bootstrapCatalogPersistence: UserBootstrapCatalogPersistence?
+  /// An authoritative account rebase may replace active catalog inclusion.
   /// Projection audits and other scoped repairs must leave omissions inert.
   public let replacesActiveCatalog: Bool
   /// Forces a snapshot projection audit even when the durable user cursor has
-  /// already reached the checkpoint. This is reserved for exceptional global
-  /// watermark regression recovery and must never rewind the user cursor.
+  /// already reached the checkpoint. This is reserved for zero-date bootstrap
+  /// and exceptional global watermark recovery, and never rewinds the cursor.
   public let requiresProjectionAudit: Bool
   public let reason: String
+
+  /// A zero-date bootstrap can resume after its user cursor reached an older
+  /// checkpoint. Only that authoritative replacement plus audit combination
+  /// may inspect a checkpoint behind the durable target, and the writer must
+  /// preserve every newer user-owned projection and cursor.
+  public var allowsCheckpointBehindTarget: Bool {
+    replacesActiveCatalog && requiresProjectionAudit
+  }
 
   public init(
     chats: InlineProtocol.GetChatsResult,
@@ -135,6 +173,7 @@ public struct UserRepairSnapshot: Sendable {
     replayThroughState: BucketState? = nil,
     targetState: BucketState,
     mutationToken: AuthAccountMutationToken,
+    bootstrapCatalogPersistence: UserBootstrapCatalogPersistence? = nil,
     replacesActiveCatalog: Bool = false,
     requiresProjectionAudit: Bool = false,
     reason: String
@@ -146,10 +185,42 @@ public struct UserRepairSnapshot: Sendable {
     self.replayThroughState = replayThroughState
     self.targetState = targetState
     self.mutationToken = mutationToken
+    self.bootstrapCatalogPersistence = bootstrapCatalogPersistence
     self.replacesActiveCatalog = replacesActiveCatalog
     self.requiresProjectionAudit = requiresProjectionAudit
     self.reason = reason
   }
+}
+
+/// One independently durable projection fetched during a zero-date account
+/// bootstrap. Persisting these does not commit the user or global cursor; the
+/// complete `UserRepairSnapshot` remains the sole baseline owner.
+public enum UserBootstrapProjection: Sendable {
+  case chats(InlineProtocol.GetChatsResult)
+  case me(InlineProtocol.GetMeResult)
+  case settings(InlineProtocol.GetUserSettingsResult)
+}
+
+public struct UserBootstrapProjectionSnapshot: Sendable {
+  public let projection: UserBootstrapProjection
+  public let checkpointState: BucketState
+  public let mutationToken: AuthAccountMutationToken
+
+  public init(
+    projection: UserBootstrapProjection,
+    checkpointState: BucketState,
+    mutationToken: AuthAccountMutationToken
+  ) {
+    self.projection = projection
+    self.checkpointState = checkpointState
+    self.mutationToken = mutationToken
+  }
+}
+
+public enum UserBootstrapProjectionPersistence: Sendable {
+  case chats(UserBootstrapCatalogPersistence)
+  case me
+  case settings
 }
 
 /// Opaque admission captured by a user repair whose child catch-up demands
@@ -243,6 +314,11 @@ public protocol ApplyUpdates: Sendable {
   func repairSpace(_ snapshot: SpaceRepairSnapshot) async -> BucketState?
   /// Apply a current account projection fetched after a frozen user cursor.
   func repairUser(_ snapshot: UserRepairSnapshot) async -> UserRepairOutcome?
+  /// Persist one successful zero-date bootstrap projection without advancing
+  /// the user or global cursor.
+  func persistUserBootstrapProjection(
+    _ snapshot: UserBootstrapProjectionSnapshot
+  ) async -> UserBootstrapProjectionPersistence?
   /// Advance a pending user repair only after its exact child demands are durable.
   func finalizeUserRepair(
     _ finalization: UserRepairFinalization,
@@ -264,6 +340,12 @@ public extension ApplyUpdates {
   }
 
   func repairUser(_ snapshot: UserRepairSnapshot) async -> UserRepairOutcome? {
+    nil
+  }
+
+  func persistUserBootstrapProjection(
+    _: UserBootstrapProjectionSnapshot
+  ) async -> UserBootstrapProjectionPersistence? {
     nil
   }
 

@@ -1,10 +1,12 @@
 import AsyncAlgorithms
 import Auth
 import Foundation
+import GRDB
 import InlineProtocol
 import Logger
 import Testing
 
+@testable import InlineKit
 @testable import RealtimeV2
 
 @Suite("SyncTests", .serialized)
@@ -1986,6 +1988,8 @@ final class SyncTests {
     #expect(repair.replayThroughState?.seq == 43)
     #expect(repair.replacesActiveCatalog)
     #expect(repair.requiresProjectionAudit)
+    let persistedProjectionKinds = await apply.persistedBootstrapProjectionKinds
+    #expect(Set(persistedProjectionKinds) == ["chats", "me", "settings"])
     let methods = await client.getCalledMethods()
     #expect(methods.first == .getUpdatesState)
     #expect(Set(methods[1 ... 3]) == Set([.getChats, .getMe, .getUserSettings]))
@@ -1996,8 +2000,215 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
-  @Test("authenticated fresh connection retains zero checkpoint when its account snapshot is incomplete")
-  func testAuthenticatedFreshConnectionRetainsZeroWhenSnapshotFails() async throws {
+  @Test("fresh bootstrap carries a child hint through P1 until its persisted seed is reported")
+  func testFreshBootstrapDoesNotCommitPastQueuedChildHint() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    let chatKey = BucketKey.chat(peer: makeChatPeer(chatId: 7))
+    await apply.setBootstrapSeededStates([
+      chatKey: BucketState(date: 90, seq: 5),
+    ])
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 1 }
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let client = FakeProtocolClient(
+      responses: [],
+      gateCallNumbers: [5],
+      methodResponses: [
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 100, seq: 42),
+          makeGetUpdatesStateResult(date: 110, seq: 42),
+        ],
+        .getChats: [.getChats(.init())],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+      ]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    try await sync.acceptedSessionOpened(
+      sessionID: 1,
+      mutationToken: auth.handle.beginAccountMutation()
+    )
+    await client.waitForCallStarted(5)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 7, updateSeq: 5)])
+    #expect(await storage.getState().lastSyncDate == 0)
+    await client.releaseCall(5)
+
+    #expect(await waitForCondition(timeout: .seconds(3)) {
+      await storage.getState().lastSyncDate == 100
+    })
+    #expect(await storage.getBucketState(for: .user).seq == 42)
+    await sync.prepareForTermination()
+  }
+
+  @Test("failed fresh repair handoff requeues its exact discovery targets")
+  func testFailedFreshRepairHandoffRequeuesDiscoveryTargets() async throws {
+    let baseStorage = InMemorySyncStorage()
+    let storage = FailNextUserReadSyncStorage(base: baseStorage)
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 1 }
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let client = FakeProtocolClient(
+      responses: [],
+      gateCallNumbers: [5],
+      gateMethods: [.getUpdates],
+      methodResponses: [
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 100, seq: 42),
+          makeGetUpdatesStateResult(date: 110, seq: 42),
+        ],
+        .getChats: [.getChats(.init())],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+      ]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    try await sync.acceptedSessionOpened(
+      sessionID: 1,
+      mutationToken: auth.handle.beginAccountMutation()
+    )
+    await client.waitForCallStarted(5)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 7, updateSeq: 5)])
+    await client.waitForCallStarted(6)
+    await storage.failNextUserRead()
+    await client.releaseCall(5)
+
+    #expect(await waitForCondition(timeout: .seconds(1)) {
+      let stats = await sync.getStats()
+      return await apply.repairedUsers.count == 1 && stats.queuedDiscoveryTargets == 2
+    })
+    #expect(await baseStorage.getState().lastSyncDate == 0)
+    await client.releaseMethod(.getUpdates)
+    await sync.prepareForTermination()
+  }
+
+  @Test("authenticated fresh bootstrap crosses Sync and the real database admission boundary")
+  func testAuthenticatedFreshBootstrapWithRealDatabase() async throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let database = try AppDatabase(queue)
+    let storage = GRDBSyncStorage(db: database)
+    let engine = UpdatesEngine(
+      database: database,
+      authenticatedUserID: { 1 },
+      validateAccountMutation: { _ in },
+      applyUserSettings: { _, _, _ in }
+    )
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with {
+      $0.id = 1
+      $0.firstName = "Recovered"
+    }
+    var chat = InlineProtocol.Chat()
+    chat.id = 8
+    chat.date = 90
+    chat.title = "Recovered chat"
+    chat.peerID = makeChatPeer(chatId: 8)
+    chat.seq = 7
+    var chats = InlineProtocol.GetChatsResult()
+    chats.chats = [chat]
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    var updatedUser = InlineProtocol.UpdateUpdatedUser()
+    updatedUser.user = .with {
+      $0.id = 1
+      $0.firstName = "Caught up after snapshot"
+    }
+    let update43 = makeDurableUpdate(
+      seq: 43,
+      date: 110,
+      payload: .updatedUser(updatedUser)
+    )
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 100, seq: 42),
+          makeGetUpdatesStateResult(date: 110, seq: 43),
+        ],
+        .getChats: [.getChats(chats)],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+        .getUpdates: [makeGetUpdatesResult(
+          seq: 43,
+          date: 110,
+          updates: [update43],
+          final: true,
+          resultType: .slice
+        )],
+      ]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: InlineApplyUpdates(engine: engine),
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    try await sync.acceptedSessionOpened(
+      sessionID: 1,
+      mutationToken: auth.handle.beginAccountMutation()
+    )
+
+    #expect(await waitForCondition(timeout: .seconds(3)) {
+      let global = try? await storage.getState()
+      let user = try? await storage.getBucketState(for: .user)
+      return global?.lastSyncDate == 100 && user?.seq == 43
+    })
+    #expect(try await storage.getBucketState(for: .user).seq == 43)
+    #expect(try await storage.getBucketState(for: .chat(peer: makeChatPeer(chatId: 8))).seq == 7)
+    try await queue.read { (db: Database) throws in
+      #expect(try User.fetchOne(db, id: 1)?.firstName == "Caught up after snapshot")
+      #expect(try Chat.fetchOne(db, id: 8)?.title == "Recovered chat")
+    }
+    let methods = await client.getCalledMethods()
+    #expect(methods.count(where: { $0 == .getUpdatesState }) == 2)
+    #expect(methods.count(where: { $0 == .getChats }) == 1)
+    #expect(methods.count(where: { $0 == .getMe }) == 1)
+    #expect(methods.count(where: { $0 == .getUserSettings }) == 1)
+    #expect(await client.getUpdatesStartSequences() == [42])
+    #expect(await client.getUpdatesEndSequences() == [43])
+    await sync.prepareForTermination()
+  }
+
+  enum BootstrapProjectionFailure: CaseIterable, Equatable, Sendable {
+    case chats
+    case me
+    case settings
+  }
+
+  @Test(
+    "authenticated fresh connection retains zero while preserving successful projections",
+    arguments: BootstrapProjectionFailure.allCases
+  )
+  func testAuthenticatedFreshConnectionRetainsZeroWhenSnapshotFails(
+    _ failedProjection: BootstrapProjectionFailure
+  ) async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
     await apply.setRepairStorage(storage)
@@ -2007,13 +2218,22 @@ final class SyncTests {
     me.user = user
     var settings = InlineProtocol.GetUserSettingsResult()
     settings.userSettings = .init()
+    let chatsResponse: InlineProtocol.RpcResult.OneOf_Result? = failedProjection == .chats
+      ? nil
+      : .getChats(.init())
+    let meResponse: InlineProtocol.RpcResult.OneOf_Result? = failedProjection == .me
+      ? nil
+      : .getMe(me)
+    let settingsResponse: InlineProtocol.RpcResult.OneOf_Result? = failedProjection == .settings
+      ? nil
+      : .getUserSettings(settings)
     let client = FakeProtocolClient(
       responses: [],
       methodResponses: [
         .getUpdatesState: [makeGetUpdatesStateResult(date: 100, seq: 42)],
-        .getChats: [nil],
-        .getMe: [.getMe(me)],
-        .getUserSettings: [.getUserSettings(settings)],
+        .getChats: [chatsResponse],
+        .getMe: [meResponse],
+        .getUserSettings: [settingsResponse],
       ]
     )
     let auth = Auth.mocked(authenticated: true)
@@ -2029,13 +2249,193 @@ final class SyncTests {
     let mutationToken = try auth.handle.beginAccountMutation()
     await sync.acceptedSessionOpened(sessionID: 1, mutationToken: mutationToken)
     #expect(await waitForCondition(timeout: .seconds(1)) {
-      await client.getCallCount() >= 4
+      let callCount = await client.getCallCount()
+      let projectionCount = await apply.persistedBootstrapProjectionKinds.count
+      return callCount >= 4 && projectionCount == 2
     })
     #expect(await storage.getState().lastSyncDate == 0)
     let userState = await storage.getBucketState(for: .user)
     #expect(userState.date == 0)
     #expect(userState.seq == 0)
     #expect(await apply.repairedUsers.isEmpty)
+    let persistedProjectionKinds = await apply.persistedBootstrapProjectionKinds
+    let expectedProjectionKinds: Set<String> = switch failedProjection {
+      case .chats: ["me", "settings"]
+      case .me: ["chats", "settings"]
+      case .settings: ["chats", "me"]
+    }
+    #expect(Set(persistedProjectionKinds) == expectedProjectionKinds)
+    await sync.prepareForTermination()
+  }
+
+  @Test(
+    "authenticated fresh bootstrap retries a transient projection failure without admitting its baseline",
+    arguments: BootstrapProjectionFailure.allCases
+  )
+  func testAuthenticatedFreshConnectionRetriesProjectionFailure(
+    _ failedProjection: BootstrapProjectionFailure
+  ) async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 1 }
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let failedMethod: InlineProtocol.Method = switch failedProjection {
+      case .chats: .getChats
+      case .me: .getMe
+      case .settings: .getUserSettings
+    }
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 100, seq: 42),
+          makeGetUpdatesStateResult(date: 100, seq: 42),
+          makeGetUpdatesStateResult(date: 110, seq: 42),
+        ],
+        .getChats: [.getChats(.init()), .getChats(.init())],
+        .getMe: [.getMe(me), .getMe(me)],
+        .getUserSettings: [.getUserSettings(settings), .getUserSettings(settings)],
+      ],
+      methodErrors: [failedMethod: [URLError(.timedOut)]]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    await sync.acceptedSessionOpened(
+      sessionID: 1,
+      mutationToken: try auth.handle.beginAccountMutation()
+    )
+    #expect(await waitForCondition(timeout: .seconds(1)) {
+      await apply.persistedBootstrapProjectionKinds.count == 2
+    })
+    #expect(await storage.getState().lastSyncDate == 0)
+    #expect(await storage.getBucketState(for: .user).seq == 0)
+
+    #expect(await waitForCondition(timeout: .seconds(4)) {
+      await storage.getState().lastSyncDate == 100
+    })
+    #expect(await storage.getBucketState(for: .user).seq == 42)
+    #expect(await apply.repairedUsers.count == 1)
+    let methods = await client.getCalledMethods()
+    #expect(methods.filter { $0 == .getUpdatesState }.count == 3)
+    #expect(methods.filter { $0 == .getChats }.count == 2)
+    #expect(methods.filter { $0 == .getMe }.count == 2)
+    #expect(methods.filter { $0 == .getUserSettings }.count == 2)
+    await sync.prepareForTermination()
+  }
+
+  @Test("cancelled fresh bootstrap may keep partial projections but never admits a baseline")
+  func testCancelledFreshBootstrapDoesNotAdmitBaseline() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 1 }
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let client = FakeProtocolClient(
+      responses: [],
+      gateMethods: [.getUserSettings],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 100, seq: 42)],
+        .getChats: [.getChats(.init())],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+      ]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    await sync.acceptedSessionOpened(
+      sessionID: 1,
+      mutationToken: try auth.handle.beginAccountMutation()
+    )
+    #expect(await waitForCondition(timeout: .seconds(1)) {
+      let methods = await client.getCalledMethods()
+      let projectionCount = await apply.persistedBootstrapProjectionKinds.count
+      return methods.contains(.getUserSettings) && projectionCount == 2
+    })
+    #expect(await storage.getState().lastSyncDate == 0)
+    #expect(await storage.getBucketState(for: .user).seq == 0)
+
+    let termination = Task { await sync.prepareForTermination() }
+    try? await Task.sleep(for: .milliseconds(10))
+    await client.releaseMethod(.getUserSettings)
+    await termination.value
+
+    #expect(await storage.getState().lastSyncDate == 0)
+    #expect(await storage.getBucketState(for: .user).seq == 0)
+    #expect(await apply.repairedUsers.isEmpty)
+  }
+
+  @Test("authenticated zero-date bootstrap preserves a user cursor ahead of its captured checkpoint")
+  func testAuthenticatedFreshConnectionAcceptsCheckpointBehindUserCursor() async throws {
+    let storage = InMemorySyncStorage()
+    await storage.setBucketState(for: .user, state: BucketState(date: 300, seq: 75))
+    let apply = RecordingApplyUpdates()
+    await apply.setRepairStorage(storage)
+    var me = InlineProtocol.GetMeResult()
+    me.user = .with { $0.id = 1 }
+    var settings = InlineProtocol.GetUserSettingsResult()
+    settings.userSettings = .init()
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [
+          makeGetUpdatesStateResult(date: 200, seq: 50),
+          makeGetUpdatesStateResult(date: 220, seq: 55),
+        ],
+        .getChats: [.getChats(.init())],
+        .getMe: [.getMe(me)],
+        .getUserSettings: [.getUserSettings(settings)],
+      ]
+    )
+    let auth = Auth.mocked(authenticated: true)
+    let sync = Sync(
+      applyUpdates: apply,
+      syncStorage: storage,
+      client: client,
+      config: SyncConfig(lastSyncSafetyGapSeconds: 15),
+      auth: auth.handle
+    )
+
+    await sync.activateGeneration()
+    await sync.acceptedSessionOpened(
+      sessionID: 1,
+      mutationToken: try auth.handle.beginAccountMutation()
+    )
+    #expect(await waitForCondition(timeout: .seconds(3)) {
+      let globalDate = await storage.getState().lastSyncDate
+      let repairCount = await apply.repairedUsers.count
+      return globalDate == 200 && repairCount == 1
+    })
+
+    let repair = try #require(await apply.repairedUsers.first)
+    #expect(repair.targetState.seq == 75)
+    #expect(repair.checkpointState.seq == 50)
+    #expect(repair.replayThroughState?.seq == 55)
+    #expect(repair.allowsCheckpointBehindTarget)
+    #expect(await storage.getBucketState(for: .user).seq == 75)
+    let persistedProjectionKinds = await apply.persistedBootstrapProjectionKinds
+    #expect(Set(persistedProjectionKinds) == ["chats", "me", "settings"])
+    #expect(await client.getCalledMethods().contains(.getUpdates) == false)
     await sync.prepareForTermination()
   }
 
@@ -4648,14 +5048,16 @@ actor RecordingApplyUpdates: ApplyUpdates {
   private(set) var repairedChats: [ChatRepairSnapshot] = []
   private(set) var repairedSpaces: [SpaceRepairSnapshot] = []
   private(set) var repairedUsers: [UserRepairSnapshot] = []
+  private(set) var persistedBootstrapProjectionKinds: [String] = []
   private(set) var bucketCommits: [UpdateBucketCommit] = []
   private var mutationTokens: [AuthAccountMutationToken] = []
   var result = UpdateApplyResult.success(count: 0)
   var resultSequence: [UpdateApplyResult] = []
   var repairResult = true
   var finalizeUserRepairResult = true
-  var repairStorage: InMemorySyncStorage?
+  var repairStorage: (any SyncStorage)?
   var userRepairOutcome: UserRepairOutcome?
+  var bootstrapSeededStates: [BucketKey: BucketState] = [:]
   private var shouldGateNextApply = false
   private var applyGate: CheckedContinuation<Void, Never>?
   private var applyGateArrival: CheckedContinuation<Void, Never>?
@@ -4688,12 +5090,16 @@ actor RecordingApplyUpdates: ApplyUpdates {
     finalizeUserRepairResult = result
   }
 
-  func setRepairStorage(_ storage: InMemorySyncStorage) {
+  func setRepairStorage(_ storage: any SyncStorage) {
     repairStorage = storage
   }
 
   func setUserRepairOutcome(_ outcome: UserRepairOutcome?) {
     userRepairOutcome = outcome
+  }
+
+  func setBootstrapSeededStates(_ states: [BucketKey: BucketState]) {
+    bootstrapSeededStates = states
   }
 
   func apply(
@@ -4773,7 +5179,7 @@ actor RecordingApplyUpdates: ApplyUpdates {
     guard repairResult else { return nil }
     let outcome = userRepairOutcome ?? .applied(
       state: snapshot.checkpointState,
-      seededStates: [:],
+      seededStates: snapshot.bootstrapCatalogPersistence?.seededStates ?? [:],
       replayThroughState: snapshot.replayThroughState,
       retiredBucketKeys: []
     )
@@ -4781,6 +5187,28 @@ actor RecordingApplyUpdates: ApplyUpdates {
       _ = await repairStorage?.advanceBucketState(for: .user, state: state)
     }
     return outcome
+  }
+
+  func persistUserBootstrapProjection(
+    _ snapshot: UserBootstrapProjectionSnapshot
+  ) async -> UserBootstrapProjectionPersistence? {
+    switch snapshot.projection {
+      case .chats:
+        persistedBootstrapProjectionKinds.append("chats")
+        return .chats(UserBootstrapCatalogPersistence(
+          checkpointState: snapshot.checkpointState,
+          userStateAtPersistence: .init(date: 0, seq: 0),
+          seededStates: bootstrapSeededStates,
+          catchUpTargets: [:],
+          retiredBucketKeys: []
+        ))
+      case .me:
+        persistedBootstrapProjectionKinds.append("me")
+        return .me
+      case .settings:
+        persistedBootstrapProjectionKinds.append("settings")
+        return .settings
+    }
   }
 
   func finalizeUserRepair(
@@ -4877,6 +5305,7 @@ private actor TransientBucketReadFailureStorage: SyncStorage {
     if key == failingKey, attempts == 1 { throw ReadFailure() }
     return await base.getBucketState(for: key)
   }
+
   func setBucketState(for key: BucketKey, state: BucketState) async -> Bool {
     await base.setBucketState(for: key, state: state)
   }
@@ -5000,6 +5429,57 @@ actor InMemorySyncStorage: SyncStorage {
     guard bucketStateWriteFailuresRemaining > 0 else { return false }
     bucketStateWriteFailuresRemaining -= 1
     return true
+  }
+}
+
+private actor FailNextUserReadSyncStorage: SyncStorage {
+  private struct InjectedReadFailure: Error {}
+
+  private let base: InMemorySyncStorage
+  private var shouldFailNextUserRead = false
+
+  init(base: InMemorySyncStorage) {
+    self.base = base
+  }
+
+  func failNextUserRead() {
+    shouldFailNextUserRead = true
+  }
+
+  func getState() async throws -> SyncState {
+    await base.getState()
+  }
+
+  func setState(_ state: SyncState) async -> Bool {
+    await base.setState(state)
+  }
+
+  func getBucketState(for key: BucketKey) async throws -> BucketState {
+    if key == .user, shouldFailNextUserRead {
+      shouldFailNextUserRead = false
+      throw InjectedReadFailure()
+    }
+    return await base.getBucketState(for: key)
+  }
+
+  func setBucketState(for key: BucketKey, state: BucketState) async -> Bool {
+    await base.setBucketState(for: key, state: state)
+  }
+
+  func advanceBucketState(for key: BucketKey, state: BucketState) async -> BucketState? {
+    await base.advanceBucketState(for: key, state: state)
+  }
+
+  func removeBucketState(for key: BucketKey) async -> Bool {
+    await base.removeBucketState(for: key)
+  }
+
+  func setBucketStates(states: [BucketKey: BucketState]) async -> Bool {
+    await base.setBucketStates(states: states)
+  }
+
+  func clearSyncState() async -> Bool {
+    await base.clearSyncState()
   }
 }
 
