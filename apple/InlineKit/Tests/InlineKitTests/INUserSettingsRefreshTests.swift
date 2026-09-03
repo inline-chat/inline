@@ -104,6 +104,30 @@ struct INUserSettingsRefreshTests {
     #expect(harness.settings.notification.disableDmNotifications)
   }
 
+  @Test("notification presentation replaces a stale cached value with the server value")
+  func notificationPresentationRefreshesCachedValue() async throws {
+    let harness = try makeHarness(cachedMode: .all)
+    defer { harness.removeUserDefaults() }
+
+    #expect(harness.settings.notification.mode == .all)
+
+    let refresh = Task {
+      await harness.settings.refresh(reason: .notificationPresentation)
+    }
+    await harness.fetcher.waitForCalls(1)
+    await harness.fetcher.succeed(
+      NotificationSettingsValues(
+        mode: .onlyMentions,
+        silent: false,
+        disableDmNotifications: true
+      )
+    )
+    await refresh.value
+
+    #expect(harness.settings.notification.mode == .onlyMentions)
+    #expect(harness.settings.notification.disableDmNotifications)
+  }
+
   @Test("keeps a local edit made while refresh is in flight")
   func rejectsResponseAfterLocalEdit() async throws {
     let harness = try makeHarness()

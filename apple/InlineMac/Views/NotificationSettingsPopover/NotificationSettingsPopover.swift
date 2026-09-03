@@ -82,6 +82,9 @@ struct NotificationSettingsButton: View {
   private var popover: some View {
     picker
       .transition(.opacity)
+      .task {
+        await INUserSettings.current.refresh(reason: .notificationPresentation)
+      }
   }
 
   var notificationIcon: String {
