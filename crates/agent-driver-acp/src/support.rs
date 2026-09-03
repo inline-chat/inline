@@ -201,9 +201,9 @@ const CLAUDE: AcpProviderSupport = AcpProviderSupport {
     arguments: &[],
     distribution: AcpDistribution::NpmAdapter(NpmAdapterDistribution {
         package: "@agentclientprotocol/claude-agent-acp",
-        registry_version: "0.63.0",
+        registry_version: "0.73.0",
         integrity: Some(
-            "sha512-/Ylytz6KPGkih1sZd2sJAmWIGMh59T+FCJhlsfW9zpB1Lrg0/Njgk/7TplRfX2f7dELx0FeN+SBG+Uju12XwlA==",
+            "sha512-xKnGIntdBbr2dDS2NEsVGdjoLH62EaWjfYlp/U7TYdxUJzERlApe2gliYW3rVFTeWGjG0dUyPszhG9TWhsqGlA==",
         ),
     }),
     version_discovery: VersionDiscovery::InitializeAgentInfo,
@@ -221,7 +221,13 @@ const CLAUDE: AcpProviderSupport = AcpProviderSupport {
         // The adapter source is not among the pinned local references.
         evidence_complete: false,
     },
-    expected_mode_ids: &["bypassPermissions", "default", "acceptEdits", "plan"],
+    expected_mode_ids: &[
+        "default",
+        "acceptEdits",
+        "plan",
+        "auto",
+        "bypassPermissions",
+    ],
     capabilities: AcpCapabilityExpectations {
         authentication: true,
         load_session: None,
@@ -334,12 +340,11 @@ mod tests {
 
     #[test]
     fn launch_descriptors_preserve_verified_adapter_pins() {
-        let descriptor = provider_support("claude")
-            .expect("claude support")
-            .launch_descriptor(None);
+        let support = provider_support("claude").expect("claude support");
+        let descriptor = support.launch_descriptor(None);
         assert_eq!(descriptor.provider_id.as_str(), "claude");
         assert_eq!(descriptor.program, PathBuf::from("claude-agent-acp"));
-        assert_eq!(descriptor.adapter_version.as_deref(), Some("0.63.0"));
+        assert_eq!(descriptor.adapter_version.as_deref(), Some("0.73.0"));
         assert!(
             descriptor
                 .adapter_checksum
@@ -347,5 +352,18 @@ mod tests {
                 .is_some_and(|checksum| checksum.starts_with("sha512-"))
         );
         assert_eq!(descriptor.validate(), Ok(()));
+        assert_eq!(
+            support.expected_mode_ids,
+            [
+                "default",
+                "acceptEdits",
+                "plan",
+                "auto",
+                "bypassPermissions"
+            ]
+        );
+        let auth = support.auth_probe.expect("Claude auth probe");
+        assert_eq!(auth.program, "claude");
+        assert_eq!(auth.arguments, ["auth", "status"]);
     }
 }

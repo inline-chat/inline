@@ -40,6 +40,7 @@ pub(crate) fn permission_options(options: &[PermissionOption]) -> Vec<ApprovalOp
     let mut mapped = options
         .iter()
         .filter_map(|option| match option.kind {
+            _ if requires_provider_choice(options, option) => safe_provider_option(option),
             PermissionOptionKind::AllowOnce => Some(ApprovalOption::ApproveOnce),
             PermissionOptionKind::AllowAlways => Some(ApprovalOption::ApproveForSession),
             PermissionOptionKind::RejectOnce | PermissionOptionKind::RejectAlways => {
@@ -51,6 +52,38 @@ pub(crate) fn permission_options(options: &[PermissionOption]) -> Vec<ApprovalOp
         .collect::<Vec<_>>();
     mapped.push(ApprovalOption::CancelTurn);
     mapped
+}
+
+fn requires_provider_choice(options: &[PermissionOption], option: &PermissionOption) -> bool {
+    match option.kind {
+        PermissionOptionKind::AllowOnce => {
+            options
+                .iter()
+                .filter(|candidate| candidate.kind == PermissionOptionKind::AllowOnce)
+                .count()
+                > 1
+        }
+        PermissionOptionKind::AllowAlways => {
+            options
+                .iter()
+                .filter(|candidate| candidate.kind == PermissionOptionKind::AllowAlways)
+                .count()
+                > 1
+        }
+        PermissionOptionKind::RejectOnce | PermissionOptionKind::RejectAlways => {
+            options
+                .iter()
+                .filter(|candidate| {
+                    matches!(
+                        candidate.kind,
+                        PermissionOptionKind::RejectOnce | PermissionOptionKind::RejectAlways
+                    )
+                })
+                .count()
+                > 1
+        }
+        _ => true,
+    }
 }
 
 fn safe_provider_option(option: &PermissionOption) -> Option<ApprovalOption> {
@@ -576,6 +609,38 @@ mod tests {
             vec![
                 ApprovalOption::ApproveOnce,
                 ApprovalOption::ApproveForSession,
+                ApprovalOption::Reject,
+                ApprovalOption::CancelTurn,
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_distinct_claude_choices_that_share_an_acp_kind() {
+        let options = vec![
+            PermissionOption::new(
+                "exit-plan-auto",
+                "Yes, and use auto mode",
+                PermissionOptionKind::AllowAlways,
+            ),
+            PermissionOption::new(
+                "exit-plan-default",
+                "Yes, manually approve edits",
+                PermissionOptionKind::AllowAlways,
+            ),
+            PermissionOption::new("reject", "No", PermissionOptionKind::RejectOnce),
+        ];
+        assert_eq!(
+            permission_options(&options),
+            vec![
+                ApprovalOption::ProviderChoice {
+                    option_id: "exit-plan-auto".to_string(),
+                    label: "Yes, and use auto mode".to_string(),
+                },
+                ApprovalOption::ProviderChoice {
+                    option_id: "exit-plan-default".to_string(),
+                    label: "Yes, manually approve edits".to_string(),
+                },
                 ApprovalOption::Reject,
                 ApprovalOption::CancelTurn,
             ]

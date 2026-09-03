@@ -329,6 +329,24 @@ fn probe_configured_provider_with_runtime(
             }
         }
     } else if let Some(auth_probe) = support.auth_probe {
+        if provider_id == "claude" {
+            let node = super::resolve_executable(std::path::Path::new("node")).map_err(|_| {
+                "Claude bridge requires Node.js 22 or newer; install or update Node.js, then retry"
+                    .to_string()
+            })?;
+            let node_version = probe_command(
+                provider_id,
+                &node,
+                &["--version"],
+                "Claude bridge Node.js version",
+            )?;
+            if !supported_claude_node_version(&node_version) {
+                return Err(format!(
+                    "Claude bridge requires Node.js 22 or newer; found {}",
+                    node_version.trim()
+                ));
+            }
+        }
         let auth_executable = super::resolve_executable(std::path::Path::new(auth_probe.program))
             .map_err(|_| {
             format!(
@@ -342,12 +360,7 @@ fn probe_configured_provider_with_runtime(
             auth_probe.arguments,
             &format!("{} authentication", support.display_name),
         )?;
-        if provider_id == "claude"
-            && serde_json::from_str::<serde_json::Value>(&auth)
-                .ok()
-                .and_then(|value| value.get("loggedIn").and_then(serde_json::Value::as_bool))
-                != Some(true)
-        {
+        if provider_id == "claude" && !claude_auth_is_logged_in(&auth) {
             return Err(
                 "Claude is not authenticated; run `claude` and `/login`, then retry".to_string(),
             );
@@ -391,6 +404,24 @@ fn probe_configured_provider_with_runtime(
         provider_runtime,
         version,
     })
+}
+
+fn claude_auth_is_logged_in(output: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(output)
+        .ok()
+        .and_then(|value| value.get("loggedIn").and_then(serde_json::Value::as_bool))
+        == Some(true)
+}
+
+fn supported_claude_node_version(output: &str) -> bool {
+    output
+        .trim()
+        .strip_prefix('v')
+        .unwrap_or(output.trim())
+        .split('.')
+        .next()
+        .and_then(|major| major.parse::<u64>().ok())
+        .is_some_and(|major| major >= 22)
 }
 
 pub(super) async fn probe_configured_provider_async(
@@ -1235,6 +1266,32 @@ mod tests {
             "\u{1b}[32mopencode/deepseek-v4-flash-free\u{1b}[0m\n"
         ));
         assert!(!has_opencode_model("Credentials\n0 credentials\n"));
+    }
+
+    #[test]
+    fn claude_auth_probe_requires_explicit_valid_logged_in_json() {
+        assert!(claude_auth_is_logged_in(
+            r#"{"loggedIn":true,"authMethod":"claude.ai"}"#
+        ));
+        for output in [
+            r#"{"loggedIn":false}"#,
+            r#"{"loggedIn":"true"}"#,
+            r#"{"authenticated":true}"#,
+            "not json",
+            "",
+        ] {
+            assert!(!claude_auth_is_logged_in(output), "accepted {output:?}");
+        }
+    }
+
+    #[test]
+    fn claude_adapter_node_version_gate_matches_its_engine_contract() {
+        for version in ["v22.0.0", "22.12.1", "v26.4.0\n"] {
+            assert!(supported_claude_node_version(version));
+        }
+        for version in ["v21.9.0", "18.20.8", "node 22", "", "vnext"] {
+            assert!(!supported_claude_node_version(version));
+        }
     }
 
     #[test]

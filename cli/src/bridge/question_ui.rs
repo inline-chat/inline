@@ -105,6 +105,17 @@ fn question_actions(
             },
         });
     }
+    buttons.push(MessageActionButton {
+        action_id: "bridge_question_skip".to_string(),
+        text: "Skip".to_string(),
+        kind: MessageActionKind::Callback {
+            data: serde_json::to_vec(&QuestionCallback {
+                version: 1,
+                token: token.to_string(),
+                choice: QuestionCallbackChoice::Skip,
+            })?,
+        },
+    });
     Ok(MessageActions {
         rows: buttons
             .chunks(2)
@@ -185,29 +196,42 @@ pub(super) async fn handle_question_action<D: AgentDriver + 'static>(
         .await?;
         return Ok(QuestionActionOutcome::Handled);
     }
-    let QuestionCallbackChoice::Option { index } = callback.choice else {
-        bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-            interaction_id: *interaction_id,
-            toast: Some("Reply to this question with your answer.".to_string()),
-        })
-        .await?;
-        return Ok(QuestionActionOutcome::Handled);
+    let (answers, resolved_text, toast) = match callback.choice {
+        QuestionCallbackChoice::Option { index } => {
+            let Some(question) = pending.request.questions.first() else {
+                return Ok(QuestionActionOutcome::Handled);
+            };
+            let Some(option) = question.options.get(index) else {
+                bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                    interaction_id: *interaction_id,
+                    toast: Some("This question is no longer active.".to_string()),
+                })
+                .await?;
+                return Ok(QuestionActionOutcome::Handled);
+            };
+            (
+                vec![QuestionAnswer {
+                    question_id: question.question_id.clone(),
+                    answers: vec![option.label.clone()],
+                }],
+                "Answered.",
+                "Answer sent.",
+            )
+        }
+        QuestionCallbackChoice::Other => {
+            bot.answer_message_action(inline_client::AnswerMessageActionRequest {
+                interaction_id: *interaction_id,
+                toast: Some("Reply to this question with your answer.".to_string()),
+            })
+            .await?;
+            return Ok(QuestionActionOutcome::Handled);
+        }
+        QuestionCallbackChoice::Skip => (
+            empty_question_answers(&pending.request),
+            "Skipped.",
+            "Question skipped.",
+        ),
     };
-    let Some(question) = pending.request.questions.first() else {
-        return Ok(QuestionActionOutcome::Handled);
-    };
-    let Some(option) = question.options.get(index) else {
-        bot.answer_message_action(inline_client::AnswerMessageActionRequest {
-            interaction_id: *interaction_id,
-            toast: Some("This question is no longer active.".to_string()),
-        })
-        .await?;
-        return Ok(QuestionActionOutcome::Handled);
-    };
-    let answers = vec![QuestionAnswer {
-        question_id: question.question_id.clone(),
-        answers: vec![option.label.clone()],
-    }];
     let event_id = format!("inline-action-{}", interaction_id.get());
     let context = QuestionClaimContext {
         installation_id: binding.installation_id.clone(),
@@ -260,10 +284,10 @@ pub(super) async fn handle_question_action<D: AgentDriver + 'static>(
             pending_questions.remove(&message_id.get());
             bot.answer_message_action(inline_client::AnswerMessageActionRequest {
                 interaction_id: *interaction_id,
-                toast: Some("Answer sent.".to_string()),
+                toast: Some(toast.to_string()),
             })
             .await?;
-            if try_update_question_message(bot, chat_id.get(), pending.message_id, "Answered.")
+            if try_update_question_message(bot, chat_id.get(), pending.message_id, resolved_text)
                 .await
                 .is_ok()
             {
@@ -342,9 +366,11 @@ pub(super) fn render_question(provider_name: &str, request: &QuestionRequest) ->
         }
     }
     if request.questions.len() == 1 {
-        text.push_str("\n\nReply to this message with your answer.");
+        text.push_str("\n\nReply to this message with your answer, or use Skip.");
     } else {
-        text.push_str("\n\nReply with one answer per line, in the same order.");
+        text.push_str(
+            "\n\nReply with one answer per line, in the same order. Reply `skip all` to skip.",
+        );
     }
     if let Some(milliseconds) = request.auto_resolution_ms {
         let seconds = milliseconds.div_ceil(1_000);
@@ -359,6 +385,16 @@ pub(super) fn parse_question_answers(
 ) -> Result<Vec<QuestionAnswer>, &'static str> {
     if question_contains_secret(request) {
         return Err("Secret answers cannot be sent through Inline.");
+    }
+    if input.trim().eq_ignore_ascii_case("skip all")
+        && !request.questions.iter().any(|question| {
+            question
+                .options
+                .iter()
+                .any(|option| option.label.eq_ignore_ascii_case("skip all"))
+        })
+    {
+        return Ok(empty_question_answers(request));
     }
     let lines = input
         .lines()
@@ -520,6 +556,12 @@ mod tests {
     }
 
     #[test]
+    fn explicit_skip_declines_every_question() {
+        let answers = parse_question_answers(&question_request(), "skip all").expect("skip");
+        assert_eq!(answers, empty_question_answers(&question_request()));
+    }
+
+    #[test]
     fn rejects_unknown_fixed_option_and_secret_input() {
         let mut request = question_request();
         request.questions.truncate(1);
@@ -546,6 +588,7 @@ mod tests {
         assert_eq!(actions.rows[0].actions[0].text, "Core");
         assert_eq!(actions.rows[0].actions[1].text, "TUI");
         assert_eq!(actions.rows[1].actions[0].text, "Other");
+        assert_eq!(actions.rows[1].actions[1].text, "Skip");
         assert!(actions.rows.iter().all(|row| row.actions.len() <= 2));
     }
 }

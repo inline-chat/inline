@@ -2,6 +2,7 @@
 
 mod descriptor;
 mod driver;
+mod elicitation;
 mod host_tools;
 mod mapping;
 mod process;

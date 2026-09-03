@@ -1,5 +1,13 @@
 use super::*;
 
+#[test]
+fn codex_and_claude_publish_initial_provider_catalogs() {
+    assert!(publishes_initial_provider_catalog("codex"));
+    assert!(publishes_initial_provider_catalog("claude"));
+    assert!(!publishes_initial_provider_catalog("opencode"));
+    assert!(!publishes_initial_provider_catalog("amp"));
+}
+
 #[tokio::test]
 async fn advancing_control_epoch_cancels_detached_generation_watchers() {
     let epoch = ControlTaskEpoch::new();

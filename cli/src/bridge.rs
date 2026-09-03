@@ -147,6 +147,7 @@ struct ApprovalCallback {
 enum QuestionCallbackChoice {
     Option { index: usize },
     Other,
+    Skip,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1494,11 +1495,23 @@ async fn run_provider_installation(
         Some(&binding.workspace_id),
         settings_identity.codex_projects_path.as_deref(),
     );
-    // Codex exposes a stable account-wide model catalog. ACP catalogs are tied
-    // to a started workspace/session, so v0.1 intentionally publishes only
-    // their stable project choices rather than presenting stale model options.
+    // Claude's ACP catalog is session-scoped, so loading it also prewarms the
+    // exact workspace session reused by the first turn. Bound that startup
+    // read so a slow provider cannot hold the Inline event stream indefinitely.
     let provider_catalog = if provider_id.as_str() == PROVIDER_ID {
         sessions.settings_catalog(&binding, now_seconds()).await
+    } else if publishes_initial_provider_catalog(provider_id.as_str()) {
+        match tokio::time::timeout(
+            SETTINGS_DEADLINE,
+            sessions.settings_catalog(&binding, now_seconds()),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(SessionManagerError::Driver(DriverError::Transient(
+                "provider settings catalog timed out".to_string(),
+            ))),
+        }
     } else {
         Ok(DriverSettingsCatalog::default())
     };
@@ -2373,6 +2386,10 @@ async fn run_provider_installation(
     bot_shutdown?;
     owner_control_shutdown?;
     Ok(())
+}
+
+fn publishes_initial_provider_catalog(provider_id: &str) -> bool {
+    matches!(provider_id, "codex" | "claude")
 }
 
 async fn shutdown_provider_driver(

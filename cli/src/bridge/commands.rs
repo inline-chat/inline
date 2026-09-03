@@ -63,6 +63,11 @@ pub(super) fn is_workspace_recovery_command(text: &str, bot_username: &str) -> b
         && (!command.explicit_target || command.targets_this_bot)
 }
 
+fn unsupported_close_message(provider_id: &str) -> Option<&'static str> {
+    (provider_id != "codex")
+        .then_some("This provider does not support /close. Use /new to start a fresh session.")
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
     sessions: &ProviderSessionManager<D>,
@@ -84,6 +89,11 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
     }
     let name = invocation.name.as_str();
     let arguments = invocation.arguments.trim();
+    if name == "close"
+        && let Some(message) = unsupported_close_message(sessions.provider_id().as_str())
+    {
+        return handled(message);
+    }
     if actor_user_id != settings.identity.owner_user_id && name == "close" {
         return handled("Only the bot owner can release the provider connection.");
     }
@@ -533,6 +543,15 @@ mod tests {
         assert!(!amp.contains("/sessions"));
         assert!(!amp.contains("/history"));
         assert!(amp.contains("/projects"));
+    }
+
+    #[test]
+    fn close_is_reserved_for_codex_session_release() {
+        assert_eq!(
+            unsupported_close_message("claude"),
+            Some("This provider does not support /close. Use /new to start a fresh session.")
+        );
+        assert_eq!(unsupported_close_message("codex"), None);
     }
 
     #[derive(Debug, Default)]

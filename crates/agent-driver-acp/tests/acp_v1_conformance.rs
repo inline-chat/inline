@@ -9,8 +9,8 @@ use futures_util::StreamExt;
 use inline_agent_bridge::{
     AgentDriver, AgentEvent, ApprovalDecision, ApprovalOption, DriverError, HostToolCall,
     HostToolConfiguration, HostToolFuture, HostToolHandler, HostToolResult, HostToolSpec,
-    HostToolTransport, ResumeSessionSpec, SessionReplay, SessionSpec, SteeringSupport, TurnInput,
-    TurnOptions, TurnOutcome,
+    HostToolTransport, QuestionAnswer, ResumeSessionSpec, SessionReplay, SessionSpec,
+    SteeringSupport, TurnInput, TurnOptions, TurnOutcome,
 };
 use inline_agent_driver_acp::AcpDriver;
 use tokio::sync::{Notify, oneshot};
@@ -82,11 +82,166 @@ async fn initializes_v1_maps_capabilities_and_shuts_down_cleanly() {
             .and_then(|session| session.config_options)
             .is_some()
     );
+    assert!(
+        request
+            .client_capabilities
+            .elicitation
+            .and_then(|elicitation| elicitation.form)
+            .is_some()
+    );
 
     tokio::time::timeout(TIMEOUT, driver.shutdown())
         .await
         .expect("ACP shutdown timed out")
         .expect("ACP shutdown failed");
+}
+
+#[tokio::test]
+async fn claude_form_elicitation_round_trips_through_inline_questions() {
+    let (response_tx, response_rx) = oneshot::channel();
+    let response_tx = Arc::new(Mutex::new(Some(response_tx)));
+    let observed_response = response_tx.clone();
+    let agent = Agent
+        .builder()
+        .on_receive_request(
+            async move |request: acp::InitializeRequest, responder, _connection| {
+                responder.respond(acp::InitializeResponse::new(request.protocol_version))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: acp::NewSessionRequest, responder, _connection| {
+                responder.respond(acp::NewSessionResponse::new("claude-question"))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: acp::PromptRequest,
+                        responder,
+                        connection: ConnectionTo<agent_client_protocol::Client>| {
+                let observed_response = observed_response.clone();
+                tokio::spawn(async move {
+                    let custom_meta = serde_json::json!({
+                        "_askUserQuestionCustomAnswer": {
+                            "questionId": "question_0",
+                            "isCustomAnswer": true,
+                        }
+                    })
+                    .as_object()
+                    .expect("custom answer metadata")
+                    .clone();
+                    let schema = acp::ElicitationSchema::new()
+                        .property(
+                            "question_0",
+                            acp::StringPropertySchema::new()
+                                .title("Target")
+                                .one_of(vec![
+                                    acp::EnumOption::new("core", "Core")
+                                        .description("Inspect the core"),
+                                    acp::EnumOption::new("cli", "CLI"),
+                                ]),
+                            false,
+                        )
+                        .property(
+                            "question_0_custom",
+                            acp::StringPropertySchema::new()
+                                .title("Other")
+                                .meta(custom_meta),
+                            false,
+                        );
+                    let response = connection
+                        .send_request(acp::CreateElicitationRequest::new(
+                            acp::ElicitationFormMode::new(
+                                acp::ElicitationSessionScope::new(request.session_id),
+                                schema,
+                            ),
+                            "Which target?",
+                        ))
+                        .block_task()
+                        .await?;
+                    if let Some(sender) = observed_response
+                        .lock()
+                        .expect("elicitation response sender poisoned")
+                        .take()
+                    {
+                        let _ = sender.send(response.action.clone());
+                    }
+                    responder.respond(acp::PromptResponse::new(acp::StopReason::EndTurn))
+                });
+                Ok(())
+            },
+            agent_client_protocol::on_receive_request!(),
+        );
+    let driver = AcpDriver::connect_transport(agent, "test")
+        .await
+        .expect("connect Claude elicitation fixture");
+    let session = driver
+        .start_session(SessionSpec {
+            cwd: PathBuf::from("/tmp"),
+        })
+        .await
+        .expect("new session");
+    let mut turn = driver
+        .start_turn(
+            &session,
+            TurnInput {
+                text: "ask me".to_string(),
+                attachments: Vec::new(),
+                client_message_id: None,
+            },
+            TurnOptions::default(),
+        )
+        .await
+        .expect("start turn");
+    assert!(matches!(
+        next_event(&mut turn.events).await,
+        AgentEvent::TurnStarted { .. }
+    ));
+    let question = match next_event(&mut turn.events).await {
+        AgentEvent::QuestionRequested(question) => question,
+        event => panic!("expected question request, got {event:?}"),
+    };
+    assert_eq!(question.questions.len(), 1);
+    assert_eq!(question.questions[0].header, "Target");
+    assert_eq!(question.questions[0].prompt, "Which target?");
+    assert_eq!(question.questions[0].options[0].label, "Core");
+    assert!(question.questions[0].allows_other);
+
+    driver
+        .resolve_question(
+            &question.request_id,
+            vec![QuestionAnswer {
+                question_id: "question_0".to_string(),
+                answers: vec!["Core".to_string()],
+            }],
+        )
+        .await
+        .expect("resolve Claude question");
+    let action = tokio::time::timeout(TIMEOUT, response_rx)
+        .await
+        .expect("elicitation response timed out")
+        .expect("elicitation response sender dropped");
+    let acp::ElicitationAction::Accept(accepted) = action else {
+        panic!("expected accepted elicitation response")
+    };
+    assert_eq!(
+        accepted
+            .content
+            .expect("accepted content")
+            .get("question_0"),
+        Some(&acp::ElicitationContentValue::String("core".to_string()))
+    );
+    assert!(matches!(
+        next_event(&mut turn.events).await,
+        AgentEvent::TurnCompleted {
+            outcome: TurnOutcome::Completed,
+            ..
+        }
+    ));
+    driver
+        .shutdown()
+        .await
+        .expect("shutdown elicitation fixture");
 }
 
 #[derive(Debug)]
@@ -375,6 +530,19 @@ async fn creates_session_normalizes_stream_and_resolves_permission() {
 fn config_options(model: &str, reasoning: &str) -> Vec<acp::SessionConfigOption> {
     vec![
         acp::SessionConfigOption::select(
+            "mode",
+            "Mode",
+            "default",
+            vec![
+                acp::SessionConfigSelectOption::new("default", "Manual"),
+                acp::SessionConfigSelectOption::new("acceptEdits", "Accept edits"),
+                acp::SessionConfigSelectOption::new("plan", "Plan"),
+                acp::SessionConfigSelectOption::new("auto", "Auto"),
+                acp::SessionConfigSelectOption::new("bypassPermissions", "Bypass permissions"),
+            ],
+        )
+        .category(acp::SessionConfigOptionCategory::Mode),
+        acp::SessionConfigOption::select(
             "model",
             "Model",
             model.to_string(),
@@ -394,6 +562,17 @@ fn config_options(model: &str, reasoning: &str) -> Vec<acp::SessionConfigOption>
             ],
         )
         .category(acp::SessionConfigOptionCategory::ThoughtLevel),
+        acp::SessionConfigOption::boolean("fast", "Fast mode", false)
+            .category(acp::SessionConfigOptionCategory::ModelConfig),
+        acp::SessionConfigOption::select(
+            "agent",
+            "Agent",
+            "default",
+            vec![
+                acp::SessionConfigSelectOption::new("default", "Default"),
+                acp::SessionConfigSelectOption::new("reviewer", "Reviewer"),
+            ],
+        ),
     ]
 }
 
@@ -402,14 +581,16 @@ fn session_modes(current: &str) -> acp::SessionModeState {
         current.to_string(),
         vec![
             acp::SessionMode::new("default", "Manual"),
+            acp::SessionMode::new("acceptEdits", "Accept edits"),
             acp::SessionMode::new("plan", "Plan"),
+            acp::SessionMode::new("auto", "Auto"),
             acp::SessionMode::new("bypassPermissions", "Bypass Permissions"),
         ],
     )
 }
 
 #[tokio::test]
-async fn prewarms_settings_session_and_applies_model_reasoning_and_permission_mode() {
+async fn prewarms_claude_shaped_settings_and_applies_supported_selections() {
     let new_session_count = Arc::new(AtomicUsize::new(0));
     let observed_new_session_count = new_session_count.clone();
     let selections = Arc::new(Mutex::new(Vec::new()));
@@ -495,7 +676,13 @@ async fn prewarms_settings_session_and_applies_model_reasoning_and_permission_mo
             .iter()
             .map(|option| option.value.as_str())
             .collect::<Vec<_>>(),
-        ["default", "plan", "bypassPermissions"]
+        [
+            "default",
+            "acceptEdits",
+            "plan",
+            "auto",
+            "bypassPermissions"
+        ]
     );
 
     let session = driver

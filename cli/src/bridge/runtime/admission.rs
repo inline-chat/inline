@@ -135,6 +135,7 @@ async fn handle_provider_unavailable_workspace_command(
     } else {
         "folder"
     };
+    let provider_name = provider_display_name(route.provider_id.as_str()).unwrap_or("The provider");
     let message = if record.sender_user_id != route.owner_user_id
         || record.binding.chat_id != route.owner_dm_chat_id
     {
@@ -144,7 +145,7 @@ async fn handle_provider_unavailable_workspace_command(
         .session_thread_binding_for_chat(&route.installation_id, record.binding.chat_id)?
         .is_some()
     {
-        "This session thread is pinned to its Codex project. Choose a project in the bot DM, then open another session."
+        "This session thread is pinned to its provider project. Choose a project in the bot DM, then open another session."
             .to_string()
     } else {
         let choices = route
@@ -164,7 +165,7 @@ async fn handle_provider_unavailable_workspace_command(
                 .collect::<Vec<_>>()
                 .join("; ");
             format!(
-                "Projects remain available while Codex restarts. Recent: {list}. Use `/{command_name} <number|name>`."
+                "Projects remain available while {provider_name} restarts. Recent: {list}. Use `/{command_name} <number|name>`."
             )
         } else {
             match resolve_workspace_argument(command.arguments.trim(), &choices) {
@@ -176,7 +177,7 @@ async fn handle_provider_unavailable_workspace_command(
                         now_seconds(),
                     )?;
                     format!(
-                        "Switched this conversation to {}. New work will use it after Codex reconnects.",
+                        "Switched this conversation to {}. New work will use it after {provider_name} reconnects.",
                         selected.display_name
                     )
                 }

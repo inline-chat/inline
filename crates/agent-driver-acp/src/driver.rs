@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -15,7 +15,7 @@ use inline_agent_bridge::{
     AgentDriver, AgentEvent, AgentEventReceiver, AgentEventSender, ApplyTiming, ApprovalDecision,
     ApprovalRequest, AuthenticationRequired, DriverCapabilities, DriverCommand, DriverError,
     DriverFuture, DriverResult, DriverSettingsCatalog, HostToolConfiguration, InputAttachment,
-    InputAttachmentKind, OutputAttachment, OutputAttachmentKind, ProviderSessionId,
+    InputAttachmentKind, OutputAttachment, OutputAttachmentKind, ProviderSessionId, QuestionAnswer,
     ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, SteeringSupport, TurnId, TurnInput,
     TurnOptions, TurnOutcome, TurnTiming,
 };
@@ -23,6 +23,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{oneshot, watch};
 
+use crate::elicitation::{ElicitationField, answer_response, normalize_form};
 use crate::host_tools::AcpHostToolProxy;
 use crate::mapping::{
     ToolCallSnapshots, available_commands, permission_command, permission_options,
@@ -36,6 +37,8 @@ const MAX_FINAL_AGENT_TEXT_BYTES: usize = 64 * 1024;
 const TRUNCATED_AGENT_TEXT_MARKER: &str = "\n[additional agent output omitted]";
 const MAX_PENDING_APPROVALS: usize = 32;
 const MAX_PENDING_APPROVALS_PER_SESSION: usize = 8;
+const MAX_PENDING_ELICITATIONS: usize = 32;
+const MAX_PENDING_ELICITATIONS_PER_SESSION: usize = 8;
 const MAX_RETAINED_PERMISSION_OPTIONS: usize = 7;
 const MAX_RETAINED_PERMISSION_OPTION_ID_BYTES: usize = 128;
 const MAX_RETAINED_PERMISSION_OPTION_LABEL_CHARS: usize = 80;
@@ -208,6 +211,16 @@ struct PendingApproval {
 
 type PendingApprovals = Arc<StdMutex<HashMap<String, PendingApproval>>>;
 
+#[derive(Debug)]
+struct PendingElicitation {
+    session_id: String,
+    fields: Vec<ElicitationField>,
+    responder: Responder<acp::CreateElicitationResponse>,
+    completion: oneshot::Sender<()>,
+}
+
+type PendingElicitations = Arc<StdMutex<HashMap<String, PendingElicitation>>>;
+
 #[derive(Clone, Debug)]
 struct SessionMetadata {
     cwd: PathBuf,
@@ -323,9 +336,9 @@ pub struct AcpDriver {
     capabilities: DriverCapabilities,
     prompt_capabilities: acp::PromptCapabilities,
     resume_mode: ResumeMode,
-    default_permission_mode: Option<Arc<str>>,
     active_turns: ActiveTurns,
     approvals: PendingApprovals,
+    elicitations: PendingElicitations,
     sessions: Sessions,
     host_tools: HostTools,
     pub(crate) lifecycle: ConnectionLifecycle,
@@ -356,10 +369,6 @@ impl AcpDriver {
         self.capabilities.resume_session = false;
     }
 
-    pub(crate) fn set_default_permission_mode(&mut self, mode: impl Into<Arc<str>>) {
-        self.default_permission_mode = Some(mode.into());
-    }
-
     /// Connects the driver to an already constructed ACP client transport.
     ///
     /// The normal bridge path uses [`crate::spawn_acp_driver`]. This transport
@@ -378,6 +387,7 @@ impl AcpDriver {
     ) -> DriverResult<Self> {
         let active_turns = Arc::new(StdMutex::new(HashMap::new()));
         let approvals = Arc::new(StdMutex::new(HashMap::new()));
+        let elicitations = Arc::new(StdMutex::new(HashMap::new()));
         let sequence = Arc::new(AtomicU64::new(1));
         let sessions = Arc::new(StdMutex::new(SessionRegistry::default()));
         let host_tools = Arc::new(StdMutex::new(None));
@@ -393,8 +403,13 @@ impl AcpDriver {
         let permission_approvals = approvals.clone();
         let permission_sequence = sequence.clone();
         let permission_epoch = epoch.clone();
+        let elicitation_turns = active_turns.clone();
+        let pending_elicitations = elicitations.clone();
+        let elicitation_sequence = sequence.clone();
+        let elicitation_epoch = epoch.clone();
         let lifecycle_turns = active_turns.clone();
         let lifecycle_approvals = approvals.clone();
+        let lifecycle_elicitations = elicitations.clone();
         tokio::spawn(async move {
             let result = Client
                 .builder()
@@ -426,6 +441,20 @@ impl AcpDriver {
                     },
                     agent_client_protocol::on_receive_request!(),
                 )
+                .on_receive_request(
+                    async move |request: acp::CreateElicitationRequest, responder, _connection| {
+                        handle_elicitation_request(
+                            &elicitation_turns,
+                            &pending_elicitations,
+                            &elicitation_sequence,
+                            &elicitation_epoch,
+                            request,
+                            responder,
+                        );
+                        Ok(())
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
                 .connect_with(transport, async move |connection| {
                     connection_tx.send(connection.clone()).map_err(|_| {
                         agent_client_protocol::Error::internal_error()
@@ -444,6 +473,7 @@ impl AcpDriver {
             fail_all_turns(
                 &lifecycle_turns,
                 &lifecycle_approvals,
+                &lifecycle_elicitations,
                 result.as_ref().err(),
             );
             let _ = completion_tx.send(Some(result));
@@ -457,10 +487,15 @@ impl AcpDriver {
             })?;
         let initialize = acp::InitializeRequest::new(ProtocolVersion::V1)
             .client_capabilities(
-                acp::ClientCapabilities::new().session(
-                    acp::ClientSessionCapabilities::new()
-                        .config_options(acp::SessionConfigOptionsCapabilities::new()),
-                ),
+                acp::ClientCapabilities::new()
+                    .session(
+                        acp::ClientSessionCapabilities::new()
+                            .config_options(acp::SessionConfigOptionsCapabilities::new()),
+                    )
+                    .elicitation(
+                        acp::ElicitationCapabilities::new()
+                            .form(acp::ElicitationFormCapabilities::new()),
+                    ),
             )
             .client_info(acp::Implementation::new(
                 "inline-agent-bridge",
@@ -500,9 +535,9 @@ impl AcpDriver {
             capabilities,
             prompt_capabilities,
             resume_mode,
-            default_permission_mode: None,
             active_turns,
             approvals,
+            elicitations,
             sessions,
             host_tools,
             lifecycle: ConnectionLifecycle {
@@ -737,29 +772,10 @@ impl AcpDriver {
 
     fn effective_permission_mode(
         &self,
-        session_id: &str,
+        _session_id: &str,
         selected: Option<&str>,
     ) -> DriverResult<Option<String>> {
-        if let Some(selected) = selected {
-            return Ok(Some(selected.to_string()));
-        }
-        let Some(default) = self.default_permission_mode.as_deref() else {
-            return Ok(None);
-        };
-        let sessions = self.sessions.lock().expect("ACP session registry poisoned");
-        let session = sessions.sessions.get(session_id).ok_or_else(|| {
-            DriverError::InvalidSession("ACP session metadata is unavailable".to_string())
-        })?;
-        Ok(session
-            .modes
-            .as_ref()
-            .filter(|modes| {
-                modes
-                    .available_modes
-                    .iter()
-                    .any(|mode| mode.id.to_string() == default)
-            })
-            .map(|_| default.to_string()))
+        Ok(selected.map(str::to_string))
     }
 }
 
@@ -799,11 +815,7 @@ impl AgentDriver for AcpDriver {
                     .values()
                     .find(|session| session.cwd == cwd)
                     .map(|session| {
-                        settings_catalog(
-                            &session.config_options,
-                            session.modes.as_ref(),
-                            self.default_permission_mode.as_deref(),
-                        )
+                        settings_catalog(&session.config_options, session.modes.as_ref(), None)
                     })
             } {
                 return Ok(catalog);
@@ -824,7 +836,7 @@ impl AgentDriver for AcpDriver {
                         .expect("new ACP session was not recorded")
                         .modes
                         .as_ref(),
-                    self.default_permission_mode.as_deref(),
+                    None,
                 )
             };
             Ok(catalog)
@@ -1046,6 +1058,7 @@ impl AgentDriver for AcpDriver {
             let connection = self.connection.clone();
             let active_turns = self.active_turns.clone();
             let approvals = self.approvals.clone();
+            let elicitations = self.elicitations.clone();
             let auth_methods = self.auth_methods.clone();
             let prompt =
                 acp::PromptRequest::new(acp::SessionId::new(session_key.clone()), prompt_blocks);
@@ -1054,6 +1067,7 @@ impl AgentDriver for AcpDriver {
                 finish_turn(
                     &active_turns,
                     &approvals,
+                    &elicitations,
                     &session_key,
                     &auth_methods,
                     result,
@@ -1103,6 +1117,7 @@ impl AgentDriver for AcpDriver {
                 turn_id.as_str()
             );
             cancel_pending_approvals(&self.approvals, Some(&session_key));
+            cancel_pending_elicitations(&self.elicitations, Some(&session_key));
             self.connection
                 .send_notification(acp::CancelNotification::new(session_key))
                 .map_err(|error| acp_request_error(error, &self.auth_methods))?;
@@ -1178,9 +1193,38 @@ impl AgentDriver for AcpDriver {
         })
     }
 
+    fn resolve_question<'a>(
+        &'a self,
+        request_id: &'a str,
+        answers: Vec<QuestionAnswer>,
+    ) -> DriverFuture<'a, ()> {
+        Box::pin(async move {
+            let (pending, response) = {
+                let mut elicitations = self
+                    .elicitations
+                    .lock()
+                    .expect("ACP elicitation map poisoned");
+                let pending = elicitations.get(request_id).ok_or_else(|| {
+                    DriverError::Rejected("ACP question is no longer active".to_string())
+                })?;
+                let response = answer_response(&pending.fields, answers)?;
+                let pending = elicitations
+                    .remove(request_id)
+                    .expect("validated ACP elicitation disappeared");
+                (pending, response)
+            };
+            let _ = pending.completion.send(());
+            pending
+                .responder
+                .respond(response)
+                .map_err(|error| acp_request_error(error, &self.auth_methods))
+        })
+    }
+
     fn shutdown<'a>(&'a self) -> DriverFuture<'a, ()> {
         Box::pin(async move {
             cancel_pending_approvals(&self.approvals, None);
+            cancel_pending_elicitations(&self.elicitations, None);
             self.host_tools
                 .lock()
                 .expect("ACP host tools poisoned")
@@ -1572,6 +1616,35 @@ fn handle_permission_request(
 }
 
 fn bounded_permission_options(options: Vec<acp::PermissionOption>) -> Vec<acp::PermissionOption> {
+    let allow_once_count = options
+        .iter()
+        .filter(|option| option.kind == acp::PermissionOptionKind::AllowOnce)
+        .count();
+    let allow_always_count = options
+        .iter()
+        .filter(|option| option.kind == acp::PermissionOptionKind::AllowAlways)
+        .count();
+    let reject_count = options
+        .iter()
+        .filter(|option| {
+            matches!(
+                option.kind,
+                acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways
+            )
+        })
+        .count();
+    let preserve_provider_label = options
+        .iter()
+        .filter(|option| match option.kind {
+            acp::PermissionOptionKind::AllowOnce => allow_once_count > 1,
+            acp::PermissionOptionKind::AllowAlways => allow_always_count > 1,
+            acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways => {
+                reject_count > 1
+            }
+            _ => true,
+        })
+        .map(|option| option.option_id.to_string())
+        .collect::<HashSet<_>>();
     options
         .into_iter()
         .filter_map(|option| {
@@ -1583,6 +1656,14 @@ fn bounded_permission_options(options: Vec<acp::PermissionOption>) -> Vec<acp::P
                 return None;
             }
             let name = match option.kind {
+                _ if preserve_provider_label.contains(&option_id) => option
+                    .name
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(MAX_RETAINED_PERMISSION_OPTION_LABEL_CHARS)
+                    .collect(),
                 acp::PermissionOptionKind::AllowOnce => "Allow once".to_string(),
                 acp::PermissionOptionKind::AllowAlways => "Allow for session".to_string(),
                 acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways => {
@@ -1610,14 +1691,131 @@ fn bounded_permission_options(options: Vec<acp::PermissionOption>) -> Vec<acp::P
         .collect()
 }
 
+fn handle_elicitation_request(
+    active_turns: &ActiveTurns,
+    elicitations: &PendingElicitations,
+    sequence: &AtomicU64,
+    epoch: &str,
+    request: acp::CreateElicitationRequest,
+    responder: Responder<acp::CreateElicitationResponse>,
+) {
+    let acp::ElicitationMode::Form(form) = request.mode else {
+        let _ = responder.respond(acp::CreateElicitationResponse::new(
+            acp::ElicitationAction::Cancel,
+        ));
+        return;
+    };
+    let acp::ElicitationScope::Session(scope) = form.scope else {
+        let _ = responder.respond(acp::CreateElicitationResponse::new(
+            acp::ElicitationAction::Cancel,
+        ));
+        return;
+    };
+    let session_key = scope.session_id.to_string();
+    let active = active_turns.lock().expect("ACP active turns poisoned");
+    let Some(turn) = active.get(&session_key) else {
+        let _ = responder.respond(acp::CreateElicitationResponse::new(
+            acp::ElicitationAction::Cancel,
+        ));
+        return;
+    };
+    let turn_id = turn.turn_id.clone();
+    let sender = turn.sender.clone();
+    drop(active);
+
+    let request_id = format!(
+        "acp-question-{epoch}-{}",
+        sequence.fetch_add(1, Ordering::Relaxed)
+    );
+    let normalized = match normalize_form(
+        request_id.clone(),
+        turn_id,
+        &request.message,
+        form.requested_schema,
+    ) {
+        Ok(normalized) => normalized,
+        Err(error) => {
+            log::warn!(
+                target: "inline_agent_driver_acp::elicitation",
+                "phase=unsupported_form error={error}"
+            );
+            let _ = responder.respond(acp::CreateElicitationResponse::new(
+                acp::ElicitationAction::Cancel,
+            ));
+            return;
+        }
+    };
+    let cancellation = responder.cancellation();
+    let (completion_tx, completion_rx) = oneshot::channel();
+    let event = AgentEvent::QuestionRequested(normalized.request);
+    let mut pending = elicitations.lock().expect("ACP elicitation map poisoned");
+    if pending.len() >= MAX_PENDING_ELICITATIONS
+        || pending
+            .values()
+            .filter(|pending| pending.session_id == session_key)
+            .count()
+            >= MAX_PENDING_ELICITATIONS_PER_SESSION
+    {
+        drop(pending);
+        let _ = responder.respond(acp::CreateElicitationResponse::new(
+            acp::ElicitationAction::Cancel,
+        ));
+        return;
+    }
+    pending.insert(
+        request_id.clone(),
+        PendingElicitation {
+            session_id: session_key,
+            fields: normalized.fields,
+            responder,
+            completion: completion_tx,
+        },
+    );
+    drop(pending);
+    if !sender.send(Ok(event)) {
+        if let Some(pending) = elicitations
+            .lock()
+            .expect("ACP elicitation map poisoned")
+            .remove(&request_id)
+        {
+            let _ = pending.completion.send(());
+            let _ = pending
+                .responder
+                .respond(acp::CreateElicitationResponse::new(
+                    acp::ElicitationAction::Cancel,
+                ));
+        }
+        return;
+    }
+    let elicitations = elicitations.clone();
+    tokio::spawn(async move {
+        tokio::select! {
+            () = cancellation.cancelled() => {
+                if let Some(pending) = elicitations
+                    .lock()
+                    .expect("ACP elicitation map poisoned")
+                    .remove(&request_id)
+                {
+                    let _ = pending.responder.respond_with_error(
+                        agent_client_protocol::Error::request_cancelled(),
+                    );
+                }
+            }
+            _ = completion_rx => {}
+        }
+    });
+}
+
 fn finish_turn(
     active_turns: &ActiveTurns,
     approvals: &PendingApprovals,
+    elicitations: &PendingElicitations,
     session_key: &str,
     auth_methods: &[String],
     result: Result<acp::PromptResponse, agent_client_protocol::Error>,
 ) {
     cancel_pending_approvals(approvals, Some(session_key));
+    cancel_pending_elicitations(elicitations, Some(session_key));
     let Some(turn) = active_turns
         .lock()
         .expect("ACP active turns poisoned")
@@ -1672,12 +1870,33 @@ fn cancel_pending_approvals(approvals: &PendingApprovals, session_id: Option<&st
     }
 }
 
+fn cancel_pending_elicitations(elicitations: &PendingElicitations, session_id: Option<&str>) {
+    let mut elicitations = elicitations.lock().expect("ACP elicitation map poisoned");
+    let ids = elicitations
+        .iter()
+        .filter(|(_, pending)| session_id.is_none_or(|session_id| pending.session_id == session_id))
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    for id in ids {
+        if let Some(pending) = elicitations.remove(&id) {
+            let _ = pending.completion.send(());
+            let _ = pending
+                .responder
+                .respond(acp::CreateElicitationResponse::new(
+                    acp::ElicitationAction::Cancel,
+                ));
+        }
+    }
+}
+
 fn fail_all_turns(
     active_turns: &ActiveTurns,
     approvals: &PendingApprovals,
+    elicitations: &PendingElicitations,
     error: Option<&String>,
 ) {
     cancel_pending_approvals(approvals, None);
+    cancel_pending_elicitations(elicitations, None);
     let turns = active_turns
         .lock()
         .expect("ACP active turns poisoned")
@@ -1831,6 +2050,7 @@ async fn request_with_timeout_after<T>(
 #[cfg(test)]
 mod tests {
     use futures_util::StreamExt;
+    use inline_agent_bridge::ApprovalOption;
 
     use super::*;
 
@@ -2160,6 +2380,7 @@ mod tests {
     async fn connection_epoch_loss_is_a_typed_terminal_outcome() {
         let active_turns = ActiveTurns::default();
         let approvals = PendingApprovals::default();
+        let elicitations = PendingElicitations::default();
         let (sender, mut events) = AgentEventReceiver::default_channel();
         let turn_id = TurnId::new("turn-1").expect("turn");
         active_turns.lock().expect("turns").insert(
@@ -2176,6 +2397,7 @@ mod tests {
         fail_all_turns(
             &active_turns,
             &approvals,
+            &elicitations,
             Some(&"ACP transport closed".to_string()),
         );
 
@@ -2192,22 +2414,37 @@ mod tests {
 
     #[test]
     fn approval_mapping_preserves_exact_provider_choice() {
-        let options = vec![acp::PermissionOption::new(
-            "custom",
-            "Use sandbox",
-            acp::PermissionOptionKind::AllowOnce,
-        )];
+        let options = bounded_permission_options(vec![
+            acp::PermissionOption::new(
+                "exit-plan-auto",
+                "Yes, and use auto mode",
+                acp::PermissionOptionKind::AllowAlways,
+            ),
+            acp::PermissionOption::new(
+                "exit-plan-default",
+                "Yes, manually approve edits",
+                acp::PermissionOptionKind::AllowAlways,
+            ),
+        ]);
+        assert!(matches!(
+            permission_options(&options).as_slice(),
+            [
+                ApprovalOption::ProviderChoice { option_id, label },
+                ApprovalOption::ProviderChoice { .. },
+                ApprovalOption::CancelTurn,
+            ] if option_id == "exit-plan-auto" && label == "Yes, and use auto mode"
+        ));
         let outcome = approval_outcome(
             &options,
             ApprovalDecision::ProviderChoice {
-                option_id: "custom".to_string(),
+                option_id: "exit-plan-default".to_string(),
             },
         )
         .expect("provider choice");
         assert!(matches!(
             outcome,
             acp::RequestPermissionOutcome::Selected(selected)
-                if selected.option_id.to_string() == "custom"
+                if selected.option_id.to_string() == "exit-plan-default"
         ));
     }
 
@@ -2217,7 +2454,7 @@ mod tests {
             .map(|index| {
                 acp::PermissionOption::new(
                     format!("option-{index}"),
-                    "provider detail that is not retained",
+                    format!("Provider choice {index}"),
                     acp::PermissionOptionKind::AllowOnce,
                 )
             })
@@ -2235,7 +2472,7 @@ mod tests {
         assert_eq!(bounded.len(), MAX_RETAINED_PERMISSION_OPTIONS);
         assert!(bounded.iter().all(|option| {
             option.option_id.to_string().len() <= MAX_RETAINED_PERMISSION_OPTION_ID_BYTES
-                && option.name == "Allow once"
+                && option.name.len() <= MAX_RETAINED_PERMISSION_OPTION_LABEL_CHARS
         }));
     }
 

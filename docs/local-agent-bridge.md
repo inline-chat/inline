@@ -91,7 +91,12 @@ Current beta provider paths:
   durable resume, but its cross-process `session/resume` path does not currently
   pass Inline's live reliability gate. After a bridge/provider restart, Inline
   therefore starts a fresh Claude session and says so instead of failing the
-  first user direction or retrying an ambiguous resume.
+  first user direction or retrying an ambiguous resume. Inline advertises ACP
+  form elicitation and translates Claude `AskUserQuestion` requests into the
+  same bounded Inline question messages and buttons used by Codex. Arbitrary
+  form fields that Inline cannot safely represent are cancelled rather than
+  guessed; generic free-text forms are rejected because ACP does not identify
+  whether their answers contain secrets.
 - **Amp experimental:** uses Inline's source-revision-pinned ACP adapter in
   direct CLI mode with the exact authenticated Amp executable accepted during
   setup. The adapter is installed from an Inline-owned complete lock and
@@ -110,7 +115,10 @@ omit the SDK's optional native CLI packages, and verification repairs older
 installs that still contain one, so the separately verified host CLI is the
 only executable runtime. Providers without an Inline-owned complete lock are
 withheld from setup. The background service never downloads or updates
-adapters. Claude currently requires Node.js 22 or newer.
+adapters. Claude currently requires Node.js 22 or newer. Claude authentication
+is a host setup and service-restart preflight; Inline does not advertise an
+interactive terminal-auth surface, so an expired session must be repaired with
+the Claude CLI on that host before restarting the bridge.
 
 ## Using the bot
 
@@ -205,7 +213,11 @@ Linked Codex sessions require `/resume` after Open, release, or provider restart
 
 Claude uses the same Agent Settings folder control and `/projects` picker as
 Codex, so users can safely choose among verified recent folders without
-exposing host paths in message actions. Native Claude session continuation is
+exposing host paths in message actions. The bridge also prewarms Claude's
+workspace-scoped settings catalog for the first Agent Settings frame, bounded
+by the normal settings deadline; model, reasoning, and permission controls then
+come from the adapter's live advertised values. No Claude-only permission mode
+is silently forced. Native Claude session continuation is
 not enabled yet. `/history` is the intentionally separate, owner-only local
 history importer: it opens a bounded six-row picker, imports the visible
 You/Claude branch into a private Inline reply thread, omits tool and attachment
@@ -346,10 +358,14 @@ OS-process-reaped acknowledgement, so
 independently daemonized processes remain a provider limitation rather than an
 absolute cancellation guarantee.
 
-When an agent asks one to three non-secret questions, reply directly to the
+When an agent asks up to four non-secret questions, reply directly to the
 question message. Choices accept either their number or label; multi-question
-forms take one answer per line. Secret-entry requests are declined locally so
-credentials never pass through Inline.
+forms take one answer per line. Use **Skip** for one question or reply `skip all`
+to decline a form without inventing an answer. ACP form elicitation is
+deliberately limited to bounded choices plus Claude's marked per-question
+custom-answer companion.
+Generic free-text and secret entry are not supported: credential forms are
+declined locally rather than passing their values through Inline messages.
 
 ### Files, photos, video, and voice
 

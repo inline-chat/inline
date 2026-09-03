@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn persisted_claude_executable_is_revalidated_against_the_current_cli_pin() {
         let root = tempfile::tempdir().expect("tempdir");
-        let install = root.path().join("adapters/claude/0.63.0");
+        let install = root.path().join("adapters/claude/0.73.0");
         let package = install.join("node_modules/@agentclientprotocol/claude-agent-acp");
         let bin = install.join("node_modules/.bin");
         fs::create_dir_all(package.join("dist")).expect("package directory");
