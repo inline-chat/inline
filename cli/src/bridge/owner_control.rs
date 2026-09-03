@@ -223,6 +223,19 @@ pub(super) fn owner_control_error_invalidates_authentication(
     )
 }
 
+pub(super) fn owner_control_error_is_retryable(error: &(dyn std::error::Error + 'static)) -> bool {
+    matches!(
+        error.downcast_ref::<ClientRequestError>(),
+        Some(ClientRequestError::Backend(BackendError {
+            category: ClientErrorCategory::Network
+                | ClientErrorCategory::Timeout
+                | ClientErrorCategory::RateLimited
+                | ClientErrorCategory::Internal,
+            ..
+        }))
+    )
+}
+
 fn owner_event_invalidates_authentication(event: &ClientEvent) -> bool {
     matches!(
         event,
@@ -362,6 +375,27 @@ mod tests {
             "redacted",
         ));
         assert!(!owner_control_error_invalidates_authentication(&network));
+    }
+
+    #[test]
+    fn owner_control_retries_only_transient_connection_failures() {
+        for category in [
+            ClientErrorCategory::Network,
+            ClientErrorCategory::Timeout,
+            ClientErrorCategory::RateLimited,
+            ClientErrorCategory::Internal,
+        ] {
+            let error = ClientRequestError::Backend(BackendError::new(category, "redacted"));
+            assert!(owner_control_error_is_retryable(&error));
+        }
+
+        for category in [
+            ClientErrorCategory::AuthExpired,
+            ClientErrorCategory::ProtocolMismatch,
+        ] {
+            let error = ClientRequestError::Backend(BackendError::new(category, "redacted"));
+            assert!(!owner_control_error_is_retryable(&error));
+        }
     }
 
     #[test]

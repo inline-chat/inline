@@ -119,7 +119,9 @@ mod settings;
 use settings::*;
 mod owner_control;
 mod projects;
-use owner_control::{OwnerControl, owner_control_error_invalidates_authentication};
+use owner_control::{
+    OwnerControl, owner_control_error_invalidates_authentication, owner_control_error_is_retryable,
+};
 mod workspace_rpc;
 use workspace_rpc::*;
 mod routing;
@@ -443,27 +445,28 @@ pub async fn run_service(
     let _instance_lock = acquire_instance_lock(&paths.instance_lock)?;
     let owner_control_seed_required = !account.owner_control_cursor_seeded;
     let owner_auth = owner_credential(&secrets)?;
-    let owner_control = match OwnerControl::connect(
-        &runtime_config,
-        &paths,
-        account.owner_user_id,
-        &owner_auth,
-        owner_control_seed_required,
-    )
-    .await
-    {
-        Ok(control) => {
-            if owner_control_seed_required {
-                account.owner_control_cursor_seeded = true;
-                let _account_mutation_lock = acquire_account_mutation_lock(&paths)?;
-                let mut latest: AccountBridgeConfig = read_required_json(&paths.config)?;
-                latest.owner_control_cursor_seeded = true;
-                write_private_json(&paths.config, &latest)?;
+    let mut owner_connection_failures = 0_u32;
+    let owner_control = loop {
+        match OwnerControl::connect(
+            &runtime_config,
+            &paths,
+            account.owner_user_id,
+            &owner_auth,
+            owner_control_seed_required,
+        )
+        .await
+        {
+            Ok(control) => {
+                if owner_control_seed_required {
+                    account.owner_control_cursor_seeded = true;
+                    let _account_mutation_lock = acquire_account_mutation_lock(&paths)?;
+                    let mut latest: AccountBridgeConfig = read_required_json(&paths.config)?;
+                    latest.owner_control_cursor_seeded = true;
+                    write_private_json(&paths.config, &latest)?;
+                }
+                break Some(Arc::new(control));
             }
-            Some(Arc::new(control))
-        }
-        Err(error) => {
-            if owner_control_error_invalidates_authentication(error.as_ref()) {
+            Err(error) if owner_control_error_invalidates_authentication(error.as_ref()) => {
                 let _ = clear_bridge_owner_authority(&paths, &owner_auth)?;
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
@@ -471,10 +474,23 @@ pub async fn run_service(
                 )
                 .into());
             }
-            // Owner authorization is required for every prompt. Do not start
-            // healthy-looking providers with a permanently missing connection;
-            // the service manager retries startup after bounded local retries.
-            return Err(error);
+            Err(error) if owner_control_error_is_retryable(error.as_ref()) => {
+                owner_connection_failures = owner_connection_failures.saturating_add(1);
+                crate::telemetry::report_bridge_runtime_error(
+                    "owner",
+                    "owner_startup",
+                    error.as_ref(),
+                    Some(owner_connection_failures),
+                );
+                let delay = provider_restart_delay(owner_connection_failures);
+                eprintln!(
+                    "Owner connection unavailable; bridge will retry in {} seconds: {}",
+                    delay.as_secs(),
+                    safe_diagnostic(&error.to_string())
+                );
+                tokio::time::sleep(delay).await;
+            }
+            Err(error) => return Err(error),
         }
     };
     let mut owner_authentication_invalidation = owner_control

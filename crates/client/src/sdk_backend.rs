@@ -2620,13 +2620,13 @@ impl ClientBackend for SdkBackend {
 impl SyncHost for SdkBackend {
     fn get_updates_state(
         &self,
-        date: i64,
+        date: Option<i64>,
     ) -> BoxFuture<'static, BackendResult<proto::GetUpdatesStateResult>> {
         let backend = self.clone();
         Box::pin(async move {
             let session = backend.require_session().await?;
             let state = backend
-                .call_realtime(&session, proto::GetUpdatesStateInput { date: Some(date) })
+                .call_realtime(&session, proto::GetUpdatesStateInput { date })
                 .await?;
             backend.capture_state_preceding_updates().await?;
             Ok(state)

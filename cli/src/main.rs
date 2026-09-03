@@ -502,6 +502,62 @@ One-pass review:
     },
 }
 
+impl Command {
+    /// Stable, argument-free command identity for privacy-safe diagnostics.
+    fn telemetry_name(&self) -> &'static str {
+        match self {
+            Self::Auth { .. } => "auth",
+            Self::Login(_) => "login",
+            Self::Logout => "logout",
+            Self::Update { .. } => "update",
+            Self::Doctor => "doctor",
+            Self::Skill { .. } => "skill",
+            Self::Plugin { .. } => "plugin",
+            Self::Setup { command } => match command {
+                SetupCommand::Codex(_) => "setup_codex",
+                SetupCommand::Opencode(_) => "setup_opencode",
+                SetupCommand::Claude(_) => "setup_claude",
+                SetupCommand::Amp(_) => "setup_amp",
+                SetupCommand::Hermes(_) => "setup_hermes",
+                SetupCommand::Openclaw(_) => "setup_openclaw",
+            },
+            Self::Agents { command } => match command {
+                agents::AgentsCommand::Discover => "agents_discover",
+                agents::AgentsCommand::Setup(_) => "agents_setup",
+            },
+            Self::Bridge { command } => match command {
+                BridgeCommand::Status => "bridge_status",
+                BridgeCommand::Start => "bridge_start",
+                BridgeCommand::Stop => "bridge_stop",
+                BridgeCommand::Restart => "bridge_restart",
+                BridgeCommand::Doctor => "bridge_doctor",
+                BridgeCommand::Logs { .. } => "bridge_logs",
+                BridgeCommand::Uninstall => "bridge_uninstall",
+                BridgeCommand::Workspace { .. } => "bridge_workspace",
+                BridgeCommand::Operators { .. } => "bridge_operators",
+                BridgeCommand::Run(_) => "bridge_run",
+                BridgeCommand::ProviderHost(_) => "bridge_provider_host",
+                BridgeCommand::InlineToolsMcp => "bridge_inline_tools_mcp",
+                BridgeCommand::Dev { .. } => "bridge_dev",
+            },
+            Self::Chats { .. } => "chats",
+            Self::Users { .. } => "users",
+            Self::Messages { .. } => "messages",
+            Self::Spaces { .. } => "spaces",
+            Self::Notifications { .. } => "notifications",
+            Self::Tasks { .. } => "tasks",
+            Self::Bots { .. } => "bots",
+            Self::Typing { .. } => "typing",
+            Self::Me => "me",
+            Self::Search(_) => "search",
+            Self::Transcript(_) => "transcript",
+            Self::Completion { .. } => "completion",
+            Self::Schema { .. } => "schema",
+            Self::Capabilities { .. } => "capabilities",
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum SetupCommand {
     #[command(about = "Set up Codex as a personal Inline bot (external beta: macOS only)")]
@@ -2365,14 +2421,29 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
     // at multiple command levels; preserve all explicit verbosity requests.
     diagnostics::init(flags.verbose.max(cli.verbose));
     let telemetry = telemetry::init();
+    let telemetry_command = cli.command.telemetry_name();
     if let Err(error) = run_until_terminated(cli, started_at).await {
         if is_reported_cli_failure(error.as_ref()) {
             drop(telemetry);
             std::process::exit(1);
         }
         diagnostics::log_error(error.as_ref());
-        let error_payload = diagnostics::error_payload(error.as_ref());
-        telemetry::report(&error_payload, None, None);
+        let mut error_payload = diagnostics::error_payload(error.as_ref());
+        let report_summary = format!(
+            "{telemetry_command} failed code={}: {}",
+            error_payload.code, error_payload.message
+        );
+        match diagnostics::write_failure_report(&report_summary) {
+            Ok(Some(path)) => {
+                error_payload.diagnostic_report_path = Some(path.display().to_string());
+            }
+            Ok(None) => {}
+            Err(report_error) => log::debug!(
+                "could not save verbose diagnostic report: {}",
+                diagnostics::safe_text(&report_error.to_string())
+            ),
+        }
+        telemetry::report(&error_payload, None, None, Some(telemetry_command));
         if flags.json {
             let payload = JsonErrorEnvelope {
                 error: error_payload,
@@ -6020,6 +6091,29 @@ mod cli_parsing_tests {
     #[test]
     fn command_tree_has_no_alias_or_flag_collisions() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn telemetry_command_names_are_stable_and_do_not_include_arguments() {
+        for (arguments, expected) in [
+            (vec!["inline", "bridge", "restart"], "bridge_restart"),
+            (
+                vec![
+                    "inline",
+                    "agents",
+                    "setup",
+                    "--target",
+                    "codex",
+                    "--non-interactive",
+                ],
+                "agents_setup",
+            ),
+            (vec!["inline", "setup", "claude"], "setup_claude"),
+            (vec!["inline", "messages", "list"], "messages"),
+        ] {
+            let cli = Cli::try_parse_from(arguments).unwrap();
+            assert_eq!(cli.command.telemetry_name(), expected);
+        }
     }
 
     #[test]

@@ -72,7 +72,12 @@ fn telemetry_disabled(value: &str) -> bool {
     )
 }
 
-pub(crate) fn report(error: &JsonCliError, target: Option<&str>, phase: Option<&str>) {
+pub(crate) fn report(
+    error: &JsonCliError,
+    target: Option<&str>,
+    phase: Option<&str>,
+    command: Option<&str>,
+) {
     if matches!(
         error.code.as_str(),
         "invalid_args" | "not_authenticated" | "setup_cancelled" | "confirmation_required"
@@ -92,6 +97,9 @@ pub(crate) fn report(error: &JsonCliError, target: Option<&str>, phase: Option<&
     }
     if let Some(phase) = phase {
         event.tags.insert("phase".into(), safe_code(phase));
+    }
+    if let Some(command) = command {
+        event.tags.insert("command".into(), safe_code(command));
     }
     event
         .extra
@@ -218,6 +226,8 @@ fn classify_bridge_runtime_failure(error: &(dyn std::error::Error + 'static)) ->
         "provider_authentication_required"
     } else if message.contains("active elsewhere") || message.contains("active writer") {
         "provider_session_busy"
+    } else if message.contains("bad request") && message.contains("http 400") {
+        "remote_bad_request"
     } else if message.contains("epoch ended") {
         "provider_epoch_ended"
     } else if message.contains("app-server disconnected")
@@ -306,6 +316,7 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         "phase",
         "failure",
         "attempt",
+        "command",
     ] {
         if let Some(value) = event.tags.get(name) {
             safe.tags.insert(name.into(), safe_code(value));
@@ -342,6 +353,7 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
     } else {
         vec![
             "inline-cli".into(),
+            safe.tags.get("command").cloned().unwrap_or_default().into(),
             safe.tags
                 .get("error_code")
                 .cloned()
@@ -445,11 +457,16 @@ mod tests {
             "This thread's Agent configuration is unavailable on this provider.",
         );
         let unknown = std::io::Error::other("private prompt /Users/private/project token-123");
+        let bad_request = std::io::Error::other("Internal: Bad request (HTTP 400)");
         assert_eq!(
             classify_bridge_runtime_failure(&configuration),
             "agent_configuration_catalog_unavailable"
         );
         assert_eq!(classify_bridge_runtime_failure(&unknown), "unknown");
+        assert_eq!(
+            classify_bridge_runtime_failure(&bad_request),
+            "remote_bad_request"
+        );
         assert!(should_report_bridge_attempt(1));
         assert!(should_report_bridge_attempt(3));
         assert!(should_report_bridge_attempt(8));

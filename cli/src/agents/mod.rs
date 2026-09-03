@@ -665,6 +665,7 @@ fn report_setup_failure_for_target(
         "inline bridge status --json --pretty",
         "inline bridge doctor --json --pretty",
         "inline bridge logs --lines 200 --json --pretty",
+        "inline bridge restart --verbose --verbose",
     ];
     const CODEX_INTEGRATION_RECOVERY_COMMANDS: &[&str] = &["codex --version", "codex login status"];
     let recovery_commands = if timed_out && phase == "service" {
@@ -704,7 +705,7 @@ fn report_setup_failure_for_target(
             None
         }
     };
-    crate::telemetry::report(&payload, target_id, Some(phase));
+    crate::telemetry::report(&payload, target_id, Some(phase), Some("agents_setup"));
     let retry = progress.retry.clone();
     let status = if may_have_mutated || !changes.is_empty() {
         "partial"

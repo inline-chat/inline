@@ -172,12 +172,12 @@ fn sentry_http_envelope_contains_allowlisted_scrubbed_failure_text() {
     );
     assert_eq!(
         event["fingerprint"],
-        serde_json::json!(["inline-cli", "missing_peer", "", ""])
+        serde_json::json!(["inline-cli", "search", "missing_peer", "", ""])
     );
     assert_eq!(
         event["tags"],
         serde_json::json!({
-            "error_code": "missing_peer", "os": std::env::consts::OS, "arch": std::env::consts::ARCH
+            "command": "search", "error_code": "missing_peer", "os": std::env::consts::OS, "arch": std::env::consts::ARCH
         })
     );
     assert_eq!(

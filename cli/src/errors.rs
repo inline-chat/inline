@@ -28,6 +28,8 @@ pub(crate) struct JsonCliError {
     pub(crate) hint: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) examples: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) diagnostic_report_path: Option<String>,
 }
 
 /// Signals a non-success command result that has already been rendered.
@@ -61,6 +63,7 @@ impl JsonCliError {
             body: None,
             hint: None,
             examples: Vec::new(),
+            diagnostic_report_path: None,
         }
     }
 
@@ -488,6 +491,16 @@ fn format_human_cli_error(payload: &JsonCliError, error_label: &str) -> String {
         }
     }
 
+    if let Some(path) = &payload.diagnostic_report_path {
+        writeln!(&mut output).expect("write string");
+        writeln!(&mut output, "Diagnostic report: {path}").expect("write string");
+        writeln!(
+            &mut output,
+            "Review this report, then attach it when contacting Inline support."
+        )
+        .expect("write string");
+    }
+
     output.trim_end_matches('\n').to_string()
 }
 
@@ -745,6 +758,16 @@ mod tests {
         assert!(err.hint.as_deref().unwrap_or("").contains("--yes"));
         assert!(err.hint.as_deref().unwrap_or("").contains("-y"));
         assert!(!err.examples.is_empty());
+    }
+
+    #[test]
+    fn human_errors_surface_a_saved_diagnostic_report() {
+        let mut payload = JsonCliError::new("timeout", "bridge start timed out");
+        payload.diagnostic_report_path = Some("/tmp/inline-diagnostics.log".to_string());
+
+        let rendered = format_human_cli_error(&payload, "Error");
+        assert!(rendered.contains("Diagnostic report: /tmp/inline-diagnostics.log"));
+        assert!(rendered.contains("attach it when contacting Inline support"));
     }
 
     #[test]

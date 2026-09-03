@@ -63,7 +63,7 @@ impl Default for SyncConfig {
 pub(crate) trait SyncHost: Clone + Send + Sync + 'static {
     fn get_updates_state(
         &self,
-        date: i64,
+        date: Option<i64>,
     ) -> BoxFuture<'static, BackendResult<proto::GetUpdatesStateResult>>;
 
     fn get_updates(
@@ -187,11 +187,11 @@ impl SyncManager {
     ) -> BackendResult<Vec<ClientEventDelivery>> {
         let mut events = self.recover_pending_batches(host).await?;
         let state = self.prepared_sync_state().await?;
-        log::debug!(
-            "starting Inline update discovery from date={}",
-            state.last_sync_date
-        );
-        let result = host.get_updates_state(state.last_sync_date).await?;
+        // Zero is the local sentinel for an unseeded cursor. The wire contract
+        // uses an absent date to request a fresh checkpoint and rejects date=0.
+        let cursor = (state.last_sync_date > 0).then_some(state.last_sync_date);
+        log::debug!("starting Inline update discovery from date={cursor:?}");
+        let result = host.get_updates_state(cursor).await?;
         self.begin_discovery_round(result.date, result.updates_found != Some(false))
             .await;
         events.extend(
@@ -1547,6 +1547,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct FakeHost {
         state: proto::GetUpdatesStateResult,
+        state_requests: Arc<Mutex<Vec<Option<i64>>>>,
         responses: Arc<Mutex<VecDeque<BackendResult<proto::GetUpdatesResult>>>>,
         requests: Arc<Mutex<Vec<proto::GetUpdatesInput>>>,
         applied: Arc<Mutex<Vec<Vec<proto::Update>>>>,
@@ -1567,6 +1568,7 @@ mod tests {
                     updates_found: Some(true),
                     seq: None,
                 },
+                state_requests: Arc::new(Mutex::new(Vec::new())),
                 responses: Arc::new(Mutex::new(
                     responses.into_iter().map(Ok).collect::<VecDeque<_>>(),
                 )),
@@ -1606,10 +1608,13 @@ mod tests {
     impl SyncHost for FakeHost {
         fn get_updates_state(
             &self,
-            _date: i64,
+            date: Option<i64>,
         ) -> BoxFuture<'static, BackendResult<proto::GetUpdatesStateResult>> {
-            let state = self.state.clone();
-            Box::pin(async move { Ok(state) })
+            let host = self.clone();
+            Box::pin(async move {
+                host.state_requests.lock().await.push(date);
+                Ok(host.state)
+            })
         }
 
         fn get_updates(
@@ -1754,6 +1759,7 @@ mod tests {
         let events = sync.discover(&host).await.unwrap();
 
         assert!(events.is_empty());
+        assert_eq!(*host.state_requests.lock().await, vec![None]);
         assert_eq!(
             store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
             SyncBucketState { seq: 1, date: 20 }
@@ -1785,6 +1791,10 @@ mod tests {
         );
 
         sync.discover(&host).await.unwrap();
+        assert_eq!(
+            host.state_requests.lock().await.as_slice(),
+            &[Some(old_date)]
+        );
         assert_eq!(store.sync_state().await.unwrap().last_sync_date, old_date);
         let error = sync
             .process_realtime(&host, vec![chat_hint(7, 2)])
