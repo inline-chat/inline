@@ -1358,7 +1358,7 @@ fn service_definition_check(
             }
             Ok(_) => {}
         }
-        return match verify_systemd_unit(path) {
+        match verify_systemd_unit(path) {
             Ok(SystemdUnitVerification::Verified) => Check {
                 ok: true,
                 detail: "systemd accepted the service definition".to_string(),
@@ -1373,7 +1373,7 @@ fn service_definition_check(
                 ok: false,
                 detail: safe_diagnostic(&error.to_string()),
             },
-        };
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
