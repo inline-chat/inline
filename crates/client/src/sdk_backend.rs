@@ -50,7 +50,7 @@ use crate::{
     RequestBotChatSettingsRequest, SendInteractiveTextRequest, SendNotificationMode,
     SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole,
     SpaceRecord, StoreError, StoredReaction, StoredReadState, StoredSession, StoredTransaction,
-    SyncConfig, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
+    SyncConfig, SyncState, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
     UpdateChatInfoRequest, UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest,
     UploadRequest, UploadThumbnail, UserRecord, UserSettingsRecord, VERSION,
 };
@@ -885,8 +885,16 @@ impl SdkBackend {
     }
 
     async fn seed_initial_event_cursor(&self) -> BackendResult<()> {
+        let suppress_history = should_suppress_initial_history(
+            self.store
+                .sync_state()
+                .await
+                .map_err(store_error_to_backend)?,
+        );
         let deliveries = self.sync.discover(self).await?;
-        self.acknowledge_initial_deliveries(deliveries).await?;
+        if suppress_history {
+            self.acknowledge_initial_deliveries(deliveries).await?;
+        }
         self.sync_required.store(false, Ordering::Release);
         Ok(())
     }
@@ -1116,6 +1124,10 @@ impl SdkBackend {
             }
         }
     }
+}
+
+fn should_suppress_initial_history(state: SyncState) -> bool {
+    state.last_sync_date <= 0
 }
 
 impl ClientBackend for SdkBackend {
@@ -6780,6 +6792,13 @@ mod tests {
 
     #[tokio::test]
     async fn initial_cursor_seed_suppresses_history_but_reconnect_preserves_new_work() {
+        assert!(should_suppress_initial_history(SyncState {
+            last_sync_date: 0,
+        }));
+        assert!(!should_suppress_initial_history(SyncState {
+            last_sync_date: 1,
+        }));
+
         let store = InMemoryStore::new();
         let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
         let deliveries = store
